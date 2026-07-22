@@ -1,6 +1,6 @@
 use astra_vn_core::{
-    compile_astra_project, AstraSource, PresentationCommand, SkipMode, SystemUnlockKind,
-    VnPlayerCommand, VnRunConfig, VnRuntime,
+    compile_astra_project, AstraSource, PresentationCommand, ReadingMode, SkipMode,
+    SystemUnlockKind, VnPlayerCommand, VnRunConfig, VnRuntime,
 };
 
 const STORY: &str = r#"
@@ -94,6 +94,39 @@ fn skip_read_reaches_choice_when_all_prior_dialogue_is_read() {
         runtime.state().pending_choice.as_ref().unwrap().key,
         "choice.next"
     );
+}
+
+#[astra_headless_test::test]
+fn fast_forward_commits_skipped_dialogue_without_emitting_transient_dialogue_frames() {
+    let compiled = compile_astra_project(
+        [AstraSource::story("fast-forward.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut runtime = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
+
+    runtime
+        .apply(VnPlayerCommand::Launch {
+            story_id: "story.main".to_string(),
+            state_id: "state.prologue".to_string(),
+        })
+        .unwrap();
+    let output = runtime
+        .apply(VnPlayerCommand::SetReadingMode {
+            mode: ReadingMode::FastForward,
+        })
+        .unwrap();
+
+    assert_eq!(runtime.state().backlog.len(), 2);
+    assert!(output
+        .presentation
+        .iter()
+        .all(|command| !matches!(command, PresentationCommand::Dialogue { .. })));
+    assert!(matches!(
+        output.presentation.last(),
+        Some(PresentationCommand::Choice { key, options })
+            if key == "choice.next" && options.len() == 1
+    ));
 }
 
 #[astra_headless_test::test]

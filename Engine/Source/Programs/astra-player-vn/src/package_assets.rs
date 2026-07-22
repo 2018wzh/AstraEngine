@@ -1,6 +1,10 @@
 use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
+    collections::{BTreeMap, BTreeSet},
+    sync::{
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+        Arc, Mutex,
+    },
+    thread::{self, JoinHandle},
 };
 
 use astra_asset::{AssetCatalog, VfsManifest, VfsSourceRef};
@@ -52,6 +56,7 @@ struct CacheEntry {
 #[derive(Debug)]
 struct AssetCache {
     entries: BTreeMap<String, CacheEntry>,
+    pinned: BTreeSet<String>,
     bytes: usize,
     max_bytes: usize,
     clock: u64,
@@ -65,7 +70,11 @@ impl AssetCache {
         Some(entry.value.clone())
     }
 
-    fn insert(&mut self, asset_id: String, value: CachedAsset) -> Result<(), NativeVnHostError> {
+    fn insert(
+        &mut self,
+        asset_id: String,
+        value: CachedAsset,
+    ) -> Result<Vec<CachedAsset>, NativeVnHostError> {
         let bytes = value.bytes();
         if bytes == 0 || bytes > self.max_bytes {
             return Err(NativeVnHostError::Asset(
@@ -73,8 +82,10 @@ impl AssetCache {
             ));
         }
         self.clock = self.clock.saturating_add(1);
+        let mut retired = Vec::new();
         if let Some(previous) = self.entries.remove(&asset_id) {
             self.bytes = self.bytes.saturating_sub(previous.value.bytes());
+            retired.push(previous.value);
         }
         self.entries.insert(
             asset_id,
@@ -88,14 +99,20 @@ impl AssetCache {
             let evict_id = self
                 .entries
                 .iter()
+                .filter(|(id, _)| !self.pinned.contains(*id))
                 .min_by_key(|(id, entry)| (entry.last_used, *id))
                 .map(|(id, _)| id.clone())
-                .ok_or_else(|| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_STATE".into()))?;
+                .ok_or_else(|| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_ASSET_CACHE_PINNED_BUDGET_EXCEEDED".into(),
+                    )
+                })?;
             let evicted = self
                 .entries
                 .remove(&evict_id)
                 .ok_or_else(|| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_STATE".into()))?;
             self.bytes = self.bytes.saturating_sub(evicted.value.bytes());
+            retired.push(evicted.value);
             tracing::debug!(
                 event = "player.asset.cache.evicted",
                 asset_id = evict_id,
@@ -104,7 +121,7 @@ impl AssetCache {
                 "evicted a package asset from the bounded CPU cache"
             );
         }
-        Ok(())
+        Ok(retired)
     }
 
     fn insert_without_eviction(
@@ -118,14 +135,13 @@ impl AssetCache {
                 "ASTRA_PLAYER_ASSET_CACHE_ENTRY_BUDGET".into(),
             ));
         }
-        if self.entries.contains_key(&asset_id) {
-            self.insert(asset_id, value)?;
-            return Ok(true);
-        }
-        if self.bytes.saturating_add(bytes) > self.max_bytes {
+        if !self.can_insert_without_eviction(&asset_id, bytes) {
             return Ok(false);
         }
         self.clock = self.clock.saturating_add(1);
+        if let Some(previous) = self.entries.remove(&asset_id) {
+            self.bytes = self.bytes.saturating_sub(previous.value.bytes());
+        }
         self.entries.insert(
             asset_id,
             CacheEntry {
@@ -135,6 +151,20 @@ impl AssetCache {
         );
         self.bytes = self.bytes.saturating_add(bytes);
         Ok(true)
+    }
+
+    fn can_insert_without_eviction(&self, asset_id: &str, bytes: usize) -> bool {
+        if bytes == 0 || bytes > self.max_bytes {
+            return false;
+        }
+        let previous_bytes = self
+            .entries
+            .get(asset_id)
+            .map_or(0, |entry| entry.value.bytes());
+        self.bytes
+            .saturating_sub(previous_bytes)
+            .saturating_add(bytes)
+            <= self.max_bytes
     }
 }
 
@@ -150,6 +180,137 @@ pub(crate) struct PackageAssetStore {
     package: PackageReader,
     descriptors: BTreeMap<String, AssetDescriptor>,
     cache: Mutex<AssetCache>,
+}
+
+enum ImagePrefetchCommand {
+    Load(String),
+    Shutdown,
+}
+
+struct ImagePrefetchCompletion {
+    asset_id: String,
+    result: Result<(), String>,
+}
+
+pub(crate) type ImagePrefetchResult = (String, Result<(), String>);
+
+pub(crate) struct PackageImagePrefetcher {
+    commands: SyncSender<ImagePrefetchCommand>,
+    completions: Receiver<ImagePrefetchCompletion>,
+    workers: Vec<JoinHandle<()>>,
+}
+
+impl PackageImagePrefetcher {
+    const QUEUE_CAPACITY: usize = 32;
+    const WORKER_COUNT: usize = 2;
+
+    pub fn start(store: Arc<PackageAssetStore>) -> Result<Self, NativeVnHostError> {
+        let (commands, worker_commands) = mpsc::sync_channel(Self::QUEUE_CAPACITY);
+        let (worker_completions, completions) = mpsc::channel();
+        let worker_commands = Arc::new(Mutex::new(worker_commands));
+        let mut workers: Vec<JoinHandle<()>> = Vec::with_capacity(Self::WORKER_COUNT);
+        for worker_index in 0..Self::WORKER_COUNT {
+            let worker_store = Arc::clone(&store);
+            let worker_commands = Arc::clone(&worker_commands);
+            let worker_completions = worker_completions.clone();
+            let worker = match thread::Builder::new()
+                .name(format!("astra-image-prefetch-{worker_index}"))
+                .spawn(move || loop {
+                    let command = worker_commands
+                        .lock()
+                        .expect("image prefetch command queue was poisoned")
+                        .recv();
+                    match command {
+                        Ok(ImagePrefetchCommand::Load(asset_id)) => {
+                            let result = worker_store
+                                .load_image(&asset_id)
+                                .map(|_| ())
+                                .map_err(|error| error.to_string());
+                            if worker_completions
+                                .send(ImagePrefetchCompletion { asset_id, result })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(ImagePrefetchCommand::Shutdown) | Err(_) => break,
+                    }
+                }) {
+                Ok(worker) => worker,
+                Err(error) => {
+                    for _ in 0..workers.len() {
+                        let _ = commands.send(ImagePrefetchCommand::Shutdown);
+                    }
+                    for worker in workers {
+                        let _ = worker.join();
+                    }
+                    return Err(NativeVnHostError::Asset(format!(
+                        "ASTRA_PLAYER_IMAGE_PREFETCH_THREAD: {error}"
+                    )));
+                }
+            };
+            workers.push(worker);
+        }
+        drop(worker_completions);
+        Ok(Self {
+            commands,
+            completions,
+            workers,
+        })
+    }
+
+    pub fn try_schedule(&self, asset_id: String) -> Result<bool, NativeVnHostError> {
+        match self.commands.try_send(ImagePrefetchCommand::Load(asset_id)) {
+            Ok(()) => Ok(true),
+            Err(TrySendError::Full(_)) => Ok(false),
+            Err(TrySendError::Disconnected(_)) => Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_IMAGE_PREFETCH_DISCONNECTED".into(),
+            )),
+        }
+    }
+
+    fn try_recv(&self) -> Result<Option<ImagePrefetchCompletion>, NativeVnHostError> {
+        match self.completions.try_recv() {
+            Ok(completion) => Ok(Some(completion)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_IMAGE_PREFETCH_COMPLETION_DISCONNECTED".into(),
+            )),
+        }
+    }
+
+    pub fn drain_completions(&self) -> Result<Vec<ImagePrefetchResult>, NativeVnHostError> {
+        let mut completed = Vec::new();
+        while let Some(completion) = self.try_recv()? {
+            completed.push((completion.asset_id, completion.result));
+        }
+        Ok(completed)
+    }
+
+    pub fn shutdown(&mut self) -> Result<Vec<ImagePrefetchResult>, NativeVnHostError> {
+        if self.workers.is_empty() {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_IMAGE_PREFETCH_SHUTDOWN_ORDER".into(),
+            ));
+        }
+        for _ in 0..self.workers.len() {
+            self.commands
+                .send(ImagePrefetchCommand::Shutdown)
+                .map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_IMAGE_PREFETCH_DISCONNECTED".into())
+                })?;
+        }
+        for worker in self.workers.drain(..) {
+            worker.join().map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_IMAGE_PREFETCH_PANICKED".into())
+            })?;
+        }
+        let mut completed = Vec::new();
+        while let Ok(completion) = self.completions.try_recv() {
+            completed.push((completion.asset_id, completion.result));
+        }
+        Ok(completed)
+    }
 }
 
 impl PackageAssetStore {
@@ -250,6 +411,7 @@ impl PackageAssetStore {
             descriptors,
             cache: Mutex::new(AssetCache {
                 entries: BTreeMap::new(),
+                pinned: BTreeSet::new(),
                 bytes: 0,
                 max_bytes: max_cache_bytes,
                 clock: 0,
@@ -280,6 +442,41 @@ impl PackageAssetStore {
             .lock()
             .map(|cache| cache.bytes as u64)
             .unwrap_or(u64::MAX)
+    }
+
+    pub fn is_image_cached(&self, asset_id: &str) -> Result<bool, NativeVnHostError> {
+        self.cache
+            .lock()
+            .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_POISONED".into()))
+            .map(|cache| {
+                matches!(
+                    cache.entries.get(asset_id).map(|entry| &entry.value),
+                    Some(CachedAsset::Image(_))
+                )
+            })
+    }
+
+    pub fn pin_image_working_set(&self, asset_ids: &[String]) -> Result<(), NativeVnHostError> {
+        if let Some(asset_id) = asset_ids
+            .iter()
+            .find(|asset_id| !self.contains_image(asset_id))
+        {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_IMAGE_PIN_KIND: asset_hash={}",
+                Hash256::from_sha256(asset_id.as_bytes())
+            )));
+        }
+        let pinned = asset_ids.iter().cloned().collect::<BTreeSet<_>>();
+        if pinned.len() != asset_ids.len() {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_IMAGE_PIN_DUPLICATE".into(),
+            ));
+        }
+        self.cache
+            .lock()
+            .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_LOCK".into()))?
+            .pinned = pinned;
+        Ok(())
     }
 
     pub fn load_image(&self, asset_id: &str) -> Result<TextureFrame, NativeVnHostError> {
@@ -377,11 +574,8 @@ impl PackageAssetStore {
             .into_rgba8();
         let (width, height) = decoded.dimensions();
         let rgba8: Arc<[u8]> = decoded.into_raw().into();
-        Ok(TextureFrame {
-            width,
-            height,
-            hash: Hash256::from_sha256(&rgba8),
-            rgba8,
+        TextureFrame::from_rgba8(width, height, rgba8).map_err(|error| {
+            NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_TEXTURE: {error}"))
         })
     }
 
@@ -416,10 +610,14 @@ impl PackageAssetStore {
     }
 
     fn cache_insert(&self, asset_id: &str, value: CachedAsset) -> Result<(), NativeVnHostError> {
-        self.cache
-            .lock()
-            .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_POISONED".into()))?
-            .insert(asset_id.into(), value)
+        let retired = {
+            let mut cache = self.cache.lock().map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_POISONED".into())
+            })?;
+            cache.insert(asset_id.into(), value)?
+        };
+        drop(retired);
+        Ok(())
     }
 }
 
@@ -497,14 +695,15 @@ mod tests {
     fn decoded_cache_evicts_least_recently_used_entry_within_bound() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
+            pinned: BTreeSet::new(),
             bytes: 0,
             max_bytes: 6,
             clock: 0,
         };
-        cache.insert("a".into(), media(b"aaa")).unwrap();
-        cache.insert("b".into(), media(b"bbb")).unwrap();
+        drop(cache.insert("a".into(), media(b"aaa")).unwrap());
+        drop(cache.insert("b".into(), media(b"bbb")).unwrap());
         assert!(cache.get("a").is_some());
-        cache.insert("c".into(), media(b"ccc")).unwrap();
+        drop(cache.insert("c".into(), media(b"ccc")).unwrap());
         assert!(cache.entries.contains_key("a"));
         assert!(!cache.entries.contains_key("b"));
         assert!(cache.entries.contains_key("c"));
@@ -515,6 +714,7 @@ mod tests {
     fn decoded_cache_rejects_single_entry_over_budget() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
+            pinned: BTreeSet::new(),
             bytes: 0,
             max_bytes: 2,
             clock: 0,
@@ -528,6 +728,7 @@ mod tests {
     fn prewarm_insert_never_evicts_an_authored_prefix() {
         let mut cache = AssetCache {
             entries: BTreeMap::new(),
+            pinned: BTreeSet::new(),
             bytes: 0,
             max_bytes: 6,
             clock: 0,
@@ -541,5 +742,45 @@ mod tests {
         assert!(cache.entries.contains_key("a"));
         assert!(!cache.entries.contains_key("b"));
         assert_eq!(cache.bytes, 4);
+    }
+
+    #[test]
+    fn background_admission_accounts_for_replacement_without_evicting_neighbors() {
+        let mut cache = AssetCache {
+            entries: BTreeMap::new(),
+            pinned: BTreeSet::new(),
+            bytes: 0,
+            max_bytes: 8,
+            clock: 0,
+        };
+        drop(cache.insert("a".into(), media(b"aaaa")).unwrap());
+        drop(cache.insert("b".into(), media(b"bbbb")).unwrap());
+
+        assert!(cache.can_insert_without_eviction("a", 4));
+        assert!(!cache.can_insert_without_eviction("a", 5));
+        assert!(!cache
+            .insert_without_eviction("a".into(), media(b"aaaaa"))
+            .unwrap());
+        assert_eq!(cache.bytes, 8);
+        assert!(cache.entries.contains_key("a"));
+        assert!(cache.entries.contains_key("b"));
+    }
+
+    #[test]
+    fn decoded_cache_never_evicts_the_explicit_working_set() {
+        let mut cache = AssetCache {
+            entries: BTreeMap::new(),
+            pinned: BTreeSet::new(),
+            bytes: 0,
+            max_bytes: 6,
+            clock: 0,
+        };
+        drop(cache.insert("a".into(), media(b"aaa")).unwrap());
+        drop(cache.insert("b".into(), media(b"bbb")).unwrap());
+        cache.pinned.insert("a".into());
+        drop(cache.insert("c".into(), media(b"ccc")).unwrap());
+        assert!(cache.entries.contains_key("a"));
+        assert!(!cache.entries.contains_key("b"));
+        assert!(cache.entries.contains_key("c"));
     }
 }

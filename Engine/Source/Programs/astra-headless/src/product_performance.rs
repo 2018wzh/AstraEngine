@@ -22,6 +22,45 @@ use astra_product_host::{ProductPerformanceObserver, ProductPerformanceSample};
 
 const FRAME_DEADLINE_NS: u64 = 8_333_333;
 const TRACE_COUNTER_HEARTBEAT_FRAMES: u64 = 120;
+// The performance report owns every frame's budget samples. The trace keeps
+// every physical-input flow and frame timeline, then samples expensive nested
+// CPU/GPU phase trees at a deterministic cadence. This prevents a long 120 Hz
+// product run from exhausting the bounded writer while preserving an unbiased
+// timeline for Perfetto hotspot analysis.
+// A 32-frame cadence keeps detail below the p95 frame population. The report
+// remains per-frame and is the authority for E2 thresholds; Perfetto retains a
+// deterministic, representative timeline plus every physical-input flow.
+const TRACE_DETAILED_PHASE_SAMPLE_INTERVAL: u64 = 32;
+const TRACE_TRACK_INPUT_FLOW: u32 = 1;
+const TRACE_TRACK_GPU_FLOW: u32 = 2;
+
+fn trace_detailed_phase(sequence: u64) -> bool {
+    sequence.is_multiple_of(TRACE_DETAILED_PHASE_SAMPLE_INTERVAL)
+}
+
+fn measurement_duration_us(frame_count: u64, presentation_rate_hz: u32) -> Result<u64, String> {
+    let rate = u64::from(presentation_rate_hz);
+    if rate == 0 {
+        return Err("ASTRA_PERFORMANCE_PRESENTATION_RATE_INVALID".into());
+    }
+    frame_count
+        .checked_mul(1_000_000)
+        .ok_or_else(|| "ASTRA_PERFORMANCE_DURATION_OVERFLOW".into())
+        .map(|microseconds| microseconds.div_ceil(rate))
+}
+
+fn trace_track(name: &str) -> u32 {
+    // Trace Event thread ids are logical lanes, not operating-system thread ids.
+    // Assign each phase a deterministic lane so nested phase summaries remain
+    // independently queryable by Trace Processor instead of overlapping on one
+    // synthetic thread and being discarded during import.
+    let mut hash = 2_166_136_261_u32;
+    for byte in name.bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    100_u32.wrapping_add(hash)
+}
 
 #[derive(Clone, Copy)]
 struct TraceCounterSample {
@@ -37,13 +76,13 @@ struct RecorderState {
     memory_baseline: Option<(u64, u64)>,
     allocation_baseline: astra_observability::AllocationSnapshot,
     active_input_flow: Option<ActiveInputFlow>,
-    pending_product_cpu_ns: u64,
-    product_cpu_by_gpu_sequence: BTreeMap<u64, u64>,
-    warmup_frames: u64,
+    pending_product_sample: Option<BoundProductSample>,
+    product_sample_by_gpu_sequence: BTreeMap<u64, BoundProductSample>,
     warmup_frames_remaining: u64,
     measurement_started: Option<Instant>,
     measurement_stopped: Option<Instant>,
-    pacing_started: Instant,
+    measurement_frame_count: u64,
+    next_frame_deadline: Option<Instant>,
     paced_frame_count: u64,
     presentation_rate_hz: u32,
     start_sequence: u64,
@@ -53,11 +92,18 @@ struct RecorderState {
     gpu_measurement_cutoff: Option<u64>,
     trace_counters: BTreeMap<(&'static str, &'static str), TraceCounterSample>,
     deadline_miss_count: u64,
+    skipped_presentation_samples: u64,
 }
 
 struct ActiveInputFlow {
     sequence: u64,
     gpu_seen: bool,
+}
+
+#[derive(Clone, Copy)]
+struct BoundProductSample {
+    cpu_ns: u64,
+    phases: ProductPerformanceSample,
 }
 
 pub struct ProductPerformanceRecorder {
@@ -80,6 +126,10 @@ impl ProductPerformanceObserver for ProductPerformanceRecorder {
 
     fn record_sample(&self, sample: ProductPerformanceSample) -> Result<(), String> {
         self.record_product_sample_inner(sample)
+    }
+
+    fn finish_presentation_sample(&self) -> Result<(), String> {
+        self.finish_presentation_scope()
     }
 }
 
@@ -113,13 +163,13 @@ impl ProductPerformanceRecorder {
                 memory_baseline: None,
                 allocation_baseline: astra_observability::allocation_snapshot(),
                 active_input_flow: None,
-                pending_product_cpu_ns: 0,
-                product_cpu_by_gpu_sequence: BTreeMap::new(),
-                warmup_frames,
+                pending_product_sample: None,
+                product_sample_by_gpu_sequence: BTreeMap::new(),
                 warmup_frames_remaining: warmup_frames,
                 measurement_started: (warmup_frames == 0).then(Instant::now),
                 measurement_stopped: None,
-                pacing_started: started,
+                measurement_frame_count: 0,
+                next_frame_deadline: None,
                 paced_frame_count: 0,
                 presentation_rate_hz,
                 start_sequence,
@@ -129,6 +179,7 @@ impl ProductPerformanceRecorder {
                 gpu_measurement_cutoff: None,
                 trace_counters: BTreeMap::new(),
                 deadline_miss_count: 0,
+                skipped_presentation_samples: 0,
             })),
             decoded_cache_bytes: AtomicU64::new(0),
         })
@@ -176,7 +227,7 @@ impl ProductPerformanceRecorder {
         }
         let correlation_id = state.active_input_flow.as_ref().map(|flow| flow.sequence);
         let timestamp_ns = elapsed_ns(state.started)?;
-        for (domain, name, duration_ns) in [
+        let phases = [
             ("runtime.cpu", "runtime.tick_action", sample.runtime_tick_ns),
             ("vn.cpu", "vn.step", sample.vn_step_ns),
             ("ui.cpu", "ui.layout_paint", sample.ui_layout_paint_ns),
@@ -185,6 +236,10 @@ impl ProductPerformanceRecorder {
                 "ui.request_validation",
                 sample.ui_request_validation_ns,
             ),
+            ("ui.cpu", "ui.input_routing", sample.ui_input_routing_ns),
+            ("ui.cpu", "ui.tree_build", sample.ui_tree_build_ns),
+            ("ui.cpu", "ui.layout_finalize", sample.ui_layout_finalize_ns),
+            ("ui.cpu", "ui.semantics", sample.ui_semantics_ns),
             ("ui.cpu", "ui.update_layout", sample.ui_update_layout_ns),
             (
                 "ui.cpu",
@@ -201,6 +256,9 @@ impl ProductPerformanceRecorder {
             ("ui.cpu", "ui.controller", sample.ui_controller_ns),
             ("ui.cpu", "ui.frame_model", sample.ui_frame_model_ns),
             ("ui.cpu", "ui.text_scene", sample.ui_text_scene_ns),
+            ("ui.cpu", "ui.text_layout", sample.ui_text_layout_ns),
+            ("ui.cpu", "ui.text_resource", sample.ui_text_resource_ns),
+            ("ui.cpu", "ui.text_compose", sample.ui_text_compose_ns),
             ("ui.cpu", "ui.action_dispatch", sample.ui_action_dispatch_ns),
             ("ui.cpu", "ui.present_scene", sample.ui_present_scene_ns),
             (
@@ -215,9 +273,13 @@ impl ProductPerformanceRecorder {
             ),
             ("vn.cpu", "vn.stage_prepare", sample.vn_stage_prepare_ns),
             ("vn.cpu", "vn.stage_scene", sample.vn_stage_scene_ns),
+            ("vn.cpu", "vn.stage_texture", sample.vn_stage_texture_ns),
+            ("vn.cpu", "vn.stage_command", sample.vn_stage_command_ns),
+            ("vn.cpu", "vn.stage_lifecycle", sample.vn_stage_lifecycle_ns),
             ("vn.cpu", "vn.scene_compose", sample.vn_scene_compose_ns),
             ("vn.cpu", "vn.runtime_render", sample.ui_runtime_render_ns),
             ("media.cpu", "media.decode_mix", sample.media_decode_ns),
+            ("media.cpu", "media.prewarm", sample.media_prewarm_ns),
             (
                 "media.cpu",
                 "media.provider_decode",
@@ -250,14 +312,24 @@ impl ProductPerformanceRecorder {
                 sample.media_audio_completion_ns,
             ),
             ("save.cpu", "save_load", sample.save_load_ns),
-        ] {
-            if duration_ns == 0 {
-                continue;
+        ];
+        if correlation_id.is_none_or(trace_detailed_phase) {
+            for (domain, name, duration_ns) in phases {
+                if duration_ns == 0 {
+                    continue;
+                }
+                state
+                    .trace
+                    .complete(
+                        domain,
+                        name,
+                        trace_track(name),
+                        correlation_id,
+                        timestamp_ns,
+                        duration_ns,
+                    )
+                    .map_err(|error| error.to_string())?;
             }
-            state
-                .trace
-                .complete(domain, name, 1, correlation_id, timestamp_ns, duration_ns)
-                .map_err(|error| error.to_string())?;
         }
         let product_cpu_ns = sample
             .runtime_tick_ns
@@ -266,10 +338,49 @@ impl ProductPerformanceRecorder {
             .and_then(|value| value.checked_add(sample.save_load_ns))
             .ok_or("ASTRA_PERFORMANCE_PRODUCT_CPU_OVERFLOW")?;
         if sample.bind_to_next_presentation {
-            state.pending_product_cpu_ns = state
-                .pending_product_cpu_ns
-                .checked_add(product_cpu_ns)
-                .ok_or("ASTRA_PERFORMANCE_PRODUCT_CPU_OVERFLOW")?;
+            if correlation_id.is_none() {
+                return Err("ASTRA_PERFORMANCE_PRESENTATION_SAMPLE_OUTSIDE_INPUT_FLOW".into());
+            }
+            if state
+                .pending_product_sample
+                .replace(BoundProductSample {
+                    cpu_ns: product_cpu_ns,
+                    phases: sample,
+                })
+                .is_some()
+            {
+                return Err("ASTRA_PERFORMANCE_PRESENTATION_SAMPLE_NESTED".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_presentation_scope(&self) -> Result<(), String> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "ASTRA_PERFORMANCE_RECORDER_POISONED")?;
+        let state = guard
+            .as_mut()
+            .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if !state.armed {
+            return Ok(());
+        }
+        if state.pending_product_sample.take().is_some() {
+            state.skipped_presentation_samples = state
+                .skipped_presentation_samples
+                .checked_add(1)
+                .ok_or("ASTRA_PERFORMANCE_SKIPPED_PRESENTATION_COUNTER_OVERFLOW")?;
+            let timestamp_ns = elapsed_ns(state.started)?;
+            state
+                .trace
+                .counter(
+                    "presentation",
+                    "skipped_sample.count",
+                    timestamp_ns,
+                    state.skipped_presentation_samples,
+                )
+                .map_err(|error| error.to_string())?;
         }
         Ok(())
     }
@@ -290,18 +401,20 @@ impl ProductPerformanceRecorder {
                 return Err("ASTRA_PERFORMANCE_START_SEQUENCE_MISSED".into());
             }
             let started = Instant::now();
-            state.pacing_started = started;
+            state.next_frame_deadline = None;
             state.paced_frame_count = 0;
             state.measurement_started = (state.warmup_frames_remaining == 0).then_some(started);
             state.measurement_stopped = None;
+            state.measurement_frame_count = 0;
             state.allocation_baseline = astra_observability::allocation_snapshot();
             state.first_gpu_sequence = None;
             state.last_paced_gpu_sequence = None;
             state.gpu_measurement_cutoff = None;
             state.trace_counters.clear();
             state.deadline_miss_count = 0;
-            state.pending_product_cpu_ns = 0;
-            state.product_cpu_by_gpu_sequence.clear();
+            state.skipped_presentation_samples = 0;
+            state.pending_product_sample = None;
+            state.product_sample_by_gpu_sequence.clear();
             state.armed = true;
         }
         if state.active_input_flow.is_some() {
@@ -313,7 +426,7 @@ impl ProductPerformanceRecorder {
             .flow(
                 "frame.flow",
                 "physical_input_to_gpu",
-                1,
+                TRACE_TRACK_INPUT_FLOW,
                 sequence,
                 timestamp_ns,
                 PerfettoFlowPhase::Start,
@@ -344,6 +457,9 @@ impl ProductPerformanceRecorder {
         if active.sequence != sequence {
             return Err("ASTRA_PERFORMANCE_INPUT_FLOW_SEQUENCE_MISMATCH".into());
         }
+        if state.pending_product_sample.is_some() {
+            return Err("ASTRA_PERFORMANCE_PRESENTATION_SAMPLE_SCOPE_UNCLOSED".into());
+        }
         if !active.gpu_seen {
             let timestamp_ns = elapsed_ns(state.started)?;
             state
@@ -351,7 +467,7 @@ impl ProductPerformanceRecorder {
                 .flow(
                     "frame.flow",
                     "physical_input_to_gpu",
-                    1,
+                    TRACE_TRACK_INPUT_FLOW,
                     sequence,
                     timestamp_ns,
                     PerfettoFlowPhase::End,
@@ -380,13 +496,7 @@ impl ProductPerformanceRecorder {
                 .last_paced_gpu_sequence
                 .ok_or("ASTRA_PERFORMANCE_GPU_MEASUREMENT_EMPTY")?,
         );
-        let offset = frame_deadline_offset(state.paced_frame_count, state.presentation_rate_hz)?;
-        state.measurement_stopped = Some(
-            state
-                .pacing_started
-                .checked_add(offset)
-                .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_DEADLINE_OVERFLOW")?,
-        );
+        state.measurement_stopped = Some(Instant::now());
         Ok(())
     }
 
@@ -415,7 +525,7 @@ impl ProductPerformanceRecorder {
             .complete(
                 domain,
                 name,
-                1,
+                trace_track(name),
                 correlation_id,
                 end_ns.saturating_sub(duration_ns),
                 duration_ns,
@@ -486,10 +596,19 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if correlation_id.is_some_and(|sequence| !trace_detailed_phase(sequence)) {
+            return Ok(());
+        }
         let timestamp_ns = elapsed_ns(state.started)?;
         state
             .trace
-            .begin(domain, name, 1, correlation_id, timestamp_ns)
+            .begin(
+                domain,
+                name,
+                trace_track(name),
+                correlation_id,
+                timestamp_ns,
+            )
             .map_err(|error| error.to_string())
     }
 
@@ -506,10 +625,19 @@ impl ProductPerformanceRecorder {
         let state = guard
             .as_mut()
             .ok_or("ASTRA_PERFORMANCE_RECORDER_FINISHED")?;
+        if correlation_id.is_some_and(|sequence| !trace_detailed_phase(sequence)) {
+            return Ok(());
+        }
         let timestamp_ns = elapsed_ns(state.started)?;
         state
             .trace
-            .end(domain, name, 1, correlation_id, timestamp_ns)
+            .end(
+                domain,
+                name,
+                trace_track(name),
+                correlation_id,
+                timestamp_ns,
+            )
             .map_err(|error| error.to_string())
     }
 
@@ -539,12 +667,17 @@ impl ProductPerformanceRecorder {
         let measurement_stopped = state
             .measurement_stopped
             .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_NOT_STOPPED")?;
-        let duration_us = measurement_stopped
-            .checked_duration_since(measurement_started)
-            .ok_or("ASTRA_PERFORMANCE_MEASUREMENT_TIME_REVERSED")?
-            .as_micros()
-            .try_into()
-            .map_err(|_| "ASTRA_PERFORMANCE_DURATION_OVERFLOW")?;
+        if measurement_stopped < measurement_started {
+            return Err("ASTRA_PERFORMANCE_MEASUREMENT_TIME_REVERSED".into());
+        }
+        // Headless advances a deterministic presentation clock. The report
+        // duration must therefore cover every measured cadence interval, not
+        // the wall-clock gap between the first and last sampled callback. The
+        // latter omits the first interval and is sensitive to host timer
+        // granularity, which incorrectly rejected a complete 72,000-frame
+        // 120 Hz workload as shorter than ten minutes.
+        let duration_us =
+            measurement_duration_us(state.measurement_frame_count, state.presentation_rate_hz)?;
         let trace_summary = state.trace.finish().map_err(|error| error.to_string())?;
         let report = state
             .recorder
@@ -626,12 +759,14 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
                 .paced_frame_count
                 .checked_add(1)
                 .ok_or_else(|| performance_error("paced frame count overflowed"))?;
-            let offset = frame_deadline_offset(state.paced_frame_count, state.presentation_rate_hz)
-                .map_err(performance_error)?;
-            state
-                .pacing_started
-                .checked_add(offset)
-                .ok_or_else(|| performance_error("frame deadline overflowed"))?
+            let deadline = next_frame_deadline(
+                state.next_frame_deadline,
+                Instant::now(),
+                state.presentation_rate_hz,
+            )
+            .map_err(performance_error)?;
+            state.next_frame_deadline = Some(deadline);
+            deadline
         };
         pace_until(deadline);
         Ok(())
@@ -653,15 +788,31 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
         {
             return Ok(None);
         }
-        let product_cpu_ns = std::mem::take(&mut state.pending_product_cpu_ns);
+        // Time-driven presentation can originate in the media executor without
+        // a ProductPerformanceSample that is marked as scene-producing. Its
+        // decode/mix work remains an independently traced product phase; the
+        // GPU frame still owns scene construction and submission time. Never
+        // consume a later UI sample on behalf of that media-only frame.
+        if state.active_input_flow.is_none() {
+            return Err(performance_error(
+                "GPU frame submitted outside an input flow",
+            ));
+        }
+        let product_sample = state
+            .pending_product_sample
+            .take()
+            .unwrap_or(BoundProductSample {
+                cpu_ns: 0,
+                phases: ProductPerformanceSample::default(),
+            });
         if state
-            .product_cpu_by_gpu_sequence
-            .insert(sequence, product_cpu_ns)
+            .product_sample_by_gpu_sequence
+            .insert(sequence, product_sample)
             .is_some()
         {
             return Err(performance_error("duplicate GPU sequence CPU binding"));
         }
-        if state.product_cpu_by_gpu_sequence.len() > 1_024 {
+        if state.product_sample_by_gpu_sequence.len() > 1_024 {
             return Err(performance_error("GPU CPU correlation capacity exceeded"));
         }
         Ok(state
@@ -692,11 +843,11 @@ impl HeadlessPerformanceObserver for ProductPerformanceRecorder {
         {
             return Ok(());
         }
-        let product_cpu_ns = state
-            .product_cpu_by_gpu_sequence
+        let product_sample = state
+            .product_sample_by_gpu_sequence
             .remove(&sample.sequence)
             .ok_or_else(|| performance_error("GPU frame has no submit-time CPU binding"))?;
-        self.record_gpu_frame_sample(state, sample, product_cpu_ns)
+        self.record_gpu_frame_sample(state, sample, product_sample)
     }
 }
 
@@ -705,7 +856,7 @@ impl ProductPerformanceRecorder {
         &self,
         state: &mut RecorderState,
         sample: HeadlessGpuFrameSample,
-        product_cpu_ns: u64,
+        product_sample: BoundProductSample,
     ) -> Result<(), PlatformError> {
         if state.warmup_frames_remaining > 0 {
             if let Some(flow_id) = sample.input_flow_id {
@@ -720,7 +871,7 @@ impl ProductPerformanceRecorder {
                     .flow(
                         "frame.flow",
                         "physical_input_to_gpu",
-                        2,
+                        TRACE_TRACK_GPU_FLOW,
                         flow_id,
                         timestamp_ns,
                         PerfettoFlowPhase::End,
@@ -729,26 +880,25 @@ impl ProductPerformanceRecorder {
             }
             state.warmup_frames_remaining -= 1;
             if state.warmup_frames_remaining == 0 {
-                let offset = frame_deadline_offset(state.warmup_frames, state.presentation_rate_hz)
-                    .map_err(performance_error)?;
-                state.measurement_started = Some(
-                    state
-                        .pacing_started
-                        .checked_add(offset)
-                        .ok_or_else(|| performance_error("measurement deadline overflowed"))?,
-                );
+                state.measurement_started = Some(Instant::now());
                 state.last_memory_sample = None;
                 state.memory_baseline = None;
+                state.measurement_frame_count = 0;
             }
             return Ok(());
         }
+        state.measurement_frame_count = state
+            .measurement_frame_count
+            .checked_add(1)
+            .ok_or_else(|| performance_error("measurement frame count overflowed"))?;
         let timestamp_ns: u64 = state
             .started
             .elapsed()
             .as_nanos()
             .try_into()
             .map_err(|_| performance_error("trace timestamp overflowed"))?;
-        let cpu_ns = product_cpu_ns
+        let cpu_ns = product_sample
+            .cpu_ns
             .checked_add(sample.scene_build_ns)
             .and_then(|value| value.checked_add(sample.cpu_submit_ns))
             .ok_or_else(|| performance_error("CPU frame duration overflowed"))?;
@@ -805,79 +955,258 @@ impl ProductPerformanceRecorder {
                 .map_err(|error| performance_error(&error.to_string()))?;
         }
         // Timestamp queries resolve on the next materialization so the CPU never
-        // waits for the just-submitted frame. Keep streamed trace timestamps
-        // monotonic and carry the measured durations on correlated slices.
-        let start_ns = timestamp_ns;
-        let gpu_start_ns = timestamp_ns;
+        // waits for the just-submitted frame. The report retains every measured
+        // frame; the trace emits a bounded representative timeline.
         let active_flow = sample.input_flow_id;
-        for (domain, name, thread_id, duration_ns) in [
-            ("runtime.cpu", "scene.build", 1, sample.scene_build_ns),
+        // The report records every frame. Perfetto phase slices are sampled at
+        // a fixed cadence so a ten-minute 120 Hz run remains below the bounded
+        // trace writer limit while still preserving representative CPU phase
+        // timelines and all correlated physical-input flows.
+        // A full 73,200-frame product run still records its per-frame budget
+        // counters and physical-input flow. One detailed phase sample per
+        // thirty-two submitted frames keeps the trace below the hard two-million
+        // event contract on the highest-density product workload.
+        let trace_detailed_phase = trace_detailed_phase(sample.sequence);
+        if trace_detailed_phase {
+            state
+                .trace
+                .complete(
+                    "frame.timeline",
+                    "frame.end_to_end",
+                    trace_track("frame.end_to_end"),
+                    Some(sample.sequence),
+                    timestamp_ns,
+                    end_to_end_ns,
+                )
+                .map_err(|error| performance_error(&error.to_string()))?;
+            for (domain, name, duration_ns) in [
+                (
+                    "product.bound",
+                    "product.runtime",
+                    product_sample.phases.runtime_tick_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui",
+                    product_sample.phases.ui_layout_paint_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.media",
+                    product_sample.phases.media_decode_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.save_load",
+                    product_sample.phases.save_load_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_tree_build",
+                    product_sample.phases.ui_tree_build_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_action_dispatch",
+                    product_sample.phases.ui_action_dispatch_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.runtime_host_step",
+                    product_sample.phases.ui_runtime_host_step_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.runtime_output_decode",
+                    product_sample.phases.ui_runtime_output_decode_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.runtime_render",
+                    product_sample.phases.ui_runtime_render_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.stage_prepare",
+                    product_sample.phases.vn_stage_prepare_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.stage_scene",
+                    product_sample.phases.vn_stage_scene_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.stage_texture",
+                    product_sample.phases.vn_stage_texture_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.stage_command",
+                    product_sample.phases.vn_stage_command_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.stage_lifecycle",
+                    product_sample.phases.vn_stage_lifecycle_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.scene_compose",
+                    product_sample.phases.vn_scene_compose_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_model_binding",
+                    product_sample.phases.ui_model_binding_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_controller",
+                    product_sample.phases.ui_controller_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_frame_model",
+                    product_sample.phases.ui_frame_model_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_text_scene",
+                    product_sample.phases.ui_text_scene_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_text_layout",
+                    product_sample.phases.ui_text_layout_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_text_resource",
+                    product_sample.phases.ui_text_resource_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_text_compose",
+                    product_sample.phases.ui_text_compose_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_present_scene",
+                    product_sample.phases.ui_present_scene_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_request_validation",
+                    product_sample.phases.ui_request_validation_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_input_routing",
+                    product_sample.phases.ui_input_routing_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_layout_finalize",
+                    product_sample.phases.ui_layout_finalize_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_semantics",
+                    product_sample.phases.ui_semantics_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_update_layout",
+                    product_sample.phases.ui_update_layout_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_paint_conversion",
+                    product_sample.phases.ui_paint_conversion_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_output_validation",
+                    product_sample.phases.ui_output_validation_ns,
+                ),
+                (
+                    "product.bound",
+                    "product.ui_host_scene",
+                    product_sample.phases.ui_host_scene_ns,
+                ),
+            ] {
+                trace_complete_nonzero(
+                    &mut state.trace,
+                    domain,
+                    name,
+                    trace_track(name),
+                    sample.sequence,
+                    timestamp_ns,
+                    duration_ns,
+                )
+                .map_err(|error| performance_error(&error))?;
+            }
+        }
+        let phases = [
+            ("frame.cpu", "frame.cpu", cpu_ns),
+            ("runtime.cpu", "scene.build", sample.scene_build_ns),
+            ("runtime.cpu", "scene.digest", sample.scene_digest_ns),
             (
-                "renderer.cpu",
-                "wgpu.prepare_submit",
-                1,
-                sample.cpu_submit_ns,
+                "runtime.cpu",
+                "scene.validation",
+                sample.scene_validation_ns,
             ),
+            ("runtime.cpu", "scene.pending", sample.scene_pending_ns),
+            ("renderer.cpu", "wgpu.prepare_submit", sample.cpu_submit_ns),
             (
                 "renderer.cpu",
                 "scene.commands",
-                1,
                 sample.scene_command_cpu_ns,
             ),
-            ("renderer.cpu", "scene.atlas", 1, sample.scene_atlas_cpu_ns),
+            ("renderer.cpu", "scene.atlas", sample.scene_atlas_cpu_ns),
             (
                 "renderer.cpu",
                 "scene.geometry",
-                1,
                 sample.scene_geometry_cpu_ns,
             ),
             (
                 "renderer.cpu",
                 "scene.vertex_upload",
-                1,
                 sample.scene_vertex_upload_cpu_ns,
             ),
             (
                 "renderer.cpu",
                 "scene.render_submit",
-                1,
                 sample.scene_render_submit_cpu_ns,
             ),
             (
                 "renderer.cpu",
                 "scene.render_encode",
-                1,
                 sample.scene_render_encode_cpu_ns,
             ),
             (
                 "renderer.cpu",
                 "scene.queue_submit",
-                1,
                 sample.scene_queue_submit_cpu_ns,
             ),
-            (
-                "renderer.gpu",
-                "atlas.upload",
-                2,
-                sample.atlas_upload_gpu_ns,
-            ),
-            ("renderer.gpu", "scene.pass", 2, sample.scene_gpu_ns),
-            ("renderer.gpu", "filter.pass", 2, sample.filter_gpu_ns),
-        ] {
-            trace_complete_nonzero(
-                &mut state.trace,
-                domain,
-                name,
-                thread_id,
-                sample.sequence,
-                if thread_id == 1 {
-                    start_ns
-                } else {
-                    gpu_start_ns
-                },
-                duration_ns,
-            )
-            .map_err(|error| performance_error(&error))?;
+            ("renderer.gpu", "atlas.upload", sample.atlas_upload_gpu_ns),
+            ("renderer.gpu", "scene.pass", sample.scene_gpu_ns),
+            ("renderer.gpu", "filter.pass", sample.filter_gpu_ns),
+        ];
+        if trace_detailed_phase {
+            for (domain, name, duration_ns) in phases {
+                trace_complete_nonzero(
+                    &mut state.trace,
+                    domain,
+                    name,
+                    trace_track(name),
+                    sample.sequence,
+                    timestamp_ns,
+                    duration_ns,
+                )
+                .map_err(|error| performance_error(&error))?;
+            }
         }
         if let Some(flow_id) = active_flow {
             state
@@ -885,18 +1214,18 @@ impl ProductPerformanceRecorder {
                 .flow(
                     "frame.flow",
                     "physical_input_to_gpu",
-                    2,
+                    TRACE_TRACK_GPU_FLOW,
                     flow_id,
-                    gpu_start_ns,
+                    timestamp_ns,
                     PerfettoFlowPhase::Step,
                 )
                 .and_then(|_| {
                     state.trace.flow(
                         "frame.flow",
                         "physical_input_to_gpu",
-                        2,
+                        TRACE_TRACK_GPU_FLOW,
                         flow_id,
-                        gpu_start_ns,
+                        timestamp_ns,
                         PerfettoFlowPhase::End,
                     )
                 })
@@ -928,6 +1257,24 @@ impl ProductPerformanceRecorder {
                 "allocator",
                 "frame.bytes",
                 sample.heap_allocation_bytes,
+                true,
+            ),
+            (
+                "allocator",
+                "scene_command.bytes",
+                sample.command_allocation_bytes,
+                true,
+            ),
+            (
+                "allocator",
+                "scene_atlas.bytes",
+                sample.atlas_allocation_bytes,
+                true,
+            ),
+            (
+                "allocator",
+                "scene_geometry.bytes",
+                sample.geometry_allocation_bytes,
                 true,
             ),
             ("allocator", "live.bytes", allocation.live_bytes, false),
@@ -1046,6 +1393,23 @@ fn frame_deadline_offset(
     Ok(Duration::from_nanos(nanoseconds))
 }
 
+fn next_frame_deadline(
+    previous_deadline: Option<Instant>,
+    now: Instant,
+    presentation_rate_hz: u32,
+) -> Result<Instant, &'static str> {
+    let Some(previous_deadline) = previous_deadline else {
+        return Ok(now);
+    };
+    let frame_period = frame_deadline_offset(1, presentation_rate_hz)?;
+    let scheduled = previous_deadline
+        .checked_add(frame_period)
+        .ok_or("frame deadline overflowed")?;
+    // Authored waits intentionally leave the GPU idle. Do not replay the
+    // elapsed presentation slots as a catch-up burst when rendering resumes.
+    Ok(scheduled.max(now))
+}
+
 fn pace_until(deadline: Instant) {
     const SPIN_WINDOW: Duration = Duration::from_micros(200);
     loop {
@@ -1099,6 +1463,25 @@ mod tests {
     }
 
     #[test]
+    fn frame_pacing_drops_elapsed_slots_instead_of_catching_up_after_idle() {
+        let started = Instant::now();
+        let first = next_frame_deadline(None, started, 120).unwrap();
+        assert_eq!(first, started);
+
+        let second_now = started + Duration::from_millis(1);
+        let second = next_frame_deadline(Some(first), second_now, 120).unwrap();
+        assert_eq!(second, started + Duration::from_nanos(8_333_333));
+
+        let resumed = started + Duration::from_secs(30);
+        let after_authored_wait = next_frame_deadline(Some(second), resumed, 120).unwrap();
+        assert_eq!(after_authored_wait, resumed);
+        assert_eq!(
+            next_frame_deadline(Some(after_authored_wait), resumed, 120).unwrap(),
+            resumed + Duration::from_nanos(8_333_333)
+        );
+    }
+
+    #[test]
     fn trace_counters_emit_changes_and_bounded_heartbeats() {
         let previous = TraceCounterSample {
             value: 42,
@@ -1114,6 +1497,75 @@ mod tests {
             42,
             false,
         ));
+    }
+
+    #[test]
+    fn trace_phase_tracks_are_stable_and_distinct() {
+        let names = [
+            "physical_input.consume",
+            "package.storage_verify",
+            "package.table_open",
+            "package.source_unlock",
+            "product.open",
+            "checkpoint.encode_write",
+            "runtime.tick_action",
+            "vn.step",
+            "ui.layout_paint",
+            "ui.host_scene",
+            "vn.runtime_render",
+            "media.decode_mix",
+            "media.mixer",
+            "save_load",
+            "frame.cpu",
+            "frame.end_to_end",
+            "scene.build",
+            "scene.validation",
+            "wgpu.prepare_submit",
+            "scene.commands",
+            "scene.atlas",
+            "scene.geometry",
+            "scene.vertex_upload",
+            "scene.render_submit",
+            "scene.render_encode",
+            "scene.queue_submit",
+            "atlas.upload",
+            "scene.pass",
+            "filter.pass",
+        ];
+        let tracks = names.into_iter().map(trace_track).collect::<BTreeSet<_>>();
+        assert_eq!(tracks.len(), names.len());
+        assert!(tracks
+            .iter()
+            .all(|track| ![TRACE_TRACK_INPUT_FLOW, TRACE_TRACK_GPU_FLOW].contains(track)));
+    }
+
+    #[test]
+    fn detailed_trace_phase_sampling_is_fixed_and_includes_each_cadence_boundary() {
+        assert!(!trace_detailed_phase(1));
+        assert!(!trace_detailed_phase(
+            TRACE_DETAILED_PHASE_SAMPLE_INTERVAL - 1
+        ));
+        assert!(trace_detailed_phase(TRACE_DETAILED_PHASE_SAMPLE_INTERVAL));
+        assert!(trace_detailed_phase(
+            TRACE_DETAILED_PHASE_SAMPLE_INTERVAL * 2
+        ));
+    }
+
+    #[test]
+    fn deterministic_measurement_duration_covers_all_120hz_intervals() {
+        assert_eq!(
+            measurement_duration_us(
+                72_000,
+                astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ
+            )
+            .unwrap(),
+            600_000_000
+        );
+        assert_eq!(
+            measurement_duration_us(1, astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ)
+                .unwrap(),
+            8_334
+        );
     }
 
     #[test]
@@ -1169,6 +1621,9 @@ mod tests {
             sequence: 1,
             input_flow_id: Some(1),
             scene_build_ns: 10,
+            scene_digest_ns: 3,
+            scene_validation_ns: 4,
+            scene_pending_ns: 3,
             cpu_submit_ns: 20,
             gpu_duration_ns: 30,
             scene_cpu_ns: 15,
@@ -1192,6 +1647,9 @@ mod tests {
             pipeline_count: 1,
             heap_allocation_bytes: 0,
             heap_allocation_count: 0,
+            command_allocation_bytes: 0,
+            atlas_allocation_bytes: 0,
+            geometry_allocation_bytes: 0,
         };
         let product_sample = ProductPerformanceSample {
             bind_to_next_presentation: true,
@@ -1199,6 +1657,10 @@ mod tests {
             vn_step_ns: 2,
             ui_layout_paint_ns: 40,
             ui_request_validation_ns: 1,
+            ui_input_routing_ns: 1,
+            ui_tree_build_ns: 2,
+            ui_layout_finalize_ns: 3,
+            ui_semantics_ns: 1,
             ui_update_layout_ns: 10,
             ui_paint_conversion_ns: 5,
             ui_output_validation_ns: 1,
@@ -1207,6 +1669,9 @@ mod tests {
             ui_controller_ns: 3,
             ui_frame_model_ns: 2,
             ui_text_scene_ns: 1,
+            ui_text_layout_ns: 1,
+            ui_text_resource_ns: 1,
+            ui_text_compose_ns: 1,
             ui_action_dispatch_ns: 1,
             ui_present_scene_ns: 1,
             ui_runtime_host_step_ns: 1,
@@ -1215,7 +1680,11 @@ mod tests {
             vn_stage_prepare_ns: 1,
             vn_stage_scene_ns: 1,
             vn_scene_compose_ns: 1,
+            vn_stage_texture_ns: 1,
+            vn_stage_command_ns: 1,
+            vn_stage_lifecycle_ns: 1,
             media_decode_ns: 6,
+            media_prewarm_ns: 1,
             media_provider_decode_ns: 3,
             media_parse_convert_ns: 2,
             media_mixer_ns: 1,
@@ -1225,6 +1694,10 @@ mod tests {
             media_audio_completion_ns: 1,
             save_load_ns: 7,
         };
+        // The production observer receives measured durations after the work
+        // completes. Keep this synthetic sample inside the active flow's real
+        // elapsed interval so the streamed timestamp contract remains valid.
+        std::thread::sleep(Duration::from_millis(1));
         recorder
             .record_product_sample(
                 1,
@@ -1240,15 +1713,38 @@ mod tests {
         recorder.pace_gpu_frame(1).unwrap();
         assert_eq!(recorder.bind_gpu_frame(1).unwrap(), Some(1));
         recorder.record_gpu_frame(sample).unwrap();
+        recorder.finish_presentation_scope().unwrap();
         recorder.end_input_flow(1).unwrap();
+
         recorder.begin_input_flow(2).unwrap();
-        sample.sequence = 2;
-        sample.input_flow_id = Some(2);
-        recorder.record_product_sample(2, product_sample).unwrap();
-        recorder.pace_gpu_frame(2).unwrap();
-        assert_eq!(recorder.bind_gpu_frame(2).unwrap(), Some(2));
-        recorder.record_gpu_frame(sample).unwrap();
+        recorder
+            .record_product_sample(
+                2,
+                ProductPerformanceSample {
+                    bind_to_next_presentation: true,
+                    runtime_tick_ns: 9_000_000,
+                    ..ProductPerformanceSample::default()
+                },
+            )
+            .unwrap();
+        recorder.finish_presentation_scope().unwrap();
         recorder.end_input_flow(2).unwrap();
+        {
+            let guard = recorder.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert!(state.pending_product_sample.is_none());
+            assert_eq!(state.skipped_presentation_samples, 1);
+        }
+
+        recorder.begin_input_flow(3).unwrap();
+        sample.sequence = 2;
+        sample.input_flow_id = Some(3);
+        recorder.record_product_sample(3, product_sample).unwrap();
+        recorder.pace_gpu_frame(2).unwrap();
+        assert_eq!(recorder.bind_gpu_frame(2).unwrap(), Some(3));
+        recorder.record_gpu_frame(sample).unwrap();
+        recorder.finish_presentation_scope().unwrap();
+        recorder.end_input_flow(3).unwrap();
         recorder.stop_gpu_measurement().unwrap();
         recorder
             .finish(

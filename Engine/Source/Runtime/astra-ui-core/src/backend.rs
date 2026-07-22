@@ -98,6 +98,10 @@ impl ValidateUi for UiFrameRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UiPerformanceSample {
     pub request_validation_ns: u64,
+    pub input_routing_ns: u64,
+    pub tree_build_ns: u64,
+    pub layout_finalize_ns: u64,
+    pub semantics_ns: u64,
     pub update_layout_ns: u64,
     pub paint_conversion_ns: u64,
     pub output_validation_ns: u64,
@@ -185,6 +189,10 @@ impl ValidateUi for UiFrameOutput {
             ));
         }
         if self.performance.request_validation_ns > 60_000_000_000
+            || self.performance.input_routing_ns > 60_000_000_000
+            || self.performance.tree_build_ns > 60_000_000_000
+            || self.performance.layout_finalize_ns > 60_000_000_000
+            || self.performance.semantics_ns > 60_000_000_000
             || self.performance.update_layout_ns > 60_000_000_000
             || self.performance.paint_conversion_ns > 60_000_000_000
             || self.performance.output_validation_ns > 60_000_000_000

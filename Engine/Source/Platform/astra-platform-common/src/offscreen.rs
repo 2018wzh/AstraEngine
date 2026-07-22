@@ -67,6 +67,9 @@ struct FilterPassContext<'a> {
 
 const READBACK_RING_SIZE: usize = 3;
 const READBACK_TIMEOUT: Duration = Duration::from_secs(5);
+const PERFORMANCE_ATLAS_SIDE: u32 = 4096;
+const PERFORMANCE_ATLAS_BYTES: u64 =
+    PERFORMANCE_ATLAS_SIDE as u64 * PERFORMANCE_ATLAS_SIDE as u64 * 4;
 
 #[derive(Default)]
 struct ReadbackRing {
@@ -121,6 +124,9 @@ pub struct WgpuFramePerformanceCounters {
     pub pipeline_count: u64,
     pub engine_allocation_bytes: u64,
     pub engine_allocation_count: u64,
+    pub command_allocation_bytes: u64,
+    pub atlas_allocation_bytes: u64,
+    pub geometry_allocation_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,14 +166,34 @@ pub struct WgpuPendingProfile {
 
 impl WgpuOffscreenRenderer {
     pub async fn new() -> Result<Self, PlatformError> {
-        Self::new_internal(None).await
+        Self::new_internal(None, None).await
     }
 
     pub async fn new_with_policy(policy: &GpuAdapterPolicy) -> Result<Self, PlatformError> {
-        Self::new_internal(Some(policy)).await
+        Self::new_internal(Some(policy), None).await
     }
 
-    async fn new_internal(policy: Option<&GpuAdapterPolicy>) -> Result<Self, PlatformError> {
+    pub async fn new_for_performance(
+        policy: &GpuAdapterPolicy,
+        max_gpu_resource_bytes: u64,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, PlatformError> {
+        if max_gpu_resource_bytes < PERFORMANCE_ATLAS_BYTES {
+            return Err(unavailable(
+                "offscreen.performance.atlas_reservation",
+                "GPU resource budget is too small for the persistent performance atlas",
+            ));
+        }
+        let mut renderer = Self::new_internal(Some(policy), Some(PERFORMANCE_ATLAS_SIDE)).await?;
+        renderer.prewarm(width, height)?;
+        Ok(renderer)
+    }
+
+    async fn new_internal(
+        policy: Option<&GpuAdapterPolicy>,
+        atlas_reservation: Option<u32>,
+    ) -> Result<Self, PlatformError> {
         let instance = native_wgpu_instance()?;
         let adapter = if let Some(policy) = policy {
             select_adapter(&instance, policy).await?
@@ -222,7 +248,10 @@ impl WgpuOffscreenRenderer {
         identity
             .validate()
             .map_err(|_| unavailable("offscreen.identity", "GPU identity is invalid"))?;
-        let scene_renderer = WgpuGlyphAtlasRenderer::new(&device);
+        let scene_renderer = match atlas_reservation {
+            Some(side) => WgpuGlyphAtlasRenderer::new_reserved(&device, &queue, side)?,
+            None => WgpuGlyphAtlasRenderer::new(&device),
+        };
         let gpu_timer = if device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
             let byte_length = u64::from(MAX_GPU_TIMESTAMP_QUERIES) * 8;
             Some(GpuTimer {
@@ -303,7 +332,61 @@ impl WgpuOffscreenRenderer {
             pipeline_count: 1 + self.filter_pipelines.len() as u64,
             engine_allocation_bytes: self.scene_renderer.last_engine_allocation_bytes(),
             engine_allocation_count: self.scene_renderer.last_engine_allocation_count(),
+            command_allocation_bytes: self.scene_renderer.last_command_allocation_bytes(),
+            atlas_allocation_bytes: self.scene_renderer.last_atlas_allocation_bytes(),
+            geometry_allocation_bytes: self.scene_renderer.last_geometry_allocation_bytes(),
         }
+    }
+
+    fn prewarm(&mut self, width: u32, height: u32) -> Result<(), PlatformError> {
+        if width == 0 || height == 0 {
+            return Err(invalid(
+                "offscreen.performance.prewarm",
+                "performance surface dimensions must be non-zero",
+            ));
+        }
+        let started = Instant::now();
+        self.submit_frame(&SceneFrame {
+            sequence: 0,
+            width,
+            height,
+            clear_rgba: [0, 0, 0, 255],
+            // An empty scene only allocates the output texture.  Submit one real
+            // primitive so DX12 validates the bind group, vertex path and render
+            // pipeline before any measured product frame can reach that lazy path.
+            commands: vec![SceneCommand::Clear {
+                rgba: [0, 0, 0, 255],
+            }],
+            semantics: None,
+        })?;
+        let encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("astra-offscreen-performance-prewarm-fence"),
+            });
+        let submission = self.queue.submit([encoder.finish()]);
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(READBACK_TIMEOUT),
+            })
+            .map_err(|_| {
+                unavailable(
+                    "offscreen.performance.prewarm",
+                    "GPU prewarm exceeded its bounded timeout",
+                )
+            })?;
+        self.pending_output = None;
+        self.last_readback_bytes = 0;
+        self.last_queue_submissions = 0;
+        tracing::info!(
+            event = "platform.offscreen.performance.prewarm.complete",
+            width,
+            height,
+            duration_us = started.elapsed().as_micros() as u64,
+            "prewarmed the profile-bound WGPU pipeline before measured frames"
+        );
+        Ok(())
     }
 
     pub fn render(&mut self, frame: &SceneFrame) -> Result<CapturedFrame, PlatformError> {

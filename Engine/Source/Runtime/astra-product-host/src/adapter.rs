@@ -24,6 +24,14 @@ pub trait ProductPerformanceObserver: Send + Sync {
     fn record_sample(&self, _sample: ProductPerformanceSample) -> Result<(), String> {
         Ok(())
     }
+
+    /// Closes the scene-producing sample whose host batch has just returned.
+    /// A renderer may deterministically suppress an unchanged scene; in that
+    /// case the observer must discard its CPU sample instead of charging an
+    /// unrelated later GPU frame.
+    fn finish_presentation_sample(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +82,10 @@ pub struct ProductPerformanceSample {
     pub vn_step_ns: u64,
     pub ui_layout_paint_ns: u64,
     pub ui_request_validation_ns: u64,
+    pub ui_input_routing_ns: u64,
+    pub ui_tree_build_ns: u64,
+    pub ui_layout_finalize_ns: u64,
+    pub ui_semantics_ns: u64,
     pub ui_update_layout_ns: u64,
     pub ui_paint_conversion_ns: u64,
     pub ui_output_validation_ns: u64,
@@ -82,6 +94,9 @@ pub struct ProductPerformanceSample {
     pub ui_controller_ns: u64,
     pub ui_frame_model_ns: u64,
     pub ui_text_scene_ns: u64,
+    pub ui_text_layout_ns: u64,
+    pub ui_text_resource_ns: u64,
+    pub ui_text_compose_ns: u64,
     pub ui_action_dispatch_ns: u64,
     pub ui_present_scene_ns: u64,
     pub ui_runtime_host_step_ns: u64,
@@ -89,8 +104,12 @@ pub struct ProductPerformanceSample {
     pub ui_runtime_render_ns: u64,
     pub vn_stage_prepare_ns: u64,
     pub vn_stage_scene_ns: u64,
+    pub vn_stage_texture_ns: u64,
+    pub vn_stage_command_ns: u64,
+    pub vn_stage_lifecycle_ns: u64,
     pub vn_scene_compose_ns: u64,
     pub media_decode_ns: u64,
+    pub media_prewarm_ns: u64,
     pub media_provider_decode_ns: u64,
     pub media_parse_convert_ns: u64,
     pub media_mixer_ns: u64,

@@ -56,6 +56,7 @@ impl ValidatedVnRuntimeState {
 #[derive(Debug)]
 pub struct VnRuntimeIndex {
     story_hash: Hash128,
+    state_ids: BTreeSet<String>,
     commands_by_state: BTreeMap<String, Vec<(usize, usize)>>,
     story_by_state: BTreeMap<String, String>,
 }
@@ -100,6 +101,7 @@ impl VnRuntimeIndex {
             .collect();
         Ok(Self {
             story_hash: compiled.story_hash,
+            state_ids: compiled.states.keys().cloned().collect(),
             commands_by_state,
             story_by_state,
         })
@@ -268,6 +270,18 @@ impl VnRuntime {
         command: VnPlayerCommand,
         before: Hash128,
     ) -> Result<(PendingVnStepOutput, Arc<[u8]>), VnError> {
+        let pending = self.apply_with_state_hash_pending(command, before)?;
+        let encoded_state: Arc<[u8]> = postcard::to_allocvec(&self.state)
+            .expect("AstraVN runtime state must serialize for hashing")
+            .into();
+        Ok((pending, encoded_state))
+    }
+
+    fn apply_with_state_hash_pending(
+        &mut self,
+        command: VnPlayerCommand,
+        before: Hash128,
+    ) -> Result<PendingVnStepOutput, VnError> {
         tracing::trace!(
             event = "vn.runtime.command.start",
             before_state_hash = %before,
@@ -588,26 +602,20 @@ impl VnRuntime {
         let audio = presentation.iter().filter_map(vn_audio_command).collect();
         let timeline_tasks = presentation.iter().filter_map(vn_timeline_task).collect();
         let mutations = variable_mutations(&before_variables, &self.state.variables);
-        let encoded_state: Arc<[u8]> = postcard::to_allocvec(&self.state)
-            .expect("AstraVN runtime state must serialize for hashing")
-            .into();
-        Ok((
-            PendingVnStepOutput(VnStepOutput {
-                schema: "astra.vn.step_output.v1".to_string(),
-                next_cursor: self.state.cursor.clone(),
-                wait: self.state.pending_wait.clone(),
-                awaits: Vec::new(),
-                events,
-                presentation,
-                audio,
-                timeline_tasks,
-                mutations,
-                coverage: VnCoverage { reached },
-                state_hash_before_advance: before,
-                state_hash_after_advance: before,
-            }),
-            encoded_state,
-        ))
+        Ok(PendingVnStepOutput(VnStepOutput {
+            schema: "astra.vn.step_output.v1".to_string(),
+            next_cursor: self.state.cursor.clone(),
+            wait: self.state.pending_wait.clone(),
+            awaits: Vec::new(),
+            events,
+            presentation,
+            audio,
+            timeline_tasks,
+            mutations,
+            coverage: VnCoverage { reached },
+            state_hash_before_advance: before,
+            state_hash_after_advance: before,
+        }))
     }
 
     pub fn save_slot(&self, slot: impl Into<String>) -> Result<VnSaveBlob, VnError> {
@@ -634,6 +642,15 @@ impl VnRuntime {
         &mut self,
         presentation: &mut Vec<PresentationCommand>,
         reached: &mut BTreeSet<String>,
+    ) -> Result<(), VnError> {
+        self.run_until_blocked_with_dialogue_presentation(presentation, reached, true)
+    }
+
+    fn run_until_blocked_with_dialogue_presentation(
+        &mut self,
+        presentation: &mut Vec<PresentationCommand>,
+        reached: &mut BTreeSet<String>,
+        emit_dialogue: bool,
     ) -> Result<(), VnError> {
         loop {
             if self.state.pending_wait.is_some() {
@@ -686,12 +703,14 @@ impl VnRuntime {
                             },
                         );
                     }
-                    presentation.push(PresentationCommand::Dialogue {
-                        key,
-                        speaker,
-                        voice,
-                        window,
-                    });
+                    if emit_dialogue {
+                        presentation.push(PresentationCommand::Dialogue {
+                            key,
+                            speaker,
+                            voice,
+                            window,
+                        });
+                    }
                     self.set_pending_wait(VnWaitState::new(
                         VnWaitKind::Dialogue,
                         format!("dialogue:{id}"),
@@ -1189,21 +1208,16 @@ impl VnRuntime {
             match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
                 Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
                     self.state.pending_wait = None;
-                    let presentation_start = presentation.len();
-                    self.run_until_blocked(presentation, reached)?;
-                    if matches!(
-                        self.state.pending_wait.as_ref().map(|wait| wait.kind),
-                        Some(VnWaitKind::Dialogue | VnWaitKind::Input)
-                    ) && self.state.system_stack.is_empty()
-                    {
-                        let retained = presentation
-                            .drain(presentation_start..)
-                            .filter(|command| {
-                                !matches!(command, PresentationCommand::Dialogue { .. })
-                            })
-                            .collect::<Vec<_>>();
-                        presentation.extend(retained);
-                    }
+                    // Fast-forward still commits dialogue to backlog/read-state, but only
+                    // non-dialogue presentation reaches the renderer. Suppressing the
+                    // transient dialogue command at its source avoids a drain/filter/
+                    // reallocate cycle for every skipped wait while preserving authored
+                    // stage, audio, timeline, and route effects in their original order.
+                    self.run_until_blocked_with_dialogue_presentation(
+                        presentation,
+                        reached,
+                        false,
+                    )?;
                 }
                 None => {
                     self.run_until_blocked(presentation, reached)?;
@@ -1224,8 +1238,7 @@ impl VnRuntime {
     }
 
     fn resolve_runtime_target(&self, target: &str) -> String {
-        let state_ids = self.compiled.states.keys().cloned().collect();
-        resolve_target(target, &state_ids)
+        resolve_target(target, &self.index.state_ids)
     }
 
     fn reach(&mut self, target: &str, reached: &mut BTreeSet<String>) {
@@ -1331,6 +1344,18 @@ pub fn reduce_vn_step_indexed_prehashed_pending_encoded(
     let (output, encoded_state) =
         runtime.apply_with_state_hash_pending_encoded(command, state_hash)?;
     Ok((runtime.state, output, encoded_state))
+}
+
+pub fn reduce_vn_step_indexed_prehashed_pending(
+    compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
+    state: VnRuntimeState,
+    state_hash: Hash128,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, PendingVnStepOutput), VnError> {
+    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
+    let output = runtime.apply_with_state_hash_pending(command, state_hash)?;
+    Ok((runtime.state, output))
 }
 
 pub fn reduce_vn_step_indexed_validated(

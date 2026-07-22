@@ -1,6 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet, VecDeque},
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
 
 use astra_core::Hash256;
+use rayon::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -155,7 +159,36 @@ pub struct TextureFrame {
     pub hash: Hash256,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+impl TextureFrame {
+    /// Creates an immutable texture whose identity is derived from these exact
+    /// pixels. In-process producers use this constructor so downstream
+    /// renderers can retain the already-validated payload without hashing it
+    /// again. Deserialized frames intentionally lose this process-local mark.
+    pub fn from_rgba8(width: u32, height: u32, rgba8: Arc<[u8]>) -> Result<Self, MediaError> {
+        validate_texture_dimensions(width, height, rgba8.len())?;
+        let frame = Self {
+            width,
+            height,
+            hash: Hash256::from_sha256(&rgba8),
+            rgba8,
+        };
+        remember_validated_payload(&frame.rgba8, frame.hash)?;
+        Ok(frame)
+    }
+
+    /// Creates an untrusted transport value. The claimed hash is verified at
+    /// the renderer boundary before any retained state changes.
+    pub fn from_untrusted(width: u32, height: u32, rgba8: Arc<[u8]>, hash: Hash256) -> Self {
+        Self {
+            width,
+            height,
+            rgba8,
+            hash,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GlyphBitmapFormat {
     Alpha8,
@@ -169,6 +202,42 @@ pub struct GlyphBitmap {
     pub format: GlyphBitmapFormat,
     pub pixels: Arc<[u8]>,
     pub hash: Hash256,
+}
+
+impl GlyphBitmap {
+    pub fn from_pixels(
+        width: u32,
+        height: u32,
+        format: GlyphBitmapFormat,
+        pixels: Arc<[u8]>,
+    ) -> Result<Self, MediaError> {
+        validate_glyph_dimensions(width, height, format, pixels.len())?;
+        let glyph = Self {
+            width,
+            height,
+            format,
+            hash: Hash256::from_sha256(&pixels),
+            pixels,
+        };
+        remember_validated_payload(&glyph.pixels, glyph.hash)?;
+        Ok(glyph)
+    }
+
+    pub fn from_untrusted(
+        width: u32,
+        height: u32,
+        format: GlyphBitmapFormat,
+        pixels: Arc<[u8]>,
+        hash: Hash256,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            format,
+            pixels,
+            hash,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -211,15 +280,15 @@ pub enum SceneCommand {
     },
     GlyphRun {
         id: String,
-        glyphs: Vec<GlyphInstance>,
+        glyphs: Arc<[GlyphInstance]>,
         rgba: [u8; 4],
         opacity: f32,
         blend: BlendMode,
     },
     Mesh2D {
         id: String,
-        vertices: Vec<MeshVertex2D>,
-        indices: Vec<u32>,
+        vertices: Arc<[MeshVertex2D]>,
+        indices: Arc<[u32]>,
         material: MeshMaterial2D,
         texture_id: Option<String>,
         opacity: f32,
@@ -354,6 +423,8 @@ impl Renderer2DProvider for CpuRendererProvider {
             request,
             textures: BTreeMap::new(),
             glyphs: BTreeMap::new(),
+            texture_ids: HashSet::new(),
+            glyph_ids: HashSet::new(),
         })
     }
 }
@@ -363,6 +434,8 @@ pub struct HeadlessRenderer {
     request: RendererCreateRequest,
     textures: BTreeMap<String, TextureFrame>,
     glyphs: BTreeMap<String, GlyphBitmap>,
+    texture_ids: HashSet<String>,
+    glyph_ids: HashSet<String>,
 }
 
 impl HeadlessRenderer {
@@ -406,51 +479,56 @@ impl HeadlessRenderer {
         &self,
         commands: &[DrawCommand],
     ) -> Result<RetainedResourceJournal, MediaError> {
+        validate_resource_payloads(commands)?;
         let mut mutations = Vec::new();
+        let mut resource_overlay = BTreeMap::new();
         let mut clip_depth = 1_usize;
         let mut transform_depth = 1_usize;
         let mut opacity_depth = 1_usize;
         for command in commands {
             match command {
                 DrawCommand::UploadTexture { resource_id, frame } => {
-                    validate_texture(frame)?;
-                    if retained_resource_exists(
-                        &self.textures,
-                        &self.glyphs,
-                        &mutations,
+                    validate_texture_metadata(frame)?;
+                    if retained_resource_exists_indexed(
+                        &self.texture_ids,
+                        &self.glyph_ids,
+                        &resource_overlay,
                         resource_id,
                     ) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_DUPLICATE: texture resource is already uploaded",
                         ));
                     }
+                    resource_overlay.insert(resource_id.as_str(), PendingResource::Texture(frame));
                     mutations.push(RetainedResourceMutation::UploadTexture { resource_id, frame });
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
-                    validate_glyph(glyph)?;
-                    if retained_resource_exists(
-                        &self.textures,
-                        &self.glyphs,
-                        &mutations,
+                    validate_glyph_metadata(glyph)?;
+                    if retained_resource_exists_indexed(
+                        &self.texture_ids,
+                        &self.glyph_ids,
+                        &resource_overlay,
                         resource_id,
                     ) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_DUPLICATE: glyph resource is already uploaded",
                         ));
                     }
+                    resource_overlay.insert(resource_id.as_str(), PendingResource::Glyph(glyph));
                     mutations.push(RetainedResourceMutation::UploadGlyph { resource_id, glyph });
                 }
                 DrawCommand::ReleaseResource { resource_id } => {
-                    if !retained_resource_exists(
-                        &self.textures,
-                        &self.glyphs,
-                        &mutations,
+                    if !retained_resource_exists_indexed(
+                        &self.texture_ids,
+                        &self.glyph_ids,
+                        &resource_overlay,
                         resource_id,
                     ) {
                         return Err(MediaError::message(
                             "ASTRA_MEDIA_RESOURCE_UNKNOWN: released resource is not uploaded",
                         ));
                     }
+                    resource_overlay.insert(resource_id.as_str(), PendingResource::Released);
                     mutations.push(RetainedResourceMutation::Release { resource_id });
                 }
                 DrawCommand::Sprite {
@@ -460,14 +538,15 @@ impl HeadlessRenderer {
                     ..
                 } => {
                     validate_opacity(*opacity)?;
-                    let texture = retained_texture(&self.textures, &mutations, texture_id)
-                        .ok_or_else(|| {
-                            MediaError::message(
-                                "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
-                            )
-                        })?;
+                    let dimensions =
+                        retained_texture_dimensions(&self.textures, &resource_overlay, texture_id)
+                            .ok_or_else(|| {
+                                MediaError::message(
+                                    "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
+                                )
+                            })?;
                     if let Some(source) = source {
-                        validate_source_rect(texture, *source)?;
+                        validate_source_rect_dimensions(dimensions, *source)?;
                     }
                 }
                 DrawCommand::GlyphRun {
@@ -476,9 +555,12 @@ impl HeadlessRenderer {
                     ..
                 } => {
                     validate_opacity(*opacity)?;
-                    for instance in instances {
-                        if retained_glyph(&self.glyphs, &mutations, &instance.resource_id).is_none()
-                        {
+                    for instance in instances.iter() {
+                        if !retained_glyph_exists(
+                            &self.glyph_ids,
+                            &resource_overlay,
+                            &instance.resource_id,
+                        ) {
                             return Err(MediaError::message(
                                 "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
                             ));
@@ -512,7 +594,12 @@ impl HeadlessRenderer {
                     match (material, texture_id) {
                         (MeshMaterial2D::Solid, None) => {}
                         (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id))
-                            if retained_texture(&self.textures, &mutations, id).is_some() => {}
+                            if retained_texture_dimensions(
+                                &self.textures,
+                                &resource_overlay,
+                                id,
+                            )
+                            .is_some() => {}
                         _ => {
                             return Err(MediaError::message(
                                 "ASTRA_MEDIA_MESH_MATERIAL: mesh material and texture mismatch",
@@ -593,14 +680,18 @@ impl HeadlessRenderer {
         for mutation in journal.mutations {
             match mutation {
                 OwnedRetainedResourceMutation::UploadTexture { resource_id, frame } => {
+                    self.texture_ids.insert(resource_id.clone());
                     self.textures.insert(resource_id, frame);
                 }
                 OwnedRetainedResourceMutation::UploadGlyph { resource_id, glyph } => {
+                    self.glyph_ids.insert(resource_id.clone());
                     self.glyphs.insert(resource_id, glyph);
                 }
                 OwnedRetainedResourceMutation::Release { resource_id } => {
                     self.textures.remove(&resource_id);
                     self.glyphs.remove(&resource_id);
+                    self.texture_ids.remove(&resource_id);
+                    self.glyph_ids.remove(&resource_id);
                 }
             }
         }
@@ -660,88 +751,66 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
     }
 }
 
-fn retained_resource_exists(
-    textures: &BTreeMap<String, TextureFrame>,
-    glyphs: &BTreeMap<String, GlyphBitmap>,
-    mutations: &[RetainedResourceMutation<'_>],
+enum PendingResource<'a> {
+    Texture(&'a TextureFrame),
+    Glyph(&'a GlyphBitmap),
+    Released,
+}
+
+fn retained_resource_exists_indexed(
+    texture_ids: &HashSet<String>,
+    glyph_ids: &HashSet<String>,
+    overlay: &BTreeMap<&str, PendingResource<'_>>,
     resource_id: &str,
 ) -> bool {
-    for mutation in mutations.iter().rev() {
-        match mutation {
-            RetainedResourceMutation::UploadTexture {
-                resource_id: candidate,
-                ..
-            }
-            | RetainedResourceMutation::UploadGlyph {
-                resource_id: candidate,
-                ..
-            } if *candidate == resource_id => return true,
-            RetainedResourceMutation::Release {
-                resource_id: candidate,
-            } if *candidate == resource_id => return false,
-            _ => {}
-        }
+    match overlay.get(resource_id) {
+        Some(PendingResource::Texture(_) | PendingResource::Glyph(_)) => true,
+        Some(PendingResource::Released) => false,
+        None => texture_ids.contains(resource_id) || glyph_ids.contains(resource_id),
     }
-    textures.contains_key(resource_id) || glyphs.contains_key(resource_id)
 }
 
-fn retained_texture<'a>(
-    textures: &'a BTreeMap<String, TextureFrame>,
-    mutations: &'a [RetainedResourceMutation<'a>],
+fn retained_texture_dimensions(
+    textures: &BTreeMap<String, TextureFrame>,
+    overlay: &BTreeMap<&str, PendingResource<'_>>,
     resource_id: &str,
-) -> Option<&'a TextureFrame> {
-    for mutation in mutations.iter().rev() {
-        match mutation {
-            RetainedResourceMutation::UploadTexture {
-                resource_id: candidate,
-                frame,
-            } if *candidate == resource_id => return Some(frame),
-            RetainedResourceMutation::UploadGlyph {
-                resource_id: candidate,
-                ..
-            }
-            | RetainedResourceMutation::Release {
-                resource_id: candidate,
-            } if *candidate == resource_id => return None,
-            _ => {}
-        }
+) -> Option<(u32, u32)> {
+    match overlay.get(resource_id) {
+        Some(PendingResource::Texture(frame)) => Some((frame.width, frame.height)),
+        Some(PendingResource::Glyph(_) | PendingResource::Released) => None,
+        None => textures
+            .get(resource_id)
+            .map(|frame| (frame.width, frame.height)),
     }
-    textures.get(resource_id)
 }
 
-fn retained_glyph<'a>(
-    glyphs: &'a BTreeMap<String, GlyphBitmap>,
-    mutations: &'a [RetainedResourceMutation<'a>],
+fn retained_glyph_exists(
+    glyph_ids: &HashSet<String>,
+    overlay: &BTreeMap<&str, PendingResource<'_>>,
     resource_id: &str,
-) -> Option<&'a GlyphBitmap> {
-    for mutation in mutations.iter().rev() {
-        match mutation {
-            RetainedResourceMutation::UploadGlyph {
-                resource_id: candidate,
-                glyph,
-            } if *candidate == resource_id => return Some(glyph),
-            RetainedResourceMutation::UploadTexture {
-                resource_id: candidate,
-                ..
-            }
-            | RetainedResourceMutation::Release {
-                resource_id: candidate,
-            } if *candidate == resource_id => return None,
-            _ => {}
+) -> bool {
+    match overlay.get(resource_id) {
+        Some(PendingResource::Glyph(glyph)) => {
+            let _ = glyph;
+            true
         }
+        Some(PendingResource::Texture(_) | PendingResource::Released) => false,
+        None => glyph_ids.contains(resource_id),
     }
-    glyphs.get(resource_id)
 }
 
-fn validate_source_rect(frame: &TextureFrame, source: RectI) -> Result<(), MediaError> {
+fn validate_source_rect_dimensions(
+    dimensions: (u32, u32),
+    source: RectI,
+) -> Result<(), MediaError> {
     let right = source.x.checked_add_unsigned(source.width);
     let bottom = source.y.checked_add_unsigned(source.height);
     if source.x < 0
         || source.y < 0
         || source.width == 0
         || source.height == 0
-        || right.is_none_or(|value| value > frame.width as i32)
-        || bottom.is_none_or(|value| value > frame.height as i32)
+        || right.is_none_or(|value| value > dimensions.0 as i32)
+        || bottom.is_none_or(|value| value > dimensions.1 as i32)
     {
         return Err(MediaError::message(
             "ASTRA_MEDIA_TEXTURE_SOURCE: source rectangle is outside the texture",
@@ -835,7 +904,7 @@ impl Renderer2D for HeadlessRenderer {
                     blend,
                     ..
                 } => {
-                    for instance in glyphs {
+                    for instance in glyphs.iter() {
                         let glyph =
                             glyph_resources.get(&instance.resource_id).ok_or_else(|| {
                                 MediaError::message(
@@ -1056,6 +1125,8 @@ impl Renderer2D for HeadlessRenderer {
         };
         self.textures = textures;
         self.glyphs = glyph_resources;
+        self.texture_ids = self.textures.keys().cloned().collect();
+        self.glyph_ids = self.glyphs.keys().cloned().collect();
         tracing::trace!(
             target: "astra_media_core::renderer2d",
             event = "renderer2d.frame.committed",
@@ -1107,40 +1178,192 @@ fn validate_opacity(opacity: f32) -> Result<(), MediaError> {
     }
 }
 
-fn validate_texture(frame: &TextureFrame) -> Result<(), MediaError> {
-    let expected = frame.width as usize * frame.height as usize * 4;
-    if frame.width == 0 || frame.height == 0 || frame.rgba8.len() != expected {
+enum ResourcePayload<'a> {
+    Texture(&'a TextureFrame),
+    Glyph(&'a GlyphBitmap),
+}
+
+impl ResourcePayload<'_> {
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::Texture(frame) => frame.rgba8.len(),
+            Self::Glyph(glyph) => glyph.pixels.len(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), MediaError> {
+        match self {
+            Self::Texture(frame) => validate_texture(frame),
+            Self::Glyph(glyph) => validate_glyph(glyph),
+        }
+    }
+}
+
+fn validate_resource_payloads(commands: &[DrawCommand]) -> Result<(), MediaError> {
+    const PARALLEL_PAYLOAD_BYTES: usize = 256 * 1024;
+    const MAX_VALIDATION_WORKERS: usize = 4;
+    static VALIDATION_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    let mut large = Vec::new();
+    for (index, command) in commands.iter().enumerate() {
+        let payload = match command {
+            DrawCommand::UploadTexture { frame, .. } => ResourcePayload::Texture(frame),
+            DrawCommand::UploadGlyph { glyph, .. } => ResourcePayload::Glyph(glyph),
+            _ => continue,
+        };
+        if payload.byte_len() >= PARALLEL_PAYLOAD_BYTES {
+            large.push((index, payload));
+        } else {
+            payload.validate()?;
+        }
+    }
+    if large.len() <= 1 {
+        return large
+            .into_iter()
+            .try_for_each(|(_, payload)| payload.validate());
+    }
+    let worker_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(MAX_VALIDATION_WORKERS)
+        .min(large.len());
+    if worker_count <= 1 {
+        return large
+            .into_iter()
+            .try_for_each(|(_, payload)| payload.validate());
+    }
+    let pool = VALIDATION_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(MAX_VALIDATION_WORKERS)
+            .thread_name(|index| format!("astra-resource-validation-{index}"))
+            .build()
+            .expect("bounded resource-validation pool must initialize")
+    });
+    let mut failures = pool.install(|| {
+        large
+            .par_iter()
+            .filter_map(|(index, payload)| payload.validate().err().map(|error| (*index, error)))
+            .collect::<Vec<_>>()
+    });
+    failures.sort_by_key(|(index, _)| *index);
+    if let Some((_, error)) = failures.into_iter().next() {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn validate_texture_metadata(frame: &TextureFrame) -> Result<(), MediaError> {
+    validate_texture_dimensions(frame.width, frame.height, frame.rgba8.len())
+}
+
+fn validate_texture_dimensions(
+    width: u32,
+    height: u32,
+    payload_len: usize,
+) -> Result<(), MediaError> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| MediaError::message("ASTRA_MEDIA_TEXTURE_SIZE: texture size overflows"))?;
+    if width == 0 || height == 0 || payload_len != expected {
         return Err(MediaError::message(
             "ASTRA_MEDIA_TEXTURE_SIZE: texture dimensions do not match payload",
         ));
+    }
+    Ok(())
+}
+
+fn validate_texture(frame: &TextureFrame) -> Result<(), MediaError> {
+    validate_texture_metadata(frame)?;
+    if validated_payload_is_cached(&frame.rgba8, frame.hash)? {
+        return Ok(());
     }
     if Hash256::from_sha256(&frame.rgba8) != frame.hash {
         return Err(MediaError::message(
             "ASTRA_MEDIA_TEXTURE_HASH: texture payload hash mismatch",
         ));
     }
+    remember_validated_payload(&frame.rgba8, frame.hash)?;
+    Ok(())
+}
+
+fn validate_glyph_metadata(glyph: &GlyphBitmap) -> Result<(), MediaError> {
+    validate_glyph_dimensions(glyph.width, glyph.height, glyph.format, glyph.pixels.len())
+}
+
+fn validate_glyph_dimensions(
+    width: u32,
+    height: u32,
+    format: GlyphBitmapFormat,
+    payload_len: usize,
+) -> Result<(), MediaError> {
+    let channels = match format {
+        GlyphBitmapFormat::Alpha8 => 1,
+        GlyphBitmapFormat::Rgba8 => 4,
+    };
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(channels))
+        .ok_or_else(|| MediaError::message("ASTRA_MEDIA_GLYPH_SIZE: glyph size overflows"))?;
+    if width == 0 || height == 0 || payload_len != expected || width > 4096 || height > 4096 {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_GLYPH_SIZE: glyph dimensions do not match payload",
+        ));
+    }
     Ok(())
 }
 
 fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), MediaError> {
-    let channels = match glyph.format {
-        GlyphBitmapFormat::Alpha8 => 1,
-        GlyphBitmapFormat::Rgba8 => 4,
-    };
-    let expected = (glyph.width as usize)
-        .checked_mul(glyph.height as usize)
-        .and_then(|pixels| pixels.checked_mul(channels))
-        .ok_or_else(|| MediaError::message("ASTRA_MEDIA_GLYPH_SIZE: glyph size overflows"))?;
-    if glyph.width == 0 || glyph.height == 0 || glyph.pixels.len() != expected {
-        return Err(MediaError::message(
-            "ASTRA_MEDIA_GLYPH_SIZE: glyph dimensions do not match payload",
-        ));
+    validate_glyph_metadata(glyph)?;
+    if validated_payload_is_cached(&glyph.pixels, glyph.hash)? {
+        return Ok(());
     }
     if Hash256::from_sha256(&glyph.pixels) != glyph.hash {
         return Err(MediaError::message(
             "ASTRA_MEDIA_GLYPH_HASH: glyph payload hash mismatch",
         ));
     }
+    remember_validated_payload(&glyph.pixels, glyph.hash)?;
+    Ok(())
+}
+
+const VALIDATED_PAYLOAD_CACHE_LIMIT: usize = 4096;
+
+struct ValidatedPayloadEntry {
+    bytes: Weak<[u8]>,
+    hash: Hash256,
+}
+
+fn validated_payload_cache() -> &'static Mutex<VecDeque<ValidatedPayloadEntry>> {
+    static CACHE: OnceLock<Mutex<VecDeque<ValidatedPayloadEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+fn validated_payload_is_cached(bytes: &Arc<[u8]>, hash: Hash256) -> Result<bool, MediaError> {
+    let weak = Arc::downgrade(bytes);
+    let cache = validated_payload_cache().lock().map_err(|_| {
+        MediaError::message("ASTRA_MEDIA_VALIDATION_CACHE_POISONED: payload cache lock failed")
+    })?;
+    Ok(cache
+        .iter()
+        .any(|entry| entry.hash == hash && Weak::ptr_eq(&entry.bytes, &weak)))
+}
+
+fn remember_validated_payload(bytes: &Arc<[u8]>, hash: Hash256) -> Result<(), MediaError> {
+    let weak = Arc::downgrade(bytes);
+    let mut cache = validated_payload_cache().lock().map_err(|_| {
+        MediaError::message("ASTRA_MEDIA_VALIDATION_CACHE_POISONED: payload cache lock failed")
+    })?;
+    cache.retain(|entry| entry.bytes.strong_count() > 0);
+    if cache
+        .iter()
+        .any(|entry| entry.hash == hash && Weak::ptr_eq(&entry.bytes, &weak))
+    {
+        return Ok(());
+    }
+    while cache.len() >= VALIDATED_PAYLOAD_CACHE_LIMIT {
+        cache.pop_front();
+    }
+    cache.push_back(ValidatedPayloadEntry { bytes: weak, hash });
     Ok(())
 }
 

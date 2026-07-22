@@ -1085,8 +1085,8 @@ impl RuntimeAction for VnStepAction {
         };
         let state_decode_ns = profile_elapsed_ns(state_started);
         let reduce_started = profile.then(Instant::now);
-        let (mut state, mut output, encoded_state) = if let Some(cached) = cached_state {
-            astra_vn_core::reduce_vn_step_indexed_prehashed_pending_encoded(
+        let (mut state, mut output) = if let Some(cached) = cached_state {
+            astra_vn_core::reduce_vn_step_indexed_prehashed_pending(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 cached.state,
@@ -1097,7 +1097,7 @@ impl RuntimeAction for VnStepAction {
             let validated =
                 decoded_state.expect("cache miss must decode the authoritative VN state");
             let (state, state_hash) = validated.into_state_and_hash();
-            astra_vn_core::reduce_vn_step_indexed_prehashed_pending_encoded(
+            astra_vn_core::reduce_vn_step_indexed_prehashed_pending(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 state,
@@ -1108,7 +1108,6 @@ impl RuntimeAction for VnStepAction {
         .map_err(|err| RuntimeError::message(err.to_string()))?;
         let reduce_ns = profile_elapsed_ns(reduce_started);
         let await_started = profile.then(Instant::now);
-        let mut await_id_replacement = None;
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
                 output.set_wait(wait.clone());
@@ -1117,7 +1116,7 @@ impl RuntimeAction for VnStepAction {
                     .as_deref()
                     .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok());
                 if !has_runtime_await_id {
-                    let authored_await_id = wait.await_id.clone().ok_or_else(|| {
+                    wait.await_id.as_ref().ok_or_else(|| {
                         RuntimeError::message(
                             "VN reducer created a wait without an authored await identity",
                         )
@@ -1128,7 +1127,6 @@ impl RuntimeAction for VnStepAction {
                     )));
                     let runtime_await_id = token.token_id.0.to_string();
                     wait.await_id = Some(runtime_await_id.clone());
-                    await_id_replacement = Some((authored_await_id, runtime_await_id));
                     output.set_wait(wait.clone());
                     output.push_await(token.token_id.0.to_string());
                     ctx.push_await(token)?;
@@ -1137,18 +1135,18 @@ impl RuntimeAction for VnStepAction {
         }
         let await_ns = profile_elapsed_ns(await_started);
         let replace_started = profile.then(Instant::now);
-        let encoded_state = if let Some((authored_await_id, runtime_await_id)) =
-            await_id_replacement
-        {
-            replace_unique_postcard_string(encoded_state, &authored_await_id, &runtime_await_id)?
-        } else {
-            encoded_state
-        };
+        // Serialize only after the host-owned await identity has been applied.
+        // Patching the previously encoded payload required a linear search over
+        // the growing backlog on every input frame and dominated late-route p99.
+        let encoded_state: Arc<[u8]> = postcard::to_allocvec(&state)
+            .map_err(|error| RuntimeError::message(format!("encode VN runtime state: {error}")))?
+            .into();
+        let encoded_state_bytes = encoded_state.len();
         // The host-owned await identity is part of the authoritative state.
         // Reuse this exact byte hash at the Runtime component boundary instead
         // of hashing the growing VN state twice on every input frame.
         let encoded_state =
-            astra_runtime::ValidatedRuntimeComponentEncoding::postcard(encoded_state);
+            astra_runtime::ValidatedRuntimeComponentEncoding::postcard_blake3(encoded_state);
         let authoritative_state_hash = encoded_state.state_hash();
         let output = output.finalize(authoritative_state_hash);
         let (next_payload_hash, next_state_hash) =
@@ -1211,6 +1209,7 @@ impl RuntimeAction for VnStepAction {
             reduce_ns,
             await_ns,
             replace_component_ns,
+            encoded_state_bytes,
             output_emit_ns,
             trace_store_ns,
             "measured NativeVN RuntimeAction phases"
@@ -1220,41 +1219,6 @@ impl RuntimeAction for VnStepAction {
             payload: trace_payload,
         })
     }
-}
-
-fn replace_unique_postcard_string(
-    encoded: Arc<[u8]>,
-    old: &str,
-    new: &str,
-) -> Result<Arc<[u8]>, RuntimeError> {
-    let old_encoded = postcard::to_allocvec(old)
-        .map_err(|error| RuntimeError::message(format!("encode old VN await identity: {error}")))?;
-    let new_encoded = postcard::to_allocvec(new)
-        .map_err(|error| RuntimeError::message(format!("encode new VN await identity: {error}")))?;
-    let mut matches = encoded
-        .windows(old_encoded.len())
-        .enumerate()
-        .filter_map(|(offset, window)| (window == old_encoded).then_some(offset));
-    let offset = matches.next().ok_or_else(|| {
-        RuntimeError::message(
-            "VN authored await identity is missing from its canonical postcard state",
-        )
-    })?;
-    if matches.next().is_some() {
-        return Err(RuntimeError::message(
-            "VN authored await identity is ambiguous in its canonical postcard state",
-        ));
-    }
-    let mut replaced = Vec::with_capacity(
-        encoded
-            .len()
-            .saturating_sub(old_encoded.len())
-            .saturating_add(new_encoded.len()),
-    );
-    replaced.extend_from_slice(&encoded[..offset]);
-    replaced.extend_from_slice(&new_encoded);
-    replaced.extend_from_slice(&encoded[offset + old_encoded.len()..]);
-    Ok(replaced.into())
 }
 
 fn profile_elapsed_ns(started: Option<Instant>) -> u64 {
@@ -1901,40 +1865,5 @@ mod runtime_view_tests {
         let view = runtime_view_state(&state, Hash128::from_bytes([4; 16]));
         assert_eq!(view.state.route_coverage, state.route_coverage);
         assert_eq!(view.state.route_flags, state.route_flags);
-    }
-
-    #[test]
-    fn postcard_await_identity_replacement_matches_canonical_state_encoding() {
-        let authored = "wait.0000000000000001";
-        let runtime = "018f2f6b-7c8d-7e9f-8a0b-1c2d3e4f5061";
-        let mut before = state();
-        before.pending_wait = Some(VnWaitState {
-            schema: "astra.vn.wait_state.v1".into(),
-            kind: VnWaitKind::Dialogue,
-            fence: "dialogue".into(),
-            command_id: "line.current".into(),
-            await_id: Some(authored.into()),
-        });
-        let mut after = before.clone();
-        after.pending_wait.as_mut().unwrap().await_id = Some(runtime.into());
-
-        let patched = replace_unique_postcard_string(
-            postcard::to_allocvec(&before).unwrap().into(),
-            authored,
-            runtime,
-        )
-        .unwrap();
-        assert_eq!(patched.as_ref(), postcard::to_allocvec(&after).unwrap());
-        assert_eq!(
-            postcard::from_bytes::<VnRuntimeState>(&patched).unwrap(),
-            after
-        );
-    }
-
-    #[test]
-    fn postcard_await_identity_replacement_rejects_missing_or_ambiguous_fields() {
-        let encoded: Arc<[u8]> = postcard::to_allocvec(&vec!["same", "same"]).unwrap().into();
-        assert!(replace_unique_postcard_string(Arc::clone(&encoded), "missing", "new").is_err());
-        assert!(replace_unique_postcard_string(encoded, "same", "new").is_err());
     }
 }

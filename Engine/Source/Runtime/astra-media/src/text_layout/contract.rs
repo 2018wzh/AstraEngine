@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use astra_core::{Diagnostic, Hash256};
 use astra_media_core::{BlendMode, GlyphBitmap, GlyphInstance, RectI, SceneCommand};
@@ -314,19 +317,44 @@ impl TextLayoutResult {
 struct OwnedGlyphResource {
     bitmap: GlyphBitmap,
     references: usize,
+    last_used_sequence: u64,
+}
+
+#[derive(Debug, Clone)]
+struct OwnedTextLayout {
+    resource_ids: BTreeSet<String>,
+    layout_hash: Hash256,
+    rgba: [u8; 4],
+    translation: (i32, i32),
+    commands: Vec<SceneCommand>,
+    shared_layout: Option<Arc<TextLayoutResult>>,
 }
 
 /// Host-owned bridge from immutable shaped layouts to renderer resource lifetime commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RetainedGlyphCachePolicy {
+    max_resources: usize,
+    max_bytes: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TextRenderResourceOwner {
     resources: BTreeMap<String, OwnedGlyphResource>,
-    layouts: BTreeMap<String, BTreeSet<String>>,
+    layouts: BTreeMap<String, OwnedTextLayout>,
+    retained_cache: Option<RetainedGlyphCachePolicy>,
+    usage_sequence: u64,
 }
 
 pub struct TextRenderLayoutUpdate<'a> {
     pub layout_id: &'a str,
     pub layout: &'a TextLayoutResult,
+    /// Optional host-owned immutable layout identity. Reusing this exact `Arc`
+    /// permits the resource owner to replay validated draw commands without
+    /// rescanning glyph payloads. A borrowed/mutable layout always takes the
+    /// full validation path.
+    pub shared_layout: Option<&'a Arc<TextLayoutResult>>,
     pub rgba: [u8; 4],
+    pub translation: (i32, i32),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -347,9 +375,34 @@ struct PreparedTextLayout {
     glyphs: Vec<GlyphInstance>,
     clip: Option<LayoutClip>,
     rgba: [u8; 4],
+    translation: (i32, i32),
+    layout_hash: Hash256,
+    cached_commands: Option<Vec<SceneCommand>>,
+    shared_layout: Option<Arc<TextLayoutResult>>,
 }
 
 impl TextRenderResourceOwner {
+    /// Creates a resource owner that keeps unreferenced, content-addressed glyphs
+    /// in a deterministic bounded LRU. This is intended for product hosts where
+    /// dialogue and system pages repeatedly reuse the same packaged fonts.
+    pub fn with_retained_glyph_cache(
+        max_resources: usize,
+        max_bytes: usize,
+    ) -> Result<Self, MediaError> {
+        if max_resources == 0 || max_bytes == 0 {
+            return Err(MediaError::message(
+                "ASTRA_TEXT_RENDER_CACHE_BUDGET: retained glyph limits must be non-zero",
+            ));
+        }
+        Ok(Self {
+            retained_cache: Some(RetainedGlyphCachePolicy {
+                max_resources,
+                max_bytes,
+            }),
+            ..Self::default()
+        })
+    }
+
     pub fn update_frame(
         &mut self,
         updates: &[TextRenderLayoutUpdate<'_>],
@@ -371,6 +424,39 @@ impl TextRenderResourceOwner {
                     "ASTRA_TEXT_RENDER_LAYOUT_DUPLICATE: frame updates a layout more than once",
                 ));
             }
+            if let Some(shared_layout) = update.shared_layout {
+                if !std::ptr::eq(shared_layout.as_ref(), update.layout) {
+                    return Err(MediaError::message(
+                        "ASTRA_TEXT_RENDER_SHARED_LAYOUT_IDENTITY: shared layout does not own the borrowed layout",
+                    ));
+                }
+            }
+            if let (Some(previous), Some(shared_layout)) =
+                (self.layouts.get(update.layout_id), update.shared_layout)
+            {
+                if previous.layout_hash == update.layout.hash
+                    && previous.rgba == update.rgba
+                    && previous.translation == update.translation
+                    && previous
+                        .shared_layout
+                        .as_ref()
+                        .is_some_and(|owned| Arc::ptr_eq(owned, shared_layout))
+                {
+                    self.validate_layout_resources(&previous.resource_ids)?;
+                    prepared.push(PreparedTextLayout {
+                        layout_id: update.layout_id.to_string(),
+                        next_ids: previous.resource_ids.clone(),
+                        glyphs: Vec::new(),
+                        clip: None,
+                        rgba: update.rgba,
+                        translation: update.translation,
+                        layout_hash: update.layout.hash,
+                        cached_commands: Some(previous.commands.clone()),
+                        shared_layout: update.shared_layout.cloned(),
+                    });
+                    continue;
+                }
+            }
             let declared = update
                 .layout
                 .glyph_resources
@@ -382,7 +468,15 @@ impl TextRenderResourceOwner {
                     "ASTRA_TEXT_RENDER_RESOURCE_DUPLICATE: layout contains duplicate glyph resources",
                 ));
             }
-            let glyphs = update.layout.glyph_instances();
+            let mut glyphs = update.layout.glyph_instances();
+            for glyph in &mut glyphs {
+                glyph.x = glyph.x.checked_add(update.translation.0).ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_RENDER_TRANSLATION: glyph x overflowed")
+                })?;
+                glyph.y = glyph.y.checked_add(update.translation.1).ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_RENDER_TRANSLATION: glyph y overflowed")
+                })?;
+            }
             let next_ids = glyphs
                 .iter()
                 .map(|instance| instance.resource_id.clone())
@@ -420,7 +514,7 @@ impl TextRenderResourceOwner {
             let previous_ids = self
                 .layouts
                 .get(update.layout_id)
-                .cloned()
+                .map(|layout| layout.resource_ids.clone())
                 .unwrap_or_default();
             self.validate_layout_resources(&previous_ids)?;
             for id in previous_ids.difference(&next_ids) {
@@ -433,8 +527,16 @@ impl TextRenderResourceOwner {
                 layout_id: update.layout_id.to_string(),
                 next_ids,
                 glyphs,
-                clip: update.layout.clip,
+                clip: update
+                    .layout
+                    .clip
+                    .map(|clip| translate_layout_clip(clip, update.translation))
+                    .transpose()?,
                 rgba: update.rgba,
+                translation: update.translation,
+                layout_hash: update.layout.hash,
+                cached_commands: None,
+                shared_layout: update.shared_layout.cloned(),
             });
         }
 
@@ -444,11 +546,11 @@ impl TextRenderResourceOwner {
                     "ASTRA_TEXT_RENDER_LAYOUT_DUPLICATE: frame removes an invalid or updated layout",
                 ));
             }
-            let ids = self.layouts.get(*layout_id).ok_or_else(|| {
+            let layout = self.layouts.get(*layout_id).ok_or_else(|| {
                 MediaError::message("ASTRA_TEXT_RENDER_LAYOUT_UNKNOWN: layout is not bound")
             })?;
-            self.validate_layout_resources(ids)?;
-            for id in ids {
+            self.validate_layout_resources(&layout.resource_ids)?;
+            for id in &layout.resource_ids {
                 increment_reference_change(&mut reference_changes, id, true)?;
             }
         }
@@ -467,7 +569,11 @@ impl TextRenderResourceOwner {
                         "ASTRA_TEXT_RENDER_STATE: glyph reference count overflow or underflow",
                     )
                 })?;
-            if current == 0 && next > 0 && !new_bitmaps.contains_key(id) {
+            if current == 0
+                && next > 0
+                && !self.resources.contains_key(id)
+                && !new_bitmaps.contains_key(id)
+            {
                 return Err(MediaError::message(
                     "ASTRA_TEXT_RENDER_STATE: new glyph resource has no declared bitmap",
                 ));
@@ -475,15 +581,29 @@ impl TextRenderResourceOwner {
             next_reference_counts.insert(id.clone(), next);
         }
 
+        let next_usage_sequence = self.usage_sequence.checked_add(1).ok_or_else(|| {
+            MediaError::message("ASTRA_TEXT_RENDER_STATE: glyph usage sequence overflowed")
+        })?;
         let mut lifecycle = Vec::new();
         for (id, next) in &next_reference_counts {
             if *next == 0 {
-                self.resources.remove(id);
-                lifecycle.push(SceneCommand::ReleaseResource {
-                    resource_id: id.clone(),
-                });
+                if self.retained_cache.is_some() {
+                    let resource = self.resources.get_mut(id).ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_TEXT_RENDER_STATE: released glyph resource is not owned",
+                        )
+                    })?;
+                    resource.references = 0;
+                    resource.last_used_sequence = next_usage_sequence;
+                } else {
+                    self.resources.remove(id);
+                    lifecycle.push(SceneCommand::ReleaseResource {
+                        resource_id: id.clone(),
+                    });
+                }
             } else if let Some(resource) = self.resources.get_mut(id) {
                 resource.references = *next;
+                resource.last_used_sequence = next_usage_sequence;
             } else {
                 let bitmap = new_bitmaps
                     .remove(id)
@@ -493,6 +613,7 @@ impl TextRenderResourceOwner {
                     OwnedGlyphResource {
                         bitmap: bitmap.clone(),
                         references: *next,
+                        last_used_sequence: next_usage_sequence,
                     },
                 );
                 lifecycle.push(SceneCommand::UploadGlyph {
@@ -501,14 +622,21 @@ impl TextRenderResourceOwner {
                 });
             }
         }
+        self.usage_sequence = next_usage_sequence;
+        self.evict_dormant_glyphs(&mut lifecycle)?;
         for layout_id in removals {
             self.layouts.remove(*layout_id);
         }
 
         let mut layouts = Vec::with_capacity(prepared.len());
         for layout in prepared {
-            self.layouts
-                .insert(layout.layout_id.clone(), layout.next_ids);
+            if let Some(commands) = layout.cached_commands {
+                layouts.push(TextRenderLayoutDraw {
+                    layout_id: layout.layout_id,
+                    commands,
+                });
+                continue;
+            }
             let mut commands = Vec::with_capacity(3);
             if let Some(clip) = layout.clip {
                 commands.push(SceneCommand::PushClip {
@@ -517,7 +645,7 @@ impl TextRenderResourceOwner {
             }
             commands.push(SceneCommand::GlyphRun {
                 id: layout.layout_id.clone(),
-                glyphs: layout.glyphs,
+                glyphs: layout.glyphs.into(),
                 rgba: layout.rgba,
                 opacity: 1.0,
                 blend: BlendMode::Alpha,
@@ -525,6 +653,17 @@ impl TextRenderResourceOwner {
             if layout.clip.is_some() {
                 commands.push(SceneCommand::PopClip);
             }
+            self.layouts.insert(
+                layout.layout_id.clone(),
+                OwnedTextLayout {
+                    resource_ids: layout.next_ids,
+                    layout_hash: layout.layout_hash,
+                    rgba: layout.rgba,
+                    translation: layout.translation,
+                    commands: commands.clone(),
+                    shared_layout: layout.shared_layout,
+                },
+            );
             layouts.push(TextRenderLayoutDraw {
                 layout_id: layout.layout_id,
                 commands,
@@ -551,7 +690,9 @@ impl TextRenderResourceOwner {
             &[TextRenderLayoutUpdate {
                 layout_id,
                 layout,
+                shared_layout: None,
                 rgba,
+                translation: (0, 0),
             }],
             &[],
         )?;
@@ -587,6 +728,64 @@ impl TextRenderResourceOwner {
         Ok(())
     }
 
+    fn evict_dormant_glyphs(
+        &mut self,
+        lifecycle: &mut Vec<SceneCommand>,
+    ) -> Result<(), MediaError> {
+        let Some(policy) = self.retained_cache else {
+            return Ok(());
+        };
+        let mut dormant = self
+            .resources
+            .iter()
+            .filter(|(_, resource)| resource.references == 0)
+            .map(|(id, resource)| {
+                (
+                    resource.last_used_sequence,
+                    id.clone(),
+                    resource.bitmap.pixels.len(),
+                )
+            })
+            .collect::<Vec<_>>();
+        dormant.sort_by(|left, right| (left.0, &left.1).cmp(&(right.0, &right.1)));
+        let mut dormant_count = dormant.len();
+        let mut dormant_bytes = dormant.iter().try_fold(0usize, |total, entry| {
+            total.checked_add(entry.2).ok_or_else(|| {
+                MediaError::message("ASTRA_TEXT_RENDER_CACHE_BUDGET: dormant byte count overflowed")
+            })
+        })?;
+        let mut evicted_count = 0usize;
+        let mut evicted_bytes = 0usize;
+        for (_, id, byte_size) in dormant {
+            if dormant_count <= policy.max_resources && dormant_bytes <= policy.max_bytes {
+                break;
+            }
+            self.resources.remove(&id).ok_or_else(|| {
+                MediaError::message(
+                    "ASTRA_TEXT_RENDER_STATE: dormant glyph disappeared during eviction",
+                )
+            })?;
+            dormant_count -= 1;
+            dormant_bytes -= byte_size;
+            evicted_count += 1;
+            evicted_bytes = evicted_bytes.checked_add(byte_size).ok_or_else(|| {
+                MediaError::message("ASTRA_TEXT_RENDER_CACHE_BUDGET: eviction bytes overflowed")
+            })?;
+            lifecycle.push(SceneCommand::ReleaseResource { resource_id: id });
+        }
+        if evicted_count > 0 {
+            tracing::debug!(
+                target: "astra_media::text",
+                event = "text.render_resources.cache_evicted",
+                evicted_count,
+                evicted_bytes,
+                dormant_count,
+                dormant_bytes,
+            );
+        }
+        Ok(())
+    }
+
     pub fn shutdown(&mut self) -> Vec<SceneCommand> {
         let commands: Vec<SceneCommand> = self
             .resources
@@ -604,6 +803,21 @@ impl TextRenderResourceOwner {
         );
         commands
     }
+}
+
+fn translate_layout_clip(
+    mut clip: LayoutClip,
+    translation: (i32, i32),
+) -> Result<LayoutClip, MediaError> {
+    clip.x = clip
+        .x
+        .checked_add(translation.0)
+        .ok_or_else(|| MediaError::message("ASTRA_TEXT_RENDER_TRANSLATION: clip x overflowed"))?;
+    clip.y = clip
+        .y
+        .checked_add(translation.1)
+        .ok_or_else(|| MediaError::message("ASTRA_TEXT_RENDER_TRANSLATION: clip y overflowed"))?;
+    Ok(clip)
 }
 
 fn increment_reference_change(

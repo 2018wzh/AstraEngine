@@ -362,7 +362,7 @@ impl WgpuPresentationCore {
         }
         #[cfg(feature = "platform-test-driver")]
         if self.test_device_loss.swap(false, Ordering::AcqRel) {
-            self.glyph_renderer.recover(&self.device);
+            self.glyph_renderer.recover(&self.device, &self.queue);
             self.last_upload = if let Some(frame) = self.last_frame.as_ref() {
                 Some(UploadFrame {
                     texture: upload_frame(&self.device, &self.queue, frame),
@@ -409,7 +409,7 @@ impl WgpuPresentationCore {
         install_device_lost_callback(&device, Arc::clone(&device_lost));
         let (layout, sampler, pipeline) = pipeline(&device, self.config.format);
         self.surface.configure(&device, &self.config);
-        self.glyph_renderer.recover(&device);
+        self.glyph_renderer.recover(&device, &queue);
         let last_upload = if let Some(frame) = self.last_frame.as_ref() {
             Some(UploadFrame {
                 texture: upload_frame(&device, &queue, frame),

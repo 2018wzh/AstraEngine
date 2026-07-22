@@ -1,5 +1,6 @@
 use std::{
     alloc::{GlobalAlloc, Layout, System},
+    cell::Cell,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -11,10 +12,21 @@ pub struct AllocationSnapshot {
     pub allocation_count: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThreadAllocationSnapshot {
+    pub allocated_bytes: u64,
+    pub allocation_count: u64,
+}
+
 static LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static PEAK_LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
 static ALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    static THREAD_ALLOCATED_BYTES: Cell<u64> = const { Cell::new(0) };
+    static THREAD_ALLOCATION_COUNT: Cell<u64> = const { Cell::new(0) };
+}
 
 pub struct TrackingAllocator;
 
@@ -33,6 +45,8 @@ impl TrackingAllocator {
         ALLOCATED_BYTES.fetch_add(bytes, Ordering::Relaxed);
         ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
         PEAK_LIVE_BYTES.fetch_max(live, Ordering::Relaxed);
+        THREAD_ALLOCATED_BYTES.set(THREAD_ALLOCATED_BYTES.get().saturating_add(bytes));
+        THREAD_ALLOCATION_COUNT.set(THREAD_ALLOCATION_COUNT.get().saturating_add(1));
     }
 
     fn record_dealloc(&self, bytes: usize) {
@@ -46,6 +60,13 @@ pub fn allocation_snapshot() -> AllocationSnapshot {
         peak_live_bytes: PEAK_LIVE_BYTES.load(Ordering::Relaxed),
         allocated_bytes: ALLOCATED_BYTES.load(Ordering::Relaxed),
         allocation_count: ALLOCATION_COUNT.load(Ordering::Relaxed),
+    }
+}
+
+pub fn thread_allocation_snapshot() -> ThreadAllocationSnapshot {
+    ThreadAllocationSnapshot {
+        allocated_bytes: THREAD_ALLOCATED_BYTES.get(),
+        allocation_count: THREAD_ALLOCATION_COUNT.get(),
     }
 }
 

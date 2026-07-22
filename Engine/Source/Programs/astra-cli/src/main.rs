@@ -3580,16 +3580,16 @@ fn build_standalone_bundle_into(
                 status: "pass".to_string(),
             });
 
-            let config = player_config_bytes(
+            let config = player_config_bytes(PlayerConfigInput {
                 target,
                 profile,
                 platform_name,
-                &package_storage_hash,
-                &display_config,
-                &locale_config,
-                ui_components.as_ref(),
-                source_locked.then_some(source_profile_bundle_path),
-            )?;
+                package_storage_hash: &package_storage_hash,
+                display_config: &display_config,
+                locale_config: &locale_config,
+                ui_components: ui_components.as_ref(),
+                source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
+            })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -3613,16 +3613,16 @@ fn build_standalone_bundle_into(
                 id: "crash_reporter.not_applicable".to_string(),
                 status: "pass".to_string(),
             });
-            let config = player_config_bytes(
+            let config = player_config_bytes(PlayerConfigInput {
                 target,
                 profile,
                 platform_name,
-                &package_storage_hash,
-                &display_config,
-                &locale_config,
-                ui_components.as_ref(),
-                source_locked.then_some(source_profile_bundle_path),
-            )?;
+                package_storage_hash: &package_storage_hash,
+                display_config: &display_config,
+                locale_config: &locale_config,
+                ui_components: ui_components.as_ref(),
+                source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
+            })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -3678,16 +3678,16 @@ fn build_standalone_bundle_into(
                 "macos_universal_player",
                 &player_bytes,
             ));
-            let config = player_config_bytes(
+            let config = player_config_bytes(PlayerConfigInput {
                 target,
                 profile,
                 platform_name,
-                &package_storage_hash,
-                &display_config,
-                &locale_config,
-                ui_components.as_ref(),
-                source_locked.then_some(source_profile_bundle_path),
-            )?;
+                package_storage_hash: &package_storage_hash,
+                display_config: &display_config,
+                locale_config: &locale_config,
+                ui_components: ui_components.as_ref(),
+                source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
+            })?;
             fs::write(resources.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "Contents/Resources/AstraPlayer.config.json",
@@ -3736,16 +3736,16 @@ fn build_standalone_bundle_into(
                 status: "pass".to_string(),
             });
 
-            let config = player_config_bytes(
+            let config = player_config_bytes(PlayerConfigInput {
                 target,
                 profile,
                 platform_name,
-                &package_storage_hash,
-                &display_config,
-                &locale_config,
-                ui_components.as_ref(),
-                source_locked.then_some(source_profile_bundle_path),
-            )?;
+                package_storage_hash: &package_storage_hash,
+                display_config: &display_config,
+                locale_config: &locale_config,
+                ui_components: ui_components.as_ref(),
+                source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
+            })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -3826,16 +3826,16 @@ fn build_standalone_bundle_into(
                 fs::write(destination, &bytes)?;
                 files.push(bundle_file(relative, "android_player_test_cdylib", &bytes));
             }
-            let config = player_config_bytes(
+            let config = player_config_bytes(PlayerConfigInput {
                 target,
                 profile,
                 platform_name,
-                &package_storage_hash,
-                &display_config,
-                &locale_config,
-                ui_components.as_ref(),
-                source_locked.then_some(source_profile_bundle_path),
-            )?;
+                package_storage_hash: &package_storage_hash,
+                display_config: &display_config,
+                locale_config: &locale_config,
+                ui_components: ui_components.as_ref(),
+                source_unlock_profile: source_locked.then_some(source_profile_bundle_path),
+            })?;
             fs::write(out.join("AstraPlayer.config.json"), &config)?;
             files.push(bundle_file(
                 "AstraPlayer.config.json",
@@ -4183,17 +4183,19 @@ fn validate_component_relative_path(value: &str) -> Result<String, CliError> {
     Ok(value.to_string())
 }
 
-fn player_config_bytes(
-    target: &str,
-    profile: &str,
-    platform_name: &str,
-    package_storage_hash: &str,
-    display_config: &Option<PlayerDisplayConfig>,
-    locale_config: &PlayerLocaleConfig,
-    ui_components: Option<&serde_json::Value>,
-    source_unlock_profile: Option<&str>,
-) -> Result<Vec<u8>, CliError> {
-    let observability = if platform_name == "windows" {
+struct PlayerConfigInput<'a> {
+    target: &'a str,
+    profile: &'a str,
+    platform_name: &'a str,
+    package_storage_hash: &'a str,
+    display_config: &'a Option<PlayerDisplayConfig>,
+    locale_config: &'a PlayerLocaleConfig,
+    ui_components: Option<&'a serde_json::Value>,
+    source_unlock_profile: Option<&'a str>,
+}
+
+fn player_config_bytes(input: PlayerConfigInput<'_>) -> Result<Vec<u8>, CliError> {
+    let observability = if input.platform_name == "windows" {
         serde_json::json!({
             "filter": "warn",
             "console_format": "compact",
@@ -4210,21 +4212,21 @@ fn player_config_bytes(
     };
     let mut config = serde_json::json!({
         "schema": "astra.player_config.v2",
-        "target": target,
-        "profile": profile,
-        "platform": platform_name,
-        "locale": locale_config.default_locale,
+        "target": input.target,
+        "profile": input.profile,
+        "platform": input.platform_name,
+        "locale": input.locale_config.default_locale,
         "package": "package/nativevn.astrapkg",
-        "package_storage_hash": package_storage_hash,
+        "package_storage_hash": input.package_storage_hash,
         "observability": observability
     });
-    if let Some(display) = display_config {
+    if let Some(display) = input.display_config {
         config["display"] = serde_json::to_value(display)?;
     }
-    if let Some(components) = ui_components {
+    if let Some(components) = input.ui_components {
         config["ui_components"] = components.clone();
     }
-    if let Some(source_profile) = source_unlock_profile {
+    if let Some(source_profile) = input.source_unlock_profile {
         config["source_unlock"] = serde_json::json!({
             "schema": "astra.player_source_unlock.v1",
             "source_profile": source_profile

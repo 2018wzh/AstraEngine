@@ -1,6 +1,6 @@
 use std::{
-    fs,
-    io::Cursor,
+    fs::{self, File},
+    io::{BufReader, BufWriter, Cursor, Read},
     path::{Path, PathBuf},
 };
 
@@ -23,6 +23,7 @@ pub(crate) struct ArtifactRecorder {
     rasterized_frame_count: u64,
     audio_frames: u64,
     audio_artifact_count: u64,
+    open_audio_bytes: u64,
     final_frame: Option<(u64, u32, u32, Vec<u8>)>,
     submitted_scene_digest: Sha256,
     rasterized_frame_digest: Sha256,
@@ -30,6 +31,14 @@ pub(crate) struct ArtifactRecorder {
     audio_square_sum: f64,
     audio_sample_count: u64,
     audio_peak: f64,
+}
+
+pub(crate) struct AudioArtifactStream {
+    relative_path: String,
+    partial_path: PathBuf,
+    writer: hound::WavWriter<BufWriter<File>>,
+    sample_count: u64,
+    byte_size: u64,
 }
 
 impl ArtifactRecorder {
@@ -110,6 +119,7 @@ impl ArtifactRecorder {
             rasterized_frame_count: 0,
             audio_frames: 0,
             audio_artifact_count: 0,
+            open_audio_bytes: 0,
             final_frame: None,
             submitted_scene_digest: Sha256::new(),
             rasterized_frame_digest: Sha256::new(),
@@ -235,8 +245,153 @@ impl ArtifactRecorder {
         self.commit_manifest()
     }
 
-    pub(crate) fn validate_audio_timeline(&self, sample_count: usize) -> Result<(), PlatformError> {
-        self.validate_audio_timeline_samples(sample_count, None)
+    pub(crate) fn begin_audio_stream(&mut self) -> Result<AudioArtifactStream, PlatformError> {
+        if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
+            return Err(integrity(
+                "artifact.audio.stream",
+                "manifest-only retention does not open an audio artifact stream",
+            ));
+        }
+        let ordinal = self
+            .audio_artifact_count
+            .checked_add(1)
+            .ok_or_else(|| limit("artifact.audio", "audio artifact counter overflowed"))?;
+        if ordinal > self.policy.max_artifacts {
+            return Err(limit("artifact.audio", "audio artifact count exceeded"));
+        }
+        let header_bytes = 44_u64;
+        if self
+            .total_bytes
+            .checked_add(self.open_audio_bytes)
+            .and_then(|bytes| bytes.checked_add(header_bytes))
+            .is_none_or(|bytes| bytes > self.policy.max_total_bytes)
+        {
+            return Err(limit("artifact.audio", "audio byte limit exceeded"));
+        }
+        let relative_path = format!("audio/output-{ordinal:010}.wav");
+        let final_path = self.root.join(&relative_path);
+        let partial_path = final_path.with_extension("partial");
+        let writer = hound::WavWriter::create(
+            &partial_path,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: 48_000,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .map_err(|_| io_error("artifact.wav.open"))?;
+        self.audio_artifact_count = ordinal;
+        self.open_audio_bytes = self.open_audio_bytes.saturating_add(header_bytes);
+        Ok(AudioArtifactStream {
+            relative_path,
+            partial_path,
+            writer,
+            sample_count: 0,
+            byte_size: header_bytes,
+        })
+    }
+
+    pub(crate) fn append_audio_stream(
+        &mut self,
+        stream: &mut AudioArtifactStream,
+        samples: &[f32],
+    ) -> Result<(), PlatformError> {
+        self.validate_audio_timeline_samples(samples.len(), Some(samples))?;
+        let next_sample_count = stream
+            .sample_count
+            .checked_add(samples.len() as u64)
+            .ok_or_else(|| limit("artifact.audio", "audio sample counter overflowed"))?;
+        if !next_sample_count.is_multiple_of(2)
+            || audio_duration_ns(next_sample_count / 2)? > self.policy.max_duration_ns
+        {
+            return Err(limit(
+                "artifact.audio",
+                "streamed audio duration limit exceeded",
+            ));
+        }
+        let encoded_bytes = (samples.len() as u64)
+            .checked_mul(2)
+            .ok_or_else(|| limit("artifact.audio", "audio byte size overflowed"))?;
+        let next_stream_bytes = stream
+            .byte_size
+            .checked_add(encoded_bytes)
+            .ok_or_else(|| limit("artifact.audio", "audio byte size overflowed"))?;
+        if self
+            .total_bytes
+            .checked_add(self.open_audio_bytes)
+            .and_then(|bytes| bytes.checked_add(encoded_bytes))
+            .is_none_or(|bytes| bytes > self.policy.max_total_bytes)
+        {
+            return Err(limit("artifact.audio", "audio byte limit exceeded"));
+        }
+        for sample in samples {
+            stream
+                .writer
+                .write_sample(pcm_i16(*sample))
+                .map_err(|_| io_error("artifact.wav.write"))?;
+        }
+        stream.sample_count = next_sample_count;
+        stream.byte_size = next_stream_bytes;
+        self.open_audio_bytes = self.open_audio_bytes.saturating_add(encoded_bytes);
+        let frames = (samples.len() / 2) as u64;
+        let next_audio_frames = self
+            .audio_frames
+            .checked_add(frames)
+            .ok_or_else(|| limit("artifact.audio", "audio frame counter overflowed"))?;
+        self.commit_audio_analysis(next_audio_frames, samples);
+        Ok(())
+    }
+
+    pub(crate) fn finish_audio_stream(
+        &mut self,
+        stream: AudioArtifactStream,
+    ) -> Result<(), PlatformError> {
+        let AudioArtifactStream {
+            relative_path,
+            partial_path,
+            writer,
+            sample_count,
+            byte_size,
+        } = stream;
+        writer
+            .finalize()
+            .map_err(|_| io_error("artifact.wav.finalize"))?;
+        let actual_bytes = fs::metadata(&partial_path)
+            .map_err(|_| io_error("artifact.wav.metadata"))?
+            .len();
+        if actual_bytes != byte_size || !sample_count.is_multiple_of(2) {
+            return Err(integrity(
+                "artifact.wav",
+                "streamed WAV size or stereo alignment is invalid",
+            ));
+        }
+        let final_path = self.root.join(&relative_path);
+        fs::rename(&partial_path, &final_path).map_err(|_| io_error("artifact.wav.commit"))?;
+        let sha256 = sha256_file(&final_path)?;
+        self.open_audio_bytes = self.open_audio_bytes.saturating_sub(byte_size);
+        self.total_bytes = self
+            .total_bytes
+            .checked_add(byte_size)
+            .ok_or_else(|| limit("artifact.audio", "artifact byte counter overflowed"))?;
+        let frames = sample_count / 2;
+        self.manifest.artifacts.push(ArtifactEntry::Audio {
+            relative_path,
+            sha256,
+            byte_size,
+            sample_rate: 48_000,
+            channels: 2,
+            frame_count: frames,
+            duration_ns: audio_duration_ns(frames)?,
+            checkpoint: None,
+        });
+        self.commit_manifest()
+    }
+
+    pub(crate) fn abort_audio_stream(&mut self, stream: AudioArtifactStream) {
+        self.open_audio_bytes = self.open_audio_bytes.saturating_sub(stream.byte_size);
+        drop(stream.writer);
+        let _ = fs::remove_file(stream.partial_path);
     }
 
     fn validate_audio_timeline_samples(
@@ -295,6 +450,12 @@ impl ArtifactRecorder {
     }
 
     pub(crate) fn finish(&mut self) -> Result<String, PlatformError> {
+        if self.open_audio_bytes != 0 {
+            return Err(integrity(
+                "artifact.finish",
+                "audio artifact stream is still open",
+            ));
+        }
         if let Some((sequence, width, height, rgba8)) = self.final_frame.take() {
             let mut bytes = Vec::new();
             PngEncoder::new(&mut bytes)
@@ -402,10 +563,8 @@ fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PlatformError> {
             if !sample.is_finite() {
                 return Err(integrity("artifact.wav", "audio sample is not finite"));
             }
-            let scaled = (sample.clamp(-1.0, 1.0) * if *sample < 0.0 { 32768.0 } else { 32767.0 })
-                .round() as i16;
             writer
-                .write_sample(scaled)
+                .write_sample(pcm_i16(*sample))
                 .map_err(|_| io_error("artifact.wav.write"))?;
         }
         writer
@@ -413,6 +572,27 @@ fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PlatformError> {
             .map_err(|_| io_error("artifact.wav.finalize"))?;
     }
     Ok(cursor.into_inner())
+}
+
+fn pcm_i16(sample: f32) -> i16 {
+    (sample.clamp(-1.0, 1.0) * if sample < 0.0 { 32768.0 } else { 32767.0 }).round() as i16
+}
+
+fn sha256_file(path: &Path) -> Result<String, PlatformError> {
+    let file = File::open(path).map_err(|_| io_error("artifact.hash.open"))?;
+    let mut reader = BufReader::new(file);
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|_| io_error("artifact.hash.read"))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("sha256:{:x}", digest.finalize()))
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), PlatformError> {

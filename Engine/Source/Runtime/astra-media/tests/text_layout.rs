@@ -33,12 +33,16 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
                 TextRenderLayoutUpdate {
                     layout_id: "frame.a",
                     layout: &layout,
+                    shared_layout: None,
                     rgba: [255; 4],
+                    translation: (0, 0),
                 },
                 TextRenderLayoutUpdate {
                     layout_id: "frame.b",
                     layout: &layout,
+                    shared_layout: None,
                     rgba: [255; 4],
+                    translation: (0, 0),
                 },
             ],
             &[],
@@ -60,12 +64,16 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
                 TextRenderLayoutUpdate {
                     layout_id: "frame.a",
                     layout: &layout,
+                    shared_layout: None,
                     rgba: [255; 4],
+                    translation: (0, 0),
                 },
                 TextRenderLayoutUpdate {
                     layout_id: "frame.b",
                     layout: &layout,
+                    shared_layout: None,
                     rgba: [255; 4],
+                    translation: (0, 0),
                 },
             ],
             &[],
@@ -82,7 +90,9 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
             &[TextRenderLayoutUpdate {
                 layout_id: "frame.a",
                 layout: &conflicting,
+                shared_layout: None,
                 rgba: [255; 4],
+                translation: (0, 0),
             }],
             &["frame.b"],
         )
@@ -97,12 +107,16 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
                 TextRenderLayoutUpdate {
                     layout_id: "frame.a",
                     layout: &layout,
+                    shared_layout: None,
                     rgba: [255; 4],
+                    translation: (0, 0),
                 },
                 TextRenderLayoutUpdate {
                     layout_id: "frame.b",
                     layout: &layout,
+                    shared_layout: None,
                     rgba: [255; 4],
+                    translation: (0, 0),
                 },
             ],
             &[],
@@ -119,6 +133,52 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
             .count(),
         layout.glyph_resources.len()
     );
+}
+
+#[astra_headless_test::test]
+fn retained_glyph_cache_reuses_resources_and_evicts_under_pressure() {
+    let provider = provider();
+    let layout = provider
+        .layout(&request("retained glyph resources"))
+        .unwrap();
+    let mut owner = TextRenderResourceOwner::with_retained_glyph_cache(4_096, 1024 * 1024).unwrap();
+    let initial = owner.update_layout("retained", &layout, [255; 4]).unwrap();
+    let upload_count = initial
+        .iter()
+        .filter(|command| matches!(command, SceneCommand::UploadGlyph { .. }))
+        .count();
+    assert_eq!(upload_count, layout.glyph_resources.len());
+
+    let removed = owner.remove_layout("retained").unwrap();
+    assert!(removed.is_empty());
+    let reused = owner.update_layout("retained", &layout, [255; 4]).unwrap();
+    assert!(!reused
+        .iter()
+        .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
+    owner.remove_layout("retained").unwrap();
+    assert_eq!(
+        owner
+            .shutdown()
+            .iter()
+            .filter(|command| matches!(command, SceneCommand::ReleaseResource { .. }))
+            .count(),
+        layout.glyph_resources.len()
+    );
+
+    let mut constrained = TextRenderResourceOwner::with_retained_glyph_cache(1, 1).unwrap();
+    constrained
+        .update_layout("constrained", &layout, [255; 4])
+        .unwrap();
+    let evicted = constrained.remove_layout("constrained").unwrap();
+    assert_eq!(
+        evicted
+            .iter()
+            .filter(|command| matches!(command, SceneCommand::ReleaseResource { .. }))
+            .count(),
+        layout.glyph_resources.len()
+    );
+    assert!(TextRenderResourceOwner::with_retained_glyph_cache(0, 1).is_err());
+    assert!(TextRenderResourceOwner::with_retained_glyph_cache(1, 0).is_err());
 }
 
 fn fixture_font(
@@ -496,6 +556,28 @@ fn shared_layout_reuses_the_authoritative_cached_allocation() {
 
     assert!(Arc::ptr_eq(&first, &second));
     assert_eq!(provider.cache_stats().unwrap().entries, 1);
+}
+
+#[test]
+fn validation_layouts_can_be_released_before_runtime_rendering() {
+    let provider = provider();
+    let request = request("cache clear validation");
+
+    provider.layout_shared(&request).unwrap();
+    let populated = provider.cache_stats().unwrap();
+    assert_eq!(populated.entries, 1);
+    assert_eq!(populated.misses, 1);
+
+    provider.clear_layout_cache().unwrap();
+    let cleared = provider.cache_stats().unwrap();
+    assert_eq!(cleared.entries, 0);
+    assert_eq!(cleared.hits, 0);
+    assert_eq!(cleared.misses, 0);
+
+    provider.layout_shared(&request).unwrap();
+    let repopulated = provider.cache_stats().unwrap();
+    assert_eq!(repopulated.entries, 1);
+    assert_eq!(repopulated.misses, 1);
 }
 
 #[astra_headless_test::test]

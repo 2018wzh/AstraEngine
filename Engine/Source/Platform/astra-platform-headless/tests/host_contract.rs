@@ -784,11 +784,11 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
         .is_file());
     assert!(temp
         .path()
-        .join("artifacts/audio/output-0000000001-source-0000000001.wav")
+        .join("artifacts/audio/output-0000000001.wav")
         .is_file());
     assert!(temp
         .path()
-        .join("artifacts/audio/output-0000000002-source-0000000001.wav")
+        .join("artifacts/audio/output-0000000002.wav")
         .is_file());
     assert!(temp
         .path()
@@ -954,11 +954,23 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
         })
         .await
         .unwrap();
-    for output in [first, second] {
+    session
+        .client
+        .submit_audio(
+            first,
+            AudioPacket {
+                sequence: 1,
+                channels: 2,
+                samples: vec![0.0; 1_600],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
         session
             .client
             .submit_audio(
-                output,
+                second,
                 AudioPacket {
                     sequence: 1,
                     channels: 2,
@@ -966,17 +978,12 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
                 },
             )
             .await
-            .unwrap();
-    }
-    session.client.close_audio(first).await.unwrap();
-    assert_eq!(
-        session.client.close_audio(second).await.unwrap_err().code,
+            .unwrap_err()
+            .code,
         PlatformErrorCode::QueueOverflow
     );
-    assert_eq!(
-        session.client.close_audio(second).await.unwrap_err().code,
-        PlatformErrorCode::StaleHandle
-    );
+    session.client.close_audio(first).await.unwrap();
+    session.client.abort_audio(second).await.unwrap();
     session.client.shutdown().await.unwrap();
 }
 

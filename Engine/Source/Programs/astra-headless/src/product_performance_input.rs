@@ -12,6 +12,11 @@ use astra_headless_protocol::{
 pub struct ProductPerformanceInputRequest<'a> {
     pub prefix: &'a Path,
     pub output: &'a Path,
+    /// Inclusive authoritative input sequence at which the performance prefix
+    /// must stop. The selected message has to be a successful wait
+    /// observation, so appended physical frames begin from a known live UI
+    /// surface instead of continuing into another route.
+    pub stop_after_sequence: Option<u64>,
     pub warmup_frames: u64,
     pub measurement_frames: u64,
     pub viewport_width: u32,
@@ -50,6 +55,7 @@ pub fn prepare(request: ProductPerformanceInputRequest<'_>) -> Result<(), String
     let mut validator = SequenceValidator::default();
     let mut await_tick_shift = 0_u64;
     let mut last_effective_tick = 0_u64;
+    let mut stopped_at_requested_sequence = request.stop_after_sequence.is_none();
     while let Some(message) = reader
         .read::<InputMessage>()
         .map_err(|error| error.to_string())?
@@ -75,7 +81,26 @@ pub fn prepare(request: ProductPerformanceInputRequest<'_>) -> Result<(), String
                 .checked_add(u64::from(*timeout_ticks))
                 .ok_or("ASTRA_PERFORMANCE_INPUT_PREFIX_AWAIT_SHIFT_OVERFLOW")?;
         }
+        let stops_here = request.stop_after_sequence == Some(message.sequence);
+        if stops_here
+            && !matches!(
+                message.event,
+                PhysicalInput::Await {
+                    continue_at_match: true,
+                    ..
+                }
+            )
+        {
+            return Err("ASTRA_PERFORMANCE_INPUT_STOP_NOT_STABLE_AWAIT".into());
+        }
         prefix.push(message);
+        if stops_here {
+            stopped_at_requested_sequence = true;
+            break;
+        }
+    }
+    if !stopped_at_requested_sequence {
+        return Err("ASTRA_PERFORMANCE_INPUT_STOP_SEQUENCE_MISSING".into());
     }
     let last = prefix
         .last()
@@ -176,6 +201,7 @@ mod tests {
         prepare(ProductPerformanceInputRequest {
             prefix: &prefix,
             output: &output,
+            stop_after_sequence: None,
             warmup_frames: 2,
             measurement_frames: 2,
             viewport_width: 800,
@@ -196,5 +222,38 @@ mod tests {
         assert_eq!(messages[3].tick, 2);
         assert_eq!(messages[4].tick, 2);
         assert!(matches!(messages[5].event, PhysicalInput::Shutdown));
+    }
+
+    #[test]
+    fn clips_at_a_verified_wait_before_appending_the_stress_frames() {
+        let temp = tempfile::tempdir().unwrap();
+        let prefix = temp.path().join("prefix.jsonl");
+        fs::write(
+            &prefix,
+            concat!(
+                "{\"schema\":\"astra.user_input_sequence.v1\",\"session\":\"demo.performance\",\"sequence\":1,\"tick\":0,\"event\":{\"type\":\"resume\"}}\n",
+                "{\"schema\":\"astra.user_input_sequence.v1\",\"session\":\"demo.performance\",\"sequence\":2,\"tick\":1,\"event\":{\"type\":\"await\",\"observation\":{\"kind\":\"equals\",\"key\":\"vn.pending_wait_command\",\"value_hash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"timeout_ticks\":1,\"continue_at_match\":true}}\n",
+                "{\"schema\":\"astra.user_input_sequence.v1\",\"session\":\"demo.performance\",\"sequence\":3,\"tick\":2,\"event\":{\"type\":\"shutdown\"}}\n"
+            ),
+        )
+        .unwrap();
+        let output = temp.path().join("output.jsonl");
+        prepare(ProductPerformanceInputRequest {
+            prefix: &prefix,
+            output: &output,
+            stop_after_sequence: Some(2),
+            warmup_frames: 2,
+            measurement_frames: 2,
+            viewport_width: 800,
+            viewport_height: 600,
+            point_a: (10, 20),
+            point_b: (30, 40),
+        })
+        .unwrap();
+        let output_text = fs::read_to_string(output).unwrap();
+        assert!(output_text.contains("\"sequence\":2"));
+        assert!(
+            !output_text.contains("\"sequence\":3,\"tick\":2,\"event\":{\"type\":\"shutdown\"}")
+        );
     }
 }

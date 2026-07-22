@@ -168,6 +168,10 @@ mod tests {
     fn sample(update_layout_ns: u64, paint_conversion_ns: u64) -> UiPerformanceSample {
         UiPerformanceSample {
             request_validation_ns: 0,
+            input_routing_ns: 0,
+            tree_build_ns: 0,
+            layout_finalize_ns: 0,
+            semantics_ns: 0,
             update_layout_ns,
             paint_conversion_ns,
             output_validation_ns: 0,

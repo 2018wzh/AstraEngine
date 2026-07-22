@@ -41,7 +41,8 @@ fn commands() -> Vec<SceneCommand> {
                 x: 0,
                 y: 0,
                 rotation_quadrants: 0,
-            }],
+            }]
+            .into(),
             rgba: [255; 4],
             opacity: 1.0,
             blend: BlendMode::Alpha,

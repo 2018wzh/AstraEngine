@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
 use astra_media_core::{BlendMode, MeshMaterial2D, MeshVertex2D, SceneCommand, TextureFrame};
@@ -10,11 +10,38 @@ use astra_ui_core::{
 use yakui_core::paint::{PaintDom, Pipeline, TextureChange, TextureFormat};
 use yakui_core::TextureId as YakuiTextureId;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TextureContentKey {
+    content_hash: Hash256,
+    width: u32,
+    height: u32,
+    format: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ManagedTextureBinding {
+    content: TextureContentKey,
+    id: UiTextureId,
+    generation: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SharedTexture {
+    id: UiTextureId,
+    generation: u64,
+    references: u32,
+}
+
+/// Converts Yakui's ephemeral managed texture IDs into stable Scene2D
+/// resources. Yakui may retire and recreate a glyph texture while rebuilding a
+/// tree even if its pixels did not change. Retaining by verified content keeps
+/// the atlas placement and avoids a release/upload transaction for that case.
 #[derive(Debug, Default)]
 pub struct YakuiPaintConverter {
     next_texture_id: u64,
-    texture_ids: BTreeMap<String, UiTextureId>,
-    texture_generations: BTreeMap<UiTextureId, u64>,
+    managed_textures: BTreeMap<String, ManagedTextureBinding>,
+    shared_textures: BTreeMap<TextureContentKey, SharedTexture>,
+    user_texture_generations: BTreeMap<UiTextureId, u64>,
     force_full_resync: bool,
 }
 
@@ -44,46 +71,42 @@ impl YakuiPaintConverter {
 
         if self.force_full_resync {
             for (id, texture) in textures.iter() {
-                let logical = self.texture_id(YakuiTextureId::Managed(id));
-                let texture_generation = self.bump_generation(logical);
-                uploads.push(texture_upload(logical, texture_generation, texture)?);
+                self.sync_managed_texture(
+                    texture_key(YakuiTextureId::Managed(id)),
+                    texture,
+                    true,
+                    &mut uploads,
+                )?;
             }
+            let mut resynced = BTreeSet::new();
+            uploads.retain(|upload| resynced.insert((upload.id, upload.generation)));
         } else {
-            for (id, change) in textures.edits() {
-                let key = texture_key(YakuiTextureId::Managed(id));
-                match change {
-                    TextureChange::Added | TextureChange::Modified => {
-                        let logical = self.texture_id(YakuiTextureId::Managed(id));
-                        let texture_generation = self.bump_generation(logical);
-                        let texture = textures.get(id).ok_or_else(|| {
-                            UiValidationError::invalid(
-                                "ASTRA_UI_YAKUI_TEXTURE_MISSING",
-                                "Yakui reported an added/modified texture without storage",
-                            )
-                        })?;
-                        uploads.push(texture_upload(logical, texture_generation, texture)?);
-                    }
-                    TextureChange::Removed => {
-                        let logical = self.texture_ids.remove(&key).ok_or_else(|| {
-                            UiValidationError::invalid(
-                                "ASTRA_UI_YAKUI_TEXTURE_UNKNOWN",
-                                "Yakui removed an unknown texture",
-                            )
-                        })?;
-                        let texture_generation =
-                            self.texture_generations.remove(&logical).ok_or_else(|| {
-                                UiValidationError::invalid(
-                                    "ASTRA_UI_YAKUI_TEXTURE_GENERATION",
-                                    "removed texture has no live generation",
-                                )
-                            })?;
-                        releases.push(UiTextureRelease {
-                            id: logical,
-                            generation: texture_generation,
-                        });
-                    }
+            // Process removals before additions, but delay actual releases
+            // until all edits have been reconciled. A tree rebuild can replace
+            // one Yakui managed ID with another for unchanged glyph pixels in
+            // the same frame; issuing the release eagerly would defeat reuse.
+            let edits: Vec<_> = textures.edits().collect();
+            for (id, change) in &edits {
+                if *change == TextureChange::Removed {
+                    self.remove_managed_texture(&texture_key(YakuiTextureId::Managed(*id)))?;
                 }
             }
+            for (id, change) in edits {
+                if matches!(change, TextureChange::Added | TextureChange::Modified) {
+                    let key = texture_key(YakuiTextureId::Managed(id));
+                    if change == TextureChange::Modified {
+                        self.remove_managed_texture(&key)?;
+                    }
+                    let texture = textures.get(id).ok_or_else(|| {
+                        UiValidationError::invalid(
+                            "ASTRA_UI_YAKUI_TEXTURE_MISSING",
+                            "Yakui reported an added/modified texture without storage",
+                        )
+                    })?;
+                    self.sync_managed_texture(key, texture, false, &mut uploads)?;
+                }
+            }
+            releases.extend(self.release_unreferenced_textures());
         }
 
         let mut primitives = Vec::new();
@@ -91,9 +114,10 @@ impl YakuiPaintConverter {
         let height = viewport.physical_height as f32;
         for (layer_index, layer) in paint.layers().iter().enumerate() {
             for (call_index, call) in layer.calls.iter().enumerate() {
-                let texture = call.texture.map(|id| self.texture_id(id));
-                let texture_generation =
-                    texture.map(|id| self.texture_generations.get(&id).copied().unwrap_or(0));
+                let texture = call.texture.map(|id| self.texture_reference(id));
+                let texture = texture.transpose()?;
+                let texture_generation = texture.map(|(_, generation)| generation);
+                let texture = texture.map(|(id, _)| id);
                 if texture.is_some() && texture_generation == Some(0) {
                     return Err(UiValidationError::invalid(
                         "ASTRA_UI_YAKUI_TEXTURE_NOT_LIVE",
@@ -159,27 +183,147 @@ impl YakuiPaintConverter {
         Ok(frame)
     }
 
-    fn texture_id(&mut self, id: YakuiTextureId) -> UiTextureId {
+    fn texture_reference(
+        &mut self,
+        id: YakuiTextureId,
+    ) -> Result<(UiTextureId, u64), UiValidationError> {
         match id {
-            YakuiTextureId::User(value) => UiTextureId(value | (1_u64 << 63)),
+            YakuiTextureId::User(value) => {
+                let id = UiTextureId(value | (1_u64 << 63));
+                let generation = self.user_texture_generations.entry(id).or_insert(0);
+                if *generation == 0 {
+                    return Err(UiValidationError::invalid(
+                        "ASTRA_UI_YAKUI_USER_TEXTURE_NOT_LIVE",
+                        "paint call references a user texture without an upload",
+                    ));
+                }
+                Ok((id, *generation))
+            }
             YakuiTextureId::Managed(_) => {
                 let key = texture_key(id);
-                if let Some(value) = self.texture_ids.get(&key) {
-                    *value
-                } else {
-                    let value = UiTextureId(self.next_texture_id);
-                    self.next_texture_id = self.next_texture_id.saturating_add(1);
-                    self.texture_ids.insert(key, value);
-                    value
-                }
+                let binding = self.managed_textures.get(&key).ok_or_else(|| {
+                    UiValidationError::invalid(
+                        "ASTRA_UI_YAKUI_TEXTURE_NOT_LIVE",
+                        "paint call references a managed texture without a live binding",
+                    )
+                })?;
+                Ok((binding.id, binding.generation))
             }
         }
     }
 
-    fn bump_generation(&mut self, id: UiTextureId) -> u64 {
-        let generation = self.texture_generations.entry(id).or_insert(0);
-        *generation = generation.saturating_add(1);
-        *generation
+    fn sync_managed_texture(
+        &mut self,
+        key: String,
+        texture: &yakui_core::paint::Texture,
+        force_upload: bool,
+        uploads: &mut Vec<UiTextureUpload>,
+    ) -> Result<(), UiValidationError> {
+        let mut upload = texture_upload(UiTextureId(0), 0, texture)?;
+        let content = TextureContentKey {
+            content_hash: upload.content_hash,
+            width: upload.width,
+            height: upload.height,
+            format: texture_format_key(upload.format),
+        };
+        if let Some(existing) = self.managed_textures.get(&key).copied() {
+            if existing.content == content {
+                if force_upload {
+                    upload.id = existing.id;
+                    upload.generation = existing.generation;
+                    uploads.push(upload);
+                }
+                return Ok(());
+            }
+            self.remove_managed_texture(&key)?;
+        }
+        let (id, generation, requires_upload) = match self.shared_textures.get_mut(&content) {
+            Some(shared) => {
+                shared.references = shared.references.saturating_add(1);
+                (shared.id, shared.generation, force_upload)
+            }
+            None => {
+                let id = UiTextureId(self.next_texture_id);
+                self.next_texture_id = self.next_texture_id.saturating_add(1);
+                let generation = 1;
+                self.shared_textures.insert(
+                    content,
+                    SharedTexture {
+                        id,
+                        generation,
+                        references: 1,
+                    },
+                );
+                (id, generation, true)
+            }
+        };
+        self.managed_textures.insert(
+            key,
+            ManagedTextureBinding {
+                content,
+                id,
+                generation,
+            },
+        );
+        if requires_upload {
+            upload.id = id;
+            upload.generation = generation;
+            uploads.push(upload);
+        }
+        Ok(())
+    }
+
+    fn remove_managed_texture(&mut self, key: &str) -> Result<(), UiValidationError> {
+        let binding = self.managed_textures.remove(key).ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_YAKUI_TEXTURE_UNKNOWN",
+                "Yakui removed an unknown texture",
+            )
+        })?;
+        let shared = self
+            .shared_textures
+            .get_mut(&binding.content)
+            .ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_YAKUI_TEXTURE_GENERATION",
+                    "managed texture binding has no shared resource",
+                )
+            })?;
+        if shared.id != binding.id
+            || shared.generation != binding.generation
+            || shared.references == 0
+        {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_YAKUI_TEXTURE_REFERENCE",
+                "managed texture binding disagrees with its shared resource",
+            ));
+        }
+        shared.references -= 1;
+        Ok(())
+    }
+
+    fn release_unreferenced_textures(&mut self) -> Vec<UiTextureRelease> {
+        let released: Vec<_> = self
+            .shared_textures
+            .iter()
+            .filter_map(|(content, shared)| {
+                (shared.references == 0).then_some((*content, shared.id, shared.generation))
+            })
+            .collect();
+        for (content, _, _) in &released {
+            let _ = self.shared_textures.remove(content);
+        }
+        released
+            .into_iter()
+            .map(|(_, id, generation)| UiTextureRelease { id, generation })
+            .collect()
+    }
+}
+
+fn texture_format_key(format: UiTextureFormat) -> u8 {
+    match format {
+        UiTextureFormat::R8Unorm => 1,
+        UiTextureFormat::Rgba8SrgbPremultiplied => 2,
     }
 }
 
@@ -250,12 +394,9 @@ pub fn ui_frame_to_scene_commands(
         let rgba8 = scene_texture_rgba8(upload);
         commands.push(SceneCommand::UploadTexture {
             resource_id: texture_resource_id(frame, upload.id, upload.generation),
-            frame: TextureFrame {
-                width: upload.width,
-                height: upload.height,
-                hash: Hash256::from_sha256(&rgba8),
-                rgba8: rgba8.into(),
-            },
+            frame: TextureFrame::from_rgba8(upload.width, upload.height, rgba8.into()).map_err(
+                |error| UiValidationError::invalid("ASTRA_UI_TEXTURE_PAYLOAD", error.to_string()),
+            )?,
         });
     }
     for primitive in &frame.primitives {
@@ -273,8 +414,9 @@ pub fn ui_frame_to_scene_commands(
                     uv: vertex.uv,
                     premultiplied_rgba: vertex.premultiplied_rgba,
                 })
-                .collect(),
-            indices: primitive.indices.clone(),
+                .collect::<Vec<_>>()
+                .into(),
+            indices: primitive.indices.clone().into(),
             material: match primitive.material {
                 UiMaterialKind::SolidColor => MeshMaterial2D::Solid,
                 UiMaterialKind::ColorTexture => MeshMaterial2D::ColorTexture,
@@ -320,17 +462,24 @@ fn scene_texture_rgba8(upload: &UiTextureUpload) -> Vec<u8> {
 }
 
 fn texture_resource_id(frame: &UiRenderFrame, id: UiTextureId, generation: u64) -> String {
-    format!(
-        "ui:{}/{}/{}/{}",
-        frame.session_id, frame.generation, id.0, generation
-    )
+    texture_resource_id_for_session(&frame.session_id, id, generation)
+}
+
+fn texture_resource_id_for_session(session_id: &str, id: UiTextureId, generation: u64) -> String {
+    // `UiRenderFrame::generation` changes for every submitted UI frame. It is
+    // intentionally excluded: a texture's own id and generation are its
+    // lifetime identity, so unchanged Yakui resources keep their atlas
+    // placement across input-only UI generations.
+    format!("ui:{session_id}/{}/{generation}", id.0)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::scene_texture_rgba8;
+    use super::{scene_texture_rgba8, texture_resource_id_for_session, YakuiPaintConverter};
     use astra_core::Hash256;
     use astra_ui_core::{UiTextureFormat, UiTextureId, UiTextureUpload};
+    use yakui_core::geometry::UVec2;
+    use yakui_core::paint::{Texture, TextureFormat};
 
     #[astra_headless_test::test]
     fn glyph_mask_upload_becomes_straight_alpha_scene_texture() {
@@ -366,5 +515,89 @@ mod tests {
             scene_texture_rgba8(&upload),
             vec![199, 100, 50, 128, 0, 0, 0, 0]
         );
+    }
+
+    #[astra_headless_test::test]
+    fn texture_resource_identity_is_stable_across_ui_render_generations() {
+        let first = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 3);
+        let repeated = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 3);
+        let updated = texture_resource_id_for_session("vn.ui.demo:0", UiTextureId(7), 4);
+
+        assert_eq!(first, repeated);
+        assert_ne!(first, updated);
+    }
+
+    #[astra_headless_test::test]
+    fn identical_recreated_managed_texture_reuses_the_live_scene_resource() {
+        let mut converter = YakuiPaintConverter::new();
+        let texture = Texture::new(TextureFormat::R8, UVec2::new(2, 1), vec![42, 84]);
+        let mut initial = Vec::new();
+        converter
+            .sync_managed_texture("ManagedTextureId(1)".into(), &texture, false, &mut initial)
+            .unwrap();
+        let first = converter
+            .managed_textures
+            .get("ManagedTextureId(1)")
+            .copied()
+            .unwrap();
+        assert_eq!(initial.len(), 1);
+
+        converter
+            .remove_managed_texture("ManagedTextureId(1)")
+            .unwrap();
+        let mut replacement = Vec::new();
+        converter
+            .sync_managed_texture(
+                "ManagedTextureId(2)".into(),
+                &texture,
+                false,
+                &mut replacement,
+            )
+            .unwrap();
+        let second = converter
+            .managed_textures
+            .get("ManagedTextureId(2)")
+            .copied()
+            .unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.generation, second.generation);
+        assert!(replacement.is_empty());
+        assert!(converter.release_unreferenced_textures().is_empty());
+    }
+
+    #[astra_headless_test::test]
+    fn changed_managed_texture_uploads_new_content_and_releases_old_resource() {
+        let mut converter = YakuiPaintConverter::new();
+        let first_texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);
+        let second_texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![84]);
+        let mut initial = Vec::new();
+        converter
+            .sync_managed_texture(
+                "ManagedTextureId(1)".into(),
+                &first_texture,
+                false,
+                &mut initial,
+            )
+            .unwrap();
+        let old = initial[0].id;
+        converter
+            .remove_managed_texture("ManagedTextureId(1)")
+            .unwrap();
+        let mut replacement = Vec::new();
+        converter
+            .sync_managed_texture(
+                "ManagedTextureId(1)".into(),
+                &second_texture,
+                false,
+                &mut replacement,
+            )
+            .unwrap();
+
+        assert_eq!(replacement.len(), 1);
+        assert_ne!(replacement[0].id, old);
+        let releases = converter.release_unreferenced_textures();
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].id, old);
     }
 }

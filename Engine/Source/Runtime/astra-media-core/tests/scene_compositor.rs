@@ -25,8 +25,8 @@ fn cpu_reference_compositor_screens_premultiplied_ui_meshes() {
             DrawCommand::clear([64, 128, 192, 255]),
             DrawCommand::Mesh2D {
                 id: "screen-mesh".into(),
-                vertices: vec![vertex([0.0, 0.0]), vertex([2.0, 0.0]), vertex([0.0, 2.0])],
-                indices: vec![0, 1, 2],
+                vertices: vec![vertex([0.0, 0.0]), vertex([2.0, 0.0]), vertex([0.0, 2.0])].into(),
+                indices: vec![0, 1, 2].into(),
                 material: MeshMaterial2D::Solid,
                 texture_id: None,
                 opacity: 1.0,
@@ -219,7 +219,8 @@ fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
                 x: 0,
                 y: 0,
                 rotation_quadrants: 0,
-            }],
+            }]
+            .into(),
             rgba: [255; 4],
             opacity: 1.0,
             blend: BlendMode::Alpha,
@@ -240,7 +241,8 @@ fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
                     x: 0,
                     y: 0,
                     rotation_quadrants: 0,
-                }],
+                }]
+                .into(),
                 rgba: [255; 4],
                 opacity: 1.0,
                 blend: BlendMode::Alpha,

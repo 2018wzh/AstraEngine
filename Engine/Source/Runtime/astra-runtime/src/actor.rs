@@ -53,6 +53,10 @@ pub struct ComponentRecord {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimePayloadCodec {
     Postcard,
+    /// Postcard bytes authenticated with BLAKE3-256. This is intended for
+    /// high-frequency authoritative components whose deterministic state hash
+    /// is the first 128 bits of the same digest.
+    PostcardBlake3,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -75,6 +79,7 @@ pub struct ValidatedRuntimeComponentEncoding {
     bytes: Arc<[u8]>,
     storage_hash: Hash256,
     state_hash: Hash128,
+    codec: RuntimePayloadCodec,
 }
 
 impl ValidatedRuntimeComponentEncoding {
@@ -92,6 +97,19 @@ impl ValidatedRuntimeComponentEncoding {
             bytes,
             storage_hash,
             state_hash: Hash128::from_bytes(state_bytes),
+            codec: RuntimePayloadCodec::Postcard,
+        }
+    }
+
+    pub fn postcard_blake3(bytes: Arc<[u8]>) -> Self {
+        let digest = blake3::hash(&bytes);
+        let mut state_bytes = [0_u8; 16];
+        state_bytes.copy_from_slice(&digest.as_bytes()[..16]);
+        Self {
+            bytes,
+            storage_hash: Hash256::from_bytes(*digest.as_bytes()),
+            state_hash: Hash128::from_bytes(state_bytes),
+            codec: RuntimePayloadCodec::PostcardBlake3,
         }
     }
 
@@ -119,7 +137,13 @@ impl<'de> Deserialize<'de> for RuntimeComponentPayload {
         D: Deserializer<'de>,
     {
         let wire = RuntimeComponentPayloadWire::deserialize(deserializer)?;
-        if Hash256::from_sha256(&wire.bytes) != wire.hash {
+        let actual_hash = match wire.codec {
+            RuntimePayloadCodec::Postcard => Hash256::from_sha256(&wire.bytes),
+            RuntimePayloadCodec::PostcardBlake3 => {
+                Hash256::from_bytes(*blake3::hash(&wire.bytes).as_bytes())
+            }
+        };
+        if actual_hash != wire.hash {
             return Err(D::Error::custom(
                 "ASTRA_RUNTIME_COMPONENT_HASH: runtime component payload hash does not match its bytes",
             ));
@@ -159,7 +183,7 @@ impl RuntimeComponentPayload {
         Self {
             schema: schema.into(),
             version,
-            codec: RuntimePayloadCodec::Postcard,
+            codec: encoding.codec,
             hash: encoding.storage_hash,
             bytes: encoding.bytes,
         }
@@ -173,7 +197,9 @@ impl RuntimeComponentPayload {
 
     pub fn validated_postcard_bytes(&self) -> Result<Arc<[u8]>, RuntimeError> {
         match self.codec {
-            RuntimePayloadCodec::Postcard => Ok(Arc::clone(&self.bytes)),
+            RuntimePayloadCodec::Postcard | RuntimePayloadCodec::PostcardBlake3 => {
+                Ok(Arc::clone(&self.bytes))
+            }
         }
     }
 

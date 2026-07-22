@@ -179,3 +179,23 @@ fn validated_component_encoding_binds_both_hashes_to_shared_bytes() {
     assert_eq!(encoding.storage_hash(), Hash256::from_sha256(&bytes));
     assert_eq!(encoding.state_hash(), Hash128::from_blake3(&bytes));
 }
+
+#[test]
+fn blake3_component_encoding_reuses_one_digest_for_storage_and_state() {
+    let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
+        status: "blake3".to_string(),
+        count: 12,
+    })
+    .unwrap()
+    .into();
+    let encoding = ValidatedRuntimeComponentEncoding::postcard_blake3(Arc::clone(&bytes));
+    let digest = blake3::hash(&bytes);
+    let mut state_bytes = [0_u8; 16];
+    state_bytes.copy_from_slice(&digest.as_bytes()[..16]);
+
+    assert_eq!(
+        encoding.storage_hash(),
+        Hash256::from_bytes(*digest.as_bytes())
+    );
+    assert_eq!(encoding.state_hash(), Hash128::from_bytes(state_bytes));
+}

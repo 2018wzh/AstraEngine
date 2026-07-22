@@ -8,7 +8,10 @@ mod record;
 mod ring;
 mod windows_crash;
 
-pub use allocation::{allocation_snapshot, AllocationSnapshot, TrackingAllocator};
+pub use allocation::{
+    allocation_snapshot, thread_allocation_snapshot, AllocationSnapshot, ThreadAllocationSnapshot,
+    TrackingAllocator,
+};
 pub use config::{
     ConsoleFormat, CrashReportingMode, HostObservabilityConfig, HostRole, DEFAULT_MAX_ARCHIVES,
     DEFAULT_MAX_CRASH_BUNDLES, DEFAULT_MAX_FILE_BYTES, DEFAULT_RING_MAX_BYTES,

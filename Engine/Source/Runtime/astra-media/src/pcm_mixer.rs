@@ -317,14 +317,11 @@ impl ProductionAudioMixer {
         let mut samples = vec![0.0_f32; CANONICAL_FRAMES_PER_TICK * 2];
         let mut completed = Vec::new();
         let mut completed_fades = Vec::new();
+        let mut frame_completed = Vec::new();
         for frame in 0..CANONICAL_FRAMES_PER_TICK {
             self.advance_fades(&mut completed_fades)?;
-            let ids = self.voices.keys().cloned().collect::<Vec<_>>();
-            let mut frame_completed = Vec::new();
-            for id in ids {
-                let voice = self.voices.get_mut(&id).ok_or_else(|| {
-                    mixer_error("ASTRA_AUDIO_MIXER_STATE", "voice disappeared during render")
-                })?;
+            frame_completed.clear();
+            for (id, voice) in &mut self.voices {
                 if voice.paused {
                     continue;
                 }
@@ -338,11 +335,11 @@ impl ProductionAudioMixer {
                     if voice.looping {
                         voice.cursor = 0;
                     } else {
-                        frame_completed.push(id);
+                        frame_completed.push(id.clone());
                     }
                 }
             }
-            for id in frame_completed {
+            for id in frame_completed.drain(..) {
                 self.voices.remove(&id);
                 completed.push(id);
             }

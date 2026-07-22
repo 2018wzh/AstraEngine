@@ -437,7 +437,11 @@ impl BlueprintYakuiRenderer {
             ),
             clip_children: property_bool(node, "clip_children", frame, item)?.unwrap_or(false),
         };
-        let children = node.children.clone();
+        // Blueprint nodes are immutable for the lifetime of the packaged UI.
+        // Borrow the validated child slice while Yakui builds this generation;
+        // cloning the recursive subtree here made every text/action frame copy
+        // the complete view hierarchy before layout.
+        let children = &node.children;
         let parent = Some(semantic_id.as_str());
         let mut child_error = None;
         let mut changed_event = None;
@@ -508,7 +512,7 @@ impl BlueprintYakuiRenderer {
                             .show(|| {
                                 child_error = self
                                     .render_children(
-                                        &children, parent, frame, item, request, actions,
+                                        children, parent, frame, item, request, actions,
                                     )
                                     .err();
                             });
@@ -523,7 +527,7 @@ impl BlueprintYakuiRenderer {
                             .show(|| {
                                 child_error = self
                                     .render_children(
-                                        &children, parent, frame, item, request, actions,
+                                        children, parent, frame, item, request, actions,
                                     )
                                     .err();
                             });
@@ -559,7 +563,7 @@ impl BlueprintYakuiRenderer {
                     Pad::all(padding).show(|| {
                         Stack::new().show(|| {
                             child_error = self
-                                .render_children(&children, parent, frame, item, request, actions)
+                                .render_children(children, parent, frame, item, request, actions)
                                 .err();
                         });
                     });
@@ -602,7 +606,7 @@ impl BlueprintYakuiRenderer {
                         )
                         .show(|| {
                             child_error = self
-                                .render_children(&children, parent, frame, item, request, actions)
+                                .render_children(children, parent, frame, item, request, actions)
                                 .err();
                         });
                     })
@@ -674,7 +678,7 @@ impl BlueprintYakuiRenderer {
                 }
                 _ => AstraNodeWidget::show(props, || {
                     child_error = self
-                        .render_children(&children, parent, frame, item, request, actions)
+                        .render_children(children, parent, frame, item, request, actions)
                         .err();
                 }),
             })
@@ -1422,7 +1426,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         } else {
             None
         };
-        self.retained_frame = Some(frame.clone());
+        self.retained_frame = Some(frame);
         Ok(YakuiViewOutput {
             actions,
             repaint_after_ns: None,
@@ -1515,7 +1519,6 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             hash: Hash256::from_sha256(&[]),
         };
         snapshot.hash = snapshot.compute_hash()?;
-        snapshot.validate()?;
         self.retained_semantic_hash = Some(snapshot.hash);
         if focus_settled {
             self.semantic_focus_override = None;

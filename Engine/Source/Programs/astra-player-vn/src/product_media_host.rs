@@ -24,7 +24,8 @@ pub struct NativeVnProductMediaHost {
     active_videos: Vec<ActiveVideoStream>,
     restored_videos: Vec<NativeVnVideoStreamSnapshot>,
     decoded_audio_cache: BTreeMap<Hash256, CachedDecodedAudio>,
-    decoded_audio_lru: VecDeque<Hash256>,
+    decoded_audio_lru: VecDeque<(Hash256, u64)>,
+    decoded_audio_access_epoch: u64,
     decoded_audio_cache_bytes: u64,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
@@ -34,6 +35,7 @@ pub struct NativeVnProductMediaHost {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NativeVnMediaPerformanceSample {
+    pub prewarm_ns: u64,
     pub provider_decode_ns: u64,
     pub parse_convert_ns: u64,
     pub mixer_ns: u64,
@@ -48,6 +50,7 @@ struct CachedDecodedAudio {
     asset: PcmAsset,
     decoded_hash: String,
     byte_size: u64,
+    last_access_epoch: u64,
 }
 
 struct ActiveVideoStream {
@@ -115,6 +118,7 @@ impl NativeVnProductMediaHost {
             restored_videos: Vec::new(),
             decoded_audio_cache: BTreeMap::new(),
             decoded_audio_lru: VecDeque::new(),
+            decoded_audio_access_epoch: 0,
             decoded_audio_cache_bytes: 0,
             max_video_frames: 18_000,
             max_decode_output_bytes: 512 * 1024 * 1024,
@@ -196,7 +200,7 @@ impl NativeVnProductMediaHost {
         self.audio.has_active_voice()
     }
 
-    pub fn submitted_audio_timeline(&self) -> &[f32] {
+    pub fn submitted_audio_timeline(&self) -> Vec<f32> {
         self.audio.submitted_timeline()
     }
 
@@ -297,7 +301,11 @@ impl NativeVnProductMediaHost {
         mut completed: Vec<PlayerTimelineCompletion>,
         render_audio_tick: bool,
     ) -> Result<(), PlatformError> {
+        let prewarm_started = self.performance.as_ref().map(|_| Instant::now());
         self.prewarm_pending_audio(source, executor).await?;
+        self.add_profile_duration(prewarm_started, |sample, duration| {
+            sample.prewarm_ns = sample.prewarm_ns.saturating_add(duration);
+        })?;
         self.restore_video_streams(source, executor).await?;
         for _ in 0..Self::MAX_COMPLETION_CHAIN {
             let tasks = source.take_timeline_tasks();
@@ -318,7 +326,7 @@ impl NativeVnProductMediaHost {
             }
 
             for completion in std::mem::take(&mut completed) {
-                tracing::info!(
+                tracing::debug!(
                     event = "astra.player.timeline.completed",
                     task_id = %completion.task_id,
                     target = %completion.target,
@@ -378,7 +386,7 @@ impl NativeVnProductMediaHost {
                 self.add_profile_duration(mixer_started, |sample, duration| {
                     sample.mixer_ns = sample.mixer_ns.saturating_add(duration);
                 })?;
-                tracing::info!(
+                tracing::trace!(
                     event = "astra.player.audio.started",
                     command_id = %request.command_id,
                     command = %request.command,
@@ -599,10 +607,25 @@ impl NativeVnProductMediaHost {
     }
 
     fn cached_audio(&mut self, encoded_hash: &Hash256) -> Option<CachedDecodedAudio> {
-        let cached = self.decoded_audio_cache.get(encoded_hash)?.clone();
-        self.decoded_audio_lru.retain(|hash| hash != encoded_hash);
-        self.decoded_audio_lru.push_back(*encoded_hash);
-        Some(cached)
+        if !self.touch_cached_audio(encoded_hash) {
+            return None;
+        }
+        self.decoded_audio_cache.get(encoded_hash).cloned()
+    }
+
+    fn touch_cached_audio(&mut self, encoded_hash: &Hash256) -> bool {
+        self.compact_audio_recency_if_needed();
+        if !self.decoded_audio_cache.contains_key(encoded_hash) {
+            return false;
+        }
+        self.decoded_audio_access_epoch = self.decoded_audio_access_epoch.saturating_add(1);
+        let epoch = self.decoded_audio_access_epoch;
+        self.decoded_audio_cache
+            .get_mut(encoded_hash)
+            .expect("cache membership was checked")
+            .last_access_epoch = epoch;
+        self.decoded_audio_lru.push_back((*encoded_hash, epoch));
+        true
     }
 
     async fn prewarm_pending_audio(
@@ -614,33 +637,56 @@ impl NativeVnProductMediaHost {
         if requests.is_empty() {
             return Ok(());
         }
+        let requested_count = requests
+            .iter()
+            .map(|request| request.encoded_hash)
+            .collect::<BTreeSet<_>>()
+            .len();
         let mut required_hashes = BTreeSet::new();
         for request in &requests {
             required_hashes.insert(request.encoded_hash);
-            if self.cached_audio(&request.encoded_hash).is_none() {
-                self.decode_audio(source, executor, request).await?;
+            if !self.touch_cached_audio(&request.encoded_hash) {
+                let cached = self
+                    .decode_audio_uncached(source, executor, request)
+                    .await?;
+                if !self.cache_audio_without_eviction(request.encoded_hash, cached) {
+                    break;
+                }
             }
         }
-        if required_hashes
+        let retained_count = required_hashes
             .iter()
-            .any(|hash| !self.decoded_audio_cache.contains_key(hash))
-        {
-            return Err(media_error(
-                "player.audio.prewarm",
-                "ASTRA_PLAYER_AUDIO_PREWARM_BUDGET_EXCEEDED",
-            ));
-        }
+            .filter(|hash| self.decoded_audio_cache.contains_key(hash))
+            .count();
         tracing::info!(
             event = "astra.player.audio.prewarm.completed",
-            asset_count = required_hashes.len(),
+            requested_count,
+            retained_count,
             decoded_cache_bytes = self.decoded_audio_cache_bytes,
             cache_budget_bytes = self.max_decoded_cache_bytes,
-            "prewarmed reusable entry-story audio into the bounded decoded cache"
+            "prewarmed an authored-order audio prefix within the bounded decoded cache"
         );
         Ok(())
     }
 
     async fn decode_audio(
+        &mut self,
+        source: &mut NativeVnHostCommandSource,
+        executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
+        request: &NativeVnAudioPreloadRequest,
+    ) -> Result<CachedDecodedAudio, PlatformError> {
+        let cached = self
+            .decode_audio_uncached(source, executor, request)
+            .await?;
+        self.cache_audio(
+            request.encoded_hash,
+            cached.asset.clone(),
+            cached.decoded_hash.clone(),
+        );
+        Ok(cached)
+    }
+
+    async fn decode_audio_uncached(
         &mut self,
         source: &mut NativeVnHostCommandSource,
         executor: &mut PlayerHostCommandExecutor<PlatformCommandSink>,
@@ -675,18 +721,38 @@ impl NativeVnProductMediaHost {
         self.add_profile_duration(convert_started, |sample, duration| {
             sample.parse_convert_ns = sample.parse_convert_ns.saturating_add(duration);
         })?;
-        let cached = CachedDecodedAudio {
+        Ok(CachedDecodedAudio {
             byte_size: (asset.samples.len() as u64)
                 .saturating_mul(std::mem::size_of::<f32>() as u64),
             asset,
             decoded_hash: decoded.hash,
-        };
-        self.cache_audio(
-            request.encoded_hash,
-            cached.asset.clone(),
-            cached.decoded_hash.clone(),
-        );
-        Ok(cached)
+            last_access_epoch: 0,
+        })
+    }
+
+    fn cache_audio_without_eviction(
+        &mut self,
+        encoded_hash: Hash256,
+        mut cached: CachedDecodedAudio,
+    ) -> bool {
+        if cached.byte_size > self.max_decoded_cache_bytes
+            || self
+                .decoded_audio_cache_bytes
+                .saturating_add(cached.byte_size)
+                > self.max_decoded_cache_bytes
+        {
+            return false;
+        }
+        self.compact_audio_recency_if_needed();
+        self.decoded_audio_access_epoch = self.decoded_audio_access_epoch.saturating_add(1);
+        cached.last_access_epoch = self.decoded_audio_access_epoch;
+        self.decoded_audio_cache_bytes = self
+            .decoded_audio_cache_bytes
+            .saturating_add(cached.byte_size);
+        self.decoded_audio_lru
+            .push_back((encoded_hash, cached.last_access_epoch));
+        self.decoded_audio_cache.insert(encoded_hash, cached);
+        true
     }
 
     fn cache_audio(&mut self, encoded_hash: Hash256, asset: PcmAsset, decoded_hash: String) {
@@ -706,14 +772,20 @@ impl NativeVnProductMediaHost {
             self.decoded_audio_cache_bytes = self
                 .decoded_audio_cache_bytes
                 .saturating_sub(previous.byte_size);
-            self.decoded_audio_lru.retain(|hash| hash != &encoded_hash);
         }
         while self.decoded_audio_cache_bytes.saturating_add(byte_size)
             > self.max_decoded_cache_bytes
         {
-            let Some(evicted_hash) = self.decoded_audio_lru.pop_front() else {
+            let Some((evicted_hash, access_epoch)) = self.decoded_audio_lru.pop_front() else {
                 break;
             };
+            if self
+                .decoded_audio_cache
+                .get(&evicted_hash)
+                .is_some_and(|cached| cached.last_access_epoch != access_epoch)
+            {
+                continue;
+            }
             if let Some(evicted) = self.decoded_audio_cache.remove(&evicted_hash) {
                 self.decoded_audio_cache_bytes = self
                     .decoded_audio_cache_bytes
@@ -726,16 +798,52 @@ impl NativeVnProductMediaHost {
                 );
             }
         }
+        self.compact_audio_recency_if_needed();
+        self.decoded_audio_access_epoch = self.decoded_audio_access_epoch.saturating_add(1);
+        let access_epoch = self.decoded_audio_access_epoch;
         self.decoded_audio_cache.insert(
             encoded_hash,
             CachedDecodedAudio {
                 asset,
                 decoded_hash,
                 byte_size,
+                last_access_epoch: access_epoch,
             },
         );
-        self.decoded_audio_lru.push_back(encoded_hash);
+        self.decoded_audio_lru
+            .push_back((encoded_hash, access_epoch));
         self.decoded_audio_cache_bytes = self.decoded_audio_cache_bytes.saturating_add(byte_size);
+    }
+
+    fn compact_audio_recency_if_needed(&mut self) {
+        let maximum_entries = self
+            .decoded_audio_cache
+            .len()
+            .saturating_mul(4)
+            .saturating_add(32);
+        if self.decoded_audio_access_epoch != u64::MAX
+            && self.decoded_audio_lru.len() <= maximum_entries
+        {
+            return;
+        }
+        let mut recency = self
+            .decoded_audio_cache
+            .iter()
+            .map(|(hash, cached)| (*hash, cached.last_access_epoch))
+            .collect::<Vec<_>>();
+        recency.sort_unstable_by_key(|(_, epoch)| *epoch);
+        self.decoded_audio_lru.clear();
+        for (index, (hash, _)) in recency.into_iter().enumerate() {
+            let epoch = index as u64 + 1;
+            if let Some(cached) = self.decoded_audio_cache.get_mut(&hash) {
+                cached.last_access_epoch = epoch;
+            }
+            self.decoded_audio_lru.push_back((hash, epoch));
+            self.decoded_audio_access_epoch = epoch;
+        }
+        if self.decoded_audio_cache.is_empty() {
+            self.decoded_audio_access_epoch = 0;
+        }
     }
 
     async fn present_due_video_frames(
@@ -884,11 +992,11 @@ fn decoded_bgra_frame(
     for pixel in rgba8.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
-    Ok(astra_media_core::TextureFrame {
-        width,
-        height,
-        hash: astra_core::Hash256::from_sha256(&rgba8),
-        rgba8: rgba8.into(),
+    astra_media_core::TextureFrame::from_rgba8(width, height, rgba8.into()).map_err(|error| {
+        media_error(
+            "player.video.contract",
+            format!("ASTRA_PLAYER_VIDEO_TEXTURE: {error}"),
+        )
     })
 }
 
@@ -898,4 +1006,47 @@ fn media_error(operation: &'static str, error: impl std::fmt::Display) -> Platfo
         operation,
         error.to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pcm(id: &str, samples: usize) -> PcmAsset {
+        PcmAsset::from_canonical_samples(id, vec![0.0; samples]).unwrap()
+    }
+
+    #[astra_headless_test::test]
+    fn decoded_audio_recency_evicts_the_oldest_live_generation() {
+        let mut host = NativeVnProductMediaHost::new(8);
+        host.max_decoded_cache_bytes = 32;
+        let first = Hash256::from_sha256(b"first");
+        let second = Hash256::from_sha256(b"second");
+        let third = Hash256::from_sha256(b"third");
+
+        host.cache_audio(first, pcm("first", 4), "first".into());
+        host.cache_audio(second, pcm("second", 4), "second".into());
+        assert!(host.cached_audio(&first).is_some());
+        host.cache_audio(third, pcm("third", 4), "third".into());
+
+        assert!(host.decoded_audio_cache.contains_key(&first));
+        assert!(!host.decoded_audio_cache.contains_key(&second));
+        assert!(host.decoded_audio_cache.contains_key(&third));
+        assert_eq!(host.decoded_audio_cache_bytes, 32);
+    }
+
+    #[astra_headless_test::test]
+    fn decoded_audio_recency_queue_compacts_stale_generations() {
+        let mut host = NativeVnProductMediaHost::new(8);
+        let hash = Hash256::from_sha256(b"stable");
+        host.cache_audio(hash, pcm("stable", 4), "stable".into());
+        for _ in 0..128 {
+            assert!(host.touch_cached_audio(&hash));
+        }
+        host.compact_audio_recency_if_needed();
+
+        assert!(host.decoded_audio_lru.len() <= 33);
+        let live_epoch = host.decoded_audio_cache[&hash].last_access_epoch;
+        assert_eq!(host.decoded_audio_lru.back(), Some(&(hash, live_epoch)));
+    }
 }

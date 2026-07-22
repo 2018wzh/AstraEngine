@@ -33,9 +33,6 @@ image.workspace = true
 hound.workspace = true
 rustfft.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Threading"] }
-
 [dev-dependencies]
 astra-headless-test = { path = "../../Developer/astra-headless-test" }
 tempfile.workspace = true

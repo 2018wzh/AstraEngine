@@ -4,7 +4,6 @@ use cosmic_text::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use astra_core::Hash256;
 use astra_media_core::{GlyphBitmap, GlyphBitmapFormat};
 
 use crate::MediaError;
@@ -317,11 +316,10 @@ pub(super) fn glyph_bitmap(image: &cosmic_text::SwashImage) -> Result<GlyphBitma
             )))
         }
     };
-    Ok(GlyphBitmap {
-        width: image.placement.width,
-        height: image.placement.height,
+    GlyphBitmap::from_pixels(
+        image.placement.width,
+        image.placement.height,
         format,
-        hash: Hash256::from_sha256(&pixels),
-        pixels: pixels.into(),
-    })
+        pixels.into(),
+    )
 }

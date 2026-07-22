@@ -1135,7 +1135,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1230,6 +1229,7 @@ version = "0.1.0"
 dependencies = [
  "astra-core",
  "astra-headless-test",
+ "rayon",
  "schemars",
  "serde",
  "thiserror 1.0.69",
@@ -1348,6 +1348,7 @@ dependencies = [
  "tracing",
  "url",
  "wgpu",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

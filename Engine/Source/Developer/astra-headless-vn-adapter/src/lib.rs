@@ -143,6 +143,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                     .map_err(|error| ProductHostError::Binding(error.to_string()))?;
             let asset_cache_bytes = cache_budget.asset_bytes;
             let audio_cache_bytes = cache_budget.audio_bytes;
+            let glyph_cache_bytes = cache_budget.glyph_bytes;
             let mut sink = PlatformCommandSink::new(request.platform.clone());
             sink.bind_surface(logical_surface, surface)
                 .map_err(|error| binding("surface.bind", error))?;
@@ -157,6 +158,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 request.height,
                 logical_surface,
                 asset_cache_bytes,
+                glyph_cache_bytes,
             )
             .map_err(|error| binding("runtime.open", error))?;
             source.set_ui_host_performance_sampling_enabled(performance_observer.is_some());
@@ -456,7 +458,7 @@ impl ProductSession for NativeVnHeadlessSession {
         Ok(CanonicalAudioSnapshot {
             sample_rate: astra_media::CANONICAL_SAMPLE_RATE,
             channels: astra_media::CANONICAL_CHANNELS,
-            samples: self.media.submitted_audio_timeline().to_vec(),
+            samples: self.media.submitted_audio_timeline(),
         })
     }
 
@@ -615,6 +617,18 @@ impl NativeVnHeadlessSession {
                 sample.ui_request_validation_ns = sample
                     .ui_request_validation_ns
                     .saturating_add(ui_sample.request_validation_ns);
+                sample.ui_input_routing_ns = sample
+                    .ui_input_routing_ns
+                    .saturating_add(ui_sample.input_routing_ns);
+                sample.ui_tree_build_ns = sample
+                    .ui_tree_build_ns
+                    .saturating_add(ui_sample.tree_build_ns);
+                sample.ui_layout_finalize_ns = sample
+                    .ui_layout_finalize_ns
+                    .saturating_add(ui_sample.layout_finalize_ns);
+                sample.ui_semantics_ns = sample
+                    .ui_semantics_ns
+                    .saturating_add(ui_sample.semantics_ns);
                 sample.ui_update_layout_ns = sample
                     .ui_update_layout_ns
                     .saturating_add(ui_sample.update_layout_ns);
@@ -628,6 +642,10 @@ impl NativeVnHeadlessSession {
                     duration.saturating_sub(
                         ui_sample
                             .request_validation_ns
+                            .saturating_add(ui_sample.input_routing_ns)
+                            .saturating_add(ui_sample.tree_build_ns)
+                            .saturating_add(ui_sample.layout_finalize_ns)
+                            .saturating_add(ui_sample.semantics_ns)
                             .saturating_add(ui_sample.update_layout_ns)
                             .saturating_add(ui_sample.paint_conversion_ns)
                             .saturating_add(ui_sample.output_validation_ns),
@@ -647,6 +665,15 @@ impl NativeVnHeadlessSession {
                 sample.ui_text_scene_ns = sample
                     .ui_text_scene_ns
                     .saturating_add(ui_host_sample.text_scene_ns);
+                sample.ui_text_layout_ns = sample
+                    .ui_text_layout_ns
+                    .saturating_add(ui_host_sample.text_layout_ns);
+                sample.ui_text_resource_ns = sample
+                    .ui_text_resource_ns
+                    .saturating_add(ui_host_sample.text_resource_ns);
+                sample.ui_text_compose_ns = sample
+                    .ui_text_compose_ns
+                    .saturating_add(ui_host_sample.text_compose_ns);
                 sample.ui_action_dispatch_ns = sample
                     .ui_action_dispatch_ns
                     .saturating_add(ui_host_sample.action_dispatch_ns);
@@ -668,16 +695,35 @@ impl NativeVnHeadlessSession {
                 sample.vn_stage_scene_ns = sample
                     .vn_stage_scene_ns
                     .saturating_add(ui_host_sample.stage_scene_ns);
+                sample.vn_stage_texture_ns = sample
+                    .vn_stage_texture_ns
+                    .saturating_add(ui_host_sample.stage_texture_ns);
+                sample.vn_stage_command_ns = sample
+                    .vn_stage_command_ns
+                    .saturating_add(ui_host_sample.stage_command_ns);
+                sample.vn_stage_lifecycle_ns = sample
+                    .vn_stage_lifecycle_ns
+                    .saturating_add(ui_host_sample.stage_lifecycle_ns);
                 sample.vn_scene_compose_ns = sample
                     .vn_scene_compose_ns
                     .saturating_add(ui_host_sample.scene_compose_ns);
             }
         })?;
-        self.flush_performance_sample(batch_presents_scene(&batch))?;
-        self.executor
+        let binds_presentation = batch_presents_scene(&batch);
+        self.flush_performance_sample(binds_presentation)?;
+        let execution = self
+            .executor
             .execute_batch(batch)
             .await
-            .map_err(|error| ProductHostError::Input(error.to_string()))?;
+            .map_err(|error| ProductHostError::Input(error.to_string()));
+        if binds_presentation {
+            if let Some(observer) = &self.performance_observer {
+                observer
+                    .finish_presentation_sample()
+                    .map_err(ProductHostError::Output)?;
+            }
+        }
+        execution?;
         self.process_ui_host_request().await?;
         Ok(())
     }
@@ -760,11 +806,21 @@ impl NativeVnHeadlessSession {
                     sample.runtime_tick_ns = sample.runtime_tick_ns.saturating_add(duration);
                 }
                 if let Some(present) = present {
-                    self.flush_performance_sample(batch_presents_scene(&present))?;
-                    self.executor
+                    let binds_presentation = batch_presents_scene(&present);
+                    self.flush_performance_sample(binds_presentation)?;
+                    let execution = self
+                        .executor
                         .execute_batch(present)
                         .await
-                        .map_err(|error| ProductHostError::Output(error.to_string()))?;
+                        .map_err(|error| ProductHostError::Output(error.to_string()));
+                    if binds_presentation {
+                        if let Some(observer) = &self.performance_observer {
+                            observer
+                                .finish_presentation_sample()
+                                .map_err(ProductHostError::Output)?;
+                        }
+                    }
+                    execution?;
                 }
             }
             let media_started = self.profile_started();
@@ -779,6 +835,9 @@ impl NativeVnHeadlessSession {
             let media_sample = self.media.take_performance_sample();
             self.add_profile_duration(media_started, |sample, duration| {
                 sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
+                sample.media_prewarm_ns = sample
+                    .media_prewarm_ns
+                    .saturating_add(media_sample.prewarm_ns);
                 sample.media_provider_decode_ns = sample
                     .media_provider_decode_ns
                     .saturating_add(media_sample.provider_decode_ns);
@@ -817,6 +876,9 @@ impl NativeVnHeadlessSession {
         let media_sample = self.media.take_performance_sample();
         self.add_profile_duration(media_started, |sample, duration| {
             sample.media_decode_ns = sample.media_decode_ns.saturating_add(duration);
+            sample.media_prewarm_ns = sample
+                .media_prewarm_ns
+                .saturating_add(media_sample.prewarm_ns);
             sample.media_provider_decode_ns = sample
                 .media_provider_decode_ns
                 .saturating_add(media_sample.provider_decode_ns);

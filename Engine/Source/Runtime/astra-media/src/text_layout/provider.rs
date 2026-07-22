@@ -215,6 +215,20 @@ impl CosmicTextLayoutProvider {
         })
     }
 
+    /// Drops shaped-layout entries without rebuilding the packaged font database.
+    ///
+    /// Exhaustive validation requests use identities that the interactive UI
+    /// never reuses. They must not occupy the bounded runtime LRU and evict
+    /// product layouts before the first frame is rendered.
+    pub fn clear_layout_cache(&self) -> Result<(), MediaError> {
+        let mut state = self.lock_state()?;
+        state.layout_cache.clear();
+        state.access_sequence = 0;
+        state.hits = 0;
+        state.misses = 0;
+        Ok(())
+    }
+
     fn replace_fonts_locked(
         &self,
         state: &mut FontState,

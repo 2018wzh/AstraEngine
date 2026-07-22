@@ -31,7 +31,6 @@ use sha2::{Digest, Sha256};
 
 mod compare;
 mod performance_e2;
-mod performance_scheduling;
 mod product_performance;
 mod product_performance_input;
 
@@ -201,6 +200,8 @@ enum Command {
         prefix: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long)]
+        stop_after_sequence: Option<u64>,
         #[arg(long, default_value_t = 1_200)]
         warmup_frames: u64,
         #[arg(long, default_value_t = 72_000)]
@@ -380,6 +381,7 @@ async fn main() {
         Command::PrepareProductPerformanceInput {
             prefix,
             output,
+            stop_after_sequence,
             warmup_frames,
             measurement_frames,
             viewport_width,
@@ -392,6 +394,7 @@ async fn main() {
             product_performance_input::ProductPerformanceInputRequest {
                 prefix: &prefix,
                 output: &output,
+                stop_after_sequence,
                 warmup_frames,
                 measurement_frames,
                 viewport_width,
@@ -1086,7 +1089,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
     };
     let performance_scheduling = performance_observer
         .as_ref()
-        .map(|_| performance_scheduling::PerformanceSchedulingGuard::activate())
+        .map(|_| astra_platform_common::PerformanceSchedulingGuard::activate_coordinator())
         .transpose()?;
     fs::create_dir_all(artifact_root).map_err(|e| e.to_string())?;
     let input_bytes =
@@ -1281,7 +1284,7 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
             ..
         } = &message.event
         {
-            tracing::info!(
+            tracing::trace!(
                 event = "astra.headless.await.completed",
                 sequence = message.sequence,
                 effective_tick,

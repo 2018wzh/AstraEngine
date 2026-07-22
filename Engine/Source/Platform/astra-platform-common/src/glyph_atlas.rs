@@ -14,10 +14,13 @@ use sha2::{Digest, Sha256};
 use smallvec::{smallvec, SmallVec};
 
 const ATLAS_SIDE: u32 = 4096;
+const MIN_ATLAS_SIDE: u32 = 1024;
 const ATLAS_PADDING: u32 = 1;
 const MAX_GLYPH_RESOURCES: usize = 65_536;
 const MAX_GLYPH_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ATLAS_UPLOAD_BYTES: usize = ATLAS_SIDE as usize * ATLAS_SIDE as usize * 4;
+const ATLAS_STAGING_RING_SIZE: usize = 1;
+const ATLAS_STAGING_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 const VERTEX_STRIDE: wgpu::BufferAddress = 32;
 
 pub(crate) struct WgpuGlyphAtlasRenderer {
@@ -33,10 +36,18 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
     last_draw_calls: u64,
     last_engine_allocation_bytes: u64,
     last_engine_allocation_count: u64,
+    last_command_allocation_bytes: u64,
+    last_command_allocation_breakdown: Option<[u64; 4]>,
+    command_allocation_diagnostics_emitted: u32,
+    last_atlas_allocation_bytes: u64,
+    last_geometry_allocation_bytes: u64,
     vertex_bytes: Vec<u8>,
     uploaded_vertex_bytes: Vec<u8>,
     draw_batches: Vec<DrawBatch>,
     atlas_upload_pixels: Vec<u8>,
+    atlas_staging_belts: [wgpu::util::StagingBelt; ATLAS_STAGING_RING_SIZE],
+    atlas_staging_index: usize,
+    reserved_side: Option<u32>,
 }
 
 struct CachedOutput {
@@ -48,8 +59,8 @@ struct CachedOutput {
 pub(crate) struct PreparedGlyphFrame {
     pub(crate) texture: wgpu::Texture,
     pub(crate) cpu_profile: GlyphCpuProfile,
-    next_resources: Option<BTreeMap<String, AtlasResource>>,
-    next_atlas: Option<GpuAtlas>,
+    resource_mutations: ResourceMutationJournal,
+    atlas_update: PreparedAtlasUpdate,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -74,13 +85,14 @@ struct AtlasUpdateContext<'a> {
     queue: &'a wgpu::Queue,
     layout: &'a wgpu::BindGroupLayout,
     sampler: &'a wgpu::Sampler,
+    staging_belt: &'a mut wgpu::util::StagingBelt,
     timestamp_query: Option<(&'a wgpu::QuerySet, u32, u32)>,
 }
 
 type PreparedRender = (
     wgpu::Texture,
-    Option<BTreeMap<String, AtlasResource>>,
-    Option<GpuAtlas>,
+    ResourceMutationJournal,
+    PreparedAtlasUpdate,
     GlyphCpuProfile,
 );
 
@@ -90,10 +102,151 @@ enum AtlasResource {
     Texture(Arc<TextureFrame>),
 }
 
+type ResourceMutationJournal = BTreeMap<String, Option<AtlasResource>>;
+
+struct AtlasResourceView<'a> {
+    base: &'a BTreeMap<String, AtlasResource>,
+    mutations: &'a ResourceMutationJournal,
+}
+
+impl<'a> AtlasResourceView<'a> {
+    fn new(
+        base: &'a BTreeMap<String, AtlasResource>,
+        mutations: &'a ResourceMutationJournal,
+    ) -> Self {
+        Self { base, mutations }
+    }
+
+    fn get(&self, resource_id: &str) -> Option<&AtlasResource> {
+        match self.mutations.get(resource_id) {
+            Some(resource) => resource.as_ref(),
+            None => self.base.get(resource_id),
+        }
+    }
+
+    fn contains_key(&self, resource_id: &str) -> bool {
+        self.get(resource_id).is_some()
+    }
+
+    fn len(&self) -> usize {
+        self.base.len()
+            + self
+                .mutations
+                .iter()
+                .filter(|(id, resource)| resource.is_some() && !self.base.contains_key(*id))
+                .count()
+            - self
+                .mutations
+                .iter()
+                .filter(|(id, resource)| resource.is_none() && self.base.contains_key(*id))
+                .count()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&String, &AtlasResource)> {
+        self.base
+            .iter()
+            .filter(|(id, _)| !self.mutations.contains_key(*id))
+            .chain(
+                self.mutations
+                    .iter()
+                    .filter_map(|(id, resource)| resource.as_ref().map(|resource| (id, resource))),
+            )
+    }
+
+    fn values(&self) -> impl Iterator<Item = &AtlasResource> {
+        self.iter().map(|(_, resource)| resource)
+    }
+}
+
 struct GpuAtlas {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     packed: PackedAtlas,
+}
+
+enum PreparedAtlasUpdate {
+    None,
+    Replace(GpuAtlas),
+    Mutate(PackedAtlasMutation),
+}
+
+type AtlasPlacementJournal = BTreeMap<String, Option<AtlasPlacement>>;
+
+struct PackedAtlasMutation {
+    placements: AtlasPlacementJournal,
+    cursor_x: u32,
+    cursor_y: u32,
+    row_height: u32,
+    consumed_free_slots: BTreeSet<usize>,
+    added_free_slots: Vec<AtlasSlot>,
+    freed_area: u64,
+}
+
+struct AtlasAllocatorState<'a> {
+    width: u32,
+    height: u32,
+    cursor_x: u32,
+    cursor_y: u32,
+    row_height: u32,
+    base_free_slots: &'a [AtlasSlot],
+    consumed_free_slots: BTreeSet<usize>,
+    added_free_slots: Vec<AtlasSlot>,
+    freed_area: u64,
+}
+
+impl<'a> AtlasAllocatorState<'a> {
+    fn new(packed: &'a PackedAtlas) -> Self {
+        Self {
+            width: packed.width,
+            height: packed.height,
+            cursor_x: packed.cursor_x,
+            cursor_y: packed.cursor_y,
+            row_height: packed.row_height,
+            base_free_slots: &packed.free_slots,
+            consumed_free_slots: BTreeSet::new(),
+            added_free_slots: Vec::new(),
+            freed_area: packed.freed_area,
+        }
+    }
+}
+
+struct AtlasPlacementView<'a> {
+    packed: &'a PackedAtlas,
+    mutations: Option<&'a AtlasPlacementJournal>,
+}
+
+impl<'a> AtlasPlacementView<'a> {
+    fn committed(packed: &'a PackedAtlas) -> Self {
+        Self {
+            packed,
+            mutations: None,
+        }
+    }
+
+    fn pending(packed: &'a PackedAtlas, mutations: &'a AtlasPlacementJournal) -> Self {
+        Self {
+            packed,
+            mutations: Some(mutations),
+        }
+    }
+
+    fn get(&self, resource_id: &str) -> Option<&AtlasPlacement> {
+        match self
+            .mutations
+            .and_then(|mutations| mutations.get(resource_id))
+        {
+            Some(placement) => placement.as_ref(),
+            None => self.packed.placements.get(resource_id),
+        }
+    }
+
+    fn width(&self) -> u32 {
+        self.packed.width
+    }
+
+    fn height(&self) -> u32 {
+        self.packed.height
+    }
 }
 
 impl AtlasResource {
@@ -162,7 +315,10 @@ struct DrawQuad<'a> {
 }
 
 struct DrawRun<'a> {
-    quads: SmallVec<[DrawQuad<'a>; 8]>,
+    // Classic text runs regularly contain more than eight glyphs. Keeping the
+    // expected bounded run inline avoids a per-frame growth allocation while
+    // retaining an explicit spill path for authored long text.
+    quads: SmallVec<[DrawQuad<'a>; 32]>,
     rgba: [u8; 4],
     opacity: f32,
     clip: RectI,
@@ -201,6 +357,31 @@ struct DrawBatch {
 
 impl WgpuGlyphAtlasRenderer {
     pub(crate) fn new(device: &wgpu::Device) -> Self {
+        Self::new_internal(device, None)
+    }
+
+    pub(crate) fn new_reserved(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        side: u32,
+    ) -> Result<Self, PlatformError> {
+        if !(MIN_ATLAS_SIDE..=ATLAS_SIDE).contains(&side) || !side.is_power_of_two() {
+            return Err(invalid(
+                "glyph atlas reservation side is outside the supported range",
+            ));
+        }
+        let mut renderer = Self::new_internal(device, Some(side));
+        renderer.atlas = Some(create_reserved_gpu_atlas(
+            device,
+            queue,
+            &renderer.layout,
+            &renderer.sampler,
+            side,
+        ));
+        Ok(renderer)
+    }
+
+    fn new_internal(device: &wgpu::Device, reserved_side: Option<u32>) -> Self {
         let (layout, sampler, pipeline) = create_pipeline(device);
         Self {
             resources: BTreeMap::new(),
@@ -215,27 +396,44 @@ impl WgpuGlyphAtlasRenderer {
             last_draw_calls: 0,
             last_engine_allocation_bytes: 0,
             last_engine_allocation_count: 0,
+            last_command_allocation_bytes: 0,
+            last_command_allocation_breakdown: None,
+            command_allocation_diagnostics_emitted: 0,
+            last_atlas_allocation_bytes: 0,
+            last_geometry_allocation_bytes: 0,
             vertex_bytes: Vec::new(),
             uploaded_vertex_bytes: Vec::new(),
             draw_batches: Vec::new(),
-            atlas_upload_pixels: Vec::with_capacity(MAX_ATLAS_UPLOAD_BYTES),
+            atlas_upload_pixels: Vec::with_capacity(ATLAS_STAGING_CHUNK_BYTES as usize),
+            atlas_staging_belts: std::array::from_fn(|_| primed_staging_belt(device)),
+            atlas_staging_index: 0,
+            reserved_side,
         }
     }
 
-    pub(super) fn recover(&mut self, device: &wgpu::Device) {
+    pub(super) fn recover(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let (layout, sampler, pipeline) = create_pipeline(device);
         self.layout = layout;
         self.sampler = sampler;
         self.pipeline = pipeline;
-        self.atlas = None;
+        self.atlas = self.reserved_side.map(|side| {
+            create_reserved_gpu_atlas(device, queue, &self.layout, &self.sampler, side)
+        });
         self.output = None;
         self.vertex_buffer = None;
         self.vertex_capacity = 0;
         self.uploaded_vertex_bytes.clear();
+        self.atlas_staging_belts = std::array::from_fn(|_| primed_staging_belt(device));
+        self.atlas_staging_index = 0;
         self.last_upload_bytes = 0;
         self.last_draw_calls = 0;
         self.last_engine_allocation_bytes = 0;
         self.last_engine_allocation_count = 0;
+        self.last_command_allocation_bytes = 0;
+        self.last_command_allocation_breakdown = None;
+        self.command_allocation_diagnostics_emitted = 0;
+        self.last_atlas_allocation_bytes = 0;
+        self.last_geometry_allocation_bytes = 0;
     }
 
     pub(crate) fn render(
@@ -244,13 +442,13 @@ impl WgpuGlyphAtlasRenderer {
         queue: &wgpu::Queue,
         frame: &SceneFrame,
     ) -> Result<PreparedGlyphFrame, PlatformError> {
-        let (texture, next_resources, next_atlas, cpu_profile) =
+        let (texture, resource_mutations, atlas_update, cpu_profile) =
             self.render_internal(device, queue, frame, true, None, None)?;
         Ok(PreparedGlyphFrame {
             texture,
             cpu_profile,
-            next_resources,
-            next_atlas,
+            resource_mutations,
+            atlas_update,
         })
     }
 
@@ -261,7 +459,7 @@ impl WgpuGlyphAtlasRenderer {
         frame: &SceneFrame,
         queries: GlyphProfileQueries<'_>,
     ) -> Result<PreparedGlyphFrame, PlatformError> {
-        let (texture, next_resources, next_atlas, cpu_profile) = self.render_internal(
+        let (texture, resource_mutations, atlas_update, cpu_profile) = self.render_internal(
             device,
             queue,
             frame,
@@ -274,8 +472,8 @@ impl WgpuGlyphAtlasRenderer {
         Ok(PreparedGlyphFrame {
             texture,
             cpu_profile,
-            next_resources,
-            next_atlas,
+            resource_mutations,
+            atlas_update,
         })
     }
 
@@ -290,11 +488,44 @@ impl WgpuGlyphAtlasRenderer {
     }
 
     pub(crate) fn commit(&mut self, prepared: PreparedGlyphFrame) -> wgpu::Texture {
-        if let Some(resources) = prepared.next_resources {
-            self.resources = resources;
+        for (resource_id, resource) in prepared.resource_mutations {
+            match resource {
+                Some(resource) => {
+                    self.resources.insert(resource_id, resource);
+                }
+                None => {
+                    self.resources.remove(&resource_id);
+                }
+            }
         }
-        if let Some(atlas) = prepared.next_atlas {
-            self.atlas = Some(atlas);
+        match prepared.atlas_update {
+            PreparedAtlasUpdate::None => {}
+            PreparedAtlasUpdate::Replace(atlas) => self.atlas = Some(atlas),
+            PreparedAtlasUpdate::Mutate(mutation) => {
+                let atlas = self
+                    .atlas
+                    .as_mut()
+                    .expect("incremental atlas mutation requires a committed atlas");
+                for (resource_id, placement) in mutation.placements {
+                    match placement {
+                        Some(placement) => {
+                            atlas.packed.placements.insert(resource_id, placement);
+                        }
+                        None => {
+                            atlas.packed.placements.remove(&resource_id);
+                        }
+                    }
+                }
+                atlas.packed.cursor_x = mutation.cursor_x;
+                atlas.packed.cursor_y = mutation.cursor_y;
+                atlas.packed.row_height = mutation.row_height;
+                for index in mutation.consumed_free_slots.into_iter().rev() {
+                    atlas.packed.free_slots.remove(index);
+                }
+                atlas.packed.free_slots.extend(mutation.added_free_slots);
+                atlas.packed.free_slots.sort_by_key(atlas_slot_sort_key);
+                atlas.packed.freed_area = mutation.freed_area;
+            }
         }
         prepared.texture
     }
@@ -331,6 +562,18 @@ impl WgpuGlyphAtlasRenderer {
         self.last_engine_allocation_count
     }
 
+    pub(crate) fn last_command_allocation_bytes(&self) -> u64 {
+        self.last_command_allocation_bytes
+    }
+
+    pub(crate) fn last_atlas_allocation_bytes(&self) -> u64 {
+        self.last_atlas_allocation_bytes
+    }
+
+    pub(crate) fn last_geometry_allocation_bytes(&self) -> u64 {
+        self.last_geometry_allocation_bytes
+    }
+
     pub(crate) fn requires_atlas_update(&self, frame: &SceneFrame) -> bool {
         self.atlas.is_none()
             || frame.commands.iter().any(|command| {
@@ -357,16 +600,22 @@ impl WgpuGlyphAtlasRenderer {
     ) -> Result<PreparedRender, PlatformError> {
         let profile_cpu = timestamp_query.is_some();
         let command_started = Instant::now();
-        let engine_allocation_before = astra_observability::allocation_snapshot();
-        let mut resources: Option<BTreeMap<String, AtlasResource>> = None;
-        macro_rules! resources {
-            () => {
-                resources.as_ref().unwrap_or(&self.resources)
+        let engine_allocation_before = astra_observability::thread_allocation_snapshot();
+        validate_scene_resource_payloads(&frame.commands)?;
+        let resource_validation_allocation = astra_observability::thread_allocation_snapshot();
+        let mut render_mutations = ResourceMutationJournal::new();
+        let mut committed_mutations = ResourceMutationJournal::new();
+        macro_rules! resource_get {
+            ($id:expr) => {
+                match render_mutations.get($id) {
+                    Some(resource) => resource.as_ref(),
+                    None => self.resources.get($id),
+                }
             };
         }
-        macro_rules! resources_mut {
-            () => {
-                resources.get_or_insert_with(|| self.resources.clone())
+        macro_rules! resource_contains {
+            ($id:expr) => {
+                resource_get!($id).is_some()
             };
         }
         let mut resources_changed = self.atlas.is_none();
@@ -376,25 +625,42 @@ impl WgpuGlyphAtlasRenderer {
         let mut transform_stack: SmallVec<[Transform2D; 16]> = smallvec![Transform2D::IDENTITY];
         let mut camera = Transform2D::IDENTITY;
         let mut opacity_stack: SmallVec<[f32; 16]> = smallvec![1.0_f32];
-        let mut transient_resources = BTreeSet::new();
         let mut transient_sequence = 0_u64;
-        let mut run_ids: SmallVec<[&str; 64]> = SmallVec::new();
-        let mut drawn_resources: SmallVec<[&str; 64]> = SmallVec::new();
+        // The Classic UI's retained scene contains more than 64 uniquely named
+        // primitives. Keep the common bounded scene entirely on the stack so
+        // static 120 Hz frames do not allocate merely while validating IDs.
+        // Larger authored scenes still remain bounded by their declared frame
+        // budget and may spill explicitly rather than silently dropping draws.
+        let mut run_ids: SmallVec<[&str; 128]> = SmallVec::new();
+        let mut drawn_resources: SmallVec<[&str; 128]> = SmallVec::new();
+        let mut upload_texture_count = 0_u32;
+        let mut upload_glyph_count = 0_u32;
+        let mut release_resource_count = 0_u32;
+        let mut transient_texture_count = 0_u32;
+        let mut transient_glyph_count = 0_u32;
+        let mut mesh_command_allocation_bytes = 0_u64;
+        let mut mesh_command_allocation_count = 0_u64;
+        let command_setup_allocation = astra_observability::thread_allocation_snapshot();
         for command in &frame.commands {
             match command {
                 SceneCommand::UploadTexture { resource_id, frame } => {
+                    upload_texture_count += 1;
                     validate_resource_id(resource_id)?;
-                    validate_texture(frame)?;
+                    validate_texture_metadata(frame)?;
                     if apply_mutations {
-                        if resources!().contains_key(resource_id) {
+                        if committed_mutations.contains_key(resource_id) {
+                            return Err(invalid(
+                                "texture resource id is mutated more than once in a frame",
+                            ));
+                        }
+                        if resource_contains!(resource_id) {
                             return Err(invalid("texture upload repeats a live resource id"));
                         }
-                        resources_mut!().insert(
-                            resource_id.clone(),
-                            AtlasResource::Texture(Arc::new(frame.clone())),
-                        );
+                        let resource = AtlasResource::Texture(Arc::new(frame.clone()));
+                        render_mutations.insert(resource_id.clone(), Some(resource.clone()));
+                        committed_mutations.insert(resource_id.clone(), Some(resource));
                         resources_changed = true;
-                    } else if resources!().get(resource_id)
+                    } else if resource_get!(resource_id)
                         != Some(&AtlasResource::Texture(Arc::new(frame.clone())))
                     {
                         return Err(invalid(
@@ -403,18 +669,23 @@ impl WgpuGlyphAtlasRenderer {
                     }
                 }
                 SceneCommand::UploadGlyph { resource_id, glyph } => {
+                    upload_glyph_count += 1;
                     validate_resource_id(resource_id)?;
-                    validate_glyph(glyph)?;
+                    validate_glyph_metadata(glyph)?;
                     if apply_mutations {
-                        if resources!().contains_key(resource_id) {
+                        if committed_mutations.contains_key(resource_id) {
+                            return Err(invalid(
+                                "glyph resource id is mutated more than once in a frame",
+                            ));
+                        }
+                        if resource_contains!(resource_id) {
                             return Err(invalid("glyph upload repeats a live resource id"));
                         }
-                        resources_mut!().insert(
-                            resource_id.clone(),
-                            AtlasResource::Glyph(Arc::new(glyph.clone())),
-                        );
+                        let resource = AtlasResource::Glyph(Arc::new(glyph.clone()));
+                        render_mutations.insert(resource_id.clone(), Some(resource.clone()));
+                        committed_mutations.insert(resource_id.clone(), Some(resource));
                         resources_changed = true;
-                    } else if resources!().get(resource_id)
+                    } else if resource_get!(resource_id)
                         != Some(&AtlasResource::Glyph(Arc::new(glyph.clone())))
                     {
                         return Err(invalid(
@@ -423,6 +694,7 @@ impl WgpuGlyphAtlasRenderer {
                     }
                 }
                 SceneCommand::ReleaseResource { resource_id } => {
+                    release_resource_count += 1;
                     validate_resource_id(resource_id)?;
                     if apply_mutations {
                         if drawn_resources.contains(&resource_id.as_str()) {
@@ -430,11 +702,13 @@ impl WgpuGlyphAtlasRenderer {
                                 "glyph resource cannot be released after use in the same frame",
                             ));
                         }
-                        if resources_mut!().remove(resource_id).is_none() {
+                        if !resource_contains!(resource_id) {
                             return Err(invalid("glyph release references an unknown resource"));
                         }
+                        render_mutations.insert(resource_id.clone(), None);
+                        committed_mutations.insert(resource_id.clone(), None);
                         resources_changed = true;
-                    } else if resources!().contains_key(resource_id) {
+                    } else if resource_contains!(resource_id) {
                         return Err(invalid(
                             "retained glyph release was not committed before recovery",
                         ));
@@ -474,9 +748,9 @@ impl WgpuGlyphAtlasRenderer {
                             "glyph run identity, opacity, or blend mode is invalid",
                         ));
                     }
-                    let mut quads: SmallVec<[DrawQuad<'_>; 8]> = SmallVec::new();
-                    for glyph in glyphs {
-                        let bitmap = resources!().get(&glyph.resource_id).ok_or_else(|| {
+                    let mut quads: SmallVec<[DrawQuad<'_>; 32]> = SmallVec::new();
+                    for glyph in glyphs.iter() {
+                        let bitmap = resource_get!(&glyph.resource_id).ok_or_else(|| {
                             invalid("glyph run references a resource that is not live")
                         })?;
                         let AtlasResource::Glyph(bitmap) = bitmap else {
@@ -528,8 +802,7 @@ impl WgpuGlyphAtlasRenderer {
                             "sprite identity, opacity, or blend mode is invalid",
                         ));
                     }
-                    let texture = resources!()
-                        .get(texture_id)
+                    let texture = resource_get!(texture_id)
                         .ok_or_else(|| invalid("sprite references a resource that is not live"))?;
                     let AtlasResource::Texture(texture) = texture else {
                         return Err(invalid("sprite references a non-texture resource"));
@@ -616,6 +889,7 @@ impl WgpuGlyphAtlasRenderer {
                     opacity,
                     blend,
                 } => {
+                    let mesh_command_started = astra_observability::thread_allocation_snapshot();
                     if id.is_empty()
                         || id.len() > 256
                         || !insert_unique(&mut run_ids, id)
@@ -651,7 +925,7 @@ impl WgpuGlyphAtlasRenderer {
                             MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask,
                             Some(resource_id),
                         ) => {
-                            match resources!().get(resource_id) {
+                            match resource_get!(resource_id) {
                                 Some(AtlasResource::Texture(_)) => {}
                                 Some(AtlasResource::Glyph(_)) => {
                                     return Err(invalid(
@@ -682,6 +956,17 @@ impl WgpuGlyphAtlasRenderer {
                         )),
                         transform: current_transform(camera, &transform_stack),
                     }));
+                    let mesh_command_finished = astra_observability::thread_allocation_snapshot();
+                    mesh_command_allocation_bytes = mesh_command_allocation_bytes.saturating_add(
+                        mesh_command_finished
+                            .allocated_bytes
+                            .saturating_sub(mesh_command_started.allocated_bytes),
+                    );
+                    mesh_command_allocation_count = mesh_command_allocation_count.saturating_add(
+                        mesh_command_finished
+                            .allocation_count
+                            .saturating_sub(mesh_command_started.allocation_count),
+                    );
                 }
                 SceneCommand::Clear { rgba } => {
                     push_quad_run(
@@ -715,17 +1000,20 @@ impl WgpuGlyphAtlasRenderer {
                     blend,
                     ..
                 } => {
+                    transient_texture_count += 1;
                     validate_draw_identity(id, opacity, *blend, &mut run_ids)?;
-                    validate_texture(texture)?;
+                    validate_texture_metadata(texture)?;
                     validate_destination(*destination)?;
-                    let resource_id =
-                        transient_resource_id(resources!(), &mut transient_sequence, "texture")?;
-                    resources_mut!().insert(
+                    let resource_id = transient_resource_id(
+                        &AtlasResourceView::new(&self.resources, &render_mutations),
+                        &mut transient_sequence,
+                        "texture",
+                    )?;
+                    render_mutations.insert(
                         resource_id.clone(),
-                        AtlasResource::Texture(Arc::new(texture.clone())),
+                        Some(AtlasResource::Texture(Arc::new(texture.clone()))),
                     );
                     resources_changed = true;
-                    transient_resources.insert(resource_id.clone());
                     push_quad_run(
                         &mut quad_runs,
                         &mut draw_runs,
@@ -759,16 +1047,19 @@ impl WgpuGlyphAtlasRenderer {
                     opacity,
                     blend,
                 } => {
+                    transient_glyph_count += 1;
                     validate_draw_identity(id, opacity, *blend, &mut run_ids)?;
-                    validate_glyph(glyph)?;
-                    let resource_id =
-                        transient_resource_id(resources!(), &mut transient_sequence, "glyph")?;
-                    resources_mut!().insert(
+                    validate_glyph_metadata(glyph)?;
+                    let resource_id = transient_resource_id(
+                        &AtlasResourceView::new(&self.resources, &render_mutations),
+                        &mut transient_sequence,
+                        "glyph",
+                    )?;
+                    render_mutations.insert(
                         resource_id.clone(),
-                        AtlasResource::Glyph(Arc::new(glyph.clone())),
+                        Some(AtlasResource::Glyph(Arc::new(glyph.clone()))),
                     );
                     resources_changed = true;
-                    transient_resources.insert(resource_id.clone());
                     push_quad_run(
                         &mut quad_runs,
                         &mut draw_runs,
@@ -830,33 +1121,124 @@ impl WgpuGlyphAtlasRenderer {
         if !clip_stack.is_empty() || transform_stack.len() != 1 || opacity_stack.len() != 1 {
             return Err(invalid("GPU scene command stacks are not balanced"));
         }
-        validate_resource_budget(resources!())?;
+        let command_walk_allocation = astra_observability::thread_allocation_snapshot();
+        let resource_view = AtlasResourceView::new(&self.resources, &render_mutations);
+        validate_resource_budget(&resource_view)?;
         let command_ns = profiled_elapsed_ns(profile_cpu, command_started)?;
+        let command_allocation_after = astra_observability::thread_allocation_snapshot();
+        let command_allocation_bytes = command_allocation_after
+            .allocated_bytes
+            .saturating_sub(engine_allocation_before.allocated_bytes);
+        let command_allocation_breakdown = [
+            resource_validation_allocation
+                .allocated_bytes
+                .saturating_sub(engine_allocation_before.allocated_bytes),
+            command_setup_allocation
+                .allocated_bytes
+                .saturating_sub(resource_validation_allocation.allocated_bytes),
+            command_walk_allocation
+                .allocated_bytes
+                .saturating_sub(command_setup_allocation.allocated_bytes),
+            command_allocation_after
+                .allocated_bytes
+                .saturating_sub(command_walk_allocation.allocated_bytes),
+        ];
+        if command_allocation_bytes > 0
+            && self.last_command_allocation_breakdown != Some(command_allocation_breakdown)
+            && self.command_allocation_diagnostics_emitted < 32
+        {
+            self.command_allocation_diagnostics_emitted += 1;
+            tracing::debug!(
+                event = "platform.wgpu.scene.command_allocation",
+                total_bytes = command_allocation_bytes,
+                resource_validation_bytes = command_allocation_breakdown[0],
+                command_setup_bytes = command_allocation_breakdown[1],
+                command_walk_bytes = command_allocation_breakdown[2],
+                resource_budget_bytes = command_allocation_breakdown[3],
+                quad_runs = quad_runs.len(),
+                quad_runs_spilled = quad_runs.spilled(),
+                draw_primitives = draw_runs.len(),
+                draw_primitives_spilled = draw_runs.spilled(),
+                run_ids = run_ids.len(),
+                run_ids_spilled = run_ids.spilled(),
+                drawn_resources = drawn_resources.len(),
+                drawn_resources_spilled = drawn_resources.spilled(),
+                render_mutations = render_mutations.len(),
+                committed_mutations = committed_mutations.len(),
+                upload_texture_count,
+                upload_glyph_count,
+                release_resource_count,
+                transient_texture_count,
+                transient_glyph_count,
+                mesh_command_allocation_bytes,
+                mesh_command_allocation_count,
+                "WGPU scene command allocation profile changed"
+            );
+        }
+        self.last_command_allocation_bytes = command_allocation_bytes;
+        self.last_command_allocation_breakdown = Some(command_allocation_breakdown);
 
         let atlas_started = Instant::now();
-        let (next_atlas, upload_bytes) = if resources_changed {
-            update_gpu_atlas(
+        let (atlas_update, upload_bytes) = if resources_changed {
+            if atlas_upload_query.is_some() {
+                device
+                    .poll(wgpu::PollType::Poll)
+                    .map_err(|_| invalid("glyph atlas staging ring polling failed"))?;
+            }
+            let staging_index = self.atlas_staging_index;
+            let result = update_gpu_atlas(
                 AtlasUpdateContext {
                     device,
                     queue,
                     layout: &self.layout,
                     sampler: &self.sampler,
+                    staging_belt: &mut self.atlas_staging_belts[staging_index],
                     timestamp_query: atlas_upload_query,
                 },
                 self.atlas.as_ref(),
                 &self.resources,
-                resources!(),
+                &resource_view,
                 &mut self.atlas_upload_pixels,
-            )?
+            );
+            if atlas_upload_query.is_some() {
+                self.atlas_staging_index = 0;
+            }
+            result?
         } else {
-            (None, 0)
+            (PreparedAtlasUpdate::None, 0)
         };
         let atlas_ns = profiled_elapsed_ns(profile_cpu, atlas_started)?;
+        let atlas_allocation_after = astra_observability::thread_allocation_snapshot();
+        self.last_atlas_allocation_bytes = atlas_allocation_after
+            .allocated_bytes
+            .saturating_sub(command_allocation_after.allocated_bytes);
         self.last_upload_bytes = upload_bytes;
-        let active_atlas = next_atlas
-            .as_ref()
-            .or(self.atlas.as_ref())
-            .ok_or_else(|| invalid("glyph atlas is unavailable"))?;
+        let (active_bind_group, placement_view) = match &atlas_update {
+            PreparedAtlasUpdate::None => {
+                let atlas = self
+                    .atlas
+                    .as_ref()
+                    .ok_or_else(|| invalid("glyph atlas is unavailable"))?;
+                (
+                    &atlas.bind_group,
+                    AtlasPlacementView::committed(&atlas.packed),
+                )
+            }
+            PreparedAtlasUpdate::Replace(atlas) => (
+                &atlas.bind_group,
+                AtlasPlacementView::committed(&atlas.packed),
+            ),
+            PreparedAtlasUpdate::Mutate(mutation) => {
+                let atlas = self
+                    .atlas
+                    .as_ref()
+                    .ok_or_else(|| invalid("incremental atlas update has no base atlas"))?;
+                (
+                    &atlas.bind_group,
+                    AtlasPlacementView::pending(&atlas.packed, &mutation.placements),
+                )
+            }
+        };
         let geometry_started = Instant::now();
         self.vertex_bytes.clear();
         self.draw_batches.clear();
@@ -864,13 +1246,16 @@ impl WgpuGlyphAtlasRenderer {
             frame,
             &quad_runs,
             &draw_runs,
-            &active_atlas.packed,
-            resources!(),
+            &placement_view,
+            &resource_view,
             &mut self.vertex_bytes,
             &mut self.draw_batches,
         )?;
         let geometry_ns = profiled_elapsed_ns(profile_cpu, geometry_started)?;
-        let engine_allocation_after = astra_observability::allocation_snapshot();
+        let engine_allocation_after = astra_observability::thread_allocation_snapshot();
+        self.last_geometry_allocation_bytes = engine_allocation_after
+            .allocated_bytes
+            .saturating_sub(atlas_allocation_after.allocated_bytes);
         self.last_engine_allocation_bytes = engine_allocation_after
             .allocated_bytes
             .saturating_sub(engine_allocation_before.allocated_bytes);
@@ -985,7 +1370,7 @@ impl WgpuGlyphAtlasRenderer {
             });
             if let Some(vertex_buffer) = &self.vertex_buffer {
                 pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &active_atlas.bind_group, &[]);
+                pass.set_bind_group(0, active_bind_group, &[]);
                 pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 for batch in &self.draw_batches {
                     pass.set_scissor_rect(
@@ -1007,14 +1392,11 @@ impl WgpuGlyphAtlasRenderer {
         queue.submit([command_buffer]);
         let queue_submit_ns = profiled_elapsed_ns(profile_cpu, queue_submit_started)?;
         self.last_draw_calls = self.draw_batches.len() as u64;
-        for resource_id in transient_resources {
-            resources_mut!().remove(&resource_id);
-        }
         let render_submit_ns = profiled_elapsed_ns(profile_cpu, render_submit_started)?;
         Ok((
             output,
-            resources,
-            next_atlas,
+            committed_mutations,
+            atlas_update,
             GlyphCpuProfile {
                 command_ns,
                 atlas_ns,
@@ -1043,9 +1425,7 @@ fn vertex_upload_required(current: &[u8], uploaded: &[u8], buffer_recreated: boo
     buffer_recreated || current != uploaded
 }
 
-fn validate_resource_budget(
-    resources: &BTreeMap<String, AtlasResource>,
-) -> Result<(), PlatformError> {
+fn validate_resource_budget(resources: &AtlasResourceView<'_>) -> Result<(), PlatformError> {
     let bytes = resources.values().try_fold(0usize, |total, resource| {
         total
             .checked_add(resource.byte_len())
@@ -1070,7 +1450,90 @@ fn validate_resource_id(resource_id: &str) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
+enum SceneResourcePayload<'a> {
+    Texture(&'a TextureFrame),
+    Glyph(&'a GlyphBitmap),
+}
+
+impl SceneResourcePayload<'_> {
+    fn byte_len(&self) -> usize {
+        match self {
+            Self::Texture(frame) => frame.rgba8.len(),
+            Self::Glyph(glyph) => glyph.pixels.len(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), PlatformError> {
+        match self {
+            Self::Texture(frame) => validate_texture(frame),
+            Self::Glyph(glyph) => validate_glyph(glyph),
+        }
+    }
+}
+
+fn validate_scene_resource_payloads(commands: &[SceneCommand]) -> Result<(), PlatformError> {
+    const PARALLEL_PAYLOAD_BYTES: usize = 256 * 1024;
+    const MAX_VALIDATION_WORKERS: usize = 4;
+    let mut large = Vec::new();
+    for (index, command) in commands.iter().enumerate() {
+        let payload = match command {
+            SceneCommand::UploadTexture { frame, .. }
+            | SceneCommand::Texture { frame, .. }
+            | SceneCommand::VideoFrame { frame, .. } => SceneResourcePayload::Texture(frame),
+            SceneCommand::UploadGlyph { glyph, .. } | SceneCommand::Glyph { glyph, .. } => {
+                SceneResourcePayload::Glyph(glyph)
+            }
+            _ => continue,
+        };
+        if payload.byte_len() >= PARALLEL_PAYLOAD_BYTES {
+            large.push((index, payload));
+        } else {
+            payload.validate()?;
+        }
+    }
+    if large.len() <= 1 {
+        return large
+            .into_iter()
+            .try_for_each(|(_, payload)| payload.validate());
+    }
+    let worker_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(MAX_VALIDATION_WORKERS)
+        .min(large.len());
+    if worker_count <= 1 {
+        return large
+            .into_iter()
+            .try_for_each(|(_, payload)| payload.validate());
+    }
+    let mut buckets = (0..worker_count).map(|_| Vec::new()).collect::<Vec<_>>();
+    for (position, payload) in large.into_iter().enumerate() {
+        buckets[position % worker_count].push(payload);
+    }
+    let mut failures = std::thread::scope(|scope| {
+        let handles = buckets
+            .into_iter()
+            .map(|bucket| {
+                scope.spawn(move || {
+                    bucket.into_iter().find_map(|(index, payload)| {
+                        payload.validate().err().map(|error| (index, error))
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().expect("resource validation worker panicked"))
+            .collect::<Vec<_>>()
+    });
+    failures.sort_by_key(|(index, _)| *index);
+    if let Some((_, error)) = failures.into_iter().next() {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn validate_glyph_metadata(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
     let channels = match glyph.format {
         GlyphBitmapFormat::Alpha8 => 1usize,
         GlyphBitmapFormat::Rgba8 => 4usize,
@@ -1078,11 +1541,19 @@ fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
     let expected = (glyph.width as usize)
         .checked_mul(glyph.height as usize)
         .and_then(|pixels| pixels.checked_mul(channels));
-    if glyph.width == 0
-        || glyph.height == 0
-        || expected != Some(glyph.pixels.len())
-        || astra_core::Hash256::from_sha256(&glyph.pixels) != glyph.hash
-    {
+    if glyph.width == 0 || glyph.height == 0 || expected != Some(glyph.pixels.len()) {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "surface.present_scene",
+            "glyph dimensions or format is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
+    validate_glyph_metadata(glyph)?;
+    if astra_core::Hash256::from_sha256(&glyph.pixels) != glyph.hash {
         return Err(PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "surface.present_scene",
@@ -1092,15 +1563,23 @@ fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn validate_texture(texture: &TextureFrame) -> Result<(), PlatformError> {
+fn validate_texture_metadata(texture: &TextureFrame) -> Result<(), PlatformError> {
     let expected = (texture.width as usize)
         .checked_mul(texture.height as usize)
         .and_then(|pixels| pixels.checked_mul(4));
-    if texture.width == 0
-        || texture.height == 0
-        || expected != Some(texture.rgba8.len())
-        || astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash
-    {
+    if texture.width == 0 || texture.height == 0 || expected != Some(texture.rgba8.len()) {
+        return Err(PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "surface.present_scene",
+            "texture dimensions are invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_texture(texture: &TextureFrame) -> Result<(), PlatformError> {
+    validate_texture_metadata(texture)?;
+    if astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash {
         return Err(PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "surface.present_scene",
@@ -1132,7 +1611,14 @@ fn validate_destination(destination: RectI) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn pack_atlas(resources: &BTreeMap<String, AtlasResource>) -> Result<PackedAtlas, PlatformError> {
+fn pack_atlas(resources: &AtlasResourceView<'_>) -> Result<PackedAtlas, PlatformError> {
+    pack_atlas_with_min_side(resources, MIN_ATLAS_SIDE)
+}
+
+fn pack_atlas_with_min_side(
+    resources: &AtlasResourceView<'_>,
+    minimum_side: u32,
+) -> Result<PackedAtlas, PlatformError> {
     let widest = resources
         .values()
         .map(|resource| resource.width() + ATLAS_PADDING * 2)
@@ -1152,7 +1638,6 @@ fn pack_atlas(resources: &BTreeMap<String, AtlasResource>) -> Result<PackedAtlas
     if widest > ATLAS_SIDE || total_area > u64::from(ATLAS_SIDE) * u64::from(ATLAS_SIDE) {
         return Err(invalid("glyph is larger than the configured atlas"));
     }
-    let atlas_width = ATLAS_SIDE;
     let mut ordered = resources.iter().collect::<Vec<_>>();
     ordered.sort_by(|(left_id, left), (right_id, right)| {
         right
@@ -1161,28 +1646,61 @@ fn pack_atlas(resources: &BTreeMap<String, AtlasResource>) -> Result<PackedAtlas
             .then_with(|| right.width().cmp(&left.width()))
             .then_with(|| left_id.cmp(right_id))
     });
+    for side in [MIN_ATLAS_SIDE, 2048, ATLAS_SIDE]
+        .into_iter()
+        .filter(|side| *side >= minimum_side)
+    {
+        if let Some(packed) = pack_atlas_for_side(&ordered, side)? {
+            return Ok(packed);
+        }
+    }
+    Err(invalid("glyph atlas capacity was exceeded"))
+}
+
+fn pack_atlas_at_side(
+    resources: &AtlasResourceView<'_>,
+    side: u32,
+) -> Result<Option<PackedAtlas>, PlatformError> {
+    if !(MIN_ATLAS_SIDE..=ATLAS_SIDE).contains(&side) || !side.is_power_of_two() {
+        return Err(invalid("glyph atlas side is outside the supported range"));
+    }
+    let mut ordered = resources.iter().collect::<Vec<_>>();
+    ordered.sort_by(|(left_id, left), (right_id, right)| {
+        right
+            .height()
+            .cmp(&left.height())
+            .then_with(|| right.width().cmp(&left.width()))
+            .then_with(|| left_id.cmp(right_id))
+    });
+    pack_atlas_for_side(&ordered, side)
+}
+
+fn pack_atlas_for_side(
+    ordered: &[(&String, &AtlasResource)],
+    side: u32,
+) -> Result<Option<PackedAtlas>, PlatformError> {
     let mut placements = BTreeMap::new();
     let mut x = ATLAS_PADDING * 3;
     let mut y = ATLAS_PADDING;
     let mut row_height = 0;
-    for (resource_id, resource) in ordered {
-        if resource.width() + ATLAS_PADDING * 2 > atlas_width
-            || resource.height() + ATLAS_PADDING * 2 > ATLAS_SIDE
+    for &(resource_id, resource) in ordered {
+        if resource.width() + ATLAS_PADDING * 2 > side
+            || resource.height() + ATLAS_PADDING * 2 > side
         {
-            return Err(invalid("glyph is larger than the configured atlas"));
+            return Ok(None);
         }
-        if x + resource.width() + ATLAS_PADDING > atlas_width {
+        if x + resource.width() + ATLAS_PADDING > side {
             x = ATLAS_PADDING * 3;
             y = y
                 .checked_add(row_height + ATLAS_PADDING)
                 .ok_or_else(|| invalid("glyph atlas row overflowed"))?;
             row_height = 0;
         }
-        if y + resource.height() + ATLAS_PADDING > ATLAS_SIDE {
-            return Err(invalid("glyph atlas capacity was exceeded"));
+        if y + resource.height() + ATLAS_PADDING > side {
+            return Ok(None);
         }
         placements.insert(
-            resource_id.clone(),
+            (*resource_id).clone(),
             AtlasPlacement {
                 x,
                 y,
@@ -1193,65 +1711,93 @@ fn pack_atlas(resources: &BTreeMap<String, AtlasResource>) -> Result<PackedAtlas
         x += resource.width() + ATLAS_PADDING;
         row_height = row_height.max(resource.height());
     }
-    Ok(PackedAtlas {
+    Ok(Some(PackedAtlas {
         placements,
-        width: atlas_width,
-        height: ATLAS_SIDE,
+        width: side,
+        height: side,
         cursor_x: x,
         cursor_y: y,
         row_height,
         free_slots: Vec::new(),
         freed_area: 0,
-    })
+    }))
 }
 
 fn update_gpu_atlas(
-    context: AtlasUpdateContext<'_>,
+    mut context: AtlasUpdateContext<'_>,
     current: Option<&GpuAtlas>,
     old_resources: &BTreeMap<String, AtlasResource>,
-    new_resources: &BTreeMap<String, AtlasResource>,
+    new_resources: &AtlasResourceView<'_>,
     upload_pixels: &mut Vec<u8>,
-) -> Result<(Option<GpuAtlas>, u64), PlatformError> {
+) -> Result<(PreparedAtlasUpdate, u64), PlatformError> {
     let Some(current) = current else {
-        let atlas = create_full_gpu_atlas(
-            context.device,
-            context.queue,
-            context.layout,
-            context.sampler,
-            new_resources,
-            context.timestamp_query,
-            upload_pixels,
-        )?;
-        return Ok((
-            Some(atlas),
-            u64::from(ATLAS_SIDE) * u64::from(ATLAS_SIDE) * 4,
-        ));
+        let atlas = create_full_gpu_atlas(&mut context, new_resources, upload_pixels)?;
+        let upload_bytes = u64::from(atlas.packed.width) * u64::from(atlas.packed.height) * 4;
+        return Ok((PreparedAtlasUpdate::Replace(atlas), upload_bytes));
     };
-    let mut packed = current.packed.clone();
-    for stale_id in packed
+    let mut allocator = AtlasAllocatorState::new(&current.packed);
+    let mut placement_mutations = AtlasPlacementJournal::new();
+    for stale_id in current
+        .packed
         .placements
         .keys()
         .filter(|id| !old_resources.contains_key(*id))
         .cloned()
         .collect::<Vec<_>>()
     {
-        if let Some(placement) = packed.placements.remove(&stale_id) {
-            release_atlas_slot(&mut packed, placement)?;
-        }
+        let placement = *current
+            .packed
+            .placements
+            .get(&stale_id)
+            .ok_or_else(|| invalid("stale resource has no atlas placement"))?;
+        release_pending_atlas_slot(&mut allocator, placement)?;
+        placement_mutations.insert(stale_id, None);
     }
     for resource_id in old_resources.keys() {
         if !new_resources.contains_key(resource_id) {
-            let placement = packed
+            let placement = *current
+                .packed
                 .placements
-                .remove(resource_id)
+                .get(resource_id)
                 .ok_or_else(|| invalid("released resource has no atlas placement"))?;
-            release_atlas_slot(&mut packed, placement)?;
+            release_pending_atlas_slot(&mut allocator, placement)?;
+            placement_mutations.insert(resource_id.clone(), None);
         }
     }
-    let additions = new_resources
+    let uploads = new_resources
         .iter()
-        .filter(|(id, _)| !old_resources.contains_key(*id))
+        .filter(|(id, resource)| old_resources.get(*id) != Some(*resource))
         .collect::<Vec<_>>();
+    for (resource_id, resource) in &uploads {
+        if current.packed.placements.contains_key(*resource_id) {
+            continue;
+        }
+        let placement = match allocate_pending_atlas_slot(
+            &mut allocator,
+            resource.width(),
+            resource.height(),
+        ) {
+            Ok(placement) => placement,
+            Err(_error) => {
+                tracing::debug!(
+                    event = "platform.wgpu.atlas.repacked",
+                    resource_count = new_resources.len(),
+                    freed_area = allocator.freed_area,
+                    previous_width = current.packed.width,
+                    previous_height = current.packed.height,
+                    "glyph atlas capacity or fragmentation triggered a GPU-side repack"
+                );
+                return repack_gpu_atlas(
+                    &mut context,
+                    current,
+                    old_resources,
+                    new_resources,
+                    upload_pixels,
+                );
+            }
+        };
+        placement_mutations.insert((*resource_id).clone(), Some(placement));
+    }
     let mut upload_encoder = context.timestamp_query.map(|(query_set, begin, _)| {
         let mut encoder = context
             .device
@@ -1262,42 +1808,20 @@ fn update_gpu_atlas(
         encoder
     });
     let mut upload_bytes = 0u64;
-    for (resource_id, resource) in additions {
-        let placement = match allocate_atlas_slot(&mut packed, resource.width(), resource.height())
-        {
-            Ok(placement) => placement,
-            Err(_error) if should_defragment(&packed) => {
-                tracing::debug!(
-                    event = "platform.wgpu.atlas.defragmented",
-                    resource_count = new_resources.len(),
-                    freed_area = packed.freed_area,
-                    "glyph atlas fragmentation threshold triggered a full rebuild"
-                );
-                let atlas = create_full_gpu_atlas(
-                    context.device,
-                    context.queue,
-                    context.layout,
-                    context.sampler,
-                    new_resources,
-                    context.timestamp_query,
-                    upload_pixels,
-                )?;
-                return Ok((
-                    Some(atlas),
-                    u64::from(ATLAS_SIDE) * u64::from(ATLAS_SIDE) * 4,
-                ));
-            }
-            Err(error) => return Err(error),
-        };
-        packed.placements.insert(resource_id.clone(), placement);
+    for (resource_id, resource) in uploads {
+        let placement = placement_mutations
+            .get(resource_id)
+            .and_then(|placement| *placement)
+            .or_else(|| current.packed.placements.get(resource_id).copied())
+            .ok_or_else(|| invalid("new atlas resource has no planned placement"))?;
         upload_resource_rect(
-            context.device,
             context.queue,
             upload_encoder.as_mut(),
             &current.texture,
             resource,
             placement,
             upload_pixels,
+            context.staging_belt,
         )?;
         upload_bytes = upload_bytes
             .checked_add(
@@ -1311,52 +1835,260 @@ fn update_gpu_atlas(
         (context.timestamp_query, upload_encoder)
     {
         encoder.write_timestamp(query_set, end);
+        context.staging_belt.finish();
         context.queue.submit([encoder.finish()]);
+        context.staging_belt.recall();
     }
     Ok((
-        Some(GpuAtlas {
-            texture: current.texture.clone(),
-            bind_group: current.bind_group.clone(),
-            packed,
+        PreparedAtlasUpdate::Mutate(PackedAtlasMutation {
+            placements: placement_mutations,
+            cursor_x: allocator.cursor_x,
+            cursor_y: allocator.cursor_y,
+            row_height: allocator.row_height,
+            consumed_free_slots: allocator.consumed_free_slots,
+            added_free_slots: allocator.added_free_slots,
+            freed_area: allocator.freed_area,
         }),
         upload_bytes,
     ))
 }
 
-fn create_full_gpu_atlas(
+fn repack_gpu_atlas(
+    context: &mut AtlasUpdateContext<'_>,
+    current: &GpuAtlas,
+    old_resources: &BTreeMap<String, AtlasResource>,
+    new_resources: &AtlasResourceView<'_>,
+    upload_pixels: &mut Vec<u8>,
+) -> Result<(PreparedAtlasUpdate, u64), PlatformError> {
+    let mut side = current.packed.width;
+    let packed = loop {
+        if let Some(packed) = pack_atlas_at_side(new_resources, side)? {
+            break packed;
+        }
+        if side == ATLAS_SIDE {
+            return Err(invalid("glyph atlas capacity was exceeded"));
+        }
+        side = side.saturating_mul(2).min(ATLAS_SIDE);
+    };
+    let atlas = create_empty_gpu_atlas(context, packed);
+    let mut encoder = context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("astra-glyph-atlas-repack-encoder"),
+        });
+    if let Some((query_set, begin, _)) = context.timestamp_query {
+        encoder.write_timestamp(query_set, begin);
+    }
+    let mut upload_bytes = 0u64;
+    let mut staged_uploads = false;
+    for (resource_id, resource) in new_resources.iter() {
+        let placement = *atlas
+            .packed
+            .placements
+            .get(resource_id)
+            .ok_or_else(|| invalid("repacked atlas resource has no placement"))?;
+        let copy_bytes = u64::from(resource.width() + ATLAS_PADDING * 2)
+            * u64::from(resource.height() + ATLAS_PADDING * 2)
+            * 4;
+        if old_resources.get(resource_id) == Some(resource) {
+            if let Some(old_placement) = current.packed.placements.get(resource_id) {
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &current.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: old_placement.x - ATLAS_PADDING,
+                            y: old_placement.y - ATLAS_PADDING,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &atlas.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: placement.x - ATLAS_PADDING,
+                            y: placement.y - ATLAS_PADDING,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: resource.width() + ATLAS_PADDING * 2,
+                        height: resource.height() + ATLAS_PADDING * 2,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                upload_bytes = upload_bytes
+                    .checked_add(copy_bytes)
+                    .ok_or_else(|| invalid("glyph atlas repack byte count overflowed"))?;
+                continue;
+            }
+        }
+        upload_resource_rect(
+            context.queue,
+            Some(&mut encoder),
+            &atlas.texture,
+            resource,
+            placement,
+            upload_pixels,
+            context.staging_belt,
+        )?;
+        staged_uploads = true;
+        upload_bytes = upload_bytes
+            .checked_add(copy_bytes)
+            .ok_or_else(|| invalid("glyph atlas repack byte count overflowed"))?;
+    }
+    if let Some((query_set, _, end)) = context.timestamp_query {
+        encoder.write_timestamp(query_set, end);
+    }
+    if staged_uploads {
+        context.staging_belt.finish();
+    }
+    context.queue.submit([encoder.finish()]);
+    if staged_uploads {
+        context.staging_belt.recall();
+    }
+    Ok((PreparedAtlasUpdate::Replace(atlas), upload_bytes))
+}
+
+fn create_empty_gpu_atlas(context: &AtlasUpdateContext<'_>, packed: PackedAtlas) -> GpuAtlas {
+    let texture = context.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("astra-glyph-atlas"),
+        size: wgpu::Extent3d {
+            width: packed.width,
+            height: packed.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind_group = context
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("astra-glyph-atlas-bind-group"),
+            layout: context.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(context.sampler),
+                },
+            ],
+        });
+    GpuAtlas {
+        texture,
+        bind_group,
+        packed,
+    }
+}
+
+fn create_reserved_gpu_atlas(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
-    resources: &BTreeMap<String, AtlasResource>,
-    timestamp_query: Option<(&wgpu::QuerySet, u32, u32)>,
-    upload_pixels: &mut Vec<u8>,
-) -> Result<GpuAtlas, PlatformError> {
-    let packed = pack_atlas(resources)?;
-    build_atlas_pixels(resources, &packed, upload_pixels)?;
-    let texture = upload_atlas(
+    side: u32,
+) -> GpuAtlas {
+    let packed = PackedAtlas {
+        placements: BTreeMap::new(),
+        width: side,
+        height: side,
+        cursor_x: ATLAS_PADDING * 3,
+        cursor_y: ATLAS_PADDING,
+        row_height: 0,
+        free_slots: Vec::new(),
+        freed_area: 0,
+    };
+    let mut staging_belt = primed_staging_belt(device);
+    let context = AtlasUpdateContext {
         device,
         queue,
+        layout,
+        sampler,
+        staging_belt: &mut staging_belt,
+        timestamp_query: None,
+    };
+    let atlas = create_empty_gpu_atlas(&context, packed);
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &atlas.texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &[255, 255, 255, 255],
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4),
+            rows_per_image: Some(1),
+        },
+        wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    atlas
+}
+
+fn create_full_gpu_atlas(
+    context: &mut AtlasUpdateContext<'_>,
+    resources: &AtlasResourceView<'_>,
+    upload_pixels: &mut Vec<u8>,
+) -> Result<GpuAtlas, PlatformError> {
+    create_full_gpu_atlas_with_min_side(context, resources, upload_pixels, MIN_ATLAS_SIDE)
+}
+
+fn create_full_gpu_atlas_with_min_side(
+    context: &mut AtlasUpdateContext<'_>,
+    resources: &AtlasResourceView<'_>,
+    upload_pixels: &mut Vec<u8>,
+    minimum_side: u32,
+) -> Result<GpuAtlas, PlatformError> {
+    let packed = if minimum_side == MIN_ATLAS_SIDE {
+        pack_atlas(resources)?
+    } else {
+        pack_atlas_with_min_side(resources, minimum_side)?
+    };
+    build_atlas_pixels(resources, &packed, upload_pixels)?;
+    let texture = upload_atlas(
+        context.device,
+        context.queue,
         upload_pixels,
         packed.width,
         packed.height,
-        timestamp_query,
+        context.timestamp_query,
     )?;
+    upload_pixels.clear();
+    upload_pixels.shrink_to(ATLAS_STAGING_CHUNK_BYTES as usize);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("astra-glyph-atlas-bind-group"),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(sampler),
-            },
-        ],
-    });
+    let bind_group = context
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("astra-glyph-atlas-bind-group"),
+            layout: context.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(context.sampler),
+                },
+            ],
+        });
     Ok(GpuAtlas {
         texture,
         bind_group,
@@ -1364,11 +2096,192 @@ fn create_full_gpu_atlas(
     })
 }
 
-fn release_atlas_slot(
-    packed: &mut PackedAtlas,
+fn release_pending_atlas_slot(
+    allocator: &mut AtlasAllocatorState<'_>,
     placement: AtlasPlacement,
 ) -> Result<(), PlatformError> {
-    let slot = AtlasSlot {
+    let slot = placement_to_slot(placement)?;
+    allocator.freed_area = allocator
+        .freed_area
+        .checked_add(atlas_slot_area(slot))
+        .ok_or_else(|| invalid("glyph atlas freed area overflowed"))?;
+    insert_pending_free_slot(allocator, slot);
+    Ok(())
+}
+
+fn insert_pending_free_slot(allocator: &mut AtlasAllocatorState<'_>, mut slot: AtlasSlot) {
+    loop {
+        if let Some((index, merged)) = allocator
+            .base_free_slots
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !allocator.consumed_free_slots.contains(index))
+            .find_map(|(index, candidate)| {
+                merge_adjacent_atlas_slots(slot, *candidate).map(|merged| (index, merged))
+            })
+        {
+            allocator.consumed_free_slots.insert(index);
+            slot = merged;
+            continue;
+        }
+        if let Some((index, merged)) =
+            allocator
+                .added_free_slots
+                .iter()
+                .enumerate()
+                .find_map(|(index, candidate)| {
+                    merge_adjacent_atlas_slots(slot, *candidate).map(|merged| (index, merged))
+                })
+        {
+            allocator.added_free_slots.remove(index);
+            slot = merged;
+            continue;
+        }
+        break;
+    }
+    allocator.added_free_slots.push(slot);
+    allocator.added_free_slots.sort_by_key(atlas_slot_sort_key);
+}
+
+fn merge_adjacent_atlas_slots(left: AtlasSlot, right: AtlasSlot) -> Option<AtlasSlot> {
+    if left.y == right.y && left.height == right.height {
+        if left.x.checked_add(left.width) == Some(right.x) {
+            return Some(AtlasSlot {
+                x: left.x,
+                y: left.y,
+                width: left.width.checked_add(right.width)?,
+                height: left.height,
+            });
+        }
+        if right.x.checked_add(right.width) == Some(left.x) {
+            return Some(AtlasSlot {
+                x: right.x,
+                y: right.y,
+                width: right.width.checked_add(left.width)?,
+                height: right.height,
+            });
+        }
+    }
+    if left.x == right.x && left.width == right.width {
+        if left.y.checked_add(left.height) == Some(right.y) {
+            return Some(AtlasSlot {
+                x: left.x,
+                y: left.y,
+                width: left.width,
+                height: left.height.checked_add(right.height)?,
+            });
+        }
+        if right.y.checked_add(right.height) == Some(left.y) {
+            return Some(AtlasSlot {
+                x: right.x,
+                y: right.y,
+                width: right.width,
+                height: right.height.checked_add(left.height)?,
+            });
+        }
+    }
+    None
+}
+
+fn allocate_pending_atlas_slot(
+    allocator: &mut AtlasAllocatorState<'_>,
+    width: u32,
+    height: u32,
+) -> Result<AtlasPlacement, PlatformError> {
+    let required_width = width + ATLAS_PADDING * 2;
+    let required_height = height + ATLAS_PADDING * 2;
+    let base = allocator
+        .base_free_slots
+        .iter()
+        .enumerate()
+        .filter(|(index, slot)| {
+            !allocator.consumed_free_slots.contains(index)
+                && slot.width >= required_width
+                && slot.height >= required_height
+        })
+        .min_by_key(|(_, slot)| atlas_slot_sort_key(slot))
+        .map(|(index, slot)| (index, *slot));
+    let added = allocator
+        .added_free_slots
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| slot.width >= required_width && slot.height >= required_height)
+        .min_by_key(|(_, slot)| atlas_slot_sort_key(slot))
+        .map(|(index, slot)| (index, *slot));
+    let selected = match (base, added) {
+        (Some((index, slot)), Some((added_index, added_slot))) => {
+            if atlas_slot_sort_key(&slot) <= atlas_slot_sort_key(&added_slot) {
+                allocator.consumed_free_slots.insert(index);
+                slot
+            } else {
+                allocator.added_free_slots.remove(added_index)
+            }
+        }
+        (Some((index, slot)), None) => {
+            allocator.consumed_free_slots.insert(index);
+            slot
+        }
+        (None, Some((index, _))) => allocator.added_free_slots.remove(index),
+        (None, None) => {
+            if allocator.cursor_x + required_width > allocator.width {
+                allocator.cursor_x = ATLAS_PADDING * 3;
+                allocator.cursor_y = allocator
+                    .cursor_y
+                    .checked_add(allocator.row_height + ATLAS_PADDING)
+                    .ok_or_else(|| invalid("glyph atlas row overflowed"))?;
+                allocator.row_height = 0;
+            }
+            if allocator.cursor_y + required_height > allocator.height {
+                return Err(invalid("glyph atlas capacity was exceeded"));
+            }
+            let placement = AtlasPlacement {
+                x: allocator.cursor_x + ATLAS_PADDING,
+                y: allocator.cursor_y + ATLAS_PADDING,
+                width,
+                height,
+            };
+            allocator.cursor_x += required_width;
+            allocator.row_height = allocator.row_height.max(required_height);
+            return Ok(placement);
+        }
+    };
+    let used_area = u64::from(required_width) * u64::from(required_height);
+    allocator.freed_area = allocator
+        .freed_area
+        .checked_sub(used_area)
+        .ok_or_else(|| invalid("glyph atlas free-slot area accounting underflowed"))?;
+    if selected.width > required_width {
+        insert_pending_free_slot(
+            allocator,
+            AtlasSlot {
+                x: selected.x + required_width,
+                y: selected.y,
+                width: selected.width - required_width,
+                height: required_height,
+            },
+        );
+    }
+    if selected.height > required_height {
+        insert_pending_free_slot(
+            allocator,
+            AtlasSlot {
+                x: selected.x,
+                y: selected.y + required_height,
+                width: selected.width,
+                height: selected.height - required_height,
+            },
+        );
+    }
+    Ok(AtlasPlacement {
+        x: selected.x + ATLAS_PADDING,
+        y: selected.y + ATLAS_PADDING,
+        width,
+        height,
+    })
+}
+
+fn placement_to_slot(placement: AtlasPlacement) -> Result<AtlasSlot, PlatformError> {
+    Ok(AtlasSlot {
         x: placement
             .x
             .checked_sub(ATLAS_PADDING)
@@ -1379,109 +2292,44 @@ fn release_atlas_slot(
             .ok_or_else(|| invalid("glyph atlas placement padding underflowed"))?,
         width: placement.width + ATLAS_PADDING * 2,
         height: placement.height + ATLAS_PADDING * 2,
-    };
-    packed.freed_area = packed
-        .freed_area
-        .checked_add(u64::from(slot.width) * u64::from(slot.height))
-        .ok_or_else(|| invalid("glyph atlas freed area overflowed"))?;
-    packed.free_slots.push(slot);
-    packed.free_slots.sort_by_key(|slot| {
-        (
-            u64::from(slot.width) * u64::from(slot.height),
-            slot.y,
-            slot.x,
-        )
-    });
-    Ok(())
+    })
 }
 
-fn allocate_atlas_slot(
-    packed: &mut PackedAtlas,
-    width: u32,
-    height: u32,
-) -> Result<AtlasPlacement, PlatformError> {
-    let required_width = width + ATLAS_PADDING * 2;
-    let required_height = height + ATLAS_PADDING * 2;
-    if let Some(index) = packed
-        .free_slots
-        .iter()
-        .position(|slot| slot.width >= required_width && slot.height >= required_height)
-    {
-        let slot = packed.free_slots.remove(index);
-        packed.freed_area = packed
-            .freed_area
-            .saturating_sub(u64::from(slot.width) * u64::from(slot.height));
-        return Ok(AtlasPlacement {
-            x: slot.x + ATLAS_PADDING,
-            y: slot.y + ATLAS_PADDING,
-            width,
-            height,
-        });
-    }
-    if packed.cursor_x + required_width > packed.width {
-        packed.cursor_x = ATLAS_PADDING * 3;
-        packed.cursor_y = packed
-            .cursor_y
-            .checked_add(packed.row_height + ATLAS_PADDING)
-            .ok_or_else(|| invalid("glyph atlas row overflowed"))?;
-        packed.row_height = 0;
-    }
-    if packed.cursor_y + required_height > packed.height {
-        return Err(invalid("glyph atlas capacity was exceeded"));
-    }
-    let placement = AtlasPlacement {
-        x: packed.cursor_x + ATLAS_PADDING,
-        y: packed.cursor_y + ATLAS_PADDING,
-        width,
-        height,
-    };
-    packed.cursor_x += required_width;
-    packed.row_height = packed.row_height.max(required_height);
-    Ok(placement)
+fn atlas_slot_area(slot: AtlasSlot) -> u64 {
+    u64::from(slot.width) * u64::from(slot.height)
 }
 
-fn should_defragment(packed: &PackedAtlas) -> bool {
-    packed.freed_area * 4 >= u64::from(packed.width) * u64::from(packed.height)
+fn atlas_slot_sort_key(slot: &AtlasSlot) -> (u64, u32, u32) {
+    (atlas_slot_area(*slot), slot.y, slot.x)
 }
 
 fn upload_resource_rect(
-    device: &wgpu::Device,
     queue: &wgpu::Queue,
     encoder: Option<&mut wgpu::CommandEncoder>,
     texture: &wgpu::Texture,
     resource: &AtlasResource,
     placement: AtlasPlacement,
     upload_pixels: &mut Vec<u8>,
+    staging_belt: &mut wgpu::util::StagingBelt,
 ) -> Result<(), PlatformError> {
     let width = resource.width() + ATLAS_PADDING * 2;
     let height = resource.height() + ATLAS_PADDING * 2;
     prepare_upload_pixels(upload_pixels, width, height)?;
-    let mut destination = 0usize;
-    for padded_row in -1_i32..=resource.height() as i32 {
-        for padded_column in -1_i32..=resource.width() as i32 {
-            let pixel = resource_pixel(
-                resource,
-                padded_column.clamp(0, resource.width() as i32 - 1) as usize,
-                padded_row.clamp(0, resource.height() as i32 - 1) as usize,
-            );
-            upload_pixels[destination..destination + 4].copy_from_slice(&pixel);
-            destination += 4;
-        }
-    }
+    write_padded_resource(resource, upload_pixels, width, 0, 0)?;
     let origin = wgpu::Origin3d {
         x: placement.x - ATLAS_PADDING,
         y: placement.y - ATLAS_PADDING,
         z: 0,
     };
     if let Some(encoder) = encoder {
-        encode_texture_upload(
-            device,
+        encode_texture_upload_belt(
             encoder,
             texture,
             upload_pixels,
             width,
             height,
             origin,
+            staging_belt,
         )?;
     } else {
         queue.write_texture(
@@ -1508,31 +2356,134 @@ fn upload_resource_rect(
 }
 
 fn build_atlas_pixels(
-    resources: &BTreeMap<String, AtlasResource>,
+    resources: &AtlasResourceView<'_>,
     atlas: &PackedAtlas,
     upload_pixels: &mut Vec<u8>,
 ) -> Result<(), PlatformError> {
     prepare_upload_pixels(upload_pixels, atlas.width, atlas.height)?;
     upload_pixels.fill(0);
     upload_pixels[..4].copy_from_slice(&[255; 4]);
-    for (resource_id, resource) in resources {
+    for (resource_id, resource) in resources.iter() {
         let placement = atlas
             .placements
             .get(resource_id)
             .ok_or_else(|| invalid("glyph atlas placement is missing"))?;
-        for padded_row in -1_i32..=resource.height() as i32 {
-            for padded_column in -1_i32..=resource.width() as i32 {
-                let source_row = padded_row.clamp(0, resource.height() as i32 - 1) as usize;
-                let source_column = padded_column.clamp(0, resource.width() as i32 - 1) as usize;
-                let destination_row = (placement.y as i32 + padded_row) as usize;
-                let destination_column = (placement.x as i32 + padded_column) as usize;
-                let destination = (destination_row * atlas.width as usize + destination_column) * 4;
-                upload_pixels[destination..destination + 4].copy_from_slice(&resource_pixel(
-                    resource,
-                    source_column,
-                    source_row,
-                ));
+        write_padded_resource(
+            resource,
+            upload_pixels,
+            atlas.width,
+            placement.x - ATLAS_PADDING,
+            placement.y - ATLAS_PADDING,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_padded_resource(
+    resource: &AtlasResource,
+    destination: &mut [u8],
+    destination_width: u32,
+    destination_x: u32,
+    destination_y: u32,
+) -> Result<(), PlatformError> {
+    let source_width = resource.width() as usize;
+    let source_height = resource.height() as usize;
+    let destination_width = destination_width as usize;
+    let destination_x = destination_x as usize;
+    let destination_y = destination_y as usize;
+    let padded_width = source_width + ATLAS_PADDING as usize * 2;
+    let padded_height = source_height + ATLAS_PADDING as usize * 2;
+    let required_rows = destination_y
+        .checked_add(padded_height)
+        .ok_or_else(|| invalid("glyph atlas padded row overflowed"))?;
+    let required_columns = destination_x
+        .checked_add(padded_width)
+        .ok_or_else(|| invalid("glyph atlas padded column overflowed"))?;
+    let required_bytes = required_rows
+        .checked_mul(destination_width)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| invalid("glyph atlas padded destination overflowed"))?;
+    if source_width == 0
+        || source_height == 0
+        || required_columns > destination_width
+        || required_bytes > destination.len()
+    {
+        return Err(invalid(
+            "glyph atlas padded resource is outside destination",
+        ));
+    }
+    match resource {
+        AtlasResource::Glyph(glyph) if glyph.format == GlyphBitmapFormat::Alpha8 => {
+            let padding = ATLAS_PADDING as usize;
+            for padded_row in 0..padded_height {
+                let source_row = padded_row.saturating_sub(padding).min(source_height - 1);
+                for padded_column in 0..padded_width {
+                    let source_column = padded_column.saturating_sub(padding).min(source_width - 1);
+                    let alpha = glyph.pixels[source_row * source_width + source_column];
+                    let offset = ((destination_y + padded_row) * destination_width
+                        + destination_x
+                        + padded_column)
+                        * 4;
+                    destination[offset..offset + 4].copy_from_slice(&[alpha; 4]);
+                }
             }
+        }
+        AtlasResource::Glyph(glyph) => write_padded_rgba_rows(
+            &glyph.pixels,
+            source_width,
+            source_height,
+            destination,
+            destination_width,
+            destination_x,
+            destination_y,
+        )?,
+        AtlasResource::Texture(texture) => write_padded_rgba_rows(
+            &texture.rgba8,
+            source_width,
+            source_height,
+            destination,
+            destination_width,
+            destination_x,
+            destination_y,
+        )?,
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_padded_rgba_rows(
+    source: &[u8],
+    source_width: usize,
+    source_height: usize,
+    destination: &mut [u8],
+    destination_width: usize,
+    destination_x: usize,
+    destination_y: usize,
+) -> Result<(), PlatformError> {
+    let padding = ATLAS_PADDING as usize;
+    let source_row_bytes = source_width
+        .checked_mul(4)
+        .ok_or_else(|| invalid("glyph atlas source row overflowed"))?;
+    if source.len() != source_row_bytes.saturating_mul(source_height) {
+        return Err(invalid("glyph atlas RGBA resource byte count is invalid"));
+    }
+    for padded_row in 0..source_height + padding * 2 {
+        let source_row = padded_row.saturating_sub(padding).min(source_height - 1);
+        let source_start = source_row * source_row_bytes;
+        let destination_start =
+            ((destination_y + padded_row) * destination_width + destination_x) * 4;
+        let interior_start = destination_start + padding * 4;
+        destination[interior_start..interior_start + source_row_bytes]
+            .copy_from_slice(&source[source_start..source_start + source_row_bytes]);
+        for column in 0..padding {
+            let left = destination_start + column * 4;
+            destination[left..left + 4].copy_from_slice(&source[source_start..source_start + 4]);
+        }
+        let right_source = source_start + source_row_bytes - 4;
+        let right_destination = interior_start + source_row_bytes;
+        for column in 0..padding {
+            let right = right_destination + column * 4;
+            destination[right..right + 4].copy_from_slice(&source[right_source..right_source + 4]);
         }
     }
     Ok(())
@@ -1547,41 +2498,19 @@ fn prepare_upload_pixels(
         .checked_mul(height as usize)
         .and_then(|pixels| pixels.checked_mul(4))
         .ok_or_else(|| invalid("glyph atlas upload byte count overflowed"))?;
-    if required > MAX_ATLAS_UPLOAD_BYTES || upload_pixels.capacity() < required {
+    if required > MAX_ATLAS_UPLOAD_BYTES {
         return Err(invalid(
             "glyph atlas upload exceeds the reserved staging budget",
         ));
     }
+    if upload_pixels.capacity() < required {
+        upload_pixels
+            .try_reserve_exact(required - upload_pixels.capacity())
+            .map_err(|_| invalid("glyph atlas upload staging allocation failed"))?;
+    }
     upload_pixels.clear();
     upload_pixels.resize(required, 0);
     Ok(())
-}
-
-fn resource_pixel(resource: &AtlasResource, column: usize, row: usize) -> [u8; 4] {
-    match resource {
-        AtlasResource::Glyph(glyph) if glyph.format == GlyphBitmapFormat::Alpha8 => {
-            let alpha = glyph.pixels[row * glyph.width as usize + column];
-            [alpha, alpha, alpha, alpha]
-        }
-        AtlasResource::Glyph(glyph) => {
-            let source = (row * glyph.width as usize + column) * 4;
-            [
-                glyph.pixels[source],
-                glyph.pixels[source + 1],
-                glyph.pixels[source + 2],
-                glyph.pixels[source + 3],
-            ]
-        }
-        AtlasResource::Texture(texture) => {
-            let source = (row * texture.width as usize + column) * 4;
-            [
-                texture.rgba8[source],
-                texture.rgba8[source + 1],
-                texture.rgba8[source + 2],
-                texture.rgba8[source + 3],
-            ]
-        }
-    }
 }
 
 fn upload_atlas(
@@ -1603,7 +2532,9 @@ fn upload_atlas(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     if let Some((query_set, begin, end)) = timestamp_query {
@@ -1611,7 +2542,7 @@ fn upload_atlas(
             label: Some("astra-glyph-atlas-upload-encoder"),
         });
         encoder.write_timestamp(query_set, begin);
-        encode_texture_upload(
+        encode_texture_upload_once(
             device,
             &mut encoder,
             &texture,
@@ -1646,7 +2577,20 @@ fn upload_atlas(
     Ok(texture)
 }
 
-fn encode_texture_upload(
+fn primed_staging_belt(device: &wgpu::Device) -> wgpu::util::StagingBelt {
+    let mut belt = wgpu::util::StagingBelt::new(device.clone(), ATLAS_STAGING_CHUNK_BYTES);
+    {
+        let _ = belt.allocate(
+            wgpu::BufferSize::new(wgpu::COPY_BUFFER_ALIGNMENT)
+                .expect("copy buffer alignment is non-zero"),
+            wgpu::BufferSize::new(wgpu::COPY_BUFFER_ALIGNMENT)
+                .expect("copy buffer alignment is non-zero"),
+        );
+    }
+    belt
+}
+
+fn encode_texture_upload_once(
     device: &wgpu::Device,
     encoder: &mut wgpu::CommandEncoder,
     texture: &wgpu::Texture,
@@ -1664,7 +2608,7 @@ fn encode_texture_upload(
         .checked_mul(u64::from(height))
         .ok_or_else(|| invalid("glyph atlas staging buffer size overflowed"))?;
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("astra-glyph-atlas-upload-staging"),
+        label: Some("astra-glyph-atlas-initial-upload-staging"),
         size,
         usage: wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: true,
@@ -1704,12 +2648,68 @@ fn encode_texture_upload(
     Ok(())
 }
 
+fn encode_texture_upload_belt(
+    encoder: &mut wgpu::CommandEncoder,
+    texture: &wgpu::Texture,
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    origin: wgpu::Origin3d,
+    staging_belt: &mut wgpu::util::StagingBelt,
+) -> Result<(), PlatformError> {
+    let tight_row = width
+        .checked_mul(4)
+        .ok_or_else(|| invalid("glyph atlas upload row overflowed"))?;
+    let padded_row =
+        tight_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let size = u64::from(padded_row)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| invalid("glyph atlas staging buffer size overflowed"))?;
+    let size = wgpu::BufferSize::new(size)
+        .ok_or_else(|| invalid("glyph atlas staging buffer cannot be empty"))?;
+    let alignment = wgpu::BufferSize::new(u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT))
+        .expect("copy row alignment is non-zero");
+    let staging = staging_belt.allocate(size, alignment);
+    {
+        let mut mapped = staging.get_mapped_range_mut();
+        for row in 0..height as usize {
+            let source = row * tight_row as usize;
+            let destination = row * padded_row as usize;
+            mapped
+                .slice(destination..destination + tight_row as usize)
+                .copy_from_slice(&pixels[source..source + tight_row as usize]);
+        }
+    }
+    encoder.copy_buffer_to_texture(
+        wgpu::TexelCopyBufferInfo {
+            buffer: staging.buffer(),
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: staging.offset(),
+                bytes_per_row: Some(padded_row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    Ok(())
+}
+
 fn build_vertices(
     frame: &SceneFrame,
     quad_runs: &[DrawRun],
     runs: &[DrawPrimitive],
-    atlas: &PackedAtlas,
-    resources: &BTreeMap<String, AtlasResource>,
+    atlas: &AtlasPlacementView<'_>,
+    resources: &AtlasResourceView<'_>,
     bytes: &mut Vec<u8>,
     batches: &mut Vec<DrawBatch>,
 ) -> Result<(), PlatformError> {
@@ -1744,21 +2744,20 @@ fn build_vertices(
                             source,
                         } => {
                             let placement = atlas
-                                .placements
                                 .get(resource_id.as_ref())
                                 .ok_or_else(|| invalid("draw resource has no atlas placement"))?;
                             let source_right = source.x as u32 + source.width;
                             let source_bottom = source.y as u32 + source.height;
                             (
-                                (placement.x + source.x as u32) as f32 / atlas.width as f32,
-                                (placement.y + source.y as u32) as f32 / atlas.height as f32,
-                                (placement.x + source_right) as f32 / atlas.width as f32,
-                                (placement.y + source_bottom) as f32 / atlas.height as f32,
+                                (placement.x + source.x as u32) as f32 / atlas.width() as f32,
+                                (placement.y + source.y as u32) as f32 / atlas.height() as f32,
+                                (placement.x + source_right) as f32 / atlas.width() as f32,
+                                (placement.y + source_bottom) as f32 / atlas.height() as f32,
                             )
                         }
                         QuadSource::White => {
-                            let u = 0.5 / atlas.width as f32;
-                            let v = 0.5 / atlas.height as f32;
+                            let u = 0.5 / atlas.width() as f32;
+                            let v = 0.5 / atlas.height() as f32;
                             (u, v, u, v)
                         }
                     };
@@ -1790,11 +2789,10 @@ fn build_vertices(
                     .as_ref()
                     .map(|resource_id| {
                         let resource = resources
-                            .get(*resource_id)
+                            .get(resource_id)
                             .ok_or_else(|| invalid("mesh texture resource is missing"))?;
                         let placement = atlas
-                            .placements
-                            .get(*resource_id)
+                            .get(resource_id)
                             .ok_or_else(|| invalid("mesh texture has no atlas placement"))?;
                         Ok::<_, PlatformError>((placement, resource.width(), resource.height()))
                     })
@@ -1805,12 +2803,13 @@ fn build_vertices(
                         transform_point(run.transform, vertex.position[0], vertex.position[1]);
                     let (u, v) = if let Some((placement, width, height)) = texture_mapping {
                         (
-                            (placement.x as f32 + vertex.uv[0] * width as f32) / atlas.width as f32,
+                            (placement.x as f32 + vertex.uv[0] * width as f32)
+                                / atlas.width() as f32,
                             (placement.y as f32 + vertex.uv[1] * height as f32)
-                                / atlas.height as f32,
+                                / atlas.height() as f32,
                         )
                     } else {
-                        (0.5 / atlas.width as f32, 0.5 / atlas.height as f32)
+                        (0.5 / atlas.width() as f32, 0.5 / atlas.height() as f32)
                     };
                     push_vertex(
                         bytes,
@@ -1925,7 +2924,7 @@ fn validate_draw_identity<'a>(
     id: &'a str,
     opacity: &f32,
     blend: BlendMode,
-    run_ids: &mut SmallVec<[&'a str; 64]>,
+    run_ids: &mut SmallVec<[&'a str; 128]>,
 ) -> Result<(), PlatformError> {
     if id.is_empty()
         || id.len() > 256
@@ -1939,7 +2938,7 @@ fn validate_draw_identity<'a>(
     Ok(())
 }
 
-fn insert_unique<'a>(values: &mut SmallVec<[&'a str; 64]>, value: &'a str) -> bool {
+fn insert_unique<'a>(values: &mut SmallVec<[&'a str; 128]>, value: &'a str) -> bool {
     if values.contains(&value) {
         false
     } else {
@@ -1949,7 +2948,7 @@ fn insert_unique<'a>(values: &mut SmallVec<[&'a str; 64]>, value: &'a str) -> bo
 }
 
 fn transient_resource_id(
-    resources: &BTreeMap<String, AtlasResource>,
+    resources: &AtlasResourceView<'_>,
     sequence: &mut u64,
     kind: &str,
 ) -> Result<String, PlatformError> {
@@ -2172,13 +3171,32 @@ struct VertexOutput {
 #[cfg(test)]
 mod tests {
     use super::{
-        allocate_atlas_slot, pack_atlas, prepare_upload_pixels, release_atlas_slot,
-        vertex_upload_required, AtlasResource, ATLAS_SIDE, MAX_ATLAS_UPLOAD_BYTES,
+        allocate_pending_atlas_slot, insert_unique, pack_atlas, prepare_upload_pixels,
+        release_pending_atlas_slot, vertex_upload_required, write_padded_resource,
+        AtlasAllocatorState, AtlasResource, AtlasResourceView, ResourceMutationJournal,
+        ATLAS_PADDING, ATLAS_SIDE, MAX_ATLAS_UPLOAD_BYTES,
     };
     use astra_core::Hash256;
     use astra_media_core::TextureFrame;
     use astra_platform::PlatformErrorCode;
+    use smallvec::SmallVec;
     use std::{collections::BTreeMap, sync::Arc};
+
+    #[test]
+    fn classic_scene_id_journal_stays_within_inline_capacity() {
+        let mut ids: SmallVec<[&str; 128]> = SmallVec::new();
+        for id in ["a"; 128] {
+            // Distinct suffixes are unnecessary for this capacity invariant;
+            // insert directly so the test only exercises the inline journal.
+            ids.push(id);
+        }
+        assert_eq!(ids.len(), 128);
+        assert!(!ids.spilled());
+
+        let mut unique_ids: SmallVec<[&str; 128]> = SmallVec::new();
+        assert!(insert_unique(&mut unique_ids, "classic.background"));
+        assert!(!insert_unique(&mut unique_ids, "classic.background"));
+    }
 
     #[test]
     fn atlas_width_tracks_total_area_and_packs_multiple_stage_textures() {
@@ -2198,11 +3216,51 @@ mod tests {
             })
             .collect::<BTreeMap<_, _>>();
 
-        let packed = pack_atlas(&resources).expect("stage textures must fit the bounded atlas");
+        let mutations = ResourceMutationJournal::new();
+        let packed = pack_atlas(&AtlasResourceView::new(&resources, &mutations))
+            .expect("stage textures must fit the bounded atlas");
 
         assert_eq!(packed.placements.len(), 8);
         assert_eq!(packed.width, 4096);
         assert_eq!(packed.height, 4096);
+    }
+
+    #[test]
+    fn resource_view_applies_mutations_without_cloning_the_base_map() {
+        let texture = |value| {
+            let rgba8 = vec![value; 4];
+            AtlasResource::Texture(Arc::new(TextureFrame {
+                width: 1,
+                height: 1,
+                hash: Hash256::from_sha256(&rgba8),
+                rgba8: rgba8.into(),
+            }))
+        };
+        let base = [
+            ("keep".to_string(), texture(1)),
+            ("release".to_string(), texture(2)),
+            ("replace".to_string(), texture(3)),
+        ]
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+        let mutations = [
+            ("add".to_string(), Some(texture(4))),
+            ("release".to_string(), None),
+            ("replace".to_string(), Some(texture(5))),
+        ]
+        .into_iter()
+        .collect::<ResourceMutationJournal>();
+        let view = AtlasResourceView::new(&base, &mutations);
+
+        assert_eq!(view.len(), 3);
+        assert!(view.contains_key("keep"));
+        assert!(view.contains_key("add"));
+        assert!(!view.contains_key("release"));
+        assert!(view.get("replace") == mutations["replace"].as_ref());
+        assert_eq!(
+            view.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+            vec!["keep", "add", "replace"]
+        );
     }
 
     #[test]
@@ -2220,12 +3278,31 @@ mod tests {
         )]
         .into_iter()
         .collect::<BTreeMap<_, _>>();
-        let mut packed = pack_atlas(&resources).unwrap();
-        let original = packed.placements.remove("texture.stable").unwrap();
-        release_atlas_slot(&mut packed, original).unwrap();
-        let reused = allocate_atlas_slot(&mut packed, 32, 32).unwrap();
+        let mutations = ResourceMutationJournal::new();
+        let packed = pack_atlas(&AtlasResourceView::new(&resources, &mutations)).unwrap();
+        let original = packed.placements["texture.stable"];
+        let mut allocator = AtlasAllocatorState::new(&packed);
+        release_pending_atlas_slot(&mut allocator, original).unwrap();
+        let reused = allocate_pending_atlas_slot(&mut allocator, 32, 32).unwrap();
         assert_eq!((reused.x, reused.y), (original.x, original.y));
-        assert_eq!(packed.freed_area, 0);
+        let original_area = u64::from(original.width + ATLAS_PADDING * 2)
+            * u64::from(original.height + ATLAS_PADDING * 2);
+        let reused_area = u64::from(32 + ATLAS_PADDING * 2).pow(2);
+        assert_eq!(allocator.freed_area, original_area - reused_area);
+        assert_eq!(allocator.added_free_slots.len(), 2);
+        release_pending_atlas_slot(&mut allocator, reused).unwrap();
+        assert_eq!(allocator.freed_area, original_area);
+        assert_eq!(allocator.added_free_slots.len(), 1);
+        assert_eq!(
+            (
+                allocator.added_free_slots[0].width,
+                allocator.added_free_slots[0].height
+            ),
+            (
+                original.width + ATLAS_PADDING * 2,
+                original.height + ATLAS_PADDING * 2
+            )
+        );
     }
 
     #[test]
@@ -2234,6 +3311,27 @@ mod tests {
         assert!(!vertex_upload_required(&uploaded, &uploaded, false));
         assert!(vertex_upload_required(&[1, 2, 3, 5], &uploaded, false));
         assert!(vertex_upload_required(&uploaded, &uploaded, true));
+    }
+
+    #[test]
+    fn rgba_row_upload_preserves_clamped_padding_pixels() {
+        let rgba8 = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let resource = AtlasResource::Texture(Arc::new(TextureFrame {
+            width: 2,
+            height: 2,
+            hash: Hash256::from_sha256(&rgba8),
+            rgba8: rgba8.into(),
+        }));
+        let mut destination = vec![0; 4 * 4 * 4];
+        write_padded_resource(&resource, &mut destination, 4, 0, 0).unwrap();
+        let pixels = destination
+            .chunks_exact(4)
+            .map(|pixel| pixel[0])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pixels,
+            vec![1, 1, 5, 5, 1, 1, 5, 5, 9, 9, 13, 13, 9, 9, 13, 13]
+        );
     }
 
     #[test]

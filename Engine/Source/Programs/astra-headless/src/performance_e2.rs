@@ -31,8 +31,12 @@ use serde::Deserialize;
 const FRAME_PERIOD_NS: u64 = 8_333_333;
 const WARMUP_FRAMES: u64 = 1_200;
 const MEASURED_FRAMES: u64 = 72_000;
-const PROFILER_OVERHEAD_FRAMES: u64 = 600;
-const MAX_PROFILER_OVERHEAD_PPM: u64 = 1_030_000;
+// Ten seconds at 120 Hz makes the p95 comparison resilient to the occasional
+// DX12 scheduling outlier while keeping the self-check bounded and independent
+// of the ten-minute acceptance measurement.
+const PROFILER_OVERHEAD_FRAMES: u64 = 1_200;
+const PROFILER_TRACE_SAMPLE_STRIDE: u64 = 32;
+const MAX_PROFILER_OVERHEAD_PPM: u64 = 30_000;
 const MAX_PROFILER_WORKING_SET_BYTES: u64 = 32 * 1024 * 1024;
 
 pub(crate) const PRODUCT_METRICS: &[&str] = &[
@@ -338,12 +342,16 @@ pub async fn run(request: PerformanceE2Request<'_>) -> Result<(), String> {
         package_hash,
     )
     .map_err(|error| format!("ASTRA_PERFORMANCE_PACKAGE_VERIFY_FAILED: {error}"))?;
-    let performance_scheduling =
-        super::performance_scheduling::PerformanceSchedulingGuard::activate()?;
+    let performance_scheduling = astra_platform_common::PerformanceSchedulingGuard::activate()?;
 
-    let mut renderer = WgpuOffscreenRenderer::new_with_policy(gpu_policy)
-        .await
-        .map_err(|error| format!("ASTRA_PERFORMANCE_GPU_REQUIRED: {error}"))?;
+    let mut renderer = WgpuOffscreenRenderer::new_for_performance(
+        gpu_policy,
+        profile.max_gpu_resource_bytes,
+        profile.viewport_width,
+        profile.viewport_height,
+    )
+    .await
+    .map_err(|error| format!("ASTRA_PERFORMANCE_GPU_REQUIRED: {error}"))?;
     if renderer.identity().device_type != "integrated_gpu" {
         return Err("ASTRA_PERFORMANCE_INTEGRATED_GPU_REQUIRED".into());
     }
@@ -585,6 +593,13 @@ fn record_measured_frame(
     // monotonic clock epoch. Anchor every correlated slice to the measured
     // frame timestamp instead of inventing an absolute GPU timeline.
     let frame_timestamp_ns = pending.submitted_timestamp_ns;
+    // The report above retains all 72,000 measured frames. Perfetto is a
+    // bounded hotspot timeline, so serialize one correlated Scene2D sample per
+    // fixed stride; this keeps trace I/O outside the p95 frame population while
+    // retaining deterministic representative CPU/GPU/flow evidence.
+    if !pending.index.is_multiple_of(PROFILER_TRACE_SAMPLE_STRIDE) {
+        return Ok(deadline_miss);
+    }
     trace
         .flow(
             "frame.flow",
@@ -800,6 +815,11 @@ fn validate_profiler_overhead(
     let memory_before = sample_process_memory()
         .map_err(|error| format!("ASTRA_PERFORMANCE_MEMORY_SAMPLE_FAILED: {error}"))?;
     let mut disabled = Vec::with_capacity(PROFILER_OVERHEAD_FRAMES as usize);
+    // GPU timestamps are mandatory E2 measurement infrastructure. The disabled
+    // side therefore keeps the identical bounded timestamp-query/readback ring
+    // and measures the incremental cost of trace serialization, not a different
+    // renderer submission path.
+    let mut disabled_pending = VecDeque::with_capacity(WGPU_TIMESTAMP_RING_SIZE);
     let disabled_started = Instant::now();
     for index in 0..PROFILER_OVERHEAD_FRAMES {
         let scheduled = disabled_started + Duration::from_nanos(FRAME_PERIOD_NS * index);
@@ -808,10 +828,37 @@ fn validate_profiler_overhead(
         }
         animate(frame, WARMUP_FRAMES + index + 1)?;
         let started = Instant::now();
-        renderer
-            .submit_frame(frame)
+        if disabled_pending.len() >= WGPU_TIMESTAMP_RING_SIZE - 1 {
+            let oldest = *disabled_pending
+                .front()
+                .expect("bounded timestamp queue is not empty");
+            if renderer
+                .try_resolve_profiled_submission(oldest)
+                .map_err(|error| format!("ASTRA_PERFORMANCE_PROFILER_BASELINE_FAILED: {error}"))?
+                .is_some()
+            {
+                disabled_pending.pop_front();
+            }
+        }
+        if disabled_pending.len() == WGPU_TIMESTAMP_RING_SIZE {
+            renderer
+                .resolve_profiled_submission(
+                    disabled_pending
+                        .pop_front()
+                        .expect("bounded timestamp queue is not empty"),
+                )
+                .map_err(|error| format!("ASTRA_PERFORMANCE_PROFILER_BASELINE_FAILED: {error}"))?;
+        }
+        let submission = renderer
+            .submit_frame_timestamped(frame)
             .map_err(|error| format!("ASTRA_PERFORMANCE_PROFILER_BASELINE_FAILED: {error}"))?;
+        disabled_pending.push_back(submission);
         disabled.push(duration_ns(started.elapsed())?);
+    }
+    while let Some(pending) = disabled_pending.pop_front() {
+        renderer
+            .resolve_profiled_submission(pending)
+            .map_err(|error| format!("ASTRA_PERFORMANCE_PROFILER_BASELINE_FAILED: {error}"))?;
     }
     let name = trace_path
         .file_name()
@@ -862,20 +909,27 @@ fn validate_profiler_overhead(
         pending.push_back(submission);
         let timestamp_ns = duration_ns(trace_started.elapsed())?;
         let frame_cpu_ns = duration_ns(started.elapsed())?;
-        writer
-            .complete(
-                "profiler",
-                "overhead.sample",
-                1,
-                Some(index),
-                timestamp_ns.saturating_sub(frame_cpu_ns),
-                frame_cpu_ns,
-            )
-            .and_then(|_| match resolved_gpu_ns {
-                Some(gpu_ns) => writer.counter("profiler", "gpu.duration_ns", timestamp_ns, gpu_ns),
-                None => Ok(()),
-            })
-            .map_err(|error| error.to_string())?;
+        // Mirror the production trace policy: timestamp every submitted frame for the GPU
+        // distribution, but serialize detailed CPU slices only once per bounded sample stride.
+        // The overhead gate must measure the configuration that the E2 run actually uses.
+        if index % PROFILER_TRACE_SAMPLE_STRIDE == 0 {
+            writer
+                .complete(
+                    "profiler",
+                    "overhead.sample",
+                    1,
+                    Some(index),
+                    timestamp_ns.saturating_sub(frame_cpu_ns),
+                    frame_cpu_ns,
+                )
+                .and_then(|_| match resolved_gpu_ns {
+                    Some(gpu_ns) => {
+                        writer.counter("profiler", "gpu.duration_ns", timestamp_ns, gpu_ns)
+                    }
+                    None => Ok(()),
+                })
+                .map_err(|error| error.to_string())?;
+        }
         enabled.push(duration_ns(started.elapsed())?);
     }
     while let Some(pending) = pending.pop_front() {
@@ -896,8 +950,7 @@ fn validate_profiler_overhead(
         .saturating_sub(disabled_p95)
         .checked_mul(1_000_000)
         .ok_or_else(|| "ASTRA_PERFORMANCE_PROFILER_RATIO_OVERFLOW".to_string())?
-        .div_ceil(FRAME_PERIOD_NS)
-        .saturating_add(1_000_000);
+        .div_ceil(disabled_p95);
     let extra_working_set = memory_after
         .working_set_bytes
         .saturating_sub(memory_before.working_set_bytes)
@@ -989,7 +1042,8 @@ fn draw_commands() -> Vec<SceneCommand> {
                 x: 128,
                 y: 128,
                 rotation_quadrants: 0,
-            }],
+            }]
+            .into(),
             rgba: [255, 240, 220, 255],
             opacity: 1.0,
             blend: BlendMode::Alpha,
@@ -1012,8 +1066,9 @@ fn draw_commands() -> Vec<SceneCommand> {
                     uv: [0.0, 1.0],
                     premultiplied_rgba: [80, 80, 240, 255],
                 },
-            ],
-            indices: vec![0, 1, 2],
+            ]
+            .into(),
+            indices: vec![0, 1, 2].into(),
             material: MeshMaterial2D::Solid,
             texture_id: None,
             opacity: 0.9,

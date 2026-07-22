@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use crate::artifact::ArtifactRecorder;
+use crate::artifact::{ArtifactRecorder, AudioArtifactStream};
 use astra_media::{
     DecodeKind as MediaDecodeKind, DecodeOutput as MediaDecodeOutput, DecodeProvider,
     DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
@@ -52,6 +52,9 @@ pub struct HeadlessGpuFrameSample {
     pub sequence: u64,
     pub input_flow_id: Option<u64>,
     pub scene_build_ns: u64,
+    pub scene_digest_ns: u64,
+    pub scene_validation_ns: u64,
+    pub scene_pending_ns: u64,
     pub cpu_submit_ns: u64,
     pub gpu_duration_ns: u64,
     pub scene_cpu_ns: u64,
@@ -75,6 +78,9 @@ pub struct HeadlessGpuFrameSample {
     pub pipeline_count: u64,
     pub heap_allocation_bytes: u64,
     pub heap_allocation_count: u64,
+    pub command_allocation_bytes: u64,
+    pub atlas_allocation_bytes: u64,
+    pub geometry_allocation_bytes: u64,
 }
 
 pub trait HeadlessPerformanceObserver: Debug + Send + Sync {
@@ -135,14 +141,19 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
                 profile.limits.command_queue_capacity,
                 profile.limits.event_queue_capacity,
             )?;
+            let performance_session = factory.performance_observer.is_some();
             let state = HostState::new(factory, profile, backend)?;
             tracing::info!(
                 event = "platform.headless.session.start",
                 "started isolated Headless platform session"
             );
-            tokio::spawn(async move {
-                state.run().await;
-            });
+            if performance_session {
+                spawn_performance_host(state)?;
+            } else {
+                tokio::spawn(async move {
+                    state.run().await;
+                });
+            }
             Ok(PlatformHostSession {
                 client,
                 events,
@@ -150,6 +161,52 @@ impl PlatformHostFactory for HeadlessPlatformFactory {
             })
         })
     }
+}
+
+fn spawn_performance_host(state: HostState) -> Result<(), PlatformError> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| performance_thread_error("runtime", error.to_string()))?;
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("astra-headless-performance-host".into())
+        .spawn(move || {
+            let scheduling = astra_platform_common::PerformanceSchedulingGuard::activate();
+            match scheduling {
+                Ok(scheduling) => {
+                    if ready_tx.send(Ok(())).is_err() {
+                        return;
+                    }
+                    runtime.block_on(state.run());
+                    if let Err(error) = scheduling.restore() {
+                        tracing::error!(
+                            event = "platform.headless.performance_scheduling.restore_failed",
+                            diagnostic = %error,
+                            "failed to restore Headless performance host scheduling policy"
+                        );
+                    }
+                }
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error));
+                }
+            }
+        })
+        .map_err(|error| performance_thread_error("spawn", error.to_string()))?;
+    ready_rx
+        .recv()
+        .map_err(|error| performance_thread_error("handshake", error.to_string()))?
+        .map_err(|error| performance_thread_error("scheduling", error))
+}
+
+fn performance_thread_error(stage: &str, diagnostic: String) -> PlatformError {
+    PlatformError::new(
+        PlatformErrorCode::InvalidState,
+        "headless.performance.thread",
+        "dedicated performance host thread failed",
+    )
+    .with_field("stage", stage)
+    .with_field("diagnostic", diagnostic)
 }
 
 fn validate_provider_bindings(
@@ -278,13 +335,15 @@ struct PendingScene {
     clear_rgba: [u8; 4],
     semantics: Option<astra_ui_core::UiSemanticSnapshot>,
     scene_build_ns: u64,
+    scene_digest_ns: u64,
+    scene_validation_ns: u64,
+    scene_pending_ns: u64,
 }
 struct AudioState {
     channels: u16,
     max_frames: usize,
     last_sequence: u64,
-    timeline: Vec<f32>,
-    retain_timeline: bool,
+    artifact_stream: Option<AudioArtifactStream>,
     submitted_samples: u64,
     square_sum: f64,
     peak: f32,
@@ -505,6 +564,9 @@ impl HostState {
                             sequence: pending.sequence,
                             input_flow_id: observer.bind_gpu_frame(pending.sequence)?,
                             scene_build_ns: pending.scene_build_ns,
+                            scene_digest_ns: pending.scene_digest_ns,
+                            scene_validation_ns: pending.scene_validation_ns,
+                            scene_pending_ns: pending.scene_pending_ns,
                             cpu_submit_ns: 0,
                             gpu_duration_ns: 0,
                             scene_cpu_ns: 0,
@@ -528,6 +590,9 @@ impl HostState {
                             pipeline_count: counters.pipeline_count,
                             heap_allocation_bytes: counters.engine_allocation_bytes,
                             heap_allocation_count: counters.engine_allocation_count,
+                            command_allocation_bytes: counters.command_allocation_bytes,
+                            atlas_allocation_bytes: counters.atlas_allocation_bytes,
+                            geometry_allocation_bytes: counters.geometry_allocation_bytes,
                         },
                     });
                     captured
@@ -594,7 +659,24 @@ impl HostState {
             }
             HostCommand::CreateSurface { request, reply } => {
                 let gpu_renderer = if self.profile.providers.renderer == "wgpu_offscreen" {
-                    let renderer = if let Some(policy) = &self.profile.gpu_adapter {
+                    let renderer = if self.performance_observer.is_some() {
+                        match self.profile.gpu_adapter.as_ref() {
+                            Some(policy) => {
+                                WgpuOffscreenRenderer::new_for_performance(
+                                    policy,
+                                    self.profile.max_gpu_resource_bytes,
+                                    request.width,
+                                    request.height,
+                                )
+                                .await
+                            }
+                            None => Err(PlatformError::new(
+                                PlatformErrorCode::InvalidProfile,
+                                "headless.performance.gpu_policy",
+                                "performance observer requires an explicit GPU adapter policy",
+                            )),
+                        }
+                    } else if let Some(policy) = &self.profile.gpu_adapter {
                         WgpuOffscreenRenderer::new_with_policy(policy).await
                     } else {
                         WgpuOffscreenRenderer::new().await
@@ -686,16 +768,7 @@ impl HostState {
                 let result = (|| {
                     let scene_build_started = Instant::now();
                     let sequence = frame.sequence;
-                    let canonical = canonical_json_digest(&(
-                        frame.sequence,
-                        frame.width,
-                        frame.height,
-                        frame.clear_rgba,
-                        &frame.commands,
-                        &frame.semantics,
-                    ))
-                    .map_err(|_| invalid("surface.present_scene", "scene serialization failed"))?;
-                    let (journal, pending, deferred_resources, materialize) = {
+                    let (canonical, journal, pending, deferred_resources, materialize) = {
                         let s = self.surfaces.get(surface)?;
                         ensure_increasing(
                             s.last_sequence,
@@ -713,7 +786,31 @@ impl HostState {
                             rgba: frame.clear_rgba,
                         });
                         commands.extend(frame.commands);
+                        let scene_validation_started = Instant::now();
                         let journal = s.renderer.validate_frame(&commands).map_err(media_error)?;
+                        let scene_validation_ns = elapsed_ns(
+                            scene_validation_started,
+                            "surface.present_scene",
+                            "scene validation duration overflowed",
+                        )?;
+                        let scene_digest_started = Instant::now();
+                        let canonical = scene_submission_digest(
+                            frame.sequence,
+                            frame.width,
+                            frame.height,
+                            frame.clear_rgba,
+                            &commands,
+                            &frame.semantics,
+                        )
+                        .map_err(|_| {
+                            invalid("surface.present_scene", "scene serialization failed")
+                        })?;
+                        let scene_digest_ns = elapsed_ns(
+                            scene_digest_started,
+                            "surface.present_scene",
+                            "scene digest duration overflowed",
+                        )?;
+                        let scene_pending_started = Instant::now();
                         let deferred_resources: Vec<_> = commands
                             .iter()
                             .filter(|command| {
@@ -753,8 +850,16 @@ impl HostState {
                                         "scene build duration overflowed",
                                     )
                                 })?,
+                            scene_digest_ns,
+                            scene_validation_ns,
+                            scene_pending_ns: elapsed_ns(
+                                scene_pending_started,
+                                "surface.present_scene",
+                                "scene pending duration overflowed",
+                            )?,
                         };
                         (
+                            canonical,
                             journal,
                             pending,
                             deferred_resources,
@@ -824,24 +929,30 @@ impl HostState {
                         "headless audio requires 48kHz stereo",
                     ))
                 } else {
-                    self.audio.insert(AudioState {
-                        channels: request.channels,
-                        max_frames: request.max_buffered_frames,
-                        last_sequence: 0,
-                        timeline: Vec::new(),
-                        retain_timeline: !matches!(
+                    (|| {
+                        let artifact_stream = if matches!(
                             self.profile.artifacts.retention,
                             astra_platform::HeadlessArtifactRetention::ManifestOnly
-                        ),
-                        submitted_samples: 0,
-                        square_sum: 0.0,
-                        peak: 0.0,
-                        queued: Vec::new(),
-                        paused: false,
-                        consumed: 0,
-                        callback_count: 0,
-                        underflow_count: 0,
-                    })
+                        ) {
+                            None
+                        } else {
+                            Some(self.artifacts.begin_audio_stream()?)
+                        };
+                        self.audio.insert(AudioState {
+                            channels: request.channels,
+                            max_frames: request.max_buffered_frames,
+                            last_sequence: 0,
+                            artifact_stream,
+                            submitted_samples: 0,
+                            square_sum: 0.0,
+                            peak: 0.0,
+                            queued: Vec::new(),
+                            paused: false,
+                            consumed: 0,
+                            callback_count: 0,
+                            underflow_count: 0,
+                        })
+                    })()
                 };
                 let _ = reply.send(result);
             }
@@ -863,17 +974,6 @@ impl HostState {
                         .submitted_samples
                         .checked_add(packet.samples.len() as u64)
                         .ok_or_else(|| invalid("audio.submit", "sample count overflowed"))?;
-                    let retained_samples = if audio.retain_timeline {
-                        usize::try_from(submitted_samples)
-                            .map_err(|_| invalid("audio.submit", "sample count overflowed"))?
-                    } else {
-                        packet.samples.len()
-                    };
-                    self.artifacts.validate_audio_timeline(retained_samples)?;
-                    if !audio.retain_timeline {
-                        self.artifacts
-                            .record_audio(packet.sequence, &packet.samples)?;
-                    }
                     let a = self.audio.get_mut(output)?;
                     ensure_sequence(a.last_sequence, packet.sequence, "audio.submit")?;
                     if packet.channels != a.channels
@@ -883,6 +983,13 @@ impl HostState {
                             "audio.submit",
                             "audio packet format or sample is invalid",
                         ));
+                    }
+                    if let Some(stream) = a.artifact_stream.as_mut() {
+                        self.artifacts
+                            .append_audio_stream(stream, &packet.samples)?;
+                    } else {
+                        self.artifacts
+                            .record_audio(packet.sequence, &packet.samples)?;
                     }
                     if packet.frame_count() > a.max_frames
                         || a.queued.len().saturating_add(packet.samples.len())
@@ -905,9 +1012,6 @@ impl HostState {
                         a.peak = a.peak.max(sample.abs());
                     }
                     a.submitted_samples = submitted_samples;
-                    if a.retain_timeline {
-                        a.timeline.extend_from_slice(&packet.samples);
-                    }
                     a.queued.extend(packet.samples);
                     a.last_sequence = packet.sequence;
                     Ok(())
@@ -956,7 +1060,11 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::AbortAudio { output, reply } => {
-                let result = self.audio.remove(output).map(|_| ());
+                let result = self.audio.remove(output).map(|mut state| {
+                    if let Some(stream) = state.artifact_stream.take() {
+                        self.artifacts.abort_audio_stream(stream);
+                    }
+                });
                 let _ = reply.send(result);
             }
             HostCommand::CloseAudio { output, reply } => {
@@ -964,10 +1072,9 @@ impl HostState {
                     // Handle lifetime is independent from artifact persistence. Once close
                     // begins, remove the platform resource even if bounded artifact commit
                     // fails, so cleanup reports the owning error instead of a secondary leak.
-                    let state = self.audio.remove(output)?;
-                    if state.retain_timeline {
-                        self.artifacts
-                            .record_audio(state.last_sequence.max(1), &state.timeline)?;
+                    let mut state = self.audio.remove(output)?;
+                    if let Some(stream) = state.artifact_stream.take() {
+                        self.artifacts.finish_audio_stream(stream)?;
                     }
                     Ok(())
                 })();
@@ -1660,6 +1767,145 @@ fn canonical_json_digest(value: &impl serde::Serialize) -> Result<[u8; 32], serd
     let mut digest = Sha256::new();
     serde_json::to_writer(Sha256Writer(&mut digest), value)?;
     Ok(digest.finalize().into())
+}
+
+fn scene_submission_digest(
+    sequence: u64,
+    width: u32,
+    height: u32,
+    clear_rgba: [u8; 4],
+    commands: &[SceneCommand],
+    semantics: &Option<astra_ui_core::UiSemanticSnapshot>,
+) -> Result<[u8; 32], serde_json::Error> {
+    let mut digest = Sha256::new();
+    write_json_digest_record(
+        &mut digest,
+        &(
+            "astra.headless.scene_submission.v2",
+            sequence,
+            width,
+            height,
+            clear_rgba,
+            semantics,
+        ),
+    )?;
+    for command in commands {
+        match command {
+            SceneCommand::UploadTexture { resource_id, frame } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "upload_texture",
+                    resource_id,
+                    frame.width,
+                    frame.height,
+                    frame.rgba8.len(),
+                    frame.hash,
+                ),
+            )?,
+            SceneCommand::UploadGlyph { resource_id, glyph } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "upload_glyph",
+                    resource_id,
+                    glyph.width,
+                    glyph.height,
+                    &glyph.format,
+                    glyph.pixels.len(),
+                    glyph.hash,
+                ),
+            )?,
+            SceneCommand::Texture {
+                id,
+                frame,
+                destination,
+                opacity,
+                blend,
+            } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "texture",
+                    id,
+                    frame.width,
+                    frame.height,
+                    frame.rgba8.len(),
+                    frame.hash,
+                    destination,
+                    opacity,
+                    blend,
+                ),
+            )?,
+            SceneCommand::VideoFrame {
+                id,
+                frame,
+                destination,
+                opacity,
+                blend,
+                presentation_time_ns,
+            } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "video_frame",
+                    id,
+                    frame.width,
+                    frame.height,
+                    frame.rgba8.len(),
+                    frame.hash,
+                    destination,
+                    opacity,
+                    blend,
+                    presentation_time_ns,
+                ),
+            )?,
+            SceneCommand::Glyph {
+                id,
+                glyph,
+                x,
+                y,
+                rgba,
+                opacity,
+                blend,
+            } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "glyph",
+                    id,
+                    glyph.width,
+                    glyph.height,
+                    &glyph.format,
+                    glyph.pixels.len(),
+                    glyph.hash,
+                    x,
+                    y,
+                    rgba,
+                    opacity,
+                    blend,
+                ),
+            )?,
+            _ => write_json_digest_record(&mut digest, command)?,
+        }
+    }
+    Ok(digest.finalize().into())
+}
+
+fn write_json_digest_record(
+    digest: &mut Sha256,
+    value: &impl serde::Serialize,
+) -> Result<(), serde_json::Error> {
+    serde_json::to_writer(Sha256Writer(digest), value)?;
+    digest.update(b"\n");
+    Ok(())
+}
+
+fn elapsed_ns(
+    started: Instant,
+    operation: &'static str,
+    overflow_message: &'static str,
+) -> Result<u64, PlatformError> {
+    started
+        .elapsed()
+        .as_nanos()
+        .try_into()
+        .map_err(|_| invalid(operation, overflow_message))
 }
 
 fn invalid(operation: &'static str, message: &'static str) -> PlatformError {

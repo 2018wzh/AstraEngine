@@ -6,6 +6,7 @@ mod glyph_atlas;
 mod http_range;
 #[cfg(not(target_arch = "wasm32"))]
 mod offscreen;
+mod performance_scheduling;
 mod presentation;
 mod resource;
 mod storage;
@@ -19,6 +20,7 @@ pub use gamepad::*;
 pub use http_range::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen::*;
+pub use performance_scheduling::*;
 pub use presentation::*;
 pub use resource::*;
 pub use storage::*;

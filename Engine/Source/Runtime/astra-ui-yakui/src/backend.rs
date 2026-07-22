@@ -216,6 +216,7 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             .set_scale_factor(request.viewport.scale_factor * request.viewport.font_scale);
 
         let update_started = Instant::now();
+        let input_routing_started = Instant::now();
         let mut dispositions = Vec::with_capacity(request.input.events.len());
         for event in &request.input.events {
             if let Some(action) = navigation_action(event) {
@@ -253,9 +254,23 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
                 dispositions.push(self.input.route(&mut self.yakui, event)?);
             }
         }
+        let input_routing_ns = input_routing_started
+            .elapsed()
+            .as_nanos()
+            .min(u64::MAX as u128) as u64;
         self.yakui.start();
+        let tree_build_started = Instant::now();
         let view = self.renderer.build(&mut self.yakui, &request);
+        let tree_build_ns = tree_build_started
+            .elapsed()
+            .as_nanos()
+            .min(u64::MAX as u128) as u64;
+        let layout_finalize_started = Instant::now();
         self.yakui.finish();
+        let layout_finalize_ns = layout_finalize_started
+            .elapsed()
+            .as_nanos()
+            .min(u64::MAX as u128) as u64;
         let view = view?;
         if let Some(widget_id) = view.focus_widget {
             self.yakui.request_focus(Some(widget_id));
@@ -268,7 +283,9 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
                 disposition.disposition = astra_ui_core::UiInputDispositionKind::Consumed;
             }
         }
+        let semantics_started = Instant::now();
         let semantics = self.renderer.semantics(&self.yakui, &request)?;
+        let semantics_ns = semantics_started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
         self.last_semantics = Some(semantics.clone());
         let update_layout_ns = update_started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
 
@@ -302,6 +319,10 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             actions,
             performance: UiPerformanceSample {
                 request_validation_ns,
+                input_routing_ns,
+                tree_build_ns,
+                layout_finalize_ns,
+                semantics_ns,
                 update_layout_ns,
                 paint_conversion_ns,
                 output_validation_ns: 0,

@@ -11,7 +11,7 @@ use luaur_rt as mlua;
 #[cfg(feature = "portable-luau-runtime")]
 use luaur_rt::{Lua, LuaSerdeExt, Table, Value};
 #[cfg(feature = "luau-runtime")]
-use mlua::{Lua, LuaSerdeExt, Table, Value};
+use mlua::{Compiler, Lua, LuaSerdeExt, Table, Value};
 use thiserror::Error;
 
 #[cfg(all(feature = "luau-runtime", feature = "portable-luau-runtime"))]
@@ -34,7 +34,18 @@ pub enum LuauUiControllerError {
 struct RegisteredController {
     manifest: VnUiControllerManifest,
     handlers: ControllerHandlerSet,
+    /// Retained for source inspection and deterministic registration diagnostics.
+    /// Invocation uses the native bytecode image where the runtime supports it.
     source: Arc<str>,
+    program: ControllerProgram,
+}
+
+#[derive(Clone)]
+enum ControllerProgram {
+    #[cfg(feature = "luau-runtime")]
+    Bytecode(Arc<[u8]>),
+    #[cfg(feature = "portable-luau-runtime")]
+    Source(Arc<str>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,7 +100,7 @@ impl LuauUiControllerHost {
         source: impl Into<String>,
     ) -> Result<(), LuauUiControllerError> {
         let source: Arc<str> = Arc::from(source.into());
-        let (_, registrations) = load_controller_source(&source, self.budget)?;
+        let (_, registrations, program) = compile_controller_source(&source, self.budget)?;
         if registrations.is_empty() {
             return Err(LuauUiControllerError::Registration(
                 "a controller source must register at least one controller".into(),
@@ -112,6 +123,7 @@ impl LuauUiControllerHost {
                         manifest: loaded.manifest,
                         handlers: loaded.handlers,
                         source: Arc::clone(&source),
+                        program: program.clone(),
                     },
                 )
             }));
@@ -196,7 +208,7 @@ impl LuauUiControllerHost {
             debug_assert!(!required, "required controller handler was not registered");
             return Ok(Vec::new());
         }
-        let (lua, registrations) = load_controller_source(&registered.source, self.budget)?;
+        let (lua, registrations) = load_controller_program(&registered.program, self.budget)?;
         let loaded = registrations.get(id).ok_or_else(|| {
             LuauUiControllerError::Registration(
                 "controller source did not reproduce its registered identity".into(),
@@ -276,18 +288,56 @@ impl ControllerInvocation<'_> {
     }
 }
 
-fn load_controller_source(
+fn compile_controller_source(
     source: &str,
+    budget: PolicyExecutionBudget,
+) -> Result<(Lua, BTreeMap<String, LoadedController>, ControllerProgram), LuauUiControllerError> {
+    let lua = create_sandboxed_lua(budget)
+        .map_err(|error| LuauUiControllerError::Registration(error.to_string()))?;
+    let registrations = Rc::new(RefCell::new(BTreeMap::new()));
+    install_ui_api(&lua, Rc::clone(&registrations))?;
+    let function = lua
+        .load(source)
+        .set_name("astra-ui-controller")
+        .into_function()
+        .map_err(runtime_error)?;
+    #[cfg(feature = "luau-runtime")]
+    let program = ControllerProgram::Bytecode(Arc::from(
+        Compiler::new()
+            .set_optimization_level(2)
+            .set_debug_level(0)
+            .compile(source)
+            .map_err(runtime_error)?,
+    ));
+    #[cfg(feature = "portable-luau-runtime")]
+    let program = ControllerProgram::Source(Arc::from(source));
+    function.call::<()>(()).map_err(runtime_error)?;
+    let registrations = registrations.borrow().clone();
+    Ok((lua, registrations, program))
+}
+
+fn load_controller_program(
+    program: &ControllerProgram,
     budget: PolicyExecutionBudget,
 ) -> Result<(Lua, BTreeMap<String, LoadedController>), LuauUiControllerError> {
     let lua = create_sandboxed_lua(budget)
         .map_err(|error| LuauUiControllerError::Registration(error.to_string()))?;
     let registrations = Rc::new(RefCell::new(BTreeMap::new()));
     install_ui_api(&lua, Rc::clone(&registrations))?;
-    lua.load(source)
-        .set_name("astra-ui-controller")
-        .exec()
-        .map_err(runtime_error)?;
+    match program {
+        #[cfg(feature = "luau-runtime")]
+        ControllerProgram::Bytecode(bytes) => lua
+            .load(bytes.as_ref())
+            .set_name("astra-ui-controller")
+            .exec()
+            .map_err(runtime_error)?,
+        #[cfg(feature = "portable-luau-runtime")]
+        ControllerProgram::Source(source) => lua
+            .load(source.as_ref())
+            .set_name("astra-ui-controller")
+            .exec()
+            .map_err(runtime_error)?,
+    }
     let registrations = registrations.borrow().clone();
     Ok((lua, registrations))
 }

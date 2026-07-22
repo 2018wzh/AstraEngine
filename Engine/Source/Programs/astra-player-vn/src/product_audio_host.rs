@@ -4,8 +4,8 @@ use std::{
 };
 
 use astra_media::{
-    AudioCommand, PcmAsset, PcmAssetResolver, ProductionAudioMixer, ProductionMixerSnapshot,
-    CANONICAL_CHANNELS, CANONICAL_FRAMES_PER_TICK, CANONICAL_SAMPLE_RATE,
+    AudioCommand, MixedTick, PcmAsset, PcmAssetResolver, ProductionAudioMixer,
+    ProductionMixerSnapshot, CANONICAL_CHANNELS, CANONICAL_FRAMES_PER_TICK, CANONICAL_SAMPLE_RATE,
 };
 use astra_player_core::{PlayerDecodedAudio, PlayerHostCommandResult, PlayerMixedAudio};
 
@@ -20,8 +20,58 @@ pub struct NativeVnProductAudioHost {
     known_bgm_targets: BTreeSet<String>,
     pending_fade_stops: BTreeMap<String, NativeVnPendingFadeStop>,
     last_meter: Option<NativeVnAudioMeterSnapshot>,
-    submitted_timeline: Vec<f32>,
+    submitted_timeline: SubmittedAudioTimeline,
     retain_submitted_timeline: bool,
+}
+
+/// Retains Headless review audio without repeatedly relocating the full run.
+///
+/// A single growing `Vec` copies every previously submitted sample whenever its
+/// capacity expands. On long 120 Hz runs that copy happens on the audio tick and
+/// can consume an entire frame deadline. Fixed-size chunks keep append cost
+/// bounded; the review artifact is materialized only when capture is requested.
+#[derive(Default)]
+struct SubmittedAudioTimeline {
+    chunks: Vec<Vec<f32>>,
+    sample_count: usize,
+}
+
+impl SubmittedAudioTimeline {
+    const CHUNK_SAMPLES: usize = CANONICAL_FRAMES_PER_TICK * CANONICAL_CHANNELS as usize * 120;
+
+    fn clear(&mut self) {
+        self.chunks.clear();
+        self.sample_count = 0;
+    }
+
+    fn extend_from_slice(&mut self, mut samples: &[f32]) {
+        while !samples.is_empty() {
+            let needs_chunk = self
+                .chunks
+                .last()
+                .is_none_or(|chunk| chunk.len() == Self::CHUNK_SAMPLES);
+            if needs_chunk {
+                self.chunks.push(Vec::with_capacity(Self::CHUNK_SAMPLES));
+            }
+            let chunk = self
+                .chunks
+                .last_mut()
+                .expect("a submitted-audio chunk was just allocated");
+            let count = samples.len().min(Self::CHUNK_SAMPLES - chunk.len());
+            chunk.extend_from_slice(&samples[..count]);
+            self.sample_count = self.sample_count.saturating_add(count);
+            samples = &samples[count..];
+        }
+    }
+
+    fn to_vec(&self) -> Vec<f32> {
+        let mut samples = Vec::with_capacity(self.sample_count);
+        for chunk in &self.chunks {
+            samples.extend_from_slice(chunk);
+        }
+        debug_assert_eq!(samples.len(), self.sample_count);
+        samples
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -102,7 +152,7 @@ impl NativeVnProductAudioHost {
             known_bgm_targets: BTreeSet::new(),
             pending_fade_stops: BTreeMap::new(),
             last_meter: None,
-            submitted_timeline: Vec::new(),
+            submitted_timeline: SubmittedAudioTimeline::default(),
             retain_submitted_timeline,
         }
     }
@@ -121,8 +171,8 @@ impl NativeVnProductAudioHost {
         self.last_meter
     }
 
-    pub fn submitted_timeline(&self) -> &[f32] {
-        &self.submitted_timeline
+    pub fn submitted_timeline(&self) -> Vec<f32> {
+        self.submitted_timeline.to_vec()
     }
 
     pub fn snapshot(&self) -> NativeVnProductAudioSnapshot {
@@ -384,7 +434,7 @@ impl NativeVnProductAudioHost {
                         "ASTRA_PLAYER_AUDIO_REPLACEMENT_OWNER_MISSING",
                     )
                 })?;
-            tracing::info!(
+            tracing::debug!(
                 event = "astra.player.audio.voice_replaced",
                 command_id = %request.command_id,
                 bus = %existing_bus,
@@ -445,7 +495,7 @@ impl NativeVnProductAudioHost {
         if request.command == "bgm" {
             self.known_bgm_targets.insert(request.command_id.clone());
         }
-        tracing::info!(
+        tracing::debug!(
             event = "astra.player.audio.voice_bound",
             command_id = %request.command_id,
             frame_count,
@@ -542,10 +592,15 @@ impl NativeVnProductAudioHost {
                 "ASTRA_PLAYER_AUDIO_OUTPUT_FORMAT_STATE_INVALID",
             ));
         }
+        let MixedTick {
+            samples,
+            completed_voices,
+            ..
+        } = mixed;
         if self.retain_submitted_timeline {
-            self.submitted_timeline.extend_from_slice(&mixed.samples);
+            self.submitted_timeline.extend_from_slice(&samples);
         }
-        let samples = upmix_canonical_stereo(&mixed.samples, output_channels)?;
+        let samples = upmix_canonical_stereo(samples, output_channels)?;
         let packet = PlayerMixedAudio {
             sample_rate: self.output_sample_rate,
             channels: output_channels,
@@ -555,7 +610,7 @@ impl NativeVnProductAudioHost {
         performance.render_ns = elapsed_ns(render_started, "player.audio.performance.render")?;
         let submit_started = profile.then(Instant::now);
         let submit = source
-            .prepare_persistent_audio_submit(output, self.next_packet_sequence, &packet)
+            .prepare_persistent_audio_submit(output, self.next_packet_sequence, packet)
             .map_err(|error| player_platform_error("player.audio.submit.prepare", error))?;
         executor
             .execute_batch(submit)
@@ -568,7 +623,7 @@ impl NativeVnProductAudioHost {
             .checked_add(1)
             .ok_or_else(|| player_platform_error("player.audio.submit", "sequence overflowed"))?;
         if self.next_packet_sequence.is_multiple_of(120) {
-            tracing::info!(
+            tracing::trace!(
                 event = "astra.player.audio.timeline_progress",
                 packet_sequence = self.next_packet_sequence,
                 active_voice_count = self
@@ -578,7 +633,7 @@ impl NativeVnProductAudioHost {
                 "Player production mixer advanced the canonical audio timeline"
             );
         }
-        for voice_id in mixed.completed_voices {
+        for voice_id in completed_voices {
             let kind = self.voice_kinds.remove(&voice_id).ok_or_else(|| {
                 player_platform_error("player.audio.complete", "completion owner is missing")
             })?;
@@ -587,7 +642,7 @@ impl NativeVnProductAudioHost {
             if kind == "voice" {
                 completed_signals.insert("voice_end".into());
             }
-            tracing::info!(
+            tracing::debug!(
                 event = "astra.player.audio.voice_completed",
                 voice_id = %voice_id,
                 kind,
@@ -631,7 +686,7 @@ impl NativeVnProductAudioHost {
             if kind == "voice" {
                 completed_signals.insert("voice_end".into());
             }
-            tracing::info!(
+            tracing::debug!(
                 event = "astra.player.audio.fade_stop_completed",
                 fade_id,
                 voice_id = %pending.voice_id,
@@ -689,7 +744,7 @@ impl NativeVnProductAudioHost {
                     &self.assets,
                 )
                 .map_err(|error| player_platform_error("player.audio.bus_enabled", error))?;
-            tracing::info!(
+            tracing::debug!(
                 event = "astra.player.audio.bus_enabled",
                 bus = %request.target,
                 enabled = request.action == "enable_bus",
@@ -729,7 +784,7 @@ impl NativeVnProductAudioHost {
                     completed_signals.insert(request.target.clone());
                     completed_signals.insert(format!("{}.end", request.target));
                     completed_signals.insert(fence.clone());
-                    tracing::info!(
+                    tracing::debug!(
                         event = "astra.player.audio.fade_stop_already_complete",
                         command_id = %request.command_id,
                         target = %request.target,
@@ -797,7 +852,7 @@ impl NativeVnProductAudioHost {
                     &self.assets,
                 )
                 .map_err(|error| player_platform_error("player.audio.fade_stop", error))?;
-            tracing::info!(
+            tracing::debug!(
                 event = "astra.player.audio.fade_stop_scheduled",
                 command_id = %request.command_id,
                 target = %request.target,
@@ -974,7 +1029,7 @@ fn elapsed_ns(
 }
 
 fn upmix_canonical_stereo(
-    canonical: &[f32],
+    canonical: Vec<f32>,
     output_channels: u16,
 ) -> Result<Vec<f32>, astra_platform::PlatformError> {
     if output_channels < CANONICAL_CHANNELS
@@ -988,7 +1043,7 @@ fn upmix_canonical_stereo(
         ));
     }
     if output_channels == CANONICAL_CHANNELS {
-        return Ok(canonical.to_vec());
+        return Ok(canonical);
     }
     let frame_count = canonical.len() / usize::from(CANONICAL_CHANNELS);
     let sample_count = frame_count
@@ -1059,11 +1114,37 @@ fn player_platform_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{upmix_canonical_stereo, NativeVnProductAudioHost, CANONICAL_SAMPLE_RATE};
+    use super::{
+        upmix_canonical_stereo, NativeVnProductAudioHost, SubmittedAudioTimeline,
+        CANONICAL_SAMPLE_RATE,
+    };
+
+    #[astra_headless_test::test]
+    fn submitted_audio_timeline_uses_bounded_chunks_without_changing_capture_order() {
+        let mut timeline = SubmittedAudioTimeline::default();
+        let input = (0..SubmittedAudioTimeline::CHUNK_SAMPLES + 17)
+            .map(|sample| sample as f32)
+            .collect::<Vec<_>>();
+
+        timeline.extend_from_slice(&input[..31]);
+        timeline.extend_from_slice(&input[31..]);
+
+        assert_eq!(timeline.chunks.len(), 2);
+        assert_eq!(
+            timeline.chunks[0].len(),
+            SubmittedAudioTimeline::CHUNK_SAMPLES
+        );
+        assert_eq!(timeline.chunks[1].len(), 17);
+        assert_eq!(timeline.to_vec(), input);
+
+        timeline.clear();
+        assert!(timeline.chunks.is_empty());
+        assert!(timeline.to_vec().is_empty());
+    }
 
     #[astra_headless_test::test]
     fn canonical_stereo_upmix_preserves_front_channels_and_silences_surround_channels() {
-        let output = upmix_canonical_stereo(&[0.25, -0.5, 0.75, -1.0], 8).unwrap();
+        let output = upmix_canonical_stereo(vec![0.25, -0.5, 0.75, -1.0], 8).unwrap();
 
         assert_eq!(output.len(), 16);
         assert_eq!(&output[..8], &[0.25, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);

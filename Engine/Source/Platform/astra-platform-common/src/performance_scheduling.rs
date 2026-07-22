@@ -1,8 +1,10 @@
 #[cfg(windows)]
 mod platform {
+    use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::Threading::{
+        AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, AvSetMmThreadPriority,
         GetCurrentProcess, GetCurrentThread, GetPriorityClass, GetThreadPriority, SetPriorityClass,
-        SetThreadPriority, HIGH_PRIORITY_CLASS, THREAD_PRIORITY_HIGHEST,
+        SetThreadPriority, AVRT_PRIORITY_HIGH, HIGH_PRIORITY_CLASS, THREAD_PRIORITY_HIGHEST,
     };
 
     const THREAD_PRIORITY_ERROR_RETURN: i32 = i32::MAX;
@@ -10,46 +12,76 @@ mod platform {
     pub struct PerformanceSchedulingGuard {
         process_priority: u32,
         thread_priority: i32,
+        mmcss_handle: Option<HANDLE>,
         restored: bool,
     }
 
     impl PerformanceSchedulingGuard {
         pub fn activate() -> Result<Self, String> {
-            // SAFETY: pseudo handles returned for the current process and thread remain valid
-            // for the duration of the call and must not be closed.
+            Self::activate_with_policy(THREAD_PRIORITY_HIGHEST, Some(AVRT_PRIORITY_HIGH))
+        }
+
+        pub fn activate_coordinator() -> Result<Self, String> {
+            Self::activate_with_policy(THREAD_PRIORITY_HIGHEST, Some(AVRT_PRIORITY_HIGH))
+        }
+
+        fn activate_with_policy(
+            thread_priority_target: i32,
+            mmcss_priority: Option<i32>,
+        ) -> Result<Self, String> {
+            // SAFETY: current-process/current-thread pseudo handles remain valid for the call
+            // and must not be closed.
             let process = unsafe { GetCurrentProcess() };
-            // SAFETY: `process` is the valid current-process pseudo handle.
             let process_priority = unsafe { GetPriorityClass(process) };
             if process_priority == 0 {
                 return Err(last_error(
                     "ASTRA_PERFORMANCE_PROCESS_PRIORITY_QUERY_FAILED",
                 ));
             }
-            // SAFETY: the API only changes the scheduling class of the current process.
             if unsafe { SetPriorityClass(process, HIGH_PRIORITY_CLASS) } == 0 {
                 return Err(last_error("ASTRA_PERFORMANCE_PROCESS_PRIORITY_SET_FAILED"));
             }
 
-            // SAFETY: pseudo handles returned for the current thread remain valid for the
-            // duration of the call and must not be closed.
             let thread = unsafe { GetCurrentThread() };
-            // SAFETY: `thread` is the valid current-thread pseudo handle.
             let thread_priority = unsafe { GetThreadPriority(thread) };
             if thread_priority == THREAD_PRIORITY_ERROR_RETURN {
-                // SAFETY: restore the process setting before returning the activation error.
                 unsafe { SetPriorityClass(process, process_priority) };
                 return Err(last_error("ASTRA_PERFORMANCE_THREAD_PRIORITY_QUERY_FAILED"));
             }
-            // SAFETY: the API only changes the scheduling priority of the current thread.
-            if unsafe { SetThreadPriority(thread, THREAD_PRIORITY_HIGHEST) } == 0 {
-                // SAFETY: restore the process setting before returning the activation error.
+            if unsafe { SetThreadPriority(thread, thread_priority_target) } == 0 {
                 unsafe { SetPriorityClass(process, process_priority) };
                 return Err(last_error("ASTRA_PERFORMANCE_THREAD_PRIORITY_SET_FAILED"));
             }
 
+            let mmcss_handle = if let Some(mmcss_priority) = mmcss_priority {
+                let mut task_index = 0;
+                let task_name = "Games\0".encode_utf16().collect::<Vec<_>>();
+                let handle =
+                    unsafe { AvSetMmThreadCharacteristicsW(task_name.as_ptr(), &mut task_index) };
+                if handle.is_null() {
+                    unsafe {
+                        SetThreadPriority(thread, thread_priority);
+                        SetPriorityClass(process, process_priority);
+                    }
+                    return Err(last_error("ASTRA_PERFORMANCE_MMCSS_REGISTER_FAILED"));
+                }
+                if unsafe { AvSetMmThreadPriority(handle, mmcss_priority) } == 0 {
+                    unsafe {
+                        AvRevertMmThreadCharacteristics(handle);
+                        SetThreadPriority(thread, thread_priority);
+                        SetPriorityClass(process, process_priority);
+                    }
+                    return Err(last_error("ASTRA_PERFORMANCE_MMCSS_PRIORITY_FAILED"));
+                }
+                Some(handle)
+            } else {
+                None
+            };
+
             Ok(Self {
                 process_priority,
                 thread_priority,
+                mmcss_handle,
                 restored: false,
             })
         }
@@ -61,14 +93,16 @@ mod platform {
         }
 
         fn restore_inner(&self) -> Result<(), String> {
-            // SAFETY: both APIs receive current-process/current-thread pseudo handles and the
-            // priority values returned by the corresponding query APIs during activation.
+            if let Some(handle) = self.mmcss_handle {
+                if unsafe { AvRevertMmThreadCharacteristics(handle) } == 0 {
+                    return Err(last_error("ASTRA_PERFORMANCE_MMCSS_RESTORE_FAILED"));
+                }
+            }
             if unsafe { SetThreadPriority(GetCurrentThread(), self.thread_priority) } == 0 {
                 return Err(last_error(
                     "ASTRA_PERFORMANCE_THREAD_PRIORITY_RESTORE_FAILED",
                 ));
             }
-            // SAFETY: see above.
             if unsafe { SetPriorityClass(GetCurrentProcess(), self.process_priority) } == 0 {
                 return Err(last_error(
                     "ASTRA_PERFORMANCE_PROCESS_PRIORITY_RESTORE_FAILED",
@@ -97,6 +131,10 @@ mod platform {
 
     impl PerformanceSchedulingGuard {
         pub fn activate() -> Result<Self, String> {
+            Err("ASTRA_PERFORMANCE_SCHEDULING_NOT_IMPLEMENTED".into())
+        }
+
+        pub fn activate_coordinator() -> Result<Self, String> {
             Err("ASTRA_PERFORMANCE_SCHEDULING_NOT_IMPLEMENTED".into())
         }
 
