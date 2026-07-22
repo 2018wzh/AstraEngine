@@ -76,7 +76,7 @@ impl YakuiPaintConverter {
             // save without recreating the platform surface), so make the
             // transition explicit and ordered: release every live texture
             // before re-uploading the stable ids below.
-            releases.extend(self.release_live_textures_for_resync());
+            releases.extend(self.release_live_textures_for_resync()?);
             for (id, texture) in textures.iter() {
                 self.sync_managed_texture(
                     texture_key(YakuiTextureId::Managed(id)),
@@ -326,7 +326,9 @@ impl YakuiPaintConverter {
             .collect()
     }
 
-    fn release_live_textures_for_resync(&mut self) -> Vec<UiTextureRelease> {
+    fn release_live_textures_for_resync(
+        &mut self,
+    ) -> Result<Vec<UiTextureRelease>, UiValidationError> {
         let releases = self
             .shared_textures
             .values()
@@ -335,13 +337,31 @@ impl YakuiPaintConverter {
                 generation: shared.generation,
             })
             .collect::<Vec<_>>();
-        // Keep only entries with active managed references. Those retain their
-        // identity and are uploaded again during the same frame; dormant
-        // entries are evicted because they cannot be represented after a full
-        // renderer synchronization.
+        // Keep only entries with active managed references. A resync advances
+        // their generation so the renderer observes a release of the old
+        // Scene2D resource followed by a distinct upload. Reusing the old
+        // generation would mutate one atlas resource twice in one submission.
         self.shared_textures
             .retain(|_, shared| shared.references > 0);
-        releases
+        for shared in self.shared_textures.values_mut() {
+            shared.generation = shared.generation.checked_add(1).ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_YAKUI_TEXTURE_GENERATION_OVERFLOW",
+                    "texture generation overflowed during full resync",
+                )
+            })?;
+        }
+        for binding in self.managed_textures.values_mut() {
+            let shared = self.shared_textures.get(&binding.content).ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_YAKUI_TEXTURE_REFERENCE",
+                    "managed texture binding disappeared during full resync",
+                )
+            })?;
+            binding.id = shared.id;
+            binding.generation = shared.generation;
+        }
+        Ok(releases)
     }
 }
 
@@ -645,7 +665,7 @@ mod tests {
             .copied()
             .unwrap();
 
-        let releases = converter.release_live_textures_for_resync();
+        let releases = converter.release_live_textures_for_resync().unwrap();
         assert_eq!(releases.len(), 1);
         assert_eq!(releases[0].id, binding.id);
         assert_eq!(releases[0].generation, binding.generation);
@@ -661,6 +681,6 @@ mod tests {
             .unwrap();
         assert_eq!(replay.len(), 1);
         assert_eq!(replay[0].id, binding.id);
-        assert_eq!(replay[0].generation, binding.generation);
+        assert_eq!(replay[0].generation, binding.generation + 1);
     }
 }
