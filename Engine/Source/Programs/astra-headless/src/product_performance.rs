@@ -82,6 +82,7 @@ struct RecorderState {
     measurement_started: Option<Instant>,
     measurement_stopped: Option<Instant>,
     measurement_frame_count: u64,
+    measurement_sample_capacity: u64,
     next_frame_deadline: Option<Instant>,
     paced_frame_count: u64,
     presentation_rate_hz: u32,
@@ -143,6 +144,18 @@ impl ProductPerformanceRecorder {
     ) -> Result<Self, String> {
         budget.validate().map_err(|error| error.to_string())?;
         validate_product_budget(&budget)?;
+        let measurement_sample_capacity = budget
+            .metrics
+            .first()
+            .map(|metric| metric.max_samples)
+            .ok_or("ASTRA_PERFORMANCE_PRODUCT_BUDGET_EMPTY")?
+            .try_into()
+            .map_err(|_| "ASTRA_PERFORMANCE_PRODUCT_SAMPLE_CAPACITY_OVERFLOW")?;
+        if budget.metrics.iter().any(|metric| {
+            u64::try_from(metric.max_samples).ok() != Some(measurement_sample_capacity)
+        }) {
+            return Err("ASTRA_PERFORMANCE_PRODUCT_SAMPLE_CAPACITY_MISMATCH".into());
+        }
         if presentation_rate_hz != astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ {
             return Err("ASTRA_PERFORMANCE_PRESENTATION_RATE_INVALID".into());
         }
@@ -169,6 +182,7 @@ impl ProductPerformanceRecorder {
                 measurement_started: (warmup_frames == 0).then(Instant::now),
                 measurement_stopped: None,
                 measurement_frame_count: 0,
+                measurement_sample_capacity,
                 next_frame_deadline: None,
                 paced_frame_count: 0,
                 presentation_rate_hz,
@@ -489,7 +503,10 @@ impl ProductPerformanceRecorder {
             return Err("ASTRA_PERFORMANCE_START_SEQUENCE_NOT_REACHED".into());
         }
         if state.gpu_measurement_cutoff.is_some() {
-            return Err("ASTRA_PERFORMANCE_GPU_MEASUREMENT_ALREADY_STOPPED".into());
+            // The recorder may have stopped itself exactly at the declared
+            // sample capacity while the product input sequence continues.
+            // Explicit shutdown is then a no-op, not a second measurement.
+            return Ok(());
         }
         state.gpu_measurement_cutoff = Some(
             state
@@ -953,6 +970,14 @@ impl ProductPerformanceRecorder {
                 .recorder
                 .record(metric, value)
                 .map_err(|error| performance_error(&error.to_string()))?;
+        }
+        if state.measurement_frame_count == state.measurement_sample_capacity {
+            // Product input sequences can contain additional physical events
+            // after their 72,000-frame steady segment. Stop precisely at the
+            // bounded budget instead of recording one extra frame and failing
+            // after an otherwise valid ten-minute measurement.
+            state.gpu_measurement_cutoff = Some(sample.sequence);
+            state.measurement_stopped = Some(Instant::now());
         }
         // Timestamp queries resolve on the next materialization so the CPU never
         // waits for the just-submitted frame. The report retains every measured
@@ -1745,6 +1770,15 @@ mod tests {
         recorder.record_gpu_frame(sample).unwrap();
         recorder.finish_presentation_scope().unwrap();
         recorder.end_input_flow(3).unwrap();
+        {
+            let guard = recorder.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert_eq!(state.measurement_frame_count, 1);
+            assert_eq!(state.gpu_measurement_cutoff, Some(2));
+        }
+        // The product may still have physical inputs after the budget closes.
+        // Shutdown must preserve the exact completed measurement instead of
+        // treating that normal path as a duplicate-stop error.
         recorder.stop_gpu_measurement().unwrap();
         recorder
             .finish(
