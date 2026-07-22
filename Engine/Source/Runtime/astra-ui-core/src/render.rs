@@ -107,8 +107,8 @@ impl ValidateUi for UiRenderFrame {
                 format!("draw call count exceeds {MAX_DRAW_CALLS}"),
             ));
         }
-        let mut texture_ops = BTreeSet::new();
         let mut uploaded = BTreeSet::new();
+        let mut released = BTreeSet::new();
         let mut texture_bytes = 0usize;
         for upload in &self.textures.uploads {
             if upload.width == 0 || upload.height == 0 {
@@ -143,20 +143,26 @@ impl ValidateUi for UiRenderFrame {
                 ));
             }
             let key = (upload.id, upload.generation);
-            if !texture_ops.insert(key) {
+            if !uploaded.insert(key) {
                 return Err(UiValidationError::invalid(
                     "ASTRA_UI_TEXTURE_DUPLICATE",
                     "duplicate texture operation in frame",
                 ));
             }
-            uploaded.insert(key);
             texture_bytes = texture_bytes.saturating_add(upload.pixels.len());
         }
         for release in &self.textures.releases {
-            if !texture_ops.insert((release.id, release.generation)) {
+            let key = (release.id, release.generation);
+            if !released.insert(key) {
+                return Err(UiValidationError::invalid(
+                    "ASTRA_UI_TEXTURE_DUPLICATE",
+                    "duplicate texture release in frame",
+                ));
+            }
+            if uploaded.contains(&key) && !self.textures.full_resync {
                 return Err(UiValidationError::invalid(
                     "ASTRA_UI_TEXTURE_CONFLICT",
-                    "texture cannot be uploaded and released in one transaction",
+                    "texture cannot be uploaded and released in one transaction without a full resync",
                 ));
             }
         }
@@ -241,5 +247,56 @@ impl ValidateUi for UiRenderFrame {
             ));
         }
         crate::validate_serialized_size(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{UiInsets, ValidateUi};
+
+    fn frame(full_resync: bool) -> UiRenderFrame {
+        let pixels: Arc<[u8]> = vec![255].into();
+        UiRenderFrame {
+            schema: "astra.ui_render_frame.v1".into(),
+            session_id: "ui.test".into(),
+            generation: 1,
+            viewport: UiViewport {
+                physical_width: 1,
+                physical_height: 1,
+                scale_factor: 1.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
+            textures: UiTextureDelta {
+                uploads: vec![UiTextureUpload {
+                    id: UiTextureId(1),
+                    generation: 1,
+                    width: 1,
+                    height: 1,
+                    format: UiTextureFormat::R8Unorm,
+                    content_hash: Hash256::from_sha256(&pixels),
+                    pixels,
+                }],
+                releases: vec![UiTextureRelease {
+                    id: UiTextureId(1),
+                    generation: 1,
+                }],
+                full_resync,
+            },
+            primitives: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn full_resync_allows_ordered_release_and_reupload() {
+        frame(true).validate().unwrap();
+        let error = frame(false).validate().unwrap_err();
+        assert_eq!(error.code(), "ASTRA_UI_TEXTURE_CONFLICT");
     }
 }
