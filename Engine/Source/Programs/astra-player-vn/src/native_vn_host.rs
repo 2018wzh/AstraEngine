@@ -242,6 +242,9 @@ pub struct NativeVnUiHostPerformanceSample {
     pub runtime_host_step_ns: u64,
     pub runtime_output_decode_ns: u64,
     pub runtime_render_ns: u64,
+    pub stage_prepare_ns: u64,
+    pub stage_scene_ns: u64,
+    pub scene_compose_ns: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2840,6 +2843,15 @@ impl NativeVnHostCommandSource {
         sample.runtime_render_ns = sample
             .runtime_render_ns
             .saturating_add(incoming.runtime_render_ns);
+        sample.stage_prepare_ns = sample
+            .stage_prepare_ns
+            .saturating_add(incoming.stage_prepare_ns);
+        sample.stage_scene_ns = sample
+            .stage_scene_ns
+            .saturating_add(incoming.stage_scene_ns);
+        sample.scene_compose_ns = sample
+            .scene_compose_ns
+            .saturating_add(incoming.scene_compose_ns);
     }
 
     fn render_ui(
@@ -3597,6 +3609,8 @@ impl NativeVnHostCommandSource {
         ordered_outputs: &[NativeVnOrderedRuntimeOutput],
         presentation_count: usize,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        let stage_prepare_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         let stage_commands = ordered_outputs
             .iter()
             .filter_map(|output| match output {
@@ -3727,6 +3741,12 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
+        let stage_prepare_ns = performance_phase_duration(stage_prepare_started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.stage_prepare_ns = sample.stage_prepare_ns.saturating_add(stage_prepare_ns);
+        }
+        let stage_scene_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         let mut lifecycle = Vec::new();
         let next_stage_scene = if let Some(director) = next_stage_director.as_ref() {
             self.ensure_stage_textures(director.state())?;
@@ -3755,6 +3775,10 @@ impl NativeVnHostCommandSource {
         } else {
             None
         };
+        let stage_scene_ns = performance_phase_duration(stage_scene_started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.stage_scene_ns = sample.stage_scene_ns.saturating_add(stage_scene_ns);
+        }
 
         for command in ordered_outputs.iter().filter_map(|output| match output {
             NativeVnOrderedRuntimeOutput::Presentation(command) => Some(command),
@@ -3784,6 +3808,8 @@ impl NativeVnHostCommandSource {
         } else {
             None
         };
+        let scene_compose_started =
+            performance_phase_started(self.ui_host_performance_sampling_enabled);
         if ui_frame.is_none() && !self.live_layout_ids.is_empty() {
             let layout_ids = self.live_layout_ids.iter().cloned().collect::<Vec<_>>();
             let removal_refs = layout_ids.iter().map(String::as_str).collect::<Vec<_>>();
@@ -3842,17 +3868,20 @@ impl NativeVnHostCommandSource {
             );
         }
         self.pending_audio.extend(next_audio);
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::PresentScene {
-                sequence: self.command_sequence,
-                surface: self.surface,
-                width: self.width,
-                height: self.height,
-                clear_rgba: [8, 10, 16, 255],
-                commands: lifecycle,
-                semantics: self.ui_semantics.clone(),
-            },
-        ])?)
+        let batch = PlayerHostCommandBatch::new(vec![PlayerHostCommand::PresentScene {
+            sequence: self.command_sequence,
+            surface: self.surface,
+            width: self.width,
+            height: self.height,
+            clear_rgba: [8, 10, 16, 255],
+            commands: lifecycle,
+            semantics: self.ui_semantics.clone(),
+        }])?;
+        let scene_compose_ns = performance_phase_duration(scene_compose_started)?;
+        if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
+            sample.scene_compose_ns = sample.scene_compose_ns.saturating_add(scene_compose_ns);
+        }
+        Ok(batch)
     }
 
     fn ensure_stage_textures(
