@@ -329,23 +329,16 @@ impl<'a> DeterministicActionContext<'a> {
         component_id: ComponentId,
         bytes: Arc<[u8]>,
     ) -> Result<(Hash256, Hash128), RuntimeError> {
-        let state_hash = Hash128::from_blake3(&bytes);
-        self.replace_component_encoded_postcard_prehashed(component_id, bytes, state_hash)
+        let encoding = crate::ValidatedRuntimeComponentEncoding::postcard(bytes);
+        self.replace_component_validated_postcard(component_id, encoding)
     }
 
-    /// Replaces an already encoded postcard component while reusing the
-    /// authoritative hash produced from the exact encoded byte sequence.
-    ///
-    /// Reducers that serialize state in order to compute their public state
-    /// hash would otherwise hash the same growing payload again at the Runtime
-    /// boundary. The component's SHA-256 storage hash is still computed here;
-    /// callers may only reuse the BLAKE3 state hash that accompanies these
-    /// precise bytes.
-    pub fn replace_component_encoded_postcard_prehashed(
+    /// Replaces an encoded postcard component whose SHA-256 storage hash and
+    /// BLAKE3 state hash were computed together from the owned bytes.
+    pub fn replace_component_validated_postcard(
         &mut self,
         component_id: ComponentId,
-        bytes: Arc<[u8]>,
-        state_hash: Hash128,
+        encoding: crate::ValidatedRuntimeComponentEncoding,
     ) -> Result<(Hash256, Hash128), RuntimeError> {
         let component = self.actors.component_mut(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
@@ -355,10 +348,11 @@ impl<'a> DeterministicActionContext<'a> {
         })?;
         let before_hash = component.payload.hash;
         let schema = component.payload.schema.clone();
-        let payload = crate::RuntimeComponentPayload::encoded_postcard(
+        let state_hash = encoding.state_hash();
+        let payload = crate::RuntimeComponentPayload::validated_encoded_postcard(
             component.payload.schema.clone(),
             component.payload.version,
-            bytes,
+            encoding,
         );
         let after_hash = payload.hash;
         component.payload = payload;

@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::RuntimeError;
 
@@ -63,6 +64,46 @@ pub struct RuntimeComponentPayload {
     pub(crate) bytes: Arc<[u8]>,
 }
 
+/// An encoded postcard component whose storage and deterministic hashes were
+/// computed together from the owned byte sequence.
+///
+/// Keeping the bytes and hashes in one opaque value prevents callers from
+/// pairing a digest with different bytes while allowing hot reducers to avoid
+/// scanning a growing component once per hash algorithm.
+#[derive(Debug, Clone)]
+pub struct ValidatedRuntimeComponentEncoding {
+    bytes: Arc<[u8]>,
+    storage_hash: Hash256,
+    state_hash: Hash128,
+}
+
+impl ValidatedRuntimeComponentEncoding {
+    pub fn postcard(bytes: Arc<[u8]>) -> Self {
+        let mut storage = Sha256::new();
+        let mut state = blake3::Hasher::new();
+        for chunk in bytes.chunks(64 * 1024) {
+            storage.update(chunk);
+            state.update(chunk);
+        }
+        let storage_hash = Hash256::from_bytes(storage.finalize().into());
+        let mut state_bytes = [0_u8; 16];
+        state_bytes.copy_from_slice(&state.finalize().as_bytes()[..16]);
+        Self {
+            bytes,
+            storage_hash,
+            state_hash: Hash128::from_bytes(state_bytes),
+        }
+    }
+
+    pub fn storage_hash(&self) -> Hash256 {
+        self.storage_hash
+    }
+
+    pub fn state_hash(&self) -> Hash128 {
+        self.state_hash
+    }
+}
+
 #[derive(Deserialize)]
 struct RuntimeComponentPayloadWire {
     schema: SchemaId,
@@ -110,17 +151,17 @@ impl RuntimeComponentPayload {
         })
     }
 
-    pub(crate) fn encoded_postcard(
+    pub(crate) fn validated_encoded_postcard(
         schema: impl Into<SchemaId>,
         version: SchemaVersion,
-        bytes: Arc<[u8]>,
+        encoding: ValidatedRuntimeComponentEncoding,
     ) -> Self {
         Self {
             schema: schema.into(),
             version,
             codec: RuntimePayloadCodec::Postcard,
-            hash: Hash256::from_sha256(&bytes),
-            bytes,
+            hash: encoding.storage_hash,
+            bytes: encoding.bytes,
         }
     }
 

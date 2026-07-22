@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 astra-core = { path = "../astra-core" }
 astra-package = { path = "../astra-package" }
+blake3.workspace = true
 indexmap.workspace = true
 postcard.workspace = true
 schemars.workspace = true

@@ -1735,6 +1735,7 @@ dependencies = [
  "astra-core",
  "astra-headless-test",
  "astra-package",
+ "blake3",
  "indexmap",
  "postcard",
  "schemars",

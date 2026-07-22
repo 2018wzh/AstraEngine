@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use astra_core::{SchemaVersion, StableId};
+use astra_core::{Hash128, Hash256, SchemaVersion, StableId};
 use astra_runtime::{
     ActorId, EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeComponentPayload,
     RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, ValidatedModuleBinding,
+    ValidatedRuntimeComponentEncoding,
 };
 use serde::{Deserialize, Serialize};
 
@@ -163,4 +164,18 @@ fn component_payload_clone_shares_wire_compatible_immutable_bytes() {
             count: 7,
         }
     );
+}
+
+#[test]
+fn validated_component_encoding_binds_both_hashes_to_shared_bytes() {
+    let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
+        status: "validated".to_string(),
+        count: 11,
+    })
+    .unwrap()
+    .into();
+    let encoding = ValidatedRuntimeComponentEncoding::postcard(Arc::clone(&bytes));
+
+    assert_eq!(encoding.storage_hash(), Hash256::from_sha256(&bytes));
+    assert_eq!(encoding.state_hash(), Hash128::from_blake3(&bytes));
 }
