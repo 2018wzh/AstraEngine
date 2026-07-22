@@ -170,6 +170,7 @@ struct NativeVnSession {
     compiled: Arc<CoreCompiledStory>,
     runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
+    state_cache: Arc<Mutex<Option<VnStepStateCache>>>,
 }
 
 struct VnStepAction {
@@ -177,7 +178,7 @@ struct VnStepAction {
     compiled: Arc<CoreCompiledStory>,
     runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
-    state_cache: Mutex<Option<VnStepStateCache>>,
+    state_cache: Arc<Mutex<Option<VnStepStateCache>>>,
 }
 
 struct VnStepStateCache {
@@ -232,6 +233,11 @@ impl NativeVnRuntimeProvider {
                     RuntimeOutputDomain::Trace,
                     VN_RUNTIME_STATE_SCHEMA,
                     VN_RUNTIME_STATE_SCHEMA_MAJOR,
+                ),
+                output_schema(
+                    RuntimeOutputDomain::Trace,
+                    VN_RUNTIME_VIEW_STATE_SCHEMA,
+                    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
                 ),
                 output_schema(
                     RuntimeOutputDomain::DirtySaveSection,
@@ -332,6 +338,7 @@ impl NativeVnRuntimeProvider {
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         let output = Arc::new(Mutex::new(None));
+        let state_cache = Arc::new(Mutex::new(None));
         world
             .register_action(
                 NATIVE_VN_PROVIDER_ID,
@@ -340,7 +347,7 @@ impl NativeVnRuntimeProvider {
                     compiled: Arc::clone(&compiled),
                     runtime_index: Arc::clone(&runtime_index),
                     output: Arc::clone(&output),
-                    state_cache: Mutex::new(None),
+                    state_cache: Arc::clone(&state_cache),
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?;
@@ -383,6 +390,7 @@ impl NativeVnRuntimeProvider {
                 compiled,
                 runtime_index,
                 output,
+                state_cache,
             },
         );
         Ok(RuntimeOpenReport {
@@ -539,6 +547,19 @@ impl NativeVnRuntimeProvider {
             .world
             .read_component_postcard_payload(session.vn_component)
             .map_err(|err| CoreVnError::message(err.to_string()))?;
+        let runtime_view_state = {
+            let cache = session
+                .state_cache
+                .lock()
+                .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?;
+            let cached = cache.as_ref().ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_VIEW_STATE_MISSING",
+                    "VN step did not retain its validated state for the Player view",
+                )
+            })?;
+            runtime_view_state(&cached.state, cached.state_hash)
+        };
         // Audio cues are also typed presentation commands. Preserve their position
         // relative to stage audio controls instead of grouping output by domain:
         // a BGM start followed by fade-stop must never be observed in reverse.
@@ -633,6 +654,13 @@ impl NativeVnRuntimeProvider {
                 SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
                 current_state_bytes,
             ),
+            RuntimeOutputEnvelope::postcard(
+                RuntimeOutputDomain::Trace,
+                VN_RUNTIME_VIEW_STATE_SCHEMA,
+                SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
+                &runtime_view_state,
+            )
+            .map_err(|err| CoreVnError::message(err.to_string()))?,
         ];
         let observations = vec![RuntimeOutputEnvelope::postcard(
             RuntimeOutputDomain::Observation,
@@ -934,6 +962,57 @@ fn runtime_command_from_input(
             "ASTRA_NATIVE_VN_ACTION_UNKNOWN",
             format!("runtime action {other} is not supported"),
         )),
+    }
+}
+
+fn runtime_view_state(
+    state: &VnRuntimeState,
+    authoritative_state_hash: Hash128,
+) -> VnRuntimeViewState {
+    let active_page = state.system_stack.last().map(|frame| frame.page);
+    let backlog = if active_page == Some(SystemPageKind::Backlog) {
+        state.backlog.clone()
+    } else {
+        state.backlog.last().cloned().into_iter().collect()
+    };
+    let voice_replay = if active_page == Some(SystemPageKind::VoiceReplay) {
+        state.voice_replay.clone()
+    } else {
+        BTreeMap::new()
+    };
+    let expose_route_history =
+        active_page == Some(SystemPageKind::RouteChart) || state.cursor.is_none();
+    VnRuntimeViewState {
+        schema: VN_RUNTIME_VIEW_STATE_SCHEMA.to_string(),
+        authoritative_state_hash,
+        backlog_count: state.backlog.len(),
+        state: VnRuntimeState {
+            schema: state.schema.clone(),
+            instance_id: state.instance_id.clone(),
+            profile: state.profile.clone(),
+            locale: state.locale.clone(),
+            cursor: state.cursor.clone(),
+            call_stack: state.call_stack.clone(),
+            system_stack: state.system_stack.clone(),
+            system: state.system.clone(),
+            pending_choice: state.pending_choice.clone(),
+            variables: state.variables.clone(),
+            backlog,
+            read_state: Default::default(),
+            voice_replay,
+            route_coverage: if expose_route_history {
+                state.route_coverage.clone()
+            } else {
+                Default::default()
+            },
+            route_flags: if expose_route_history {
+                state.route_flags.clone()
+            } else {
+                Default::default()
+            },
+            wait_sequence: state.wait_sequence,
+            pending_wait: state.pending_wait.clone(),
+        },
     }
 }
 
@@ -1639,5 +1718,122 @@ fn ffi_error(code: &'static str, message: String) -> FfiRuntimeProviderResult {
         ok: false,
         payload: RVec::new(),
         diagnostics: RVec::from(vec![RString::from(format!("{code}: {message}"))]),
+    }
+}
+
+#[cfg(test)]
+mod runtime_view_tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn cursor(command_id: &str) -> VnCommandCursor {
+        VnCommandCursor {
+            story_id: "story".into(),
+            state_id: "state".into(),
+            scene_id: "scene".into(),
+            command_id: command_id.into(),
+            ordinal: 0,
+        }
+    }
+
+    fn backlog_entry(command_id: &str) -> BacklogEntry {
+        BacklogEntry {
+            command_id: command_id.into(),
+            key: format!("key.{command_id}"),
+            speaker: None,
+            voice: None,
+            story_id: "story".into(),
+            state_id: "state".into(),
+            route_position: 0,
+            read: true,
+            layout: BacklogLayoutMetadata { window: None },
+        }
+    }
+
+    fn state() -> VnRuntimeState {
+        VnRuntimeState {
+            schema: VN_RUNTIME_STATE_SCHEMA.into(),
+            instance_id: "instance".into(),
+            profile: "classic".into(),
+            locale: "ja-JP".into(),
+            cursor: Some(cursor("current")),
+            call_stack: Vec::new(),
+            system_stack: Vec::new(),
+            system: VnSystemState::default(),
+            pending_choice: None,
+            variables: BTreeMap::new(),
+            backlog: vec![backlog_entry("first"), backlog_entry("last")],
+            read_state: BTreeSet::from(["read.command".into()]),
+            voice_replay: BTreeMap::from([(
+                "voice".into(),
+                VoiceReplayEntry {
+                    voice: "voice".into(),
+                    line_key: "line".into(),
+                    speaker: None,
+                },
+            )]),
+            route_coverage: BTreeSet::from(["route".into()]),
+            route_flags: BTreeMap::from([(
+                "route".into(),
+                VnRouteFlag::new(VnRouteFlagKind::Launch, "source", "target"),
+            )]),
+            wait_sequence: 0,
+            pending_wait: None,
+        }
+    }
+
+    fn open_page(state: &mut VnRuntimeState, page: SystemPageKind) {
+        state.system_stack.push(VnSystemFrame {
+            return_to: cursor("return"),
+            return_wait: None,
+            return_choice: None,
+            page,
+        });
+    }
+
+    #[test]
+    fn ordinary_runtime_view_is_bounded_but_preserves_authoritative_count() {
+        let state = state();
+        let hash = Hash128::from_bytes([7; 16]);
+        let view = runtime_view_state(&state, hash);
+
+        assert_eq!(view.authoritative_state_hash, hash);
+        assert_eq!(view.backlog_count, 2);
+        assert_eq!(view.state.backlog, vec![backlog_entry("last")]);
+        assert!(view.state.read_state.is_empty());
+        assert!(view.state.voice_replay.is_empty());
+        assert!(view.state.route_coverage.is_empty());
+        assert!(view.state.route_flags.is_empty());
+    }
+
+    #[test]
+    fn system_pages_expose_only_the_history_the_page_owns() {
+        let mut backlog = state();
+        open_page(&mut backlog, SystemPageKind::Backlog);
+        let backlog_view = runtime_view_state(&backlog, Hash128::from_bytes([1; 16]));
+        assert_eq!(backlog_view.state.backlog, backlog.backlog);
+        assert!(backlog_view.state.voice_replay.is_empty());
+
+        let mut voice = state();
+        open_page(&mut voice, SystemPageKind::VoiceReplay);
+        let voice_view = runtime_view_state(&voice, Hash128::from_bytes([2; 16]));
+        assert_eq!(voice_view.state.voice_replay, voice.voice_replay);
+        assert_eq!(voice_view.state.backlog.len(), 1);
+
+        let mut route = state();
+        open_page(&mut route, SystemPageKind::RouteChart);
+        let route_view = runtime_view_state(&route, Hash128::from_bytes([3; 16]));
+        assert_eq!(route_view.state.route_coverage, route.route_coverage);
+        assert_eq!(route_view.state.route_flags, route.route_flags);
+        assert!(route_view.state.voice_replay.is_empty());
+    }
+
+    #[test]
+    fn terminal_runtime_view_exposes_route_completion_evidence() {
+        let mut state = state();
+        state.cursor = None;
+        let view = runtime_view_state(&state, Hash128::from_bytes([4; 16]));
+        assert_eq!(view.state.route_coverage, state.route_coverage);
+        assert_eq!(view.state.route_flags, state.route_flags);
     }
 }

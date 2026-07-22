@@ -40,8 +40,9 @@ use astra_vn_core::{
     CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, ReadingMode,
     SaveCompletionPolicy, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
     StageLayerKind, SystemPageKind, SystemUiProfilePolicy, TimelineCommand, VnAudioBus,
-    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState, VnWaitKind,
-    VN_RUNTIME_STATE_SCHEMA, VN_RUNTIME_STATE_SCHEMA_MAJOR,
+    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    VnRuntimeViewState, VnWaitKind, VN_RUNTIME_STATE_SCHEMA, VN_RUNTIME_VIEW_STATE_SCHEMA,
+    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
 };
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
@@ -104,6 +105,7 @@ pub struct NativeVnHostCommandSource {
     host: ProductRuntimeHost,
     session_id: GameRuntimeSessionId,
     runtime_state: Option<VnRuntimeState>,
+    runtime_backlog_count: usize,
     text_provider: Arc<CosmicTextLayoutProvider>,
     font_families: Vec<String>,
     available_font_families: Vec<String>,
@@ -695,6 +697,7 @@ impl NativeVnHostCommandSource {
             host,
             session_id: open.session_id,
             runtime_state: None,
+            runtime_backlog_count: 0,
             text_provider: binding.presentation.text_provider,
             font_families: ordered_font_families,
             available_font_families: binding.presentation.font_families,
@@ -1026,7 +1029,7 @@ impl NativeVnHostCommandSource {
             audio_enabled: state.system.audio_enabled,
             skip_allowed: state.system.skip_allowed,
             system_config: state.system.config.clone(),
-            backlog_count: state.backlog.len(),
+            backlog_count: self.runtime_backlog_count,
             occupied_save_slot_count: self
                 .ui_save_slots
                 .values()
@@ -1482,11 +1485,11 @@ impl NativeVnHostCommandSource {
                 "ASTRA_PLAYER_SAVE_SLOT_INVALID: save slot must not be empty".into(),
             ));
         }
-        let runtime_state = self.runtime_state.clone().ok_or_else(|| {
-            NativeVnHostError::Save(
+        if self.runtime_state.is_none() {
+            return Err(NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_STATE_MISSING: runtime has not launched".into(),
-            )
-        })?;
+            ));
+        }
         let step_evidence = self.last_step_evidence.clone().ok_or_else(|| {
             NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_EVIDENCE_MISSING: runtime has no completed step".into(),
@@ -1496,7 +1499,7 @@ impl NativeVnHostCommandSource {
             session_id: self.session_id.clone(),
             slot: slot.clone(),
         })?;
-        validate_saved_runtime_state(&sections)?;
+        let runtime_state = saved_runtime_state(&sections)?;
         let retained_draw = std::iter::once(SceneCommand::rect(
             "vn.frame.clear",
             0,
@@ -1610,6 +1613,10 @@ impl NativeVnHostCommandSource {
             })?;
         let save_metadata = envelope.payload.save_metadata;
         self.runtime_state = Some(envelope.payload.runtime_state);
+        self.runtime_backlog_count = self
+            .runtime_state
+            .as_ref()
+            .map_or(0, |state| state.backlog.len());
         self.activate_locale(&restored_locale)?;
         self.stage_director = envelope.payload.stage_director;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
@@ -3340,23 +3347,32 @@ impl NativeVnHostCommandSource {
                 SchemaVersion::new(1, 0, 0),
             )
             .map_err(|err| NativeVnHostError::RuntimeEvidence(err.to_string()))?;
-        for trace in output
+        let runtime_view = output
             .outputs
             .iter()
-            .filter(|envelope| envelope.domain == RuntimeOutputDomain::Trace)
-        {
-            if trace.schema == VN_RUNTIME_STATE_SCHEMA {
-                self.runtime_state = Some(
-                    trace
-                        .decode_postcard(
-                            RuntimeOutputDomain::Trace,
-                            VN_RUNTIME_STATE_SCHEMA,
-                            SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
-                        )
-                        .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?,
-                );
-            }
+            .find(|envelope| {
+                envelope.domain == RuntimeOutputDomain::Trace
+                    && envelope.schema == VN_RUNTIME_VIEW_STATE_SCHEMA
+            })
+            .ok_or_else(|| {
+                NativeVnHostError::RuntimeEvidence(
+                    "ASTRA_PLAYER_VN_VIEW_STATE_MISSING: runtime view state trace is required"
+                        .into(),
+                )
+            })?
+            .decode_postcard::<VnRuntimeViewState>(
+                RuntimeOutputDomain::Trace,
+                VN_RUNTIME_VIEW_STATE_SCHEMA,
+                SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
+            )
+            .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
+        if runtime_view.schema != VN_RUNTIME_VIEW_STATE_SCHEMA {
+            return Err(NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_VIEW_STATE_SCHEMA: runtime view state schema is invalid".into(),
+            ));
         }
+        self.runtime_backlog_count = runtime_view.backlog_count;
+        self.runtime_state = Some(runtime_view.state);
         self.queue_current_story_audio_preloads()?;
         let runtime_state = self.runtime_state.as_ref().ok_or_else(|| {
             NativeVnHostError::RuntimeEvidence(
@@ -3864,6 +3880,12 @@ fn validate_product_provider_bindings(
 }
 
 fn validate_saved_runtime_state(sections: &RuntimeSaveSections) -> Result<(), NativeVnHostError> {
+    saved_runtime_state(sections).map(|_| ())
+}
+
+fn saved_runtime_state(
+    sections: &RuntimeSaveSections,
+) -> Result<VnRuntimeState, NativeVnHostError> {
     let [section] = sections.sections.as_slice() else {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_RUNTIME_SECTION_SET: exactly one runtime.world section is required"
@@ -3880,12 +3902,35 @@ fn validate_saved_runtime_state(sections: &RuntimeSaveSections) -> Result<(), Na
             "ASTRA_PLAYER_SAVE_INTEGRITY: runtime section contract or hash mismatch".into(),
         ));
     }
-    astra_runtime::read_runtime_save(
+    let snapshot = astra_runtime::read_runtime_save(
         &astra_runtime::SaveBlob(section.bytes.clone()),
         &astra_core::SchemaMigrationRegistry::default(),
     )
     .map_err(|error| NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}")))?;
-    Ok(())
+    let mut states = snapshot
+        .actors
+        .actor_snapshots()
+        .into_iter()
+        .flat_map(|actor| snapshot.actors.component_snapshots(actor.actor_id))
+        .filter(|component| component.payload.schema().as_str() == VN_RUNTIME_STATE_SCHEMA)
+        .map(|component| {
+            component
+                .payload
+                .decode::<VnRuntimeState>()
+                .map_err(|error| {
+                    NativeVnHostError::Save(format!(
+                        "ASTRA_PLAYER_SAVE_RUNTIME_STATE_INVALID: {error}"
+                    ))
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if states.len() != 1 {
+        return Err(NativeVnHostError::Save(
+            "ASTRA_PLAYER_SAVE_RUNTIME_STATE_SET: runtime save must contain exactly one VN state"
+                .into(),
+        ));
+    }
+    Ok(states.remove(0))
 }
 
 fn player_timeline_task(

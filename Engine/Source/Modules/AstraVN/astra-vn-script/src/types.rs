@@ -10,6 +10,8 @@ use crate::VnError;
 
 pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v2";
 pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 2;
+pub const VN_RUNTIME_VIEW_STATE_SCHEMA: &str = "astra.vn.runtime_view_state.v1";
+pub const VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AstraSource {
@@ -585,6 +587,14 @@ pub struct VnRuntimeState {
     pub wait_sequence: u64,
     #[serde(default)]
     pub pending_wait: Option<VnWaitState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VnRuntimeViewState {
+    pub schema: String,
+    pub authoritative_state_hash: Hash128,
+    pub backlog_count: usize,
+    pub state: VnRuntimeState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
