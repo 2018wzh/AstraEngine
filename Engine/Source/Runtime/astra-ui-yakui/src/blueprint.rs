@@ -7,7 +7,7 @@ use astra_ui_core::{
     UiActionEnvelope, UiBindingRoot, UiBlueprintBundle, UiBlueprintFrameModel, UiEventBinding,
     UiFrameRequest, UiInputEventKind, UiPoint, UiRect, UiSemanticAction, UiSemanticNode,
     UiSemanticRole, UiSemanticSnapshot, UiThemeValue, UiValidationError, UiValue, UiValueExpr,
-    ValidateUi, MAX_TEXTURE_BYTES,
+    UiViewBlueprint, ValidateUi, MAX_TEXTURE_BYTES,
 };
 use yakui_core::geometry::{Color, UVec2, Vec2};
 use yakui_core::paint::{Texture, TextureFormat};
@@ -42,7 +42,7 @@ struct PendingSemantic {
 }
 
 pub struct BlueprintYakuiRenderer {
-    bundle: UiBlueprintBundle,
+    views: BTreeMap<String, Arc<UiViewBlueprint>>,
     pending: Vec<PendingSemantic>,
     virtual_lists: BTreeMap<String, VirtualListState>,
     virtual_grids: BTreeMap<String, VirtualGridState>,
@@ -66,7 +66,11 @@ impl BlueprintYakuiRenderer {
     pub fn new(bundle: UiBlueprintBundle) -> Result<Self, UiValidationError> {
         bundle.validate()?;
         Ok(Self {
-            bundle,
+            views: bundle
+                .views
+                .into_iter()
+                .map(|(id, view)| (id, Arc::new(view)))
+                .collect(),
             pending: Vec::new(),
             virtual_lists: BTreeMap::new(),
             virtual_grids: BTreeMap::new(),
@@ -1203,17 +1207,12 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 }
             }
         }
-        let view = self
-            .bundle
-            .views
-            .get(&frame.view_id)
-            .cloned()
-            .ok_or_else(|| {
-                UiValidationError::invalid(
-                    "ASTRA_UI_BLUEPRINT_VIEW_MISSING",
-                    "requested view is absent",
-                )
-            })?;
+        let view = self.views.get(&frame.view_id).cloned().ok_or_else(|| {
+            UiValidationError::invalid(
+                "ASTRA_UI_BLUEPRINT_VIEW_MISSING",
+                "requested view is absent",
+            )
+        })?;
         if view.model_schema != request.model_schema {
             return Err(UiValidationError::invalid(
                 "ASTRA_UI_BLUEPRINT_MODEL_SCHEMA",
@@ -1223,17 +1222,12 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         let mut required_assets = BTreeSet::new();
         self.collect_visual_assets(&view.root, &frame, None, request, &mut required_assets)?;
         for modal in &frame.modals {
-            let modal_view = self
-                .bundle
-                .views
-                .get(&modal.view_id)
-                .cloned()
-                .ok_or_else(|| {
-                    UiValidationError::invalid(
-                        "ASTRA_UI_MODAL_VIEW_MISSING",
-                        "modal view is absent from the packaged blueprint bundle",
-                    )
-                })?;
+            let modal_view = self.views.get(&modal.view_id).cloned().ok_or_else(|| {
+                UiValidationError::invalid(
+                    "ASTRA_UI_MODAL_VIEW_MISSING",
+                    "modal view is absent from the packaged blueprint bundle",
+                )
+            })?;
             let modal_frame = UiBlueprintFrameModel {
                 schema: frame.schema.clone(),
                 view_id: modal.view_id.clone(),
@@ -1297,7 +1291,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                 return;
             }
             for (index, modal) in frame.modals.iter().enumerate() {
-                let modal_view = match self.bundle.views.get(&modal.view_id).cloned() {
+                let modal_view = match self.views.get(&modal.view_id).cloned() {
                     Some(view) => view,
                     None => {
                         render_error = Some(UiValidationError::invalid(
