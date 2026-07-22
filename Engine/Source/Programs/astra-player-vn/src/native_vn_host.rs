@@ -4631,7 +4631,7 @@ fn append_text_value(
     let layout = match cache.get(layout_id) {
         Some(cached) if cached.request_hash == request_hash => Arc::clone(&cached.layout),
         _ => {
-            let layout = Arc::new(provider.layout(&request)?);
+            let layout = provider.layout_shared(&request)?;
             cache.insert(
                 layout_id.to_string(),
                 CachedUiTextLayout {

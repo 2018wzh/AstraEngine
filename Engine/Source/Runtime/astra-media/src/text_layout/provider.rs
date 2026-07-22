@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use astra_core::Hash256;
@@ -45,7 +45,7 @@ pub(super) struct LoadedFace {
 }
 
 struct CacheEntry {
-    result: TextLayoutResult,
+    result: Arc<TextLayoutResult>,
     last_access: u64,
 }
 
@@ -239,6 +239,87 @@ impl CosmicTextLayoutProvider {
             MediaError::message("ASTRA_TEXT_STATE_POISONED: font database lock was poisoned")
         })
     }
+
+    /// Returns the immutable cached layout owned by the font provider.
+    ///
+    /// Rendering hosts that retain a layout across resource and scene phases
+    /// must not deep-clone its shaped runs and glyph resources after Yakui has
+    /// already populated the same cache entry during measurement.
+    pub fn layout_shared(
+        &self,
+        request: &TextLayoutRequest,
+    ) -> Result<Arc<TextLayoutResult>, MediaError> {
+        let span = tracing::debug_span!(
+            target: "astra_media::text",
+            "text_layout",
+            event = "text.layout",
+            target_id = %self.context.target,
+            profile = %self.context.profile,
+            run_count = request.runs.len(),
+        );
+        let _entered = span.enter();
+        super::validation::validate_request(request, &self.config)?;
+        let mut state = self.lock_state()?;
+        validate_family_chain(request, &state)?;
+        let cache_key = request_cache_key(request, &state.fonts)?;
+        state.access_sequence = state.access_sequence.checked_add(1).ok_or_else(|| {
+            MediaError::message("ASTRA_TEXT_CACHE_SEQUENCE: cache sequence overflow")
+        })?;
+        let access_sequence = state.access_sequence;
+        if state.layout_cache.contains_key(&cache_key) {
+            let result = {
+                let entry = state.layout_cache.get_mut(&cache_key).ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_CACHE_STATE: cached layout disappeared")
+                })?;
+                entry.last_access = access_sequence;
+                Arc::clone(&entry.result)
+            };
+            state.hits += 1;
+            tracing::trace!(
+                target: "astra_media::text",
+                event = "text.layout.cache_hit",
+                layout_hash = %result.hash,
+                cache_entries = state.layout_cache.len(),
+            );
+            return Ok(result);
+        }
+        state.misses += 1;
+        let result = Arc::new(layout_uncached(
+            request,
+            &mut state,
+            &self.context,
+            &self.config,
+        )?);
+        if state.layout_cache.len() == self.config.max_cache_entries {
+            let oldest = state
+                .layout_cache
+                .iter()
+                .min_by_key(|(key, value)| (value.last_access, **key))
+                .map(|(key, _)| *key)
+                .ok_or_else(|| {
+                    MediaError::message("ASTRA_TEXT_CACHE_STATE: cache eviction had no candidate")
+                })?;
+            state.layout_cache.remove(&oldest);
+        }
+        state.layout_cache.insert(
+            cache_key,
+            CacheEntry {
+                result: Arc::clone(&result),
+                last_access: access_sequence,
+            },
+        );
+        tracing::debug!(
+            target: "astra_media::text",
+            event = "text.layout.completed",
+            layout_hash = %result.hash,
+            line_count = result.lines.len(),
+            glyph_count = result.shaped_runs.iter().map(|run| run.glyphs.len()).sum::<usize>(),
+            resource_count = result.glyph_resources.len(),
+            clipped = result.clipped,
+            ellipsized = result.ellipsized,
+        );
+        Ok(result)
+    }
 }
 
 impl TextLayoutProvider for CosmicTextLayoutProvider {
@@ -258,66 +339,7 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
     }
 
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError> {
-        let span = tracing::debug_span!(
-            target: "astra_media::text",
-            "text_layout",
-            event = "text.layout",
-            target_id = %self.context.target,
-            profile = %self.context.profile,
-            run_count = request.runs.len(),
-        );
-        let _entered = span.enter();
-        super::validation::validate_request(request, &self.config)?;
-        let mut state = self.lock_state()?;
-        validate_family_chain(request, &state)?;
-        let cache_key = request_cache_key(request, &state.fonts)?;
-        state.access_sequence = state.access_sequence.checked_add(1).ok_or_else(|| {
-            MediaError::message("ASTRA_TEXT_CACHE_SEQUENCE: cache sequence overflow")
-        })?;
-        let access_sequence = state.access_sequence;
-        if let Some(entry) = state.layout_cache.get_mut(&cache_key) {
-            entry.last_access = access_sequence;
-            let result = entry.result.clone();
-            state.hits += 1;
-            tracing::trace!(
-                target: "astra_media::text",
-                event = "text.layout.cache_hit",
-                layout_hash = %result.hash,
-                cache_entries = state.layout_cache.len(),
-            );
-            return Ok(result);
-        }
-        state.misses += 1;
-        let result = layout_uncached(request, &mut state, &self.context, &self.config)?;
-        if state.layout_cache.len() == self.config.max_cache_entries {
-            let oldest = state
-                .layout_cache
-                .iter()
-                .min_by_key(|(key, value)| (value.last_access, **key))
-                .map(|(key, _)| *key)
-                .ok_or_else(|| {
-                    MediaError::message("ASTRA_TEXT_CACHE_STATE: cache eviction had no candidate")
-                })?;
-            state.layout_cache.remove(&oldest);
-        }
-        state.layout_cache.insert(
-            cache_key,
-            CacheEntry {
-                result: result.clone(),
-                last_access: access_sequence,
-            },
-        );
-        tracing::debug!(
-            target: "astra_media::text",
-            event = "text.layout.completed",
-            layout_hash = %result.hash,
-            line_count = result.lines.len(),
-            glyph_count = result.shaped_runs.iter().map(|run| run.glyphs.len()).sum::<usize>(),
-            resource_count = result.glyph_resources.len(),
-            clipped = result.clipped,
-            ellipsized = result.ellipsized,
-        );
-        Ok(result)
+        Ok(self.layout_shared(request)?.as_ref().clone())
     }
 
     fn measure(&self, request: &TextLayoutRequest) -> Result<TextLayoutMeasurement, MediaError> {
@@ -335,14 +357,19 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
                     MediaError::message("ASTRA_TEXT_CACHE_STATE: cached layout disappeared")
                 })?;
                 entry.last_access = access_sequence;
-                TextLayoutMeasurement::from(&entry.result)
+                TextLayoutMeasurement::from(entry.result.as_ref())
             };
             state.hits += 1;
             return Ok(measurement);
         }
         state.misses += 1;
-        let result = layout_uncached(request, &mut state, &self.context, &self.config)?;
-        let measurement = TextLayoutMeasurement::from(&result);
+        let result = Arc::new(layout_uncached(
+            request,
+            &mut state,
+            &self.context,
+            &self.config,
+        )?);
+        let measurement = TextLayoutMeasurement::from(result.as_ref());
         if state.layout_cache.len() == self.config.max_cache_entries {
             let oldest = state
                 .layout_cache

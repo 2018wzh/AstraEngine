@@ -13,6 +13,7 @@ use astra_media_core::{
     SceneCommand,
 };
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
+use std::sync::Arc;
 
 fn open_font_fixture(file: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -483,6 +484,18 @@ fn measurement_reuses_the_authoritative_layout_cache_without_glyph_clone_contrac
     let stats_after_layout = provider.cache_stats().unwrap();
     assert_eq!(stats_after_layout.misses, 1);
     assert_eq!(stats_after_layout.hits, 1);
+}
+
+#[astra_headless_test::test]
+fn shared_layout_reuses_the_authoritative_cached_allocation() {
+    let provider = provider();
+    let request = request("share this shaped line");
+
+    let first = provider.layout_shared(&request).unwrap();
+    let second = provider.layout_shared(&request).unwrap();
+
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(provider.cache_stats().unwrap().entries, 1);
 }
 
 #[astra_headless_test::test]
