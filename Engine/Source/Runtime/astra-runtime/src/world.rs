@@ -340,6 +340,8 @@ impl HistoryChain {
 
 #[derive(Debug, Clone, Copy)]
 struct RuntimeHistoryDigests {
+    machine_definitions: Option<Hash128>,
+    machine_trace: HistoryChain,
     events: HistoryChain,
     presentation: HistoryChain,
     mutations: HistoryChain,
@@ -349,6 +351,8 @@ struct RuntimeHistoryDigests {
 impl Default for RuntimeHistoryDigests {
     fn default() -> Self {
         Self {
+            machine_definitions: None,
+            machine_trace: HistoryChain::empty("astra.runtime.machine_trace.chain.v3"),
             events: HistoryChain::empty("astra.runtime.events.chain.v2"),
             presentation: HistoryChain::empty("astra.runtime.presentation.chain.v2"),
             mutations: HistoryChain::empty("astra.runtime.mutations.chain.v2"),
@@ -368,6 +372,14 @@ impl RuntimeHistoryDigests {
     }
 
     fn refresh_from_world(&mut self, world: &RuntimeWorld) {
+        if self.machine_definitions.is_none() {
+            self.machine_definitions = Some(world.machines.definition_fingerprint());
+        }
+        Self::refresh(
+            &mut self.machine_trace,
+            "astra.runtime.machine_trace.chain.v3",
+            world.machines.trace(),
+        );
         Self::refresh(
             &mut self.events,
             "astra.runtime.events.chain.v2",
@@ -392,14 +404,15 @@ impl RuntimeHistoryDigests {
 }
 
 #[derive(Serialize)]
-struct RuntimeStateDigestV2<'a> {
+struct RuntimeStateDigestV3<'a> {
     schema: &'static str,
     config: &'a RuntimeConfig,
     package: &'a PackageHandle,
     id_source: &'a StableIdGenerator,
     actors: Hash128,
     blackboard: &'a Blackboard,
-    machines: &'a StateMachineStore,
+    machine_state: Hash128,
+    machine_trace_history: Hash128,
     awaits: &'a AwaitQueue,
     delayed_events: &'a DelayedEventQueue,
     event_pending: Hash128,
@@ -692,7 +705,9 @@ impl RuntimeWorld {
             transition_count = definition.transitions.len(),
             "runtime.state_machine.add"
         );
-        self.machines.add(definition)
+        self.machines.add(definition)?;
+        self.history_digests.get_mut().machine_definitions = None;
+        Ok(())
     }
 
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
@@ -1263,14 +1278,18 @@ impl RuntimeWorld {
     pub fn state_hash(&self) -> Hash128 {
         let mut history = self.history_digests.borrow_mut();
         history.refresh_from_world(self);
-        let digest = RuntimeStateDigestV2 {
-            schema: "astra.runtime.state_digest.v2",
+        let machine_definitions = history
+            .machine_definitions
+            .expect("runtime history refresh must retain state machine definitions");
+        let digest = RuntimeStateDigestV3 {
+            schema: "astra.runtime.state_digest.v3",
             config: &self.config,
             package: &self.package,
             id_source: &self.id_source,
             actors: self.actors.deterministic_fingerprint(),
             blackboard: &self.blackboard,
-            machines: &self.machines,
+            machine_state: self.machines.state_fingerprint(machine_definitions),
+            machine_trace_history: history.machine_trace.hash,
             awaits: &self.awaits,
             delayed_events: &self.delayed_events,
             event_pending: self.events.deterministic_pending_fingerprint(),
