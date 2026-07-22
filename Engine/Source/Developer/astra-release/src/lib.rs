@@ -1855,7 +1855,7 @@ fn native_vn_behavioral_evidence(
                     "runtime provider emitted no runtime state envelope".to_string(),
                 )
             })?;
-        let state_hash = astra_core::Hash128::from_blake3(&state.bytes);
+        let state_hash = astra_core::Hash128::from_blake3(state.bytes());
         let event_bytes = postcard::to_allocvec(
             &output
                 .outputs
