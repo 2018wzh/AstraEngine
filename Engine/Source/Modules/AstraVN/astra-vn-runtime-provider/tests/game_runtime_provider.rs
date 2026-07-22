@@ -36,6 +36,15 @@ fn native_vn_provider_descriptor_declares_game_runtime_slot_contract() {
     assert!(descriptor
         .release_checks
         .contains(&"runtime_provider.native_vn".to_string()));
+    assert!(descriptor.output_schemas.iter().any(|schema| {
+        schema.domain == RuntimeOutputDomain::Trace
+            && schema.schema == "astra.vn.runtime_view_state.v1"
+            && schema.version == SchemaVersion::new(1, 0, 0)
+    }));
+    assert!(!descriptor
+        .output_schemas
+        .iter()
+        .any(|schema| schema.schema == "astra.vn.runtime_state.v2"));
 }
 
 #[astra_headless_test::test]
@@ -298,10 +307,13 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         })
         .unwrap();
     assert_eq!(first.status, "blocked");
+    assert!(!first.outputs.iter().any(|value| {
+        value.domain == RuntimeOutputDomain::Trace && value.schema == "astra.vn.runtime_state.v2"
+    }));
     assert!(first.outputs.iter().any(|value| {
         value.domain == RuntimeOutputDomain::Trace
-            && value.schema == "astra.vn.runtime_state.v2"
-            && value.version == SchemaVersion::new(2, 0, 0)
+            && value.schema == "astra.vn.runtime_view_state.v1"
+            && value.version == SchemaVersion::new(1, 0, 0)
     }));
     assert!(first.outputs.iter().any(|value| {
         matches!(

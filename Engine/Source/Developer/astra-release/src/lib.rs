@@ -28,8 +28,9 @@ use astra_vn::{
     decode_compiled_project, load_player_locale_config, load_presentation_provider_manifest,
     NativeVnRuntimeProvider, SystemStoryManifest, SystemStoryValidationStatus,
     VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
-    VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnProfileManifest,
-    VnStandardCommandManifest, VnSystemUiProfileManifest,
+    VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnProfileManifest, VnRuntimeViewState,
+    VnStandardCommandManifest, VnSystemUiProfileManifest, VN_RUNTIME_VIEW_STATE_SCHEMA,
+    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1848,14 +1849,20 @@ fn native_vn_behavioral_evidence(
         let state = output
             .outputs
             .iter()
-            .find(|envelope| envelope.schema == "astra.vn.runtime_state.v2")
+            .find(|envelope| envelope.schema == VN_RUNTIME_VIEW_STATE_SCHEMA)
             .ok_or_else(|| {
                 (
                     "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE",
-                    "runtime provider emitted no runtime state envelope".to_string(),
+                    "runtime provider emitted no bounded runtime view state envelope".to_string(),
                 )
-            })?;
-        let state_hash = astra_core::Hash128::from_blake3(state.bytes());
+            })?
+            .decode_postcard::<VnRuntimeViewState>(
+                RuntimeOutputDomain::Trace,
+                VN_RUNTIME_VIEW_STATE_SCHEMA,
+                astra_core::SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
+            )
+            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?;
+        let state_hash = state.authoritative_state_hash;
         let event_bytes = postcard::to_allocvec(
             &output
                 .outputs
@@ -1864,7 +1871,7 @@ fn native_vn_behavioral_evidence(
                     matches!(
                         envelope.domain,
                         RuntimeOutputDomain::Effect | RuntimeOutputDomain::Trace
-                    ) && envelope.schema != "astra.vn.runtime_state.v2"
+                    )
                 })
                 .collect::<Vec<_>>(),
         )

@@ -231,11 +231,6 @@ impl NativeVnRuntimeProvider {
                 ),
                 output_schema(
                     RuntimeOutputDomain::Trace,
-                    VN_RUNTIME_STATE_SCHEMA,
-                    VN_RUNTIME_STATE_SCHEMA_MAJOR,
-                ),
-                output_schema(
-                    RuntimeOutputDomain::Trace,
                     VN_RUNTIME_VIEW_STATE_SCHEMA,
                     VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
                 ),
@@ -543,10 +538,6 @@ impl NativeVnRuntimeProvider {
                     "astra.vn.step did not produce an output",
                 )
             })?;
-        let (_, current_state_bytes) = session
-            .world
-            .read_component_postcard_payload(session.vn_component)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
         let runtime_view_state = {
             let cache = session
                 .state_cache
@@ -648,12 +639,6 @@ impl NativeVnRuntimeProvider {
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?,
-            RuntimeOutputEnvelope::postcard_bytes(
-                RuntimeOutputDomain::Trace,
-                VN_RUNTIME_STATE_SCHEMA,
-                SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
-                current_state_bytes,
-            ),
             RuntimeOutputEnvelope::postcard(
                 RuntimeOutputDomain::Trace,
                 VN_RUNTIME_VIEW_STATE_SCHEMA,
