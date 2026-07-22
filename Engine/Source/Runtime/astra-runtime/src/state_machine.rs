@@ -180,7 +180,27 @@ pub struct StateMachineStore {
     trace: Vec<ActionTrace>,
 }
 
+pub(crate) struct StateMachineTransactionCheckpoint {
+    machines: Vec<StateMachineInstance>,
+    trace_len: usize,
+}
+
 impl StateMachineStore {
+    pub(crate) fn transaction_checkpoint(&self) -> StateMachineTransactionCheckpoint {
+        StateMachineTransactionCheckpoint {
+            machines: self.machines.clone(),
+            trace_len: self.trace.len(),
+        }
+    }
+
+    pub(crate) fn restore_transaction_checkpoint(
+        &mut self,
+        checkpoint: StateMachineTransactionCheckpoint,
+    ) {
+        self.machines = checkpoint.machines;
+        self.trace.truncate(checkpoint.trace_len);
+    }
+
     pub fn add(&mut self, definition: StateMachineDefinition) -> Result<(), RuntimeError> {
         if self
             .machines

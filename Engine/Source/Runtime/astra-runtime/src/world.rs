@@ -415,7 +415,7 @@ struct RuntimeTransactionCheckpoint {
     id_source: StableIdGenerator,
     actors: ActorStore,
     blackboard: Blackboard,
-    machines: StateMachineStore,
+    machines: crate::state_machine::StateMachineTransactionCheckpoint,
     awaits: AwaitQueue,
     delayed_events: DelayedEventQueue,
     events: EventQueueCheckpoint,
@@ -1310,7 +1310,7 @@ impl RuntimeWorld {
             id_source: self.id_source.clone(),
             actors: self.actors.clone(),
             blackboard: self.blackboard.clone(),
-            machines: self.machines.clone(),
+            machines: self.machines.transaction_checkpoint(),
             awaits: self.awaits.clone(),
             delayed_events: self.delayed_events.clone(),
             events: self.events.transaction_checkpoint(),
@@ -1326,7 +1326,8 @@ impl RuntimeWorld {
         self.id_source = checkpoint.id_source;
         self.actors = checkpoint.actors;
         self.blackboard = checkpoint.blackboard;
-        self.machines = checkpoint.machines;
+        self.machines
+            .restore_transaction_checkpoint(checkpoint.machines);
         self.awaits = checkpoint.awaits;
         self.delayed_events = checkpoint.delayed_events;
         self.events
