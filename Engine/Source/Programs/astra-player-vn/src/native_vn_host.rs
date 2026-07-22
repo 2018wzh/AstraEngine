@@ -4723,6 +4723,11 @@ fn append_ui_semantic_text(
             256.0,
         )?;
         let rgba = parse_ui_text_rgba(node.properties.get("text.rgba"))?;
+        // Yakui already shaped this exact semantic text while resolving the
+        // widget's measured bounds. Reuse the same authoritative request key
+        // here so the scene-resource phase receives the provider-owned layout
+        // instead of shaping a second cache entry for identical content.
+        let request_key = format!("ui.measure.{}", node.id);
         append_text_value(
             provider,
             font_families,
@@ -4731,7 +4736,7 @@ fn append_ui_semantic_text(
             layout_ids,
             pending,
             &format!("ui.text.{}", node.id),
-            name,
+            &request_key,
             text,
             x.saturating_add(8),
             y.saturating_add(8),
