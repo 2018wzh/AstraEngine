@@ -1086,7 +1086,7 @@ impl RuntimeAction for VnStepAction {
         let state_decode_ns = profile_elapsed_ns(state_started);
         let reduce_started = profile.then(Instant::now);
         let (mut state, mut output, encoded_state) = if let Some(cached) = cached_state {
-            astra_vn_core::reduce_vn_step_indexed_prehashed_encoded(
+            astra_vn_core::reduce_vn_step_indexed_prehashed_pending_encoded(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 cached.state,
@@ -1097,7 +1097,7 @@ impl RuntimeAction for VnStepAction {
             let validated =
                 decoded_state.expect("cache miss must decode the authoritative VN state");
             let (state, state_hash) = validated.into_state_and_hash();
-            astra_vn_core::reduce_vn_step_indexed_prehashed_encoded(
+            astra_vn_core::reduce_vn_step_indexed_prehashed_pending_encoded(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 state,
@@ -1111,7 +1111,7 @@ impl RuntimeAction for VnStepAction {
         let mut await_id_replacement = None;
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
-                output.wait = Some(wait.clone());
+                output.set_wait(wait.clone());
                 let has_runtime_await_id = wait
                     .await_id
                     .as_deref()
@@ -1129,8 +1129,8 @@ impl RuntimeAction for VnStepAction {
                     let runtime_await_id = token.token_id.0.to_string();
                     wait.await_id = Some(runtime_await_id.clone());
                     await_id_replacement = Some((authored_await_id, runtime_await_id));
-                    output.wait = Some(wait.clone());
-                    output.awaits.push(token.token_id.0.to_string());
+                    output.set_wait(wait.clone());
+                    output.push_await(token.token_id.0.to_string());
                     ctx.push_await(token)?;
                 }
             }
@@ -1150,7 +1150,7 @@ impl RuntimeAction for VnStepAction {
         let encoded_state =
             astra_runtime::ValidatedRuntimeComponentEncoding::postcard(encoded_state);
         let authoritative_state_hash = encoded_state.state_hash();
-        output.state_hash_after_advance = authoritative_state_hash;
+        let output = output.finalize(authoritative_state_hash);
         let (next_payload_hash, next_state_hash) =
             ctx.replace_component_validated_postcard(self.component, encoded_state)?;
         let replace_component_ns = profile_elapsed_ns(replace_started);

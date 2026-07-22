@@ -258,6 +258,16 @@ impl VnRuntime {
         command: VnPlayerCommand,
         before: Hash128,
     ) -> Result<(VnStepOutput, Arc<[u8]>), VnError> {
+        let (pending, encoded) = self.apply_with_state_hash_pending_encoded(command, before)?;
+        let after = Hash128::from_blake3(&encoded);
+        Ok((pending.finalize(after), encoded))
+    }
+
+    fn apply_with_state_hash_pending_encoded(
+        &mut self,
+        command: VnPlayerCommand,
+        before: Hash128,
+    ) -> Result<(PendingVnStepOutput, Arc<[u8]>), VnError> {
         tracing::trace!(
             event = "vn.runtime.command.start",
             before_state_hash = %before,
@@ -581,9 +591,8 @@ impl VnRuntime {
         let encoded_state: Arc<[u8]> = postcard::to_allocvec(&self.state)
             .expect("AstraVN runtime state must serialize for hashing")
             .into();
-        let state_hash_after_advance = Hash128::from_blake3(&encoded_state);
         Ok((
-            VnStepOutput {
+            PendingVnStepOutput(VnStepOutput {
                 schema: "astra.vn.step_output.v1".to_string(),
                 next_cursor: self.state.cursor.clone(),
                 wait: self.state.pending_wait.clone(),
@@ -595,8 +604,8 @@ impl VnRuntime {
                 mutations,
                 coverage: VnCoverage { reached },
                 state_hash_before_advance: before,
-                state_hash_after_advance,
-            },
+                state_hash_after_advance: before,
+            }),
             encoded_state,
         ))
     }
@@ -1248,6 +1257,25 @@ impl VnRuntime {
     }
 }
 
+/// A reducer output whose after-state hash must be finalized from the exact
+/// encoded state bytes before it can cross a provider boundary.
+pub struct PendingVnStepOutput(VnStepOutput);
+
+impl PendingVnStepOutput {
+    pub fn set_wait(&mut self, wait: VnWaitState) {
+        self.0.wait = Some(wait);
+    }
+
+    pub fn push_await(&mut self, await_id: String) {
+        self.0.awaits.push(await_id);
+    }
+
+    pub fn finalize(mut self, state_hash_after_advance: Hash128) -> VnStepOutput {
+        self.0.state_hash_after_advance = state_hash_after_advance;
+        self.0
+    }
+}
+
 pub fn reduce_vn_step(
     compiled: Arc<CompiledStory>,
     state: &VnRuntimeState,
@@ -1289,6 +1317,19 @@ pub fn reduce_vn_step_indexed_prehashed_encoded(
 ) -> Result<(VnRuntimeState, VnStepOutput, Arc<[u8]>), VnError> {
     let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
     let (output, encoded_state) = runtime.apply_with_state_hash_encoded(command, state_hash)?;
+    Ok((runtime.state, output, encoded_state))
+}
+
+pub fn reduce_vn_step_indexed_prehashed_pending_encoded(
+    compiled: Arc<CompiledStory>,
+    index: Arc<VnRuntimeIndex>,
+    state: VnRuntimeState,
+    state_hash: Hash128,
+    command: VnPlayerCommand,
+) -> Result<(VnRuntimeState, PendingVnStepOutput, Arc<[u8]>), VnError> {
+    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
+    let (output, encoded_state) =
+        runtime.apply_with_state_hash_pending_encoded(command, state_hash)?;
     Ok((runtime.state, output, encoded_state))
 }
 
