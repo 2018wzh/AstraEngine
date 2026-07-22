@@ -3481,7 +3481,13 @@ impl NativeVnHostCommandSource {
                                 })
                                 .collect(),
                             semantics: semantics.clone(),
-                            draw: self.ui_draw.clone(),
+                            // `ui_draw` is the last complete submission and can contain
+                            // one-shot resource lifecycle commands. Replaying those commands
+                            // on a pointer-only frame would re-upload already live glyphs or
+                            // textures, which the renderer correctly rejects. The retained
+                            // resource owner remains authoritative until a new UI layout emits
+                            // an explicit lifecycle delta.
+                            draw: reusable_ui_draw_commands(&self.ui_draw),
                         };
                         self.accumulate_ui_host_performance(host_performance);
                         return Ok(result);
@@ -5611,13 +5617,36 @@ fn ordered_ui_font_families(font_families: &[String], locale: &str) -> Vec<Strin
 mod native_vn_host_tests {
     use super::{
         default_runtime_launch_state, frame_localization_subset, ordered_ui_font_families,
-        parse_ui_text_alignment, retained_pointer_activation_target, save_slots_for_policy,
+        parse_ui_text_alignment, retained_pointer_activation_target, reusable_ui_draw_commands,
+        save_slots_for_policy,
         state_prefetch_successors, system_action_gameplay_entry_states, NativeVnDecodedCacheBudget,
         ReadingMode, SaveCompletionPolicy, SystemPageKind, SystemUiProfilePolicy,
         UiBlueprintModalFrameModel, UiTextAlignment, UiValue,
         DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES,
     };
     use std::collections::{BTreeMap, BTreeSet};
+
+    #[test]
+    fn reusable_ui_frame_does_not_replay_resource_lifecycle() {
+        let draw = vec![
+            astra_media_core::SceneCommand::ReleaseResource {
+                resource_id: "glyph.cached".into(),
+            },
+            astra_media_core::SceneCommand::rect("ui.cached.panel", 0, 0, 8, 8, [1, 2, 3, 255]),
+        ];
+
+        assert_eq!(
+            reusable_ui_draw_commands(&draw),
+            vec![astra_media_core::SceneCommand::rect(
+                "ui.cached.panel",
+                0,
+                0,
+                8,
+                8,
+                [1, 2, 3, 255],
+            )],
+        );
+    }
 
     #[test]
     fn image_prefetch_control_flow_prioritizes_branch_targets_over_linear_fallthrough() {
@@ -6544,6 +6573,25 @@ fn validate_story_presentation(
         }
     }
     Ok(())
+}
+
+/// Returns the drawable portion of a previously submitted UI frame.
+///
+/// Resource lifetime commands are deliberately omitted: a cached UI frame is
+/// only valid while the existing renderer residency remains live, and replaying
+/// an `Upload*` command violates the retained-resource contract.
+fn reusable_ui_draw_commands(draw: &[SceneCommand]) -> Vec<SceneCommand> {
+    draw.iter()
+        .filter(|command| {
+            !matches!(
+                command,
+                SceneCommand::UploadTexture { .. }
+                    | SceneCommand::UploadGlyph { .. }
+                    | SceneCommand::ReleaseResource { .. }
+            )
+        })
+        .cloned()
+        .collect()
 }
 
 fn validate_stage_command_policy(
