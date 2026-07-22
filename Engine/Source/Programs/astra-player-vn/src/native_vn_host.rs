@@ -1821,6 +1821,7 @@ impl NativeVnHostCommandSource {
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         let batch = self.step("launch_default", serde_json::json!({}))?;
         self.queue_default_gameplay_story_audio_preloads()?;
+        self.prewarm_default_gameplay_story_images()?;
         Ok(batch)
     }
 
@@ -1841,6 +1842,13 @@ impl NativeVnHostCommandSource {
     }
 
     fn queue_default_gameplay_story_audio_preloads(&mut self) -> Result<(), NativeVnHostError> {
+        let Some(story_id) = self.default_gameplay_story_id() else {
+            return Ok(());
+        };
+        self.queue_story_audio_preloads(&story_id)
+    }
+
+    fn default_gameplay_story_id(&self) -> Option<String> {
         let system_story_ids = self
             .story
             .system_story_manifest
@@ -1848,20 +1856,80 @@ impl NativeVnHostCommandSource {
             .values()
             .map(|entry| entry.story_id.as_str())
             .collect::<BTreeSet<_>>();
-        let story_id = self
-            .story
+        self.story
             .story_manifest
             .stories
             .iter()
             .find(|story| !system_story_ids.contains(story.id.as_str()))
-            .map(|story| story.id.clone());
-        let Some(story_id) = story_id else {
-            // A system-only package is a valid product shape (for example the
-            // minimal NativeVN contract fixture). The current system story was
-            // already queued by `step`, so there is no gameplay story to warm.
+            .map(|story| story.id.clone())
+    }
+
+    fn prewarm_default_gameplay_story_images(&self) -> Result<(), NativeVnHostError> {
+        const MAX_ENTRY_IMAGE_PRELOADS: usize = 4_096;
+
+        let Some(story_id) = self.default_gameplay_story_id() else {
             return Ok(());
         };
-        self.queue_story_audio_preloads(&story_id)
+        let story = self
+            .story
+            .story_manifest
+            .stories
+            .iter()
+            .find(|story| story.id == story_id)
+            .ok_or_else(|| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_IMAGE_PREWARM_STORY_MANIFEST_MISSING".into())
+            })?;
+        let mut seen = BTreeSet::new();
+        let mut asset_ids = Vec::new();
+        for state_id in &story.states {
+            let state = self.story.states.get(state_id).ok_or_else(|| {
+                NativeVnHostError::Asset(format!(
+                    "ASTRA_PLAYER_IMAGE_PREWARM_STATE_MISSING: {state_id}"
+                ))
+            })?;
+            if state.story_id != story_id {
+                return Err(NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_IMAGE_PREWARM_STORY_STATE_MISMATCH".into(),
+                ));
+            }
+            for command in state.scenes.iter().flat_map(|scene| scene.commands.iter()) {
+                let CompiledCommand::Presentation {
+                    command: PresentationCommand::Stage(stage),
+                    ..
+                } = command
+                else {
+                    continue;
+                };
+                let asset_id = match stage {
+                    StageCommand::Preload { asset }
+                    | StageCommand::Background { asset, .. }
+                    | StageCommand::Show { asset, .. } => Some(asset),
+                    StageCommand::Movie { fallback, .. } => fallback.as_ref(),
+                    _ => None,
+                };
+                if let Some(asset_id) = asset_id.filter(|id| self.asset_store.contains_image(id)) {
+                    if seen.insert(asset_id.clone()) {
+                        asset_ids.push(asset_id.clone());
+                    }
+                }
+            }
+        }
+        if asset_ids.len() > MAX_ENTRY_IMAGE_PRELOADS {
+            return Err(NativeVnHostError::Asset(format!(
+                "ASTRA_PLAYER_IMAGE_PREWARM_COUNT_EXCEEDED: {} > {MAX_ENTRY_IMAGE_PRELOADS}",
+                asset_ids.len()
+            )));
+        }
+        let requested = asset_ids.len();
+        let retained = self.asset_store.prewarm_image_prefix(&asset_ids)?;
+        tracing::info!(
+            event = "player.image.prewarm.completed",
+            requested_count = requested,
+            retained_count = retained,
+            cache_bytes = self.asset_store.cache_bytes(),
+            "prewarmed an authored-order image prefix within the decoded asset cache budget"
+        );
+        Ok(())
     }
 
     fn queue_story_audio_preloads(&mut self, story_id: &str) -> Result<(), NativeVnHostError> {

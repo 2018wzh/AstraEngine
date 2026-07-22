@@ -106,6 +106,36 @@ impl AssetCache {
         }
         Ok(())
     }
+
+    fn insert_without_eviction(
+        &mut self,
+        asset_id: String,
+        value: CachedAsset,
+    ) -> Result<bool, NativeVnHostError> {
+        let bytes = value.bytes();
+        if bytes == 0 || bytes > self.max_bytes {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_ASSET_CACHE_ENTRY_BUDGET".into(),
+            ));
+        }
+        if self.entries.contains_key(&asset_id) {
+            self.insert(asset_id, value)?;
+            return Ok(true);
+        }
+        if self.bytes.saturating_add(bytes) > self.max_bytes {
+            return Ok(false);
+        }
+        self.clock = self.clock.saturating_add(1);
+        self.entries.insert(
+            asset_id,
+            CacheEntry {
+                value,
+                last_used: self.clock,
+            },
+        );
+        self.bytes = self.bytes.saturating_add(bytes);
+        Ok(true)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -256,23 +286,30 @@ impl PackageAssetStore {
         if let Some(CachedAsset::Image(frame)) = self.cache_get(asset_id)? {
             return Ok(frame);
         }
-        let descriptor = self.descriptor(asset_id, AssetKind::Image)?;
-        let encoded = self.read_asset(asset_id, descriptor)?;
-        let decoded = image::load_from_memory(&encoded)
-            .map_err(|error| {
-                NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_DECODE: {error}"))
-            })?
-            .to_rgba8();
-        let (width, height) = decoded.dimensions();
-        let rgba8: Arc<[u8]> = decoded.into_raw().into();
-        let frame = TextureFrame {
-            width,
-            height,
-            hash: Hash256::from_sha256(&rgba8),
-            rgba8,
-        };
+        let frame = self.decode_image(asset_id)?;
         self.cache_insert(asset_id, CachedAsset::Image(frame.clone()))?;
         Ok(frame)
+    }
+
+    pub fn prewarm_image_prefix(&self, asset_ids: &[String]) -> Result<usize, NativeVnHostError> {
+        let mut retained = 0usize;
+        for asset_id in asset_ids {
+            if matches!(self.cache_get(asset_id)?, Some(CachedAsset::Image(_))) {
+                retained += 1;
+                continue;
+            }
+            let frame = self.decode_image(asset_id)?;
+            let inserted = self
+                .cache
+                .lock()
+                .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_LOCK".into()))?
+                .insert_without_eviction(asset_id.clone(), CachedAsset::Image(frame))?;
+            if !inserted {
+                break;
+            }
+            retained += 1;
+        }
+        Ok(retained)
     }
 
     pub fn load_media(&self, asset_id: &str) -> Result<LoadedMediaAsset, NativeVnHostError> {
@@ -328,6 +365,24 @@ impl PackageAssetStore {
             .ok_or_else(|| {
                 NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_MISSING: {asset_id}"))
             })
+    }
+
+    fn decode_image(&self, asset_id: &str) -> Result<TextureFrame, NativeVnHostError> {
+        let descriptor = self.descriptor(asset_id, AssetKind::Image)?;
+        let encoded = self.read_asset(asset_id, descriptor)?;
+        let decoded = image::load_from_memory(&encoded)
+            .map_err(|error| {
+                NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_DECODE: {error}"))
+            })?
+            .to_rgba8();
+        let (width, height) = decoded.dimensions();
+        let rgba8: Arc<[u8]> = decoded.into_raw().into();
+        Ok(TextureFrame {
+            width,
+            height,
+            hash: Hash256::from_sha256(&rgba8),
+            rgba8,
+        })
     }
 
     fn read_asset(
@@ -467,5 +522,24 @@ mod tests {
         let error = cache.insert("oversized".into(), media(b"abc")).unwrap_err();
         assert!(error.to_string().contains("CACHE_ENTRY_BUDGET"));
         assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn prewarm_insert_never_evicts_an_authored_prefix() {
+        let mut cache = AssetCache {
+            entries: BTreeMap::new(),
+            bytes: 0,
+            max_bytes: 6,
+            clock: 0,
+        };
+        assert!(cache
+            .insert_without_eviction("a".into(), media(b"aaaa"))
+            .unwrap());
+        assert!(!cache
+            .insert_without_eviction("b".into(), media(b"bbb"))
+            .unwrap());
+        assert!(cache.entries.contains_key("a"));
+        assert!(!cache.entries.contains_key("b"));
+        assert_eq!(cache.bytes, 4);
     }
 }
