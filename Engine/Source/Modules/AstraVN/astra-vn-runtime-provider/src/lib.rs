@@ -1088,6 +1088,7 @@ impl RuntimeAction for VnStepAction {
         .map_err(|err| RuntimeError::message(err.to_string()))?;
         let reduce_ns = profile_elapsed_ns(reduce_started);
         let await_started = profile.then(Instant::now);
+        let mut state_changed_after_reduce = false;
         if state.pending_wait != previous_wait {
             if let Some(wait) = state.pending_wait.as_mut() {
                 output.wait = Some(wait.clone());
@@ -1101,6 +1102,7 @@ impl RuntimeAction for VnStepAction {
                         wait.kind
                     )));
                     wait.await_id = Some(token.token_id.0.to_string());
+                    state_changed_after_reduce = true;
                     output.wait = Some(wait.clone());
                     output.awaits.push(token.token_id.0.to_string());
                     ctx.push_await(token)?;
@@ -1109,6 +1111,13 @@ impl RuntimeAction for VnStepAction {
         }
         let await_ns = profile_elapsed_ns(await_started);
         let replace_started = profile.then(Instant::now);
+        let encoded_state = if state_changed_after_reduce {
+            postcard::to_allocvec(&state)
+                .map(Arc::<[u8]>::from)
+                .map_err(|err| RuntimeError::message(format!("encode VN runtime state: {err}")))?
+        } else {
+            encoded_state
+        };
         let (next_payload_hash, next_state_hash) =
             ctx.replace_component_encoded_postcard(self.component, encoded_state)?;
         let replace_component_ns = profile_elapsed_ns(replace_started);
