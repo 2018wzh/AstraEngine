@@ -1723,6 +1723,9 @@ impl NativeVnHostCommandSource {
             .ui_generation
             .checked_add(1)
             .ok_or(NativeVnHostError::SequenceOverflow)?;
+        // The UI model has changed under the same session identity. The Yakui
+        // backend emits an ordered release/resync transaction so the retained
+        // Scene2D resources remain synchronized with this restored state.
         self.ui_backend
             .context_restored(&format!("vn.ui.{}", self.session_id.0), self.ui_generation)
             .map_err(NativeVnHostError::Ui)?;

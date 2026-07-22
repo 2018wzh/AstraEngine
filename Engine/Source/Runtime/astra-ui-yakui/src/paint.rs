@@ -70,6 +70,13 @@ impl YakuiPaintConverter {
         let mut releases = Vec::new();
 
         if self.force_full_resync {
+            // A full resync is requested only after the caller has reset its
+            // rendering context. The Scene2D resource owner may still contain
+            // the prior session's resources (for example while restoring a
+            // save without recreating the platform surface), so make the
+            // transition explicit and ordered: release every live texture
+            // before re-uploading the stable ids below.
+            releases.extend(self.release_live_textures_for_resync());
             for (id, texture) in textures.iter() {
                 self.sync_managed_texture(
                     texture_key(YakuiTextureId::Managed(id)),
@@ -317,6 +324,24 @@ impl YakuiPaintConverter {
             .into_iter()
             .map(|(_, id, generation)| UiTextureRelease { id, generation })
             .collect()
+    }
+
+    fn release_live_textures_for_resync(&mut self) -> Vec<UiTextureRelease> {
+        let releases = self
+            .shared_textures
+            .values()
+            .map(|shared| UiTextureRelease {
+                id: shared.id,
+                generation: shared.generation,
+            })
+            .collect::<Vec<_>>();
+        // Keep only entries with active managed references. Those retain their
+        // identity and are uploaded again during the same frame; dormant
+        // entries are evicted because they cannot be represented after a full
+        // renderer synchronization.
+        self.shared_textures
+            .retain(|_, shared| shared.references > 0);
+        releases
     }
 }
 
@@ -599,5 +624,43 @@ mod tests {
         let releases = converter.release_unreferenced_textures();
         assert_eq!(releases.len(), 1);
         assert_eq!(releases[0].id, old);
+    }
+
+    #[astra_headless_test::test]
+    fn full_resync_releases_live_resources_before_reusing_their_identity() {
+        let mut converter = YakuiPaintConverter::new();
+        let texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);
+        let mut initial = Vec::new();
+        converter
+            .sync_managed_texture(
+                "ManagedTextureId(1)".into(),
+                &texture,
+                false,
+                &mut initial,
+            )
+            .unwrap();
+        let binding = converter
+            .managed_textures
+            .get("ManagedTextureId(1)")
+            .copied()
+            .unwrap();
+
+        let releases = converter.release_live_textures_for_resync();
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].id, binding.id);
+        assert_eq!(releases[0].generation, binding.generation);
+
+        let mut replay = Vec::new();
+        converter
+            .sync_managed_texture(
+                "ManagedTextureId(1)".into(),
+                &texture,
+                true,
+                &mut replay,
+            )
+            .unwrap();
+        assert_eq!(replay.len(), 1);
+        assert_eq!(replay[0].id, binding.id);
+        assert_eq!(replay[0].generation, binding.generation);
     }
 }
