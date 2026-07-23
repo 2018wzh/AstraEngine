@@ -652,12 +652,7 @@ mod tests {
         let texture = Texture::new(TextureFormat::R8, UVec2::new(1, 1), vec![42]);
         let mut initial = Vec::new();
         converter
-            .sync_managed_texture(
-                "ManagedTextureId(1)".into(),
-                &texture,
-                false,
-                &mut initial,
-            )
+            .sync_managed_texture("ManagedTextureId(1)".into(), &texture, false, &mut initial)
             .unwrap();
         let binding = converter
             .managed_textures
@@ -672,12 +667,7 @@ mod tests {
 
         let mut replay = Vec::new();
         converter
-            .sync_managed_texture(
-                "ManagedTextureId(1)".into(),
-                &texture,
-                true,
-                &mut replay,
-            )
+            .sync_managed_texture("ManagedTextureId(1)".into(), &texture, true, &mut replay)
             .unwrap();
         assert_eq!(replay.len(), 1);
         assert_eq!(replay[0].id, binding.id);

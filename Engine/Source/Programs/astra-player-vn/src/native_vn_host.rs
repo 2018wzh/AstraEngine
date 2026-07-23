@@ -5621,10 +5621,9 @@ mod native_vn_host_tests {
     use super::{
         default_runtime_launch_state, frame_localization_subset, ordered_ui_font_families,
         parse_ui_text_alignment, retained_pointer_activation_target, reusable_ui_draw_commands,
-        save_slots_for_policy,
-        state_prefetch_successors, system_action_gameplay_entry_states, NativeVnDecodedCacheBudget,
-        ReadingMode, SaveCompletionPolicy, SystemPageKind, SystemUiProfilePolicy,
-        UiBlueprintModalFrameModel, UiTextAlignment, UiValue,
+        save_slots_for_policy, state_prefetch_successors, system_action_gameplay_entry_states,
+        NativeVnDecodedCacheBudget, ReadingMode, SaveCompletionPolicy, SystemPageKind,
+        SystemUiProfilePolicy, UiBlueprintModalFrameModel, UiTextAlignment, UiValue,
         DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES,
     };
     use std::collections::{BTreeMap, BTreeSet};
