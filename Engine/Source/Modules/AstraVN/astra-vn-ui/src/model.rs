@@ -15,6 +15,9 @@ pub struct MessageViewModel {
     pub window: Option<String>,
     pub auto_enabled: bool,
     pub skip_mode: SkipMode,
+    pub visible_graphemes: u32,
+    pub text_graphemes: u32,
+    pub reveal_complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -256,6 +259,21 @@ impl VnUiModelContext<'_> {
             window: entry.layout.window.clone(),
             auto_enabled: self.runtime.system.auto_enabled,
             skip_mode: self.runtime.system.skip_mode,
+            visible_graphemes: self
+                .runtime
+                .text_reveal
+                .as_ref()
+                .map_or(u32::MAX, |reveal| reveal.visible_graphemes),
+            text_graphemes: self
+                .runtime
+                .text_reveal
+                .as_ref()
+                .map_or(0, |reveal| reveal.text_graphemes),
+            reveal_complete: self
+                .runtime
+                .text_reveal
+                .as_ref()
+                .is_none_or(|reveal| reveal.complete()),
         })
     }
 

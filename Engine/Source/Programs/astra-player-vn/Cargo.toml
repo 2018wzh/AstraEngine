@@ -35,6 +35,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+unicode-segmentation.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy", default-features = false, features = ["luau-runtime"] }

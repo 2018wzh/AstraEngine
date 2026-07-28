@@ -18,9 +18,10 @@ ui_view ui.tsui.classic.message model:astra.vn.ui_model.message.v2 theme:tsui.th
     panel id:advance fill:true
       on activate -> vn.advance
     image id:dialogue_frame asset:theme:dialogue.frame min_width:754 min_height:82 position_x:23 position_y:483
-    row id:dialogue position_x:56 position_y:484 gap:18
-      text id:speaker_text value:$model.speaker_key min_width:92 font_size:20 max_lines:2
-      text id:body value:$model.text_key font_size:22 max_lines:3
+    row id:dialogue position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:speaker_text value:$model.speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:body value:$model.text_key visible_graphemes:$model.visible_graphemes max_width:562 font_size:22 max_lines:64 text_padding:0
 
 ui_view ui.tsui.classic.monologue model:astra.vn.ui_model.message.v2 theme:tsui.theme.classic #@id ui.tsui.classic.monologue
   screen id:root
@@ -72,9 +73,10 @@ ui_view ui.tsui.classic.popup model:astra.vn.ui_model.quick_panel.v1 theme:tsui.
     image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
     image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
     image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
-    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
-      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
-      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:underlay_body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:underlay_body value:$model.underlay_text_key max_width:562 font_size:22 max_lines:64 text_padding:0
     column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.quick_panel font_size:11 text_color:theme:text.system_dark text_padding:1
@@ -102,9 +104,10 @@ ui_view ui.tsui.classic.save model:astra.vn.ui_model.save.v1 theme:tsui.theme.cl
     image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
     image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
     image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
-    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
-      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
-      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:underlay_body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:underlay_body value:$model.underlay_text_key max_width:562 font_size:22 max_lines:64 text_padding:0
     column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.save font_size:11 text_color:theme:text.system_dark text_padding:1
@@ -131,9 +134,10 @@ ui_view ui.tsui.classic.load model:astra.vn.ui_model.load.v1 theme:tsui.theme.cl
     image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
     image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
     image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
-    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
-      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
-      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:underlay_body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:underlay_body value:$model.underlay_text_key max_width:562 font_size:22 max_lines:64 text_padding:0
     column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.load font_size:11 text_color:theme:text.system_dark text_padding:1
@@ -160,9 +164,10 @@ ui_view ui.tsui.classic.config model:astra.vn.ui_model.config.v1 theme:tsui.them
     image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
     image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
     image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
-    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
-      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
-      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:underlay_body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:underlay_body value:$model.underlay_text_key max_width:562 font_size:22 max_lines:64 text_padding:0
     column id:window position_x:232 position_y:190 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:titlebar background:theme:system.chrome min_width:332 min_height:31 max_height:31 padding:4
         text id:title value:l10n:system.config font_size:11 text_color:theme:text.system_dark text_padding:1
@@ -174,7 +179,7 @@ ui_view ui.tsui.classic.config model:astra.vn.ui_model.config.v1 theme:tsui.them
           on activate -> vn.switch_system page:"load"
         button id:exit text:l10n:system.back min_width:42 min_height:19 max_height:19 background:theme:system.tab font_size:11 text_padding:1
           on activate -> vn.return_system
-      column id:body background:theme:system.body padding:8 gap:4 min_width:332 min_height:184 max_height:184
+      scroll id:body background:theme:system.body padding:8 gap:4 min_width:332 min_height:184 max_height:184 clip_children:true
         row id:reading_modes min_height:22 max_height:22 gap:4
           button id:hidden text:l10n:system.text_hidden min_width:96 min_height:22 max_height:22 background:theme:system.button text_color:theme:text.system_dark font_size:11 text_padding:1
             on activate -> vn.set_reading_mode mode:"hidden"
@@ -197,9 +202,10 @@ ui_view ui.tsui.classic.test model:astra.vn.ui_model.title.v1 theme:tsui.theme.c
     image id:underlay_title_load asset:theme:menu.continue visible:$model.underlay_title position_x:564 position_y:432 min_width:208 min_height:64
     image id:underlay_title_exit asset:theme:menu.exit visible:$model.underlay_title position_x:564 position_y:520 min_width:208 min_height:64
     image id:underlay_dialogue_frame asset:theme:dialogue.frame visible:$model.underlay_message min_width:754 min_height:82 position_x:23 position_y:483
-    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 gap:18
-      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 font_size:20 max_lines:2
-      text id:underlay_body value:$model.underlay_text_key font_size:22 max_lines:3
+    row id:underlay_dialogue visible:$model.underlay_message position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:underlay_speaker value:$model.underlay_speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:underlay_body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:underlay_body value:$model.underlay_text_key max_width:562 font_size:22 max_lines:64 text_padding:0
     column id:window position_x:232 position_y:166 background:theme:system.border min_width:336 min_height:242 max_width:336 max_height:242 padding:2 gap:0 clip_children:true
       row id:tabs background:theme:system.chrome min_height:22 padding:2
         text id:title value:l10n:system.test_menu font_size:13 text_color:theme:text.system_dark text_padding:1

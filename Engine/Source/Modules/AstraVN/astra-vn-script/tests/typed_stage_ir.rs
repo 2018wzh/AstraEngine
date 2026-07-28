@@ -79,6 +79,33 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
 }
 
 #[astra_headless_test::test]
+fn transition_preserves_a_typed_descriptor_identity() {
+    let command = first_presentation(
+        "transition preset:director_puppet_26 duration:250 descriptor:director.puppet.26 #@id transition.director",
+    );
+    let PresentationCommand::Stage(StageCommand::Transition {
+        preset,
+        duration_ms,
+        descriptor_id,
+    }) = command
+    else {
+        panic!("expected typed transition")
+    };
+    assert_eq!(preset, "director_puppet_26");
+    assert_eq!(duration_ms, 250);
+    assert_eq!(descriptor_id.as_deref(), Some("director.puppet.26"));
+
+    let error = compile_astra_project(
+        [source(
+            "transition preset:director_puppet_26 duration:250 invalid:true",
+        )],
+        Default::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code(), "ASTRA_VN_STAGE_ATTRIBUTE_UNKNOWN");
+}
+
+#[astra_headless_test::test]
 fn shade_has_a_typed_opaque_color_and_separate_coverage() {
     let command = first_presentation("shade color:222420ff opacity:0.92 #@id shade.scene");
     let PresentationCommand::Stage(StageCommand::Shade { color, opacity }) = command else {

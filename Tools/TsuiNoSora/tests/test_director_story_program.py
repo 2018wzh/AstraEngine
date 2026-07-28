@@ -64,6 +64,21 @@ class DirectorStoryProgramTests(unittest.TestCase):
         with self.assertRaises(DirectorStoryProgramError):
             _compile_statements(statements, {})
 
+    def test_transition_helper_accepts_only_an_empty_call(self):
+        program = _compile_statements(
+            [{"kind": "command", "expression": call("ttrans1")}],
+            {},
+        )
+        self.assertEqual(
+            program,
+            [{"kind": "legacy_transition", "handler": "ttrans1"}],
+        )
+        with self.assertRaises(DirectorStoryProgramError):
+            _compile_statements(
+                [{"kind": "command", "expression": call("ttrans1", number=1)}],
+                {},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

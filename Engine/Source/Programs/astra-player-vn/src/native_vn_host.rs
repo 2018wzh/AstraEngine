@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use astra_core::{Hash256, SchemaVersion};
 use astra_media::{
     CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, TextDirection,
@@ -36,13 +38,15 @@ use astra_ui_yakui::{
     ui_frame_to_scene_commands, AstraTextMeasureRequest, AstraTextMeasureResult, AstraTextMeasurer,
     AstraYakuiBackend, BlueprintYakuiRenderer,
 };
+#[cfg(test)]
+use astra_vn_core::SystemActionEffect;
 use astra_vn_core::{
     CompiledCommand, CompiledStory, MovieLoopMode, PresentationCommand, ReadingMode,
     SaveCompletionPolicy, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
-    StageLayerKind, State, SystemActionEffect, SystemPageKind, SystemUiProfilePolicy,
-    TimelineCommand, VnAudioBus, VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig,
-    VnRuntimeState, VnRuntimeViewState, VnWaitKind, VN_RUNTIME_STATE_SCHEMA,
-    VN_RUNTIME_VIEW_STATE_SCHEMA, VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
+    StageLayerKind, State, SystemPageKind, SystemUiProfilePolicy, TimelineCommand, VnAudioBus,
+    VnAudioControlAction, VnAudioSync, VnPlayerCommand, VnRunConfig, VnRuntimeState,
+    VnRuntimeViewState, VnWaitKind, VN_RUNTIME_STATE_SCHEMA, VN_RUNTIME_VIEW_STATE_SCHEMA,
+    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
 };
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
@@ -166,6 +170,7 @@ pub struct NativeVnHostCommandSource {
     gpu_texture_budget_bytes: u64,
     live_layout_ids: BTreeSet<String>,
     scene_draw: Vec<SceneCommand>,
+    director_transition_snapshot: Option<DirectorTransitionSnapshot>,
     last_step_evidence: Option<NativeVnStepEvidence>,
     terminal_routes: std::collections::BTreeSet<String>,
     pending_timeline: Vec<PlayerTimelineTask>,
@@ -216,6 +221,19 @@ struct NativeVnUiFrameResult {
     dispositions: Vec<UiInputDisposition>,
     semantics: UiSemanticSnapshot,
     draw: Vec<SceneCommand>,
+}
+
+#[derive(Debug, Clone)]
+struct DirectorTransitionSnapshot {
+    descriptor_id: String,
+    source_draw: Vec<SceneCommand>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct SavedDirectorTransitionSnapshot {
+    descriptor_id: String,
+    source_draw_json: Vec<u8>,
+    source_draw_hash: Hash256,
 }
 
 #[derive(Clone, PartialEq)]
@@ -288,6 +306,9 @@ pub struct NativeVnUiHostPerformanceSample {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeVnAudioRequest {
     pub command_id: String,
+    /// Authored audio identity. Completion fences and `audio_control` address
+    /// this identity, never the compiler-generated command identity.
+    pub target_id: String,
     pub command: String,
     pub attributes: BTreeMap<String, String>,
     pub asset_id: String,
@@ -393,6 +414,7 @@ struct NativeVnPlayerSavePayload {
     sections: RuntimeSaveSections,
     runtime_state: VnRuntimeState,
     stage_director: ProductStageDirector,
+    director_transition_snapshot: Option<SavedDirectorTransitionSnapshot>,
     step_evidence: NativeVnStepEvidence,
     draw_commands_json: Vec<u8>,
     draw_commands_hash: Hash256,
@@ -810,6 +832,7 @@ impl NativeVnHostCommandSource {
                 .min(DEFAULT_NATIVE_VN_GPU_TEXTURE_CACHE_BYTES),
             live_layout_ids: BTreeSet::new(),
             scene_draw: Vec::new(),
+            director_transition_snapshot: None,
             last_step_evidence: None,
             terminal_routes,
             pending_timeline: Vec::new(),
@@ -914,6 +937,21 @@ impl NativeVnHostCommandSource {
         &mut self,
         delta_ns: u64,
     ) -> Result<Option<PlayerHostCommandBatch>, NativeVnHostError> {
+        if let Some(command) = self.pending_text_reveal_configuration()? {
+            let payload = serde_json::to_value(command)
+                .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
+            self.step_with_presentation("command", payload, false)?;
+        }
+        if self
+            .runtime_state
+            .as_ref()
+            .and_then(|state| state.text_reveal.as_ref())
+            .is_some_and(|reveal| !reveal.complete())
+        {
+            return self
+                .step("tick_text_reveal", serde_json::Value::Null)
+                .map(Some);
+        }
         if !self.stage_director.requires_frame_tick() {
             return Ok(None);
         }
@@ -930,6 +968,21 @@ impl NativeVnHostCommandSource {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let previous = std::mem::replace(&mut self.stage_director, next);
+        let previous_scene_draw = self.scene_draw.clone();
+        let stage_state = self.stage_director.state().clone();
+        if let Err(error) = self.ensure_stage_textures(&stage_state) {
+            self.stage_director = previous;
+            return Err(error);
+        }
+        self.scene_draw =
+            match stage_scene_commands(&stage_state, &self.textures, self.width, self.height) {
+                Ok(scene_draw) => scene_draw,
+                Err(error) => {
+                    self.stage_director = previous;
+                    self.scene_draw = previous_scene_draw;
+                    return Err(error);
+                }
+            };
         match self.render(&[], 0) {
             Ok(batch) => {
                 self.pending_stage_completions.extend(completions);
@@ -937,6 +990,7 @@ impl NativeVnHostCommandSource {
             }
             Err(error) => {
                 self.stage_director = previous;
+                self.scene_draw = previous_scene_draw;
                 Err(error)
             }
         }
@@ -1619,11 +1673,14 @@ impl NativeVnHostCommandSource {
             ));
         }
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v4".into(),
+            schema: "astra.player.native_vn_save_payload.v5".into(),
             slot,
             sections,
             runtime_state,
             stage_director: self.stage_director.clone(),
+            director_transition_snapshot: save_director_transition_snapshot(
+                self.director_transition_snapshot.as_ref(),
+            )?,
             step_evidence,
             draw_commands_hash: Hash256::from_sha256(&draw_commands_json),
             draw_commands_json,
@@ -1634,7 +1691,7 @@ impl NativeVnHostCommandSource {
         let payload_bytes = postcard::to_allocvec(&payload)
             .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v4".into(),
+            schema: "astra.player.native_vn_save.v5".into(),
             payload_hash: Hash256::from_sha256(&payload_bytes),
             payload,
         })
@@ -1695,6 +1752,9 @@ impl NativeVnHostCommandSource {
                 NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
             })?;
         let save_metadata = envelope.payload.save_metadata;
+        let restored_transition_snapshot = restore_director_transition_snapshot(
+            envelope.payload.director_transition_snapshot.as_ref(),
+        )?;
         self.runtime_state = Some(envelope.payload.runtime_state);
         self.runtime_backlog_count = self
             .runtime_state
@@ -1702,6 +1762,7 @@ impl NativeVnHostCommandSource {
             .map_or(0, |state| state.backlog.len());
         self.activate_locale(&restored_locale)?;
         self.stage_director = envelope.payload.stage_director;
+        self.director_transition_snapshot = restored_transition_snapshot;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
         self.apply_save_metadata(save_metadata)?;
@@ -1902,13 +1963,13 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        // Decode the bounded launch working set before the first RuntimeWorld
-        // presentation. `launch_default` can synchronously enter a title or
-        // route state, and doing this afterwards turns its first visible stage
-        // into an input-critical package read/decrypt/decode operation.
-        let prewarmed_images = self.prewarm_default_gameplay_story_images()?;
         let mut batch = self.step("launch_default", serde_json::json!({}))?;
         self.queue_default_gameplay_story_audio_preloads()?;
+        // `step` has already scheduled the current state's bounded asynchronous
+        // prefetch window. Do not synchronously decode a gameplay-wide image
+        // prefix here: the title scene must be presented before unrelated route
+        // assets are read, decrypted, decoded, and uploaded.
+        let prewarmed_images = self.prewarm_default_gameplay_story_images()?;
         if !prewarmed_images.is_empty() {
             let [PlayerHostCommand::PresentScene { commands, .. }] = batch.commands.as_mut_slice()
             else {
@@ -1917,7 +1978,6 @@ impl NativeVnHostCommandSource {
                 ));
             };
             let mut uploads = Vec::with_capacity(prewarmed_images.len());
-            let mut upload_bytes = 0u64;
             for asset_id in prewarmed_images {
                 if self.live_texture_ids.insert(asset_id.clone()) {
                     let frame = self.texture(&asset_id)?.clone();
@@ -1939,21 +1999,13 @@ impl NativeVnHostCommandSource {
                     self.live_texture_bytes
                         .insert(asset_id.clone(), frame_bytes);
                     self.mark_texture_used(&asset_id)?;
-                    upload_bytes = upload_bytes.saturating_add(frame_bytes);
                     uploads.push(SceneCommand::UploadTexture {
                         resource_id: asset_id,
                         frame,
                     });
                 }
             }
-            let upload_count = uploads.len();
             commands.splice(0..0, uploads);
-            tracing::info!(
-                event = "player.image.gpu_prewarm.queued",
-                upload_count,
-                upload_bytes,
-                "queued the bounded decoded image prefix before interactive presentation"
-            );
         }
         Ok(batch)
     }
@@ -2006,73 +2058,16 @@ impl NativeVnHostCommandSource {
 
         let mut seen = BTreeSet::new();
         let mut asset_ids = Vec::new();
-        let system_story_ids = self
-            .story
-            .system_story_manifest
-            .entries
-            .values()
-            .map(|entry| entry.story_id.as_str())
-            .collect::<BTreeSet<_>>();
-        // A title/system action can jump straight into a gameplay route.  Those
-        // target states take precedence over manifest order, so the first
-        // physical title input never discovers a cold route image on its
-        // presentation-critical frame.
+        // Only the launch state may perform synchronous work.  The full route
+        // graph is scheduled by the bounded asynchronous prefetcher after the
+        // first frame, otherwise opening a title window can decode an entire
+        // game's image set before the first present.
         let mut ordered_state_ids = Vec::new();
         if let Some(state_id) = default_runtime_launch_state(&self.story.stories) {
             ordered_state_ids.push(state_id);
         }
-        ordered_state_ids.extend(system_action_gameplay_entry_states(
-            &self.story.states,
-            &self.story.system_story_manifest.actions,
-            &system_story_ids,
-        ));
-        // A jump target itself can be a short title-transition state. Its
-        // presentation successor is still part of the first physical action,
-        // so rank that bounded look-ahead before the authored whole-story
-        // traversal below. This is the same validated graph used by the
-        // asynchronous steady-state prefetcher, but it runs before input.
-        let entry_state_ids = ordered_state_ids.clone();
-        if let Some(story_id) = self.default_gameplay_story_id() {
-            let story = self
-                .story
-                .story_manifest
-                .stories
-                .iter()
-                .find(|story| story.id == story_id)
-                .ok_or_else(|| {
-                    NativeVnHostError::Asset(
-                        "ASTRA_PLAYER_IMAGE_PREWARM_STORY_MANIFEST_MISSING".into(),
-                    )
-                })?;
-            ordered_state_ids.extend(
-                story
-                    .states
-                    .iter()
-                    .filter(|state_id| state_id.as_str() == "state.prologue")
-                    .cloned(),
-            );
-            ordered_state_ids.extend(
-                story
-                    .states
-                    .iter()
-                    .filter(|state_id| state_id.as_str() != "state.prologue")
-                    .cloned(),
-            );
-        }
         if ordered_state_ids.is_empty() {
             return Ok(Vec::new());
-        }
-        for state_id in &entry_state_ids {
-            let entry_assets = self.image_prefetch_windows.get(state_id).ok_or_else(|| {
-                NativeVnHostError::Asset(format!(
-                    "ASTRA_PLAYER_IMAGE_PREWARM_WINDOW_MISSING: {state_id}"
-                ))
-            })?;
-            for asset_id in entry_assets {
-                if seen.insert(asset_id.clone()) {
-                    asset_ids.push(asset_id.clone());
-                }
-            }
         }
         for state_id in &ordered_state_ids {
             let state = self.story.states.get(state_id).ok_or_else(|| {
@@ -2115,7 +2110,7 @@ impl NativeVnHostCommandSource {
         let mut gpu_prewarms = Vec::new();
         let mut gpu_prewarm_bytes = 0u64;
         for asset_id in retained_asset_ids {
-            let frame = self.asset_store.load_image(&asset_id)?;
+            let frame = self.stage_texture_for_viewport(self.asset_store.load_image(&asset_id)?)?;
             let frame_bytes = frame.rgba8.len() as u64;
             // CPU-ready frames and GPU uploads have independent budgets. Keep
             // every retained entry in the bounded decoded window so authored
@@ -2238,6 +2233,27 @@ impl NativeVnHostCommandSource {
             .ui_host_performance_sampling_enabled
             .then(NativeVnUiHostPerformanceSample::default);
         self.apply_ui_resize_events(&events)?;
+        if events
+            .iter()
+            .any(|event| matches!(event.kind, UiInputEventKind::FixedTime { .. }))
+        {
+            if let Some(command) = self.pending_text_reveal_configuration()? {
+                let payload = serde_json::to_value(command)
+                    .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
+                self.step_with_presentation("command", payload, false)?;
+            }
+        }
+        if events
+            .iter()
+            .any(|event| matches!(event.kind, UiInputEventKind::FixedTime { .. }))
+            && self
+                .runtime_state
+                .as_ref()
+                .and_then(|state| state.text_reveal.as_ref())
+                .is_some_and(|reveal| !reveal.complete())
+        {
+            return self.step("tick_text_reveal", serde_json::Value::Null);
+        }
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
             let semantic_snapshot_hash = self
@@ -3542,7 +3558,10 @@ impl NativeVnHostCommandSource {
         let draw = ui_frame_to_scene_commands(&output.render)?;
         let mut next_layout_ids = BTreeSet::new();
         let mut pending_text = Vec::new();
-        let body_font_size = (self.height as f32 / 30.0).clamp(18.0, 34.0);
+        // Must remain identical to Yakui's default when an authored text node
+        // omits `font_size`; otherwise shaped layout identity breaks at the
+        // retained-text boundary.
+        let body_font_size = 20.0;
         let text_layout_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         append_ui_semantic_text(
@@ -3709,10 +3728,66 @@ impl NativeVnHostCommandSource {
         self.step("command", payload)
     }
 
+    fn pending_text_reveal_configuration(
+        &self,
+    ) -> Result<Option<VnPlayerCommand>, NativeVnHostError> {
+        let Some(state) = self.runtime_state.as_ref() else {
+            return Ok(None);
+        };
+        if state.text_reveal.is_some()
+            || state.pending_wait.as_ref().map(|wait| wait.kind) != Some(VnWaitKind::Dialogue)
+        {
+            return Ok(None);
+        }
+        let Some(entry) = state.backlog.last() else {
+            return Err(NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_TEXT_REVEAL_BACKLOG: dialogue wait has no backlog entry".into(),
+            ));
+        };
+        let text = resolve_localized(&self.localization, &entry.key)?;
+        let text_graphemes = u32::try_from(text.graphemes(true).count()).map_err(|_| {
+            NativeVnHostError::Localization(
+                "ASTRA_PLAYER_TEXT_REVEAL_TOO_LONG: localized dialogue exceeds grapheme limit"
+                    .into(),
+            )
+        })?;
+        let configured = match state.system.config.get("text.speed") {
+            Some(value) => value.parse::<i64>().map_err(|_| {
+                NativeVnHostError::Input(
+                    "ASTRA_PLAYER_TEXT_REVEAL_SPEED: text.speed must be an integer".into(),
+                )
+            })?,
+            None => 50,
+        }
+        .clamp(0, 100);
+        let graphemes_per_second = match configured {
+            0..=20 => 18,
+            21..=40 => 30,
+            41..=60 => 45,
+            61..=80 => 65,
+            _ => 90,
+        };
+        Ok(Some(VnPlayerCommand::ConfigureTextReveal {
+            command_id: entry.command_id.clone(),
+            text_key: entry.key.clone(),
+            text_graphemes,
+            graphemes_per_second,
+        }))
+    }
+
     fn step(
         &mut self,
         action: &str,
         payload: serde_json::Value,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        self.step_with_presentation(action, payload, true)
+    }
+
+    fn step_with_presentation(
+        &mut self,
+        action: &str,
+        payload: serde_json::Value,
+        present: bool,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
         if self.shutdown_started {
             return Err(NativeVnHostError::Input(
@@ -3908,6 +3983,7 @@ impl NativeVnHostCommandSource {
                     ordered_outputs.push(NativeVnOrderedRuntimeOutput::AudioStart(
                         NativeVnAudioRequest {
                             command_id: command.command_id,
+                            target_id: command.cue.id,
                             command: command_kind.to_string(),
                             attributes,
                             asset_id,
@@ -3956,13 +4032,18 @@ impl NativeVnHostCommandSource {
                 .runtime_output_decode_ns
                 .saturating_add(runtime_output_decode_ns);
         }
+        if !present {
+            return PlayerHostCommandBatch::new(Vec::new())
+                .map_err(|error| NativeVnHostError::Input(error.to_string()));
+        }
         let render_started = performance_phase_started(self.ui_host_performance_sampling_enabled);
-        let result = self.render(&ordered_outputs, presentation_count);
+        let batch = self.render(&ordered_outputs, presentation_count)?;
         let runtime_render_ns = performance_phase_duration(render_started)?;
         if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
             sample.runtime_render_ns = sample.runtime_render_ns.saturating_add(runtime_render_ns);
         }
-        result
+
+        Ok(batch)
     }
 
     fn render(
@@ -3981,6 +4062,16 @@ impl NativeVnHostCommandSource {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let transition_request = stage_commands.iter().rev().find_map(|command| {
+            let StageCommand::Transition {
+                descriptor_id: Some(descriptor_id),
+                ..
+            } = command
+            else {
+                return None;
+            };
+            Some(descriptor_id.clone())
+        });
         let (next_stage_director, stage_outputs) = if stage_commands.is_empty() {
             (None, Vec::new())
         } else {
@@ -4173,6 +4264,28 @@ impl NativeVnHostCommandSource {
         if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
             sample.stage_scene_ns = sample.stage_scene_ns.saturating_add(stage_scene_ns);
         }
+        let active_transition = next_stage_director
+            .as_ref()
+            .map(|director| director.state().transition.as_ref())
+            .unwrap_or_else(|| self.stage_director.state().transition.as_ref())
+            .cloned();
+        let next_transition_snapshot = match (transition_request, active_transition.as_ref()) {
+            (Some(descriptor_id), Some(transition))
+                if transition.descriptor_id.as_deref() == Some(descriptor_id.as_str()) =>
+            {
+                Some(DirectorTransitionSnapshot {
+                    descriptor_id,
+                    source_draw: self.scene_draw.clone(),
+                })
+            }
+            (Some(_), _) => {
+                return Err(NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_DIRECTOR_TRANSITION_DESCRIPTOR_UNBOUND".into(),
+                ));
+            }
+            (None, Some(_)) => self.director_transition_snapshot.clone(),
+            (None, None) => None,
+        };
 
         for command in ordered_outputs.iter().filter_map(|output| match output {
             NativeVnOrderedRuntimeOutput::Presentation(command) => Some(command),
@@ -4223,15 +4336,30 @@ impl NativeVnHostCommandSource {
             self.height,
             [8, 10, 16, 255],
         ));
-        lifecycle.extend(
-            next_stage_scene
-                .as_ref()
-                .map_or(self.scene_draw.as_slice(), |(scene_draw, _)| {
-                    scene_draw.as_slice()
-                })
-                .iter()
-                .cloned(),
-        );
+        let stage_draw = next_stage_scene
+            .as_ref()
+            .map_or(self.scene_draw.as_slice(), |(scene_draw, _)| {
+                scene_draw.as_slice()
+            });
+        let composed_stage_draw = match (
+            next_transition_snapshot.as_ref(),
+            active_transition.as_ref(),
+        ) {
+            (Some(snapshot), Some(transition)) => compose_director_transition_scene(
+                snapshot,
+                stage_draw,
+                transition.progress.millionths,
+                self.width,
+                self.height,
+            )?,
+            (None, Some(transition)) if transition.descriptor_id.is_some() => {
+                return Err(NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_DIRECTOR_TRANSITION_SNAPSHOT_MISSING".into(),
+                ));
+            }
+            _ => stage_draw.to_vec(),
+        };
+        lifecycle.extend(composed_stage_draw);
         let ui_draw = ui_frame.map_or_else(Vec::new, |frame| frame.draw);
         lifecycle.extend(ui_draw.iter().cloned());
         self.command_sequence = self
@@ -4251,6 +4379,7 @@ impl NativeVnHostCommandSource {
         if let Some(stage_director) = next_stage_director {
             self.stage_director = stage_director;
         }
+        self.director_transition_snapshot = next_transition_snapshot;
         self.ui_draw = ui_draw;
         if !next_audio.is_empty() {
             tracing::trace!(
@@ -4298,7 +4427,8 @@ impl NativeVnHostCommandSource {
             if !self.textures.contains_key(asset_id) {
                 let cache_hit = self.asset_store.is_image_cached(asset_id)?;
                 let started = performance_phase_started(self.ui_host_performance_sampling_enabled);
-                let frame = self.asset_store.load_image(asset_id)?;
+                let frame =
+                    self.stage_texture_for_viewport(self.asset_store.load_image(asset_id)?)?;
                 let duration_ns = performance_phase_duration(started)?;
                 tracing::debug!(
                     event = "player.stage_texture.materialized",
@@ -4387,6 +4517,40 @@ impl NativeVnHostCommandSource {
             );
         }
         Ok(())
+    }
+
+    fn stage_texture_for_viewport(
+        &self,
+        frame: TextureFrame,
+    ) -> Result<TextureFrame, NativeVnHostError> {
+        if frame.width <= self.width && frame.height <= self.height {
+            return Ok(frame);
+        }
+        let source = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba8.to_vec())
+            .ok_or_else(|| {
+                NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_STAGE_TEXTURE_DIMENSIONS: decoded frame dimensions are invalid"
+                        .into(),
+                )
+            })?;
+        let scale =
+            (self.width as f64 / frame.width as f64).min(self.height as f64 / frame.height as f64);
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_STAGE_TEXTURE_VIEWPORT: viewport dimensions are invalid".into(),
+            ));
+        }
+        let target_width = ((frame.width as f64 * scale).floor() as u32).max(1);
+        let target_height = ((frame.height as f64 * scale).floor() as u32).max(1);
+        let resized = image::imageops::resize(
+            &source,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        TextureFrame::from_rgba8(target_width, target_height, resized.into_raw().into()).map_err(
+            |error| NativeVnHostError::Asset(format!("ASTRA_PLAYER_STAGE_TEXTURE_RESIZE: {error}")),
+        )
     }
 
     fn remove_texture(
@@ -4836,6 +5000,7 @@ fn image_prefetch_windows(
     Ok(windows)
 }
 
+#[cfg(test)]
 fn system_action_gameplay_entry_states(
     states: &BTreeMap<String, State>,
     actions: &BTreeMap<String, astra_vn_core::SystemActionProgram>,
@@ -5099,6 +5264,399 @@ fn stage_scene_commands(
         commands.push(SceneCommand::PopTransform);
     }
     Ok(commands)
+}
+
+fn compose_director_transition_scene(
+    snapshot: &DirectorTransitionSnapshot,
+    next: &[SceneCommand],
+    progress_millionths: i64,
+    width: u32,
+    height: u32,
+) -> Result<Vec<SceneCommand>, NativeVnHostError> {
+    let progress = progress_millionths.clamp(0, 1_000_000) as u64;
+    // Scene command identities are frame-local.  A Director transition draws
+    // the outgoing scene and one or more clipped instances of the incoming
+    // scene in the same frame, so their otherwise stable stage ids must be
+    // namespaced by their transition role.  Resource ids deliberately remain
+    // unchanged: they name retained GPU resources rather than draw instances.
+    let mut commands = namespace_transition_scene_draw(&snapshot.source_draw, "source")?;
+    let rectangles = match snapshot.descriptor_id.as_str() {
+        "director.puppet.1" => vec![RectI::new(
+            0,
+            0,
+            u32::try_from(u64::from(width) * progress / 1_000_000).map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+            })?,
+            height,
+        )],
+        "director.puppet.9" => {
+            let reveal_width =
+                u32::try_from(u64::from(width) * progress / 1_000_000).map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+                })?;
+            let reveal_height =
+                u32::try_from(u64::from(height) * progress / 1_000_000).map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+                })?;
+            vec![RectI::new(
+                i32::try_from((width - reveal_width) / 2).map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+                })?,
+                i32::try_from((height - reveal_height) / 2).map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+                })?,
+                reveal_width,
+                reveal_height,
+            )]
+        }
+        "director.puppet.10" => edge_in_transition_rectangles(progress, width, height)?,
+        "director.puppet.26" => dissolve_pattern_rectangles(progress, width, height)?,
+        _ => {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_DIRECTOR_TRANSITION_DESCRIPTOR_UNSUPPORTED".into(),
+            ));
+        }
+    };
+    for (clip_index, rectangle) in rectangles.into_iter().enumerate() {
+        if rectangle.width == 0 || rectangle.height == 0 {
+            continue;
+        }
+        commands.push(SceneCommand::PushClip { rect: rectangle });
+        commands.extend(namespace_transition_scene_draw(
+            next,
+            &format!("incoming.{clip_index}"),
+        )?);
+        commands.push(SceneCommand::PopClip);
+    }
+    Ok(commands)
+}
+
+fn namespace_transition_scene_draw(
+    draw: &[SceneCommand],
+    namespace: &str,
+) -> Result<Vec<SceneCommand>, NativeVnHostError> {
+    if namespace.is_empty() {
+        return Err(NativeVnHostError::Asset(
+            "ASTRA_PLAYER_DIRECTOR_TRANSITION_NAMESPACE_EMPTY".into(),
+        ));
+    }
+    let mut namespaced = draw.to_vec();
+    for command in &mut namespaced {
+        let id = match command {
+            SceneCommand::Sprite { id, .. }
+            | SceneCommand::GlyphRun { id, .. }
+            | SceneCommand::Mesh2D { id, .. }
+            | SceneCommand::Rect { id, .. }
+            | SceneCommand::Texture { id, .. }
+            | SceneCommand::VideoFrame { id, .. }
+            | SceneCommand::Glyph { id, .. } => Some(id),
+            _ => None,
+        };
+        if let Some(id) = id {
+            let namespaced_id = format!("vn.transition.{namespace}.{id}");
+            if namespaced_id.len() > 256 {
+                return Err(NativeVnHostError::Asset(
+                    "ASTRA_PLAYER_DIRECTOR_TRANSITION_COMMAND_ID_TOO_LONG".into(),
+                ));
+            }
+            *id = namespaced_id;
+        }
+    }
+    Ok(namespaced)
+}
+
+fn save_director_transition_snapshot(
+    snapshot: Option<&DirectorTransitionSnapshot>,
+) -> Result<Option<SavedDirectorTransitionSnapshot>, NativeVnHostError> {
+    snapshot
+        .map(|snapshot| {
+            let source_draw_json = serde_json::to_vec(&snapshot.source_draw)
+                .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
+            Ok(SavedDirectorTransitionSnapshot {
+                descriptor_id: snapshot.descriptor_id.clone(),
+                source_draw_hash: Hash256::from_sha256(&source_draw_json),
+                source_draw_json,
+            })
+        })
+        .transpose()
+}
+
+fn restore_director_transition_snapshot(
+    snapshot: Option<&SavedDirectorTransitionSnapshot>,
+) -> Result<Option<DirectorTransitionSnapshot>, NativeVnHostError> {
+    snapshot
+        .map(|snapshot| {
+            if Hash256::from_sha256(&snapshot.source_draw_json) != snapshot.source_draw_hash {
+                return Err(NativeVnHostError::Save(
+                    "ASTRA_PLAYER_SAVE_INTEGRITY: Director transition snapshot hash mismatch".into(),
+                ));
+            }
+            let source_draw = serde_json::from_slice(&snapshot.source_draw_json).map_err(|error| {
+                NativeVnHostError::Save(format!(
+                    "ASTRA_PLAYER_SAVE_INTEGRITY: Director transition snapshot decode failed: {error}"
+                ))
+            })?;
+            Ok(DirectorTransitionSnapshot {
+                descriptor_id: snapshot.descriptor_id.clone(),
+                source_draw,
+            })
+        })
+        .transpose()
+}
+
+fn edge_in_transition_rectangles(
+    progress: u64,
+    width: u32,
+    height: u32,
+) -> Result<Vec<RectI>, NativeVnHostError> {
+    let x_band = u32::try_from(u64::from(width) * progress / 2_000_000)
+        .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into()))?;
+    let y_band = u32::try_from(u64::from(height) * progress / 2_000_000)
+        .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into()))?;
+    let middle_height = height.saturating_sub(y_band.saturating_mul(2));
+    let right_x = width.saturating_sub(x_band);
+    Ok(vec![
+        RectI::new(0, 0, width, y_band),
+        RectI::new(
+            0,
+            i32::try_from(height.saturating_sub(y_band)).map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+            })?,
+            width,
+            y_band,
+        ),
+        RectI::new(
+            0,
+            i32::try_from(y_band).map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+            })?,
+            x_band,
+            middle_height,
+        ),
+        RectI::new(
+            i32::try_from(right_x).map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+            })?,
+            i32::try_from(y_band).map_err(|_| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+            })?,
+            x_band,
+            middle_height,
+        ),
+    ])
+}
+
+fn dissolve_pattern_rectangles(
+    progress: u64,
+    width: u32,
+    height: u32,
+) -> Result<Vec<RectI>, NativeVnHostError> {
+    // Director's type 26 is not a random dissolve.  It reveals the next frame
+    // through one of these ordered 8x8 bit patterns, tiled at native pixel
+    // resolution.  Keeping the pattern table in the executor (rather than
+    // treating it as a generic fade) makes the descriptor auditable and avoids
+    // a silently approximate transition implementation.
+    const PATTERNS: [u64; 64] = [
+        0x8000000000000000,
+        0x8000000008000000,
+        0x8800000008000000,
+        0x8800000088000000,
+        0x8800200088000000,
+        0x8800200088000200,
+        0x8800220088000200,
+        0x8800220088002200,
+        0xa800220088002200,
+        0xa80022008a002200,
+        0xaa0022008a002200,
+        0xaa002200aa002200,
+        0xaa00a200aa002200,
+        0xaa00a200aa002a00,
+        0xaa00aa00aa002a00,
+        0xaa00aa00aa00aa00,
+        0xaa40aa00aa00aa00,
+        0xaa40aa00aa04aa00,
+        0xaa44aa00aa04aa00,
+        0xaa44aa00aa44aa00,
+        0xaa44aa10aa44aa00,
+        0xaa44aa10aa44aa01,
+        0xaa44aa11aa44aa01,
+        0xaa44aa11aa44aa11,
+        0xaa54aa11aa44aa11,
+        0xaa54aa11aa45aa11,
+        0xaa55aa11aa45aa11,
+        0xaa55aa11aa55aa11,
+        0xaa55aa51aa55aa11,
+        0xaa55aa51aa55aa15,
+        0xaa55aa55aa55aa15,
+        0xaa55aa55aa55aa55,
+        0xea55aa55aa55aa55,
+        0xea55aa55ae55aa55,
+        0xee55aa55ae55aa55,
+        0xee55aa55ee55aa55,
+        0xee55ba55ee55aa55,
+        0xee55ba55ee55ab55,
+        0xee55bb55ee55ab55,
+        0xee55bb55ee55bb55,
+        0xfe55bb55ee55bb55,
+        0xfe55bb55ef55bb55,
+        0xff55bb55ef55bb55,
+        0xff55bb55ff55bb55,
+        0xff55fb55ff55bb55,
+        0xff55fb55ff55bf55,
+        0xff55ff55ff55bf55,
+        0xff55ff55ff55ff55,
+        0xffd5ff55ff55ff55,
+        0xffd5ff55ff5dff55,
+        0xffddff55ff5dff55,
+        0xffddff55ffddff55,
+        0xffddff75ffddff55,
+        0xffddff75ffddff57,
+        0xffddff77ffddff57,
+        0xffddff77ffddff77,
+        0xfffdff77ffddff77,
+        0xfffdff77ffdfff77,
+        0xffffff77ffdfff77,
+        0xffffff77ffffff77,
+        0xfffffff7ffffff77,
+        0xfffffff7ffffff7f,
+        0xffffffffffffff7f,
+        0xffffffffffffffff,
+    ];
+    let pattern_index = usize::try_from(progress.saturating_mul(63) / 1_000_000)
+        .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into()))?;
+    let pattern = PATTERNS[pattern_index];
+    let mut rectangles = Vec::new();
+    for y in 0..height {
+        let row = ((pattern >> ((7 - (y % 8)) * 8)) & 0xff) as u8;
+        let mut x = 0;
+        while x < width {
+            let bit = 0x80 >> (x % 8);
+            if row & bit == 0 {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < width && row & (0x80 >> (x % 8)) != 0 {
+                x += 1;
+            }
+            rectangles.push(RectI::new(
+                i32::try_from(start).map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+                })?,
+                i32::try_from(y).map_err(|_| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_DIRECTOR_TRANSITION_RANGE".into())
+                })?,
+                x - start,
+                1,
+            ));
+        }
+    }
+    Ok(rectangles)
+}
+
+#[cfg(test)]
+mod director_transition_tests {
+    use super::{compose_director_transition_scene, DirectorTransitionSnapshot};
+    use astra_media_core::SceneCommand;
+    use std::collections::BTreeSet;
+
+    fn next_scene() -> Vec<SceneCommand> {
+        vec![SceneCommand::rect(
+            "next",
+            0,
+            0,
+            800,
+            600,
+            [255, 255, 255, 255],
+        )]
+    }
+
+    #[astra_headless_test::test]
+    fn wipe_transition_clips_the_new_scene_by_fixed_progress() {
+        let snapshot = DirectorTransitionSnapshot {
+            descriptor_id: "director.puppet.1".into(),
+            source_draw: vec![SceneCommand::rect(
+                "previous",
+                0,
+                0,
+                800,
+                600,
+                [0, 0, 0, 255],
+            )],
+        };
+        let composed =
+            compose_director_transition_scene(&snapshot, &next_scene(), 500_000, 800, 600)
+                .expect("compose wipe");
+        assert!(matches!(
+            composed[1],
+            SceneCommand::PushClip { rect } if rect.width == 400 && rect.height == 600
+        ));
+        assert!(matches!(composed.last(), Some(SceneCommand::PopClip)));
+    }
+
+    #[astra_headless_test::test]
+    fn transition_namespaces_outgoing_and_each_incoming_draw_instance() {
+        let snapshot = DirectorTransitionSnapshot {
+            descriptor_id: "director.puppet.26".into(),
+            source_draw: vec![SceneCommand::rect(
+                "vn.scene.backdrop",
+                0,
+                0,
+                800,
+                600,
+                [0, 0, 0, 255],
+            )],
+        };
+        let next = vec![SceneCommand::rect(
+            "vn.scene.backdrop",
+            0,
+            0,
+            800,
+            600,
+            [255, 255, 255, 255],
+        )];
+        let composed = compose_director_transition_scene(&snapshot, &next, 500_000, 32, 32)
+            .expect("compose dissolve");
+        let ids = composed
+            .iter()
+            .filter_map(|command| match command {
+                SceneCommand::Rect { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            ids.len() > 2,
+            "dissolve should draw more than one incoming clip"
+        );
+        assert_eq!(ids.len(), ids.iter().collect::<BTreeSet<_>>().len());
+        assert!(ids.iter().all(|id| id.starts_with("vn.transition.")));
+    }
+
+    #[astra_headless_test::test]
+    fn dissolve_patterns_uses_the_fixed_native_pixel_mask() {
+        let snapshot = DirectorTransitionSnapshot {
+            descriptor_id: "director.puppet.26".into(),
+            source_draw: Vec::new(),
+        };
+        let first = compose_director_transition_scene(&snapshot, &next_scene(), 500_000, 32, 32)
+            .expect("compose dissolve");
+        let second = compose_director_transition_scene(&snapshot, &next_scene(), 500_000, 32, 32)
+            .expect("compose dissolve repeat");
+        assert_eq!(first, second);
+        let clips = first
+            .iter()
+            .filter_map(|command| match command {
+                SceneCommand::PushClip { rect } => Some(*rect),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(clips.contains(&astra_media_core::RectI::new(0, 0, 1, 1)));
+        assert!(clips.contains(&astra_media_core::RectI::new(2, 0, 1, 1)));
+        assert!(
+            !clips.contains(&astra_media_core::RectI::new(1, 0, 1, 1)),
+            "the mid-transition pattern must preserve its masked pixels"
+        );
+    }
 }
 
 fn effect_filter_graph(
@@ -5503,6 +6061,18 @@ fn append_ui_semantic_text(
             .get(name)
             .map(String::as_str)
             .unwrap_or(name);
+        let text = match node.properties.get("text.visible_graphemes") {
+            Some(value) => {
+                let visible = value.parse::<usize>().map_err(|_| {
+                    NativeVnHostError::Asset(
+                        "ASTRA_PLAYER_UI_TEXT_REVEAL_GRAPHEME_COUNT: semantic grapheme count is invalid"
+                            .into(),
+                    )
+                })?;
+                text.graphemes(true).take(visible).collect::<String>()
+            }
+            None => text.to_string(),
+        };
         let x = non_negative_coord(node.bounds_points.min.x, "x")?;
         let y = non_negative_coord(node.bounds_points.min.y, "y")?;
         let width =
@@ -5520,7 +6090,10 @@ fn append_ui_semantic_text(
         let font_size = parse_bounded_f32_property(
             node,
             "text.font_size",
-            (body_font_size * 0.72).max(16.0),
+            // Blueprint text without an authored size uses Yakui's 20 px
+            // default.  The renderer must shape with that exact value or its
+            // cached layout no longer matches the semantic measurement.
+            body_font_size,
             6.0,
             256.0,
         )?;
@@ -5536,7 +6109,7 @@ fn append_ui_semantic_text(
             layout_ids,
             pending,
             &format!("ui.text.{}", node.id),
-            text,
+            &text,
             x.saturating_add(8),
             y.saturating_add(8),
             width.saturating_sub(16).max(1),
@@ -6299,8 +6872,8 @@ fn decode_save_envelope(bytes: &[u8]) -> Result<NativeVnPlayerSaveEnvelope, Nati
     let envelope: NativeVnPlayerSaveEnvelope = postcard::from_bytes(bytes).map_err(|error| {
         NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
     })?;
-    if envelope.schema != "astra.player.native_vn_save.v4"
-        || envelope.payload.schema != "astra.player.native_vn_save_payload.v4"
+    if envelope.schema != "astra.player.native_vn_save.v5"
+        || envelope.payload.schema != "astra.player.native_vn_save_payload.v5"
     {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),

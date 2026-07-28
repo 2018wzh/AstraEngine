@@ -13,6 +13,7 @@ from director_native_story import (
     _score_openings,
     _split_reading_text,
     trace_route_choice_witness,
+    parse_director_transition_descriptors,
     _Lowering,
     DirectorNativeStoryError,
     LAYER_SPECS,
@@ -32,6 +33,73 @@ def _keyboard_events(key):
 
 
 class DirectorNativeStoryAutomationTests(unittest.TestCase):
+    def test_transition_descriptors_require_exact_original_helpers(self):
+        def call(effect):
+            return {
+                "kind": "command",
+                "expression": [
+                    {"kind": "identifier", "value": "puppetTransition"},
+                    {"kind": "punctuation", "value": "("},
+                    {"kind": "number", "value": str(effect)},
+                    {"kind": "punctuation", "value": ","},
+                    {"kind": "number", "value": "1"},
+                    {"kind": "punctuation", "value": ","},
+                    {"kind": "number", "value": "4"},
+                    {"kind": "punctuation", "value": ","},
+                    {"kind": "number", "value": "1"},
+                    {"kind": "punctuation", "value": ")"},
+                ],
+            }
+
+        lingo = {
+            "scripts": [{
+                "source_sha256": "sha256:" + "a" * 64,
+                "handlers": [
+                    {"name": name, "statements": [call(effect)]}
+                    for name, effect in (("ttrans1", 26), ("ttrans2", 1), ("ttrans3", 9), ("ttrans4", 10))
+                ],
+            }]
+        }
+        descriptors = parse_director_transition_descriptors(lingo)
+        self.assertEqual(descriptors["ttrans1"]["preset"], "director_puppet_26")
+        self.assertEqual(descriptors["ttrans4"]["duration_parameter"], 1)
+        self.assertEqual(descriptors["ttrans1"]["duration_ms"], 250)
+        self.assertEqual(descriptors["ttrans1"]["algorithm"], "dissolve_patterns")
+        self.assertEqual(descriptors["ttrans1"]["change_area"], 1)
+        del lingo["scripts"][0]["handlers"][-1]
+        with self.assertRaisesRegex(DirectorNativeStoryError, "coverage"):
+            parse_director_transition_descriptors(lingo)
+
+    def test_transition_type_without_a_verified_executor_is_blocking(self):
+        def call(effect):
+            return {
+                "kind": "command",
+                "expression": [
+                    {"kind": "identifier", "value": "puppetTransition"},
+                    {"kind": "punctuation", "value": "("},
+                    {"kind": "number", "value": str(effect)},
+                    {"kind": "punctuation", "value": ","},
+                    {"kind": "number", "value": "1"},
+                    {"kind": "punctuation", "value": ","},
+                    {"kind": "number", "value": "4"},
+                    {"kind": "punctuation", "value": ","},
+                    {"kind": "number", "value": "1"},
+                    {"kind": "punctuation", "value": ")"},
+                ],
+            }
+
+        lingo = {
+            "scripts": [{
+                "source_sha256": "sha256:" + "a" * 64,
+                "handlers": [
+                    {"name": name, "statements": [call(99 if name == "ttrans1" else effect)]}
+                    for name, effect in (("ttrans1", 26), ("ttrans2", 1), ("ttrans3", 9), ("ttrans4", 10))
+                ],
+            }]
+        }
+        with self.assertRaisesRegex(DirectorNativeStoryError, "no verified executor"):
+            parse_director_transition_descriptors(lingo)
+
     def test_route_witness_reaches_next_movie_wait_and_tracks_authored_choice(self):
         states = [
             {

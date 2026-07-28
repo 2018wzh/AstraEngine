@@ -280,6 +280,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     let mut host = NativeVnProductAudioHost::default();
     let request = NativeVnAudioRequest {
         command_id: "bgm.main".into(),
+        target_id: "bgm.authored".into(),
         command: "bgm".into(),
         attributes: BTreeMap::from([("loop".into(), "true".into()), ("fade".into(), "40".into())]),
         asset_id: "asset:/bgm/main".into(),
@@ -297,7 +298,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     host.start(&mut source, &mut executor, &request, audio, &mut signals)
         .await
         .unwrap();
-    signals.insert("bgm.main.end".into());
+    signals.insert("bgm.authored.end".into());
     let mut replacement = request.clone();
     replacement.asset_id = "asset:/bgm/replacement".into();
     host.start(
@@ -313,7 +314,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     )
     .await
     .unwrap();
-    assert!(!signals.contains("bgm.main.end"));
+    assert!(!signals.contains("bgm.authored.end"));
     host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
@@ -322,7 +323,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         &NativeVnAudioControlRequest {
             command_id: "audio.pause".into(),
             action: "pause".into(),
-            target: "bgm.main".into(),
+            target: "bgm.authored".into(),
             duration_ms: None,
             fence: None,
         },
@@ -333,7 +334,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         &NativeVnAudioControlRequest {
             command_id: "audio.resume".into(),
             action: "resume".into(),
-            target: "bgm.main".into(),
+            target: "bgm.authored".into(),
             duration_ms: None,
             fence: None,
         },
@@ -344,7 +345,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         &NativeVnAudioControlRequest {
             command_id: "audio.fade-stop".into(),
             action: "fade_stop".into(),
-            target: "bgm.main".into(),
+            target: "bgm.authored".into(),
             duration_ms: Some(40),
             fence: Some("bgm.fade.complete".into()),
         },
@@ -364,13 +365,13 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     host.pump(&mut source, &mut executor, &mut signals, false)
         .await
         .unwrap();
-    assert!(signals.contains("bgm.main.end"));
+    assert!(signals.contains("bgm.authored.end"));
     assert!(signals.contains("bgm.fade.complete"));
     host.control(
         &NativeVnAudioControlRequest {
             command_id: "audio.fade-stop-again".into(),
             action: "fade_stop".into(),
-            target: "bgm.main".into(),
+            target: "bgm.authored".into(),
             duration_ms: Some(40),
             fence: Some("bgm.second-fade.complete".into()),
         },
@@ -397,7 +398,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         &NativeVnAudioControlRequest {
             command_id: "audio.stop-after-fade".into(),
             action: "stop".into(),
-            target: "bgm.main".into(),
+            target: "bgm.authored".into(),
             duration_ms: None,
             fence: None,
         },

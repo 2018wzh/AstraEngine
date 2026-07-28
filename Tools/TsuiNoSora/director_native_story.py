@@ -96,6 +96,101 @@ READING_SURFACES = {
     "mono": "tsui.surface.monologue",
     "monoreturn": "tsui.surface.monologue",
 }
+
+# The helper bodies come from the original cast. This catalog names only the
+# Director 7 numeric ABI used there; the Player was statically inspected and a
+# compatible implementation was used as a cross-check of unit/enum semantics.
+# An unknown type must remain blocking until it has an explicit renderer.
+DIRECTOR_PUPPET_TRANSITION_TIMING_MODEL = "director.puppet.quarter_second.v1"
+DIRECTOR_PUPPET_TRANSITION_TYPES = {
+    1: "wipe_right",
+    9: "center_out_square",
+    10: "edges_in_square",
+    26: "dissolve_patterns",
+}
+DIRECTOR_PUPPET_TRANSITION_QUARTER_SECOND_MS = 250
+
+
+def parse_director_transition_descriptors(lingo: dict) -> dict[str, dict]:
+    """Recover transition helper calls without retaining source text.
+
+    Only the exact ``puppetTransition(type, seconds, chunk_size, chunk_count)``
+    form is accepted.  The private IR retains source identity and numeric
+    arguments; reports and public contracts receive neither Lingo text nor a
+    Director object reference.
+    """
+    descriptors: dict[str, dict] = {}
+    for script in lingo.get("scripts", []):
+        source_sha256 = _plain_hash(script.get("source_sha256"))
+        source_id = f"lingo.{source_sha256[:24]}"
+        for handler in script.get("handlers", []):
+            name = handler.get("name")
+            if name not in {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}:
+                continue
+            statements = handler.get("statements")
+            if not isinstance(statements, list) or len(statements) != 1:
+                raise DirectorNativeStoryError("transition helper body is not exact")
+            values = _puppet_transition_values(statements[0])
+            if name in descriptors:
+                raise DirectorNativeStoryError("transition helper has multiple source definitions")
+            transition_type, duration_parameter, chunk_size, change_area = values
+            algorithm = DIRECTOR_PUPPET_TRANSITION_TYPES.get(transition_type)
+            if algorithm is None:
+                raise DirectorNativeStoryError("Director transition type has no verified executor")
+            descriptors[name] = {
+                "descriptor_id": f"director.puppet.{transition_type}",
+                "preset": f"director_puppet_{transition_type}",
+                "duration_parameter": duration_parameter,
+                "duration_ms": _director_puppet_duration_ms(duration_parameter),
+                "timing_model": DIRECTOR_PUPPET_TRANSITION_TIMING_MODEL,
+                "transition_type": transition_type,
+                "algorithm": algorithm,
+                "chunk_size": chunk_size,
+                "change_area": change_area,
+                "source_id": source_id,
+                "source_sha256": source_sha256,
+            }
+    expected = {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}
+    if set(descriptors) != expected:
+        raise DirectorNativeStoryError("original transition helper coverage is incomplete")
+    return descriptors
+
+
+def _director_puppet_duration_ms(duration_parameter: int) -> int:
+    duration_ms = duration_parameter * DIRECTOR_PUPPET_TRANSITION_QUARTER_SECOND_MS
+    if duration_ms <= 0 or duration_ms > 60_000:
+        raise DirectorNativeStoryError("Director transition duration is outside the bounded Player range")
+    return duration_ms
+
+
+def _puppet_transition_values(statement: dict) -> tuple[int, int, int, int]:
+    if statement.get("kind") != "command":
+        raise DirectorNativeStoryError("transition helper statement is not a command")
+    tokens = statement.get("expression")
+    if not isinstance(tokens, list):
+        raise DirectorNativeStoryError("transition helper expression is invalid")
+    expected = ["puppettransition", "(", None, ",", None, ",", None, ",", None, ")"]
+    if len(tokens) != len(expected):
+        raise DirectorNativeStoryError("transition helper call arity is invalid")
+    values: list[int] = []
+    for token, expected_value in zip(tokens, expected, strict=True):
+        kind = token.get("kind")
+        value = token.get("value")
+        if expected_value is None:
+            if kind != "number" or not isinstance(value, str) or not value.isdecimal():
+                raise DirectorNativeStoryError("transition helper parameter is not a positive integer")
+            integer = int(value)
+            if integer <= 0:
+                raise DirectorNativeStoryError("transition helper parameter is not positive")
+            values.append(integer)
+        elif expected_value in {"(", ",", ")"}:
+            if kind != "punctuation" or value != expected_value:
+                raise DirectorNativeStoryError("transition helper punctuation is invalid")
+        elif kind != "identifier" or not isinstance(value, str) or value.lower() != expected_value:
+            raise DirectorNativeStoryError("transition helper target is invalid")
+    return tuple(values)  # type: ignore[return-value]
+
+
 def build_native_story_ir(program: dict, lingo: dict) -> tuple[dict, dict]:
     if program.get("schema") != "tsuinosora.director_story_program_ir.v1":
         raise DirectorNativeStoryError("Director story program schema is invalid")
@@ -103,9 +198,16 @@ def build_native_story_ir(program: dict, lingo: dict) -> tuple[dict, dict]:
         raise DirectorNativeStoryError("Director Lingo schema is invalid")
 
     dispatcher, dispatcher_source = _parse_episode_dispatcher(lingo)
+    transition_descriptors = parse_director_transition_descriptors(lingo)
     sources, handlers, handler_by_source_hash = _source_catalog(program, lingo)
     selector_sizes = _selector_sizes(program)
-    lowering = _Lowering(handlers, handler_by_source_hash, selector_sizes, dispatcher)
+    lowering = _Lowering(
+        handlers,
+        handler_by_source_hash,
+        selector_sizes,
+        dispatcher,
+        transition_descriptors,
+    )
     states = lowering.lower(program)
     routes = _derive_route_automation(states, program)
     commands = [
@@ -126,6 +228,7 @@ def build_native_story_ir(program: dict, lingo: dict) -> tuple[dict, dict]:
         "mechanism_replacements": dict(sorted(lowering.mechanism_replacements.items())),
         "original_case_miss_count": lowering.original_case_miss_count,
         "episode_dispatch_source_id": dispatcher_source,
+        "transition_descriptor_count": len(transition_descriptors),
         "diagnostics": [],
         "redaction": {
             "paths": "report_relative_only",
@@ -153,11 +256,19 @@ def build_native_story_ir(program: dict, lingo: dict) -> tuple[dict, dict]:
 
 
 class _Lowering:
-    def __init__(self, handlers, handler_by_source_hash, selector_sizes, dispatcher):
+    def __init__(
+        self,
+        handlers,
+        handler_by_source_hash,
+        selector_sizes,
+        dispatcher,
+        transition_descriptors=None,
+    ):
         self.handlers = handlers
         self.handler_by_source_hash = handler_by_source_hash
         self.selector_sizes = selector_sizes
         self.dispatcher = dispatcher
+        self.transition_descriptors = transition_descriptors or {}
         self.states: list[dict] = []
         self.state_ids: set[str] = set()
         self.serial = 0
@@ -169,6 +280,7 @@ class _Lowering:
     def lower(self, program):
         self.stage_layouts = _stage_layouts(program.get("stage_layouts"))
         self.score_openings = _score_openings(program.get("score_openings"), program["movies"])
+        self.title_audio = _title_audio(program.get("title_audio"))
         movie_entries = {movie["movie_id"]: movie["entry_node"] for movie in program["movies"]}
         self.movie_entry_nodes = {entry: movie_id for movie_id, entry in movie_entries.items()}
         self.choice_option_counts = {
@@ -308,7 +420,24 @@ class _Lowering:
                 commands.append(self._mutate(_selector_path(selector, option), 0))
         for node_id in self.choice_option_counts:
             commands.append(self._mutate(_choice_initialized_path(node_id), 0))
+        if self.title_audio is not None:
+            commands.extend(
+                [
+                    self._command("preload", asset_id=self.title_audio["asset_id"]),
+                    self._command(
+                        "bgm",
+                        asset_id=self.title_audio["asset_id"],
+                        audio_id="tsui.audio.bgm",
+                        loop=True,
+                        fade_ms=0,
+                    ),
+                ]
+            )
         commands.append(self._command("system_page", page="title"))
+        if self.title_audio is not None:
+            commands.append(
+                self._command("audio_control", action="stop", target="tsui.audio.bgm")
+            )
         commands.append(self._command("jump", target=movie_entries["Y"]))
         return commands
 
@@ -583,6 +712,37 @@ class _Lowering:
             return target
         raise DirectorNativeStoryError("legacy or unsupported condition reached authoritative lowering")
 
+    def _director_transition_command(self, handler, helper):
+        descriptor = self.transition_descriptors.get(helper)
+        if not isinstance(descriptor, dict):
+            raise DirectorNativeStoryError("Director transition helper has no verified descriptor")
+        preset = descriptor.get("preset")
+        duration_ms = descriptor.get("duration_ms")
+        descriptor_id = descriptor.get("descriptor_id")
+        source_id = descriptor.get("source_id")
+        source_sha256 = descriptor.get("source_sha256")
+        if (
+            not isinstance(preset, str)
+            or not isinstance(duration_ms, int)
+            or duration_ms <= 0
+            or not isinstance(descriptor_id, str)
+            or not isinstance(source_id, str)
+            or not isinstance(source_sha256, str)
+        ):
+            raise DirectorNativeStoryError(
+                "Director transition descriptor has no calibrated duration mapping"
+            )
+        self.mechanism_replacements[descriptor_id] = "astra_director_puppet_transition"
+        return self._command(
+            "transition",
+            handler=handler,
+            preset=preset,
+            duration_ms=duration_ms,
+            transition_descriptor_id=descriptor_id,
+            transition_source_id=source_id,
+            transition_source_sha256=source_sha256,
+        )
+
     def _presentation_commands(self, node):
         presentation = node.get("presentation")
         if presentation is None:
@@ -593,9 +753,17 @@ class _Lowering:
             kind = operation["kind"]
             if kind == "preload_member":
                 commands.append(self._command("preload", handler=handler, asset_id=operation["binding"]["asset_id"]))
+            elif kind == "transition":
+                helper = operation.get("transition_helper")
+                if not isinstance(helper, str):
+                    raise DirectorNativeStoryError("scene transition is missing its original helper identity")
+                commands.append(self._director_transition_command(handler, helper))
             elif kind == "show_member":
                 layer = operation["layer"]
                 layout = self.stage_layouts[node["movie_id"]][layer]
+                helper = operation.get("transition_helper")
+                if helper is not None:
+                    commands.append(self._director_transition_command(handler, helper))
                 commands.extend(
                     [
                         self._command(
@@ -618,8 +786,6 @@ class _Lowering:
                         ),
                     ]
                 )
-                if operation.get("transition") == "transition_in":
-                    commands.append(self._command("transition", handler=handler, preset="crossfade", duration_ms=250))
             elif kind == "show_eye":
                 layout = self.stage_layouts[node["movie_id"]]["eye"]
                 commands.extend(
@@ -645,7 +811,10 @@ class _Lowering:
                     ]
                 )
             elif kind == "hide_layer":
-                duration = 250 if operation.get("transition") == "transition_out" else 0
+                helper = operation.get("transition_helper")
+                if helper is not None:
+                    commands.append(self._director_transition_command(handler, helper))
+                duration = 0
                 commands.append(self._command("clear_layer", handler=handler, layer=operation["layer"], duration_ms=duration))
             elif kind == "set_layer_visibility":
                 commands.append(self._command("layer_visibility", handler=handler, layer=operation["layer"], visible=operation["visible"]))
@@ -913,7 +1082,10 @@ def _authority_operations(operations):
     result = []
     for operation in operations:
         kind = operation["kind"]
-        if kind in {"legacy_mechanism", "wait_current_frame"}:
+        # Transition helpers are presentation-only.  Their verified descriptor
+        # is consumed by the scene-operation lowering path, while the Core
+        # authority program must remain free of renderer-only operations.
+        if kind in {"legacy_mechanism", "legacy_transition", "wait_current_frame"}:
             continue
         if kind == "if":
             if _contains_kind(operation["condition"], "legacy_value"):
@@ -1560,6 +1732,30 @@ def _stage_layouts(value):
     if set(result) != required_movies:
         raise DirectorNativeStoryError("Director stage layout movie coverage is incomplete")
     return result
+
+
+def _title_audio(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise DirectorNativeStoryError("Director title audio binding is invalid")
+    binding = value.get("binding")
+    source_hash = value.get("source_sha256")
+    source_path = value.get("source_relative_path")
+    if (
+        value.get("loop") is not True
+        or value.get("fade_frames") != 0
+        or not isinstance(binding, dict)
+        or not isinstance(binding.get("asset_id"), str)
+        or not binding["asset_id"].startswith("tsui.asset.")
+        or binding.get("media_fourcc") not in {"ediM", "sndS"}
+        or not isinstance(source_hash, str)
+        or not source_hash.startswith("sha256:")
+        or not isinstance(source_path, str)
+        or not source_path
+    ):
+        raise DirectorNativeStoryError("Director title audio source evidence is invalid")
+    return {"asset_id": binding["asset_id"]}
 
 
 def _score_openings(value, movies):

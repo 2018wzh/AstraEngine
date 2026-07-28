@@ -471,14 +471,32 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     Vec::new(),
                 )
                 .await?;
-            let mut timeline_tick = tokio::time::interval(std::time::Duration::from_millis(8));
+            let mut timeline_tick =
+                tokio::time::interval(std::time::Duration::from_nanos(16_666_667));
             timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 let event = tokio::select! {
                     event = session.events.recv() => event?,
-                    _ = timeline_tick.tick(), if media.is_active() => {
-                        let now_ms = timeline_clock.elapsed().as_millis() as u64;
-                        media.poll_and_process(&mut vn, &mut executor, now_ms).await?;
+                    _ = timeline_tick.tick() => {
+                        if let Some(batch) = vn.tick_presentation(16_666_667).map_err(|error| {
+                            astra_platform::PlatformError::new(
+                                astra_platform::PlatformErrorCode::InvalidState,
+                                "player.runtime.presentation_tick",
+                                error.to_string(),
+                            )
+                        })? {
+                            executor.execute_batch(batch).await.map_err(|error| {
+                                astra_platform::PlatformError::new(
+                                    astra_platform::PlatformErrorCode::InvalidState,
+                                    "player.host.execute",
+                                    error.to_string(),
+                                )
+                            })?;
+                        }
+                        if media.is_active() {
+                            let now_ms = timeline_clock.elapsed().as_millis() as u64;
+                            media.poll_and_process(&mut vn, &mut executor, now_ms).await?;
+                        }
                         continue;
                     }
                 };

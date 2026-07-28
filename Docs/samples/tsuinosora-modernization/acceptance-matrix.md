@@ -19,6 +19,8 @@
 
 classic profile 的目标是可观察行为忠实。几何、layer、clip、shade 和系统窗口结构属于阻断约束；捕获颜色与字体 raster 差异只能由具名 comparison policy 与 hash-bound human approval 限定批准。当前 v43 比较复用同一份 18-checkpoint GPU capture identity，15 项归一化参考中 13 项通过；`006` 仅按不可修改的 `capture_palette_v1` 通过，仍执行 2 px 几何门禁。`005/009` 的失败来自 reference/source 或 transition 稳定捕获证据不足，保持 blocking。
 
+2026-07-23 的修复切片已把 Classic/Modern 的设置与消息文本改为按实际可用宽度 shaping、换行和裁剪，并将消息 reveal 固化为可保存的 grapheme 固定时钟状态；这些是局部 E1/E2 证据，不关闭视觉验收。Director 转场链路现从完整 cast 的受控 Lingo 资源严格提取 helper、类型、时长参数和块参数，并将 scene controller 的实际 helper 调用接入 NativeVN lowering。typed descriptor、旧场景快照和进度会随 Player save v5 保存；Player 按 descriptor 合成 type 1/9/10/26，type 26 使用固定 8×8 Director pattern，而不是降级为 crossfade 或随机 dissolve。IDA 已确认原始 PE 含嵌入式 Director Player；其无符号 builtin dispatch 不能单独导出可审计的 type→像素算法，因此 pattern 与时长单位只在静态 Player identity 和兼容实现交叉核对后进入 descriptor，未知或不完整资源仍 fail-closed。此次从私有完整 dump 重新生成 Y 线 Story IR 时，外部 cast 目录的结构与 reader 要求不一致，严格 preflight 已阻断生成；所以尚未产生与本次代码相同 build/package/profile/input identity 的 Y 线 Headless E2。Windows E3 仍是后续人工输入复验，不以本轮静态分析替代。
+
 ## Modern Profile
 
 | Area | Acceptance target | Automatic evidence | Manual evidence | Blocks release |

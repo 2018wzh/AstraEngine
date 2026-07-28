@@ -28,7 +28,12 @@ STORY_MOVIES = {"K", "S", "T", "Y", "Z"}
 INITIAL_VISIBLE_LAYERS = {"sky", "character"}
 
 
-def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted: dict) -> tuple[dict, dict]:
+def build_asset_binding_ir(
+    story_source: dict,
+    scene_semantics: dict,
+    converted: dict,
+    lingo: dict | None = None,
+) -> tuple[dict, dict]:
     if story_source.get("schema") != "tsuinosora.director_story_source.v1":
         raise DirectorAssetBindingError("Director story source schema is invalid")
     if scene_semantics.get("schema") != "tsuinosora.director_scene_semantic_ir.v1":
@@ -56,6 +61,8 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
         for movie in movies.values()
         if movie["movie_id"] in STORY_MOVIES
     ]
+    if lingo is not None:
+        detailed["title_audio"] = _title_audio_binding(story_source, lingo, members, resources)
     eye_prefix = _resolve_eye_prefix(detailed, members.get(("casts", "GENERAL"), {}))
     binding_counts: Counter[str] = Counter()
     referenced_assets: set[str] = set()
@@ -72,6 +79,9 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
             binding = sprite["binding"]
             binding_counts["score_opening_media"] += 1
             referenced_assets.add(binding["asset_id"])
+    if "title_audio" in detailed:
+        referenced_assets.add(detailed["title_audio"]["binding"]["asset_id"])
+        binding_counts["title_audio_media"] += 1
     for scene in detailed.get("scenes", []):
         movie = movies.get(scene.get("movie_id"))
         if movie is None:
@@ -103,6 +113,53 @@ def build_asset_binding_ir(story_source: dict, scene_semantics: dict, converted:
         },
     }
     return detailed, report
+
+
+def _title_audio_binding(story_source, lingo, members, resources):
+    if lingo.get("schema") != "tsuinosora.director_lingo_ir.v1":
+        raise DirectorAssetBindingError("Director title audio requires validated Lingo IR")
+    menus = [movie for movie in story_source.get("movies", []) if movie.get("movie_id") == "MENU"]
+    if len(menus) != 1:
+        raise DirectorAssetBindingError("Director title movie coverage is invalid")
+    menu = menus[0]
+    candidates = []
+    for script in lingo.get("scripts", []):
+        if script.get("source_alias") != menu.get("source_alias"):
+            continue
+        if script.get("source_relative_path", "").split("/", 1)[0].upper() != "MENU":
+            continue
+        for handler in script.get("handlers", []):
+            if handler.get("name") != "startMovie":
+                continue
+            candidates.append((script, handler))
+    if len(candidates) != 1:
+        raise DirectorAssetBindingError("Director title startMovie handler is not uniquely resolved")
+    script, handler = candidates[0]
+    loop_calls = []
+    for statement in handler.get("statements", []):
+        expression = statement.get("expression", []) if statement.get("kind") == "command" else []
+        if not expression or expression[0].get("value") != "tloopplay":
+            continue
+        values = [item.get("value") for item in expression if item.get("kind") == "string"]
+        if len(values) != 1 or not isinstance(values[0], str):
+            raise DirectorAssetBindingError("Director title loop command is malformed")
+        loop_calls.append(values[0])
+    if len(loop_calls) != 1:
+        raise DirectorAssetBindingError("Director title music command coverage is not exactly one")
+    binding = _resolve_member(loop_calls[0], menu, "AUDIO", members, resources)
+    if not binding.get("asset_id") or binding.get("media_fourcc") not in {"ediM", "sndS"}:
+        raise DirectorAssetBindingError("Director title music has no playable converted audio")
+    source_hash = script.get("script_source_sha256")
+    source_path = script.get("source_relative_path")
+    if not isinstance(source_hash, str) or not source_hash.startswith("sha256:") or not isinstance(source_path, str):
+        raise DirectorAssetBindingError("Director title music source identity is invalid")
+    return {
+        "binding": binding,
+        "loop": True,
+        "fade_frames": 0,
+        "source_sha256": source_hash,
+        "source_relative_path": source_path,
+    }
 
 
 def _score_opening(movie, members, resources):

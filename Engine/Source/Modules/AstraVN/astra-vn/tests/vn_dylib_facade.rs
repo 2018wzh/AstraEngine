@@ -32,7 +32,7 @@ state prologue #@id state.prologue
     let stage = StageModel::new(1280, 720);
     assert_eq!(stage.presentation_hash().to_hex().len(), 32);
     let system_manifest = SystemStoryManifest::from_compiled(&compiled).unwrap();
-    assert_eq!(system_manifest.schema, "astra.vn.system_story_manifest.v1");
+    assert_eq!(system_manifest.schema, "astra.vn.system_story_manifest.v2");
 
     let sections =
         package_sections_for_project(&compiled, &["classic".to_string()], "facade-game").unwrap();

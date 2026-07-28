@@ -7390,7 +7390,11 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
         )
         converted_resources = _read_json(work_root / "reports" / "projectorrays_converted_resources.json")
         try:
-            lingo_ir, lingo_report = build_lingo_ir(work_root, converted_resources)
+            lingo_ir, lingo_report = build_lingo_ir(
+                work_root,
+                converted_resources,
+                transition_cast_root=dict(dump_roots).get("casts"),
+            )
         except DirectorLingoError as exc:
             lingo_report = {
                 "schema": "tsuinosora.director_lingo_report.v1",
@@ -7417,6 +7421,30 @@ def _run_director_story_source_from_demo_config(config: dict) -> dict | None:
         else:
             _write_json(work_root / "private" / "director_lingo_ir.json", lingo_ir)
         _write_json(work_root / "reports" / "director_lingo_report.json", lingo_report)
+        # The MENU startMovie handler is authoritative for title audio.  It is
+        # available only after the strict Lingo reader succeeds, so rebuild the
+        # binding IR here rather than guessing a title asset from filenames.
+        if semantic_report["status"] == "pass" and lingo_report["status"] == "pass":
+            try:
+                asset_bindings, asset_binding_report = build_asset_binding_ir(
+                    detailed,
+                    scene_semantics,
+                    converted_resources,
+                    lingo_ir,
+                )
+            except DirectorAssetBindingError as exc:
+                asset_binding_report = _blocked_asset_binding_report(str(exc))
+                report["status"] = "blocked"
+                report["diagnostics"].extend(asset_binding_report["diagnostics"])
+            else:
+                _write_json(
+                    work_root / "private" / "director_asset_bindings.json",
+                    asset_bindings,
+                )
+            _write_json(
+                work_root / "reports" / "director_asset_binding_report.json",
+                asset_binding_report,
+            )
         if (
             scene_report["status"] == "pass"
             and semantic_report["status"] == "pass"

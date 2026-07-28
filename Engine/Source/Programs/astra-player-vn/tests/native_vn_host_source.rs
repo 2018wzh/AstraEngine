@@ -6,7 +6,9 @@ use astra_media::{
 use astra_media_core::SceneCommand;
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_player_core::{PlayerHostCommand, PlayerHostResourceId};
-use astra_player_vn::{NativeVnAudioOutput, NativeVnHostCommandSource};
+use astra_player_vn::{
+    NativeVnAudioOutput, NativeVnHostCommandSource, DEFAULT_NATIVE_VN_GPU_TEXTURE_CACHE_BYTES,
+};
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
     ProviderExtensionRecord, ProviderPolicy, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
@@ -905,6 +907,87 @@ state start #@id state.start
 }
 
 #[astra_headless_test::test]
+fn packaged_native_vn_stage_composes_a_typed_director_transition() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene first #@id scene.first
+    stage viewport:640x360 safe_area:16:9 #@id stage.main
+    layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
+    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.first
+    text key:line.one speaker:hero #@id line.one
+  scene second #@id scene.second
+    transition preset:director_puppet_1 duration:250 descriptor:director.puppet.1 #@id transition.wipe
+    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.second
+    text key:line.two speaker:hero #@id line.two
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    source.launch().unwrap();
+    advance(&mut source);
+    advance(&mut source);
+    let transitioned = source.tick_presentation(16_666_667).unwrap().unwrap();
+    assert!(scene_commands(&transitioned).iter().any(|command| {
+        matches!(command, SceneCommand::PushClip { rect } if rect.width > 0 && rect.width < 640)
+    }));
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+}
+
+#[astra_headless_test::test]
+fn packaged_native_vn_stage_restores_a_director_transition_snapshot() {
+    let bytes = product_package_for(
+        r#"
+story main #@id story.main
+state start #@id state.start
+  scene first #@id scene.first
+    stage viewport:640x360 safe_area:16:9 #@id stage.main
+    layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
+    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.first
+    text key:line.one speaker:hero #@id line.one
+  scene second #@id scene.second
+    transition preset:director_puppet_9 duration:250 descriptor:director.puppet.9 #@id transition.center
+    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.second
+    text key:line.two speaker:hero #@id line.two
+"#,
+    );
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package(
+        &package,
+        VnRunConfig::classic("en"),
+        640,
+        360,
+        PlayerHostResourceId(1),
+    )
+    .unwrap();
+
+    source.launch().unwrap();
+    advance(&mut source);
+    advance(&mut source);
+    source.tick_presentation(16_666_667).unwrap().unwrap();
+    prepare_test_save_metadata(&mut source, "slot.01");
+    let saved = source.save("slot.01").unwrap();
+
+    source.restore(&saved).unwrap();
+    let restored = source.tick_presentation(16_666_667).unwrap().unwrap();
+    assert!(scene_commands(&restored).iter().any(|command| {
+        matches!(command, SceneCommand::PushClip { rect } if rect.width > 0 && rect.height > 0 && rect.width < 640)
+    }));
+    source.release_resources().unwrap();
+    source.shutdown().unwrap();
+}
+
+#[astra_headless_test::test]
 fn packaged_native_vn_preload_does_not_create_an_unbounded_gpu_residency_lease() {
     let bytes = product_package_for(
         r#"
@@ -926,15 +1009,21 @@ state start #@id state.start
     .unwrap();
 
     let frame = source.launch().unwrap();
-    assert!(!scene_commands(&frame).iter().any(|command| {
-        matches!(
-            command,
-            SceneCommand::UploadTexture { resource_id, .. }
-                if resource_id == "asset:/background/apartment-night"
-        )
-    }));
+    let uploaded = scene_commands(&frame)
+        .iter()
+        .find_map(|command| match command {
+            SceneCommand::UploadTexture { resource_id, frame }
+                if resource_id == "asset:/background/apartment-night" =>
+            {
+                Some(frame)
+            }
+            _ => None,
+        });
+    let uploaded = uploaded.expect("viewport-fitted background must be GPU-resident");
+    assert!(uploaded.width <= 640 && uploaded.height <= 360);
+    assert!(uploaded.rgba8.len() as u64 <= DEFAULT_NATIVE_VN_GPU_TEXTURE_CACHE_BYTES);
     let shutdown = source.release_resources().unwrap();
-    assert!(!scene_commands(&shutdown).iter().any(|command| {
+    assert!(scene_commands(&shutdown).iter().any(|command| {
         matches!(
             command,
             SceneCommand::ReleaseResource { resource_id }

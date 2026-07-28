@@ -472,22 +472,28 @@ impl NativeVnRuntimeProvider {
                 (
                     cached.state.pending_wait.clone(),
                     cached.state.system.reading_mode,
+                    cached.state.text_reveal.clone(),
                 )
             });
-        let (pending_wait, reading_mode) = if let Some(cached) = cached_command_state {
+        let (pending_wait, reading_mode, text_reveal) = if let Some(cached) = cached_command_state {
             cached
         } else {
             let state = session
                 .world
                 .read_component::<VnRuntimeState>(session.vn_component)
                 .map_err(|err| CoreVnError::message(err.to_string()))?;
-            (state.pending_wait, state.system.reading_mode)
+            (
+                state.pending_wait,
+                state.system.reading_mode,
+                state.text_reveal,
+            )
         };
         let mut ingress = Vec::new();
         if command_resolves_wait(
             &command,
             pending_wait.as_ref().map(|wait| wait.kind),
             reading_mode,
+            text_reveal.as_ref().is_none_or(|reveal| reveal.complete()),
             &session.compiled,
         ) {
             let await_id = pending_wait
@@ -956,6 +962,9 @@ fn runtime_command_from_input(
             "default launch must be resolved with authoritative session state",
         )),
         "advance" => Ok(CoreVnPlayerCommand::Advance),
+        "tick_text_reveal" => Ok(CoreVnPlayerCommand::TickTextReveal {
+            delta_ns: input.delta_ns,
+        }),
         "choose" => Ok(CoreVnPlayerCommand::Choose {
             option_id: required_payload_string(&input.payload, "option_id")?,
         }),
@@ -1017,6 +1026,7 @@ fn runtime_view_state(
             },
             wait_sequence: state.wait_sequence,
             pending_wait: state.pending_wait.clone(),
+            text_reveal: state.text_reveal.clone(),
         },
     }
 }
@@ -1351,6 +1361,8 @@ fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
     match command {
         CoreVnPlayerCommand::Launch { .. } => "vn.launch",
         CoreVnPlayerCommand::Advance => "player.advance",
+        CoreVnPlayerCommand::ConfigureTextReveal { .. } => "vn.text_reveal.configure",
+        CoreVnPlayerCommand::TickTextReveal { .. } => "vn.text_reveal.tick",
         CoreVnPlayerCommand::Choose { .. } => "choice.selected",
         CoreVnPlayerCommand::OpenSystem { .. } => "system.open",
         CoreVnPlayerCommand::SwitchSystemPage { .. } => "system.switch",
@@ -1372,10 +1384,12 @@ fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
     }
 }
 
-fn vn_runtime_event_kinds() -> [&'static str; 20] {
+fn vn_runtime_event_kinds() -> [&'static str; 22] {
     [
         "vn.launch",
         "player.advance",
+        "vn.text_reveal.configure",
+        "vn.text_reveal.tick",
         "choice.selected",
         "system.open",
         "system.switch",
@@ -1401,12 +1415,13 @@ fn command_resolves_wait(
     command: &CoreVnPlayerCommand,
     wait: Option<VnWaitKind>,
     reading_mode: astra_vn_core::ReadingMode,
+    text_reveal_complete: bool,
     compiled: &astra_vn_core::CompiledStory,
 ) -> bool {
     if matches!(command, CoreVnPlayerCommand::Advance)
         && matches!(wait, Some(VnWaitKind::Dialogue | VnWaitKind::Input))
     {
-        return reading_mode != astra_vn_core::ReadingMode::Hidden;
+        return reading_mode != astra_vn_core::ReadingMode::Hidden && text_reveal_complete;
     }
     matches!(
         (command, wait),
@@ -1809,6 +1824,7 @@ mod runtime_view_tests {
             )]),
             wait_sequence: 0,
             pending_wait: None,
+            text_reveal: None,
         }
     }
 

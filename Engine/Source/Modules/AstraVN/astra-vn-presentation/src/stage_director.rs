@@ -115,6 +115,7 @@ pub struct ProductStageEffect {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProductStageTransition {
     pub preset: String,
+    pub descriptor_id: Option<String>,
     pub filter: Option<String>,
     pub progress: FixedScalar,
     pub duration_ms: u32,
@@ -635,6 +636,7 @@ impl ProductStageDirector {
             StageCommand::Transition {
                 preset,
                 duration_ms,
+                descriptor_id,
             } => {
                 let resolved = self
                     .manifest
@@ -647,6 +649,7 @@ impl ProductStageDirector {
                 };
                 self.state.transition = Some(ProductStageTransition {
                     preset: preset.clone(),
+                    descriptor_id: descriptor_id.clone(),
                     filter: resolved.filter.clone(),
                     progress: FixedScalar::ZERO,
                     duration_ms: duration,

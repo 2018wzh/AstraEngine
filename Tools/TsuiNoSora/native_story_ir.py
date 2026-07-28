@@ -367,7 +367,12 @@ def _command_payload_valid(command: dict) -> bool:
             and command["duration_ms"] > 0
         )
     if kind == "transition":
-        return _safe(command.get("preset")) and isinstance(command.get("duration_ms"), int) and command["duration_ms"] >= 0
+        return (
+            _safe(command.get("preset"))
+            and isinstance(command.get("duration_ms"), int)
+            and command["duration_ms"] >= 0
+            and (command.get("transition_descriptor_id") is None or _safe(command.get("transition_descriptor_id")))
+        )
     if kind == "timeline":
         return (
             _safe(command.get("timeline_id"))
@@ -560,7 +565,12 @@ def _render_command(command: dict, strings: dict[str, str]) -> list[str]:
     if kind == "system_page":
         return [f"{prefix}system_page kind:{command['page']} {stable}"]
     if kind == "transition":
-        return [f"{prefix}transition preset:{command['preset']} duration:{command['duration_ms']} {stable}"]
+        descriptor = (
+            f" descriptor:{command['transition_descriptor_id']}"
+            if command.get("transition_descriptor_id")
+            else ""
+        )
+        return [f"{prefix}transition preset:{command['preset']} duration:{command['duration_ms']}{descriptor} {stable}"]
     if kind == "timeline":
         duration_ms = command["duration_ms"]
         value = command["value"] / 100

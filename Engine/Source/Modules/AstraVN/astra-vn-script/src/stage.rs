@@ -261,6 +261,7 @@ pub enum StageCommand {
     Transition {
         preset: String,
         duration_ms: u32,
+        descriptor_id: Option<String>,
     },
     Shake {
         target: String,

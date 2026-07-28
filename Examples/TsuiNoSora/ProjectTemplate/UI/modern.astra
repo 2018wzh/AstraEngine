@@ -16,9 +16,10 @@ ui_view ui.tsui.modern.message model:astra.vn.ui_model.message.v2 theme:tsui.the
     panel id:advance fill:true
       on activate -> vn.advance
     image id:dialogue_frame asset:theme:dialogue.frame min_width:754 min_height:82 position_x:23 position_y:483
-    row id:dialogue position_x:56 position_y:484 gap:18
-      text id:speaker_text value:$model.speaker_key min_width:92 font_size:20 max_lines:2
-      text id:body value:$model.text_key font_size:22 max_lines:3
+    row id:dialogue position_x:56 position_y:484 min_width:688 max_width:688 max_height:80 gap:18 clip_children:true
+      text id:speaker_text value:$model.speaker_key min_width:92 max_width:92 max_height:72 font_size:20 max_lines:2
+      scroll id:body_scroll min_width:578 max_width:578 min_height:72 max_height:72 clip_children:true
+        text id:body value:$model.text_key visible_graphemes:$model.visible_graphemes max_width:562 font_size:22 max_lines:64 text_padding:0
 
 ui_view ui.tsui.modern.monologue model:astra.vn.ui_model.message.v2 theme:tsui.theme.modern #@id ui.tsui.modern.monologue
   screen id:root
@@ -120,7 +121,7 @@ ui_view ui.tsui.modern.config model:astra.vn.ui_model.config.v1 theme:tsui.theme
   screen id:root background:theme:surface.sky
     image id:sky_frame asset:theme:sky.frame min_width:800 min_height:600
     column id:gold position_x:23 position_y:29 position_right:23 position_bottom:29 background:theme:accent.gold min_width:754 min_height:542 padding:2
-      column id:content background:theme:surface.paper min_width:718 min_height:538 padding:16 gap:5
+      scroll id:content background:theme:surface.paper min_width:718 min_height:538 max_height:538 padding:16 gap:5 clip_children:true
         text id:title value:l10n:system.config font_size:26
         text id:master_label value:l10n:system.config.master_volume font_size:18
         slider id:master value:$model.master_volume min:0 max:100 step:1 min_height:42 background:theme:surface.button

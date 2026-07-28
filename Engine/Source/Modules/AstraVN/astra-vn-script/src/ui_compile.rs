@@ -556,6 +556,9 @@ fn model_path_allowed(schema: &str, path: &[String]) -> bool {
                     | "voice_id"
                     | "auto_enabled"
                     | "skip_mode"
+                    | "visible_graphemes"
+                    | "text_graphemes"
+                    | "reveal_complete"
             )
         ),
         "astra.vn.ui_model.choice.v1" => {
@@ -947,6 +950,7 @@ fn validate_widget_properties(line: &ParsedLine) -> Result<(), VnError> {
             "vertical_align",
             "max_lines",
             "font_size",
+            "visible_graphemes",
         ],
         "button" => &[
             "text",

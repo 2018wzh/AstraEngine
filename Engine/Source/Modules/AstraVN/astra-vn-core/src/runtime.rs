@@ -162,6 +162,7 @@ impl VnRuntime {
                 route_flags: Default::default(),
                 wait_sequence: 0,
                 pending_wait: None,
+                text_reveal: None,
             },
         })
     }
@@ -297,6 +298,7 @@ impl VnRuntime {
                 self.state.system_stack.clear();
                 self.state.pending_choice = None;
                 self.state.pending_wait = None;
+                self.state.text_reveal = None;
                 self.state.route_coverage.insert(state_id.clone());
                 self.record_route_flag(VnRouteFlagKind::Launch, "launch", &state_id);
                 reached.insert(state_id);
@@ -306,13 +308,76 @@ impl VnRuntime {
                 if self.state.system.reading_mode == crate::ReadingMode::Hidden {
                     self.state.system.reading_mode = crate::ReadingMode::Manual;
                 } else {
-                    match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
-                        Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
-                            self.state.pending_wait = None;
-                            self.run_until_blocked(&mut presentation, &mut reached)?;
+                    if self
+                        .state
+                        .text_reveal
+                        .as_ref()
+                        .is_some_and(|reveal| !reveal.complete())
+                    {
+                        if let Some(reveal) = self.state.text_reveal.as_mut() {
+                            reveal.visible_graphemes = reveal.text_graphemes;
                         }
-                        None => self.run_until_blocked(&mut presentation, &mut reached)?,
-                        Some(_) => {}
+                    } else {
+                        match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
+                            Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
+                                self.state.pending_wait = None;
+                                self.run_until_blocked(&mut presentation, &mut reached)?;
+                            }
+                            None => self.run_until_blocked(&mut presentation, &mut reached)?,
+                            Some(_) => {}
+                        }
+                    }
+                }
+            }
+            VnPlayerCommand::ConfigureTextReveal {
+                command_id,
+                text_key,
+                text_graphemes,
+                graphemes_per_second,
+            } => {
+                let wait = self.state.pending_wait.as_ref().ok_or_else(|| {
+                    VnError::diagnostic(
+                        "ASTRA_VN_TEXT_REVEAL_WAIT",
+                        "text reveal requires a pending dialogue wait",
+                    )
+                })?;
+                if wait.kind != VnWaitKind::Dialogue
+                    || wait.command_id != command_id
+                    || text_key.is_empty()
+                    || graphemes_per_second == 0
+                    || self
+                        .state
+                        .backlog
+                        .last()
+                        .is_none_or(|entry| entry.command_id != command_id || entry.key != text_key)
+                {
+                    return Err(VnError::diagnostic("ASTRA_VN_TEXT_REVEAL_CONFIGURATION", "text reveal configuration is invalid or does not match the pending dialogue"));
+                }
+                self.state.text_reveal = Some(crate::VnTextRevealState {
+                    command_id,
+                    text_key,
+                    text_graphemes,
+                    visible_graphemes: 0,
+                    elapsed_ns: 0,
+                    graphemes_per_second,
+                });
+            }
+            VnPlayerCommand::TickTextReveal { delta_ns } => {
+                if let Some(reveal) = self.state.text_reveal.as_mut() {
+                    if !reveal.complete() {
+                        reveal.elapsed_ns =
+                            reveal.elapsed_ns.checked_add(delta_ns).ok_or_else(|| {
+                                VnError::diagnostic(
+                                    "ASTRA_VN_TEXT_REVEAL_CLOCK",
+                                    "text reveal clock overflowed",
+                                )
+                            })?;
+                        let visible = (u128::from(reveal.elapsed_ns)
+                            * u128::from(reveal.graphemes_per_second))
+                            / 1_000_000_000u128;
+                        reveal.visible_graphemes = u32::try_from(visible)
+                            .unwrap_or(u32::MAX)
+                            .min(reveal.text_graphemes);
                     }
                 }
             }
@@ -716,6 +781,7 @@ impl VnRuntime {
                         format!("dialogue:{id}"),
                         id,
                     ))?;
+                    self.state.text_reveal = None;
                     return Ok(());
                 }
                 CompiledCommand::Choice { id, key, options } => {

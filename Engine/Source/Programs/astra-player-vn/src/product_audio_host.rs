@@ -372,6 +372,12 @@ impl NativeVnProductAudioHost {
         asset: PcmAsset,
         completed_signals: &mut BTreeSet<String>,
     ) -> Result<(), astra_platform::PlatformError> {
+        if request.target_id.trim().is_empty() {
+            return Err(player_platform_error(
+                "player.audio.start",
+                "ASTRA_PLAYER_AUDIO_TARGET_ID_EMPTY",
+            ));
+        }
         let looping = parse_audio_bool(request, "loop", request.command == "bgm")?;
         let gain = parse_audio_f32(request, "gain", 1.0)?;
         let bus = request
@@ -379,8 +385,9 @@ impl NativeVnProductAudioHost {
             .get("bus")
             .cloned()
             .unwrap_or_else(|| request.command.clone());
-        completed_signals.remove(&request.command_id);
-        completed_signals.remove(&format!("{}.end", request.command_id));
+        let voice_id = request.target_id.as_str();
+        completed_signals.remove(voice_id);
+        completed_signals.remove(&format!("{voice_id}.end"));
         if request.command == "voice" {
             completed_signals.remove("voice_end");
         }
@@ -417,23 +424,21 @@ impl NativeVnProductAudioHost {
                 .apply(AudioCommand::CancelFade { fade_id }, &self.assets)
                 .map_err(|error| player_platform_error("player.audio.replace.fade", error))?;
         }
-        if let Some(existing_bus) = mixer.voice_bus(&request.command_id).map(str::to_owned) {
+        if let Some(existing_bus) = mixer.voice_bus(voice_id).map(str::to_owned) {
             mixer
                 .apply(
                     AudioCommand::StopVoice {
-                        voice_id: request.command_id.clone(),
+                        voice_id: request.target_id.clone(),
                     },
                     &self.assets,
                 )
                 .map_err(|error| player_platform_error("player.audio.replace.stop", error))?;
-            self.voice_kinds
-                .remove(&request.command_id)
-                .ok_or_else(|| {
-                    player_platform_error(
-                        "player.audio.replace",
-                        "ASTRA_PLAYER_AUDIO_REPLACEMENT_OWNER_MISSING",
-                    )
-                })?;
+            self.voice_kinds.remove(voice_id).ok_or_else(|| {
+                player_platform_error(
+                    "player.audio.replace",
+                    "ASTRA_PLAYER_AUDIO_REPLACEMENT_OWNER_MISSING",
+                )
+            })?;
             tracing::debug!(
                 event = "astra.player.audio.voice_replaced",
                 command_id = %request.command_id,
@@ -452,7 +457,7 @@ impl NativeVnProductAudioHost {
             .and_then(|_| {
                 mixer.apply(
                     AudioCommand::PlayVoice {
-                        voice_id: request.command_id.clone(),
+                        voice_id: request.target_id.clone(),
                         bus: bus.clone(),
                         asset: asset_id,
                         duration_ms: duration_ms.max(1),
@@ -491,13 +496,14 @@ impl NativeVnProductAudioHost {
             }
         }
         self.voice_kinds
-            .insert(request.command_id.clone(), request.command.clone());
+            .insert(request.target_id.clone(), request.command.clone());
         if request.command == "bgm" {
-            self.known_bgm_targets.insert(request.command_id.clone());
+            self.known_bgm_targets.insert(request.target_id.clone());
         }
         tracing::debug!(
             event = "astra.player.audio.voice_bound",
             command_id = %request.command_id,
+            target_id = %request.target_id,
             frame_count,
             duration_ms,
             looping,

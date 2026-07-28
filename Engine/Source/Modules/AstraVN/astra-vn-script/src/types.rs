@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::CommandSourceMap;
 use crate::VnError;
 
-pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v2";
-pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 2;
+pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v3";
+pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 3;
 pub const VN_RUNTIME_VIEW_STATE_SCHEMA: &str = "astra.vn.runtime_view_state.v1";
 pub const VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR: u16 = 1;
 
@@ -587,6 +587,26 @@ pub struct VnRuntimeState {
     pub wait_sequence: u64,
     #[serde(default)]
     pub pending_wait: Option<VnWaitState>,
+    /// Deterministic presentation progress. Text stays in localization assets;
+    /// this state contains only its identity and grapheme counters.
+    #[serde(default)]
+    pub text_reveal: Option<VnTextRevealState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VnTextRevealState {
+    pub command_id: String,
+    pub text_key: String,
+    pub text_graphemes: u32,
+    pub visible_graphemes: u32,
+    pub elapsed_ns: u64,
+    pub graphemes_per_second: u16,
+}
+
+impl VnTextRevealState {
+    pub fn complete(&self) -> bool {
+        self.visible_graphemes >= self.text_graphemes
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -842,26 +862,75 @@ pub struct VnMutationRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum VnPlayerCommand {
-    Launch { story_id: String, state_id: String },
+    Launch {
+        story_id: String,
+        state_id: String,
+    },
     Advance,
-    Choose { option_id: String },
-    OpenSystem { page: SystemPageKind },
-    SwitchSystemPage { page: SystemPageKind },
+    ConfigureTextReveal {
+        command_id: String,
+        text_key: String,
+        text_graphemes: u32,
+        graphemes_per_second: u16,
+    },
+    TickTextReveal {
+        delta_ns: u64,
+    },
+    Choose {
+        option_id: String,
+    },
+    OpenSystem {
+        page: SystemPageKind,
+    },
+    SwitchSystemPage {
+        page: SystemPageKind,
+    },
     ReturnSystem,
-    ReplayVoice { voice: String },
-    SetAuto { enabled: bool },
-    SetSkip { mode: SkipMode },
-    SetReadingMode { mode: ReadingMode },
-    SetAudioEnabled { enabled: bool },
-    InvokeSystemAction { action_id: String },
-    SetConfig { key: String, value: String },
-    StartReplay { replay_id: String },
-    PreviewGallery { item_id: String },
-    JumpRoute { node_id: String },
-    JumpBacklog { command_id: String },
-    SubmitText { input_id: String, value: String },
-    Unlock { kind: SystemUnlockKind, id: String },
-    CompleteWait { fence: String },
+    ReplayVoice {
+        voice: String,
+    },
+    SetAuto {
+        enabled: bool,
+    },
+    SetSkip {
+        mode: SkipMode,
+    },
+    SetReadingMode {
+        mode: ReadingMode,
+    },
+    SetAudioEnabled {
+        enabled: bool,
+    },
+    InvokeSystemAction {
+        action_id: String,
+    },
+    SetConfig {
+        key: String,
+        value: String,
+    },
+    StartReplay {
+        replay_id: String,
+    },
+    PreviewGallery {
+        item_id: String,
+    },
+    JumpRoute {
+        node_id: String,
+    },
+    JumpBacklog {
+        command_id: String,
+    },
+    SubmitText {
+        input_id: String,
+        value: String,
+    },
+    Unlock {
+        kind: SystemUnlockKind,
+        id: String,
+    },
+    CompleteWait {
+        fence: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

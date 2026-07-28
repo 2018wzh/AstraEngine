@@ -8,12 +8,19 @@ import json
 from pathlib import Path
 import re
 
+from projectorrays_json import loads_projectorrays_json
+
 
 class DirectorLingoError(ValueError):
     """Raised when decompiled Lingo cannot be classified exactly."""
 
 
-def build_lingo_ir(work_root: Path, converted_resources: dict) -> tuple[dict, dict]:
+def build_lingo_ir(
+    work_root: Path,
+    converted_resources: dict,
+    *,
+    transition_cast_root: Path | None = None,
+) -> tuple[dict, dict]:
     if converted_resources.get("schema") != "tsuinosora.projectorrays_converted_resources.v1":
         raise DirectorLingoError("converted resource schema is invalid")
     scripts: list[dict] = []
@@ -72,6 +79,31 @@ def build_lingo_ir(work_root: Path, converted_resources: dict) -> tuple[dict, di
                 **parsed,
             }
         )
+    if transition_cast_root is not None:
+        existing_helpers = {
+            handler["name"]
+            for script in scripts
+            for handler in script["handlers"]
+            if handler["name"] in {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}
+        }
+        if existing_helpers and existing_helpers != {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}:
+            raise DirectorLingoError("transition helper coverage is partial")
+        if not existing_helpers:
+            transition_script = _read_transition_control_script(transition_cast_root)
+            scripts.append(transition_script)
+            handler_count += len(transition_script["handlers"])
+            source_line_count += transition_script["source_line_count"]
+            statement_counts.update(transition_script["statement_counts"])
+            encoding_counts[transition_script["encoding"]] += 1
+        elif any(
+            handler["name"] in {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}
+            for script in scripts
+            for handler in script["handlers"]
+        ):
+            # The converted-source chain already provides the exact resource
+            # identity; adding the full-cast dump would create a competing
+            # source of authority.
+            pass
     if len(scripts) != len(resources):
         raise DirectorLingoError("Lscr source coverage is incomplete")
     detailed = {"schema": "tsuinosora.director_lingo_ir.v1", "scripts": scripts}
@@ -94,6 +126,54 @@ def build_lingo_ir(work_root: Path, converted_resources: dict) -> tuple[dict, di
         },
     }
     return detailed, report
+
+
+def _read_transition_control_script(cast_root: Path) -> dict:
+    """Bind the one source-proven transition helper to its Lscr resource."""
+    root = cast_root.resolve()
+    if not root.is_dir():
+        raise DirectorLingoError("full cast root for transition control is missing")
+    candidates: list[tuple[Path, dict]] = []
+    for path in sorted(root.rglob("*.ls")):
+        payload = path.read_bytes()
+        text, encoding = _decode_source(payload)
+        parsed = _LingoParser(text).parse()
+        names = {handler["name"] for handler in parsed["handlers"]}
+        if names == {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}:
+            candidates.append((path, {"payload": payload, "encoding": encoding, **parsed}))
+    if len(candidates) != 1:
+        raise DirectorLingoError("exactly one full-cast transition control script is required")
+    path, parsed = candidates[0]
+    match = re.fullmatch(r"MovieScript\s+(\d+)\s+-\s+.+", path.stem)
+    if match is None:
+        raise DirectorLingoError("transition control script name has no script number")
+    script_number = int(match.group(1))
+    chunks = path.parents[2] / "chunks"
+    resources = []
+    for metadata in sorted(chunks.glob("Lscr-*.json")):
+        value = loads_projectorrays_json(metadata.read_text(encoding="utf-8"))
+        if value.get("scriptNumber") != script_number:
+            continue
+        binary = metadata.with_suffix(".bin")
+        if not binary.is_file():
+            raise DirectorLingoError("transition control Lscr binary is missing")
+        resources.append(binary)
+    if len(resources) != 1:
+        raise DirectorLingoError("transition control script resource identity is ambiguous")
+    resource = resources[0]
+    relative = resource.relative_to(root).as_posix()
+    payload = parsed.pop("payload")
+    return {
+        "source_alias": "casts",
+        "source_relative_path": relative,
+        "source_sha256": f"sha256:{sha256(resource.read_bytes()).hexdigest()}",
+        "cast_library_id": "GLOBALS",
+        "cast_member_id": None,
+        "script_number": script_number,
+        "script_source_sha256": f"sha256:{sha256(payload).hexdigest()}",
+        "script_source_kind": "projectorrays_full_cast_transition_script",
+        **parsed,
+    }
 
 
 def _empty_script(resource: dict) -> dict:

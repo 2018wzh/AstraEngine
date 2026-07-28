@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use unicode_segmentation::UnicodeSegmentation;
 
 use astra_core::Hash256;
 use astra_media_core::TextureFrame;
@@ -12,7 +13,9 @@ use astra_ui_core::{
 use yakui_core::geometry::{Color, UVec2, Vec2};
 use yakui_core::paint::{Texture, TextureFormat};
 use yakui_core::{Alignment, CrossAxisAlignment, MainAxisSize, ManagedTextureId, WidgetId};
-use yakui_widgets::widgets::{Align, CountGrid, Image, List, NineSlice, Pad, Slider, Stack};
+use yakui_widgets::widgets::{
+    Align, CountGrid, Image, List, NineSlice, Pad, Scrollable, Slider, Stack,
+};
 
 use crate::{
     AstraNodeProps, AstraNodeWidget, AstraTextMeasureRequest, AstraTextMeasurer, BoundedLru,
@@ -345,11 +348,20 @@ impl BlueprintYakuiRenderer {
         let fill =
             property_color(node, "background", frame, item, request)?.unwrap_or(default_fill);
         if let Some(text_key) = name.as_deref() {
-            let text = frame
+            let localized_text = frame
                 .localization
                 .get(text_key)
                 .map(String::as_str)
                 .unwrap_or(text_key);
+            let text =
+                if let Some(visible) = property_number(node, "visible_graphemes", frame, item)? {
+                    localized_text
+                        .graphemes(true)
+                        .take(visible.max(0.0) as usize)
+                        .collect::<String>()
+                } else {
+                    localized_text.to_string()
+                };
             let viewport_width = viewport_width_points(request).max(1.0);
             let font_size = property_number(node, "font_size", frame, item)?
                 .unwrap_or_else(|| default_ui_font_size(request));
@@ -364,10 +376,15 @@ impl BlueprintYakuiRenderer {
                     "text-bearing widgets require the AstraText measurement provider",
                 )
             })?;
+            // Text is measured against the space its node may actually occupy.  Measuring
+            // against the viewport made a child in a bounded row advertise its natural
+            // viewport-wide width, which in turn forced otherwise fixed dialogue/system
+            // panels beyond their authored bounds.
+            let content_width = max_width.min(viewport_width) - text_padding * 2.0;
             let measured = measurer.measure(&AstraTextMeasureRequest {
                 semantic_id: semantic_id.clone(),
-                text: text.to_string(),
-                max_width: (max_width.min(viewport_width) - 16.0).max(1.0),
+                text,
+                max_width: content_width.max(1.0),
                 font_size,
                 max_lines,
                 direction,
@@ -382,8 +399,11 @@ impl BlueprintYakuiRenderer {
                     "AstraText returned invalid UI layout metrics",
                 ));
             }
-            min_width = min_width.max(measured.width + text_padding * 2.0);
-            min_height = min_height.max(measured.height + text_padding * 2.0);
+            // A finite authored maximum is a hard layout boundary, not a validation
+            // error caused by shaped/wrapped text.  The text renderer owns clipping or
+            // scrolling inside that boundary; the container must never grow past it.
+            min_width = min_width.max((measured.width + text_padding * 2.0).min(max_width));
+            min_height = min_height.max((measured.height + text_padding * 2.0).min(max_height));
         }
         if max_width < min_width || max_height < min_height {
             return Err(UiValidationError::invalid(
@@ -400,6 +420,12 @@ impl BlueprintYakuiRenderer {
             || node.widget == "screen";
         let mut semantic_value = None;
         let mut semantic_properties = semantic_text_properties(node, frame, item)?;
+        if let Some(visible) = property_number(node, "visible_graphemes", frame, item)? {
+            semantic_properties.insert(
+                "text.visible_graphemes".into(),
+                (visible.max(0.0) as u32).to_string(),
+            );
+        }
         let text_color = property_color(node, "text_color", frame, item, request)?.or_else(|| {
             match request.theme.tokens.get("text.body") {
                 Some(UiThemeValue::Color([r, g, b, a])) => Some(Color::rgba(*r, *g, *b, *a)),
@@ -518,7 +544,7 @@ impl BlueprintYakuiRenderer {
                             });
                     });
                 }),
-                "column" | "scroll" => AstraNodeWidget::show(props, || {
+                "column" => AstraNodeWidget::show(props, || {
                     Pad::all(padding).show(|| {
                         List::column()
                             .item_spacing(gap)
@@ -539,6 +565,26 @@ impl BlueprintYakuiRenderer {
                             child_error = self
                                 .render_virtual_list(node, parent, frame, request, actions)
                                 .err();
+                        });
+                    });
+                }),
+                "scroll" => AstraNodeWidget::show(props, || {
+                    Pad::all(padding).show(|| {
+                        // `Scrollable` owns clipping and applies the pointer-wheel
+                        // offset during layout.  Keeping it inside the Astra node
+                        // preserves authored bounds and semantic ownership.
+                        Scrollable::vertical().show(|| {
+                            List::column()
+                                .item_spacing(gap)
+                                .main_axis_size(MainAxisSize::Min)
+                                .cross_axis_alignment(cross_axis_alignment)
+                                .show(|| {
+                                    child_error = self
+                                        .render_children(
+                                            children, parent, frame, item, request, actions,
+                                        )
+                                        .err();
+                                });
                         });
                     });
                 }),

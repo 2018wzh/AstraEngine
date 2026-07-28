@@ -86,6 +86,7 @@ def _lower_operations(operations: list[dict], movie_id: object, frame: object) -
         elif kind == "audio":
             lowered.extend(_lower_audio(_nonempty_values(operation, movie_id, frame), movie_id, frame))
         elif kind == "back":
+            lowered.append({"kind": "transition", "transition_helper": "ttrans1"})
             for value in _nonempty_values(operation, movie_id, frame):
                 lowered.append(
                     {"kind": "hide_layer", "layer": "background"}
@@ -93,6 +94,7 @@ def _lower_operations(operations: list[dict], movie_id: object, frame: object) -
                     else {"kind": "show_member", "layer": "background", "member": value, "opacity": 100}
                 )
         elif kind == "char":
+            lowered.append({"kind": "transition", "transition_helper": "ttrans1"})
             lowered.extend(_lower_paired_members(operation, movie_id, frame, "character", {"+": 100, "+-": 50}))
         elif kind == "event":
             lowered.extend(
@@ -118,6 +120,7 @@ def _lower_operations(operations: list[dict], movie_id: object, frame: object) -
                     else {"kind": "show_eye", "member_suffix": value}
                 )
         elif kind == "shade":
+            lowered.append({"kind": "transition", "transition_helper": "ttrans1"})
             for value in _nonempty_values(operation, movie_id, frame):
                 if value not in {"+-", "-"}:
                     _fail(movie_id, frame, "shade control token is unsupported")
@@ -179,13 +182,19 @@ def _lower_paired_members(
                     "layer": layer,
                     "member": values[index + 1],
                     "opacity": show_tokens[token],
-                    "transition": "transition_in" if token == "+" and layer == "event" else "immediate",
+                    "transition_helper": _transition_helper(layer, token, is_hide=False),
                 }
             )
             index += 2
             continue
         if token in hide_tokens:
-            result.append({"kind": "hide_layer", "layer": layer, "transition": hide_tokens[token]})
+            result.append(
+                {
+                    "kind": "hide_layer",
+                    "layer": layer,
+                    "transition_helper": _transition_helper(layer, token, is_hide=True),
+                }
+            )
             index += 1
             continue
         if operation.get("termination") == "end_of_scene":
@@ -200,6 +209,24 @@ def _lower_paired_members(
             continue
         _fail(movie_id, frame, f"{layer} control token {token!r} is unsupported")
     return result
+
+
+def _transition_helper(layer: str, token: str, *, is_hide: bool) -> str | None:
+    """Return the exact authored helper used by the scene controller.
+
+    This is a source-control mapping, rather than a visual preset inference:
+    the helper itself remains unresolved until the full-cast transition control
+    resource has supplied its verified puppetTransition descriptor.
+    """
+    if layer != "event":
+        return None
+    if is_hide:
+        return "ttrans4" if token == "-" else None
+    if token == "+":
+        return "ttrans3"
+    if token in {"*", "*-"}:
+        return "ttrans1"
+    return None
 
 
 def _nonempty_values(operation: dict, movie_id: object, frame: object) -> list[str]:

@@ -16,11 +16,12 @@ MECHANISM_COMMANDS = {
     "tinitscene": "scene_init",
     "tdoscene": "scene_run",
     "tafterselect": "selection_close",
-    "ttrans1": "transition_in",
     "topenpopup": "system_popup",
     "tsestop": "se_stop",
     "tfadeoutfast": "bgm_fade_out_fast",
 }
+
+TRANSITION_HANDLERS = {"ttrans1", "ttrans2", "ttrans3", "ttrans4"}
 
 
 def build_story_program_ir(story_graph: dict, asset_bindings: dict) -> tuple[dict, dict]:
@@ -42,6 +43,11 @@ def build_story_program_ir(story_graph: dict, asset_bindings: dict) -> tuple[dic
     if not isinstance(score_openings, list) or len(score_openings) != len(detailed.get("movies", [])):
         raise DirectorStoryProgramError("Director asset bindings do not cover every story opening")
     detailed["score_openings"] = deepcopy(score_openings)
+    title_audio = asset_bindings.get("title_audio")
+    if title_audio is not None:
+        if not isinstance(title_audio, dict):
+            raise DirectorStoryProgramError("Director title audio binding is invalid")
+        detailed["title_audio"] = deepcopy(title_audio)
     counts: Counter[str] = Counter()
     source_statement_count = 0
     for movie in detailed.get("movies", []):
@@ -215,6 +221,25 @@ def _compile_command(tokens):
                 }
             ]
         raise DirectorStoryProgramError("selector mutation is not statically resolvable")
+    if first in TRANSITION_HANDLERS:
+        # Preserve the original handler identity.  Native lowering resolves it
+        # against the parsed puppetTransition descriptor; it must never infer
+        # a generic fade from the call name.
+        # The source reader retains the empty call punctuation as separate
+        # tokens.  Accept only the exact no-argument form, never a helper call
+        # whose arguments would change the descriptor semantics.
+        if not (
+            len(tokens) == 1
+            or (
+                len(tokens) == 3
+                and tokens[1].get("kind") == "punctuation"
+                and tokens[1].get("value") == "("
+                and tokens[2].get("kind") == "punctuation"
+                and tokens[2].get("value") == ")"
+            )
+        ):
+            raise DirectorStoryProgramError("transition helper call has unexpected arguments")
+        return [{"kind": "legacy_transition", "handler": first}]
     mechanism = MECHANISM_COMMANDS.get(first)
     if mechanism is not None:
         return [{"kind": "legacy_mechanism", "mechanism": mechanism}]

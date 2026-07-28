@@ -184,10 +184,15 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
         "se" => compile_audio(line, VnAudioBus::Se),
         "audio" => compile_audio_control(line),
         "transition" => {
-            validate_attrs(line, &["preset", "duration"], &["preset", "duration"])?;
+            validate_attrs(
+                line,
+                &["preset", "duration", "descriptor"],
+                &["preset", "duration"],
+            )?;
             Ok(StageCommand::Transition {
                 preset: symbol(line, "preset")?,
                 duration_ms: parse_u32(line, "duration")?,
+                descriptor_id: optional_symbol(line, "descriptor")?,
             })
         }
         "shake" => {

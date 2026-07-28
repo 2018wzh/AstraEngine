@@ -44,7 +44,14 @@ def build_director_story_source(
     scripts = _script_index(work_root, converted.get("resources", []))
     external_casts: dict[str, list[dict]] = {}
     for cast_id in ("GENERAL", "CHARS", "FONT", "GLOBALS", "AUDIO"):
-        cast_root = roots["casts"] / cast_id / cast_id
+        # A ProjectorRays full dump is rooted at the library directory itself:
+        # ``casts/GENERAL/chunks/...``.  Adding a second library-name segment
+        # accidentally widened the lookup to the whole dump when the nested
+        # directory was absent, causing an ambiguous CAS table to be reported
+        # for otherwise valid source evidence.
+        cast_root = roots["casts"] / cast_id
+        if not cast_root.is_dir():
+            raise DirectorStorySourceError(f"external cast library {cast_id} is missing")
         members = _read_cast_members(cast_root)
         external_casts[cast_id] = [
             {
