@@ -39,7 +39,7 @@ JSON file、critical file 和 ring 使用同一 schema，固定包含：
 - 有序 `span_stack`；
 - 经审计的结构化 `fields`。
 
-compact stderr 只供人读，不作为稳定交换格式。字段只允许 step、schema、hash、diagnostic code、provider/action/plugin id、状态和计数。禁止正文、payload、secret、native handle、原始环境值、绝对路径和未经审计的整体 `Debug` 输出。
+compact stderr 只供人读，不作为稳定交换格式，并按日志级别启用 ANSI 颜色。ANSI 只属于 console sink；JSON file、critical file、ring 和 crash tail 始终保持无颜色的 `astra.log_event.v1`。字段只允许 step、schema、hash、diagnostic code、provider/action/plugin id、状态和计数。禁止正文、payload、secret、native handle、原始环境值、绝对路径和未经审计的整体 `Debug` 输出。
 
 ## 5. Sink 与背压
 

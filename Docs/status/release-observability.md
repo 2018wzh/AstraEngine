@@ -4,7 +4,7 @@ Release observability 包含 structured logging、runtime trace、scenario/relea
 
 ## 当前实现
 
-- `astra-observability` 已统一 host 初始化、category filter、runtime reload、compact/JSON console、限额 JSON file、critical mirror 和 fatal ring。
+- `astra-observability` 已统一 host 初始化、category filter、runtime reload、带 ANSI 级别颜色的 compact console、JSON console、限额 JSON file、critical mirror 和 fatal ring；颜色只写入 console，不进入 JSON file、critical file、ring 或 crash tail。
 - `astra.log_event.v1` 固定 session/process role、span stack、thread label 和结构化 fields。
 - 当前 Cargo workspace 的运行链路已按 [logging coverage](logging-coverage.md) 分类；纯 DTO/schema/proc-macro/facade 不制造无意义日志。
 - `astra-cli`、`astra-player`、bundled Windows Player 和测试 host 共用配置入口。CLI 未给 `--log-dir` 时不落盘。bundled Player 在初始化日志前读取并严格校验 `AstraPlayer.config.json` 的 observability policy；配置中的日志、crash 目录只能是 bundle 内安全相对路径，显式 CLI 或 `ASTRA_LOG` 可用于受控验收覆盖。

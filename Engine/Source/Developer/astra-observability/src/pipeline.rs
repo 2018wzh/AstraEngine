@@ -158,7 +158,7 @@ pub fn init_host(
         (true, ConsoleFormat::Compact) => install_subscriber(
             filter_layer,
             tracing_subscriber::fmt::layer()
-                .with_ansi(false)
+                .with_ansi(true)
                 .compact()
                 .with_writer(std::io::stderr),
             stable,
