@@ -415,7 +415,12 @@ fn artifact_limit_stops_the_run_and_preserves_only_committed_evidence() {
     let manifest: astra_headless_protocol::ArtifactManifest =
         serde_json::from_slice(&fs::read(artifact_root.join("artifact-manifest.json")).unwrap())
             .unwrap();
-    assert!(manifest.artifacts.len() <= 1);
+    assert!(
+        manifest.artifacts.len() <= 1,
+        "artifact limit retained {} entries: {:?}",
+        manifest.artifacts.len(),
+        manifest.artifacts
+    );
     assert!(!walk_files(&artifact_root).iter().any(|path| path
         .extension()
         .is_some_and(|extension| extension == "partial")));

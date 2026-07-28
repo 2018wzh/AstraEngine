@@ -38,7 +38,7 @@
 
 Modern 已通过 Title、Quick Panel、Config、三语言切换、Save、Load/restore、Backlog 和 Auto/Skip 共 11 个 GPU Headless checkpoint；Classic 的历史验收已通过 18 个 checkpoint。当前 private RC 另以同一预检 build/package 身份通过 43 个视觉 checkpoint，并完成 Y 路线的 445 条物理输入见证。所有运行都由 `wgpu_offscreen` 在 Windows DX12 硬件 adapter 上完成并输出 run report/artifact manifest。旧 v43 的 13/15 比较保留为历史证据；当前 RC 的 13 项像素预检与截图稳定凭据均已闭合。Save/Load 已采集真实场景缩略图、时间戳、游玩时长并通过跨进程目录恢复。Web 使用精确锁定的 pure-Rust portable Luau runtime，`wasm32-unknown-unknown` graph 不包含 `mlua`、`abi_stable` 或 `libloading`，WASM 与 standalone bundle 已由同一 package 生成。上一最终路线包已有 36/36 Headless matrix；当前 37 路线 package 只保证 Y。Windows E3 显式延期；最终同身份重跑与 formal manual signoff 尚未闭合。
 
-本轮直接执行的 workspace Clippy 已通过；workspace test 在 Windows 链接 `astra-vn` dylib 时触发 `LNK1189` 对象数上限，测试进程未进入完整执行阶段。该失败不能由增量 crate 测试代替，也不归类为 TsuiNoSora 行为回归；提交级 workspace test 门禁继续保持 blocking。
+Rust dylib facade 现由 `dynamic_artifact_policy.toml` 和 Windows export-budget audit 约束；`astra-vn` 恢复 `rlib + dylib`，但本工作项的完整 workspace 门禁仍需以同一提交重新执行，不能用历史 linker failure 或局部 crate 通过代替。
 
 ### Stage 3 历史 pipeline 记录
 
@@ -56,6 +56,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | `S1-RUNTIME-03` | `DONE` | `cargo test -p astra-runtime await_token`；RecordedResult/DeterministicTimeout policy、乱序结果、非法 completion 和 timeout materialization 已覆盖 |
 | `S1-SAVE-01` | `DONE` | `cargo test -p astra-runtime save_replay`；stable id continuation、完整 EventQueue pending/trace/sequence、provider-free replay output/hash 和逐 tick checkpoint 已覆盖 |
 | `S1-DYLIB-01` | `DONE` | `cargo test -p astra-engine dylib_facade` |
+| `S1-DYLIB-02` | `IN_PROGRESS` | `astra-engine` / `astra-vn` Rust compatibility dylib、platform host 与 fixture cdylib 已纳入 `Tools/dynamic_artifact_policy.toml`；`python Tools/check_dynamic_artifacts.py --verify-windows-exports` 审计 policy、direct dependency closure 和 60,000 named-export budget，待同提交完整 workspace test 关闭 |
 | `S1-PLUGIN-01` | `DONE` | `cargo test -p astra-plugin descriptor_gate` and `cargo test -p astra-plugin load_unload` |
 | `S1-PLUGIN-02` | `DONE` | `cargo test -p astra-plugin ffi_action_provider` |
 | `S1-PLUGIN-03` | `DONE` | `cargo test -p astra-plugin extension_registry` |

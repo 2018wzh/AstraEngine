@@ -256,7 +256,7 @@ impl ArtifactRecorder {
             .audio_artifact_count
             .checked_add(1)
             .ok_or_else(|| limit("artifact.audio", "audio artifact counter overflowed"))?;
-        if ordinal > self.policy.max_artifacts {
+        if (self.manifest.artifacts.len() as u64) >= self.policy.max_artifacts {
             return Err(limit("artifact.audio", "audio artifact count exceeded"));
         }
         let header_bytes = 44_u64;
@@ -365,6 +365,11 @@ impl ArtifactRecorder {
                 "artifact.wav",
                 "streamed WAV size or stereo alignment is invalid",
             ));
+        }
+        if (self.manifest.artifacts.len() as u64) >= self.policy.max_artifacts {
+            self.open_audio_bytes = self.open_audio_bytes.saturating_sub(byte_size);
+            let _ = fs::remove_file(&partial_path);
+            return Err(limit("artifact.audio", "audio artifact count exceeded"));
         }
         let final_path = self.root.join(&relative_path);
         fs::rename(&partial_path, &final_path).map_err(|_| io_error("artifact.wav.commit"))?;

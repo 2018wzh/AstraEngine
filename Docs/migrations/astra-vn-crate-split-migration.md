@@ -1,6 +1,6 @@
 # AstraVN Crate Split Migration
 
-本计划把已经存在的单 crate `astra-vn` 拆成多个功能 crate，并让 `astra-vn` 只保留 facade、`rlib`/Rust ABI `dylib` 和兼容 re-export。逻辑拆分在 [AstraVN Module Layout Migration](astra-vn-module-layout-migration.md) 完成后执行；本页用当前路径标识待拆文件，前置搬迁后对应到 `Engine/Source/Modules/AstraVN/astra-vn/src/...`。
+本计划把已经存在的单 crate `astra-vn` 拆成多个功能 crate，并让 `astra-vn` 只保留 facade、`rlib`/Rust ABI `dylib` 和兼容 re-export。dylib 的允许制品、direct dependency closure 与 Windows export budget 由 [ADR 0018](../adr/0018-windows-dynamic-artifact-governance.md) 的策略清单统一约束。逻辑拆分在 [AstraVN Module Layout Migration](astra-vn-module-layout-migration.md) 完成后执行；本页用当前路径标识待拆文件，前置搬迁后对应到 `Engine/Source/Modules/AstraVN/astra-vn/src/...`。
 
 ## 现有实现入口
 
@@ -69,6 +69,7 @@
 
 ```bash
 python Tools/check_docs.py
+python Tools/check_dynamic_artifacts.py --verify-windows-exports
 cargo metadata --no-deps
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings

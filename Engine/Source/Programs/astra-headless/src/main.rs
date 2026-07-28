@@ -1814,30 +1814,47 @@ fn append_checkpoint_artifacts(
                 ExtendedColorType::Rgba8,
             )
             .map_err(|error| format!("ASTRA_HEADLESS_CHECKPOINT_PNG_FAILED: {error}"))?;
-        if manifest.artifacts.len() as u64 >= profile.artifacts.max_artifacts {
-            return Err("ASTRA_HEADLESS_ARTIFACT_COUNT_LIMIT_EXCEEDED".into());
-        }
-        let current_bytes = manifest
-            .artifacts
-            .iter()
-            .map(|entry| match entry {
-                ArtifactEntry::Frame { byte_size, .. } | ArtifactEntry::Audio { byte_size, .. } => {
-                    *byte_size
-                }
-            })
-            .sum::<u64>();
-        if current_bytes
-            .checked_add(bytes.len() as u64)
-            .is_none_or(|total| total > profile.artifacts.max_total_bytes)
-        {
-            return Err("ASTRA_HEADLESS_ARTIFACT_BYTE_LIMIT_EXCEEDED".into());
-        }
+        let audio = capture.audio.as_ref().ok_or_else(|| {
+            "ASTRA_HEADLESS_CHECKPOINT_AUDIO_CAPTURE_MISSING: retained checkpoint requires audio"
+                .to_string()
+        })?;
+        let audio_bytes = wav_bytes(&audio.samples)?;
+        let frame_count = (audio.samples.len() / usize::from(audio.channels)) as u64;
+        let duration_ns = frame_count
+            .checked_mul(1_000_000_000)
+            .and_then(|value| value.checked_div(u64::from(audio.sample_rate)))
+            .ok_or_else(|| "ASTRA_HEADLESS_CHECKPOINT_AUDIO_DURATION_OVERFLOW".to_string())?;
+        reserve_appended_artifacts(
+            profile,
+            manifest,
+            &[bytes.len() as u64, audio_bytes.len() as u64],
+        )?;
         let relative = format!("checkpoints/{id}.png");
         let path = root.join(&relative);
-        let partial = path.with_extension("partial");
-        fs::write(&partial, &bytes)
-            .and_then(|_| fs::rename(&partial, &path))
-            .map_err(|error| format!("ASTRA_HEADLESS_CHECKPOINT_ARTIFACT_WRITE_FAILED: {error}"))?;
+        let partial = path.with_extension("png.partial");
+        let audio_relative = format!("checkpoints/{id}.wav");
+        let audio_path = root.join(&audio_relative);
+        let audio_partial = audio_path.with_extension("wav.partial");
+        if let Err(error) =
+            fs::write(&partial, &bytes).and_then(|_| fs::write(&audio_partial, &audio_bytes))
+        {
+            let _ = fs::remove_file(&partial);
+            let _ = fs::remove_file(&audio_partial);
+            return Err(format!(
+                "ASTRA_HEADLESS_CHECKPOINT_ARTIFACT_WRITE_FAILED: {error}"
+            ));
+        }
+        if let Err(error) =
+            fs::rename(&partial, &path).and_then(|_| fs::rename(&audio_partial, &audio_path))
+        {
+            let _ = fs::remove_file(&partial);
+            let _ = fs::remove_file(&audio_partial);
+            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(&audio_path);
+            return Err(format!(
+                "ASTRA_HEADLESS_CHECKPOINT_ARTIFACT_COMMIT_FAILED: {error}"
+            ));
+        }
         manifest.artifacts.push(ArtifactEntry::Frame {
             relative_path: relative,
             sha256: astra_core::Hash256::from_sha256(&bytes).to_string(),
@@ -1848,19 +1865,6 @@ fn append_checkpoint_artifacts(
             sequence: capture.sequence,
             checkpoint_ids: vec![id.clone()],
         });
-        let audio = capture.audio.as_ref().ok_or_else(|| {
-            "ASTRA_HEADLESS_CHECKPOINT_AUDIO_CAPTURE_MISSING: retained checkpoint requires audio"
-                .to_string()
-        })?;
-        let audio_bytes = wav_bytes(&audio.samples)?;
-        reserve_appended_artifact(profile, manifest, audio_bytes.len() as u64)?;
-        let audio_relative = format!("checkpoints/{id}.wav");
-        let audio_path = root.join(&audio_relative);
-        let audio_partial = audio_path.with_extension("partial");
-        fs::write(&audio_partial, &audio_bytes)
-            .and_then(|_| fs::rename(&audio_partial, &audio_path))
-            .map_err(|error| format!("ASTRA_HEADLESS_CHECKPOINT_AUDIO_WRITE_FAILED: {error}"))?;
-        let frame_count = (audio.samples.len() / usize::from(audio.channels)) as u64;
         manifest.artifacts.push(ArtifactEntry::Audio {
             relative_path: audio_relative,
             sha256: astra_core::Hash256::from_sha256(&audio_bytes).to_string(),
@@ -1868,10 +1872,7 @@ fn append_checkpoint_artifacts(
             sample_rate: audio.sample_rate,
             channels: audio.channels,
             frame_count,
-            duration_ns: frame_count
-                .checked_mul(1_000_000_000)
-                .and_then(|value| value.checked_div(u64::from(audio.sample_rate)))
-                .ok_or_else(|| "ASTRA_HEADLESS_CHECKPOINT_AUDIO_DURATION_OVERFLOW".to_string())?,
+            duration_ns,
             checkpoint: Some(id.clone()),
         });
     }
@@ -1881,12 +1882,15 @@ fn append_checkpoint_artifacts(
     Ok(())
 }
 
-fn reserve_appended_artifact(
+fn reserve_appended_artifacts(
     profile: &HeadlessHostProfile,
     manifest: &ArtifactManifest,
-    added_bytes: u64,
+    added_bytes: &[u64],
 ) -> Result<(), String> {
-    if manifest.artifacts.len() as u64 >= profile.artifacts.max_artifacts {
+    let next_count = (manifest.artifacts.len() as u64)
+        .checked_add(added_bytes.len() as u64)
+        .ok_or_else(|| "ASTRA_HEADLESS_ARTIFACT_COUNT_LIMIT_EXCEEDED".to_string())?;
+    if next_count > profile.artifacts.max_artifacts {
         return Err("ASTRA_HEADLESS_ARTIFACT_COUNT_LIMIT_EXCEEDED".into());
     }
     let current_bytes = manifest
@@ -1898,8 +1902,13 @@ fn reserve_appended_artifact(
             }
         })
         .sum::<u64>();
+    let appended_bytes = added_bytes.iter().try_fold(0_u64, |total, bytes| {
+        total
+            .checked_add(*bytes)
+            .ok_or_else(|| "ASTRA_HEADLESS_ARTIFACT_BYTE_LIMIT_EXCEEDED".to_string())
+    })?;
     if current_bytes
-        .checked_add(added_bytes)
+        .checked_add(appended_bytes)
         .is_none_or(|total| total > profile.artifacts.max_total_bytes)
     {
         return Err("ASTRA_HEADLESS_ARTIFACT_BYTE_LIMIT_EXCEEDED".into());

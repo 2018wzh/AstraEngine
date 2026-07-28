@@ -37,11 +37,17 @@ use astra_target::{
     validate_manifest, TargetKind, TargetManifest, TargetValidationReport, TargetValidationStatus,
 };
 use astra_test::ScenarioReport;
-use astra_vn::{
-    compile_astra_project, format_astra_source, load_player_locale_config,
-    load_ui_component_artifact, package_sections_for_project_with_components, AstraSource,
-    CompileAstraProjectOptions, FormatOptions, PlayerLocaleConfig, VnUiComponentArtifactInput,
-    VnUiComponentBundleManifest, VnUiComponentTarget, PLAYER_LOCALE_CONFIG_SCHEMA,
+use astra_vn_core::{VnRunConfig, VnWaitKind};
+use astra_vn_package::{
+    load_player_locale_config, load_ui_component_artifact,
+    package_sections_for_project_with_components, LoadedVnUiComponentArtifact, PlayerLocaleConfig,
+    VnUiComponentArtifactInput, VnUiComponentBundleManifest, VnUiComponentTarget,
+    PLAYER_LOCALE_CONFIG_SCHEMA,
+};
+use astra_vn_policy::LuauUiControllerHost;
+use astra_vn_script::{
+    compile_astra_project, format_astra_source, AstraSource, CompileAstraProjectOptions,
+    FormatOptions,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -799,7 +805,7 @@ fn render_ui_snapshot(
     let package = PackageReader::open(package_bytes)?;
     let mut source = NativeVnHostCommandSource::from_package(
         &package,
-        astra_vn::VnRunConfig {
+        VnRunConfig {
             profile: profile.to_string(),
             locale: locale.to_string(),
         },
@@ -839,17 +845,14 @@ fn render_ui_snapshot(
             batch
         } else if let Some(wait) = source.pending_wait().cloned() {
             match wait.kind {
-                astra_vn::VnWaitKind::Dialogue
-                | astra_vn::VnWaitKind::Choice
-                | astra_vn::VnWaitKind::SystemPage => {
-                    source.dispatch_ui_event(astra_ui_core::UiInputEventKind::Keyboard {
+                VnWaitKind::Dialogue | VnWaitKind::Choice | VnWaitKind::SystemPage => source
+                    .dispatch_ui_event(astra_ui_core::UiInputEventKind::Keyboard {
                         logical_key: "Enter".into(),
                         physical_key: "Enter".into(),
                         state: astra_ui_core::UiButtonState::Pressed,
                         repeat: false,
                         modifiers: 0,
-                    })?
-                }
+                    })?,
                 _ => source.complete_wait(wait.fence)?,
             }
         } else {
@@ -2052,7 +2055,7 @@ fn cook_nativevn_sections(
     if controller_paths.is_empty() {
         return Err("nativevn project must declare at least one UI controller source".into());
     }
-    let mut controller_host = astra_vn::LuauUiControllerHost::with_default_budget()?;
+    let mut controller_host = LuauUiControllerHost::with_default_budget()?;
     for controller_path in controller_paths {
         let source = fs::read_to_string(project_dir.join(&controller_path))?;
         controller_host.register_source(source)?;
@@ -4099,7 +4102,7 @@ fn bundle_web_ui_component(
     component_id: &str,
     component_root: &str,
     manifest_path: &str,
-    loaded: &astra_vn::LoadedVnUiComponentArtifact,
+    loaded: &LoadedVnUiComponentArtifact,
     out: &Path,
     files: &mut Vec<StandaloneBundleFile>,
 ) -> Result<serde_json::Value, CliError> {

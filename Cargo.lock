@@ -727,7 +727,11 @@ dependencies = [
  "astra-ui-core",
  "astra-ui-plugin-abi",
  "astra-vn",
+ "astra-vn-core",
+ "astra-vn-package",
+ "astra-vn-policy",
  "astra-vn-runtime-provider",
+ "astra-vn-script",
  "base64",
  "clap",
  "ctrlc",
@@ -1720,6 +1724,12 @@ dependencies = [
  "astra-plugin-abi",
  "astra-target",
  "astra-vn",
+ "astra-vn-core",
+ "astra-vn-package",
+ "astra-vn-policy",
+ "astra-vn-runtime-provider",
+ "astra-vn-script",
+ "astra-vn-system",
  "postcard",
  "schemars",
  "serde",
@@ -1840,17 +1850,10 @@ name = "astra-vn"
 version = "0.1.0"
 dependencies = [
  "astra-headless-test",
- "astra-package",
- "astra-plugin",
  "astra-vn-core",
- "astra-vn-package",
- "astra-vn-policy",
  "astra-vn-presentation",
- "astra-vn-runtime-provider",
  "astra-vn-script",
  "astra-vn-system",
- "semver",
- "tempfile",
 ]
 
 [[package]]

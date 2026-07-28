@@ -20,10 +20,10 @@ use astra_release::{
     CheckStatus, PackageValidateRequest, ProductPerformanceEvidence, ReleaseDomain,
     ReleaseValidator,
 };
-use astra_vn::{
-    compile_astra_project, package_sections_for_project, AstraSource, PLAYER_LOCALE_CONFIG_SCHEMA,
-    VN_LOCALIZATION_TABLE_SCHEMA,
+use astra_vn_package::{
+    package_sections_for_project, PLAYER_LOCALE_CONFIG_SCHEMA, VN_LOCALIZATION_TABLE_SCHEMA,
 };
+use astra_vn_script::{compile_astra_project, AstraSource};
 
 #[astra_headless_test::test]
 fn release_gate_blocks_headless_profile_schema_in_package() {
@@ -1960,7 +1960,7 @@ fn release_gate_blocks_missing_system_ui_profile_manifest() {
 }
 
 #[astra_headless_test::test]
-fn release_gate_accepts_system_story_manifest_for_classic_profile() {
+fn release_gate_blocks_system_story_manifest_without_profile_policy() {
     let compiled = compile_astra_project(
         [AstraSource::story(
             "main.astra",
@@ -1989,11 +1989,14 @@ fn release_gate_accepts_system_story_manifest_for_classic_profile() {
         .iter()
         .find(|check| check.id == "vn.system_ui_profile")
         .unwrap();
-    assert_eq!(check.status, CheckStatus::Pass);
-    assert!(check
-        .evidence
-        .iter()
-        .any(|entry| entry.key == "page_count" && entry.value == "10"));
+    assert_eq!(check.status, CheckStatus::Blocked);
+    assert_eq!(
+        check
+            .diagnostic
+            .as_ref()
+            .map(|diagnostic| diagnostic.code.as_str()),
+        Some("ASTRA_VN_SYSTEM_UI_PROFILE_POLICY_MISSING")
+    );
 }
 
 fn package_with_target_manifest(
@@ -2059,7 +2062,7 @@ fn bind_request_to_target(
     policy.profile = profile.to_string();
     policy.bindings = bindings.clone();
     if use_native_vn {
-        policy.runtime_provider = astra_vn::NativeVnRuntimeProvider::descriptor();
+        policy.runtime_provider = astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor();
     }
     registry.bindings = bindings;
     request.provider_policy = serde_json::to_vec(&policy).unwrap();

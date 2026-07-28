@@ -17,6 +17,8 @@ jobs:
           python-version: "3.x"
       - name: Docs
         run: python Tools/check_docs.py
+      - name: Dynamic artifact policy and Windows export budgets
+        run: python Tools/check_dynamic_artifacts.py --verify-windows-exports
       - name: Format
         run: cargo fmt --check
       - name: Clippy

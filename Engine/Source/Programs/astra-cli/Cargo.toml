@@ -35,7 +35,11 @@ astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 astra-ui-plugin-abi = { path = "../../Runtime/astra-ui-plugin-abi" }
 astra-test = { path = "../../Developer/astra-test" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
+astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
+astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
+astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
 astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
+astra-vn-script = { path = "../../Modules/AstraVN/astra-vn-script" }
 base64.workspace = true
 clap.workspace = true
 image.workspace = true

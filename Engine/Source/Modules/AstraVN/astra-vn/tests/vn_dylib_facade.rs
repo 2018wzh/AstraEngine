@@ -1,11 +1,10 @@
-use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader};
 use astra_vn::{
-    compile_astra_project, package_sections_for_project, AstraSource, StageModel,
-    SystemStoryManifest, VnPlayerCommand, VnRunConfig, VnRuntime,
+    compile_astra_project, AstraSource, StageModel, SystemStoryManifest, VnPlayerCommand,
+    VnRunConfig, VnRuntime,
 };
 
 #[astra_headless_test::test]
-fn vn_dylib_facade_reexports_runtime_story_and_package_api() {
+fn vn_dylib_facade_reexports_runtime_story_and_presentation_api() {
     let compiled = compile_astra_project(
         [AstraSource::story(
             "facade.astra",
@@ -33,18 +32,4 @@ state prologue #@id state.prologue
     assert_eq!(stage.presentation_hash().to_hex().len(), 32);
     let system_manifest = SystemStoryManifest::from_compiled(&compiled).unwrap();
     assert_eq!(system_manifest.schema, "astra.vn.system_story_manifest.v2");
-
-    let sections =
-        package_sections_for_project(&compiled, &["classic".to_string()], "facade-game").unwrap();
-    let blob = PackageBuilder::build(PackageBuildRequest::fixture(
-        "com.example.facade",
-        "classic",
-        sections,
-    ))
-    .unwrap();
-    let reader = PackageReader::open(blob.as_bytes()).unwrap();
-    assert!(reader.has_section("vn.compiled_project"));
-    assert!(reader.has_section("vn.story"));
-    assert!(reader.has_section("vn.profile_manifest"));
-    assert!(reader.has_section("vn.system_story_manifest"));
 }

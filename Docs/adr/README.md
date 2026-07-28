@@ -20,3 +20,4 @@ ADR 记录已经锁定的产品级决策。被替换的旧决策必须在新 ADR
 | [0015](0015-ui-backend-provider-split.md) | AstraVN 使用 Yakui，AstraEMU 使用 Slint，Editor 保持 Qt/QML |
 | [0016](0016-astravn-script-declared-ui.md) | `.astra` 声明 backend-neutral UI，Rust ViewModel 与 Luau Controller 保持权威分层 |
 | [0017](0017-ui-component-plugin-boundary.md) | 独立 UI component ABI、typed slot、签名与资源上限 |
+| [0018](0018-windows-dynamic-artifact-governance.md) | Windows 动态制品、Rust dylib 闭包与导出预算治理 |

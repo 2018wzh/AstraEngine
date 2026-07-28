@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use astra_core::Hash256;
@@ -114,6 +116,7 @@ struct Fixture {
 impl Fixture {
     fn prepare(deadline: Duration) -> Self {
         let workspace = workspace_root();
+        build_fixture(&workspace);
         let target = std::env::var_os("CARGO_TARGET_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| workspace.join("target"));
@@ -183,6 +186,18 @@ impl Fixture {
     fn spawn(&self) -> UiComponentProcess {
         UiComponentProcess::spawn(self.config.clone()).expect("spawn component process")
     }
+}
+
+fn build_fixture(workspace: &Path) {
+    static BUILT: OnceLock<()> = OnceLock::new();
+    BUILT.get_or_init(|| {
+        let status = Command::new("cargo")
+            .args(["build", "-p", "ui-component-provider"])
+            .current_dir(workspace)
+            .status()
+            .expect("build UI component fixture");
+        assert!(status.success(), "UI component fixture build must succeed");
+    });
 }
 
 fn workspace_root() -> PathBuf {

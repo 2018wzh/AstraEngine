@@ -85,7 +85,13 @@ targets = [
 | `astra-vn-plugin` | 3 implemented | VN extension points、extension manifest、provider slot ids | `astra-core`, `astra-plugin-abi`, `astra-vn-package`, `serde`, `schemars` | plugin loader internals |
 | `astra-vn-editor` | 3 implemented, Stage 4 bridge planned | Graph/Timeline authoring metadata、source round-trip metadata、NativeVN `RuntimeEditorMetadata` | `astra-core`, `astra-vn-script`, `astra-vn-presentation`, `astra-vn-plugin`, `serde`, `schemars` | Qt/QML widget, Editor native handle |
 | `astra-vn-runtime-provider` | 3 implemented | `NativeVnRuntimeProvider` session-owned RuntimeWorld、`astra.vn.step` action、prepare/probe/open/step/save/restore/package/release/editor metadata 和真实 FFI instance/session lifecycle | `astra-runtime`, `astra-target`, `astra-plugin-abi`, `astra-vn-core`, `astra-vn-policy`, `astra-vn-save`, `astra-vn-package`, `astra-vn-editor` | RPG/EMU base class, RuntimeWorld/Actor pointer across ABI |
-| `astra-vn` | 3 implemented | Rust ABI dylib facade 和兼容 re-export，不承载 parser/runtime/policy/package 实现 | AstraVN 子 crate | platform-native handles, second runtime, C ABI promise, heavy decode/text provider dependencies in facade, RPG/EMU base class |
+| `astra-vn` | 3 implemented | `rlib + dylib` Rust compatibility facade 和受控 re-export，不承载 parser/runtime/policy/package 实现 | AstraVN 子 crate；direct dependency closure 受 `dynamic_artifact_policy.toml` 约束 | platform-native handles, second runtime, C ABI promise, heavy decode/text provider dependencies in facade, RPG/EMU base class |
+
+Windows dynamic artifact policy and export-budget audit:
+
+```bash
+python Tools/check_dynamic_artifacts.py
+```
 | `astra-player-core` | 3 in progress | automation contracts、平台无关 `PlayerHostCommand`、ordered executor 和 `PlatformCommandSink`；logical resource id 不暴露 native handle | `astra-core`, `astra-platform`, `serde`, `schemars`, `serde_json` | gameplay-provider 私有类型、local path 或 native handle serialization |
 | `astra-player` | 3 in progress | Windows bundled AstraVN runtime host，以及 `sendinput.*`/Web `cdp.*` automation transcript/report 校验入口 | `astra-player-core`, `astra-player-vn`, `astra-platform-windows`, `serde_json`, `serde_yaml` | package cooking、commercial payload、route-scenario/DOM/JS command bypass |
 | `astra-headless` | 2 in progress | Developer-only JSONL file/stdio runner，写 config-hash-bound artifact/run report，执行完整图像/音频比较、tolerance approval、review 与 preflight link | `astra-platform-headless`、`astra-product-host`、product adapter | shipping Player、release package、平台 profile |

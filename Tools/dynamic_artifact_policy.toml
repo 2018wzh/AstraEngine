@@ -1,0 +1,130 @@
+schema = "astra.dynamic_artifact_policy.v1"
+windows_rust_dylib_export_budget = 60000
+
+[documentation]
+required_command = "python Tools/check_dynamic_artifacts.py"
+paths = [
+    "Docs/adr/0018-windows-dynamic-artifact-governance.md",
+    "Docs/contracts/plugin-abi.md",
+    "Docs/implementation/workspace-blueprint.md",
+    "Docs/status/stages/stage-test-matrix.md",
+]
+
+[[artifact]]
+package = "astra-engine"
+target = "astra_engine"
+crate_types = ["rlib", "dylib"]
+role = "rust_compatibility_facade"
+owner = "EngineCore"
+platforms = ["windows", "linux", "macos"]
+publishable = true
+windows_export_budget = 60000
+audit_windows_exports = true
+allowed_workspace_dependencies = ["astra-core", "astra-package", "astra-plugin", "astra-runtime"]
+
+[[artifact]]
+package = "astra-vn"
+target = "astra_vn"
+crate_types = ["rlib", "dylib"]
+role = "rust_compatibility_facade"
+owner = "AstraVN"
+platforms = ["windows", "linux", "macos"]
+publishable = true
+windows_export_budget = 60000
+audit_windows_exports = true
+allowed_workspace_dependencies = [
+    "astra-vn-core",
+    "astra-vn-presentation",
+    "astra-vn-script",
+    "astra-vn-system",
+]
+
+[[artifact]]
+package = "astra-player-android"
+target = "astra_player_android"
+crate_types = ["cdylib", "rlib"]
+role = "platform_host"
+owner = "AstraPlatform"
+platforms = ["android"]
+publishable = true
+audit_windows_exports = false
+
+[[artifact]]
+package = "astra-player-web"
+target = "astra_player_web"
+crate_types = ["cdylib", "rlib"]
+role = "platform_host"
+owner = "AstraPlatform"
+platforms = ["web"]
+publishable = true
+audit_windows_exports = false
+
+[[artifact]]
+package = "headless-presentation-provider"
+target = "headless_presentation_provider"
+crate_types = ["cdylib"]
+role = "test_fixture_provider"
+owner = "EngineCore"
+platforms = ["windows"]
+publishable = false
+audit_windows_exports = false
+
+[[artifact]]
+package = "vn-extension-provider"
+target = "vn_extension_provider"
+crate_types = ["cdylib"]
+role = "test_fixture_provider"
+owner = "AstraVN"
+platforms = ["windows"]
+publishable = false
+audit_windows_exports = false
+
+[[artifact]]
+package = "ui-component-provider"
+target = "ui_component_provider"
+crate_types = ["cdylib"]
+role = "test_fixture_provider"
+owner = "RuntimeUI"
+platforms = ["windows"]
+publishable = false
+audit_windows_exports = false
+
+[[artifact]]
+package = "astra-emu-fvp"
+target = "astra_emu_fvp"
+crate_types = ["cdylib", "rlib"]
+role = "family_plugin"
+owner = "AstraEMU"
+platforms = ["windows", "linux", "macos"]
+publishable = true
+audit_windows_exports = false
+
+[[artifact]]
+package = "astra-emu-fvp-rfvp-core"
+target = "rfvp"
+crate_types = ["cdylib", "rlib"]
+role = "emulator_runtime"
+owner = "AstraEMU"
+platforms = ["windows", "linux", "macos"]
+publishable = false
+audit_windows_exports = false
+
+[[artifact]]
+package = "astra-emu-manager"
+target = "astra_emu_manager"
+crate_types = ["cdylib", "rlib"]
+role = "program_host"
+owner = "AstraEMU"
+platforms = ["windows", "linux", "macos"]
+publishable = true
+audit_windows_exports = false
+
+[[artifact]]
+package = "wmv-decoder"
+target = "wmv_decoder"
+crate_types = ["cdylib", "rlib", "staticlib"]
+role = "emulator_runtime"
+owner = "AstraEMU"
+platforms = ["windows"]
+publishable = false
+audit_windows_exports = false

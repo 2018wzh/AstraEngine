@@ -21,6 +21,12 @@ astra-platform-android = { path = "../../Platform/astra-platform-android" }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi" }
 astra-target = { path = "../../Platform/astra-target" }
 astra-vn = { path = "../../Modules/AstraVN/astra-vn" }
+astra-vn-core = { path = "../../Modules/AstraVN/astra-vn-core" }
+astra-vn-package = { path = "../../Modules/AstraVN/astra-vn-package" }
+astra-vn-policy = { path = "../../Modules/AstraVN/astra-vn-policy" }
+astra-vn-runtime-provider = { path = "../../Modules/AstraVN/astra-vn-runtime-provider" }
+astra-vn-script = { path = "../../Modules/AstraVN/astra-vn-script" }
+astra-vn-system = { path = "../../Modules/AstraVN/astra-vn-system" }
 astra-emu-manager-core = { path = "../../../../Emulator/Source/Manager/astra-emu-manager-core" }
 postcard.workspace = true
 schemars.workspace = true

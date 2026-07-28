@@ -24,14 +24,18 @@ use astra_plugin_abi::{
     RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput, RuntimeStepMode,
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
-use astra_vn::{
+use astra_vn_core::VnRuntimeViewState;
+use astra_vn_package::{
     decode_compiled_project, load_player_locale_config, load_presentation_provider_manifest,
-    NativeVnRuntimeProvider, SystemStoryManifest, SystemStoryValidationStatus,
     VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
-    VnPolicyBundleManifest, VnPolicyBundleSourceCache, VnProfileManifest, VnRuntimeViewState,
-    VnStandardCommandManifest, VnSystemUiProfileManifest, VN_RUNTIME_VIEW_STATE_SCHEMA,
-    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
+    VnProfileManifest, VnStandardCommandManifest,
 };
+use astra_vn_policy::{VnPolicyBundleManifest, VnPolicyBundleSourceCache};
+use astra_vn_runtime_provider::NativeVnRuntimeProvider;
+use astra_vn_script::{
+    SystemStoryValidationStatus, VN_RUNTIME_VIEW_STATE_SCHEMA, VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
+};
+use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -3690,7 +3694,7 @@ fn vn_system_ui_profile_check(package: &PackageReader, profile: &str) -> Release
             };
         }
     };
-    if manifest.schema != "astra.vn.system_story_manifest.v1" {
+    if manifest.schema != "astra.vn.system_story_manifest.v2" {
         return ReleaseCheckRecord {
             id: "vn.system_ui_profile".to_string(),
             domain: ReleaseDomain::Vn,
@@ -3698,7 +3702,7 @@ fn vn_system_ui_profile_check(package: &PackageReader, profile: &str) -> Release
             summary: "VN system story manifest has an unexpected schema".to_string(),
             diagnostic: Some(Diagnostic::blocking(
                 "ASTRA_VN_SYSTEM_MANIFEST_SCHEMA",
-                "vn.system_story_manifest must use astra.vn.system_story_manifest.v1",
+                "vn.system_story_manifest must use astra.vn.system_story_manifest.v2",
             )),
             evidence: vec![evidence("section", "vn.system_story_manifest")],
         };
