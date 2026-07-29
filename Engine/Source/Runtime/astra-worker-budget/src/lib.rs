@@ -131,6 +131,16 @@ impl WorkerBudgetBroker {
         self.inner.acquired.load(Ordering::Acquire)
     }
 
+    pub fn queued(&self) -> usize {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .expect("worker budget state lock must not be poisoned");
+        usize::try_from(state.next_ticket.saturating_sub(state.serving_ticket))
+            .unwrap_or(usize::MAX)
+    }
+
     pub async fn acquire(&self) -> Result<WorkerBudgetLease, WorkerBudgetError> {
         let broker = self.clone();
         tokio::task::spawn_blocking(move || broker.blocking_acquire())

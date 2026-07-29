@@ -7,7 +7,7 @@ use astra_package::PackageReader;
 use astra_platform::HeadlessHostProfile;
 use astra_target::{TargetKind, TargetManifest};
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Output},
     time::{SystemTime, UNIX_EPOCH},
@@ -20,7 +20,10 @@ fn run_nativevn_headless(
     product_profile: &str,
     choice_key: &str,
 ) -> serde_json::Value {
-    let build_identity_path = env::var("ASTRA_BUILD_IDENTITY").unwrap();
+    let build_identity_path = astra_headless_test::headless_build_identity_path()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let build_identity: serde_json::Value =
         serde_json::from_slice(&fs::read(&build_identity_path).unwrap()).unwrap();
     let build_fingerprint = build_identity["identity_hash"].as_str().unwrap();
@@ -172,7 +175,7 @@ fn run_nativevn_headless(
             .unwrap();
     }
     let artifact_root = case_dir.join(format!("headless-{product_profile}-artifacts"));
-    let output = Command::new(env::var("ASTRA_HEADLESS_BINARY").unwrap())
+    let output = Command::new(astra_headless_test::headless_binary_path().unwrap())
         .args([
             "run",
             "--profile",

@@ -123,7 +123,7 @@ await 与 checkpoint 只观察状态、等待条件或请求采样，不能直�
 
 `astra-headless run` 读取 JSONL 文件，写入 artifact 目录、manifest 和 report。`astra-headless serve --stdio` 使用相同 JSONL schema 做双向交互；二者可通过 `--gpu` 启用已在 profile 绑定的 WGPU offscreen。machine-readable 输出只走 stdout，日志只走 stderr。`prepare-review` 从通过校验的稀疏 report/manifest 选择 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，逐个复核文件 hash 后生成 `astra.headless_review_bundle.v2`；`validate-review` 阻断缺 checkpoint verdict 或试图覆盖自动失败的 review；`link-preflight` 只接受与 Headless report 完全同 identity 的 `astra.platform_run_identity.v1`。
 
-Rust 测试优先通过共享 harness 直接创建 session。CLI 面向模型、人工和外部工具。Migration 11 完成后，旧 `astra test run --headless` 必须返回带迁移说明的 blocking diagnostic；不保留隐式 alias，也不静默转发到新 binary。
+Rust 测试优先通过共享 harness 直接创建 session。Harness 从当前 test executable 所属的 Cargo target/profile 自动解析同 worktree 的 `astra-headless`，不接受 `ASTRA_HEADLESS_BINARY` 或 `ASTRA_HEADLESS_BINARY_HASH` 指定其他产物；binary 缺失时 fail fast，提交前仍先执行 `cargo build -p astra-headless`。同一个 Rust test binary 中的并行测试复用一台 Headless server，并为每个 `HeadlessTestContext` 创建独立 session；最后一个 session 结束后保留 25 ms idle grace，吸收紧邻测试后再 zero-leak shutdown，避免逐测试重启进程。CLI 面向模型、人工和外部工具。Migration 11 完成后，旧 `astra test run --headless` 必须返回带迁移说明的 blocking diagnostic；不保留隐式 alias，也不静默转发到新 binary。
 
 **Planned Done Evidence:** `cargo test -p astra-headless` 覆盖 file/stdio 等价性、日志与 report 分流、损坏 JSONL、断流、限额和非零退出状态。
 
@@ -135,7 +135,7 @@ Rust 测试优先通过共享 harness 直接创建 session。CLI 面向模型、
 
 **Goal:** 把所有平台无关 Runtime 测试收束到统一 `HeadlessTestContext`，不保留长期双轨。
 
-`Engine/Source/Runtime` 下每个测试都必须启动并关闭 Headless session，包括 parser、schema、derive 和纯数据测试。静态测试仍可直接断言被测 API，但生命周期必须经过统一 context。会 tick、render、mix、decode、save/load、package read 或消费输入的测试必须从 Headless service/client 路径执行。
+`Engine/Source/Runtime` 下每个测试都必须启动并关闭 Headless session，包括 parser、schema、derive 和纯数据测试。静态测试仍可直接断言被测 API，但生命周期必须经过统一 context。会 tick、render、mix、decode、save/load、package read 或消费输入的测试必须从 Headless service/client 路径执行。Rust test harness 默认的并行线程会对应为同一 server 上的多个隔离 session；协议 open/shutdown 保持有序，测试主体并行执行，不允许共享 Runtime、artifact session root 或可变媒体状态。
 
 Developer、Modules 和 Programs 中的平台无关 Runtime、Player 与 full-flow 测试同步迁入。Windows/Web 等真实平台测试继续使用 native host，但只能在对应 Headless preflight 已通过后启动。迁移清单必须覆盖直接 `HeadlessRendererProvider`、独立 AudioGraph meter、手写 mock sink、ScenarioRunner 私有执行和测试专用产品命令。
 

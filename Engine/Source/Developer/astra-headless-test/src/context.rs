@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{Mutex, OnceLock},
+    thread,
+    time::Duration,
 };
 
 use astra_headless_protocol::{
@@ -14,8 +16,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum HeadlessTestError {
-    #[error("headless test driver environment is missing: {0}")]
-    MissingEnvironment(&'static str),
     #[error("headless test server failed: {0}")]
     Server(String),
 }
@@ -27,8 +27,11 @@ struct Server {
     next_session: u64,
     active_sessions: usize,
     test_root: PathBuf,
+    profile: PathBuf,
+    artifact_root: PathBuf,
 }
 static SERVER: OnceLock<Mutex<Option<Server>>> = OnceLock::new();
+const SERVER_IDLE_GRACE: Duration = Duration::from_millis(25);
 
 pub struct HeadlessTestContext {
     session: String,
@@ -45,23 +48,21 @@ impl HeadlessTestContext {
             *slot = Some(start_server()?);
         }
         let server = slot.as_mut().expect("initialized above");
-        server.next_session += 1;
-        server.active_sessions += 1;
+        server.next_session = server
+            .next_session
+            .checked_add(1)
+            .ok_or_else(|| HeadlessTestError::Server("session sequence overflowed".into()))?;
         let session = format!("test-{}-{}", std::process::id(), server.next_session);
-        let profile = env::var("ASTRA_HEADLESS_PROFILE")
-            .map_err(|_| HeadlessTestError::MissingEnvironment("ASTRA_HEADLESS_PROFILE"))?;
-        let artifact_root = env::var("ASTRA_HEADLESS_ARTIFACT_ROOT")
-            .map_err(|_| HeadlessTestError::MissingEnvironment("ASTRA_HEADLESS_ARTIFACT_ROOT"))?;
         let envelope = Envelope {
             schema: HEADLESS_PROTOCOL_SCHEMA.into(),
             session: session.clone(),
             sequence: 1,
             tick: 0,
             message: Message::Open {
-                profile_path: profile,
+                profile_path: server.profile.to_string_lossy().into_owned(),
                 package_path: None,
                 checkpoint_config_path: None,
-                artifact_root,
+                artifact_root: server.artifact_root.to_string_lossy().into_owned(),
             },
         };
         server
@@ -78,6 +79,10 @@ impl HeadlessTestContext {
                 "server did not acknowledge session".into(),
             ));
         }
+        server.active_sessions = server
+            .active_sessions
+            .checked_add(1)
+            .ok_or_else(|| HeadlessTestError::Server("session count overflowed".into()))?;
         Ok(Self {
             session,
             shutdown: false,
@@ -92,13 +97,13 @@ impl HeadlessTestContext {
         if self.shutdown {
             return Ok(());
         }
-        let slot = SERVER
+        let server_slot = SERVER
             .get()
             .ok_or_else(|| HeadlessTestError::Server("server is unavailable".into()))?;
-        let mut slot = slot
+        let mut slot = server_slot
             .lock()
             .map_err(|_| HeadlessTestError::Server("server lock poisoned".into()))?;
-        let should_stop = {
+        let (should_stop, server_process_id) = {
             let server = slot
                 .as_mut()
                 .ok_or_else(|| HeadlessTestError::Server("server is unavailable".into()))?;
@@ -127,14 +132,27 @@ impl HeadlessTestContext {
                 .active_sessions
                 .checked_sub(1)
                 .ok_or_else(|| HeadlessTestError::Server("session count underflow".into()))?;
-            server.active_sessions == 0
+            (server.active_sessions == 0, server.child.id())
         };
-        if should_stop {
-            slot.take()
-                .expect("server exists while the final session is active")
-                .stop()?;
-        }
         self.shutdown = true;
+        drop(slot);
+        if should_stop {
+            thread::sleep(SERVER_IDLE_GRACE);
+            let mut slot = server_slot
+                .lock()
+                .map_err(|_| HeadlessTestError::Server("server lock poisoned".into()))?;
+            let matching_idle_server = slot.as_ref().is_some_and(|server| {
+                server.active_sessions == 0 && server.child.id() == server_process_id
+            });
+            let server = matching_idle_server.then(|| {
+                slot.take()
+                    .expect("matching idle server must still occupy the shared slot")
+            });
+            if let Some(server) = server {
+                server.stop()?;
+            }
+            drop(slot);
+        }
         Ok(())
     }
 }
@@ -147,14 +165,41 @@ impl Drop for HeadlessTestContext {
     }
 }
 
+pub fn active_headless_session_count() -> Result<usize, HeadlessTestError> {
+    let slot = SERVER
+        .get()
+        .ok_or_else(|| HeadlessTestError::Server("server is unavailable".into()))?;
+    let slot = slot
+        .lock()
+        .map_err(|_| HeadlessTestError::Server("server lock poisoned".into()))?;
+    Ok(slot
+        .as_ref()
+        .map(|server| server.active_sessions)
+        .unwrap_or(0))
+}
+
+pub fn headless_build_identity_path() -> Result<PathBuf, HeadlessTestError> {
+    let slot = SERVER
+        .get()
+        .ok_or_else(|| HeadlessTestError::Server("server is unavailable".into()))?;
+    let slot = slot
+        .lock()
+        .map_err(|_| HeadlessTestError::Server("server lock poisoned".into()))?;
+    slot.as_ref()
+        .map(|server| server.test_root.join("build-identity.json"))
+        .ok_or_else(|| HeadlessTestError::Server("server is unavailable".into()))
+}
+
 fn start_server() -> Result<Server, HeadlessTestError> {
-    let binary = headless_binary()?;
+    let binary = headless_binary_path()?;
     let binary_bytes = std::fs::read(&binary).map_err(|error| {
         HeadlessTestError::Server(format!("driver binary read failed: {error}"))
     })?;
     let actual_binary_hash = format!("sha256:{:x}", Sha256::digest(&binary_bytes));
     let test_root = prepare_test_environment(&binary, &actual_binary_hash)?;
     let identity = test_root.join("build-identity.json");
+    let profile = test_root.join("headless-profile.json");
+    let artifact_root = test_root.join("artifacts");
     let mut command = Command::new(&binary);
     command
         .args(["serve", "--stdio", "--build-identity"])
@@ -184,6 +229,8 @@ fn start_server() -> Result<Server, HeadlessTestError> {
         next_session: 0,
         active_sessions: 0,
         test_root,
+        profile,
+        artifact_root,
     })
 }
 
@@ -209,13 +256,7 @@ impl Server {
     }
 }
 
-fn headless_binary() -> Result<PathBuf, HeadlessTestError> {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_astra-headless") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
+pub fn headless_binary_path() -> Result<PathBuf, HeadlessTestError> {
     let current = env::current_exe()
         .map_err(|error| HeadlessTestError::Server(format!("test binary path failed: {error}")))?;
     let profile_root = current
@@ -297,14 +338,5 @@ fn prepare_test_environment(
             HeadlessTestError::Server(format!("headless profile write failed: {error}"))
         })?;
     }
-    env::set_var("ASTRA_HEADLESS_BINARY", binary);
-    env::set_var("ASTRA_HEADLESS_BINARY_HASH", binary_hash);
-    env::set_var(
-        "ASTRA_HEADLESS_PROFILE",
-        test_root.join("headless-profile.json"),
-    );
-    env::set_var("ASTRA_HEADLESS_PACKAGE", test_root.join("empty.astrapkg"));
-    env::set_var("ASTRA_HEADLESS_ARTIFACT_ROOT", test_root.join("artifacts"));
-    env::set_var("ASTRA_BUILD_IDENTITY", identity);
     Ok(test_root)
 }

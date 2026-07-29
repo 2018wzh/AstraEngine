@@ -1,4 +1,7 @@
-use std::sync::{Arc, Barrier};
+use std::{
+    sync::{mpsc, Arc, Barrier},
+    time::{Duration, Instant},
+};
 
 use astra_worker_budget::WorkerBudgetBroker;
 
@@ -50,5 +53,41 @@ fn nested_work_reuses_the_callers_scoped_token() {
             assert_eq!(broker.acquired(), 1);
         })
         .unwrap();
+    assert_eq!(broker.acquired(), 0);
+}
+
+#[astra_headless_test::test]
+fn worker_budget_serves_queued_workers_in_fifo_order() {
+    let broker = Arc::new(WorkerBudgetBroker::new(1).unwrap());
+    let held = broker.blocking_acquire().unwrap();
+    let (completed_tx, completed_rx) = mpsc::channel();
+    let mut handles = Vec::new();
+
+    for index in 0..4 {
+        let worker_broker = Arc::clone(&broker);
+        let completed_tx = completed_tx.clone();
+        handles.push(std::thread::spawn(move || {
+            let _lease = worker_broker.blocking_acquire().unwrap();
+            completed_tx.send(index).unwrap();
+        }));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while broker.queued() != index + 1 {
+            assert!(
+                Instant::now() < deadline,
+                "worker did not enter the FIFO queue before the bounded deadline"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    drop(held);
+    let completed = (0..4)
+        .map(|_| completed_rx.recv_timeout(Duration::from_secs(2)).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(completed, vec![0, 1, 2, 3]);
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    assert_eq!(broker.queued(), 0);
     assert_eq!(broker.acquired(), 0);
 }

@@ -126,7 +126,7 @@ python Tools/check_docs.py
 
 该脚本同时检查文档断链、状态页覆盖矩阵和历史标记残留。
 
-全量 clippy/test 直接使用当前独占 worktree 的 Cargo target。执行 workspace test 前必须先构建 `astra-headless`，测试框架会从当前 Cargo profile 解析该 binary，生成进程级 Headless 测试环境，并在最后一个 session 关闭后删除临时产物。禁止设置指向其他 worktree 的 `CARGO_TARGET_DIR`，也禁止复用其他实例生成的动态 fixture。命令超时、局部测试通过、fixture 通过或静态 report 生成，都不能替代完整 workspace 和真实 host evidence。
+全量 clippy/test 直接使用当前独占 worktree 的 Cargo target。执行 workspace test 前必须先构建 `astra-headless`；测试框架只从当前 test executable 的 Cargo target/profile 解析同 worktree binary，不接受 `ASTRA_HEADLESS_BINARY` 或 `ASTRA_HEADLESS_BINARY_HASH` 覆盖。同一 test binary 的并行测试复用一个多 session Headless server，session lifecycle、artifact root 和可变 Runtime/media state 必须隔离；最后一个 session 经短 idle grace 后关闭 server 并删除临时产物。禁止设置指向其他 worktree 的 `CARGO_TARGET_DIR`，也禁止复用其他实例生成的动态 fixture。命令超时、局部测试通过、fixture 通过或静态 report 生成，都不能替代完整 workspace 和真实 host evidence。
 
 统一 Headless 后端使用双向 JSONL `astra.user_input_sequence.v1`，并输出真实 PNG/WAV、artifact manifest 和 run report；旧 YAML runner 已删除，`--headless` 入口只返回显式迁移错误，不保留 alias。产品/full-flow 需要自动比较和模型审查双门禁，模型必须实际查看 required checkpoint 与音频分析结果，且不能覆盖自动失败或自行放宽容差。Release Gate 必须输出 machine-readable report。
 

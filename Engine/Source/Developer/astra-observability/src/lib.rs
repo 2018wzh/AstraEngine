@@ -23,7 +23,9 @@ pub use perfetto::{
     PerfettoTraceWriter, DEFAULT_PERFETTO_MAX_BYTES, DEFAULT_PERFETTO_MAX_EVENTS,
 };
 pub use pipeline::{init_host, ObservabilityError, ObservabilityGuard};
-pub use process_memory::{sample_process_memory, ProcessMemoryError, ProcessMemorySample};
+pub use process_memory::{
+    sample_process_memory, sample_process_memory_by_pid, ProcessMemoryError, ProcessMemorySample,
+};
 pub use record::{LogEventV1, SpanContextV1, LOG_EVENT_SCHEMA};
 pub use windows_crash::{
     install_windows_crash_reporter, WindowsCrashReporterConfig, WindowsCrashReporterGuard,

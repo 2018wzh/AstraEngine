@@ -32,7 +32,7 @@ impl Fixture {
             "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    text key:line speaker:hero #@id line.one\n",
         );
         let package_hash = astra_core::Hash256::from_sha256(&package_bytes).to_string();
-        let build_identity = PathBuf::from(std::env::var("ASTRA_BUILD_IDENTITY").unwrap());
+        let build_identity = astra_headless_test::headless_build_identity_path().unwrap();
         let identity: serde_json::Value =
             serde_json::from_slice(&fs::read(&build_identity).unwrap()).unwrap();
         let build_fingerprint = identity["identity_hash"].as_str().unwrap().to_owned();

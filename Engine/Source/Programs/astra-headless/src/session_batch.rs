@@ -9,6 +9,7 @@ use std::{
 
 use astra_core::PerformanceReport;
 use astra_headless_protocol::RunReport;
+use astra_observability::sample_process_memory_by_pid;
 use astra_plugin::WorkerBudgetBroker;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -65,6 +66,9 @@ struct BatchPerformanceConfig {
 struct BatchReport {
     schema: &'static str,
     status: &'static str,
+    configured_worker_limit: usize,
+    available_parallelism: usize,
+    selected_concurrency: usize,
     worker_limit: usize,
     peak_workers: usize,
     wall_time_us: u64,
@@ -113,6 +117,7 @@ struct BatchChildOutcome {
     identity: Option<BatchJobIdentity>,
     output_identity_hash: Option<String>,
     performance: Option<BatchPerformanceSummary>,
+    peak_private_memory_bytes: Option<u64>,
     diagnostic: Option<String>,
 }
 
@@ -122,7 +127,7 @@ struct BatchPerformanceSummary {
     frame_cpu_p99_ns: u64,
     frame_end_to_end_p95_ns: u64,
     frame_end_to_end_p99_ns: u64,
-    peak_private_memory_bytes: u64,
+    reported_peak_private_memory_bytes: Option<u64>,
 }
 
 struct SerialBaseline {
@@ -137,14 +142,24 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
     )
     .map_err(|error| format!("ASTRA_HEADLESS_BATCH_MANIFEST_INVALID: {error}"))?;
     validate_manifest(&manifest)?;
+    let available_parallelism = std::thread::available_parallelism()
+        .map(usize::from)
+        .map_err(|error| format!("ASTRA_HEADLESS_BATCH_PARALLELISM_QUERY: {error}"))?;
+    let selected_concurrency = select_concurrency(
+        manifest.worker_limit,
+        manifest.jobs.len(),
+        available_parallelism,
+    )?;
     tracing::info!(
         event = "headless.session_batch.start",
         session_count = manifest.jobs.len(),
-        worker_limit = manifest.worker_limit,
+        configured_worker_limit = manifest.worker_limit,
+        available_parallelism,
+        selected_concurrency,
         "starting identity-bound Headless session batch"
     );
 
-    let budget = WorkerBudgetBroker::global_with_limit(manifest.worker_limit)
+    let budget = WorkerBudgetBroker::global_with_limit(selected_concurrency)
         .map_err(|error| error.to_string())?
         .clone();
     let executable = std::env::current_exe()
@@ -235,11 +250,13 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                     identity: None,
                     output_identity_hash: None,
                     performance: None,
+                    peak_private_memory_bytes: None,
                     diagnostic: Some(diagnostic),
                 },
             };
             let identity = outcome.identity;
             let performance = outcome.performance;
+            let peak_private_memory_bytes = outcome.peak_private_memory_bytes;
             let output_identity_hash = outcome.output_identity_hash;
             let diagnostic = outcome.diagnostic;
             let report = BatchJobReport {
@@ -263,9 +280,7 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                 frame_end_to_end_p99_ns: performance
                     .as_ref()
                     .map(|summary| summary.frame_end_to_end_p99_ns),
-                peak_private_memory_bytes: performance
-                    .as_ref()
-                    .map(|summary| summary.peak_private_memory_bytes),
+                peak_private_memory_bytes,
                 serial_frame_cpu_p95_ns: None,
                 serial_frame_cpu_p99_ns: None,
                 serial_frame_end_to_end_p95_ns: None,
@@ -309,8 +324,8 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
             job.serial_frame_cpu_p99_ns = Some(performance.frame_cpu_p99_ns);
             job.serial_frame_end_to_end_p95_ns = Some(performance.frame_end_to_end_p95_ns);
             job.serial_frame_end_to_end_p99_ns = Some(performance.frame_end_to_end_p99_ns);
-            job.serial_peak_private_memory_bytes = Some(performance.peak_private_memory_bytes);
         }
+        job.serial_peak_private_memory_bytes = baseline.outcome.peak_private_memory_bytes;
         if let Some(diagnostic) = baseline.outcome.diagnostic {
             job.status = "blocked";
             job.diagnostic = Some(format!(
@@ -349,6 +364,9 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
     let report = BatchReport {
         schema: REPORT_SCHEMA,
         status: if passed { "pass" } else { "blocked" },
+        configured_worker_limit: manifest.worker_limit,
+        available_parallelism,
+        selected_concurrency,
         worker_limit: budget.limit(),
         peak_workers: budget.peak_acquired(),
         wall_time_us,
@@ -364,7 +382,9 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
         event = "headless.session_batch.complete",
         status = report.status,
         session_count = report.jobs.len(),
-        worker_limit = report.worker_limit,
+        configured_worker_limit = report.configured_worker_limit,
+        available_parallelism = report.available_parallelism,
+        selected_concurrency = report.selected_concurrency,
         peak_workers = report.peak_workers,
         wall_time_us = report.wall_time_us,
         "completed identity-bound Headless session batch"
@@ -392,6 +412,7 @@ fn run_child(executable: &Path, job: &BatchJob, artifact_root: &Path) -> BatchCh
                 identity: None,
                 output_identity_hash: None,
                 performance: None,
+                peak_private_memory_bytes: None,
                 diagnostic: Some(diagnostic),
             };
         }
@@ -433,49 +454,81 @@ fn run_child(executable: &Path, job: &BatchJob, artifact_root: &Path) -> BatchCh
         command.arg("--checkpoint-config").arg(checkpoint_config);
     }
     command.stdout(Stdio::null()).stderr(Stdio::null());
-    let diagnostic = run_child_with_timeout(&mut command, job.timeout_ms);
-    let (output_identity_hash, performance, diagnostic) = if diagnostic.is_none() {
-        match read_child_evidence(artifact_root, job.performance.is_some()) {
-            Ok((output_identity_hash, performance)) => {
-                (Some(output_identity_hash), performance, None)
+    let child_run = run_child_with_timeout(&mut command, job.timeout_ms);
+    let (output_identity_hash, performance, peak_private_memory_bytes, diagnostic) = match child_run
+    {
+        Ok(observed_peak_private_memory_bytes) => {
+            match read_child_evidence(artifact_root, job.performance.is_some()) {
+                Ok((output_identity_hash, performance)) => {
+                    let reported_peak = performance
+                        .as_ref()
+                        .and_then(|summary| summary.reported_peak_private_memory_bytes);
+                    (
+                        Some(output_identity_hash),
+                        performance,
+                        Some(
+                            reported_peak
+                                .unwrap_or(0)
+                                .max(observed_peak_private_memory_bytes),
+                        ),
+                        None,
+                    )
+                }
+                Err(error) => (None, None, None, Some(error)),
             }
-            Err(error) => (None, None, Some(error)),
         }
-    } else {
-        (None, None, diagnostic)
+        Err(diagnostic) => (None, None, None, Some(diagnostic)),
     };
     BatchChildOutcome {
         identity: Some(identity),
         output_identity_hash,
         performance,
+        peak_private_memory_bytes,
         diagnostic,
     }
 }
 
-fn run_child_with_timeout(command: &mut Command, timeout_ms: u64) -> Option<String> {
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(_) => return Some("ASTRA_HEADLESS_BATCH_CHILD_START".to_string()),
-    };
+fn run_child_with_timeout(command: &mut Command, timeout_ms: u64) -> Result<u64, String> {
+    let mut child = command
+        .spawn()
+        .map_err(|_| "ASTRA_HEADLESS_BATCH_CHILD_START".to_string())?;
+    let process_id = child.id();
     let started = Instant::now();
+    let mut peak_private_memory_bytes = 0_u64;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => return None,
-            Ok(Some(_)) => return Some("ASTRA_HEADLESS_BATCH_CHILD_FAILED".to_string()),
-            Ok(None) if started.elapsed() < Duration::from_millis(timeout_ms) => {
-                thread::sleep(Duration::from_millis(10));
+            Ok(Some(status)) if status.success() && peak_private_memory_bytes > 0 => {
+                return Ok(peak_private_memory_bytes);
             }
+            Ok(Some(status)) if status.success() => {
+                return Err("ASTRA_HEADLESS_BATCH_CHILD_MEMORY_EMPTY".to_string());
+            }
+            Ok(Some(_)) => return Err("ASTRA_HEADLESS_BATCH_CHILD_FAILED".to_string()),
+            Ok(None) if started.elapsed() < Duration::from_millis(timeout_ms) => {}
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Some("ASTRA_HEADLESS_BATCH_CHILD_TIMEOUT".to_string());
+                return Err("ASTRA_HEADLESS_BATCH_CHILD_TIMEOUT".to_string());
             }
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Some("ASTRA_HEADLESS_BATCH_CHILD_WAIT".to_string());
+                return Err("ASTRA_HEADLESS_BATCH_CHILD_WAIT".to_string());
             }
         }
+        match sample_process_memory_by_pid(process_id) {
+            Ok(memory) => {
+                peak_private_memory_bytes = peak_private_memory_bytes.max(memory.private_bytes);
+            }
+            Err(error) => match child.try_wait() {
+                Ok(Some(status)) if status.success() && peak_private_memory_bytes > 0 => {
+                    return Ok(peak_private_memory_bytes);
+                }
+                Ok(Some(_)) => return Err("ASTRA_HEADLESS_BATCH_CHILD_FAILED".to_string()),
+                _ => return Err(format!("ASTRA_HEADLESS_BATCH_CHILD_MEMORY: {error}")),
+            },
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -535,7 +588,7 @@ fn read_child_evidence(
             frame_cpu_p99_ns: cpu.p99,
             frame_end_to_end_p95_ns: end_to_end.p95,
             frame_end_to_end_p99_ns: end_to_end.p99,
-            peak_private_memory_bytes: private.max,
+            reported_peak_private_memory_bytes: Some(private.max),
         }),
     ))
 }
@@ -623,6 +676,27 @@ fn validate_manifest(manifest: &BatchManifest) -> Result<(), String> {
     Ok(())
 }
 
+fn select_concurrency(
+    configured_worker_limit: usize,
+    job_count: usize,
+    available_parallelism: usize,
+) -> Result<usize, String> {
+    if !(1..=MAX_PARALLEL_SESSIONS).contains(&configured_worker_limit) {
+        return Err("ASTRA_HEADLESS_BATCH_WORKER_LIMIT: worker_limit must be within 1..=8".into());
+    }
+    if job_count == 0 {
+        return Err("ASTRA_HEADLESS_BATCH_EMPTY: batch must contain at least one job".into());
+    }
+    if available_parallelism == 0 {
+        return Err(
+            "ASTRA_HEADLESS_BATCH_PARALLELISM_QUERY: available parallelism was zero".into(),
+        );
+    }
+    Ok(configured_worker_limit
+        .min(job_count)
+        .min(available_parallelism))
+}
+
 fn elapsed_us(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
@@ -683,5 +757,18 @@ mod tests {
         assert!(validate_manifest(&manifest)
             .unwrap_err()
             .starts_with("ASTRA_HEADLESS_BATCH_TIMEOUT"));
+    }
+
+    #[astra_headless_test::test]
+    fn batch_selects_concurrency_from_cap_jobs_and_hardware() {
+        assert_eq!(select_concurrency(8, 12, 6).unwrap(), 6);
+        assert_eq!(select_concurrency(8, 3, 16).unwrap(), 3);
+        assert_eq!(select_concurrency(2, 12, 16).unwrap(), 2);
+        assert!(select_concurrency(8, 0, 16)
+            .unwrap_err()
+            .starts_with("ASTRA_HEADLESS_BATCH_EMPTY"));
+        assert!(select_concurrency(8, 1, 0)
+            .unwrap_err()
+            .starts_with("ASTRA_HEADLESS_BATCH_PARALLELISM_QUERY"));
     }
 }
