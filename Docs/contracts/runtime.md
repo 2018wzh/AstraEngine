@@ -91,6 +91,8 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 
 StateMachine scheduler 先按稳定 machine id 构建 conflict DAG wave。wave 内任务只读同一不可变 Actor/Blackboard/event snapshot，分别生成 `ActorStoreDelta`、`BlackboardDelta` 和有序 effect；提交固定按 `(machine_id, microstep, action_index)` 验证。无法证明无冲突的 action 不会静默重试或降级，而是在注册或执行边界返回 blocking diagnostic。
 
+每个 `StateMachineDefinition` 首次创建或反序列化后只编译一次 state→transition、terminal-state 与可证明的 event-kind dispatch index。tick event root 每 tick 只计算一次；每个 candidate 用稳定 consumed bitset 标记事件，不复制或 `Vec::remove` 事件队列。cycle fingerprint 组合缓存的 base Actor/Blackboard root、overlay delta metadata、event root 与 consumed ordinal，不重新序列化完整 ActorStore、component bytes 或剩余事件。event-kind dispatch 仍按原始 event sequence 选择 trigger，不能让 kind 排序改变消费顺序。
+
 Runtime 外层 tick 使用 inverse journal：Actor、Blackboard、Event、Await 和 DelayedEvent 只记录本 tick 的增删改，失败时逆向恢复；不再为每台 machine 克隆完整 store。Actor 与 Blackboard fingerprint 缓存在 mutation 边界失效，历史 event/presentation/mutation/effect 使用增量 hash chain。Shipping 的 `TickIntegrityMode::Shipping` 不计算 aggregate state/event/presentation hash，也拒绝 replay recording；Headless、测试与 evidence profile 使用 `Evidence` 并保留完整 hash/replay。
 
 ## Replay Transcript

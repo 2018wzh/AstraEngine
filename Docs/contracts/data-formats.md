@@ -117,6 +117,7 @@ Standalone bundle 由已 cook/package 的 `.astrapkg` 生成，不从源 YAML �
 | `astra.performance_budget.v1` | `DONE` | profile owner 声明 target/profile/hash、最短 run、metric unit、sample capacity 与 percentile/min/max threshold；未知 metric、重复 metric、零容量或非单调阈值 blocking |
 | `astra.headless_session_batch.v2` | `E2` | 全局 worker limit 为 1..=8 的上限；runner 按该上限、job 数量与 `available_parallelism` 自动选择实际并发度，并将总预算按 `floor(global_limit / selected_concurrency)` 分配给每个并发子 Session，保证内部 worker 配额总和不超过全局上限；串行基线可独占完整预算。job id 与串行/并行 artifact root 必须唯一；`route`/`replay` 禁止 performance 配置，`performance` 必须绑定 budget、warmup 与非零 measurement start |
 | `astra.headless_session_batch_report.v2` | `E2` | 按 session id 稳定排序，绑定 profile/package/input/build hash、串行与并行 output identity、配置上限、硬件并行度、实际并发度、串行/并发每 Session worker 配额、并发总容量、排队/运行时间、吞吐、Session slot utilization、按子进程 kernel+user CPU time 与全局 worker 容量归一化的 worker utilization，以及所有 job 的串行/并行 private-memory peak；performance job 额外记录 CPU/E2E percentile |
+| `astra.vn.step_complexity_metrics.v1` | `E2` | 每次 NativeVN step 记录既有 backlog 数、追加条目数、decoded-state cache hit、cache miss 时物化的历史条目数、历史 chunk 逻辑写次数、hot-state 编码大小和 mutation journal 条目数；1k/10k/100k 普通推进用这些结构计数证明成本不随既有 backlog 线性扫描 |
 | `astra.performance_report.v1` | `E2_DONE_E3_IN_PROGRESS` | bounded recorder 生成 source/package/build/session-bound min/p50/p95/p99/max、sample count 和 diagnostic；TsuiNoSora 集显 Headless E2 已完成，真实 Player E3 与跨平台证据仍待闭合 |
 | `astra.text_layout_replay.v1` / `astra.text_layout_replay_snapshot.v1` | `IN_PROGRESS` | bounded postcard transcript 固化 package/build/session/provider/font/request/layout/glyph identity，支持事务性 restore continuation 与 provider-free replay；Windows Player command/release consumer已闭合，bundled VN 的 dialogue/choice/system text 已接入，Web 与 bundled VN 完整 presentation/audio 主路径尚未闭合 |
 | `astra.open_font_fixture_manifest.v1` | `DONE` | hermetic 字体回归清单，固定 upstream revision、OFL、source URL、family/face、coverage、byte size 和 SHA-256；只用于测试 provenance，不替代产品 `astra.font_manifest.v1` |
@@ -171,8 +172,8 @@ Stage 3 已开始落地、但尚未全部写入 release package 的 VN runtime �
 
 | Data type | Status | Purpose |
 | --- | --- | --- |
-| `VnRuntimeState` | `IN_PROGRESS` | 保存 profile、locale、current story/state、command cursor、call stack、pending choice、变量、backlog、read-state、voice replay、route coverage、route flags 和 `VnSystemState` |
-| `astra.runtime.save_blob.v3` | `IN_PROGRESS` | NativeVN 与 AstraEMU 已硬切 v3，nested container 保存完整 RuntimeSnapshot，并通过 restored step/seed 约束 continuation；Runtime v3 transaction/history migration 尚未完成 |
+| `VnRuntimeState` | `DONE` | 作为 save/checkpoint 时的完整语义物化视图，保存 profile、locale、cursor、stack、wait、变量、backlog、read-state、voice replay、route coverage、route flags 和 `VnSystemState`；普通 step 使用 `astra.vn.runtime_hot_state.v3` 与 append-only history chunk，不重复编码完整历史 |
+| `astra.runtime.save_blob.v3` | `DONE` | NativeVN 与 AstraEMU 已硬切 v3，nested container 保存完整 RuntimeSnapshot，并通过 restored step/seed 约束 continuation；旧 v2 save/replay 直接拒绝，不提供隐式迁移 |
 | `VnRuntimeStateSave` | `REFERENCE_ONLY` | `astra-vn-save` 的局部 VN state 工具；不得替代 product provider 的完整 RuntimeWorld save authority |
 | `BacklogEntry` / `VnReplayUiState` | `DONE` | 保存 command id、text key、speaker、voice ref、story/state、route position、read flag、layout metadata、voice replay rows 和 replay UI hash |
 | `VnSystemState` | `IN_PROGRESS` | 保存 auto enabled、skip mode、config key/value、gallery unlocks 和 replay unlocks；随 save/load/replay 保持 hash 一致 |

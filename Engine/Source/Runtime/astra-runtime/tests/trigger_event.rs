@@ -70,6 +70,74 @@ fn action_context_exposes_transition_trigger_event() {
     );
 }
 
+#[astra_headless_test::test]
+fn compiled_event_dispatch_preserves_original_event_order() {
+    let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
+    world
+        .register_action("astra.test", CaptureTriggerAction)
+        .unwrap();
+    let owner = world.create_actor("vn.driver", vec![]);
+    let start = StableId::deterministic_v7(3, 1, 1);
+    let done = StableId::deterministic_v7(3, 2, 1);
+    world
+        .add_state_machine(StateMachineDefinition {
+            id: StableId::deterministic_v7(3, 3, 1),
+            owner,
+            states: vec![
+                StateDefinition {
+                    id: start,
+                    name: "start".to_string(),
+                    terminal: false,
+                },
+                StateDefinition {
+                    id: done,
+                    name: "done".to_string(),
+                    terminal: true,
+                },
+            ],
+            transitions: vec![TransitionDefinition {
+                from: start,
+                to: done,
+                guard: GuardExpr::Or {
+                    terms: vec![
+                        GuardExpr::EventIs {
+                            kind: "vn.z_first".to_string(),
+                        },
+                        GuardExpr::EventIs {
+                            kind: "vn.a_second".to_string(),
+                        },
+                    ],
+                },
+                actions: vec![ActionInvocation {
+                    action_id: "astra.test.capture_trigger".to_string(),
+                    input: BTreeMap::new(),
+                }],
+                priority: 0,
+                source_ref: None,
+            }],
+            initial_state: start,
+        })
+        .unwrap();
+
+    world.emit_event(EventSource::PlayerInput, EventPayload::new("vn.z_first"));
+    world.emit_event(EventSource::PlayerInput, EventPayload::new("vn.a_second"));
+    world
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
+        .unwrap();
+
+    assert_eq!(
+        world.snapshot().blackboard.get("trigger.kind"),
+        Some(&BlackboardValue::String("vn.z_first".to_string()))
+    );
+}
+
 struct CaptureTriggerAction;
 
 impl RuntimeAction for CaptureTriggerAction {

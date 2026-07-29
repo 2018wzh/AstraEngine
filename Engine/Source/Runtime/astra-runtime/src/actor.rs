@@ -533,7 +533,7 @@ pub(crate) trait ActorStoreAccess {
         actor_id: ActorId,
         schema: &SchemaId,
     ) -> Vec<ComponentId>;
-    fn actor_snapshots(&self) -> Vec<ActorSnapshot>;
+    fn actor_has_tag(&self, actor_id: ActorId, tag: &str) -> bool;
     fn deterministic_fingerprint(&self) -> Hash128;
 }
 
@@ -570,8 +570,9 @@ impl ActorStoreAccess for ActorStore {
         ActorStore::component_ids_for_actor_schema(self, actor_id, schema)
     }
 
-    fn actor_snapshots(&self) -> Vec<ActorSnapshot> {
-        ActorStore::actor_snapshots(self)
+    fn actor_has_tag(&self, actor_id: ActorId, tag: &str) -> bool {
+        self.actor(actor_id)
+            .is_some_and(|actor| actor.tags.iter().any(|candidate| candidate == tag))
     }
 
     fn deterministic_fingerprint(&self) -> Hash128 {
@@ -729,65 +730,34 @@ impl ActorStoreAccess for ActorStoreOverlay<'_> {
         ids
     }
 
-    fn actor_snapshots(&self) -> Vec<ActorSnapshot> {
-        let mut actors = self
-            .base
-            .actors
-            .iter()
-            .map(|(id, actor)| (*id, actor.clone()))
-            .collect::<BTreeMap<_, _>>();
-        for (actor_id, actor) in &self.actors {
-            match actor {
-                Some(actor) => {
-                    actors.insert(*actor_id, actor.clone());
-                }
-                None => {
-                    actors.remove(actor_id);
-                }
-            }
-        }
-        actors
-            .into_values()
-            .map(|actor| ActorSnapshot {
-                actor_id: actor.actor_id,
-                name: actor.name,
-                tags: actor.tags,
-                components: actor.components,
-            })
-            .collect()
+    fn actor_has_tag(&self, actor_id: ActorId, tag: &str) -> bool {
+        self.actor(actor_id)
+            .is_some_and(|actor| actor.tags.iter().any(|candidate| candidate == tag))
     }
 
     fn deterministic_fingerprint(&self) -> Hash128 {
-        let actors = self.actor_snapshots();
-        let mut components = self
-            .base
-            .components
-            .iter()
-            .map(|(id, component)| (*id, component.clone()))
-            .collect::<BTreeMap<_, _>>();
-        for (component_id, component) in &self.components {
-            match component {
-                Some(component) => {
-                    components.insert(*component_id, component.clone());
-                }
-                None => {
-                    components.remove(component_id);
-                }
-            }
-        }
-        let metadata = components.values().map(|component| {
+        let component_delta = self.components.iter().map(|(component_id, component)| {
             (
-                component.component_id,
-                component.actor_id,
-                &component.payload.schema,
-                component.payload.version,
-                component.payload.codec,
-                component.payload.hash,
+                component_id,
+                component.as_ref().map(|component| {
+                    (
+                        component.actor_id,
+                        &component.payload.schema,
+                        component.payload.version,
+                        component.payload.codec,
+                        component.payload.hash,
+                    )
+                }),
             )
         });
         Hash128::from_blake3(
-            &postcard::to_allocvec(&(actors, metadata.collect::<Vec<_>>()))
-                .expect("actor overlay metadata must serialize for deterministic fingerprinting"),
+            &postcard::to_allocvec(&(
+                "astra.runtime.actor_overlay_fingerprint.v1",
+                ActorStoreAccess::deterministic_fingerprint(self.base),
+                &self.actors,
+                component_delta.collect::<Vec<_>>(),
+            ))
+            .expect("actor overlay metadata must serialize for deterministic fingerprinting"),
         )
     }
 }

@@ -556,7 +556,7 @@ fn vn_runtime_hot_state_stays_bounded_through_one_hundred_thousand_dialogues() {
     let base = provider.save_slot(&open.session_id, "long-route").unwrap();
     let mut maximum_hot_bytes = 0_usize;
     let mut maximum_tail_bytes = 0_usize;
-    for count in [1_000_usize, 10_000, 100_000] {
+    for (step_index, count) in [1_000_usize, 10_000, 100_000].into_iter().enumerate() {
         let mut save = base.clone();
         save.state.backlog = (0..count)
             .map(|route_position| BacklogEntry {
@@ -574,11 +574,31 @@ fn vn_runtime_hot_state_stays_bounded_through_one_hundred_thousand_dialogues() {
         save.state.read_state.insert("line.hello".into());
         save.state_hash = Hash128::from_blake3(&postcard::to_allocvec(&save.state).unwrap());
         provider.load_slot(&open.session_id, save).unwrap();
+        provider
+            .step(RuntimeStepInput {
+                session_id: open.session_id.clone(),
+                fixed_step: u64::try_from(step_index + 1).unwrap(),
+                delta_ns: 16_666_667,
+                session_seed: 91,
+                mode: RuntimeStepMode::Live,
+                action: "launch_default".to_string(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+        let complexity = provider.step_complexity_metrics(&open.session_id).unwrap();
+        assert_eq!(complexity.previous_backlog_count, count);
+        assert_eq!(complexity.appended_backlog_entries, 1);
+        assert!(complexity.state_cache_hit);
+        assert_eq!(complexity.materialized_history_entries, 0);
+        assert_eq!(complexity.history_component_writes, 1);
+        assert!(complexity.encoded_hot_state_bytes <= 4_096);
+        assert_eq!(complexity.mutation_journal_entries, 0);
+
         let metrics = provider.storage_metrics(&open.session_id).unwrap();
-        assert_eq!(metrics.backlog_count, count);
+        assert_eq!(metrics.backlog_count, count + 1);
         assert_eq!(
             metrics.history_chunk_count,
-            count.div_ceil(64),
+            (count + 1).div_ceil(64),
             "full history must be represented by fixed-size immutable chunks"
         );
         maximum_hot_bytes = maximum_hot_bytes.max(metrics.hot_state_bytes);
@@ -587,7 +607,7 @@ fn vn_runtime_hot_state_stays_bounded_through_one_hundred_thousand_dialogues() {
         assert!(metrics.tail_chunk_bytes <= 16_384);
         assert_eq!(
             provider.state(&open.session_id).unwrap().backlog.len(),
-            count
+            count + 1
         );
     }
     assert!(maximum_hot_bytes <= 4_096);

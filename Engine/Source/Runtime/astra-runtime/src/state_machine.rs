@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use astra_core::{Diagnostic, DiagnosticSeverity, SourceRef, StableId, StableIdGenerator};
@@ -56,15 +56,27 @@ pub enum GuardExpr {
     Not { term: Box<GuardExpr> },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StateMachineInstance {
     pub definition: Arc<StateMachineDefinition>,
     pub current_state: StableId,
     pub completed: bool,
+    #[serde(skip)]
+    #[schemars(skip)]
+    compiled: Arc<OnceLock<CompiledMachineDefinition>>,
+}
+
+impl PartialEq for StateMachineInstance {
+    fn eq(&self, other: &Self) -> bool {
+        self.definition == other.definition
+            && self.current_state == other.current_state
+            && self.completed == other.completed
+    }
 }
 
 impl StateMachineInstance {
     pub fn new(definition: StateMachineDefinition) -> Self {
+        let compiled = CompiledMachineDefinition::compile(&definition);
         let completed = definition
             .states
             .iter()
@@ -73,7 +85,13 @@ impl StateMachineInstance {
             current_state: definition.initial_state,
             definition: Arc::new(definition),
             completed,
+            compiled: Arc::new(OnceLock::from(compiled)),
         }
+    }
+
+    fn compiled_definition(&self) -> &CompiledMachineDefinition {
+        self.compiled
+            .get_or_init(|| CompiledMachineDefinition::compile(&self.definition))
     }
 }
 
@@ -288,6 +306,10 @@ impl StateMachineStore {
         worker_count: usize,
     ) -> StateMachineTickOutput {
         let mut output = StateMachineTickOutput::default();
+        let event_root = astra_core::Hash128::from_blake3(
+            &postcard::to_allocvec(&("astra.runtime.tick_events.v1", events))
+                .expect("runtime tick events must serialize for deterministic scheduling"),
+        );
         let waves = build_conflict_waves(&self.machines, actions);
         for wave in waves {
             let base_id_source = id_source.clone();
@@ -302,6 +324,7 @@ impl StateMachineStore {
                     blackboard,
                     actions,
                     &base_id_source,
+                    event_root,
                 )
             } else {
                 wave.iter()
@@ -315,6 +338,7 @@ impl StateMachineStore {
                             blackboard,
                             actions,
                             &base_id_source,
+                            event_root,
                         )
                     })
                     .collect()
@@ -534,6 +558,7 @@ fn execute_parallel_wave(
     blackboard: &Blackboard,
     actions: &ActionRegistry,
     id_source: &StableIdGenerator,
+    event_root: astra_core::Hash128,
 ) -> Vec<MachineCandidate> {
     let workers = worker_count.max(1).min(wave.len());
     let chunk_size = wave.len().div_ceil(workers);
@@ -554,6 +579,7 @@ fn execute_parallel_wave(
                                 blackboard,
                                 actions,
                                 id_source,
+                                event_root,
                             )
                         })
                         .collect::<Vec<_>>()
@@ -581,6 +607,7 @@ fn execute_machine_caught(
     blackboard: &Blackboard,
     actions: &ActionRegistry,
     id_source: &StableIdGenerator,
+    event_root: astra_core::Hash128,
 ) -> MachineCandidate {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         execute_machine(
@@ -592,6 +619,7 @@ fn execute_machine_caught(
             blackboard,
             actions,
             id_source,
+            event_root,
         )
     }))
     .unwrap_or_else(|_| MachineCandidate {
@@ -609,6 +637,151 @@ fn execute_machine_caught(
     })
 }
 
+struct CandidateEvents<'a> {
+    events: &'a [RuntimeEvent],
+    consumed: Vec<bool>,
+    by_kind: BTreeMap<&'a str, Vec<usize>>,
+    base_root: astra_core::Hash128,
+}
+
+impl<'a> CandidateEvents<'a> {
+    fn new(events: &'a [RuntimeEvent], base_root: astra_core::Hash128) -> Self {
+        let mut by_kind = BTreeMap::new();
+        for (index, event) in events.iter().enumerate() {
+            by_kind
+                .entry(event.payload.kind.as_str())
+                .or_insert_with(Vec::new)
+                .push(index);
+        }
+        Self {
+            events,
+            consumed: vec![false; events.len()],
+            by_kind,
+            base_root,
+        }
+    }
+
+    fn get(&self, index: usize) -> Option<&RuntimeEvent> {
+        self.consumed
+            .get(index)
+            .is_some_and(|consumed| !consumed)
+            .then(|| self.events.get(index))
+            .flatten()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (usize, &RuntimeEvent)> {
+        self.events
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !self.consumed[*index])
+    }
+
+    fn iter_kinds<'b>(
+        &'b self,
+        kinds: &'b BTreeSet<String>,
+    ) -> impl Iterator<Item = (usize, &'a RuntimeEvent)> + 'b {
+        let mut indices = kinds
+            .iter()
+            .filter_map(|kind| self.by_kind.get(kind.as_str()))
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+            .into_iter()
+            .filter(|index| !self.consumed[*index])
+            .map(|index| (index, &self.events[index]))
+    }
+
+    fn consume(&mut self, index: usize) -> Result<(), Diagnostic> {
+        let consumed = self.consumed.get_mut(index).ok_or_else(|| {
+            Diagnostic::blocking(
+                "ASTRA_RUNTIME_EVENT_CONSUME_INDEX",
+                "state machine selected an event index outside the immutable tick snapshot",
+            )
+        })?;
+        if *consumed {
+            return Err(Diagnostic::blocking(
+                "ASTRA_RUNTIME_EVENT_CONSUME_DUPLICATE",
+                "state machine attempted to consume the same event twice",
+            ));
+        }
+        *consumed = true;
+        Ok(())
+    }
+
+    fn fingerprint(&self) -> astra_core::Hash128 {
+        let consumed = self
+            .consumed
+            .iter()
+            .enumerate()
+            .filter_map(|(index, consumed)| consumed.then_some(index))
+            .collect::<Vec<_>>();
+        astra_core::Hash128::from_blake3(
+            &postcard::to_allocvec(&(
+                "astra.runtime.candidate_events.v1",
+                self.base_root,
+                consumed,
+            ))
+            .expect("candidate event fingerprint must serialize"),
+        )
+    }
+}
+
+#[derive(Debug)]
+struct CompiledMachineDefinition {
+    transitions_by_state: BTreeMap<StableId, Vec<usize>>,
+    terminal_states: BTreeSet<StableId>,
+    event_kinds_by_transition: BTreeMap<usize, BTreeSet<String>>,
+}
+
+impl CompiledMachineDefinition {
+    fn compile(definition: &StateMachineDefinition) -> Self {
+        let mut transitions_by_state: BTreeMap<StableId, Vec<usize>> = BTreeMap::new();
+        let mut event_kinds_by_transition = BTreeMap::new();
+        for (index, transition) in definition.transitions.iter().enumerate() {
+            transitions_by_state
+                .entry(transition.from)
+                .or_default()
+                .push(index);
+            if let Some(kinds) = transition.guard.positive_event_kinds() {
+                event_kinds_by_transition.insert(index, kinds);
+            }
+        }
+        for indices in transitions_by_state.values_mut() {
+            indices.sort_by_key(|index| {
+                (
+                    std::cmp::Reverse(definition.transitions[*index].priority),
+                    *index,
+                )
+            });
+        }
+        let terminal_states = definition
+            .states
+            .iter()
+            .filter_map(|state| state.terminal.then_some(state.id))
+            .collect();
+        Self {
+            transitions_by_state,
+            terminal_states,
+            event_kinds_by_transition,
+        }
+    }
+
+    fn transitions_from(&self, state: StableId) -> impl Iterator<Item = usize> + '_ {
+        self.transitions_by_state
+            .get(&state)
+            .into_iter()
+            .flatten()
+            .copied()
+    }
+
+    fn is_terminal(&self, state: StableId) -> bool {
+        self.terminal_states.contains(&state)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_machine(
     machine_index: usize,
@@ -619,13 +792,15 @@ fn execute_machine(
     blackboard: &Blackboard,
     actions: &ActionRegistry,
     id_source: &StableIdGenerator,
+    event_root: astra_core::Hash128,
 ) -> MachineCandidate {
+    let compiled = machine.compiled_definition();
     let mut candidate_machine = machine.clone();
     let mut candidate_actors = ActorStoreOverlay::new(actors);
     let mut candidate_blackboard = BlackboardOverlay::new(blackboard);
     let mut candidate_id_source = id_source.clone();
     let mut candidate_output = StateMachineTickOutput::default();
-    let mut available_events = events.to_vec();
+    let mut available_events = CandidateEvents::new(events, event_root);
     let mut visited = BTreeSet::new();
     let mut microsteps = 0_u32;
     let mut failed = None;
@@ -638,7 +813,7 @@ fn execute_machine(
             &candidate_actors,
             &candidate_blackboard,
             &candidate_id_source,
-            &available_events,
+            available_events.fingerprint(),
         );
         if !visited.insert(fingerprint) {
             failed = Some(Diagnostic::blocking(
@@ -659,6 +834,7 @@ fn execute_machine(
         }
         let Some((transition, failure_source, trigger_event_index)) = find_transition(
             &candidate_machine,
+            compiled,
             &available_events,
             &candidate_actors,
             &candidate_blackboard,
@@ -754,10 +930,13 @@ fn execute_machine(
             break;
         }
         if let Some(index) = trigger_event_index {
-            available_events.remove(index);
+            if let Err(diagnostic) = available_events.consume(index) {
+                failed = Some(diagnostic);
+                break;
+            }
         }
         candidate_machine.current_state = transition.to;
-        if state_is_terminal(&candidate_machine, candidate_machine.current_state) {
+        if compiled.is_terminal(candidate_machine.current_state) {
             candidate_machine.completed = true;
         }
         microsteps += 1;
@@ -776,45 +955,43 @@ fn execute_machine(
 
 fn find_transition(
     machine: &StateMachineInstance,
-    events: &[RuntimeEvent],
+    compiled: &CompiledMachineDefinition,
+    events: &CandidateEvents<'_>,
     actors: &dyn ActorStoreAccess,
     blackboard: &dyn BlackboardAccess,
 ) -> Option<(TransitionDefinition, Option<SourceRef>, Option<usize>)> {
-    let actor_snapshots = actors.actor_snapshots();
-    let mut best: Option<(&TransitionDefinition, Option<usize>)> = None;
-    for transition in machine
-        .definition
-        .transitions
-        .iter()
-        .filter(|transition| transition.from == machine.current_state)
-    {
+    for transition_index in compiled.transitions_from(machine.current_state) {
+        let transition = &machine.definition.transitions[transition_index];
         let trigger_event_index = match transition.guard {
             GuardExpr::Always => Some(None),
             _ if !transition.guard.depends_on_event() => transition
                 .guard
-                .evaluate(None, &actor_snapshots, blackboard)
+                .evaluate(None, actors, blackboard)
                 .then_some(None),
-            _ => events.iter().enumerate().find_map(|(index, event)| {
-                transition
-                    .guard
-                    .evaluate(Some(event), &actor_snapshots, blackboard)
-                    .then_some(Some(index))
-            }),
+            _ => {
+                let matching = if let Some(kinds) =
+                    compiled.event_kinds_by_transition.get(&transition_index)
+                {
+                    events.iter_kinds(kinds).find(|(_, event)| {
+                        transition.guard.evaluate(Some(event), actors, blackboard)
+                    })
+                } else {
+                    events.iter().find(|(_, event)| {
+                        transition.guard.evaluate(Some(event), actors, blackboard)
+                    })
+                };
+                matching.map(|(index, _)| Some(index))
+            }
         };
         if let Some(trigger_event_index) = trigger_event_index {
-            match best {
-                Some((current, _)) if transition.priority <= current.priority => {}
-                _ => best = Some((transition, trigger_event_index)),
-            }
+            return Some((
+                transition.clone(),
+                transition.source_ref.clone(),
+                trigger_event_index,
+            ));
         }
     }
-    best.map(|(transition, trigger_event_index)| {
-        (
-            transition.clone(),
-            transition.source_ref.clone(),
-            trigger_event_index,
-        )
-    })
+    None
 }
 
 fn machine_fingerprint(
@@ -822,7 +999,7 @@ fn machine_fingerprint(
     actors: &dyn ActorStoreAccess,
     blackboard: &dyn BlackboardAccess,
     id_source: &StableIdGenerator,
-    events: &[RuntimeEvent],
+    event_fingerprint: astra_core::Hash128,
 ) -> astra_core::Hash128 {
     let actor_fingerprint = actors.deterministic_fingerprint();
     let blackboard_fingerprint = blackboard.deterministic_fingerprint();
@@ -833,18 +1010,10 @@ fn machine_fingerprint(
             actor_fingerprint,
             blackboard_fingerprint,
             id_source,
-            events,
+            event_fingerprint,
         ))
         .expect("state machine candidate must serialize for cycle detection"),
     )
-}
-
-fn state_is_terminal(machine: &StateMachineInstance, state_id: StableId) -> bool {
-    machine
-        .definition
-        .states
-        .iter()
-        .any(|state| state.id == state_id && state.terminal)
 }
 
 fn guard_conflict_key(guard: &GuardExpr) -> String {
@@ -894,16 +1063,14 @@ impl GuardExpr {
     fn evaluate(
         &self,
         event: Option<&RuntimeEvent>,
-        actors: &[crate::ActorSnapshot],
+        actors: &dyn ActorStoreAccess,
         blackboard: &dyn BlackboardAccess,
     ) -> bool {
         match self {
             GuardExpr::Always => true,
             GuardExpr::EventIs { kind } => event.is_some_and(|event| event.payload.kind == *kind),
             GuardExpr::BlackboardEquals { key, value } => blackboard.get(key) == Some(value),
-            GuardExpr::HasActorTag { actor, tag } => actors
-                .iter()
-                .any(|snapshot| snapshot.actor_id == *actor && snapshot.tags.contains(tag)),
+            GuardExpr::HasActorTag { actor, tag } => actors.actor_has_tag(*actor, tag),
             GuardExpr::And { terms } => terms
                 .iter()
                 .all(|term| term.evaluate(event, actors, blackboard)),
@@ -924,6 +1091,40 @@ impl GuardExpr {
             GuardExpr::Always
             | GuardExpr::BlackboardEquals { .. }
             | GuardExpr::HasActorTag { .. } => false,
+        }
+    }
+
+    fn positive_event_kinds(&self) -> Option<BTreeSet<String>> {
+        match self {
+            GuardExpr::EventIs { kind } => Some(BTreeSet::from([kind.clone()])),
+            GuardExpr::And { terms } => {
+                let mut event_kinds: Option<BTreeSet<String>> = None;
+                for term in terms {
+                    if !term.depends_on_event() {
+                        continue;
+                    }
+                    let term_kinds = term.positive_event_kinds()?;
+                    event_kinds = Some(match event_kinds {
+                        Some(current) => current.intersection(&term_kinds).cloned().collect(),
+                        None => term_kinds,
+                    });
+                }
+                event_kinds
+            }
+            GuardExpr::Or { terms } => {
+                let mut event_kinds = BTreeSet::new();
+                for term in terms {
+                    if !term.depends_on_event() {
+                        return None;
+                    }
+                    event_kinds.extend(term.positive_event_kinds()?);
+                }
+                Some(event_kinds)
+            }
+            GuardExpr::Not { .. } => None,
+            GuardExpr::Always
+            | GuardExpr::BlackboardEquals { .. }
+            | GuardExpr::HasActorTag { .. } => None,
         }
     }
 }

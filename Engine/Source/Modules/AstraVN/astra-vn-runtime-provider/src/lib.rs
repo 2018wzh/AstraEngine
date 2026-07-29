@@ -329,6 +329,7 @@ struct NativeVnSession {
     runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
     state_cache: Arc<Mutex<Option<VnStepStateCache>>>,
+    step_complexity: Arc<Mutex<Option<VnStepComplexityMetrics>>>,
 }
 
 struct VnStepAction {
@@ -338,6 +339,7 @@ struct VnStepAction {
     runtime_index: Arc<CoreVnRuntimeIndex>,
     output: Arc<Mutex<Option<VnStepOutput>>>,
     state_cache: Arc<Mutex<Option<VnStepStateCache>>>,
+    step_complexity: Arc<Mutex<Option<VnStepComplexityMetrics>>>,
 }
 
 #[derive(Clone)]
@@ -378,6 +380,18 @@ pub struct VnRuntimeStorageMetrics {
     pub history_chunk_count: usize,
     pub hot_state_bytes: usize,
     pub tail_chunk_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VnStepComplexityMetrics {
+    pub schema: String,
+    pub previous_backlog_count: usize,
+    pub appended_backlog_entries: usize,
+    pub state_cache_hit: bool,
+    pub materialized_history_entries: usize,
+    pub history_component_writes: usize,
+    pub encoded_hot_state_bytes: usize,
+    pub mutation_journal_entries: usize,
 }
 
 fn empty_backlog_root() -> Hash128 {
@@ -776,6 +790,23 @@ impl NativeVnRuntimeProvider {
         })
     }
 
+    pub fn step_complexity_metrics(
+        &self,
+        session_id: &GameRuntimeSessionId,
+    ) -> Result<VnStepComplexityMetrics, CoreVnError> {
+        self.session(session_id)?
+            .step_complexity
+            .lock()
+            .map_err(|_| CoreVnError::message("VN step complexity lock is poisoned"))?
+            .clone()
+            .ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_STEP_COMPLEXITY_MISSING",
+                    "VN session has not completed a measured runtime step",
+                )
+            })
+    }
+
     pub fn descriptor() -> ProductRuntimeDescriptor {
         ProductRuntimeDescriptor {
             runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
@@ -952,6 +983,7 @@ impl NativeVnRuntimeProvider {
             state_hash: initial_state_hash,
             state: initial_state,
         })));
+        let step_complexity = Arc::new(Mutex::new(None));
         world
             .register_action(
                 NATIVE_VN_PROVIDER_ID,
@@ -962,6 +994,7 @@ impl NativeVnRuntimeProvider {
                     runtime_index: Arc::clone(&runtime_index),
                     output: Arc::clone(&output),
                     state_cache: Arc::clone(&state_cache),
+                    step_complexity: Arc::clone(&step_complexity),
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?;
@@ -1006,6 +1039,7 @@ impl NativeVnRuntimeProvider {
                 runtime_index,
                 output,
                 state_cache,
+                step_complexity,
             },
         );
         Ok(RuntimeOpenReport {
@@ -1725,6 +1759,12 @@ impl RuntimeAction for VnStepAction {
             .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))?
             .take()
             .filter(|cached| cached.payload_hash == payload_hash);
+        let state_cache_hit = cached_state.is_some();
+        let materialized_history_entries = if state_cache_hit {
+            0
+        } else {
+            previous_hot.backlog_count
+        };
         let decoded_state = if cached_state.is_none() {
             Some(
                 materialize_runtime_state(&previous_hot, &self.runtime_index, |component_id| {
@@ -1817,6 +1857,8 @@ impl RuntimeAction for VnStepAction {
             )));
         }
         let mut remaining = &state.backlog[previous_hot.backlog_count..];
+        let appended_backlog_entries = remaining.len();
+        let mut history_component_writes = 0_usize;
         let mut backlog_root = previous_hot.backlog_root;
         while !remaining.is_empty() {
             let available = VN_HISTORY_CHUNK_CAPACITY.saturating_sub(tail.entries.len());
@@ -1828,6 +1870,9 @@ impl RuntimeAction for VnStepAction {
                     .map_err(|error| RuntimeError::message(error.to_string()))?;
                 backlog_root = tail.root;
                 ctx.replace_component(tail_id, &tail)?;
+                history_component_writes = history_component_writes
+                    .checked_add(1)
+                    .ok_or_else(|| RuntimeError::message("VN history write count overflowed"))?;
             }
             if !remaining.is_empty() {
                 let take = VN_HISTORY_CHUNK_CAPACITY.min(remaining.len());
@@ -1850,6 +1895,9 @@ impl RuntimeAction for VnStepAction {
                 let encoded = postcard::to_allocvec(&next)
                     .map_err(|error| RuntimeError::message(error.to_string()))?;
                 ctx.replace_component_encoded_postcard(tail_id, encoded.into())?;
+                history_component_writes = history_component_writes
+                    .checked_add(1)
+                    .ok_or_else(|| RuntimeError::message("VN history write count overflowed"))?;
                 tail = next;
                 backlog_root = root;
             }
@@ -1870,6 +1918,7 @@ impl RuntimeAction for VnStepAction {
             astra_runtime::ValidatedRuntimeComponentEncoding::postcard_blake3(encoded_state);
         let authoritative_state_hash = encoded_state.state_hash();
         let output = output.finalize(authoritative_state_hash);
+        let mutation_journal_entries = output.mutations.len();
         let (next_payload_hash, next_state_hash) =
             ctx.replace_component_validated_postcard(self.component, encoded_state)?;
         let replace_component_ns = profile_elapsed_ns(replace_started);
@@ -1921,6 +1970,20 @@ impl RuntimeAction for VnStepAction {
                 payload_hash: next_payload_hash,
                 state_hash: next_state_hash,
                 state,
+            });
+        *self
+            .step_complexity
+            .lock()
+            .map_err(|_| RuntimeError::message("VN step complexity lock is poisoned"))? =
+            Some(VnStepComplexityMetrics {
+                schema: "astra.vn.step_complexity_metrics.v1".to_string(),
+                previous_backlog_count: previous_hot.backlog_count,
+                appended_backlog_entries,
+                state_cache_hit,
+                materialized_history_entries,
+                history_component_writes,
+                encoded_hot_state_bytes: encoded_state_bytes,
+                mutation_journal_entries,
             });
         let trace_store_ns = profile_elapsed_ns(trace_started);
         tracing::trace!(
