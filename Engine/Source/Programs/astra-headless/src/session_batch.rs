@@ -9,7 +9,7 @@ use std::{
 
 use astra_core::PerformanceReport;
 use astra_headless_protocol::RunReport;
-use astra_observability::sample_process_memory_by_pid;
+use astra_observability::{sample_process_cpu_time_us_by_pid, sample_process_memory_by_pid};
 use astra_plugin::WorkerBudgetBroker;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -69,11 +69,15 @@ struct BatchReport {
     configured_worker_limit: usize,
     available_parallelism: usize,
     selected_concurrency: usize,
+    serial_session_worker_limit: usize,
+    concurrent_session_worker_limit: usize,
+    concurrent_worker_capacity: usize,
     worker_limit: usize,
     peak_workers: usize,
     wall_time_us: u64,
     total_queue_time_us: u64,
     throughput_milli_sessions_per_second: u64,
+    session_slot_utilization_permille: u16,
     worker_utilization_permille: u16,
     serial_baseline_wall_time_us: u64,
     jobs: Vec<BatchJobReport>,
@@ -87,6 +91,12 @@ struct BatchJobReport {
     queue_time_us: u64,
     run_time_us: u64,
     serial_baseline_run_time_us: u64,
+    worker_limit: usize,
+    serial_worker_limit: usize,
+    cpu_time_us: Option<u64>,
+    serial_cpu_time_us: Option<u64>,
+    cpu_utilization_permille: Option<u16>,
+    serial_cpu_utilization_permille: Option<u16>,
     output_identity_hash: Option<String>,
     serial_output_identity_hash: Option<String>,
     frame_cpu_p95_ns: Option<u64>,
@@ -118,7 +128,13 @@ struct BatchChildOutcome {
     output_identity_hash: Option<String>,
     performance: Option<BatchPerformanceSummary>,
     peak_private_memory_bytes: Option<u64>,
+    cpu_time_us: Option<u64>,
     diagnostic: Option<String>,
+}
+
+struct ChildProcessObservation {
+    peak_private_memory_bytes: u64,
+    cpu_time_us: u64,
 }
 
 #[derive(Clone)]
@@ -150,12 +166,23 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
         manifest.jobs.len(),
         available_parallelism,
     )?;
+    let concurrent_session_worker_limit =
+        concurrent_session_worker_limit(manifest.worker_limit, selected_concurrency)?;
+    let concurrent_worker_capacity = concurrent_session_worker_limit
+        .checked_mul(selected_concurrency)
+        .ok_or_else(|| "ASTRA_HEADLESS_BATCH_WORKER_CAPACITY_OVERFLOW".to_string())?;
+    if concurrent_worker_capacity > manifest.worker_limit {
+        return Err("ASTRA_HEADLESS_BATCH_WORKER_OVERSUBSCRIPTION".into());
+    }
     tracing::info!(
         event = "headless.session_batch.start",
         session_count = manifest.jobs.len(),
         configured_worker_limit = manifest.worker_limit,
         available_parallelism,
         selected_concurrency,
+        serial_session_worker_limit = manifest.worker_limit,
+        concurrent_session_worker_limit,
+        concurrent_worker_capacity,
         "starting identity-bound Headless session batch"
     );
 
@@ -175,6 +202,7 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                 &executable,
                 &baseline_job,
                 &baseline_job.serial_artifact_root,
+                manifest.worker_limit,
             )
         })
         .await
@@ -209,6 +237,12 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                         queue_time_us,
                         run_time_us: 0,
                         serial_baseline_run_time_us: 0,
+                        worker_limit: concurrent_session_worker_limit,
+                        serial_worker_limit: manifest.worker_limit,
+                        cpu_time_us: None,
+                        serial_cpu_time_us: None,
+                        cpu_utilization_permille: None,
+                        serial_cpu_utilization_permille: None,
                         output_identity_hash: None,
                         serial_output_identity_hash: None,
                         frame_cpu_p95_ns: None,
@@ -237,12 +271,18 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                 "starting queued Headless batch session"
             );
             let artifact_root = job.artifact_root.clone();
-            let result =
-                tokio::task::spawn_blocking(move || run_child(&executable, &job, &artifact_root))
-                    .await
-                    .map_err(|error| {
-                        format!("ASTRA_HEADLESS_BATCH_WORKER_FAILED: child worker failed: {error}")
-                    });
+            let result = tokio::task::spawn_blocking(move || {
+                run_child(
+                    &executable,
+                    &job,
+                    &artifact_root,
+                    concurrent_session_worker_limit,
+                )
+            })
+            .await
+            .map_err(|error| {
+                format!("ASTRA_HEADLESS_BATCH_WORKER_FAILED: child worker failed: {error}")
+            });
             drop(lease);
             let outcome = match result {
                 Ok(outcome) => outcome,
@@ -251,14 +291,17 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                     output_identity_hash: None,
                     performance: None,
                     peak_private_memory_bytes: None,
+                    cpu_time_us: None,
                     diagnostic: Some(diagnostic),
                 },
             };
             let identity = outcome.identity;
             let performance = outcome.performance;
             let peak_private_memory_bytes = outcome.peak_private_memory_bytes;
+            let cpu_time_us = outcome.cpu_time_us;
             let output_identity_hash = outcome.output_identity_hash;
             let diagnostic = outcome.diagnostic;
+            let run_time_us = elapsed_us(run_started);
             let report = BatchJobReport {
                 session_id,
                 kind,
@@ -268,8 +311,16 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
                     "blocked"
                 },
                 queue_time_us,
-                run_time_us: elapsed_us(run_started),
+                run_time_us,
                 serial_baseline_run_time_us: 0,
+                worker_limit: concurrent_session_worker_limit,
+                serial_worker_limit: manifest.worker_limit,
+                cpu_time_us,
+                serial_cpu_time_us: None,
+                cpu_utilization_permille: cpu_time_us.map(|cpu_time_us| {
+                    utilization_permille(cpu_time_us, run_time_us, concurrent_session_worker_limit)
+                }),
+                serial_cpu_utilization_permille: None,
                 output_identity_hash,
                 serial_output_identity_hash: None,
                 frame_cpu_p95_ns: performance.as_ref().map(|summary| summary.frame_cpu_p95_ns),
@@ -326,6 +377,10 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
             job.serial_frame_end_to_end_p99_ns = Some(performance.frame_end_to_end_p99_ns);
         }
         job.serial_peak_private_memory_bytes = baseline.outcome.peak_private_memory_bytes;
+        job.serial_cpu_time_us = baseline.outcome.cpu_time_us;
+        job.serial_cpu_utilization_permille = baseline.outcome.cpu_time_us.map(|cpu_time_us| {
+            utilization_permille(cpu_time_us, baseline.run_time_us, job.serial_worker_limit)
+        });
         if let Some(diagnostic) = baseline.outcome.diagnostic {
             job.status = "blocked";
             job.diagnostic = Some(format!(
@@ -345,6 +400,11 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
     let total_run_time_us = jobs
         .iter()
         .fold(0_u64, |total, job| total.saturating_add(job.run_time_us));
+    let total_cpu_time_us = jobs.iter().try_fold(0_u64, |total, job| {
+        job.cpu_time_us
+            .and_then(|cpu_time_us| total.checked_add(cpu_time_us))
+            .ok_or_else(|| "ASTRA_HEADLESS_BATCH_CPU_TIME_MISSING_OR_OVERFLOW".to_string())
+    })?;
     let throughput_milli_sessions_per_second = if wall_time_us == 0 {
         0
     } else {
@@ -352,26 +412,25 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
             .saturating_mul(1_000_000_000)
             .saturating_div(wall_time_us)
     };
-    let utilization_denominator = wall_time_us.saturating_mul(budget.limit() as u64);
-    let worker_utilization_permille = if utilization_denominator == 0 {
-        0
-    } else {
-        total_run_time_us
-            .saturating_mul(1_000)
-            .saturating_div(utilization_denominator)
-            .min(1_000) as u16
-    };
+    let session_slot_utilization_permille =
+        utilization_permille(total_run_time_us, wall_time_us, budget.limit());
+    let worker_utilization_permille =
+        utilization_permille(total_cpu_time_us, wall_time_us, manifest.worker_limit);
     let report = BatchReport {
         schema: REPORT_SCHEMA,
         status: if passed { "pass" } else { "blocked" },
         configured_worker_limit: manifest.worker_limit,
         available_parallelism,
         selected_concurrency,
+        serial_session_worker_limit: manifest.worker_limit,
+        concurrent_session_worker_limit,
+        concurrent_worker_capacity,
         worker_limit: budget.limit(),
         peak_workers: budget.peak_acquired(),
         wall_time_us,
         total_queue_time_us,
         throughput_milli_sessions_per_second,
+        session_slot_utilization_permille,
         worker_utilization_permille,
         serial_baseline_wall_time_us,
         jobs,
@@ -385,8 +444,13 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
         configured_worker_limit = report.configured_worker_limit,
         available_parallelism = report.available_parallelism,
         selected_concurrency = report.selected_concurrency,
+        serial_session_worker_limit = report.serial_session_worker_limit,
+        concurrent_session_worker_limit = report.concurrent_session_worker_limit,
+        concurrent_worker_capacity = report.concurrent_worker_capacity,
         peak_workers = report.peak_workers,
         wall_time_us = report.wall_time_us,
+        session_slot_utilization_permille = report.session_slot_utilization_permille,
+        worker_utilization_permille = report.worker_utilization_permille,
         "completed identity-bound Headless session batch"
     );
     if passed {
@@ -396,7 +460,12 @@ pub(super) async fn run(manifest_path: &Path, report_path: &Path) -> Result<(), 
     }
 }
 
-fn run_child(executable: &Path, job: &BatchJob, artifact_root: &Path) -> BatchChildOutcome {
+fn run_child(
+    executable: &Path,
+    job: &BatchJob,
+    artifact_root: &Path,
+    worker_limit: usize,
+) -> BatchChildOutcome {
     let identity = (|| {
         Ok::<_, String>(BatchJobIdentity {
             profile_hash: sha256_file(&job.profile)?,
@@ -413,6 +482,7 @@ fn run_child(executable: &Path, job: &BatchJob, artifact_root: &Path) -> BatchCh
                 output_identity_hash: None,
                 performance: None,
                 peak_private_memory_bytes: None,
+                cpu_time_us: None,
                 diagnostic: Some(diagnostic),
             };
         }
@@ -431,7 +501,7 @@ fn run_child(executable: &Path, job: &BatchJob, artifact_root: &Path) -> BatchCh
         .arg("--build-identity")
         .arg(&job.build_identity)
         .arg("--worker-limit")
-        .arg("1");
+        .arg(worker_limit.to_string());
     if let Some(performance) = &job.performance {
         command
             .arg("--performance-budget")
@@ -455,53 +525,67 @@ fn run_child(executable: &Path, job: &BatchJob, artifact_root: &Path) -> BatchCh
     }
     command.stdout(Stdio::null()).stderr(Stdio::null());
     let child_run = run_child_with_timeout(&mut command, job.timeout_ms);
-    let (output_identity_hash, performance, peak_private_memory_bytes, diagnostic) = match child_run
-    {
-        Ok(observed_peak_private_memory_bytes) => {
-            match read_child_evidence(artifact_root, job.performance.is_some()) {
-                Ok((output_identity_hash, performance)) => {
-                    let reported_peak = performance
-                        .as_ref()
-                        .and_then(|summary| summary.reported_peak_private_memory_bytes);
-                    (
-                        Some(output_identity_hash),
-                        performance,
-                        Some(
-                            reported_peak
-                                .unwrap_or(0)
-                                .max(observed_peak_private_memory_bytes),
-                        ),
-                        None,
-                    )
+    let (output_identity_hash, performance, peak_private_memory_bytes, cpu_time_us, diagnostic) =
+        match child_run {
+            Ok(observation) => {
+                match read_child_evidence(artifact_root, job.performance.is_some()) {
+                    Ok((output_identity_hash, performance)) => {
+                        let reported_peak = performance
+                            .as_ref()
+                            .and_then(|summary| summary.reported_peak_private_memory_bytes);
+                        (
+                            Some(output_identity_hash),
+                            performance,
+                            Some(
+                                reported_peak
+                                    .unwrap_or(0)
+                                    .max(observation.peak_private_memory_bytes),
+                            ),
+                            Some(observation.cpu_time_us),
+                            None,
+                        )
+                    }
+                    Err(error) => (None, None, None, None, Some(error)),
                 }
-                Err(error) => (None, None, None, Some(error)),
             }
-        }
-        Err(diagnostic) => (None, None, None, Some(diagnostic)),
-    };
+            Err(diagnostic) => (None, None, None, None, Some(diagnostic)),
+        };
     BatchChildOutcome {
         identity: Some(identity),
         output_identity_hash,
         performance,
         peak_private_memory_bytes,
+        cpu_time_us,
         diagnostic,
     }
 }
 
-fn run_child_with_timeout(command: &mut Command, timeout_ms: u64) -> Result<u64, String> {
+fn run_child_with_timeout(
+    command: &mut Command,
+    timeout_ms: u64,
+) -> Result<ChildProcessObservation, String> {
     let mut child = command
         .spawn()
         .map_err(|_| "ASTRA_HEADLESS_BATCH_CHILD_START".to_string())?;
     let process_id = child.id();
     let started = Instant::now();
     let mut peak_private_memory_bytes = 0_u64;
+    let mut cpu_time_us = 0_u64;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() && peak_private_memory_bytes > 0 => {
-                return Ok(peak_private_memory_bytes);
+            Ok(Some(status))
+                if status.success() && peak_private_memory_bytes > 0 && cpu_time_us > 0 =>
+            {
+                return Ok(ChildProcessObservation {
+                    peak_private_memory_bytes,
+                    cpu_time_us,
+                });
+            }
+            Ok(Some(status)) if status.success() && peak_private_memory_bytes == 0 => {
+                return Err("ASTRA_HEADLESS_BATCH_CHILD_MEMORY_EMPTY".to_string());
             }
             Ok(Some(status)) if status.success() => {
-                return Err("ASTRA_HEADLESS_BATCH_CHILD_MEMORY_EMPTY".to_string());
+                return Err("ASTRA_HEADLESS_BATCH_CHILD_CPU_TIME_EMPTY".to_string());
             }
             Ok(Some(_)) => return Err("ASTRA_HEADLESS_BATCH_CHILD_FAILED".to_string()),
             Ok(None) if started.elapsed() < Duration::from_millis(timeout_ms) => {}
@@ -521,11 +605,33 @@ fn run_child_with_timeout(command: &mut Command, timeout_ms: u64) -> Result<u64,
                 peak_private_memory_bytes = peak_private_memory_bytes.max(memory.private_bytes);
             }
             Err(error) => match child.try_wait() {
-                Ok(Some(status)) if status.success() && peak_private_memory_bytes > 0 => {
-                    return Ok(peak_private_memory_bytes);
+                Ok(Some(status))
+                    if status.success() && peak_private_memory_bytes > 0 && cpu_time_us > 0 =>
+                {
+                    return Ok(ChildProcessObservation {
+                        peak_private_memory_bytes,
+                        cpu_time_us,
+                    });
                 }
                 Ok(Some(_)) => return Err("ASTRA_HEADLESS_BATCH_CHILD_FAILED".to_string()),
                 _ => return Err(format!("ASTRA_HEADLESS_BATCH_CHILD_MEMORY: {error}")),
+            },
+        }
+        match sample_process_cpu_time_us_by_pid(process_id) {
+            Ok(observed_cpu_time_us) => {
+                cpu_time_us = cpu_time_us.max(observed_cpu_time_us);
+            }
+            Err(error) => match child.try_wait() {
+                Ok(Some(status))
+                    if status.success() && peak_private_memory_bytes > 0 && cpu_time_us > 0 =>
+                {
+                    return Ok(ChildProcessObservation {
+                        peak_private_memory_bytes,
+                        cpu_time_us,
+                    });
+                }
+                Ok(Some(_)) => return Err("ASTRA_HEADLESS_BATCH_CHILD_FAILED".to_string()),
+                _ => return Err(format!("ASTRA_HEADLESS_BATCH_CHILD_CPU_TIME: {error}")),
             },
         }
         thread::sleep(Duration::from_millis(10));
@@ -697,6 +803,33 @@ fn select_concurrency(
         .min(available_parallelism))
 }
 
+fn concurrent_session_worker_limit(
+    configured_worker_limit: usize,
+    selected_concurrency: usize,
+) -> Result<usize, String> {
+    if !(1..=MAX_PARALLEL_SESSIONS).contains(&configured_worker_limit) {
+        return Err("ASTRA_HEADLESS_BATCH_WORKER_LIMIT: worker_limit must be within 1..=8".into());
+    }
+    if selected_concurrency == 0 || selected_concurrency > configured_worker_limit {
+        return Err(
+            "ASTRA_HEADLESS_BATCH_SELECTED_CONCURRENCY: selected concurrency exceeds the worker budget"
+                .into(),
+        );
+    }
+    Ok(configured_worker_limit / selected_concurrency)
+}
+
+fn utilization_permille(cpu_or_active_time_us: u64, wall_time_us: u64, capacity: usize) -> u16 {
+    let denominator = wall_time_us.saturating_mul(capacity as u64);
+    if denominator == 0 {
+        return 0;
+    }
+    cpu_or_active_time_us
+        .saturating_mul(1_000)
+        .saturating_div(denominator)
+        .min(1_000) as u16
+}
+
 fn elapsed_us(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
@@ -770,5 +903,27 @@ mod tests {
         assert!(select_concurrency(8, 1, 0)
             .unwrap_err()
             .starts_with("ASTRA_HEADLESS_BATCH_PARALLELISM_QUERY"));
+    }
+
+    #[astra_headless_test::test]
+    fn batch_partitions_internal_workers_without_oversubscription() {
+        assert_eq!(concurrent_session_worker_limit(8, 1).unwrap(), 8);
+        assert_eq!(concurrent_session_worker_limit(8, 2).unwrap(), 4);
+        assert_eq!(concurrent_session_worker_limit(8, 3).unwrap(), 2);
+        assert_eq!(concurrent_session_worker_limit(8, 8).unwrap(), 1);
+        assert!(concurrent_session_worker_limit(8, 0)
+            .unwrap_err()
+            .starts_with("ASTRA_HEADLESS_BATCH_SELECTED_CONCURRENCY"));
+        assert!(concurrent_session_worker_limit(4, 5)
+            .unwrap_err()
+            .starts_with("ASTRA_HEADLESS_BATCH_SELECTED_CONCURRENCY"));
+    }
+
+    #[astra_headless_test::test]
+    fn batch_utilization_is_capacity_normalized_and_bounded() {
+        assert_eq!(utilization_permille(4_000, 1_000, 4), 1_000);
+        assert_eq!(utilization_permille(2_000, 1_000, 4), 500);
+        assert_eq!(utilization_permille(10_000, 1_000, 4), 1_000);
+        assert_eq!(utilization_permille(1, 0, 4), 0);
     }
 }

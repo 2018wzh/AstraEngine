@@ -72,6 +72,36 @@ pub fn sample_process_memory_by_pid(
     })
 }
 
+#[cfg(windows)]
+pub fn sample_process_cpu_time_us_by_pid(process_id: u32) -> Result<u64, ProcessMemoryError> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, FILETIME},
+        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }
+        .map_err(|_| ProcessMemoryError::QueryFailed)?;
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    let query =
+        unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) };
+    let close = unsafe { CloseHandle(process) };
+    if query.is_err() || close.is_err() {
+        return Err(ProcessMemoryError::QueryFailed);
+    }
+    let ticks = file_time_ticks(kernel)
+        .checked_add(file_time_ticks(user))
+        .ok_or(ProcessMemoryError::QueryFailed)?;
+    Ok(ticks / 10)
+}
+
+#[cfg(windows)]
+fn file_time_ticks(value: windows::Win32::Foundation::FILETIME) -> u64 {
+    (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime)
+}
+
 #[cfg(not(windows))]
 pub fn sample_process_memory() -> Result<ProcessMemorySample, ProcessMemoryError> {
     Err(ProcessMemoryError::Unsupported)
@@ -81,6 +111,11 @@ pub fn sample_process_memory() -> Result<ProcessMemorySample, ProcessMemoryError
 pub fn sample_process_memory_by_pid(
     _process_id: u32,
 ) -> Result<ProcessMemorySample, ProcessMemoryError> {
+    Err(ProcessMemoryError::Unsupported)
+}
+
+#[cfg(not(windows))]
+pub fn sample_process_cpu_time_us_by_pid(_process_id: u32) -> Result<u64, ProcessMemoryError> {
     Err(ProcessMemoryError::Unsupported)
 }
 
@@ -102,5 +137,18 @@ mod tests {
         let sample = sample_process_memory_by_pid(std::process::id()).unwrap();
         assert!(sample.working_set_bytes > 0);
         assert!(sample.private_bytes > 0);
+    }
+
+    #[cfg(windows)]
+    #[astra_headless_test::test]
+    fn samples_process_cpu_time_by_process_id() {
+        let before = sample_process_cpu_time_us_by_pid(std::process::id()).unwrap();
+        let mut accumulator = 0_u64;
+        for value in 0..1_000_000_u64 {
+            accumulator = accumulator.wrapping_add(value.rotate_left(7));
+        }
+        std::hint::black_box(accumulator);
+        let after = sample_process_cpu_time_us_by_pid(std::process::id()).unwrap();
+        assert!(after >= before);
     }
 }

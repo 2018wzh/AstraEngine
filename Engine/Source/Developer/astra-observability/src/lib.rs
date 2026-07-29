@@ -24,7 +24,8 @@ pub use perfetto::{
 };
 pub use pipeline::{init_host, ObservabilityError, ObservabilityGuard};
 pub use process_memory::{
-    sample_process_memory, sample_process_memory_by_pid, ProcessMemoryError, ProcessMemorySample,
+    sample_process_cpu_time_us_by_pid, sample_process_memory, sample_process_memory_by_pid,
+    ProcessMemoryError, ProcessMemorySample,
 };
 pub use record::{LogEventV1, SpanContextV1, LOG_EVENT_SCHEMA};
 pub use windows_crash::{
