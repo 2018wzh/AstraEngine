@@ -1,6 +1,9 @@
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use astra_core::{Diagnostic, Hash256, SchemaVersion, StableId};
@@ -10,7 +13,7 @@ use astra_emu_family_api::{
     LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacySnapshotEnvelope,
     LegacyStepBudget, LegacyStepInput, LegacyStepOutput, LegacyWaitRequest,
 };
-use astra_plugin::ProductRuntimeProvider;
+use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
     RuntimeOpenRequest, RuntimeOutputCodec, RuntimeOutputDomain, RuntimeOutputEnvelope,
@@ -18,13 +21,14 @@ use astra_plugin_abi::{
     RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
     RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
     RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
-    RuntimeStepOutput,
+    RuntimeStepOutput, RuntimeTickIntegrityMode,
 };
 use astra_runtime::{
-    ActionDescriptor, ActionInvocation, ActionTrace, AwaitResult, AwaitTokenId, BlackboardValue,
-    DeterministicActionContext, EventPayload, GuardExpr, OrderedTickIngress, PackageHandle,
-    PlayerInput, PresentationCommand, RuntimeAction, RuntimeConfig, RuntimeError, RuntimeWorld,
-    SaveBlob, SaveRequest, StateDefinition, StateMachineDefinition, TickIngress, TickInput,
+    ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
+    ActionTrace, AwaitResult, AwaitTokenId, BlackboardValue, DeterministicActionContext,
+    EventPayload, GuardExpr, OrderedTickIngress, PackageHandle, PlayerInput, PresentationCommand,
+    RuntimeAction, RuntimeConfig, RuntimeError, RuntimeWorld, SaveBlob, SaveRequest,
+    StateDefinition, StateMachineDefinition, TickIngress, TickInput, TickIntegrityMode,
     TickRequest, TransitionDefinition,
 };
 use schemars::JsonSchema;
@@ -88,11 +92,25 @@ struct ApplyLegacyEffectsAction {
 
 impl RuntimeAction for ApplyLegacyEffectsAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.emu.apply_legacy_effects".into(),
-            input_schema: "astra.emu.legacy_effect_input.v1".into(),
-            output_schema: "astra.emu.legacy_effect_trace.v1".into(),
-        }
+        ActionDescriptor::declared(
+            "astra.emu.apply_legacy_effects",
+            "astra.emu.legacy_effect_input.v1",
+            "astra.emu.legacy_effect_trace.v1",
+            ActionExecutionClass::Serial,
+            ActionAccess::new(
+                [ActionResourceKey::ActorStore],
+                [
+                    ActionResourceKey::ActorStore,
+                    ActionResourceKey::AwaitQueue,
+                    ActionResourceKey::EventQueue,
+                    ActionResourceKey::Presentation,
+                    ActionResourceKey::MutationLog,
+                    ActionResourceKey::EffectTrace,
+                    ActionResourceKey::StableIdSource,
+                ],
+            ),
+            256,
+        )
     }
 
     fn run(
@@ -212,6 +230,166 @@ pub struct AstraEmuRuntimeProvider {
     instance_id: Option<ProviderInstanceId>,
     family: Box<dyn LegacyRuntimeProvider>,
     sessions: BTreeMap<String, EmuSession>,
+}
+
+type FamilyProviderBuilder =
+    dyn Fn() -> Result<Box<dyn LegacyRuntimeProvider>, String> + Send + Sync + 'static;
+
+pub struct AstraEmuRuntimeProviderFactory {
+    instance_id: Mutex<Option<ProviderInstanceId>>,
+    active_sessions: Arc<AtomicUsize>,
+    family_builder: Arc<FamilyProviderBuilder>,
+}
+
+struct AstraEmuProviderSession {
+    provider: AstraEmuRuntimeProvider,
+    session_id: GameRuntimeSessionId,
+    instance_id: ProviderInstanceId,
+    active_sessions: Arc<AtomicUsize>,
+    active: bool,
+}
+
+impl AstraEmuRuntimeProviderFactory {
+    pub fn new(
+        family_builder: impl Fn() -> Result<Box<dyn LegacyRuntimeProvider>, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            instance_id: Mutex::new(None),
+            active_sessions: Arc::new(AtomicUsize::new(0)),
+            family_builder: Arc::new(family_builder),
+        }
+    }
+}
+
+impl ProductRuntimeProviderFactory for AstraEmuRuntimeProviderFactory {
+    fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
+        Ok(AstraEmuRuntimeProvider::descriptor_value())
+    }
+
+    fn create_instance(
+        &self,
+        instance_id: ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        let mut current = self
+            .instance_id
+            .lock()
+            .map_err(|_| "ASTRA_EMU_FACTORY_LOCK_POISONED".to_string())?;
+        if current.is_some() {
+            return Err("ASTRA_EMU_INSTANCE_DUPLICATE".into());
+        }
+        *current = Some(instance_id.clone());
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "created".into(),
+            diagnostics: vec![],
+        })
+    }
+
+    fn destroy_instance(
+        &self,
+        instance_id: ProviderInstanceId,
+    ) -> Result<RuntimeProviderInstanceReport, String> {
+        if self.active_sessions.load(Ordering::Acquire) != 0 {
+            return Err("ASTRA_EMU_INSTANCE_ACTIVE_SESSIONS".into());
+        }
+        let mut current = self
+            .instance_id
+            .lock()
+            .map_err(|_| "ASTRA_EMU_FACTORY_LOCK_POISONED".to_string())?;
+        if current.as_ref() != Some(&instance_id) {
+            return Err("ASTRA_EMU_INSTANCE_MISMATCH".into());
+        }
+        *current = None;
+        Ok(RuntimeProviderInstanceReport {
+            instance_id,
+            status: "destroyed".into(),
+            diagnostics: vec![],
+        })
+    }
+
+    fn prepare(&self, request: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
+        let mut provider = AstraEmuRuntimeProvider::new((self.family_builder)()?)?;
+        ProductRuntimeProvider::prepare(&mut provider, request)
+    }
+
+    fn probe(&self, request: RuntimeProbeRequest) -> Result<RuntimeProbeReport, String> {
+        let mut provider = AstraEmuRuntimeProvider::new((self.family_builder)()?)?;
+        ProductRuntimeProvider::probe(&mut provider, request)
+    }
+
+    fn open(
+        &self,
+        request: RuntimeOpenRequest,
+    ) -> Result<(RuntimeOpenReport, Box<dyn ProductRuntimeSession>), String> {
+        let instance_id = self
+            .instance_id
+            .lock()
+            .map_err(|_| "ASTRA_EMU_FACTORY_LOCK_POISONED".to_string())?
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_INSTANCE_NOT_CREATED".to_string())?;
+        let mut provider = AstraEmuRuntimeProvider::new((self.family_builder)()?)?;
+        ProductRuntimeProvider::create_instance(&mut provider, instance_id.clone())?;
+        let report = match ProductRuntimeProvider::open(&mut provider, request) {
+            Ok(report) => report,
+            Err(error) => {
+                let _ = ProductRuntimeProvider::destroy_instance(&mut provider, instance_id);
+                return Err(error);
+            }
+        };
+        self.active_sessions.fetch_add(1, Ordering::AcqRel);
+        Ok((
+            report.clone(),
+            Box::new(AstraEmuProviderSession {
+                provider,
+                session_id: report.session_id,
+                instance_id,
+                active_sessions: Arc::clone(&self.active_sessions),
+                active: true,
+            }),
+        ))
+    }
+}
+
+impl Drop for AstraEmuProviderSession {
+    fn drop(&mut self) {
+        if self.active {
+            self.active_sessions.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
+impl ProductRuntimeSession for AstraEmuProviderSession {
+    fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
+        if input.session_id != self.session_id {
+            return Err("ASTRA_EMU_SESSION_MISMATCH".into());
+        }
+        ProductRuntimeProvider::step(&mut self.provider, input)
+    }
+
+    fn save(&mut self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, String> {
+        ProductRuntimeProvider::save(&mut self.provider, request)
+    }
+
+    fn restore(&mut self, request: RuntimeRestoreRequest) -> Result<RuntimeRestoreReport, String> {
+        ProductRuntimeProvider::restore(&mut self.provider, request)
+    }
+
+    fn shutdown(
+        mut self: Box<Self>,
+        session_id: GameRuntimeSessionId,
+    ) -> Result<RuntimeShutdownReport, String> {
+        if session_id != self.session_id {
+            return Err("ASTRA_EMU_SESSION_MISMATCH".into());
+        }
+        let report = ProductRuntimeProvider::shutdown(&mut self.provider, session_id)?;
+        ProductRuntimeProvider::destroy_instance(&mut self.provider, self.instance_id.clone())?;
+        self.active_sessions.fetch_sub(1, Ordering::AcqRel);
+        self.active = false;
+        Ok(report)
+    }
 }
 
 impl AstraEmuRuntimeProvider {
@@ -496,7 +674,11 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             .map_err(|error| error.to_string())?;
 
         let world_setup = (|| -> Result<_, String> {
-            let mut world = RuntimeWorld::create(
+            let integrity_mode = match request.integrity_mode {
+                RuntimeTickIntegrityMode::Shipping => TickIntegrityMode::Shipping,
+                RuntimeTickIntegrityMode::Evidence => TickIntegrityMode::Evidence,
+            };
+            let mut world = RuntimeWorld::create_with_integrity(
                 RuntimeConfig {
                     seed: request.seed,
                     required_slots: vec![],
@@ -507,6 +689,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                     profile: request.profile.clone(),
                     ..PackageHandle::default()
                 },
+                integrity_mode,
             )
             .map_err(|error| error.to_string())?;
             let owner = world.create_actor(
@@ -854,7 +1037,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
             sections: vec![
-                raw_section("runtime.world", "astra.runtime.save_blob.v2", 2, world.0),
+                raw_section("runtime.world", "astra.runtime.save_blob.v3", 3, world.0),
                 raw_section(
                     "emu.family",
                     "astra.emu.family_snapshot.v1",
@@ -873,7 +1056,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         let world = required_section(
             &request.sections,
             "runtime.world",
-            "astra.runtime.save_blob.v2",
+            "astra.runtime.save_blob.v3",
         )?
         .bytes
         .clone();
@@ -1169,6 +1352,8 @@ mod tests {
                 profile: "fvp-v1".into(),
                 locale: "und".into(),
                 seed: 17,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
                 package_hash,
                 sections: vec![RuntimeSectionPayload {
                     section_id: "emu.case_profile".into(),

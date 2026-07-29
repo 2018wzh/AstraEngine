@@ -10,6 +10,7 @@ ffmpeg-vcpkg = ["dep:ffmpeg-next", "dep:tempfile"]
 
 [dependencies]
 astra-core = { path = "../astra-core" }
+astra-worker-budget = { path = "../astra-worker-budget" }
 astra-asset = { path = "../astra-asset" }
 astra-media-core = { path = "../astra-media-core" }
 astra-package = { path = "../astra-package" }

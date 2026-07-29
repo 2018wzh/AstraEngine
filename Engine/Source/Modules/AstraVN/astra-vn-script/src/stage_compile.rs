@@ -5,9 +5,10 @@ use astra_core::Diagnostic;
 use crate::{
     lower::ParsedLine, AspectRatio, AudioControl, AudioCue, ExtensionCommandDescriptor,
     ExtensionFieldKind, ExtensionPresentationCommand, ExtensionValue, FixedScalar, MovieLoopMode,
-    StageBlendMode, StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement,
-    StageViewport, TimelineCommand, TimelineSpec, VnAudioBus, VnAudioControlAction, VnAudioSync,
-    VnError, VnMovieEndBehavior, VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
+    PresentationInterruptPolicy, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
+    StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec, VnAudioBus,
+    VnAudioControlAction, VnAudioSync, VnError, VnMovieEndBehavior, VnTimelineJoinPolicy,
+    VnTimelineKeyframe, VnTimelineTrack,
 };
 
 pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, VnError> {
@@ -46,23 +47,32 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
         "background" => {
             validate_attrs(
                 line,
-                &["asset", "layer", "preset", "duration"],
-                &["asset", "layer"],
+                &["asset", "layer", "preset", "duration", "interrupt"],
+                &["asset", "layer", "interrupt"],
             )?;
             Ok(StageCommand::Background {
                 asset: asset_uri(line, "asset")?,
                 layer: symbol(line, "layer")?,
                 preset: optional_symbol(line, "preset")?,
                 duration_ms: optional_u32(line, "duration", 0)?,
+                interrupt: parse_interrupt(line)?,
             })
         }
         "show" => {
             validate_attrs(
                 line,
                 &[
-                    "id", "asset", "pose", "layer", "at", "fit", "opacity", "preset",
+                    "id",
+                    "asset",
+                    "pose",
+                    "layer",
+                    "at",
+                    "fit",
+                    "opacity",
+                    "preset",
+                    "interrupt",
                 ],
-                &["id", "asset", "layer"],
+                &["id", "asset", "layer", "interrupt"],
             )?;
             Ok(StageCommand::Show {
                 id: symbol(line, "id")?,
@@ -84,21 +94,32 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                 },
                 opacity: opacity(line, "opacity")?,
                 preset: optional_symbol(line, "preset")?,
+                interrupt: parse_interrupt(line)?,
             })
         }
         "hide" => {
-            validate_attrs(line, &["id", "preset", "duration"], &["id"])?;
+            validate_attrs(
+                line,
+                &["id", "preset", "duration", "interrupt"],
+                &["id", "interrupt"],
+            )?;
             Ok(StageCommand::Hide {
                 id: symbol(line, "id")?,
                 preset: optional_symbol(line, "preset")?,
                 duration_ms: optional_u32(line, "duration", 0)?,
+                interrupt: parse_interrupt(line)?,
             })
         }
         "clear_layer" => {
-            validate_attrs(line, &["layer", "duration"], &["layer"])?;
+            validate_attrs(
+                line,
+                &["layer", "duration", "interrupt"],
+                &["layer", "interrupt"],
+            )?;
             Ok(StageCommand::ClearLayer {
                 layer: symbol(line, "layer")?,
                 duration_ms: optional_u32(line, "duration", 0)?,
+                interrupt: parse_interrupt(line)?,
             })
         }
         "layer_visibility" => {
@@ -142,8 +163,8 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
         "move" => {
             validate_attrs(
                 line,
-                &["id", "x", "y", "duration", "preset"],
-                &["id", "x", "y", "duration"],
+                &["id", "x", "y", "duration", "preset", "interrupt"],
+                &["id", "x", "y", "duration", "interrupt"],
             )?;
             Ok(StageCommand::Move {
                 id: symbol(line, "id")?,
@@ -151,6 +172,7 @@ pub(crate) fn compile_stage_command(line: &ParsedLine) -> Result<StageCommand, V
                 y: fixed(line, "y")?,
                 duration_ms: parse_u32(line, "duration")?,
                 preset: optional_symbol(line, "preset")?,
+                interrupt: parse_interrupt(line)?,
             })
         }
         "camera" => {
@@ -339,9 +361,16 @@ fn compile_movie(line: &ParsedLine) -> Result<StageCommand, VnError> {
     validate_attrs(
         line,
         &[
-            "layer", "asset", "alpha", "loop", "end", "fence", "fallback",
+            "layer",
+            "asset",
+            "alpha",
+            "loop",
+            "end",
+            "fence",
+            "fallback",
+            "interrupt",
         ],
-        &["layer", "asset"],
+        &["layer", "asset", "interrupt"],
     )?;
     let alpha = optional_fixed(line, "alpha", FixedScalar::ONE)?;
     if !(0..=1_000_000).contains(&alpha.millionths) {
@@ -391,6 +420,7 @@ fn compile_movie(line: &ParsedLine) -> Result<StageCommand, VnError> {
         end,
         fence,
         fallback,
+        interrupt: parse_interrupt(line)?,
     })
 }
 
@@ -844,6 +874,21 @@ fn parse_bool(line: &ParsedLine, key: &str, value: &str) -> Result<bool, VnError
         "true" => Ok(true),
         "false" => Ok(false),
         _ => Err(invalid_value(line, key, value, "true,false")),
+    }
+}
+
+fn parse_interrupt(line: &ParsedLine) -> Result<PresentationInterruptPolicy, VnError> {
+    match required(line, "interrupt")? {
+        "queue" => Ok(PresentationInterruptPolicy::Queue),
+        "replace_from_current" => Ok(PresentationInterruptPolicy::ReplaceFromCurrent),
+        "snap_then_start" => Ok(PresentationInterruptPolicy::SnapThenStart),
+        "reject" => Ok(PresentationInterruptPolicy::Reject),
+        value => Err(invalid_value(
+            line,
+            "interrupt",
+            value,
+            "queue,replace_from_current,snap_then_start,reject",
+        )),
     }
 }
 fn milliseconds_to_microseconds(line: &ParsedLine, value: u32) -> Result<u32, VnError> {

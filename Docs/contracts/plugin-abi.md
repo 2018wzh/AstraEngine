@@ -109,15 +109,17 @@ Stage 1 action provider 使用 function pointer 和 postcard payload：
 
 ```rust
 pub struct FfiActionRegistration {
+    pub abi_version: u32, // 必须为 2
     pub provider_id: RString,
     pub action_id: RString,
     pub input_schema: RString,
     pub output_schema: RString,
+    pub descriptor_json: RVec<u8>,
     pub invoke: extern "C" fn(RVec<u8>) -> RVec<u8>,
 }
 ```
 
-`invoke` 接收 `ActionCallRequest` bytes，返回 `ActionCallResult` bytes。result 只包含 `ActionTrace` 和可序列化 `ActionEffect` list；host adapter 负责应用 effect。插件不得跨 ABI 接收或保存 RuntimeWorld、Actor 指针、trait object、native handle 或平台文件描述符。
+`descriptor_json` 是完整 `ActionDescriptor`，必须声明 execution class、read/write set 和 StableId reservation，并与 registration identity 完全一致。`invoke` 接收 `ActionCallRequest` bytes，返回 `ActionCallResult` bytes。result 只包含 `ActionTrace` 和可序列化 `ActionEffect` list；host adapter 在应用前逐项校验 effect 没有越过 write set。ABI 版本、identity、access 或 ID reservation 不满足契约时 fail closed。插件不得跨 ABI 接收或保存 RuntimeWorld、Actor 指针、trait object、native handle 或平台文件描述符。
 
 ## Load / Unload Report
 

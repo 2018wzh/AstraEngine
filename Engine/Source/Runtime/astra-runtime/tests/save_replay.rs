@@ -192,7 +192,7 @@ fn replay_rejects_old_schema_and_live_output_without_partial_world_changes() {
     };
     let error = world
         .replay(RuntimeReplayTranscript {
-            schema: "astra.runtime_replay_transcript.v2".to_string(),
+            schema: "astra.runtime_replay_transcript.v3".to_string(),
             checkpoint,
             ticks: vec![ReplayTick {
                 request: TickRequest::replay(
@@ -348,7 +348,7 @@ fn replay_consumes_checkpoint_and_ordered_player_input_transcript() {
         .unwrap();
 
     let transcript = RuntimeReplayTranscript {
-        schema: "astra.runtime_replay_transcript.v2".to_string(),
+        schema: "astra.runtime_replay_transcript.v3".to_string(),
         checkpoint,
         ticks: vec![ReplayTick {
             request: TickRequest::replay(
@@ -425,7 +425,7 @@ fn replay_applies_hash_validated_provider_output_without_a_live_provider() {
         .unwrap();
 
     let transcript = RuntimeReplayTranscript {
-        schema: "astra.runtime_replay_transcript.v2".to_string(),
+        schema: "astra.runtime_replay_transcript.v3".to_string(),
         checkpoint,
         ticks: vec![ReplayTick {
             request: TickRequest::replay(
@@ -472,7 +472,7 @@ fn replay_blocks_provider_output_payload_hash_mismatch() {
     };
     let error = world
         .replay(RuntimeReplayTranscript {
-            schema: "astra.runtime_replay_transcript.v2".to_string(),
+            schema: "astra.runtime_replay_transcript.v3".to_string(),
             checkpoint,
             ticks: vec![ReplayTick {
                 request: TickRequest::replay(

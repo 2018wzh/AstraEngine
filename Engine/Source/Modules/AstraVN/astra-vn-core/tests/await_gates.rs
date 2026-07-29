@@ -7,7 +7,7 @@ story main #@id story.main
 
 state prologue #@id state.prologue
   scene opening #@id scene.opening
-    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback #@id movie.opening
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback interrupt:reject #@id movie.opening
     text key:opening.after_movie speaker:narrator #@id line.after_movie
 "#;
 

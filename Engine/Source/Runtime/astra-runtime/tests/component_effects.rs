@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::{Hash256, SchemaVersion, StableId};
 use astra_runtime::{
-    ActionDescriptor, ActionEffect, ActionInvocation, ActionTrace, BlackboardValue,
-    ComponentSelector, DeterministicActionContext, EventPayload, EventSource, GuardExpr,
-    PackageHandle, RuntimeAction, RuntimeComponentPayload, RuntimeConfig, RuntimeError,
-    RuntimeWorld, StateDefinition, StateMachineDefinition, TickInput, TransitionDefinition,
+    ActionAccess, ActionDescriptor, ActionEffect, ActionExecutionClass, ActionInvocation,
+    ActionResourceKey, ActionTrace, BlackboardValue, ComponentSelector, DeterministicActionContext,
+    EventPayload, EventSource, GuardExpr, PackageHandle, RuntimeAction, RuntimeComponentPayload,
+    RuntimeConfig, RuntimeError, RuntimeWorld, StateDefinition, StateMachineDefinition, TickInput,
+    TransitionDefinition,
 };
 
 struct ApplyEffectsAction {
@@ -15,11 +16,26 @@ struct ApplyEffectsAction {
 
 impl RuntimeAction for ApplyEffectsAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: self.id.to_string(),
-            input_schema: "astra.test.component_effects.input".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            self.id,
+            "astra.test.component_effects.input",
+            "astra.action_trace.v1",
+            ActionExecutionClass::Serial,
+            ActionAccess::new(
+                [],
+                [
+                    ActionResourceKey::ActorStore,
+                    ActionResourceKey::Blackboard,
+                    ActionResourceKey::EventQueue,
+                    ActionResourceKey::AwaitQueue,
+                    ActionResourceKey::DelayedEventQueue,
+                    ActionResourceKey::Presentation,
+                    ActionResourceKey::MutationLog,
+                    ActionResourceKey::StableIdSource,
+                ],
+            ),
+            32,
+        )
     }
 
     fn run(

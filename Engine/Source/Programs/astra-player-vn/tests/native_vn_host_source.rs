@@ -832,10 +832,10 @@ fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands(
 
     let first = source.launch().unwrap();
     let second = advance(&mut source);
+    assert!(scene_commands(&first)
+        .iter()
+        .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
     for commands in [scene_commands(&first), scene_commands(&second)] {
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
         assert!(commands
             .iter()
             .any(|command| matches!(command, SceneCommand::GlyphRun { .. })));
@@ -868,7 +868,7 @@ state start #@id state.start
   scene room #@id scene.room
     stage viewport:640x360 safe_area:16:9 #@id stage.main
     layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
-    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.main
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.main
     text key:line.one speaker:hero #@id line.one
 "#,
     );
@@ -884,7 +884,6 @@ state start #@id state.start
 
     assert_eq!(source.decoded_asset_cache_bytes(), 0);
     let launch = source.launch().unwrap();
-    assert!(source.decoded_asset_cache_bytes() > 0);
     assert!(source.decoded_asset_cache_bytes() <= 128 * 1024 * 1024);
     let commands = scene_commands(&launch);
     assert!(commands.iter().any(|command| matches!(
@@ -902,6 +901,40 @@ state start #@id state.start
     assert!(commands
         .iter()
         .any(|command| matches!(command, SceneCommand::PushClip { .. })));
+    let stable = advance(&mut source);
+    assert!(!source
+        .decoded_image_cached("asset:/background/apartment-night")
+        .unwrap());
+    assert!(!scene_commands(&stable).iter().any(|command| matches!(
+        command,
+        SceneCommand::UploadTexture { resource_id, .. }
+            if resource_id == "asset:/background/apartment-night"
+    )));
+    source.invalidate_gpu_resources();
+    let rebuilt = source
+        .dispatch_ui_event(UiInputEventKind::Resize {
+            viewport: UiViewport {
+                physical_width: 640,
+                physical_height: 360,
+                scale_factor: 1.0,
+                font_scale: 1.0,
+                safe_area_points: UiInsets {
+                    left: 0.0,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 0.0,
+                },
+            },
+        })
+        .unwrap();
+    assert!(scene_commands(&rebuilt).iter().any(|command| matches!(
+        command,
+        SceneCommand::UploadTexture { resource_id, .. }
+            if resource_id == "asset:/background/apartment-night"
+    )));
+    assert!(scene_commands(&rebuilt)
+        .iter()
+        .any(|command| matches!(command, SceneCommand::UploadGlyph { .. })));
     source.release_resources().unwrap();
     source.shutdown().unwrap();
 }
@@ -915,11 +948,11 @@ state start #@id state.start
   scene first #@id scene.first
     stage viewport:640x360 safe_area:16:9 #@id stage.main
     layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
-    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.first
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.first
     text key:line.one speaker:hero #@id line.one
   scene second #@id scene.second
     transition preset:director_puppet_1 duration:250 descriptor:director.puppet.1 #@id transition.wipe
-    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.second
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.second
     text key:line.two speaker:hero #@id line.two
 "#,
     );
@@ -934,8 +967,9 @@ state start #@id state.start
     .unwrap();
 
     source.launch().unwrap();
-    advance(&mut source);
-    advance(&mut source);
+    for _ in 0..4 {
+        advance(&mut source);
+    }
     let transitioned = source.tick_presentation(16_666_667).unwrap().unwrap();
     assert!(scene_commands(&transitioned).iter().any(|command| {
         matches!(command, SceneCommand::PushClip { rect } if rect.width > 0 && rect.width < 640)
@@ -953,11 +987,11 @@ state start #@id state.start
   scene first #@id scene.first
     stage viewport:640x360 safe_area:16:9 #@id stage.main
     layer id:bg kind:background z:0 blend:normal clip:stage #@id layer.bg
-    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.first
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.first
     text key:line.one speaker:hero #@id line.one
   scene second #@id scene.second
     transition preset:director_puppet_9 duration:250 descriptor:director.puppet.9 #@id transition.center
-    background asset:asset:/background/apartment-night layer:bg duration:0 #@id background.second
+    background asset:asset:/background/apartment-night layer:bg duration:0 interrupt:replace_from_current #@id background.second
     text key:line.two speaker:hero #@id line.two
 "#,
     );
@@ -972,8 +1006,9 @@ state start #@id state.start
     .unwrap();
 
     source.launch().unwrap();
-    advance(&mut source);
-    advance(&mut source);
+    for _ in 0..4 {
+        advance(&mut source);
+    }
     source.tick_presentation(16_666_667).unwrap().unwrap();
     prepare_test_save_metadata(&mut source, "slot.01");
     let saved = source.save("slot.01").unwrap();
@@ -1057,7 +1092,7 @@ fn package_open_accepts_movie_for_product_media_execution() {
 story main #@id story.main
 state start #@id state.start
   scene room #@id scene.room
-    movie layer:video asset:asset:/movie/unsupported end:continue #@id movie.unsupported
+    movie layer:video asset:asset:/movie/unsupported end:continue interrupt:reject #@id movie.unsupported
     text key:line.one speaker:hero #@id line.one
 "#,
     );
@@ -1085,7 +1120,7 @@ fn package_open_blocks_undeclared_presentation_preset_before_provider_creation()
 story main #@id story.main
 state start #@id state.start
   scene room #@id scene.room
-    background asset:asset:/background/missing layer:bg preset:not_packaged duration:100 #@id background.policy
+    background asset:asset:/background/missing layer:bg preset:not_packaged duration:100 interrupt:replace_from_current #@id background.policy
     text key:line.one speaker:hero #@id line.one
 "#,
     );
@@ -1223,13 +1258,14 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
         "runtime wait occurrence must expose its serialized AwaitToken identity"
     );
 
-    advance(&mut source);
-    advance(&mut source);
+    for _ in 0..4 {
+        advance(&mut source);
+    }
     let terminal = source.last_step_evidence().expect("terminal evidence");
     assert!(
         !terminal.terminal_route_ids.is_empty(),
         "terminal routes: {:?}",
-        terminal.terminal_route_ids
+        terminal.terminal_route_ids,
     );
 }
 

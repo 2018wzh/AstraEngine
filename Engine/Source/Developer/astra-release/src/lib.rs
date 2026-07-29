@@ -1835,6 +1835,8 @@ fn native_vn_behavioral_evidence(
                 profile: selection.profile().to_string(),
                 locale,
                 seed: 0xA57A,
+                integrity_mode: astra_plugin_abi::RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
                 package_hash: package.package_hash().to_string(),
                 sections: vec![compiled_section],
             })

@@ -70,7 +70,7 @@ fn standard_commands_lower_to_typed_fixed_point_ir() {
     assert_eq!(duration_ms, 480);
 
     let command = first_presentation(
-        "show id:sky asset:asset:/stage/sky layer:sky at:center fit:native opacity:1 #@id show.sky",
+        "show id:sky asset:asset:/stage/sky layer:sky at:center fit:native opacity:1 interrupt:replace_from_current #@id show.sky",
     );
     let PresentationCommand::Stage(StageCommand::Show { fit, .. }) = command else {
         panic!("expected typed show command")
@@ -157,7 +157,7 @@ fn timeline_requires_real_ordered_keyframes_and_blocking_fence() {
 fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
     let unknown = compile_astra_project(
         [source(
-            "show id:hero asset:asset:/character/hero layer:characters unknown:1",
+            "show id:hero asset:asset:/character/hero layer:characters interrupt:replace_from_current unknown:1",
         )],
         Default::default(),
     )
@@ -166,7 +166,7 @@ fn standard_commands_reject_unknown_fields_and_noncanonical_assets() {
 
     let path = compile_astra_project(
         [source(
-            "show id:hero asset:native-assets/hero.png layer:characters",
+            "show id:hero asset:native-assets/hero.png layer:characters interrupt:replace_from_current",
         )],
         Default::default(),
     )
@@ -252,7 +252,7 @@ fn extension_commands_require_schema_provider_and_typed_field_contracts() {
     standard_override.command = "show".to_string();
     let conflict = compile_astra_project(
         [source(
-            "show id:hero asset:asset:/character/hero layer:characters",
+            "show id:hero asset:asset:/character/hero layer:characters interrupt:replace_from_current",
         )],
         CompileAstraProjectOptions::default().bind_extension(standard_override),
     )

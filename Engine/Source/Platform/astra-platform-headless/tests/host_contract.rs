@@ -671,6 +671,7 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::OneShot,
                 bytes: encoded_image,
             },
         )
@@ -703,6 +704,7 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
                 coded_width: Some(2),
                 coded_height: Some(2),
                 keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::OneShot,
                 bytes: vec![1, 2, 3],
             },
         )
@@ -829,6 +831,7 @@ async fn ffmpeg_video_decode_returns_the_complete_ordered_frame_stream() {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::OneShot,
                 bytes,
             },
         )
@@ -850,6 +853,95 @@ async fn ffmpeg_video_decode_returns_the_complete_ordered_frame_stream() {
         stream.frames.first().unwrap().content_hash,
         stream.frames.last().unwrap().content_hash
     );
+    client.close_decode(session).await.unwrap();
+    client.shutdown().await.unwrap();
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+#[tokio::test]
+async fn ffmpeg_video_stream_spools_complete_output_and_returns_one_frame_at_a_time() {
+    let temp = tempfile::tempdir().unwrap();
+    let package = b"streaming video package identity";
+    fs::write(temp.path().join("fixture.astrapkg"), package).unwrap();
+    let mut profile = HeadlessHostProfile::reference(
+        "headless-video-stream-test",
+        "fixture.astrapkg",
+        hash(b"build"),
+        hash(package),
+    );
+    profile.providers.video_decode = "ffmpeg-vcpkg".into();
+    profile.max_video_frames = 1_000;
+    profile.max_decode_output_bytes = 512 * 1024 * 1024;
+    let factory = HeadlessPlatformFactory::new(temp.path().join("run"), temp.path());
+    let host = factory.start(profile.into()).await.unwrap();
+    let client = host.client.clone();
+    let session = client.open_decode(DecodeKind::Video).await.unwrap();
+    let encoded = include_bytes!("../../../../Fixtures/PublicDomainMedia/flower.mp4").to_vec();
+    let started = client
+        .decode(
+            session,
+            PlatformDecodeRequest {
+                sequence: 1,
+                kind: DecodeKind::Video,
+                codec: "mp4".into(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::Start,
+                bytes: encoded,
+            },
+        )
+        .await
+        .unwrap();
+    let DecodeOutput::CpuBuffer { format, bytes, .. } = started else {
+        panic!("stream start returned a native media frame");
+    };
+    assert_eq!(format, "postcard:astra.decoded_video_stream_descriptor.v2");
+    let descriptor =
+        astra_media::DecodedVideoStreamDescriptor::decode(&bytes, 1_000, 512 * 1024 * 1024)
+            .unwrap();
+
+    let mut sequence = 2_u64;
+    let mut frames = Vec::new();
+    loop {
+        let output = client
+            .decode(
+                session,
+                PlatformDecodeRequest {
+                    sequence,
+                    kind: DecodeKind::Video,
+                    codec: String::new(),
+                    description: Vec::new(),
+                    sample_rate: None,
+                    channels: None,
+                    coded_width: None,
+                    coded_height: None,
+                    keyframe: false,
+                    stream_action: astra_platform::DecodeStreamAction::Next,
+                    bytes: Vec::new(),
+                },
+            )
+            .await
+            .unwrap();
+        sequence += 1;
+        let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
+            panic!("stream next returned a native media frame");
+        };
+        if format == "postcard:astra.decoded_video_stream_end.v2" {
+            let end: astra_media::DecodedVideoStreamEnd = postcard::from_bytes(&bytes).unwrap();
+            end.validate_against(&descriptor).unwrap();
+            break;
+        }
+        assert_eq!(format, "postcard:astra.decoded_video_frame.v2");
+        let frame = astra_media::DecodedVideoFrame::decode(&bytes, 512 * 1024 * 1024).unwrap();
+        assert_eq!(frame.sequence, frames.len() as u64 + 1);
+        frames.push(frame.content_hash);
+    }
+    assert_eq!(frames.len() as u64, descriptor.frame_count);
+    assert_ne!(frames.first(), frames.last());
     client.close_decode(session).await.unwrap();
     client.shutdown().await.unwrap();
 }

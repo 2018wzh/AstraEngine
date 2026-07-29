@@ -42,6 +42,29 @@
       "release_eligible": true
     },
     {
+      "id": "asset.assets.fonts.notosanssc-variable.ttf",
+      "role": "font",
+      "locator": {
+        "relative_path": "Assets/Fonts/NotoSansSC-Variable.ttf"
+      },
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "byte_size": 17772300,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license_status": "approved",
+      "license_evidence": {
+        "relative_path": "README.md"
+      },
+      "release_eligible": true
+    },
+    {
       "id": "asset.assets.fonts.ofl-notosansjp.txt",
       "role": "font",
       "locator": {
@@ -52,6 +75,75 @@
       "media": {
         "kind": "document",
         "mime_type": "text/plain"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license_status": "approved",
+      "license_evidence": {
+        "relative_path": "README.md"
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "asset.assets.fonts.ofl.txt",
+      "role": "font",
+      "locator": {
+        "relative_path": "Assets/Fonts/OFL.txt"
+      },
+      "sha256": "8503c30a4d7e09c4c09015fee42f829f18acbe6330755e9930ba50ea44eaa157",
+      "byte_size": 4384,
+      "media": {
+        "kind": "document",
+        "mime_type": "text/plain"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license_status": "approved",
+      "license_evidence": {
+        "relative_path": "README.md"
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "asset.assets.fonts.poppins-regular.ttf",
+      "role": "font",
+      "locator": {
+        "relative_path": "Assets/Fonts/Poppins-Regular.ttf"
+      },
+      "sha256": "7e65201e9b79159e2300267cc885e16c8dcef2424cdfa09a29bfb0980a94a7ba",
+      "byte_size": 160316,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license_status": "approved",
+      "license_evidence": {
+        "relative_path": "README.md"
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "asset.assets.fonts.poppins-regular.ttf.astra-asset.yaml",
+      "role": "font",
+      "locator": {
+        "relative_path": "Assets/Fonts/Poppins-Regular.ttf.astra-asset.yaml"
+      },
+      "sha256": "9f53b94a4ba7e2b2e107207ace15bd07d879f8022d8b9e198a9006736ae648df",
+      "byte_size": 484,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
       },
       "generation_source": {
         "kind": "hand_authored",
@@ -1427,8 +1519,31 @@
       "locator": {
         "relative_path": "AssetSidecars/font__notosansjp-variable.astra-asset.yaml"
       },
-      "sha256": "6d725f17b53de99e19b84293548c0c17dc52401cdf94c014ad5934c598e06a54",
-      "byte_size": 564,
+      "sha256": "56afc07121c1b8d8a4c4dc324f59126955e6455b86521cf7e6f3c30cbed98a20",
+      "byte_size": 562,
+      "media": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license_status": "approved",
+      "license_evidence": {
+        "relative_path": "README.md"
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "asset.assetsidecars.font-notosanssc-variable.astra-asset.yaml",
+      "role": "review_evidence",
+      "locator": {
+        "relative_path": "AssetSidecars/font__notosanssc-variable.astra-asset.yaml"
+      },
+      "sha256": "de70d9186f54c518c06431990cba9a2d1c46945dce69205d54133771b6830911",
+      "byte_size": 597,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -17718,7 +17833,7 @@
       "locator": {
         "relative_path": "Controllers/standard_ui.luau"
       },
-      "sha256": "31b591212b567a9dcc0b7368e8925d0d73663c6b3da98440ad9ef96d4e7f82c5",
+      "sha256": "6e499ce83849d3ad05ecc2670e22479d443829f0a878800ac35253bc0341018e",
       "byte_size": 2370,
       "media": {
         "kind": "data",
@@ -18523,8 +18638,8 @@
       "locator": {
         "relative_path": "Scripts/main.astra"
       },
-      "sha256": "85050bff99cba008cbf307830f1707a52595edf7c7462494d443b8ed7872b4d1",
-      "byte_size": 53909,
+      "sha256": "b758e07b3a2891d6325390505a1411d4a999b7971116e1f415cf51d0a16726d8",
+      "byte_size": 53974,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -18638,8 +18753,8 @@
       "locator": {
         "relative_path": "UI/flagship.astra"
       },
-      "sha256": "4a692bf51843fa08ca5d5e596fffcfe87304865c22b00f8a42c6bee98851d268",
-      "byte_size": 14584,
+      "sha256": "9e892b6da6ef05e5231424c228a5a959b9e73e6261b37790885f388c3b57e5fa",
+      "byte_size": 15490,
       "media": {
         "kind": "data",
         "mime_type": "application/octet-stream"

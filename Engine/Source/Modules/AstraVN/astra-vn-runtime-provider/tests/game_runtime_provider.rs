@@ -1,12 +1,13 @@
-use astra_core::SchemaVersion;
+use astra_core::{Hash128, SchemaVersion};
 use astra_plugin_abi::{
     RuntimeOpenRequest, RuntimeOutputDomain, RuntimeStepInput, RuntimeStepMode,
-    GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID,
+    RuntimeTickIntegrityMode, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
+    NATIVE_VN_RUNTIME_ID,
 };
 use astra_vn_runtime_provider::{
-    compile_astra_project, AstraSource, NativeVnRuntimeProvider, PresentationCommand, StageCommand,
-    SystemPageKind, TimelineCommand, VnAudioCommand, VnAudioControlAction, VnPlayerCommand,
-    VnRunConfig, VnTimelineTask,
+    compile_astra_project, AstraSource, BacklogEntry, BacklogLayoutMetadata,
+    NativeVnRuntimeProvider, PresentationCommand, StageCommand, SystemPageKind, TimelineCommand,
+    VnAudioCommand, VnAudioControlAction, VnPlayerCommand, VnRunConfig, VnTimelineTask,
 };
 
 const STORY: &str = r#"
@@ -81,6 +82,8 @@ state load #@id state.system.load
                 profile: "classic".into(),
                 locale: "ja".into(),
                 seed: 3,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
                 package_hash: "sha256:fixture".into(),
                 sections: vec![],
             },
@@ -207,6 +210,8 @@ state start #@id state.start
                 profile: "classic".into(),
                 locale: "ja".into(),
                 seed: 1,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
                 package_hash: "sha256:fixture".into(),
                 sections: vec![],
             },
@@ -273,6 +278,8 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
                 profile: "classic".to_string(),
                 locale: "zh-Hans".to_string(),
                 seed: 7,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
                 package_hash: "sha256:fixture".to_string(),
                 sections: vec![],
             },
@@ -404,7 +411,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         .unwrap();
     assert_eq!(save.sections.len(), 1);
     assert_eq!(save.sections[0].section_id, "runtime.world");
-    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v2");
+    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v3");
     assert!(save.sections[0].validate_hash());
     assert!(!save.sections[0].bytes.is_empty());
     let saved_hash = provider.runtime_snapshot(&open.session_id).unwrap();
@@ -485,6 +492,8 @@ state prologue #@id state.prologue
                 profile: "classic".to_string(),
                 locale: "zh-Hans".to_string(),
                 seed: 9,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
                 package_hash: "sha256:fixture".to_string(),
                 sections: vec![],
             },
@@ -518,4 +527,139 @@ state prologue #@id state.prologue
                 )
             })
     }));
+}
+
+#[astra_headless_test::test]
+fn vn_runtime_hot_state_stays_bounded_through_one_hundred_thousand_dialogues() {
+    let compiled = compile_astra_project(
+        [AstraSource::story("long-route.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled,
+            VnRunConfig::classic("ja"),
+            RuntimeOpenRequest {
+                target_id: "headless".into(),
+                profile: "performance".into(),
+                locale: "ja".into(),
+                seed: 91,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
+                package_hash: "sha256:long-route".into(),
+                sections: vec![],
+            },
+        )
+        .unwrap();
+    let base = provider.save_slot(&open.session_id, "long-route").unwrap();
+    let mut maximum_hot_bytes = 0_usize;
+    let mut maximum_tail_bytes = 0_usize;
+    for count in [1_000_usize, 10_000, 100_000] {
+        let mut save = base.clone();
+        save.state.backlog = (0..count)
+            .map(|route_position| BacklogEntry {
+                command_id: "line.hello".into(),
+                key: "line.hello".into(),
+                speaker: Some("hero".into()),
+                voice: None,
+                story_id: "story.main".into(),
+                state_id: "state.prologue".into(),
+                route_position,
+                read: true,
+                layout: BacklogLayoutMetadata { window: None },
+            })
+            .collect();
+        save.state.read_state.insert("line.hello".into());
+        save.state_hash = Hash128::from_blake3(&postcard::to_allocvec(&save.state).unwrap());
+        provider.load_slot(&open.session_id, save).unwrap();
+        let metrics = provider.storage_metrics(&open.session_id).unwrap();
+        assert_eq!(metrics.backlog_count, count);
+        assert_eq!(
+            metrics.history_chunk_count,
+            count.div_ceil(64),
+            "full history must be represented by fixed-size immutable chunks"
+        );
+        maximum_hot_bytes = maximum_hot_bytes.max(metrics.hot_state_bytes);
+        maximum_tail_bytes = maximum_tail_bytes.max(metrics.tail_chunk_bytes);
+        assert!(metrics.hot_state_bytes <= 4_096);
+        assert!(metrics.tail_chunk_bytes <= 16_384);
+        assert_eq!(
+            provider.state(&open.session_id).unwrap().backlog.len(),
+            count
+        );
+    }
+    assert!(maximum_hot_bytes <= 4_096);
+    assert!(maximum_tail_bytes <= 16_384);
+}
+
+#[astra_headless_test::test]
+fn vn_provider_worker_counts_preserve_hashes_and_save_restore() {
+    let mut baseline = None;
+    for worker_count in [1_u8, 2, 4, 8] {
+        let compiled = compile_astra_project(
+            [AstraSource::story("parallel.astra", STORY)],
+            Default::default(),
+        )
+        .unwrap();
+        let mut provider = NativeVnRuntimeProvider::default();
+        let open = provider
+            .open_compiled_story(
+                compiled,
+                VnRunConfig::classic("ja"),
+                RuntimeOpenRequest {
+                    target_id: "headless".into(),
+                    profile: "evidence".into(),
+                    locale: "ja".into(),
+                    seed: 109,
+                    integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                    executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(worker_count),
+                    package_hash: "sha256:parallel".into(),
+                    sections: vec![],
+                },
+            )
+            .unwrap();
+        provider
+            .step(RuntimeStepInput {
+                session_id: open.session_id.clone(),
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                session_seed: 109,
+                mode: RuntimeStepMode::Live,
+                action: "launch_default".into(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+        let hashes = provider.runtime_hashes(&open.session_id).unwrap();
+        let save = provider
+            .save(astra_plugin_abi::RuntimeSaveRequest {
+                session_id: open.session_id.clone(),
+                slot: "slot.parallel".into(),
+            })
+            .unwrap();
+        provider
+            .step(RuntimeStepInput {
+                session_id: open.session_id.clone(),
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                session_seed: 109,
+                mode: RuntimeStepMode::Live,
+                action: "advance".into(),
+                payload: serde_json::json!({}),
+            })
+            .unwrap();
+        provider
+            .restore(astra_plugin_abi::RuntimeRestoreRequest {
+                session_id: open.session_id.clone(),
+                sections: save.sections,
+            })
+            .unwrap();
+        assert_eq!(provider.runtime_hashes(&open.session_id).unwrap(), hashes);
+        if let Some(expected) = baseline {
+            assert_eq!(hashes, expected);
+        } else {
+            baseline = Some(hashes);
+        }
+    }
 }

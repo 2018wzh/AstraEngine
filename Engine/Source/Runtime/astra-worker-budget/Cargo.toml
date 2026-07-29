@@ -1,0 +1,14 @@
+[package]
+name = "astra-worker-budget"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+
+[dev-dependencies]
+astra-headless-test = { path = "../../Developer/astra-headless-test" }
+
+[lib]
+doctest = false

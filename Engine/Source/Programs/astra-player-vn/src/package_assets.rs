@@ -213,6 +213,7 @@ impl PackageImagePrefetcher {
             let worker_store = Arc::clone(&store);
             let worker_commands = Arc::clone(&worker_commands);
             let worker_completions = worker_completions.clone();
+            let worker_budget = astra_plugin::WorkerBudgetBroker::global().clone();
             let worker = match thread::Builder::new()
                 .name(format!("astra-image-prefetch-{worker_index}"))
                 .spawn(move || loop {
@@ -222,10 +223,15 @@ impl PackageImagePrefetcher {
                         .recv();
                     match command {
                         Ok(ImagePrefetchCommand::Load(asset_id)) => {
-                            let result = worker_store
-                                .load_image(&asset_id)
-                                .map(|_| ())
-                                .map_err(|error| error.to_string());
+                            let result = worker_budget
+                                .run_scoped(|| {
+                                    worker_store
+                                        .load_image(&asset_id)
+                                        .map(|_| ())
+                                        .map_err(|error| error.to_string())
+                                })
+                                .map_err(|error| error.to_string())
+                                .and_then(|result| result);
                             if worker_completions
                                 .send(ImagePrefetchCompletion { asset_id, result })
                                 .is_err()
@@ -454,6 +460,32 @@ impl PackageAssetStore {
                     Some(CachedAsset::Image(_))
                 )
             })
+    }
+
+    pub fn release_uploaded_image(&self, asset_id: &str) -> Result<bool, NativeVnHostError> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_POISONED".into()))?;
+        let is_image = matches!(
+            cache.entries.get(asset_id).map(|entry| &entry.value),
+            Some(CachedAsset::Image(_))
+        );
+        if !is_image {
+            return Ok(false);
+        }
+        cache.pinned.remove(asset_id);
+        let removed = cache
+            .entries
+            .remove(asset_id)
+            .ok_or_else(|| NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_STATE".into()))?;
+        cache.bytes = cache
+            .bytes
+            .checked_sub(removed.value.bytes())
+            .ok_or_else(|| {
+                NativeVnHostError::Asset("ASTRA_PLAYER_ASSET_CACHE_BYTES_UNDERFLOW".into())
+            })?;
+        Ok(true)
     }
 
     pub fn pin_image_working_set(&self, asset_ids: &[String]) -> Result<(), NativeVnHostError> {

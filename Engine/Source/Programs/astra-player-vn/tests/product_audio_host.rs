@@ -91,76 +91,152 @@ async fn product_media_host_restores_uncommitted_timeline_tasks_after_capacity_f
 #[astra_headless_test::tokio_test]
 async fn product_media_host_presents_every_video_frame_and_restores_by_asset_identity() {
     let mut source = support::source_for_video(
-        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    stage viewport:320x180 safe_area:16:9 #@id stage.main\n    layer id:video kind:video z:100 blend:normal clip:stage #@id layer.video\n    movie layer:video asset:asset:/video/intro loop:true end:wait fence:movie.intro.end fallback:asset:/video/intro-fallback #@id movie.intro\n    text key:line.after #@id line.after\n",
+        "story main #@id story.main\nstate start #@id state.start\n  scene room #@id scene.room\n    stage viewport:320x180 safe_area:16:9 #@id stage.main\n    layer id:video kind:video z:100 blend:normal clip:stage #@id layer.video\n    movie layer:video asset:asset:/video/intro loop:true end:wait fence:movie.intro.end fallback:asset:/video/intro-fallback interrupt:reject #@id movie.intro\n    text key:line.after #@id line.after\n",
     );
     source.launch().unwrap();
     let first = vec![1, 2, 3, 255];
     let second = vec![4, 5, 6, 255];
-    let stream = astra_media::DecodedVideoStream {
-        schema: astra_media::DECODED_VIDEO_STREAM_SCHEMA.into(),
+    let frames = [
+        astra_media::DecodedVideoFrame {
+            sequence: 1,
+            pts_us: 0,
+            duration_us: 20_000,
+            width: 1,
+            height: 1,
+            content_hash: Hash256::from_sha256(&first),
+            bgra8: first,
+        },
+        astra_media::DecodedVideoFrame {
+            sequence: 2,
+            pts_us: 20_000,
+            duration_us: 20_000,
+            width: 1,
+            height: 1,
+            content_hash: Hash256::from_sha256(&second),
+            bgra8: second,
+        },
+    ];
+    let descriptor = astra_media::DecodedVideoStreamDescriptor {
+        schema: astra_media::DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.into(),
         duration_us: 40_000,
-        frames: vec![
-            astra_media::DecodedVideoFrame {
-                sequence: 1,
-                pts_us: 0,
-                duration_us: 20_000,
-                width: 1,
-                height: 1,
-                content_hash: Hash256::from_sha256(&first),
-                bgra8: first,
-            },
-            astra_media::DecodedVideoFrame {
-                sequence: 2,
-                pts_us: 20_000,
-                duration_us: 20_000,
-                width: 1,
-                height: 1,
-                content_hash: Hash256::from_sha256(&second),
-                bgra8: second,
-            },
-        ],
+        frame_count: 2,
+        decoded_byte_count: 8,
+        stream_hash: Hash256::from_sha256(b"product-video-stream"),
     };
-    let encoded = stream.encode(2, 1_024).unwrap();
+    let encoded_descriptor = descriptor.encode(2, 1_024).unwrap();
+    let encoded_frames = [
+        frames[0].encode(1_024).unwrap(),
+        frames[1].encode(1_024).unwrap(),
+    ];
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
     let decode = DecodeSessionHandle::from_parts(9, 1).unwrap();
     let surface = SurfaceHandle::from_parts(7, 1).unwrap();
     let backend_task = tokio::spawn(async move {
-        for expected_cycle in 0..2 {
-            match backend.next_command().await.unwrap() {
-                HostCommand::OpenDecode { kind, reply } => {
-                    assert_eq!(kind, DecodeKind::Video);
-                    reply.send(Ok(decode)).unwrap();
-                }
-                command => panic!("unexpected command: {}", command.operation()),
+        for cycle in 0..2 {
+            let HostCommand::OpenDecode { kind, reply } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected decode open for cycle {cycle}");
+            };
+            assert_eq!(kind, DecodeKind::Video);
+            reply.send(Ok(decode)).unwrap();
+
+            let HostCommand::Decode { request, reply, .. } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected stream start for cycle {cycle}");
+            };
+            assert_eq!(
+                request.stream_action,
+                astra_platform::DecodeStreamAction::Start
+            );
+            reply
+                .send(Ok(DecodeOutput::CpuBuffer {
+                    format: "postcard:astra.decoded_video_stream_descriptor.v2".into(),
+                    hash: Hash256::from_sha256(&encoded_descriptor).to_string(),
+                    bytes: encoded_descriptor.clone(),
+                }))
+                .unwrap();
+
+            let HostCommand::Decode { request, reply, .. } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected first frame for cycle {cycle}");
+            };
+            assert_eq!(
+                request.stream_action,
+                astra_platform::DecodeStreamAction::Next
+            );
+            reply
+                .send(Ok(DecodeOutput::CpuBuffer {
+                    format: "postcard:astra.decoded_video_frame.v2".into(),
+                    hash: Hash256::from_sha256(&encoded_frames[0]).to_string(),
+                    bytes: encoded_frames[0].clone(),
+                }))
+                .unwrap();
+
+            if cycle == 0 {
+                let HostCommand::PresentScene { frame, reply, .. } =
+                    backend.next_command().await.unwrap()
+                else {
+                    panic!("expected first frame presentation");
+                };
+                assert!(!frame.commands.is_empty());
+                reply.send(Ok(())).unwrap();
             }
-            match backend.next_command().await.unwrap() {
-                HostCommand::Decode { request, reply, .. } => {
-                    assert_eq!(request.kind, DecodeKind::Video);
-                    reply
-                        .send(Ok(DecodeOutput::CpuBuffer {
-                            format: "postcard:astra.decoded_video_stream.v1".into(),
-                            hash: Hash256::from_sha256(&encoded).to_string(),
-                            bytes: encoded.clone(),
-                        }))
-                        .unwrap();
-                }
-                command => panic!("unexpected command: {}", command.operation()),
+
+            let HostCommand::Decode { request, reply, .. } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected second frame for cycle {cycle}");
+            };
+            assert_eq!(
+                request.stream_action,
+                astra_platform::DecodeStreamAction::Next
+            );
+            reply
+                .send(Ok(DecodeOutput::CpuBuffer {
+                    format: "postcard:astra.decoded_video_frame.v2".into(),
+                    hash: Hash256::from_sha256(&encoded_frames[1]).to_string(),
+                    bytes: encoded_frames[1].clone(),
+                }))
+                .unwrap();
+
+            if cycle == 1 {
+                let HostCommand::PresentScene { frame, reply, .. } =
+                    backend.next_command().await.unwrap()
+                else {
+                    panic!("expected restored second frame presentation");
+                };
+                assert!(!frame.commands.is_empty());
+                reply.send(Ok(())).unwrap();
+                let end = astra_media::DecodedVideoStreamEnd {
+                    schema: astra_media::DECODED_VIDEO_STREAM_END_SCHEMA.into(),
+                    frame_count: descriptor.frame_count,
+                    decoded_byte_count: descriptor.decoded_byte_count,
+                    stream_hash: descriptor.stream_hash,
+                };
+                let bytes = postcard::to_allocvec(&end).unwrap();
+                let HostCommand::Decode { request, reply, .. } =
+                    backend.next_command().await.unwrap()
+                else {
+                    panic!("expected restored stream end");
+                };
+                assert_eq!(
+                    request.stream_action,
+                    astra_platform::DecodeStreamAction::Next
+                );
+                reply
+                    .send(Ok(DecodeOutput::CpuBuffer {
+                        format: "postcard:astra.decoded_video_stream_end.v2".into(),
+                        hash: Hash256::from_sha256(&bytes).to_string(),
+                        bytes,
+                    }))
+                    .unwrap();
             }
-            match backend.next_command().await.unwrap() {
-                HostCommand::CloseDecode { reply, .. } => reply.send(Ok(())).unwrap(),
-                command => panic!("unexpected command: {}", command.operation()),
-            }
-            match backend.next_command().await.unwrap() {
-                HostCommand::PresentScene { frame, reply, .. } => {
-                    assert!(!frame.commands.is_empty());
-                    reply.send(Ok(())).unwrap();
-                }
-                command => panic!(
-                    "unexpected command in video cycle {expected_cycle}: {}",
-                    command.operation()
-                ),
-            }
+
+            let HostCommand::CloseDecode { reply, .. } = backend.next_command().await.unwrap()
+            else {
+                panic!("expected decode close for cycle {cycle}");
+            };
+            reply.send(Ok(())).unwrap();
         }
         match backend.next_command().await.unwrap() {
             HostCommand::PresentScene { frame, reply, .. } => {
@@ -180,6 +256,7 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
         .unwrap();
     assert!(media.is_active());
     let snapshot = media.snapshot();
+    media.shutdown(&mut source, &mut executor).await.unwrap();
     let mut restored = NativeVnProductMediaHost::default();
     restored.restore(snapshot).unwrap();
     restored
@@ -187,7 +264,7 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
         .await
         .unwrap();
     assert!(restored.has_active_video());
-    assert!(restored.skip_active_videos(&mut source));
+    assert!(restored.skip_active_videos(&mut source).unwrap());
     restored
         .poll_and_process(&mut source, &mut executor, 21)
         .await

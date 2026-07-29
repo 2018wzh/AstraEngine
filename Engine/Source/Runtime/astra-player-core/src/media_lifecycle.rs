@@ -41,92 +41,99 @@ where
     S: PlayerHostCommandSink,
     S::Error: std::fmt::Display,
 {
-    pub async fn execute_decode_lifecycle(
+    pub async fn execute_decode_open(
         &mut self,
-        plan: PlayerDecodeLifecyclePlan,
-    ) -> Result<PlayerDecodedBuffer, PlayerMediaLifecycleError> {
-        let open = self.execute_batch(plan.open).await.map_err(|error| {
+        session: PlayerHostResourceId,
+        open: PlayerHostCommandBatch,
+    ) -> Result<(), PlayerMediaLifecycleError> {
+        let results = self.execute_batch(open).await.map_err(|error| {
             PlayerMediaLifecycleError::new("ASTRA_PLAYER_DECODE_OPEN", error.to_string())
         })?;
         if !matches!(
-            open.as_slice(),
-            [PlayerHostCommandResult::DecodeOpened { session }] if *session == plan.session
+            results.as_slice(),
+            [PlayerHostCommandResult::DecodeOpened { session: opened }] if *opened == session
         ) {
-            return Err(self
-                .cleanup_decode(
-                    plan.close,
-                    plan.session,
-                    PlayerMediaLifecycleError::new(
-                        "ASTRA_PLAYER_DECODE_OPEN_RESULT",
-                        "decode open returned an invalid logical resource",
-                    ),
-                )
-                .await);
+            return Err(PlayerMediaLifecycleError::new(
+                "ASTRA_PLAYER_DECODE_OPEN_RESULT",
+                "decode open returned an invalid logical resource",
+            ));
         }
-        let decoded = match self.execute_batch(plan.decode).await {
-            Ok(results) => match results.as_slice() {
-                [PlayerHostCommandResult::Decoded {
-                    session,
-                    format,
-                    hash,
-                    bytes,
-                }] if *session == plan.session => {
-                    if Hash256::from_sha256(bytes).to_string() != *hash {
-                        return Err(self
-                            .cleanup_decode(
-                                plan.close,
-                                plan.session,
-                                PlayerMediaLifecycleError::new(
-                                    "ASTRA_PLAYER_DECODE_HASH",
-                                    "decoded buffer hash does not match its bytes",
-                                ),
-                            )
-                            .await);
-                    }
-                    PlayerDecodedBuffer {
-                        format: format.clone(),
-                        hash: hash.clone(),
-                        bytes: bytes.clone(),
-                    }
-                }
-                _ => {
-                    return Err(self
-                        .cleanup_decode(
-                            plan.close,
-                            plan.session,
-                            PlayerMediaLifecycleError::new(
-                                "ASTRA_PLAYER_DECODE_RESULT",
-                                "decode submit returned an invalid result",
-                            ),
-                        )
-                        .await);
-                }
-            },
-            Err(error) => {
-                return Err(self
-                    .cleanup_decode(
-                        plan.close,
-                        plan.session,
-                        PlayerMediaLifecycleError::new(
-                            "ASTRA_PLAYER_DECODE_SUBMIT",
-                            error.to_string(),
-                        ),
-                    )
-                    .await);
-            }
+        Ok(())
+    }
+
+    pub async fn execute_decode_submit(
+        &mut self,
+        session: PlayerHostResourceId,
+        decode: PlayerHostCommandBatch,
+    ) -> Result<PlayerDecodedBuffer, PlayerMediaLifecycleError> {
+        let results = self.execute_batch(decode).await.map_err(|error| {
+            PlayerMediaLifecycleError::new("ASTRA_PLAYER_DECODE_SUBMIT", error.to_string())
+        })?;
+        let [PlayerHostCommandResult::Decoded {
+            session: decoded_session,
+            format,
+            hash,
+            bytes,
+        }] = results.as_slice()
+        else {
+            return Err(PlayerMediaLifecycleError::new(
+                "ASTRA_PLAYER_DECODE_RESULT",
+                "decode submit returned an invalid result",
+            ));
         };
-        let close = self.execute_batch(plan.close).await.map_err(|error| {
+        if *decoded_session != session {
+            return Err(PlayerMediaLifecycleError::new(
+                "ASTRA_PLAYER_DECODE_RESULT",
+                "decode submit returned the wrong logical resource",
+            ));
+        }
+        if Hash256::from_sha256(bytes).to_string() != *hash {
+            return Err(PlayerMediaLifecycleError::new(
+                "ASTRA_PLAYER_DECODE_HASH",
+                "decoded buffer hash does not match its bytes",
+            ));
+        }
+        Ok(PlayerDecodedBuffer {
+            format: format.clone(),
+            hash: hash.clone(),
+            bytes: bytes.clone(),
+        })
+    }
+
+    pub async fn execute_decode_close(
+        &mut self,
+        session: PlayerHostResourceId,
+        close: PlayerHostCommandBatch,
+    ) -> Result<(), PlayerMediaLifecycleError> {
+        let results = self.execute_batch(close).await.map_err(|error| {
             PlayerMediaLifecycleError::new("ASTRA_PLAYER_DECODE_CLOSE", error.to_string())
         })?;
         if !matches!(
-            close.as_slice(),
-            [PlayerHostCommandResult::DecodeClosed { session }] if *session == plan.session
+            results.as_slice(),
+            [PlayerHostCommandResult::DecodeClosed { session: closed }] if *closed == session
         ) {
             return Err(PlayerMediaLifecycleError::new(
                 "ASTRA_PLAYER_DECODE_CLOSE_RESULT",
                 "decode close returned an invalid logical resource",
             ));
         }
+        Ok(())
+    }
+
+    pub async fn execute_decode_lifecycle(
+        &mut self,
+        plan: PlayerDecodeLifecyclePlan,
+    ) -> Result<PlayerDecodedBuffer, PlayerMediaLifecycleError> {
+        if let Err(error) = self.execute_decode_open(plan.session, plan.open).await {
+            return Err(self.cleanup_decode(plan.close, plan.session, error).await);
+        }
+        let decoded = match self.execute_decode_submit(plan.session, plan.decode).await {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                return Err(self.cleanup_decode(plan.close, plan.session, error).await);
+            }
+        };
+        self.execute_decode_close(plan.session, plan.close).await?;
         Ok(decoded)
     }
 

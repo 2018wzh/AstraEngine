@@ -180,6 +180,13 @@ pub enum DecodeKind {
     Video,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeStreamAction {
+    OneShot,
+    Start,
+    Next,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformDecodeRequest {
     pub sequence: u64,
@@ -191,6 +198,7 @@ pub struct PlatformDecodeRequest {
     pub coded_width: Option<u32>,
     pub coded_height: Option<u32>,
     pub keyframe: bool,
+    pub stream_action: DecodeStreamAction,
     pub bytes: Vec<u8>,
 }
 
@@ -1040,11 +1048,17 @@ impl PlatformHostClient {
         session: DecodeSessionHandle,
         request: PlatformDecodeRequest,
     ) -> Result<DecodeOutput, PlatformError> {
-        if request.sequence == 0
-            || request.codec.is_empty()
-            || request.bytes.is_empty()
-            || request.bytes.len() > self.profile.limits().max_frame_bytes
-        {
+        let payload_invalid = match request.stream_action {
+            DecodeStreamAction::OneShot | DecodeStreamAction::Start => {
+                request.codec.is_empty()
+                    || request.bytes.is_empty()
+                    || request.bytes.len() > self.profile.limits().max_frame_bytes
+            }
+            DecodeStreamAction::Next => {
+                request.kind != DecodeKind::Video || !request.bytes.is_empty()
+            }
+        };
+        if request.sequence == 0 || payload_invalid {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
                 "decode.submit",

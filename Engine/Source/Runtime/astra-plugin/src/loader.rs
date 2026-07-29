@@ -164,7 +164,7 @@ impl PluginLoader {
             .actions
             .into_iter()
             .map(LoadedFfiAction::from_registration)
-            .collect();
+            .collect::<Result<_, _>>()?;
         info!(
             plugin_id = %descriptor.id,
             provider_count = registered_providers.len(),

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use astra_ui_core::{UiValidationError, UiValue, ValidateUi};
-use astra_vn_script::{CompiledStory, SkipMode, SystemPageKind, VnRuntimeState, VnWaitKind};
+use astra_vn_script::{
+    CompiledStory, SkipMode, SystemPageKind, VnRuntimeState, VnTextRevealState, VnWaitKind,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -237,6 +239,7 @@ impl SystemPageViewModel {
 
 pub struct VnUiModelContext<'a> {
     pub runtime: &'a VnRuntimeState,
+    pub text_reveal: Option<&'a VnTextRevealState>,
     pub story: &'a CompiledStory,
     pub save_slots: &'a [SaveSlotViewModel],
     pub localization_keys: &'a [String],
@@ -260,17 +263,14 @@ impl VnUiModelContext<'_> {
             auto_enabled: self.runtime.system.auto_enabled,
             skip_mode: self.runtime.system.skip_mode,
             visible_graphemes: self
-                .runtime
                 .text_reveal
                 .as_ref()
                 .map_or(u32::MAX, |reveal| reveal.visible_graphemes),
             text_graphemes: self
-                .runtime
                 .text_reveal
                 .as_ref()
                 .map_or(0, |reveal| reveal.text_graphemes),
             reveal_complete: self
-                .runtime
                 .text_reveal
                 .as_ref()
                 .is_none_or(|reveal| reveal.complete()),

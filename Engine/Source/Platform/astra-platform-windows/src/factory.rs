@@ -1673,6 +1673,7 @@ mod windows {
             let capability = self.provider.capability();
             if request.sequence != self.next_sequence
                 || request.kind != self.kind
+                || request.stream_action != astra_platform::DecodeStreamAction::OneShot
                 || request.bytes.is_empty()
                 || !capability
                     .codecs

@@ -382,6 +382,19 @@ struct PreparedTextLayout {
 }
 
 impl TextRenderResourceOwner {
+    /// Invalidates renderer-owned glyph residency after a device loss.
+    ///
+    /// Logical layout results remain owned by the caller and will be submitted
+    /// again on the next frame. Clearing both maps is required because cached
+    /// draw commands are only valid while their glyph resources remain live.
+    pub fn invalidate_device_resources(&mut self) -> usize {
+        let resource_count = self.resources.len();
+        self.layouts.clear();
+        self.resources.clear();
+        self.usage_sequence = 0;
+        resource_count
+    }
+
     /// Creates a resource owner that keeps unreferenced, content-addressed glyphs
     /// in a deterministic bounded LRU. This is intended for product hosts where
     /// dialogue and system pages repeatedly reuse the same packaged fonts.

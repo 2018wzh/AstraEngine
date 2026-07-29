@@ -110,6 +110,14 @@ pub enum PlayerDecodeKind {
     Video,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerDecodeStreamAction {
+    OneShot,
+    Start,
+    Next,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PlayerHostCommand {
@@ -203,6 +211,8 @@ pub enum PlayerHostCommand {
         coded_width: Option<u32>,
         coded_height: Option<u32>,
         keyframe: bool,
+        #[serde(default = "default_decode_stream_action")]
+        stream_action: PlayerDecodeStreamAction,
         bytes: Vec<u8>,
     },
     CloseDecode {
@@ -229,6 +239,10 @@ pub enum PlayerHostCommand {
         sequence: u64,
         surface: PlayerHostResourceId,
     },
+}
+
+fn default_decode_stream_action() -> PlayerDecodeStreamAction {
+    PlayerDecodeStreamAction::OneShot
 }
 
 impl PlayerHostCommand {

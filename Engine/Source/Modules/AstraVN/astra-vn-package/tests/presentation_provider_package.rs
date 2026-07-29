@@ -8,7 +8,7 @@ use astra_vn_script::{compile_astra_project, AstraSource};
 fn compiled_story() -> astra_vn_script::CompiledVnProject {
     compile_astra_project([AstraSource::story(
         "story.astra",
-        "story main\nstate start\n  scene room\n    background asset:asset:/bg layer:bg preset:soft_fade duration:300\n",
+        "story main\nstate start\n  scene room\n    background asset:asset:/bg layer:bg preset:soft_fade duration:300 interrupt:replace_from_current\n",
     )], Default::default())
     .unwrap()
 }

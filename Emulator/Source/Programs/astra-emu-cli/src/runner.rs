@@ -37,7 +37,7 @@ use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeOpenRequest, RuntimeOutputDomain,
     RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSectionCodec, RuntimeSectionPayload,
-    RuntimeStepInput, RuntimeStepMode,
+    RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
 };
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use schemars::JsonSchema;
@@ -223,6 +223,8 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         profile: "fvp-v1".into(),
         locale: "und".into(),
         seed,
+        integrity_mode: RuntimeTickIntegrityMode::Evidence,
+        executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
         package_hash: case.content_hash.clone(),
         sections: vec![section],
     })?;
@@ -428,6 +430,8 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV1,
         profile: "fvp-v1".into(),
         locale: "und".into(),
         seed,
+        integrity_mode: RuntimeTickIntegrityMode::Evidence,
+        executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
         package_hash: case.content_hash.clone(),
         sections: vec![section],
     })?;
@@ -1854,6 +1858,7 @@ impl<'a> RuntimeDriver<'a> {
                             coded_width: None,
                             coded_height: None,
                             keyframe: true,
+                            stream_action: astra_platform::DecodeStreamAction::OneShot,
                             bytes,
                         },
                     )

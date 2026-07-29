@@ -39,7 +39,7 @@ impl RuntimeWorld {
 
 `ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。Player input、Await completion、live provider output 和 recorded provider output 只能通过 non-zero、strictly increasing 的 `OrderedTickIngress` 在同一个 `TickRequest` 中提交。load 后第一步必须使用一次 `RestoreContinuation`，replay 只能使用 `Replay` 并拒绝 live output；live tick 拒绝 recorded output。重复、回退、跳步、非法 delta、seed mismatch、mode mismatch、ingress 乱序、缺少 required module 或任一 ingress 校验失败都返回稳定 blocking diagnostic，并恢复完整 tick 前状态。
 
-`runtime.world` 当前二进制 schema 为 `2.0.0`。旧布局和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；本阶段不提供隐藏兼容 adapter。
+`runtime.world` 当前二进制 schema 为 `3.0.0`，外层产品 section 为 `astra.runtime.save_blob.v3`。v2 及更早布局、旧 replay transcript 和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；不提供隐藏兼容 adapter。
 
 字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Runtime Execution](../implementation/runtime-execution.md) 和 [StateMachine Action Provider](../implementation/state-machine-action-provider.md)。
 
@@ -85,9 +85,17 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 - 状态机定义分双轨：引擎系统用 Rust code-first；项目 gameplay/VN 可以用 YAML/Graph 定义并 Cook 成 IR。
 - Save 保存 `StableIdGenerator`、Actor/Component payload、StateMachine、Blackboard、AwaitQueue、完整 EventQueue、DelayedEventQueue、MutationLog 和序列化 effect trace，不保存 ECS entity、native handle 或 Future 内部状态。
 
+### Action ABI v2 与并行执行
+
+每个 action 必须提交 `ActionDescriptor`，声明 `ActionExecutionClass`、确定性 read/write set 和 `stable_id_reservation`。空声明、动态访问、实际访问越权、pure action 写入、StableId 预留不足都会 fail closed。`RuntimeExecutorConfig` 只允许 `serial(1)` 或 `parallel(1..=8)`；Windows 与 Headless 产品入口显式选择 parallel，其他平台可选择 serial，但数据、save 和 hash 语义保持一致。
+
+StateMachine scheduler 先按稳定 machine id 构建 conflict DAG wave。wave 内任务只读同一不可变 Actor/Blackboard/event snapshot，分别生成 `ActorStoreDelta`、`BlackboardDelta` 和有序 effect；提交固定按 `(machine_id, microstep, action_index)` 验证。无法证明无冲突的 action 不会静默重试或降级，而是在注册或执行边界返回 blocking diagnostic。
+
+Runtime 外层 tick 使用 inverse journal：Actor、Blackboard、Event、Await 和 DelayedEvent 只记录本 tick 的增删改，失败时逆向恢复；不再为每台 machine 克隆完整 store。Actor 与 Blackboard fingerprint 缓存在 mutation 边界失效，历史 event/presentation/mutation/effect 使用增量 hash chain。Shipping 的 `TickIntegrityMode::Shipping` 不计算 aggregate state/event/presentation hash，也拒绝 replay recording；Headless、测试与 evidence profile 使用 `Evidence` 并保留完整 hash/replay。
+
 ## Replay Transcript
 
-`RuntimeReplayTranscript` 当前 schema 为 `astra.runtime_replay_transcript.v2`，从一个完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 保存 mode 为 `Replay` 的完整 `TickRequest` 和 hash checkpoint。Recorded provider output 携带原始 payload/hash、RuntimeEvent、PresentationCommand、AwaitToken 和 `SerializedEffectEnvelope`；Runtime 校验 descriptor、tick、payload hash 和 effect hash 后再原子应用，不加载或调用 live provider。schema、mode、output 或 checkpoint hash 任一失败时，整个 replay 恢复调用前 world，不能留下已执行的前缀 tick。
+`RuntimeReplayTranscript` 当前 schema 为 `astra.runtime_replay_transcript.v3`，从一个完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 保存 mode 为 `Replay` 的完整 `TickRequest` 和 hash checkpoint。Recorded provider output 携带原始 payload/hash、RuntimeEvent、PresentationCommand、AwaitToken 和 `SerializedEffectEnvelope`；Runtime 校验 descriptor、tick、payload hash 和 effect hash 后再原子应用，不加载或调用 live provider。schema、mode、output 或 checkpoint hash 任一失败时，整个 replay 恢复调用前 world，不能留下已执行的前缀 tick。
 
 `AwaitReplayPolicy::RecordedResult` 只接受 transcript 或 host 提交的记录结果，不能声明 deterministic timeout。`AwaitReplayPolicy::DeterministicTimeout` 必须声明合法 timeout step，并拒绝外部 completion result。
 

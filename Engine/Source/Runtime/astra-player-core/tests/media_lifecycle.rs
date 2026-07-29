@@ -98,6 +98,7 @@ fn decode_plan() -> PlayerDecodeLifecyclePlan {
             coded_width: None,
             coded_height: None,
             keyframe: true,
+            stream_action: astra_player_core::PlayerDecodeStreamAction::OneShot,
             bytes: vec![1],
         }),
         close: batch(PlayerHostCommand::CloseDecode {

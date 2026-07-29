@@ -1,3 +1,5 @@
+#[cfg(feature = "ffmpeg-vcpkg")]
+use std::io::{Read, Seek, SeekFrom};
 use std::{
     collections::VecDeque,
     fmt::Debug,
@@ -14,7 +16,9 @@ use astra_media::{
 };
 #[cfg(feature = "ffmpeg-vcpkg")]
 use astra_media::{
-    DecodedVideoFrame, DecodedVideoStream, FfmpegDecodedPacket, DECODED_VIDEO_STREAM_SCHEMA,
+    DecodedVideoFrame, DecodedVideoStream, DecodedVideoStreamDescriptor, DecodedVideoStreamEnd,
+    FfmpegDecodedPacket, DECODED_VIDEO_FRAME_SCHEMA, DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA,
+    DECODED_VIDEO_STREAM_END_SCHEMA, DECODED_VIDEO_STREAM_SCHEMA,
 };
 use astra_media_core::{
     CpuRendererProvider, HeadlessRenderer, MediaError, RenderTargetFormat, Renderer2DProvider,
@@ -355,6 +359,29 @@ struct AudioState {
 }
 struct DecodeState {
     kind: DecodeKind,
+    last_sequence: u64,
+    #[cfg(feature = "ffmpeg-vcpkg")]
+    video_spool: Option<HeadlessVideoSpool>,
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+struct HeadlessVideoFrameIndex {
+    offset: u64,
+    byte_len: u64,
+    sequence: u64,
+    pts_us: u64,
+    duration_us: u64,
+    width: u32,
+    height: u32,
+    content_hash: astra_core::Hash256,
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+struct HeadlessVideoSpool {
+    file: tempfile::NamedTempFile,
+    frames: Vec<HeadlessVideoFrameIndex>,
+    cursor: usize,
+    descriptor: DecodedVideoStreamDescriptor,
 }
 enum PackageState {
     File(FilePackageSource),
@@ -1081,7 +1108,12 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::OpenDecode { kind, reply } => {
-                let result = self.decoders.insert(DecodeState { kind });
+                let result = self.decoders.insert(DecodeState {
+                    kind,
+                    last_sequence: 0,
+                    #[cfg(feature = "ffmpeg-vcpkg")]
+                    video_spool: None,
+                });
                 let _ = reply.send(result);
             }
             HostCommand::Decode {
@@ -1089,9 +1121,9 @@ impl HostState {
                 request,
                 reply,
             } => {
-                let result = self.decoders.get(session).and_then(|state| {
-                    decode(
-                        state.kind,
+                let result = self.decoders.get_mut(session).and_then(|state| {
+                    decode_session(
+                        state,
                         request,
                         &self.profile.providers.video_decode,
                         self.profile.max_video_frames,
@@ -1101,7 +1133,18 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::CloseDecode { session, reply } => {
-                let result = self.decoders.remove(session).map(|_| ());
+                let result = self.decoders.remove(session).map(|state| {
+                    #[cfg(feature = "ffmpeg-vcpkg")]
+                    let had_video_spool = state.video_spool.is_some();
+                    #[cfg(not(feature = "ffmpeg-vcpkg"))]
+                    let had_video_spool = false;
+                    tracing::info!(
+                        event = "platform.headless.decode.session.closed",
+                        kind = ?state.kind,
+                        had_video_spool,
+                        "closed Headless decode session and released private resources"
+                    );
+                });
                 let _ = reply.send(result);
             }
             HostCommand::BeginSave { slot, reply } => {
@@ -1364,6 +1407,120 @@ fn consume_audio_callback(audio: &mut AudioState) {
     audio.consumed = audio.consumed.saturating_add(samples as u64);
 }
 
+fn decode_session(
+    state: &mut DecodeState,
+    request: astra_platform::PlatformDecodeRequest,
+    video_binding: &str,
+    max_video_frames: u64,
+    max_decode_output_bytes: u64,
+) -> Result<DecodeOutput, PlatformError> {
+    if request.sequence == 0 || request.sequence <= state.last_sequence {
+        return Err(invalid(
+            "decode.submit",
+            "decode request sequence must be strictly increasing within a session",
+        ));
+    }
+    if state.kind != request.kind {
+        return Err(invalid(
+            "decode.submit",
+            "decode request kind does not match session",
+        ));
+    }
+    let sequence = request.sequence;
+    let action = request.stream_action;
+    let output = match action {
+        astra_platform::DecodeStreamAction::OneShot => {
+            if request.bytes.is_empty() {
+                return Err(invalid(
+                    "decode.submit",
+                    "one-shot decode requires non-empty encoded bytes",
+                ));
+            }
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            if state.video_spool.is_some() {
+                return Err(invalid(
+                    "decode.submit",
+                    "one-shot decode is invalid while a video stream is active",
+                ));
+            }
+            decode(
+                state.kind,
+                request,
+                video_binding,
+                max_video_frames,
+                max_decode_output_bytes,
+            )
+        }
+        astra_platform::DecodeStreamAction::Start => {
+            if state.kind != DecodeKind::Video || request.bytes.is_empty() {
+                return Err(invalid(
+                    "decode.video.stream.start",
+                    "video stream start requires a video session and encoded bytes",
+                ));
+            }
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            {
+                if state.video_spool.is_some() {
+                    return Err(invalid(
+                        "decode.video.stream.start",
+                        "video stream is already active",
+                    ));
+                }
+                let spool = build_video_spool(
+                    &request.codec,
+                    &request.bytes,
+                    video_binding,
+                    max_video_frames,
+                    max_decode_output_bytes,
+                )?;
+                let bytes = spool
+                    .descriptor
+                    .encode(max_video_frames, max_decode_output_bytes)
+                    .map_err(media_error)?;
+                let output = DecodeOutput::CpuBuffer {
+                    format: format!("postcard:{DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA}"),
+                    hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
+                    bytes,
+                };
+                state.video_spool = Some(spool);
+                Ok(output)
+            }
+            #[cfg(not(feature = "ffmpeg-vcpkg"))]
+            {
+                let _ = (video_binding, max_video_frames, max_decode_output_bytes);
+                Err(PlatformError::new(
+                    PlatformErrorCode::ProviderUnavailable,
+                    "decode.video.stream.start",
+                    "video streaming requires an explicitly compiled ffmpeg-vcpkg provider",
+                ))
+            }
+        }
+        astra_platform::DecodeStreamAction::Next => {
+            if state.kind != DecodeKind::Video || !request.bytes.is_empty() {
+                return Err(invalid(
+                    "decode.video.stream.next",
+                    "video stream next requires a video session and empty bytes",
+                ));
+            }
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            {
+                next_video_spool_output(state, max_decode_output_bytes)
+            }
+            #[cfg(not(feature = "ffmpeg-vcpkg"))]
+            {
+                let _ = max_decode_output_bytes;
+                Err(PlatformError::new(
+                    PlatformErrorCode::ProviderUnavailable,
+                    "decode.video.stream.next",
+                    "video streaming requires an explicitly compiled ffmpeg-vcpkg provider",
+                ))
+            }
+        }
+    }?;
+    state.last_sequence = sequence;
+    Ok(output)
+}
+
 fn decode(
     kind: DecodeKind,
     request: astra_platform::PlatformDecodeRequest,
@@ -1414,6 +1571,259 @@ fn decode(
             "headless decode cannot return a native media token",
         )),
     }
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+fn build_video_spool(
+    codec: &str,
+    encoded: &[u8],
+    video_binding: &str,
+    max_video_frames: u64,
+    max_decode_output_bytes: u64,
+) -> Result<HeadlessVideoSpool, PlatformError> {
+    if video_binding != "ffmpeg-vcpkg" {
+        return Err(PlatformError::new(
+            PlatformErrorCode::ProviderUnavailable,
+            "decode.video.stream.start",
+            "video decode requires the explicit ffmpeg-vcpkg profile binding",
+        ));
+    }
+    astra_media::probe_ffmpeg_provider().map_err(media_error)?;
+    let frame_limit = usize::try_from(max_video_frames).map_err(|_| {
+        invalid(
+            "decode.video.stream.start",
+            "video frame limit exceeds the current host address space",
+        )
+    })?;
+    let frame_byte_limit = usize::try_from(max_decode_output_bytes).map_err(|_| {
+        invalid(
+            "decode.video.stream.start",
+            "video byte limit exceeds the current host address space",
+        )
+    })?;
+    let limits = astra_media::FfmpegStreamLimits {
+        max_encoded_bytes: encoded.len(),
+        max_video_frames: frame_limit,
+        max_video_frame_bytes: frame_byte_limit,
+        ..astra_media::FfmpegStreamLimits::default()
+    };
+    let mut decoder =
+        astra_media::FfmpegPlaybackDecoder::open(codec, encoded, limits).map_err(media_error)?;
+    let duration_us = decoder.playback_config().duration_us;
+    let mut file = tempfile::NamedTempFile::new().map_err(|error| {
+        PlatformError::new(
+            PlatformErrorCode::Io,
+            "decode.video.stream.spool",
+            format!("could not create private video spool: {error}"),
+        )
+    })?;
+    let mut frames = Vec::new();
+    let mut decoded_byte_count = 0_u64;
+    let mut previous_sequence = 0_u64;
+    let mut previous_pts = None;
+    let mut digest = Sha256::new();
+    digest.update(DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.as_bytes());
+    digest.update(duration_us.to_le_bytes());
+    while let Some(packet) = decoder.read_next().map_err(media_error)? {
+        let FfmpegDecodedPacket::Video { packet, bgra8 } = packet else {
+            continue;
+        };
+        let byte_len = bgra8.len() as u64;
+        let expected_byte_len = u64::from(packet.width)
+            .checked_mul(u64::from(packet.height))
+            .and_then(|pixels| pixels.checked_mul(4));
+        if packet.sequence != previous_sequence.saturating_add(1)
+            || packet.duration_us == 0
+            || packet.width == 0
+            || packet.height == 0
+            || expected_byte_len != Some(byte_len)
+            || packet.pts_us >= duration_us
+            || packet
+                .pts_us
+                .checked_add(packet.duration_us)
+                .is_none_or(|end| end > duration_us)
+            || previous_pts.is_some_and(|pts| packet.pts_us < pts)
+        {
+            return Err(invalid(
+                "decode.video.stream.start",
+                "decoded video frame order, timing, or dimensions are invalid",
+            ));
+        }
+        decoded_byte_count = decoded_byte_count.checked_add(byte_len).ok_or_else(|| {
+            invalid(
+                "decode.video.stream.start",
+                "decoded video byte accounting overflowed",
+            )
+        })?;
+        if frames.len() >= frame_limit || decoded_byte_count > max_decode_output_bytes {
+            return Err(PlatformError::new(
+                PlatformErrorCode::QueueOverflow,
+                "decode.video.stream.start",
+                "decoded video exceeds its profile-bound frame or byte limit",
+            ));
+        }
+        if astra_core::Hash256::from_sha256(&bgra8) != packet.content_hash {
+            return Err(invalid(
+                "decode.video.stream.start",
+                "decoder frame content hash does not match its bytes",
+            ));
+        }
+        let offset = file.as_file().stream_position().map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::Io,
+                "decode.video.stream.spool",
+                format!("could not query private video spool position: {error}"),
+            )
+        })?;
+        file.write_all(&bgra8).map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::Io,
+                "decode.video.stream.spool",
+                format!("could not write private video spool: {error}"),
+            )
+        })?;
+        digest.update(packet.sequence.to_le_bytes());
+        digest.update(packet.pts_us.to_le_bytes());
+        digest.update(packet.duration_us.to_le_bytes());
+        digest.update(packet.width.to_le_bytes());
+        digest.update(packet.height.to_le_bytes());
+        digest.update(packet.content_hash.as_bytes());
+        frames.push(HeadlessVideoFrameIndex {
+            offset,
+            byte_len,
+            sequence: packet.sequence,
+            pts_us: packet.pts_us,
+            duration_us: packet.duration_us,
+            width: packet.width,
+            height: packet.height,
+            content_hash: packet.content_hash,
+        });
+        previous_sequence = packet.sequence;
+        previous_pts = Some(packet.pts_us);
+    }
+    if frames.is_empty() {
+        return Err(invalid(
+            "decode.video.stream.start",
+            "decoded video stream contains no frames",
+        ));
+    }
+    file.as_file_mut().flush().map_err(|error| {
+        PlatformError::new(
+            PlatformErrorCode::Io,
+            "decode.video.stream.spool",
+            format!("could not flush private video spool: {error}"),
+        )
+    })?;
+    digest.update((frames.len() as u64).to_le_bytes());
+    digest.update(decoded_byte_count.to_le_bytes());
+    let stream_hash = {
+        let digest = digest.finalize();
+        let mut bytes = [0_u8; 32];
+        bytes.copy_from_slice(&digest);
+        astra_core::Hash256::from_bytes(bytes)
+    };
+    let descriptor = DecodedVideoStreamDescriptor {
+        schema: DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.to_string(),
+        duration_us,
+        frame_count: frames.len() as u64,
+        decoded_byte_count,
+        stream_hash,
+    };
+    descriptor
+        .validate(max_video_frames, max_decode_output_bytes)
+        .map_err(media_error)?;
+    tracing::info!(
+        event = "platform.headless.decode.video_spool.ready",
+        frame_count = descriptor.frame_count,
+        decoded_byte_count = descriptor.decoded_byte_count,
+        stream_hash = %descriptor.stream_hash,
+        "decoded and validated complete video stream into a private bounded spool"
+    );
+    Ok(HeadlessVideoSpool {
+        file,
+        frames,
+        cursor: 0,
+        descriptor,
+    })
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+fn next_video_spool_output(
+    state: &mut DecodeState,
+    max_decode_output_bytes: u64,
+) -> Result<DecodeOutput, PlatformError> {
+    let spool = state.video_spool.as_mut().ok_or_else(|| {
+        invalid(
+            "decode.video.stream.next",
+            "video stream has not been started",
+        )
+    })?;
+    let Some(index) = spool.frames.get(spool.cursor) else {
+        let end = DecodedVideoStreamEnd {
+            schema: DECODED_VIDEO_STREAM_END_SCHEMA.to_string(),
+            frame_count: spool.descriptor.frame_count,
+            decoded_byte_count: spool.descriptor.decoded_byte_count,
+            stream_hash: spool.descriptor.stream_hash,
+        };
+        end.validate_against(&spool.descriptor)
+            .map_err(media_error)?;
+        let bytes = postcard::to_allocvec(&end).map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "decode.video.stream.end",
+                format!("could not encode video stream end marker: {error}"),
+            )
+        })?;
+        return Ok(DecodeOutput::CpuBuffer {
+            format: format!("postcard:{DECODED_VIDEO_STREAM_END_SCHEMA}"),
+            hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
+            bytes,
+        });
+    };
+    let byte_len = usize::try_from(index.byte_len).map_err(|_| {
+        invalid(
+            "decode.video.stream.next",
+            "video frame exceeds the current host address space",
+        )
+    })?;
+    let mut bgra8 = vec![0_u8; byte_len];
+    spool
+        .file
+        .as_file_mut()
+        .seek(SeekFrom::Start(index.offset))
+        .and_then(|_| spool.file.as_file_mut().read_exact(&mut bgra8))
+        .map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::Io,
+                "decode.video.stream.next",
+                format!("could not read private video spool: {error}"),
+            )
+        })?;
+    let frame = DecodedVideoFrame {
+        sequence: index.sequence,
+        pts_us: index.pts_us,
+        duration_us: index.duration_us,
+        width: index.width,
+        height: index.height,
+        content_hash: index.content_hash,
+        bgra8,
+    };
+    let bytes = frame.encode(max_decode_output_bytes).map_err(media_error)?;
+    spool.cursor += 1;
+    tracing::trace!(
+        event = "platform.headless.decode.video_spool.frame",
+        frame_sequence = frame.sequence,
+        frame_pts_us = frame.pts_us,
+        cursor = spool.cursor,
+        frame_count = spool.descriptor.frame_count,
+        content_hash = %frame.content_hash,
+        "read one validated frame from the private video spool"
+    );
+    Ok(DecodeOutput::CpuBuffer {
+        format: format!("postcard:{DECODED_VIDEO_FRAME_SCHEMA}"),
+        hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
+        bytes,
+    })
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
@@ -9,10 +10,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActorId, ActorRecord, ActorStore, AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId,
-    Blackboard, BlackboardValue, ComponentId, ComponentRecord, DelayedEventId, EventId,
-    EventPayload, EventSource, PresentationCommand, RuntimeComponentPayload, RuntimeError,
-    RuntimeEvent, RuntimeMutationRecord, ScheduledEvent, SerializedEffectEnvelope,
+    actor::ActorStoreAccess, blackboard::BlackboardAccess, ActorId, ActorRecord, AwaitKind,
+    AwaitReplayPolicy, AwaitToken, AwaitTokenId, BlackboardValue, ComponentId, ComponentRecord,
+    DelayedEventId, EventId, EventPayload, EventSource, PresentationCommand,
+    RuntimeComponentPayload, RuntimeError, RuntimeEvent, RuntimeMutationRecord, ScheduledEvent,
+    SerializedEffectEnvelope,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -27,6 +29,71 @@ pub struct ActionDescriptor {
     pub id: String,
     pub input_schema: String,
     pub output_schema: String,
+    pub execution: ActionExecutionClass,
+    pub access: ActionAccess,
+    pub stable_id_reservation: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionExecutionClass {
+    Serial,
+    ParallelPure,
+    ParallelTransactional,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum ActionResourceKey {
+    ActorStore,
+    Blackboard,
+    EventQueue,
+    AwaitQueue,
+    DelayedEventQueue,
+    Presentation,
+    MutationLog,
+    EffectTrace,
+    StableIdSource,
+    ComponentSchema(String),
+    BlackboardKey(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ActionAccess {
+    pub reads: BTreeSet<ActionResourceKey>,
+    pub writes: BTreeSet<ActionResourceKey>,
+}
+
+impl ActionAccess {
+    pub fn new(
+        reads: impl IntoIterator<Item = ActionResourceKey>,
+        writes: impl IntoIterator<Item = ActionResourceKey>,
+    ) -> Self {
+        Self {
+            reads: reads.into_iter().collect(),
+            writes: writes.into_iter().collect(),
+        }
+    }
+}
+
+impl ActionDescriptor {
+    pub fn declared(
+        id: impl Into<String>,
+        input_schema: impl Into<String>,
+        output_schema: impl Into<String>,
+        execution: ActionExecutionClass,
+        access: ActionAccess,
+        stable_id_reservation: u32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            input_schema: input_schema.into(),
+            output_schema: output_schema.into(),
+            execution,
+            access,
+            stable_id_reservation,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -130,8 +197,8 @@ pub enum ActionEffect {
 pub struct DeterministicActionContext<'a> {
     step: u64,
     id_source: &'a mut dyn FnMut() -> StableId,
-    actors: &'a mut ActorStore,
-    blackboard: &'a mut Blackboard,
+    actors: &'a mut dyn ActorStoreAccess,
+    blackboard: &'a mut dyn BlackboardAccess,
     emitted_events: &'a mut Vec<RuntimeEvent>,
     presentation: &'a mut Vec<PresentationCommand>,
     awaits: &'a mut Vec<AwaitToken>,
@@ -141,6 +208,8 @@ pub struct DeterministicActionContext<'a> {
     effects: &'a mut Vec<SerializedEffectEnvelope>,
     source: String,
     trigger_event: Option<RuntimeEvent>,
+    observed_reads: RefCell<BTreeSet<ActionResourceKey>>,
+    observed_writes: RefCell<BTreeSet<ActionResourceKey>>,
 }
 
 impl<'a> DeterministicActionContext<'a> {
@@ -148,8 +217,8 @@ impl<'a> DeterministicActionContext<'a> {
     pub(crate) fn new(
         step: u64,
         id_source: &'a mut dyn FnMut() -> StableId,
-        actors: &'a mut ActorStore,
-        blackboard: &'a mut Blackboard,
+        actors: &'a mut dyn ActorStoreAccess,
+        blackboard: &'a mut dyn BlackboardAccess,
         emitted_events: &'a mut Vec<RuntimeEvent>,
         presentation: &'a mut Vec<PresentationCommand>,
         awaits: &'a mut Vec<AwaitToken>,
@@ -174,6 +243,23 @@ impl<'a> DeterministicActionContext<'a> {
             effects,
             source,
             trigger_event,
+            observed_reads: RefCell::new(BTreeSet::new()),
+            observed_writes: RefCell::new(BTreeSet::new()),
+        }
+    }
+
+    fn observe_read(&self, resource: ActionResourceKey) {
+        self.observed_reads.borrow_mut().insert(resource);
+    }
+
+    fn observe_write(&self, resource: ActionResourceKey) {
+        self.observed_writes.borrow_mut().insert(resource);
+    }
+
+    pub(crate) fn observed_access(&self) -> ActionAccess {
+        ActionAccess {
+            reads: self.observed_reads.borrow().clone(),
+            writes: self.observed_writes.borrow().clone(),
         }
     }
 
@@ -182,22 +268,28 @@ impl<'a> DeterministicActionContext<'a> {
     }
 
     pub fn trigger_event(&self) -> Option<&RuntimeEvent> {
+        self.observe_read(ActionResourceKey::EventQueue);
         self.trigger_event.as_ref()
     }
 
     pub fn next_id(&mut self) -> StableId {
+        self.observe_write(ActionResourceKey::StableIdSource);
         (self.id_source)()
     }
 
     pub fn set_blackboard(&mut self, key: impl Into<String>, value: BlackboardValue) {
+        let key = key.into();
+        self.observe_write(ActionResourceKey::BlackboardKey(key.clone()));
         self.blackboard.set(key, value);
     }
 
-    pub fn blackboard(&self) -> &Blackboard {
-        self.blackboard
+    pub fn blackboard(&self) -> BTreeMap<String, BlackboardValue> {
+        self.observe_read(ActionResourceKey::Blackboard);
+        self.blackboard.values()
     }
 
     pub fn create_actor(&mut self, name: impl Into<String>, tags: Vec<String>) -> ActorId {
+        self.observe_write(ActionResourceKey::ActorStore);
         let actor_id = ActorId(self.next_id());
         self.actors.insert_actor(ActorRecord {
             actor_id,
@@ -214,15 +306,14 @@ impl<'a> DeterministicActionContext<'a> {
         schema: impl Into<String>,
         data: BlackboardValue,
     ) -> Result<ComponentId, RuntimeError> {
+        let schema = schema.into();
+        self.observe_write(ActionResourceKey::ActorStore);
+        self.observe_write(ActionResourceKey::ComponentSchema(schema.clone()));
         let component_id = ComponentId(self.next_id());
         if self.actors.attach_component(ComponentRecord {
             component_id,
             actor_id,
-            payload: RuntimeComponentPayload::postcard(
-                schema.into(),
-                SchemaVersion::default(),
-                &data,
-            )?,
+            payload: RuntimeComponentPayload::postcard(schema, SchemaVersion::default(), &data)?,
         }) {
             Ok(component_id)
         } else {
@@ -234,10 +325,12 @@ impl<'a> DeterministicActionContext<'a> {
     }
 
     pub fn remove_actor(&mut self, actor_id: ActorId) -> bool {
+        self.observe_write(ActionResourceKey::ActorStore);
         self.actors.remove_actor(actor_id).is_some()
     }
 
     pub fn detach_component(&mut self, component_id: ComponentId) -> bool {
+        self.observe_write(ActionResourceKey::ActorStore);
         self.actors.detach_component(component_id).is_some()
     }
 
@@ -251,6 +344,9 @@ impl<'a> DeterministicActionContext<'a> {
                 "runtime component does not exist",
             ))
         })?;
+        self.observe_read(ActionResourceKey::ComponentSchema(
+            component.payload.schema.as_str().to_string(),
+        ));
         component.payload.decode()
     }
 
@@ -264,6 +360,9 @@ impl<'a> DeterministicActionContext<'a> {
                 "runtime component does not exist",
             ))
         })?;
+        self.observe_read(ActionResourceKey::ComponentSchema(
+            component.payload.schema.as_str().to_string(),
+        ));
         component.payload.validated_postcard_bytes()
     }
 
@@ -277,6 +376,9 @@ impl<'a> DeterministicActionContext<'a> {
                 "runtime component does not exist",
             ))
         })?;
+        self.observe_read(ActionResourceKey::ComponentSchema(
+            component.payload.schema.as_str().to_string(),
+        ));
         Ok((
             component.payload.hash,
             component.payload.validated_postcard_bytes()?,
@@ -297,6 +399,19 @@ impl<'a> DeterministicActionContext<'a> {
         component_id: ComponentId,
         data: &T,
     ) -> Result<(Hash256, Hash128), RuntimeError> {
+        let schema = self
+            .actors
+            .component(component_id)
+            .map(|component| component.payload.schema.as_str().to_string())
+            .ok_or_else(|| {
+                RuntimeError::diagnostic(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_COMPONENT_MISSING",
+                    "runtime component does not exist",
+                ))
+            })?;
+        self.observe_read(ActionResourceKey::ComponentSchema(schema.clone()));
+        self.observe_write(ActionResourceKey::ComponentSchema(schema));
+        self.observe_write(ActionResourceKey::MutationLog);
         let component = self.actors.component_mut(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
@@ -340,6 +455,19 @@ impl<'a> DeterministicActionContext<'a> {
         component_id: ComponentId,
         encoding: crate::ValidatedRuntimeComponentEncoding,
     ) -> Result<(Hash256, Hash128), RuntimeError> {
+        let schema = self
+            .actors
+            .component(component_id)
+            .map(|component| component.payload.schema.as_str().to_string())
+            .ok_or_else(|| {
+                RuntimeError::diagnostic(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_COMPONENT_MISSING",
+                    "runtime component does not exist",
+                ))
+            })?;
+        self.observe_read(ActionResourceKey::ComponentSchema(schema.clone()));
+        self.observe_write(ActionResourceKey::ComponentSchema(schema));
+        self.observe_write(ActionResourceKey::MutationLog);
         let component = self.actors.component_mut(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
@@ -459,6 +587,7 @@ impl<'a> DeterministicActionContext<'a> {
     }
 
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
+        self.observe_write(ActionResourceKey::EventQueue);
         let event = RuntimeEvent {
             id: EventId(self.next_id()),
             source,
@@ -470,6 +599,7 @@ impl<'a> DeterministicActionContext<'a> {
     }
 
     pub fn emit_presentation(&mut self, command: PresentationCommand) {
+        self.observe_write(ActionResourceKey::Presentation);
         self.presentation.push(command);
     }
 
@@ -479,12 +609,14 @@ impl<'a> DeterministicActionContext<'a> {
         schema: impl Into<String>,
         value: &T,
     ) -> Result<(), RuntimeError> {
+        self.observe_write(ActionResourceKey::EffectTrace);
         self.effects
             .push(SerializedEffectEnvelope::postcard(domain, schema, value)?);
         Ok(())
     }
 
     pub fn push_await(&mut self, token: AwaitToken) -> Result<(), RuntimeError> {
+        self.observe_write(ActionResourceKey::AwaitQueue);
         token.validate().map_err(RuntimeError::diagnostic)?;
         self.awaits.push(token);
         Ok(())
@@ -506,6 +638,7 @@ impl<'a> DeterministicActionContext<'a> {
         source: EventSource,
         payload: EventPayload,
     ) -> DelayedEventId {
+        self.observe_write(ActionResourceKey::DelayedEventQueue);
         let id = DelayedEventId(self.next_id());
         self.delayed_events.push(ScheduledEvent {
             id,
@@ -518,6 +651,7 @@ impl<'a> DeterministicActionContext<'a> {
     }
 
     pub fn cancel_delayed_event(&mut self, id: DelayedEventId) {
+        self.observe_write(ActionResourceKey::DelayedEventQueue);
         self.delayed_cancellations.push(id);
     }
 
@@ -630,6 +764,24 @@ impl ActionRegistry {
                 "action descriptor requires non-empty id and schemas",
             )));
         }
+        if descriptor.execution == ActionExecutionClass::ParallelPure
+            && (!descriptor.access.writes.is_empty() || descriptor.stable_id_reservation != 0)
+        {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_ACTION_ACCESS_INVALID",
+                "parallel_pure actions cannot declare writes or reserve StableIds",
+            )));
+        }
+        let writes_stable_ids = descriptor
+            .access
+            .writes
+            .contains(&ActionResourceKey::StableIdSource);
+        if (descriptor.stable_id_reservation > 0) != writes_stable_ids {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_ACTION_ID_RESERVATION_INVALID",
+                "StableIdSource write access and a non-zero StableId reservation must be declared together",
+            )));
+        }
         if let Some(existing) = self.actions.get(&descriptor.id) {
             return Err(RuntimeError::diagnostic(
                 Diagnostic::blocking(
@@ -659,17 +811,29 @@ impl ActionRegistry {
     pub fn get(&self, id: &str) -> Option<Arc<dyn RuntimeAction>> {
         self.actions.get(id).map(|action| action.action.clone())
     }
+
+    pub(crate) fn descriptor(&self, id: &str) -> Option<ActionDescriptor> {
+        self.actions
+            .get(id)
+            .map(|action| action.action.descriptor())
+    }
 }
 
 pub struct SetBlackboardAction;
 
 impl RuntimeAction for SetBlackboardAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.set_blackboard".to_string(),
-            input_schema: "astra.action.set_blackboard.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            "astra.core.set_blackboard",
+            "astra.action.set_blackboard.v1",
+            "astra.action_trace.v1",
+            ActionExecutionClass::ParallelTransactional,
+            ActionAccess::new(
+                [ActionResourceKey::Blackboard],
+                [ActionResourceKey::Blackboard],
+            ),
+            0,
+        )
     }
 
     fn run(
@@ -696,11 +860,20 @@ pub struct EmitEventAction;
 
 impl RuntimeAction for EmitEventAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.emit_event".to_string(),
-            input_schema: "astra.action.emit_event.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            "astra.core.emit_event",
+            "astra.action.emit_event.v1",
+            "astra.action_trace.v1",
+            ActionExecutionClass::ParallelTransactional,
+            ActionAccess::new(
+                [],
+                [
+                    ActionResourceKey::EventQueue,
+                    ActionResourceKey::StableIdSource,
+                ],
+            ),
+            1,
+        )
     }
 
     fn run(
@@ -723,11 +896,20 @@ pub struct CreateAwaitAction;
 
 impl RuntimeAction for CreateAwaitAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.create_await".to_string(),
-            input_schema: "astra.action.create_await.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            "astra.core.create_await",
+            "astra.action.create_await.v1",
+            "astra.action_trace.v1",
+            ActionExecutionClass::ParallelTransactional,
+            ActionAccess::new(
+                [],
+                [
+                    ActionResourceKey::AwaitQueue,
+                    ActionResourceKey::StableIdSource,
+                ],
+            ),
+            1,
+        )
     }
 
     fn run(
@@ -748,11 +930,14 @@ pub struct PresentationAction;
 
 impl RuntimeAction for PresentationAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.core.presentation".to_string(),
-            input_schema: "astra.action.presentation.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            "astra.core.presentation",
+            "astra.action.presentation.v1",
+            "astra.action_trace.v1",
+            ActionExecutionClass::ParallelTransactional,
+            ActionAccess::new([], [ActionResourceKey::Presentation]),
+            0,
+        )
     }
 
     fn run(

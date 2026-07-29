@@ -390,7 +390,10 @@ impl WebDecodeSession {
         &mut self,
         request: PlatformDecodeRequest,
     ) -> Result<DecodeOutput, PlatformError> {
-        if request.kind != self.kind || request.sequence != self.next_sequence {
+        if request.kind != self.kind
+            || request.sequence != self.next_sequence
+            || request.stream_action != astra_platform::DecodeStreamAction::OneShot
+        {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
                 "decode.submit",

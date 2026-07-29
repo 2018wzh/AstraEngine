@@ -1,5 +1,9 @@
 use astra_core::Hash256;
-use astra_media::{DecodedVideoFrame, DecodedVideoStream, DECODED_VIDEO_STREAM_SCHEMA};
+use astra_media::{
+    DecodedVideoFrame, DecodedVideoStream, DecodedVideoStreamDescriptor, DecodedVideoStreamEnd,
+    DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA, DECODED_VIDEO_STREAM_END_SCHEMA,
+    DECODED_VIDEO_STREAM_SCHEMA,
+};
 
 fn stream() -> DecodedVideoStream {
     let first = vec![1, 2, 3, 255];
@@ -52,4 +56,35 @@ fn decoded_video_stream_blocks_tamper_and_resource_overflow() {
 
     assert!(stream().encode(1, 8).is_err());
     assert!(stream().encode(2, 7).is_err());
+}
+
+#[astra_headless_test::test]
+fn streaming_descriptor_frame_and_end_are_independently_bounded() {
+    let descriptor = DecodedVideoStreamDescriptor {
+        schema: DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.into(),
+        duration_us: 40_000,
+        frame_count: 2,
+        decoded_byte_count: 8,
+        stream_hash: Hash256::from_sha256(b"stream"),
+    };
+    let encoded = descriptor.encode(2, 8).unwrap();
+    assert_eq!(
+        DecodedVideoStreamDescriptor::decode(&encoded, 2, 8).unwrap(),
+        descriptor
+    );
+
+    let frame = stream().frames.remove(0);
+    let encoded = frame.encode(1_024).unwrap();
+    assert_eq!(DecodedVideoFrame::decode(&encoded, 1_024).unwrap(), frame);
+
+    let end = DecodedVideoStreamEnd {
+        schema: DECODED_VIDEO_STREAM_END_SCHEMA.into(),
+        frame_count: descriptor.frame_count,
+        decoded_byte_count: descriptor.decoded_byte_count,
+        stream_hash: descriptor.stream_hash,
+    };
+    end.validate_against(&descriptor).unwrap();
+    let mut tampered = end;
+    tampered.frame_count += 1;
+    assert!(tampered.validate_against(&descriptor).is_err());
 }

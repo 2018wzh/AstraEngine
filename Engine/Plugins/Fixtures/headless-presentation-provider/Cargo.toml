@@ -12,4 +12,5 @@ abi_stable.workspace = true
 astra-plugin-abi = { path = "../../../Source/Runtime/astra-plugin-abi" }
 astra-runtime = { path = "../../../Source/Runtime/astra-runtime" }
 postcard.workspace = true
+serde_json.workspace = true
 tracing.workspace = true

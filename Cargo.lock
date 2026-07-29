@@ -1128,6 +1128,7 @@ dependencies = [
  "astra-platform-common",
  "astra-platform-headless",
  "astra-player-vn",
+ "astra-plugin",
  "astra-product-host",
  "clap",
  "hound",
@@ -1207,6 +1208,7 @@ dependencies = [
  "astra-headless-test",
  "astra-media-core",
  "astra-package",
+ "astra-worker-budget",
  "cosmic-text",
  "ffmpeg-next",
  "image 0.25.10",
@@ -1368,6 +1370,7 @@ dependencies = [
  "astra-ui-core",
  "hound",
  "image 0.25.10",
+ "postcard",
  "rcgen",
  "reqwest 0.13.4",
  "serde",
@@ -1631,6 +1634,7 @@ dependencies = [
  "astra-headless-test",
  "astra-plugin-abi",
  "astra-runtime",
+ "astra-worker-budget",
  "libloading 0.8.9",
  "postcard",
  "schemars",
@@ -1958,6 +1962,7 @@ dependencies = [
  "astra-headless-test",
  "astra-media-core",
  "astra-vn-script",
+ "astra-worker-budget",
  "postcard",
  "schemars",
  "serde",
@@ -2064,6 +2069,14 @@ dependencies = [
  "thiserror 1.0.69",
  "tracing",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "astra-worker-budget"
+version = "0.1.0"
+dependencies = [
+ "astra-headless-test",
+ "tokio",
 ]
 
 [[package]]
@@ -5136,6 +5149,7 @@ dependencies = [
  "astra-plugin-abi",
  "astra-runtime",
  "postcard",
+ "serde_json",
  "tracing",
 ]
 

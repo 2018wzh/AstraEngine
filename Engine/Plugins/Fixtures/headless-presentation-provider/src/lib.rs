@@ -4,10 +4,11 @@ use abi_stable::{
 };
 use astra_plugin_abi::{
     AstraPluginModule, AstraPluginModuleRef, FfiActionRegistration, FfiPluginRegistration,
-    FfiPluginShutdown, FfiProviderRegistration,
+    FfiPluginShutdown, FfiProviderRegistration, ACTION_PLUGIN_ABI_VERSION,
 };
 use astra_runtime::{
-    ActionCallRequest, ActionCallResult, ActionEffect, ActionTrace, BlackboardValue, EventPayload,
+    ActionAccess, ActionCallRequest, ActionCallResult, ActionDescriptor, ActionEffect,
+    ActionExecutionClass, ActionResourceKey, ActionTrace, BlackboardValue, EventPayload,
     EventSource, PresentationCommand,
 };
 use std::collections::BTreeMap;
@@ -83,6 +84,22 @@ extern "C" fn run_fixture_action(request: RVec<u8>) -> RVec<u8> {
 
 extern "C" fn register() -> FfiPluginRegistration {
     debug!("fixture.register");
+    let action_descriptor = ActionDescriptor::declared(
+        "astra.fixture.action.set_flag",
+        "astra.fixture.action.set_flag.request.v1",
+        "astra.action_trace.v1",
+        ActionExecutionClass::ParallelTransactional,
+        ActionAccess::new(
+            [],
+            [
+                ActionResourceKey::Blackboard,
+                ActionResourceKey::EventQueue,
+                ActionResourceKey::Presentation,
+                ActionResourceKey::StableIdSource,
+            ],
+        ),
+        1,
+    );
     FfiPluginRegistration {
         providers: RVec::from(vec![FfiProviderRegistration {
             slot: "presentation".into(),
@@ -93,10 +110,12 @@ extern "C" fn register() -> FfiPluginRegistration {
         }]),
         runtime_providers: RVec::new(),
         actions: RVec::from(vec![FfiActionRegistration {
+            abi_version: ACTION_PLUGIN_ABI_VERSION,
             provider_id: "astra.fixture.action_provider".into(),
             action_id: "astra.fixture.action.set_flag".into(),
             input_schema: "astra.fixture.action.set_flag.request.v1".into(),
             output_schema: "astra.action_trace.v1".into(),
+            descriptor_json: RVec::from(serde_json::to_vec(&action_descriptor).unwrap()),
             invoke: run_fixture_action,
         }]),
         callbacks: 0,

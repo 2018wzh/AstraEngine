@@ -199,6 +199,7 @@ async fn client_exposes_explicit_present_close_and_storage_lifecycle() {
                         coded_width: None,
                         coded_height: None,
                         keyframe: true,
+                        stream_action: astra_platform::DecodeStreamAction::OneShot,
                         bytes: vec![1, 2, 3],
                     },
                 )

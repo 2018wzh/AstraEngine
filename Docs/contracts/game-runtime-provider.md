@@ -7,18 +7,22 @@
 ## Provider Shape
 
 ```rust
-pub trait ProductRuntimeProvider: StableProvider {
+pub trait ProductRuntimeProviderFactory: Send + Sync {
     fn descriptor(&self) -> ProductRuntimeDescriptor;
     fn prepare(&self, request: RuntimePrepareRequest) -> ProviderResult<RuntimePrepareReport>;
     fn probe(&self, request: RuntimeProbeRequest) -> ProviderResult<RuntimeProbeReport>;
-    fn open(&self, request: RuntimeOpenRequest) -> ProviderResult<GameRuntimeSessionId>;
-    fn step(&self, session: GameRuntimeSessionId, input: RuntimeStepInput) -> ProviderResult<RuntimeStepOutput>;
-    fn save(&self, session: GameRuntimeSessionId, request: RuntimeSaveRequest) -> ProviderResult<RuntimeSaveSections>;
-    fn restore(&self, session: GameRuntimeSessionId, request: RuntimeRestoreRequest) -> ProviderResult<RuntimeRestoreReport>;
-    fn shutdown(&self, session: GameRuntimeSessionId) -> ProviderResult<RuntimeShutdownReport>;
+    fn open(&self, request: RuntimeOpenRequest) -> ProviderResult<Box<dyn ProductRuntimeSession>>;
     fn package_sections(&self, request: RuntimePackageRequest) -> ProviderResult<RuntimePackageSectionPlan>;
     fn release_checks(&self) -> ProviderResult<Vec<ReleaseCheckDescriptor>>;
     fn editor_metadata(&self) -> ProviderResult<RuntimeEditorMetadata>;
+}
+
+pub trait ProductRuntimeSession: Send {
+    fn session_id(&self) -> GameRuntimeSessionId;
+    fn step(&mut self, input: RuntimeStepInput) -> ProviderResult<RuntimeStepOutput>;
+    fn save(&mut self, request: RuntimeSaveRequest) -> ProviderResult<RuntimeSaveSections>;
+    fn restore(&mut self, request: RuntimeRestoreRequest) -> ProviderResult<RuntimeRestoreReport>;
+    fn shutdown(&mut self) -> ProviderResult<RuntimeShutdownReport>;
 }
 ```
 
@@ -118,7 +122,9 @@ Provider 可以在内部维护 product-specific cursor，但权威 Runtime 结�
 
 `ProductRuntimeHost` 还校验 instance/session report identity、首 step 为 `1` 且后续严格连续、delta/seed/mode、output schema/size、save/restore section descriptor、唯一 id、hash 和容量。create、prepare/probe/open 或 duplicate open 的部分成功必须执行 rollback；provider error、panic、malformed output 和 timeout 会 poison 对应 session 或 instance，除 cleanup 外不再接受调用。活动 session 阻断普通 destroy；`cleanup_after_failure` 按 session shutdown 后 destroy，并等待已超时的 blocking provider call drain，不能让后台调用继续并发修改已返回给调用方的 session。
 
-NativeVN product save 只返回一个权威 `runtime.world` section，schema 为 `astra.runtime.save_blob.v2`、codec 为 `Raw`；payload 是 Runtime save container，内部 `runtime.world` snapshot 覆盖 StableId generator、Actor/Component、StateMachine、Blackboard、Event/Await/delayed queues、MutationLog、presentation/effect trace、mounted module binding 和当前 step。Restore 必须只接受这一 section，先完成 outer hash、nested container/footer/section hash 和 schema/version 校验，再事务替换 world。拆分的 `vn.runtime_state`/`vn.policy_state` 不能继续作为 product provider save authority。
+并发 host 使用 factory/session 所有权：factory 必须是 `Send + Sync`，只处理 descriptor、prepare/probe、instance lifecycle 和 session 创建；返回的 `ProductRuntimeSession: Send` 独占其 `RuntimeWorld` 和产品状态。每条 session 有容量 32 的 ordered mailbox，同一 session 永远单飞；不同 session 可以并行。queue full、timeout、panic、provider error、malformed output 和非法 step 只 poison 对应 session；binding、descriptor、package 或 instance control failure才 poison 整个 instance。完整 Headless 多任务测试用独立进程承载平台 session，并通过全局 `WorkerBudgetBroker` 限制 session、text、image、audio、video 和 region worker 的总并发，不能在线程间移动本地 event-loop 对象。
+
+NativeVN product save 只返回一个权威 `runtime.world` section，schema 为 `astra.runtime.save_blob.v3`、codec 为 `Raw`；payload 是 Runtime save container，内部 `runtime.world` snapshot 覆盖 StableId generator、Actor/Component、StateMachine、Blackboard、Event/Await/delayed queues、MutationLog、presentation/effect trace、mounted module binding 和当前 step。Restore 必须只接受这一 section，先完成 outer hash、nested container/footer/section hash 和 schema/version 校验，再事务替换 world。v2 save 直接拒绝，拆分的 `vn.runtime_state`/`vn.policy_state` 不能继续作为 product provider save authority。
 
 ## AstraRPG Profile Boundary
 

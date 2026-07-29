@@ -21,10 +21,11 @@ use astra_player_core::{
 };
 use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareRequest,
-    RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
-    ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
+    GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeOpenRequest, RuntimeOutputDomain,
+    RuntimePrepareRequest, RuntimeProbeRequest, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput,
+    RuntimeStepMode, RuntimeTickIntegrityMode, ValidatedRuntimeProviderSelection,
+    NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
@@ -51,8 +52,9 @@ use astra_vn_core::{
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
     load_player_locale_config, load_presentation_provider_manifest, CompiledVnProject,
-    ProductStageDirector, ProductStageState, StageDirectorOutput, VnLocalizationTable,
-    VnPresentationProviderManifest, VnSystemUiProfileManifest,
+    PresentationInterruptPolicy, ProductStageDirector, ProductStageState, StageDirectorOutput,
+    TextAdvanceDisposition, VnLocalizationTable, VnPresentationProviderManifest,
+    VnSystemUiProfileManifest,
 };
 use astra_vn_policy::LuauUiControllerHost;
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
@@ -154,6 +156,7 @@ pub struct NativeVnHostCommandSource {
     height: u32,
     ui_viewport: UiViewport,
     textures: BTreeMap<String, TextureFrame>,
+    texture_dimensions: BTreeMap<String, (u32, u32)>,
     asset_store: Arc<PackageAssetStore>,
     image_prefetcher: PackageImagePrefetcher,
     image_prefetch_windows: BTreeMap<String, Vec<String>>,
@@ -161,6 +164,7 @@ pub struct NativeVnHostCommandSource {
     image_prefetch_failure: Option<String>,
     live_texture_ids: BTreeSet<String>,
     live_texture_bytes: BTreeMap<String, u64>,
+    pending_gpu_lifecycle: Vec<SceneCommand>,
     texture_last_used: BTreeMap<String, u64>,
     texture_cpu_last_used: BTreeMap<String, u64>,
     texture_use_clock: u64,
@@ -461,6 +465,54 @@ struct NativeVnHostCacheBudget {
     glyph_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeVnRuntimeExecution {
+    pub integrity_mode: RuntimeTickIntegrityMode,
+    pub executor: RuntimeExecutorConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeVnHostOpenOptions {
+    pub max_asset_cache_bytes: u64,
+    pub max_glyph_cache_bytes: u64,
+    pub runtime_execution: NativeVnRuntimeExecution,
+}
+
+struct NativeVnHostRuntimeOptions {
+    cache_budget: NativeVnHostCacheBudget,
+    execution: NativeVnRuntimeExecution,
+}
+
+impl NativeVnRuntimeExecution {
+    pub const fn shipping_serial() -> Self {
+        Self {
+            integrity_mode: RuntimeTickIntegrityMode::Shipping,
+            executor: RuntimeExecutorConfig::serial(),
+        }
+    }
+
+    pub fn shipping_parallel() -> Result<Self, NativeVnHostError> {
+        Self::parallel(RuntimeTickIntegrityMode::Shipping)
+    }
+
+    pub fn evidence_parallel() -> Result<Self, NativeVnHostError> {
+        Self::parallel(RuntimeTickIntegrityMode::Evidence)
+    }
+
+    fn parallel(integrity_mode: RuntimeTickIntegrityMode) -> Result<Self, NativeVnHostError> {
+        let worker_count = u8::try_from(astra_plugin::WorkerBudgetBroker::global().limit())
+            .map_err(|_| {
+                NativeVnHostError::Input(
+                    "ASTRA_RUNTIME_EXECUTOR_CONFIG: worker limit exceeds ABI range".into(),
+                )
+            })?;
+        Ok(Self {
+            integrity_mode,
+            executor: RuntimeExecutorConfig::parallel(worker_count),
+        })
+    }
+}
+
 impl NativeVnHostCommandSource {
     pub fn from_package(
         package: &astra_package::PackageReader,
@@ -469,27 +521,52 @@ impl NativeVnHostCommandSource {
         height: u32,
         surface: PlayerHostResourceId,
     ) -> Result<Self, NativeVnHostError> {
-        let budget = NativeVnDecodedCacheBudget::partition(DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES)?;
-        Self::from_package_with_asset_cache(
+        Self::from_package_with_execution(
             package,
             config,
             width,
             height,
             surface,
-            budget.asset_bytes,
-            budget.glyph_bytes,
+            NativeVnRuntimeExecution::shipping_serial(),
         )
     }
 
-    pub fn from_package_with_asset_cache(
+    pub fn from_package_with_execution(
         package: &astra_package::PackageReader,
         config: VnRunConfig,
         width: u32,
         height: u32,
         surface: PlayerHostResourceId,
-        max_asset_cache_bytes: u64,
-        max_glyph_cache_bytes: u64,
+        runtime_execution: NativeVnRuntimeExecution,
     ) -> Result<Self, NativeVnHostError> {
+        let budget = NativeVnDecodedCacheBudget::partition(DEFAULT_NATIVE_VN_DECODED_CACHE_BYTES)?;
+        Self::from_package_with_options(
+            package,
+            config,
+            width,
+            height,
+            surface,
+            NativeVnHostOpenOptions {
+                max_asset_cache_bytes: budget.asset_bytes,
+                max_glyph_cache_bytes: budget.glyph_bytes,
+                runtime_execution,
+            },
+        )
+    }
+
+    pub fn from_package_with_options(
+        package: &astra_package::PackageReader,
+        config: VnRunConfig,
+        width: u32,
+        height: u32,
+        surface: PlayerHostResourceId,
+        options: NativeVnHostOpenOptions,
+    ) -> Result<Self, NativeVnHostError> {
+        let NativeVnHostOpenOptions {
+            max_asset_cache_bytes,
+            max_glyph_cache_bytes,
+            runtime_execution,
+        } = options;
         validate_product_provider_bindings(package)?;
         let runtime_provider = package.runtime_provider_selection().clone();
         if config.profile != runtime_provider.profile() {
@@ -604,9 +681,12 @@ impl NativeVnHostCommandSource {
                 },
                 system_ui_policy,
             },
-            NativeVnHostCacheBudget {
-                asset_bytes: max_asset_cache_bytes,
-                glyph_bytes: max_glyph_cache_bytes,
+            NativeVnHostRuntimeOptions {
+                cache_budget: NativeVnHostCacheBudget {
+                    asset_bytes: max_asset_cache_bytes,
+                    glyph_bytes: max_glyph_cache_bytes,
+                },
+                execution: runtime_execution,
             },
         )
     }
@@ -618,8 +698,12 @@ impl NativeVnHostCommandSource {
         height: u32,
         surface: PlayerHostResourceId,
         binding: ProductPackageBinding,
-        cache_budget: NativeVnHostCacheBudget,
+        runtime_options: NativeVnHostRuntimeOptions,
     ) -> Result<Self, NativeVnHostError> {
+        let NativeVnHostRuntimeOptions {
+            cache_budget,
+            execution: runtime_execution,
+        } = runtime_options;
         if compiled.story.story_manifest.stories.is_empty() {
             return Err(NativeVnHostError::EmptyStory);
         }
@@ -753,6 +837,8 @@ impl NativeVnHostCommandSource {
             profile: config.profile,
             locale: config.locale,
             seed: 0,
+            integrity_mode: runtime_execution.integrity_mode,
+            executor: runtime_execution.executor,
             package_hash: binding.package_hash.to_string(),
             sections: vec![compiled_section],
         }) {
@@ -814,6 +900,7 @@ impl NativeVnHostCommandSource {
                 },
             },
             textures: BTreeMap::new(),
+            texture_dimensions: BTreeMap::new(),
             asset_store: binding.presentation.asset_store,
             image_prefetcher,
             image_prefetch_windows,
@@ -821,6 +908,7 @@ impl NativeVnHostCommandSource {
             image_prefetch_failure: None,
             live_texture_ids: BTreeSet::new(),
             live_texture_bytes: BTreeMap::new(),
+            pending_gpu_lifecycle: Vec::new(),
             texture_last_used: BTreeMap::new(),
             texture_cpu_last_used: BTreeMap::new(),
             texture_use_clock: 0,
@@ -933,40 +1021,70 @@ impl NativeVnHostCommandSource {
         std::mem::take(&mut self.pending_stage_completions)
     }
 
+    pub fn invalidate_gpu_resources(&mut self) {
+        let released_count = self.live_texture_ids.len();
+        let released_glyph_count = self.text_resources.invalidate_device_resources();
+        self.live_texture_ids.clear();
+        self.live_texture_bytes.clear();
+        self.pending_gpu_lifecycle.clear();
+        self.texture_last_used.clear();
+        self.live_layout_ids.clear();
+        self.resident_texture_bytes = 0;
+        self.ui_frame_reuse = None;
+        tracing::warn!(
+            event = "player.vn.gpu_resources.invalidated",
+            released_count,
+            released_glyph_count,
+            "invalidated session GPU residency; package manifests remain authoritative for rebuild"
+        );
+    }
+
+    pub fn decoded_image_cached(&self, asset_id: &str) -> Result<bool, NativeVnHostError> {
+        self.asset_store.is_image_cached(asset_id)
+    }
+
     pub fn tick_presentation(
         &mut self,
         delta_ns: u64,
     ) -> Result<Option<PlayerHostCommandBatch>, NativeVnHostError> {
-        if let Some(command) = self.pending_text_reveal_configuration()? {
-            let payload = serde_json::to_value(command)
-                .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
-            self.step_with_presentation("command", payload, false)?;
-        }
-        if self
-            .runtime_state
-            .as_ref()
-            .and_then(|state| state.text_reveal.as_ref())
-            .is_some_and(|reveal| !reveal.complete())
-        {
-            return self
-                .step("tick_text_reveal", serde_json::Value::Null)
-                .map(Some);
-        }
+        self.ensure_text_region()?;
         if !self.stage_director.requires_frame_tick() {
             return Ok(None);
         }
         let mut next = self.stage_director.clone();
         let outputs = next.tick(delta_ns).map_err(stage_director_error)?;
-        let completions = outputs
-            .into_iter()
-            .map(|output| match output {
-                StageDirectorOutput::FenceCompleted { id, .. } => Ok(id),
-                _ => Err(NativeVnHostError::Asset(
-                    "ASTRA_PLAYER_STAGE_TICK_OUTPUT: frame tick emitted a non-completion output"
-                        .into(),
-                )),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut completions = Vec::new();
+        let mut videos = Vec::new();
+        for output in outputs {
+            match output {
+                StageDirectorOutput::FenceCompleted { id, .. } => completions.push(id),
+                StageDirectorOutput::Movie(movie) => {
+                    let asset = self.asset_store.load_media(&movie.asset)?;
+                    videos.push(NativeVnVideoRequest {
+                        layer: movie.layer,
+                        asset_id: movie.asset,
+                        codec: asset.codec.clone(),
+                        encoded_bytes: Arc::clone(&asset.bytes),
+                        encoded_hash: asset.hash,
+                        alpha_millionths: movie.alpha.millionths,
+                        looping: matches!(movie.loop_mode, MovieLoopMode::Loop),
+                        fence: movie.fence,
+                        fallback_asset_id: movie.fallback,
+                        allow_fallback: next.state().profile != "advanced-vn",
+                    });
+                }
+                StageDirectorOutput::Preload { .. }
+                | StageDirectorOutput::Audio(_)
+                | StageDirectorOutput::AudioControl(_)
+                | StageDirectorOutput::AudioBusEnabled { .. }
+                | StageDirectorOutput::Effect(_) => {
+                    return Err(NativeVnHostError::RuntimeEvidence(
+                        "ASTRA_PLAYER_STAGE_TICK_OUTPUT_DOMAIN: frame tick produced an output that has no ordered host consumer"
+                            .into(),
+                    ));
+                }
+            }
+        }
         let previous = std::mem::replace(&mut self.stage_director, next);
         let previous_scene_draw = self.scene_draw.clone();
         let stage_state = self.stage_director.state().clone();
@@ -974,18 +1092,24 @@ impl NativeVnHostCommandSource {
             self.stage_director = previous;
             return Err(error);
         }
-        self.scene_draw =
-            match stage_scene_commands(&stage_state, &self.textures, self.width, self.height) {
-                Ok(scene_draw) => scene_draw,
-                Err(error) => {
-                    self.stage_director = previous;
-                    self.scene_draw = previous_scene_draw;
-                    return Err(error);
-                }
-            };
+        self.scene_draw = match stage_scene_commands(
+            &stage_state,
+            &self.textures,
+            &self.texture_dimensions,
+            self.width,
+            self.height,
+        ) {
+            Ok(scene_draw) => scene_draw,
+            Err(error) => {
+                self.stage_director = previous;
+                self.scene_draw = previous_scene_draw;
+                return Err(error);
+            }
+        };
         match self.render(&[], 0) {
             Ok(batch) => {
                 self.pending_stage_completions.extend(completions);
+                self.pending_video.extend(videos);
                 Ok(Some(batch))
             }
             Err(error) => {
@@ -1334,6 +1458,7 @@ impl NativeVnHostCommandSource {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
+                stream_action: astra_player_core::PlayerDecodeStreamAction::OneShot,
                 bytes: encoded_bytes.as_ref().to_vec(),
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
@@ -1375,6 +1500,7 @@ impl NativeVnHostCommandSource {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
+                stream_action: astra_player_core::PlayerDecodeStreamAction::Start,
                 bytes: request.encoded_bytes.as_ref().to_vec(),
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
@@ -1384,29 +1510,74 @@ impl NativeVnHostCommandSource {
         })
     }
 
+    pub(crate) fn prepare_video_stream_next(
+        &mut self,
+        session: astra_player_core::PlayerHostResourceId,
+        request_sequence: u64,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        PlayerHostCommandBatch::new(vec![PlayerHostCommand::Decode {
+            sequence: self.next_command_sequence()?,
+            request_sequence,
+            session,
+            kind: PlayerDecodeKind::Video,
+            codec: String::new(),
+            description: Vec::new(),
+            sample_rate: None,
+            channels: None,
+            coded_width: None,
+            coded_height: None,
+            keyframe: false,
+            stream_action: astra_player_core::PlayerDecodeStreamAction::Next,
+            bytes: Vec::new(),
+        }])
+        .map_err(Into::into)
+    }
+
+    pub(crate) fn prepare_video_stream_close(
+        &mut self,
+        session: astra_player_core::PlayerHostResourceId,
+    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
+            sequence: self.next_command_sequence()?,
+            session,
+        }])
+        .map_err(Into::into)
+    }
+
     pub fn bind_decoded_video_frame(
         &mut self,
         request: &NativeVnVideoRequest,
         frame: TextureFrame,
         complete: bool,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        self.stage_director
+            .start_video(&request.layer)
+            .map_err(stage_director_error)?;
         self.store_texture(
             request.asset_id.clone(),
             frame,
             &BTreeSet::from([request.asset_id.clone()]),
         )?;
         if complete {
-            if let Some(fence) = &request.fence {
-                self.pending_stage_completions.push(fence.clone());
-            }
+            let completed = self
+                .stage_director
+                .complete_video(&request.layer)
+                .map_err(stage_director_error)?;
+            self.pending_stage_completions.extend(completed);
         }
         self.render(&[], 0)
     }
 
-    pub(crate) fn complete_video_fence(&mut self, request: &NativeVnVideoRequest) {
-        if let Some(fence) = &request.fence {
-            self.pending_stage_completions.push(fence.clone());
-        }
+    pub(crate) fn complete_video_fence(
+        &mut self,
+        request: &NativeVnVideoRequest,
+    ) -> Result<(), NativeVnHostError> {
+        let completed = self
+            .stage_director
+            .complete_video(&request.layer)
+            .map_err(stage_director_error)?;
+        self.pending_stage_completions.extend(completed);
+        Ok(())
     }
 
     pub(crate) fn rehydrate_video_request(
@@ -1444,8 +1615,15 @@ impl NativeVnHostCommandSource {
         if !self.textures.contains_key(fallback) && !self.asset_store.contains_image(fallback) {
             return Err(missing_texture(fallback));
         }
-        if let Some(fence) = &request.fence {
-            self.pending_stage_completions.push(fence.clone());
+        let resolved = self
+            .stage_director
+            .fail_video(&request.layer)
+            .map_err(stage_director_error)?;
+        if resolved.as_deref() != Some(fallback) {
+            return Err(NativeVnHostError::Asset(
+                "ASTRA_PLAYER_VIDEO_FALLBACK_IDENTITY: region fallback does not match the decoded request"
+                    .into(),
+            ));
         }
         self.render(&[], 0)
     }
@@ -1963,13 +2141,13 @@ impl NativeVnHostCommandSource {
     }
 
     pub fn launch(&mut self) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        // Prepare only the authored launch-state image prefix before the
+        // runtime step schedules asynchronous look-ahead. This prevents the
+        // same image from racing through both the synchronous upload path and
+        // the prefetch cache after its CPU RGBA has already been released.
+        let prewarmed_images = self.prewarm_default_gameplay_story_images()?;
         let mut batch = self.step("launch_default", serde_json::json!({}))?;
         self.queue_default_gameplay_story_audio_preloads()?;
-        // `step` has already scheduled the current state's bounded asynchronous
-        // prefetch window. Do not synchronously decode a gameplay-wide image
-        // prefix here: the title scene must be presented before unrelated route
-        // assets are read, decrypted, decoded, and uploaded.
-        let prewarmed_images = self.prewarm_default_gameplay_story_images()?;
         if !prewarmed_images.is_empty() {
             let [PlayerHostCommand::PresentScene { commands, .. }] = batch.commands.as_mut_slice()
             else {
@@ -1978,6 +2156,7 @@ impl NativeVnHostCommandSource {
                 ));
             };
             let mut uploads = Vec::with_capacity(prewarmed_images.len());
+            let mut uploaded_ids = Vec::new();
             for asset_id in prewarmed_images {
                 if self.live_texture_ids.insert(asset_id.clone()) {
                     let frame = self.texture(&asset_id)?.clone();
@@ -2000,12 +2179,17 @@ impl NativeVnHostCommandSource {
                         .insert(asset_id.clone(), frame_bytes);
                     self.mark_texture_used(&asset_id)?;
                     uploads.push(SceneCommand::UploadTexture {
-                        resource_id: asset_id,
+                        resource_id: asset_id.clone(),
                         frame,
                     });
+                    uploaded_ids.push(asset_id);
                 }
             }
             commands.splice(0..0, uploads);
+            for asset_id in uploaded_ids {
+                self.remove_texture(&asset_id)?;
+                self.asset_store.release_uploaded_image(&asset_id)?;
+            }
         }
         Ok(batch)
     }
@@ -2237,22 +2421,7 @@ impl NativeVnHostCommandSource {
             .iter()
             .any(|event| matches!(event.kind, UiInputEventKind::FixedTime { .. }))
         {
-            if let Some(command) = self.pending_text_reveal_configuration()? {
-                let payload = serde_json::to_value(command)
-                    .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
-                self.step_with_presentation("command", payload, false)?;
-            }
-        }
-        if events
-            .iter()
-            .any(|event| matches!(event.kind, UiInputEventKind::FixedTime { .. }))
-            && self
-                .runtime_state
-                .as_ref()
-                .and_then(|state| state.text_reveal.as_ref())
-                .is_some_and(|reveal| !reveal.complete())
-        {
-            return self.step("tick_text_reveal", serde_json::Value::Null);
+            self.ensure_text_region()?;
         }
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
@@ -2408,9 +2577,49 @@ impl NativeVnHostCommandSource {
         let next_scene_draw = stage_scene_commands(
             next_stage_director.state(),
             &self.textures,
+            &self.texture_dimensions,
             viewport.physical_width,
             viewport.physical_height,
         )?;
+        let texture_ids = scene_texture_ids(&next_scene_draw);
+        for asset_id in &texture_ids {
+            self.mark_texture_used(asset_id)?;
+        }
+        let missing_ids = texture_ids
+            .difference(&self.live_texture_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let missing_bytes = missing_ids.iter().try_fold(0u64, |total, asset_id| {
+            total
+                .checked_add(self.texture(asset_id)?.rgba8.len() as u64)
+                .ok_or_else(|| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_GPU_RESIDENT_BYTES_OVERFLOW".into())
+                })
+        })?;
+        let mut lifecycle = Vec::new();
+        self.evict_gpu_textures_for(missing_bytes, &texture_ids, &mut lifecycle)?;
+        for asset_id in &missing_ids {
+            let frame = self.texture(asset_id)?.clone();
+            let frame_bytes = frame.rgba8.len() as u64;
+            self.resident_texture_bytes = self
+                .resident_texture_bytes
+                .checked_add(frame_bytes)
+                .ok_or_else(|| {
+                    NativeVnHostError::Asset("ASTRA_PLAYER_GPU_RESIDENT_BYTES_OVERFLOW".into())
+                })?;
+            self.live_texture_ids.insert(asset_id.clone());
+            self.live_texture_bytes
+                .insert(asset_id.clone(), frame_bytes);
+            lifecycle.push(SceneCommand::UploadTexture {
+                resource_id: asset_id.clone(),
+                frame,
+            });
+        }
+        self.pending_gpu_lifecycle = lifecycle;
+        for asset_id in missing_ids {
+            self.remove_texture(&asset_id)?;
+            self.asset_store.release_uploaded_image(&asset_id)?;
+        }
         self.width = viewport.physical_width;
         self.height = viewport.physical_height;
         self.ui_viewport = viewport.clone();
@@ -3113,6 +3322,7 @@ impl NativeVnHostCommandSource {
             self.height,
             [8, 10, 16, 255],
         )];
+        commands.append(&mut self.pending_gpu_lifecycle);
         commands.extend(self.scene_draw.iter().cloned());
         commands.extend(ui_draw.iter().cloned());
         // Retain only the UI layer. Keeping the fully composed frame here caused
@@ -3198,9 +3408,20 @@ impl NativeVnHostCommandSource {
         let state = self.runtime_state.as_ref().ok_or_else(|| {
             NativeVnHostError::Input("ASTRA_PLAYER_STATE: runtime has not launched".into())
         })?;
+        let text_layout_command = (state.system_stack.is_empty()
+            && state.pending_choice.is_none()
+            && state.pending_wait.as_ref().map(|wait| wait.kind) == Some(VnWaitKind::Dialogue))
+        .then(|| {
+            self.stage_director
+                .text_reveal_state()
+                .map(|text| text.command_id)
+        })
+        .flatten();
         let save_slots = self.ui_save_slots.values().cloned().collect::<Vec<_>>();
+        let text_reveal = self.stage_director.text_reveal_state();
         let context = VnUiModelContext {
             runtime: state,
+            text_reveal: text_reveal.as_ref(),
             story: &self.story,
             save_slots: &save_slots,
             localization_keys: &self.localization_keys,
@@ -3632,6 +3853,11 @@ impl NativeVnHostCommandSource {
             None
         };
         host_performance.text_scene_ns = performance_phase_duration(text_scene_started)?;
+        if let Some(command_id) = text_layout_command {
+            self.stage_director
+                .complete_text_layout(&command_id)
+                .map_err(stage_director_error)?;
+        }
         self.accumulate_ui_host_performance(host_performance);
         Ok(NativeVnUiFrameResult {
             actions: output.actions,
@@ -3682,6 +3908,7 @@ impl NativeVnHostCommandSource {
         self.texture_last_used.clear();
         self.texture_cpu_last_used.clear();
         self.textures.clear();
+        self.texture_dimensions.clear();
         self.texture_cpu_bytes = 0;
         self.resident_texture_bytes = 0;
         self.live_layout_ids.clear();
@@ -3723,21 +3950,42 @@ impl NativeVnHostCommandSource {
         &mut self,
         command: VnPlayerCommand,
     ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
+        if matches!(&command, VnPlayerCommand::Advance) {
+            match self.stage_director.request_text_advance() {
+                TextAdvanceDisposition::RevealCompleted => {
+                    let ui = self.render_ui(Vec::new())?;
+                    self.ui_semantics = Some(ui.semantics);
+                    return self.present_current_scene(ui.draw);
+                }
+                TextAdvanceDisposition::StoryAdvanceRequested => {
+                    let previous = self.stage_director.clone();
+                    self.stage_director
+                        .acknowledge_story_advance()
+                        .map_err(stage_director_error)?;
+                    let payload = serde_json::to_value(command)
+                        .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
+                    return match self.step("command", payload) {
+                        Ok(batch) => Ok(batch),
+                        Err(error) => {
+                            self.stage_director = previous;
+                            Err(error)
+                        }
+                    };
+                }
+                TextAdvanceDisposition::NoActiveText => {}
+            }
+        }
         let payload = serde_json::to_value(command)
             .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
         self.step("command", payload)
     }
 
-    fn pending_text_reveal_configuration(
-        &self,
-    ) -> Result<Option<VnPlayerCommand>, NativeVnHostError> {
+    fn ensure_text_region(&mut self) -> Result<(), NativeVnHostError> {
         let Some(state) = self.runtime_state.as_ref() else {
-            return Ok(None);
+            return Ok(());
         };
-        if state.text_reveal.is_some()
-            || state.pending_wait.as_ref().map(|wait| wait.kind) != Some(VnWaitKind::Dialogue)
-        {
-            return Ok(None);
+        if state.pending_wait.as_ref().map(|wait| wait.kind) != Some(VnWaitKind::Dialogue) {
+            return Ok(());
         }
         let Some(entry) = state.backlog.last() else {
             return Err(NativeVnHostError::RuntimeEvidence(
@@ -3767,12 +4015,30 @@ impl NativeVnHostCommandSource {
             61..=80 => 65,
             _ => 90,
         };
-        Ok(Some(VnPlayerCommand::ConfigureTextReveal {
-            command_id: entry.command_id.clone(),
-            text_key: entry.key.clone(),
-            text_graphemes,
-            graphemes_per_second,
-        }))
+        if self
+            .stage_director
+            .text_reveal_state()
+            .as_ref()
+            .is_some_and(|reveal| reveal.command_id == entry.command_id)
+        {
+            return Ok(());
+        }
+        let command_id = entry.command_id.clone();
+        let text_key = entry.key.clone();
+        let speaker = entry.speaker.clone();
+        let window = entry.layout.window.clone();
+        self.stage_director
+            .configure_text(
+                command_id,
+                text_key,
+                speaker,
+                window,
+                text_graphemes,
+                graphemes_per_second,
+                PresentationInterruptPolicy::ReplaceFromCurrent,
+            )
+            .map_err(stage_director_error)?;
+        Ok(())
     }
 
     fn step(
@@ -3883,6 +4149,7 @@ impl NativeVnHostCommandSource {
         }
         self.runtime_backlog_count = runtime_view.backlog_count;
         self.runtime_state = Some(runtime_view.state);
+        self.ensure_text_region()?;
         self.schedule_current_image_prefetch()?;
         self.queue_current_story_audio_preloads()?;
         let runtime_state = self.runtime_state.as_ref().ok_or_else(|| {
@@ -4200,6 +4467,7 @@ impl NativeVnHostCommandSource {
         let stage_scene_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         let mut lifecycle = Vec::new();
+        let mut uploaded_texture_ids = Vec::new();
         let next_stage_scene = if let Some(director) = next_stage_director.as_ref() {
             let stage_texture_started =
                 performance_phase_started(self.ui_host_performance_sampling_enabled);
@@ -4210,8 +4478,13 @@ impl NativeVnHostCommandSource {
             }
             let stage_command_started =
                 performance_phase_started(self.ui_host_performance_sampling_enabled);
-            let scene_draw =
-                stage_scene_commands(director.state(), &self.textures, self.width, self.height)?;
+            let scene_draw = stage_scene_commands(
+                director.state(),
+                &self.textures,
+                &self.texture_dimensions,
+                self.width,
+                self.height,
+            )?;
             let stage_command_ns = performance_phase_duration(stage_command_started)?;
             if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
                 sample.stage_command_ns = sample.stage_command_ns.saturating_add(stage_command_ns);
@@ -4247,9 +4520,10 @@ impl NativeVnHostCommandSource {
                 self.live_texture_bytes
                     .insert(asset_id.clone(), frame.rgba8.len() as u64);
                 lifecycle.push(SceneCommand::UploadTexture {
-                    resource_id: asset_id,
+                    resource_id: asset_id.clone(),
                     frame,
                 });
+                uploaded_texture_ids.push(asset_id);
             }
             let stage_lifecycle_ns = performance_phase_duration(stage_lifecycle_started)?;
             if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
@@ -4399,6 +4673,10 @@ impl NativeVnHostCommandSource {
             commands: lifecycle,
             semantics: self.ui_semantics.clone(),
         }])?;
+        for asset_id in uploaded_texture_ids {
+            self.remove_texture(&asset_id)?;
+            self.asset_store.release_uploaded_image(&asset_id)?;
+        }
         let scene_compose_ns = performance_phase_duration(scene_compose_started)?;
         if let Some(sample) = self.last_ui_host_performance_sample.as_mut() {
             sample.scene_compose_ns = sample.scene_compose_ns.saturating_add(scene_compose_ns);
@@ -4416,15 +4694,21 @@ impl NativeVnHostCommandSource {
             .filter(|entity| entity.visible)
             .map(|entity| entity.asset.clone())
             .collect::<BTreeSet<_>>();
+        let mut cpu_required = BTreeSet::new();
         for movie in state.movies.values() {
             if !self.textures.contains_key(&movie.asset) {
                 if let Some(fallback) = &movie.fallback {
                     required.insert(fallback.clone());
+                    cpu_required.insert(fallback.clone());
                 }
             }
         }
         for asset_id in &required {
-            if !self.textures.contains_key(asset_id) {
+            let gpu_resident = self.live_texture_ids.contains(asset_id)
+                && self.texture_dimensions.contains_key(asset_id);
+            if !self.textures.contains_key(asset_id)
+                && (!gpu_resident || cpu_required.contains(asset_id))
+            {
                 let cache_hit = self.asset_store.is_image_cached(asset_id)?;
                 let started = performance_phase_started(self.ui_host_performance_sampling_enabled);
                 let frame =
@@ -4476,6 +4760,8 @@ impl NativeVnHostCommandSource {
             .ok_or_else(|| {
                 NativeVnHostError::Asset("ASTRA_PLAYER_CPU_TEXTURE_BYTES_OVERFLOW".into())
             })?;
+        self.texture_dimensions
+            .insert(asset_id.clone(), (frame.width, frame.height));
         self.textures.insert(asset_id, frame);
 
         while self.texture_cpu_bytes > self.texture_cpu_budget_bytes {
@@ -4670,6 +4956,9 @@ impl NativeVnHostCommandSource {
                 self.image_prefetch_failure = Some(error.clone());
                 return Err(NativeVnHostError::Asset(error));
             }
+            if self.live_texture_ids.contains(&asset_id) {
+                self.asset_store.release_uploaded_image(&asset_id)?;
+            }
         }
         Ok(())
     }
@@ -4688,9 +4977,11 @@ impl NativeVnHostCommandSource {
             self.asset_store.pin_image_working_set(&[])?;
             return Ok(());
         };
-        self.asset_store.pin_image_working_set(assets)?;
+        let working_set = current_image_working_set(self.stage_director.state());
+        self.asset_store.pin_image_working_set(&working_set)?;
         for asset_id in assets {
-            if self.textures.contains_key(asset_id)
+            if self.live_texture_ids.contains(asset_id)
+                || self.textures.contains_key(asset_id)
                 || self.image_prefetch_inflight.contains(asset_id)
                 || self.asset_store.is_image_cached(asset_id)?
             {
@@ -4824,8 +5115,8 @@ fn saved_runtime_state(
         ));
     };
     if section.section_id != "runtime.world"
-        || section.schema != "astra.runtime.save_blob.v2"
-        || section.version != SchemaVersion::new(2, 0, 0)
+        || section.schema != "astra.runtime.save_blob.v3"
+        || section.version != SchemaVersion::new(3, 0, 0)
         || section.codec != RuntimeSectionCodec::Raw
         || Hash256::from_sha256(&section.bytes) != section.hash
     {
@@ -4923,6 +5214,22 @@ fn cleanup_runtime_host(
             "ASTRA_PLAYER_RUNTIME_CLEANUP_FAILED: {error}; cleanup failed: {cleanup_error}"
         )),
     }
+}
+
+fn current_image_working_set(state: &ProductStageState) -> Vec<String> {
+    let mut working_set = state
+        .entities
+        .values()
+        .filter(|entity| entity.visible)
+        .map(|entity| entity.asset.clone())
+        .collect::<BTreeSet<_>>();
+    working_set.extend(
+        state
+            .movies
+            .values()
+            .filter_map(|movie| movie.fallback.clone()),
+    );
+    working_set.into_iter().collect()
 }
 
 fn image_prefetch_windows(
@@ -5087,6 +5394,7 @@ fn state_prefetch_successors(
 fn stage_scene_commands(
     state: &ProductStageState,
     textures: &BTreeMap<String, TextureFrame>,
+    texture_dimensions: &BTreeMap<String, (u32, u32)>,
     width: u32,
     height: u32,
 ) -> Result<Vec<SceneCommand>, NativeVnHostError> {
@@ -5147,7 +5455,7 @@ fn stage_scene_commands(
                 entity.id
             ))
         })?;
-        let texture = textures
+        let (texture_width, texture_height) = texture_dimensions
             .get(&entity.asset)
             .ok_or_else(|| missing_texture(&entity.asset))?;
         let clip = match layer.clip {
@@ -5168,7 +5476,8 @@ fn stage_scene_commands(
         } else {
             entity_destination(
                 state,
-                texture,
+                *texture_width,
+                *texture_height,
                 entity.fit,
                 entity.x.millionths,
                 entity.y.millionths,
@@ -5691,9 +6000,11 @@ fn effect_filter_graph(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn entity_destination(
     state: &ProductStageState,
-    texture: &TextureFrame,
+    texture_width: u32,
+    texture_height: u32,
     fit: StageFitMode,
     entity_x: i64,
     entity_y: i64,
@@ -5710,13 +6021,13 @@ fn entity_destination(
         StageFitMode::ContainHeight => {
             let height_fit = height.saturating_mul(9) / 10;
             let width_fit =
-                (u64::from(height_fit) * u64::from(texture.width)) / u64::from(texture.height);
+                (u64::from(height_fit) * u64::from(texture_width)) / u64::from(texture_height);
             if width_fit <= u64::from(width) {
                 (width_fit, u64::from(height_fit))
             } else {
                 (
                     u64::from(width),
-                    u64::from(width) * u64::from(texture.height) / u64::from(texture.width),
+                    u64::from(width) * u64::from(texture_height) / u64::from(texture_width),
                 )
             }
         }
@@ -5729,9 +6040,9 @@ fn entity_destination(
             let scale_numerator =
                 (u64::from(width) * viewport_height).min(u64::from(height) * viewport_width);
             (
-                (u64::from(texture.width) * scale_numerator / viewport_width / viewport_height)
+                (u64::from(texture_width) * scale_numerator / viewport_width / viewport_height)
                     .max(1),
-                (u64::from(texture.height) * scale_numerator / viewport_width / viewport_height)
+                (u64::from(texture_height) * scale_numerator / viewport_width / viewport_height)
                     .max(1),
             )
         }

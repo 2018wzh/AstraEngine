@@ -32,6 +32,35 @@
       "release_eligible": true
     },
     {
+      "id": "prov.assets.fonts.notosanssc-variable.ttf",
+      "role": "font",
+      "artifact": {
+        "relative_path": "Assets/Fonts/NotoSansSC-Variable.ttf"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+      "byte_size": 17772300,
+      "media_attributes": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license": {
+        "status": "approved",
+        "scope": "public_redistribution",
+        "evidence": {
+          "relative_path": "README.md"
+        }
+      },
+      "release_eligible": true
+    },
+    {
       "id": "prov.assets.fonts.ofl-notosansjp.txt",
       "role": "font",
       "artifact": {
@@ -45,6 +74,93 @@
       "media_attributes": {
         "kind": "document",
         "mime_type": "text/plain"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license": {
+        "status": "approved",
+        "scope": "public_redistribution",
+        "evidence": {
+          "relative_path": "README.md"
+        }
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "prov.assets.fonts.ofl.txt",
+      "role": "font",
+      "artifact": {
+        "relative_path": "Assets/Fonts/OFL.txt"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "8503c30a4d7e09c4c09015fee42f829f18acbe6330755e9930ba50ea44eaa157",
+      "byte_size": 4384,
+      "media_attributes": {
+        "kind": "document",
+        "mime_type": "text/plain"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license": {
+        "status": "approved",
+        "scope": "public_redistribution",
+        "evidence": {
+          "relative_path": "README.md"
+        }
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "prov.assets.fonts.poppins-regular.ttf",
+      "role": "font",
+      "artifact": {
+        "relative_path": "Assets/Fonts/Poppins-Regular.ttf"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "7e65201e9b79159e2300267cc885e16c8dcef2424cdfa09a29bfb0980a94a7ba",
+      "byte_size": 160316,
+      "media_attributes": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license": {
+        "status": "approved",
+        "scope": "public_redistribution",
+        "evidence": {
+          "relative_path": "README.md"
+        }
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "prov.assets.fonts.poppins-regular.ttf.astra-asset.yaml",
+      "role": "font",
+      "artifact": {
+        "relative_path": "Assets/Fonts/Poppins-Regular.ttf.astra-asset.yaml"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "9f53b94a4ba7e2b2e107207ace15bd07d879f8022d8b9e198a9006736ae648df",
+      "byte_size": 484,
+      "media_attributes": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
       },
       "generation_source": {
         "kind": "hand_authored",
@@ -1780,8 +1896,37 @@
       "scene_id": "global",
       "route_id": "route_common",
       "line_id": "global",
-      "sha256": "6d725f17b53de99e19b84293548c0c17dc52401cdf94c014ad5934c598e06a54",
-      "byte_size": 564,
+      "sha256": "56afc07121c1b8d8a4c4dc324f59126955e6455b86521cf7e6f3c30cbed98a20",
+      "byte_size": 562,
+      "media_attributes": {
+        "kind": "data",
+        "mime_type": "application/octet-stream"
+      },
+      "generation_source": {
+        "kind": "hand_authored",
+        "method": "editorial",
+        "tool": "codex"
+      },
+      "license": {
+        "status": "approved",
+        "scope": "public_redistribution",
+        "evidence": {
+          "relative_path": "README.md"
+        }
+      },
+      "release_eligible": true
+    },
+    {
+      "id": "prov.assetsidecars.font-notosanssc-variable.astra-asset.yaml",
+      "role": "story_reference",
+      "artifact": {
+        "relative_path": "AssetSidecars/font__notosanssc-variable.astra-asset.yaml"
+      },
+      "scene_id": "global",
+      "route_id": "route_common",
+      "line_id": "global",
+      "sha256": "de70d9186f54c518c06431990cba9a2d1c46945dce69205d54133771b6830911",
+      "byte_size": 597,
       "media_attributes": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -21483,7 +21628,7 @@
       "scene_id": "global",
       "route_id": "route_common",
       "line_id": "global",
-      "sha256": "31b591212b567a9dcc0b7368e8925d0d73663c6b3da98440ad9ef96d4e7f82c5",
+      "sha256": "6e499ce83849d3ad05ecc2670e22479d443829f0a878800ac35253bc0341018e",
       "byte_size": 2370,
       "media_attributes": {
         "kind": "data",
@@ -22498,8 +22643,8 @@
       "scene_id": "global",
       "route_id": "route_common",
       "line_id": "global",
-      "sha256": "85050bff99cba008cbf307830f1707a52595edf7c7462494d443b8ed7872b4d1",
-      "byte_size": 53909,
+      "sha256": "b758e07b3a2891d6325390505a1411d4a999b7971116e1f415cf51d0a16726d8",
+      "byte_size": 53974,
       "media_attributes": {
         "kind": "data",
         "mime_type": "application/octet-stream"
@@ -22643,8 +22788,8 @@
       "scene_id": "global",
       "route_id": "route_common",
       "line_id": "global",
-      "sha256": "4a692bf51843fa08ca5d5e596fffcfe87304865c22b00f8a42c6bee98851d268",
-      "byte_size": 14584,
+      "sha256": "9e892b6da6ef05e5231424c228a5a959b9e73e6261b37790885f388c3b57e5fa",
+      "byte_size": 15490,
       "media_attributes": {
         "kind": "data",
         "mime_type": "application/octet-stream"

@@ -170,6 +170,15 @@ pub enum TimelineCommand {
     Cancel { id: String, reason: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationInterruptPolicy {
+    Queue,
+    ReplaceFromCurrent,
+    SnapThenStart,
+    Reject,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StageCommand {
@@ -193,6 +202,7 @@ pub enum StageCommand {
         layer: String,
         preset: Option<String>,
         duration_ms: u32,
+        interrupt: PresentationInterruptPolicy,
     },
     Show {
         id: String,
@@ -203,15 +213,18 @@ pub enum StageCommand {
         fit: StageFitMode,
         opacity: FixedScalar,
         preset: Option<String>,
+        interrupt: PresentationInterruptPolicy,
     },
     Hide {
         id: String,
         preset: Option<String>,
         duration_ms: u32,
+        interrupt: PresentationInterruptPolicy,
     },
     ClearLayer {
         layer: String,
         duration_ms: u32,
+        interrupt: PresentationInterruptPolicy,
     },
     SetLayerVisibility {
         layer: String,
@@ -233,6 +246,7 @@ pub enum StageCommand {
         y: FixedScalar,
         duration_ms: u32,
         preset: Option<String>,
+        interrupt: PresentationInterruptPolicy,
     },
     Camera {
         target: String,
@@ -251,6 +265,7 @@ pub enum StageCommand {
         end: VnMovieEndBehavior,
         fence: Option<String>,
         fallback: Option<String>,
+        interrupt: PresentationInterruptPolicy,
     },
     Audio(AudioCue),
     AudioControl(AudioControl),

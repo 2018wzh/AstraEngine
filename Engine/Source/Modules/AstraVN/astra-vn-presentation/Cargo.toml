@@ -8,6 +8,7 @@ version.workspace = true
 tracing.workspace = true
 astra-core = { path = "../../../Runtime/astra-core" }
 astra-media-core = { path = "../../../Runtime/astra-media-core" }
+astra-worker-budget = { path = "../../../Runtime/astra-worker-budget" }
 astra-vn-script = { path = "../astra-vn-script" }
 postcard.workspace = true
 schemars.workspace = true

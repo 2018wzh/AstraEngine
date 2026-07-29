@@ -45,6 +45,7 @@ fn decode_request_sequence_is_independent_from_command_order() {
         coded_width: Some(16),
         coded_height: Some(16),
         keyframe: true,
+        stream_action: astra_player_core::PlayerDecodeStreamAction::OneShot,
         bytes: vec![1],
     };
     assert_eq!(command.sequence(), 9);

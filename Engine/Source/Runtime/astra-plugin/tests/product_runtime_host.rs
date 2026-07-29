@@ -345,6 +345,8 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -412,6 +414,8 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
         profile: "release".into(),
         locale: "und".into(),
         seed: 1,
+        integrity_mode: RuntimeTickIntegrityMode::Evidence,
+        executor: RuntimeExecutorConfig::serial(),
         package_hash: "sha256:test".into(),
         sections: vec![],
     };
@@ -448,6 +452,8 @@ fn host_blocks_unknown_step_schema() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -479,6 +485,8 @@ fn host_blocks_output_count_and_payload_bounds() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -509,6 +517,8 @@ fn host_validates_save_and_restore_sections_before_accepting_state() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -567,6 +577,8 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -605,6 +617,8 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -635,6 +649,8 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -699,6 +715,8 @@ fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch(
                 profile: "release".into(),
                 locale: "und".into(),
                 seed: 1,
+                integrity_mode: RuntimeTickIntegrityMode::Evidence,
+                executor: RuntimeExecutorConfig::serial(),
                 package_hash: "sha256:test".into(),
                 sections: vec![],
             })
@@ -731,6 +749,8 @@ fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })
@@ -792,6 +812,8 @@ async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() 
         profile: "release".into(),
         locale: "und".into(),
         seed,
+        integrity_mode: RuntimeTickIntegrityMode::Evidence,
+        executor: RuntimeExecutorConfig::serial(),
         package_hash: "sha256:test".into(),
         sections: vec![],
     };
@@ -836,6 +858,8 @@ async fn async_host_timeout_poisons_the_provider_instance() {
             profile: "release".into(),
             locale: "und".into(),
             seed: 1,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: RuntimeExecutorConfig::serial(),
             package_hash: "sha256:test".into(),
             sections: vec![],
         })

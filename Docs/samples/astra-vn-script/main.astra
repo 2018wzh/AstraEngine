@@ -3,8 +3,8 @@ story main #@id story.main
 state prologue #@id state.prologue
   scene room #@id scene.room
     stage:
-      background asset:bg.room preset:soft_fade duration:300 #@id bg.room
-      show character:hero pose:normal at:center preset:hero_enter #@id hero.enter
+      background asset:bg.room preset:soft_fade duration:300 interrupt:replace_from_current #@id bg.room
+      show character:hero pose:normal at:center preset:hero_enter interrupt:replace_from_current #@id hero.enter
 
     timeline intro #@id timeline.intro
       task bgm:

@@ -210,6 +210,8 @@ impl RuntimeBridge {
             profile: "fvp-v1".into(),
             locale: "und".into(),
             seed,
+            integrity_mode: astra_plugin_abi::RuntimeTickIntegrityMode::Shipping,
+            executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
             package_hash: case.content_hash.clone(),
             sections: vec![section],
         })?;

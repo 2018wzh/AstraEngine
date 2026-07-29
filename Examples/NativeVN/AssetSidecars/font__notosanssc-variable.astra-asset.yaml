@@ -1,0 +1,22 @@
+schema: astra.asset.v1
+id: asset:/font/notosanssc-variable
+source: Assets/Fonts/NotoSansSC-Variable.ttf
+source_hash: sha256:a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da
+type: font.ttf
+license: OFL-1.1
+importer: astra.import.font
+font:
+  family: Noto Sans SC
+  face_index: 0
+  subset: cjk-production
+  coverage:
+    - { start: 32, end: 126 }
+    - { start: 8220, end: 8221 }
+    - { start: 12288, end: 12543 }
+    - { start: 13312, end: 40959 }
+    - { start: 65280, end: 65519 }
+cook:
+  processor: astra.cook.font
+  target_profiles: [advanced-vn]
+  params: {}
+review: accepted

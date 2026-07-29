@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{RuntimeError, RuntimeSnapshot};
 
 const CURRENT: SchemaVersion = CURRENT_CONTAINER_VERSION;
-const RUNTIME_WORLD_CURRENT: SchemaVersion = SchemaVersion::new(2, 0, 0);
+const RUNTIME_WORLD_CURRENT: SchemaVersion = SchemaVersion::new(3, 0, 0);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SaveBlob(pub Vec<u8>);

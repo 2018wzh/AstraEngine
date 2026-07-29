@@ -12,9 +12,9 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{
     ActionRegistry, ActorId, ActorRecord, ActorSnapshot, ActorStore, AwaitQueue, AwaitResult,
-    AwaitToken, Blackboard, ComponentId, ComponentRecord, ComponentSnapshot, CreateAwaitAction,
-    DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload, EventQueue,
-    EventQueueCheckpoint, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
+    AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
+    CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
+    EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
     ProviderReplayOutput, RuntimeAction, RuntimeComponentPayload, RuntimeEffectRecord,
     RuntimeEvent, RuntimeMutationRecord, RuntimeReplayTranscript, SaveBlob, SaveRequest,
     ScheduledEvent, SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot,
@@ -232,6 +232,14 @@ pub enum TickMode {
     Replay,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TickIntegrityMode {
+    #[default]
+    Shipping,
+    Evidence,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OrderedTickIngress {
     pub sequence: u64,
@@ -284,10 +292,15 @@ impl TickRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TickReport {
     pub step: u64,
+    pub integrity_mode: TickIntegrityMode,
     pub state_hash: Hash128,
     pub event_hash: Hash128,
     pub presentation_hash: Hash128,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+fn integrity_disabled_hash() -> Hash128 {
+    Hash128::from_blake3(b"astra.runtime.integrity.disabled.v1")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -312,6 +325,7 @@ pub struct RuntimeSnapshot {
     pub mutations: Vec<RuntimeMutationRecord>,
     pub effects: Vec<RuntimeEffectRecord>,
     pub mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
+    pub integrity_mode: TickIntegrityMode,
     pub step: u64,
 }
 
@@ -421,17 +435,13 @@ struct RuntimeStateDigestV3<'a> {
     mutation_history: Hash128,
     effect_history: Hash128,
     mounted_modules: &'a BTreeMap<String, ModuleBindingSnapshot>,
+    integrity_mode: TickIntegrityMode,
     step: u64,
 }
 
 struct RuntimeTransactionCheckpoint {
     id_source: StableIdGenerator,
-    actors: ActorStore,
-    blackboard: Blackboard,
     machines: crate::state_machine::StateMachineTransactionCheckpoint,
-    awaits: AwaitQueue,
-    delayed_events: DelayedEventQueue,
-    events: EventQueueCheckpoint,
     presentation_len: usize,
     mutations_len: usize,
     effects_len: usize,
@@ -457,11 +467,26 @@ pub struct RuntimeWorld {
     mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     step: u64,
     required_tick_mode: TickMode,
+    integrity_mode: TickIntegrityMode,
+    machine_worker_count: usize,
     history_digests: RefCell<RuntimeHistoryDigests>,
 }
 
 impl RuntimeWorld {
     pub fn create(config: RuntimeConfig, package: PackageHandle) -> Result<Self, RuntimeError> {
+        let integrity_mode = if cfg!(debug_assertions) {
+            TickIntegrityMode::Evidence
+        } else {
+            TickIntegrityMode::Shipping
+        };
+        Self::create_with_integrity(config, package, integrity_mode)
+    }
+
+    pub fn create_with_integrity(
+        config: RuntimeConfig,
+        package: PackageHandle,
+        integrity_mode: TickIntegrityMode,
+    ) -> Result<Self, RuntimeError> {
         let mut actions = ActionRegistry::default();
         actions.register(SetBlackboardAction)?;
         actions.register(EmitEventAction)?;
@@ -471,6 +496,7 @@ impl RuntimeWorld {
             seed = config.seed,
             required_slot_count = config.required_slots.len(),
             package_id = %package.package_id,
+            integrity_mode = ?integrity_mode,
             default_action_count = 4,
             "runtime.create"
         );
@@ -492,8 +518,35 @@ impl RuntimeWorld {
             mounted_modules: BTreeMap::new(),
             step: 0,
             required_tick_mode: TickMode::Live,
+            integrity_mode,
+            machine_worker_count: 1,
             history_digests: RefCell::new(RuntimeHistoryDigests::default()),
         })
+    }
+
+    pub fn tick_integrity_mode(&self) -> TickIntegrityMode {
+        self.integrity_mode
+    }
+
+    pub fn begin_replay_recording(&self) -> Result<crate::RuntimeReplayRecorder, RuntimeError> {
+        crate::RuntimeReplayRecorder::start(self.snapshot())
+    }
+
+    pub fn set_machine_worker_count(&mut self, worker_count: usize) -> Result<(), RuntimeError> {
+        if !(1..=8).contains(&worker_count) {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_WORKER_COUNT",
+                "machine worker count must be within 1..=8",
+            )));
+        }
+        if self.step != 0 {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_WORKER_COUNT_LIFECYCLE",
+                "machine worker count must be configured before the first fixed tick",
+            )));
+        }
+        self.machine_worker_count = worker_count;
+        Ok(())
     }
 
     pub fn package_id(&self) -> &str {
@@ -854,9 +907,10 @@ impl RuntimeWorld {
             ));
         }
 
-        let mut awaits = self.awaits.clone();
         for token in output.awaits {
-            awaits.insert(token).map_err(RuntimeError::diagnostic)?;
+            self.awaits
+                .insert(token)
+                .map_err(RuntimeError::diagnostic)?;
         }
         for event in output.events {
             self.enqueue_event(event);
@@ -872,7 +926,6 @@ impl RuntimeWorld {
                 envelope,
             });
         }
-        self.awaits = awaits;
         Ok(())
     }
 
@@ -888,7 +941,7 @@ impl RuntimeWorld {
     pub fn tick(&mut self, request: TickRequest) -> Result<TickReport, RuntimeError> {
         self.validate_tick_request(&request)?;
         let checkpoint_started = Instant::now();
-        let checkpoint = self.transaction_checkpoint();
+        let checkpoint = self.transaction_checkpoint()?;
         let checkpoint_ns = checkpoint_started.elapsed().as_nanos() as u64;
         let diagnostics = self.diagnostics.clone();
         let performance_step = request.timing.fixed_step;
@@ -923,7 +976,14 @@ impl RuntimeWorld {
             "measured RuntimeWorld tick transaction phases"
         );
         match result {
-            Ok(report) => Ok(report),
+            Ok(report) => {
+                self.actors.commit_transaction();
+                self.blackboard.commit_transaction();
+                self.awaits.commit_transaction();
+                self.delayed_events.commit_transaction();
+                self.events.commit_transaction();
+                Ok(report)
+            }
             Err(error) => {
                 self.restore_transaction_checkpoint(checkpoint);
                 self.diagnostics = diagnostics;
@@ -1080,6 +1140,7 @@ impl RuntimeWorld {
             &mut self.blackboard,
             &self.actions,
             &mut self.id_source,
+            self.machine_worker_count,
         );
         let machine_ns = machine_started.elapsed().as_nanos() as u64;
         for diagnostic in &output.diagnostics {
@@ -1117,17 +1178,38 @@ impl RuntimeWorld {
                 envelope,
             });
         }
-        let state_hash_started = Instant::now();
-        let state_hash = self.state_hash();
-        let state_hash_ns = state_hash_started.elapsed().as_nanos() as u64;
-        let event_hash_started = Instant::now();
-        let event_hash = self.event_hash();
-        let event_hash_ns = event_hash_started.elapsed().as_nanos() as u64;
-        let presentation_hash_started = Instant::now();
-        let presentation_hash = self.presentation_hash();
-        let presentation_hash_ns = presentation_hash_started.elapsed().as_nanos() as u64;
+        let (
+            state_hash,
+            event_hash,
+            presentation_hash,
+            state_hash_ns,
+            event_hash_ns,
+            presentation_hash_ns,
+        ) = if self.integrity_mode == TickIntegrityMode::Evidence {
+            let state_hash_started = Instant::now();
+            let state_hash = self.state_hash();
+            let state_hash_ns = state_hash_started.elapsed().as_nanos() as u64;
+            let event_hash_started = Instant::now();
+            let event_hash = self.event_hash();
+            let event_hash_ns = event_hash_started.elapsed().as_nanos() as u64;
+            let presentation_hash_started = Instant::now();
+            let presentation_hash = self.presentation_hash();
+            let presentation_hash_ns = presentation_hash_started.elapsed().as_nanos() as u64;
+            (
+                state_hash,
+                event_hash,
+                presentation_hash,
+                state_hash_ns,
+                event_hash_ns,
+                presentation_hash_ns,
+            )
+        } else {
+            let disabled = integrity_disabled_hash();
+            (disabled, disabled, disabled, 0, 0, 0)
+        };
         let report = TickReport {
             step: input.fixed_step,
+            integrity_mode: self.integrity_mode,
             state_hash,
             event_hash,
             presentation_hash,
@@ -1174,7 +1256,11 @@ impl RuntimeWorld {
         self.restore_snapshot(snapshot);
         self.required_tick_mode = TickMode::RestoreContinuation;
         let report = LoadReport {
-            state_hash: self.state_hash(),
+            state_hash: if self.integrity_mode == TickIntegrityMode::Evidence {
+                self.state_hash()
+            } else {
+                integrity_disabled_hash()
+            },
         };
         info!(state_hash = %report.state_hash, "runtime.load");
         Ok(report)
@@ -1194,6 +1280,7 @@ impl RuntimeWorld {
         self.mutations = snapshot.mutations;
         self.effects = snapshot.effects;
         self.mounted_modules = snapshot.mounted_modules;
+        self.integrity_mode = snapshot.integrity_mode;
         self.step = snapshot.step;
         *self.history_digests.get_mut() = RuntimeHistoryDigests::default();
     }
@@ -1202,7 +1289,13 @@ impl RuntimeWorld {
         &mut self,
         replay: RuntimeReplayTranscript,
     ) -> Result<ReplayReport, RuntimeError> {
-        if replay.schema != "astra.runtime_replay_transcript.v2" {
+        if self.integrity_mode != TickIntegrityMode::Evidence {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_REPLAY_RECORDING_DISABLED",
+                "runtime replay is disabled outside evidence integrity mode",
+            )));
+        }
+        if replay.schema != "astra.runtime_replay_transcript.v3" {
             return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_REPLAY_SCHEMA",
                 "runtime replay transcript schema is invalid",
@@ -1213,6 +1306,12 @@ impl RuntimeWorld {
         let original_mode = self.required_tick_mode;
         let result = (|| {
             self.restore_snapshot(replay.checkpoint);
+            if self.integrity_mode != TickIntegrityMode::Evidence {
+                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_REPLAY_RECORDING_DISABLED",
+                    "runtime replay checkpoint was not recorded in evidence integrity mode",
+                )));
+            }
             self.required_tick_mode = TickMode::Replay;
             for entry in replay.ticks {
                 let report = self.tick(entry.request)?;
@@ -1271,6 +1370,7 @@ impl RuntimeWorld {
             mutations: self.mutations.clone(),
             effects: self.effects.clone(),
             mounted_modules: self.mounted_modules.clone(),
+            integrity_mode: self.integrity_mode,
             step: self.step,
         }
     }
@@ -1298,6 +1398,7 @@ impl RuntimeWorld {
             mutation_history: history.mutations.hash,
             effect_history: history.effects.hash,
             mounted_modules: &self.mounted_modules,
+            integrity_mode: self.integrity_mode,
             step: self.step,
         };
         let bytes = postcard::to_allocvec(&digest)
@@ -1324,33 +1425,50 @@ impl RuntimeWorld {
         )
     }
 
-    fn transaction_checkpoint(&self) -> RuntimeTransactionCheckpoint {
-        RuntimeTransactionCheckpoint {
+    fn transaction_checkpoint(&mut self) -> Result<RuntimeTransactionCheckpoint, RuntimeError> {
+        self.actors.begin_transaction()?;
+        if let Err(message) = self.blackboard.begin_transaction() {
+            self.actors.rollback_transaction();
+            return Err(RuntimeError::message(message));
+        }
+        if let Err(message) = self.awaits.begin_transaction() {
+            self.blackboard.rollback_transaction();
+            self.actors.rollback_transaction();
+            return Err(RuntimeError::message(message));
+        }
+        if let Err(message) = self.delayed_events.begin_transaction() {
+            self.awaits.rollback_transaction();
+            self.blackboard.rollback_transaction();
+            self.actors.rollback_transaction();
+            return Err(RuntimeError::message(message));
+        }
+        if let Err(message) = self.events.begin_transaction() {
+            self.delayed_events.rollback_transaction();
+            self.awaits.rollback_transaction();
+            self.blackboard.rollback_transaction();
+            self.actors.rollback_transaction();
+            return Err(RuntimeError::message(message));
+        }
+        Ok(RuntimeTransactionCheckpoint {
             id_source: self.id_source.clone(),
-            actors: self.actors.clone(),
-            blackboard: self.blackboard.clone(),
             machines: self.machines.transaction_checkpoint(),
-            awaits: self.awaits.clone(),
-            delayed_events: self.delayed_events.clone(),
-            events: self.events.transaction_checkpoint(),
             presentation_len: self.presentation.len(),
             mutations_len: self.mutations.len(),
             effects_len: self.effects.len(),
             step: self.step,
             required_tick_mode: self.required_tick_mode,
-        }
+        })
     }
 
     fn restore_transaction_checkpoint(&mut self, checkpoint: RuntimeTransactionCheckpoint) {
         self.id_source = checkpoint.id_source;
-        self.actors = checkpoint.actors;
-        self.blackboard = checkpoint.blackboard;
+        self.actors.rollback_transaction();
+        self.blackboard.rollback_transaction();
         self.machines
             .restore_transaction_checkpoint(checkpoint.machines);
-        self.awaits = checkpoint.awaits;
-        self.delayed_events = checkpoint.delayed_events;
-        self.events
-            .restore_transaction_checkpoint(checkpoint.events);
+        self.awaits.rollback_transaction();
+        self.delayed_events.rollback_transaction();
+        self.events.rollback_transaction();
         self.presentation.truncate(checkpoint.presentation_len);
         self.mutations.truncate(checkpoint.mutations_len);
         self.effects.truncate(checkpoint.effects_len);
@@ -1391,6 +1509,10 @@ pub struct RuntimeDebugSession<'a> {
 }
 
 impl RuntimeDebugSession<'_> {
+    pub fn blackboard(&self) -> BTreeMap<String, BlackboardValue> {
+        self.world.blackboard.values().clone()
+    }
+
     pub fn actors(&self) -> Vec<ActorSnapshot> {
         self.world.actors.actor_snapshots()
     }

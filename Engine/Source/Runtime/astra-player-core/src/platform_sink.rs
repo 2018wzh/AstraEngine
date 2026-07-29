@@ -231,6 +231,7 @@ impl PlatformCommandSink {
                 coded_width,
                 coded_height,
                 keyframe,
+                stream_action,
                 bytes,
                 request_sequence,
                 ..
@@ -250,6 +251,7 @@ impl PlatformCommandSink {
                             coded_width: *coded_width,
                             coded_height: *coded_height,
                             keyframe: *keyframe,
+                            stream_action: decode_stream_action(*stream_action),
                             bytes: bytes.clone(),
                         },
                     )
@@ -335,6 +337,16 @@ impl PlatformCommandSink {
                 })
             }
         }
+    }
+}
+
+fn decode_stream_action(
+    action: crate::PlayerDecodeStreamAction,
+) -> astra_platform::DecodeStreamAction {
+    match action {
+        crate::PlayerDecodeStreamAction::OneShot => astra_platform::DecodeStreamAction::OneShot,
+        crate::PlayerDecodeStreamAction::Start => astra_platform::DecodeStreamAction::Start,
+        crate::PlayerDecodeStreamAction::Next => astra_platform::DecodeStreamAction::Next,
     }
 }
 

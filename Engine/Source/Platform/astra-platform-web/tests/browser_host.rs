@@ -158,6 +158,7 @@ async fn browser_host_webcodecs_decodes_encoded_video_chunk() {
                 coded_width: Some(2),
                 coded_height: Some(2),
                 keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::OneShot,
                 bytes: encoded,
             },
         )

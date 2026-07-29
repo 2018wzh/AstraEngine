@@ -129,7 +129,7 @@ impl RuntimeHostSchemaRegistry {
         self
     }
 
-    fn validate(
+    pub(crate) fn validate(
         &self,
         domain: RuntimeOutputDomain,
         envelope: &RuntimeOutputEnvelope,
@@ -149,7 +149,10 @@ impl RuntimeHostSchemaRegistry {
         Ok(())
     }
 
-    fn validate_output_bounds(&self, output: &RuntimeStepOutput) -> Result<(), RuntimeHostError> {
+    pub(crate) fn validate_output_bounds(
+        &self,
+        output: &RuntimeStepOutput,
+    ) -> Result<(), RuntimeHostError> {
         if output.outputs.len() > self.max_outputs {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_OUTPUT_COUNT",
@@ -173,7 +176,7 @@ impl RuntimeHostSchemaRegistry {
         Ok(())
     }
 
-    fn validate_sections(
+    pub(crate) fn validate_sections(
         &self,
         sections: &[RuntimeSectionPayload],
     ) -> Result<(), RuntimeHostError> {
@@ -277,7 +280,7 @@ impl ProductRuntimeHost {
         Self::bound_in_process(
             instance_id,
             selection,
-            FfiProductRuntimeProvider::new(registration),
+            FfiProductRuntimeProvider::new(registration)?,
             schemas,
         )
     }
@@ -290,7 +293,7 @@ impl ProductRuntimeHost {
     ) -> Result<Self, RuntimeHostError> {
         Self::create(
             instance_id,
-            Box::new(FfiProductRuntimeProvider::new(registration)),
+            Box::new(FfiProductRuntimeProvider::new(registration)?),
             schemas,
         )
     }
@@ -400,6 +403,10 @@ impl ProductRuntimeHost {
             ));
         }
         self.validate_bound_request(&request.target_id, &request.profile)?;
+        request
+            .executor
+            .validate()
+            .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_EXECUTOR_CONFIG", message))?;
         let session_seed = request.seed;
         let report = call_provider("ASTRA_RUNTIME_HOST_OPEN", "open", || {
             self.provider.open(request)
@@ -1007,15 +1014,27 @@ impl AsyncProductRuntimeHost {
 struct FfiProductRuntimeProvider {
     registration: FfiRuntimeProviderRegistration,
     instance_id: Option<ProviderInstanceId>,
+    session_handles: BTreeMap<String, astra_plugin_abi::RuntimeProviderSessionHandle>,
 }
 
 #[cfg(feature = "dynamic-abi")]
 impl FfiProductRuntimeProvider {
-    fn new(registration: FfiRuntimeProviderRegistration) -> Self {
-        Self {
+    fn new(registration: FfiRuntimeProviderRegistration) -> Result<Self, RuntimeHostError> {
+        if registration.abi_version != astra_plugin_abi::PRODUCT_RUNTIME_PROVIDER_ABI_VERSION {
+            return Err(RuntimeHostError::new(
+                "ASTRA_RUNTIME_PROVIDER_ABI_VERSION",
+                format!(
+                    "runtime provider ABI {} is unsupported; expected {}",
+                    registration.abi_version,
+                    astra_plugin_abi::PRODUCT_RUNTIME_PROVIDER_ABI_VERSION
+                ),
+            ));
+        }
+        Ok(Self {
             registration,
             instance_id: None,
-        }
+            session_handles: BTreeMap::new(),
+        })
     }
 
     fn direct<I: Serialize, O: DeserializeOwned>(
@@ -1040,6 +1059,32 @@ impl FfiProductRuntimeProvider {
             invoke,
             &RuntimeProviderCall {
                 instance_id,
+                payload,
+            },
+        )
+    }
+
+    fn session<I: Serialize, O: DeserializeOwned>(
+        &self,
+        invoke: FfiRuntimeProviderInvoke,
+        session_id: &GameRuntimeSessionId,
+        input: &I,
+    ) -> Result<O, String> {
+        let instance_id = self
+            .instance_id
+            .clone()
+            .ok_or_else(|| "FFI provider instance is not created".to_string())?;
+        let session_handle = self
+            .session_handles
+            .get(&session_id.0)
+            .copied()
+            .ok_or_else(|| "FFI provider session handle is not open".to_string())?;
+        let payload = serde_json::to_vec(input).map_err(|err| err.to_string())?;
+        Self::direct(
+            invoke,
+            &astra_plugin_abi::RuntimeProviderSessionCall {
+                instance_id,
+                session_handle,
                 payload,
             },
         )
@@ -1083,6 +1128,7 @@ impl ProductRuntimeProvider for FfiProductRuntimeProvider {
             self.registration.destroy_instance,
             &RuntimeProviderDestroyRequest { instance_id },
         )?;
+        self.session_handles.clear();
         self.instance_id = None;
         Ok(report)
     }
@@ -1096,26 +1142,37 @@ impl ProductRuntimeProvider for FfiProductRuntimeProvider {
     }
 
     fn open(&mut self, request: RuntimeOpenRequest) -> Result<RuntimeOpenReport, String> {
-        self.instance(self.registration.open, &request)
+        let opened: astra_plugin_abi::RuntimeProviderSessionOpenReport =
+            self.instance(self.registration.open_session, &request)?;
+        if self
+            .session_handles
+            .insert(opened.report.session_id.0.clone(), opened.session_handle)
+            .is_some()
+        {
+            return Err("FFI provider returned a duplicate session id".to_string());
+        }
+        Ok(opened.report)
     }
 
     fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
-        self.instance(self.registration.step, &input)
+        self.session(self.registration.step, &input.session_id, &input)
     }
 
     fn save(&mut self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, String> {
-        self.instance(self.registration.save, &request)
+        self.session(self.registration.save, &request.session_id, &request)
     }
 
     fn restore(&mut self, request: RuntimeRestoreRequest) -> Result<RuntimeRestoreReport, String> {
-        self.instance(self.registration.restore, &request)
+        self.session(self.registration.restore, &request.session_id, &request)
     }
 
     fn shutdown(
         &mut self,
         session_id: GameRuntimeSessionId,
     ) -> Result<RuntimeShutdownReport, String> {
-        self.instance(self.registration.shutdown, &session_id)
+        let report = self.session(self.registration.shutdown, &session_id, &session_id)?;
+        self.session_handles.remove(&session_id.0);
+        Ok(report)
     }
 }
 
@@ -1184,7 +1241,7 @@ pub struct RuntimeHostError {
 }
 
 impl RuntimeHostError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),

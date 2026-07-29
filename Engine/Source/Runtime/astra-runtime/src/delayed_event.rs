@@ -22,10 +22,59 @@ pub struct ScheduledEvent {
 pub struct DelayedEventQueue {
     queued: Vec<ScheduledEvent>,
     next_sequence: u64,
+    #[serde(skip)]
+    #[schemars(skip)]
+    transaction: Option<DelayedEventQueueTransaction>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct DelayedEventQueueTransaction {
+    queued_order: Vec<DelayedEventId>,
+    removed: BTreeMap<DelayedEventId, ScheduledEvent>,
+    added: BTreeSet<DelayedEventId>,
+    next_sequence: u64,
 }
 
 impl DelayedEventQueue {
+    pub(crate) fn begin_transaction(&mut self) -> Result<(), &'static str> {
+        if self.transaction.is_some() {
+            return Err("ASTRA_RUNTIME_DELAYED_EVENT_TRANSACTION_NESTED");
+        }
+        self.transaction = Some(DelayedEventQueueTransaction {
+            queued_order: self.queued.iter().map(|event| event.id).collect(),
+            next_sequence: self.next_sequence,
+            ..DelayedEventQueueTransaction::default()
+        });
+        Ok(())
+    }
+
+    pub(crate) fn commit_transaction(&mut self) {
+        self.transaction = None;
+    }
+
+    pub(crate) fn rollback_transaction(&mut self) {
+        let Some(transaction) = self.transaction.take() else {
+            return;
+        };
+        let mut queued = self
+            .queued
+            .drain(..)
+            .filter(|event| !transaction.added.contains(&event.id))
+            .map(|event| (event.id, event))
+            .collect::<BTreeMap<_, _>>();
+        queued.extend(transaction.removed);
+        self.queued = transaction
+            .queued_order
+            .into_iter()
+            .filter_map(|id| queued.remove(&id))
+            .collect();
+        self.next_sequence = transaction.next_sequence;
+    }
+
     pub fn schedule(&mut self, mut event: ScheduledEvent) -> DelayedEventId {
+        if let Some(transaction) = self.transaction.as_mut() {
+            transaction.added.insert(event.id);
+        }
         event.sequence = self.next_sequence;
         self.next_sequence += 1;
         let id = event.id;
@@ -34,9 +83,16 @@ impl DelayedEventQueue {
     }
 
     pub fn cancel(&mut self, id: DelayedEventId) -> bool {
-        let before = self.queued.len();
-        self.queued.retain(|event| event.id != id);
-        self.queued.len() != before
+        let Some(index) = self.queued.iter().position(|event| event.id == id) else {
+            return false;
+        };
+        let event = self.queued.remove(index);
+        if let Some(transaction) = self.transaction.as_mut() {
+            if !transaction.added.contains(&id) {
+                transaction.removed.insert(id, event);
+            }
+        }
+        true
     }
 
     pub fn drain_due(&mut self, fixed_step: u64) -> Vec<RuntimeEvent> {
@@ -46,6 +102,11 @@ impl DelayedEventQueue {
         let mut pending = Vec::new();
         for event in self.queued.drain(..) {
             if event.due_tick <= fixed_step {
+                if let Some(transaction) = self.transaction.as_mut() {
+                    if !transaction.added.contains(&event.id) {
+                        transaction.removed.insert(event.id, event.clone());
+                    }
+                }
                 ready.push(RuntimeEvent {
                     id: EventId(event.id.0),
                     source: event.source,
@@ -65,3 +126,4 @@ impl DelayedEventQueue {
         &self.queued
     }
 }
+use std::collections::{BTreeMap, BTreeSet};

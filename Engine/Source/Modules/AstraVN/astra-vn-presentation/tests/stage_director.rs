@@ -1,8 +1,8 @@
 use astra_vn_presentation::{
-    AspectRatio, FixedScalar, ProductStageDirector, StageBlendMode, StageClipPolicy, StageCommand,
-    StageFitMode, StageLayerKind, StagePlacement, StageViewport, TimelineCommand, TimelineSpec,
-    VnAudioBus, VnPresentationProviderManifest, VnTimelineJoinPolicy, VnTimelineKeyframe,
-    VnTimelineTrack,
+    AspectRatio, FixedScalar, PresentationInterruptPolicy, ProductStageDirector, StageBlendMode,
+    StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement, StageViewport,
+    TimelineCommand, TimelineSpec, VnAudioBus, VnPresentationProviderManifest,
+    VnTimelineJoinPolicy, VnTimelineKeyframe, VnTimelineTrack,
 };
 
 fn fixed(value: i64) -> FixedScalar {
@@ -157,6 +157,7 @@ fn show_hero(director: &mut ProductStageDirector) {
             fit: StageFitMode::ContainHeight,
             opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
+            interrupt: PresentationInterruptPolicy::ReplaceFromCurrent,
         })
         .unwrap();
 }
@@ -176,6 +177,7 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
             fit: StageFitMode::ContainHeight,
             opacity: FixedScalar::ONE,
             preset: Some("hero_enter".to_string()),
+            interrupt: PresentationInterruptPolicy::Reject,
         })
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_VN_STAGE_NOT_CONFIGURED");
@@ -227,6 +229,7 @@ fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
             fit: StageFitMode::ContainHeight,
             opacity: fixed(500_000),
             preset: None,
+            interrupt: PresentationInterruptPolicy::ReplaceFromCurrent,
         })
         .unwrap();
     assert_eq!(director.state().entities["half"].opacity, fixed(500_000));
@@ -241,6 +244,7 @@ fn stage_director_tracks_preload_and_layer_authority_in_snapshot_state() {
         .apply(&StageCommand::ClearLayer {
             layer: "characters".to_string(),
             duration_ms: 0,
+            interrupt: PresentationInterruptPolicy::SnapThenStart,
         })
         .unwrap();
     assert!(director.state().entities.is_empty());
@@ -265,6 +269,7 @@ fn stage_director_can_clear_an_empty_video_layer() {
         .apply(&StageCommand::ClearLayer {
             layer: "video".to_string(),
             duration_ms: 0,
+            interrupt: PresentationInterruptPolicy::SnapThenStart,
         })
         .unwrap();
 }

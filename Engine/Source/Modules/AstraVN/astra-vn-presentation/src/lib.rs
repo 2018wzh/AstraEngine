@@ -1,12 +1,14 @@
 //! AstraVN presentation model, provider manifest and headless execution.
 
 mod presentation;
+mod presentation_coordinator;
 mod presentation_execution;
 mod presentation_provider;
 mod stage_director;
 
 pub use astra_vn_script::*;
 pub use presentation::*;
+pub use presentation_coordinator::*;
 pub use presentation_execution::*;
 pub use presentation_provider::*;
 pub use stage_director::*;

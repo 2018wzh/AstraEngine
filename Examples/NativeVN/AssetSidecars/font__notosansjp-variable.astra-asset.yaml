@@ -11,8 +11,8 @@ font:
   subset: cjk-production
   coverage:
     - { start: 32, end: 126 }
+    - { start: 8220, end: 8221 }
     - { start: 12288, end: 12543 }
-    - { start: 13312, end: 40959 }
     - { start: 65280, end: 65519 }
 cook:
   processor: astra.cook.font

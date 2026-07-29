@@ -86,7 +86,7 @@ Section payload 默认使用 `postcard` + serde。大型媒体 payload 可以使
 
 ## Save
 
-Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、AudioGraph state、FilterGraph state、committed AI output、plugin opaque sections 和 migration manifest。NativeVN product provider 只输出 `runtime.world`/`astra.runtime.save_blob.v2` 权威 section；其 Raw payload 是自描述 Runtime save container，VN runtime/policy component 连同完整 Event/Await/delayed queue、MutationLog 和 effect trace 一起进入 `runtime.world` snapshot。旧的拆分 `vn.runtime_state`/`vn.policy_state` 不能作为 product save authority。
+Save 必须包含 Runtime state、Actor/Component、StateMachine、Blackboard、Director、AwaitToken、script snapshot、VN backlog、AudioGraph state、FilterGraph state、committed AI output、plugin opaque sections 和 migration manifest。NativeVN product provider 只输出 `runtime.world`/`astra.runtime.save_blob.v3` 权威 section；其 Raw payload 是自描述 Runtime save container，VN runtime/policy component 连同完整 Event/Await/delayed queue、MutationLog 和 effect trace 一起进入 `runtime.world` snapshot。旧 v2 与拆分 `vn.runtime_state`/`vn.policy_state` 不能作为 product save authority。
 
 AI Runtime 生成的文本、图像和语音结果是 save 数据，不是 package 数据。流式 chunk 通过 `ai.generated_artifact.*` extra section 固化；manifest 记录 model fingerprint、provider profile、validator result、content type、hash、codec 和可选 encryption。正式 replay 只读 save payload，不重跑 provider。
 
@@ -115,6 +115,8 @@ Standalone bundle 由已 cook/package 的 `.astrapkg` 生成，不从源 YAML �
 | `astra.player_presentation_report.v1` | `WINDOWS_PATH_DONE` | 从 `PlayerHostCommand::PresentScene` 的同 run hardware capture 生成，绑定 target/profile/package/profile hash/build/session、renderer/font provider、layout/command/capture hash、frame sequence、尺寸与变化像素；headless、空画面或 identity drift blocking，Web 与 bundled VN 完整产品主路径仍开放 |
 | `astra.player_locale_config.v1` | `WINDOWS_PATH_DONE` | Cook 从 profile-eligible `vn.localization.<locale>` sections生成 default/available locale identity；bundle config携带 default locale，Player按该 locale读取同包 localization。缺 default、default不在 available、locale id不安全、section/schema/locale漂移或重复 key均 blocking |
 | `astra.performance_budget.v1` | `DONE` | profile owner 声明 target/profile/hash、最短 run、metric unit、sample capacity 与 percentile/min/max threshold；未知 metric、重复 metric、零容量或非单调阈值 blocking |
+| `astra.headless_session_batch.v2` | `E2` | 全局 worker limit 为 1..=8；job id 与串行/并行 artifact root 必须唯一；`route`/`replay` 禁止 performance 配置，`performance` 必须绑定 budget、warmup 与非零 measurement start |
+| `astra.headless_session_batch_report.v2` | `E2` | 按 session id 稳定排序，绑定 profile/package/input/build hash、串行与并行 output identity、排队/运行时间、吞吐和 worker 利用率；performance job 额外记录 CPU/E2E percentile 与 private-memory peak |
 | `astra.performance_report.v1` | `E2_DONE_E3_IN_PROGRESS` | bounded recorder 生成 source/package/build/session-bound min/p50/p95/p99/max、sample count 和 diagnostic；TsuiNoSora 集显 Headless E2 已完成，真实 Player E3 与跨平台证据仍待闭合 |
 | `astra.text_layout_replay.v1` / `astra.text_layout_replay_snapshot.v1` | `IN_PROGRESS` | bounded postcard transcript 固化 package/build/session/provider/font/request/layout/glyph identity，支持事务性 restore continuation 与 provider-free replay；Windows Player command/release consumer已闭合，bundled VN 的 dialogue/choice/system text 已接入，Web 与 bundled VN 完整 presentation/audio 主路径尚未闭合 |
 | `astra.open_font_fixture_manifest.v1` | `DONE` | hermetic 字体回归清单，固定 upstream revision、OFL、source URL、family/face、coverage、byte size 和 SHA-256；只用于测试 provenance，不替代产品 `astra.font_manifest.v1` |
@@ -132,6 +134,7 @@ Migration 11 Headless 测试格式已经由 Rust 类型实现，仍不得进入 
 | `astra.headless_tolerance_approval.v2` | `IN_PROGRESS` | 仅接受具名人工 approval，绑定 approval 文件 hash、tolerance-set hash、前一配置 hash和原因码；不能覆盖自动失败 |
 | `astra.headless_artifact_manifest.v2` | `IN_PROGRESS` | 分开记录 submitted/rasterized 帧数和 stream hash、render policy、provider/backend/adapter identity；同帧 checkpoint 使用 `checkpoint_ids` 去重 |
 | `astra.headless_run_report.v2` | `IN_PROGRESS` | 已实现原子 pass/blocked report、checkpoint config hash、双流计数/hash、比较结果与 blocking diagnostic |
+| `astra.decoded_video_stream_descriptor.v2` / `astra.decoded_video_frame.v2` / `astra.decoded_video_stream_end.v2` | `CONTRACT_DONE` | `OpenDecode` 后以 `Start` 完整解码并校验到 host-private spool，只跨 Player boundary 返回小型 descriptor、单帧或 end marker；三者绑定 frame count、decoded byte count、stream hash、逐帧 sequence/PTS/duration/尺寸/content hash，`Next` 只允许空 payload，close 删除 spool |
 | `astra.headless_review_bundle.v2` | `IN_PROGRESS` | `prepare-review` 从稀疏 artifact 中选择 required checkpoint、首尾/最大差异/失败邻近帧和完整 WAV，并逐文件复核 hash |
 | `astra.headless_review.v2` | `IN_PROGRESS` | DTO、`validate-review` 与自动失败不可覆盖规则已实现；正式具名模型/人工 evidence 尚待生成 |
 | `astra.platform_run_identity.v1` | `IN_PROGRESS` | 真实平台工具记录 report/build/package/input/scenario/target/content/profile/session continuity；不能由 Headless 自称平台证据 |
@@ -169,7 +172,7 @@ Stage 3 已开始落地、但尚未全部写入 release package 的 VN runtime �
 | Data type | Status | Purpose |
 | --- | --- | --- |
 | `VnRuntimeState` | `IN_PROGRESS` | 保存 profile、locale、current story/state、command cursor、call stack、pending choice、变量、backlog、read-state、voice replay、route coverage、route flags 和 `VnSystemState` |
-| `astra.runtime.save_blob.v2` | `DONE` | NativeVN product provider 的唯一 `runtime.world` save section；nested container 保存完整 RuntimeSnapshot，并通过 restored step/seed 约束 continuation |
+| `astra.runtime.save_blob.v3` | `IN_PROGRESS` | NativeVN 与 AstraEMU 已硬切 v3，nested container 保存完整 RuntimeSnapshot，并通过 restored step/seed 约束 continuation；Runtime v3 transaction/history migration 尚未完成 |
 | `VnRuntimeStateSave` | `REFERENCE_ONLY` | `astra-vn-save` 的局部 VN state 工具；不得替代 product provider 的完整 RuntimeWorld save authority |
 | `BacklogEntry` / `VnReplayUiState` | `DONE` | 保存 command id、text key、speaker、voice ref、story/state、route position、read flag、layout metadata、voice replay rows 和 replay UI hash |
 | `VnSystemState` | `IN_PROGRESS` | 保存 auto enabled、skip mode、config key/value、gallery unlocks 和 replay unlocks；随 save/load/replay 保持 hash 一致 |

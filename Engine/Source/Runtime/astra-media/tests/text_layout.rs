@@ -13,7 +13,7 @@ use astra_media_core::{
     SceneCommand,
 };
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 
 fn open_font_fixture(file: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -310,6 +310,60 @@ fn provider() -> CosmicTextLayoutProvider {
         TextLayoutConfig::production_defaults(),
     )
     .unwrap()
+}
+
+#[astra_headless_test::test]
+fn text_layout_single_flight_and_worker_pool_are_bounded_and_parallel() {
+    let provider = Arc::new(provider());
+    let barrier = Arc::new(Barrier::new(8));
+    let handles = (0..8)
+        .map(|_| {
+            let provider = Arc::clone(&provider);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                provider.layout_shared(&request("single flight")).unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    let layouts = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    assert!(layouts
+        .iter()
+        .all(|layout| Arc::ptr_eq(layout, &layouts[0])));
+    let cache = provider.cache_stats().unwrap();
+    assert_eq!(cache.misses, 1);
+    assert_eq!(cache.hits, 7);
+
+    provider.clear_layout_cache().unwrap();
+    let worker_count = provider.concurrency_stats().unwrap().worker_count;
+    let barrier = Arc::new(Barrier::new(worker_count));
+    let handles = (0..worker_count)
+        .map(|index| {
+            let provider = Arc::clone(&provider);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let text = format!("worker-{index} {}", "parallel shaping ".repeat(4_000));
+                let request = request(&text);
+                barrier.wait();
+                provider.layout_shared(&request).unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    let concurrency = provider.concurrency_stats().unwrap();
+    assert_eq!(concurrency.active_workers, 0);
+    assert_eq!(concurrency.in_flight_requests, 0);
+    if concurrency.worker_count > 1 {
+        assert!(
+            concurrency.peak_active_workers > 1,
+            "distinct layout misses must execute on more than one worker"
+        );
+    }
 }
 
 #[astra_headless_test::test]

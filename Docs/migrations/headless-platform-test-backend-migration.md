@@ -75,7 +75,7 @@ Headless 必须实现 window/surface、RGBA present/capture、audio output、dec
 
 renderer、TextLayout、AudioGraph 和 decode contract 仍由 Media 层持有。Headless host 负责生命周期、输入和文件产物，不把媒体实现塞进 platform contract。输出必须来自真实 `SceneCommand`、glyph、纹理、视频帧、FilterGraph 和 AudioGraph。图像规范为 lossless PNG；音频规范为固定采样率、固定声道布局的 PCM S16LE WAV。
 
-image 与 Symphonia provider 默认可用。视频只在 profile 显式绑定 `ffmpeg-vcpkg` 且 feature/provider probe 成功时启用。Headless 解码完整 timestamped BGRA 帧流，逐帧校验 sequence、PTS、duration、尺寸、hash、总帧数和总字节上限；NativeVN 按固定时间呈现每帧，保存时只记录 asset/hash/cursor，恢复后重新从 package 解码并复核 identity。测试声明需要视频而 provider 不可用时必须阻断，不能退回首帧静态图、`SyntheticPlatformDecodeProvider`、空帧或静态 hash。
+image 与 Symphonia provider 默认可用。视频只在 profile 显式绑定 `ffmpeg-vcpkg` 且 feature/provider probe 成功时启用。Headless 先把完整 timestamped BGRA 帧流解码到 session-owned private spool，逐帧校验 sequence、PTS、duration、尺寸、hash、总帧数和总字节上限；Player 通过 `Start -> Next* -> CloseDecode` 一次只领取一帧，不能构造全流 `Vec` 或 postcard 聚合副本。NativeVN 按固定时间呈现每帧，保存时记录 asset/hash、stream descriptor identity、cursor 和 loop index，恢复后重新从 package 解码并复核 continuation。测试声明需要视频而 provider 不可用时必须阻断，不能退回首帧静态图、`SyntheticPlatformDecodeProvider`、空帧或静态 hash。
 
 Platform decode contract 同时包含 `Image`、`Audio` 与 `Video`。Headless 的 `Image` 路径必须经 `ImageDecodeProvider` 返回真实 RGBA；factory 会逐项核对 renderer、text、mixer、image/audio/video decode、save 与 package binding。未知 binding、未编译的 `ffmpeg-vcpkg` 或 probe 失败均在 session start 阻断，不能声明任意 provider 后仍使用内置实现。
 

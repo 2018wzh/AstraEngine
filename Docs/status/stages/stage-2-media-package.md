@@ -367,7 +367,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 | --- | --- | --- | --- |
 | `S2-HEADLESS-CONTRACT-01` | `IN_PROGRESS` | Headless v2 已硬切稀疏 render policy、双帧预算、双流 hash 和 renderer identity binding；等待完整隔离门禁 | `T-S2-HEADLESS-CONTRACT-01` |
 | `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | CPU 稀疏 materialization 与 surface-free WGPU 已实现；backend 复用 platform-common，Windows DX12 使用 static DXC，等待 Linux/Vulkan 与 macOS/Metal 正式 runtime | `T-S2-HEADLESS-HOST-01` |
-| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | Media-owned CPU renderer/mixer、真实 image/Symphonia decode、PNG/WAV、完整音频分析与显式 FFmpeg Windows job 已实现；等待 Windows CI 和正式 artifact evidence | `T-S2-HEADLESS-MEDIA-01` |
+| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | Media-owned CPU renderer/mixer、真实 image/Symphonia decode、PNG/WAV、完整音频分析与显式 FFmpeg Windows job 已实现；完整视频改为 private spool + descriptor/单帧/end DTO，定向 FFmpeg 全流测试、Player save/restore/skip cleanup、workspace clippy/test 与动态导出门禁通过；等待 clean Windows CI 和正式 artifact evidence | `T-S2-HEADLESS-MEDIA-01` |
 | `S2-HEADLESS-INPUT-01` | `IN_PROGRESS` | 强类型物理输入、固定时间、双向 JSONL 与 NativeVN adapter 已落地，等待全流程 evidence | `T-S2-HEADLESS-INPUT-01` |
 | `S2-HEADLESS-ARTIFACT-01` | `IN_PROGRESS` | retention、限额、原子 manifest/report 与比较器已落地，等待失败事务矩阵 evidence | `T-S2-HEADLESS-ARTIFACT-01` |
 | `S2-HEADLESS-CLI-01` | `IN_PROGRESS` | `astra-headless run`、`serve --stdio`、bootstrap 与旧 alias diagnostic 已落地 | `T-S2-HEADLESS-CLI-01` |

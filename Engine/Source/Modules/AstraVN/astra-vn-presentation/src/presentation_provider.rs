@@ -104,7 +104,11 @@ impl VnPresentationProviderManifest {
             presets: vec![
                 VnPresentationPreset {
                     id: "soft_fade".to_string(),
-                    command_kinds: vec!["background".to_string(), "hide".to_string()],
+                    command_kinds: vec![
+                        "background".to_string(),
+                        "show".to_string(),
+                        "hide".to_string(),
+                    ],
                     duration_ms: 300,
                     easing: VnPresentationEasing::EaseInOut,
                     filter: Some("astra.filter.fade".to_string()),

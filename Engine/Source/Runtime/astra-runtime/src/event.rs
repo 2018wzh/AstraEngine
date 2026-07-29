@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::StableId;
 use schemars::JsonSchema;
@@ -51,28 +51,57 @@ pub struct EventQueue {
     queued: Vec<RuntimeEvent>,
     trace: Vec<RuntimeEvent>,
     next_sequence: u64,
+    #[serde(skip)]
+    #[schemars(skip)]
+    transaction: Option<EventQueueTransaction>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct EventQueueCheckpoint {
-    queued: Vec<RuntimeEvent>,
+#[derive(Debug, Clone, Default, PartialEq)]
+struct EventQueueTransaction {
+    queued_order: Vec<EventId>,
+    removed: BTreeMap<EventId, RuntimeEvent>,
+    added: BTreeSet<EventId>,
     trace_len: usize,
     next_sequence: u64,
 }
 
 impl EventQueue {
-    pub(crate) fn transaction_checkpoint(&self) -> EventQueueCheckpoint {
-        EventQueueCheckpoint {
-            queued: self.queued.clone(),
+    pub(crate) fn begin_transaction(&mut self) -> Result<(), &'static str> {
+        if self.transaction.is_some() {
+            return Err("ASTRA_RUNTIME_EVENT_TRANSACTION_NESTED");
+        }
+        self.transaction = Some(EventQueueTransaction {
+            queued_order: self.queued.iter().map(|event| event.id).collect(),
+            removed: BTreeMap::new(),
+            added: BTreeSet::new(),
             trace_len: self.trace.len(),
             next_sequence: self.next_sequence,
-        }
+        });
+        Ok(())
     }
 
-    pub(crate) fn restore_transaction_checkpoint(&mut self, checkpoint: EventQueueCheckpoint) {
-        self.queued = checkpoint.queued;
-        self.trace.truncate(checkpoint.trace_len);
-        self.next_sequence = checkpoint.next_sequence;
+    pub(crate) fn commit_transaction(&mut self) {
+        self.transaction = None;
+    }
+
+    pub(crate) fn rollback_transaction(&mut self) {
+        let Some(transaction) = self.transaction.take() else {
+            return;
+        };
+        let mut values = self
+            .queued
+            .drain(..)
+            .filter(|event| !transaction.added.contains(&event.id))
+            .map(|event| (event.id, event))
+            .collect::<BTreeMap<_, _>>();
+        values.extend(transaction.removed);
+        self.queued = transaction
+            .queued_order
+            .into_iter()
+            .filter_map(|id| values.remove(&id))
+            .collect();
+        self.trace.truncate(transaction.trace_len);
+        self.next_sequence = transaction.next_sequence;
     }
 
     pub(crate) fn deterministic_pending_fingerprint(&self) -> astra_core::Hash128 {
@@ -83,6 +112,9 @@ impl EventQueue {
     }
 
     pub fn push(&mut self, mut event: RuntimeEvent) {
+        if let Some(transaction) = self.transaction.as_mut() {
+            transaction.added.insert(event.id);
+        }
         event.sequence = self.next_sequence;
         self.next_sequence += 1;
         self.queued.push(event);
@@ -95,6 +127,11 @@ impl EventQueue {
         let mut pending = Vec::new();
         for event in self.queued.drain(..) {
             if event.step <= step {
+                if let Some(transaction) = self.transaction.as_mut() {
+                    if !transaction.added.contains(&event.id) {
+                        transaction.removed.insert(event.id, event.clone());
+                    }
+                }
                 ready.push(event);
             } else {
                 pending.push(event);

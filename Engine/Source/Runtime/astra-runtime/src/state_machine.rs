@@ -6,12 +6,14 @@ use std::{
 use astra_core::{Diagnostic, DiagnosticSeverity, SourceRef, StableId, StableIdGenerator};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::{
-    ActionInvocation, ActionRegistry, ActionTrace, ActorId, ActorStore, AwaitToken, Blackboard,
-    BlackboardValue, DelayedEventId, DeterministicActionContext, PresentationCommand, RuntimeError,
-    RuntimeEvent, ScheduledEvent,
+    actor::{ActorStoreAccess, ActorStoreDelta, ActorStoreOverlay},
+    blackboard::{BlackboardAccess, BlackboardDelta, BlackboardOverlay},
+    ActionExecutionClass, ActionInvocation, ActionRegistry, ActionResourceKey, ActionTrace,
+    ActorId, ActorStore, AwaitToken, Blackboard, BlackboardValue, DelayedEventId,
+    DeterministicActionContext, PresentationCommand, RuntimeError, RuntimeEvent, ScheduledEvent,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -181,7 +183,7 @@ pub struct StateMachineStore {
 }
 
 pub(crate) struct StateMachineTransactionCheckpoint {
-    machines: Vec<StateMachineInstance>,
+    machine_states: Vec<(StableId, bool)>,
     trace_len: usize,
 }
 
@@ -217,7 +219,11 @@ impl StateMachineStore {
 
     pub(crate) fn transaction_checkpoint(&self) -> StateMachineTransactionCheckpoint {
         StateMachineTransactionCheckpoint {
-            machines: self.machines.clone(),
+            machine_states: self
+                .machines
+                .iter()
+                .map(|machine| (machine.current_state, machine.completed))
+                .collect(),
             trace_len: self.trace.len(),
         }
     }
@@ -226,7 +232,17 @@ impl StateMachineStore {
         &mut self,
         checkpoint: StateMachineTransactionCheckpoint,
     ) {
-        self.machines = checkpoint.machines;
+        assert_eq!(
+            self.machines.len(),
+            checkpoint.machine_states.len(),
+            "state machine topology must not change during a tick transaction"
+        );
+        for (machine, (current_state, completed)) in
+            self.machines.iter_mut().zip(checkpoint.machine_states)
+        {
+            machine.current_state = current_state;
+            machine.completed = completed;
+        }
         self.trace.truncate(checkpoint.trace_len);
     }
 
@@ -260,6 +276,7 @@ impl StateMachineStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn tick(
         &mut self,
         step: u64,
@@ -268,179 +285,67 @@ impl StateMachineStore {
         blackboard: &mut Blackboard,
         actions: &ActionRegistry,
         id_source: &mut StableIdGenerator,
+        worker_count: usize,
     ) -> StateMachineTickOutput {
         let mut output = StateMachineTickOutput::default();
-        for machine_index in 0..self.machines.len() {
-            if self.machines[machine_index].completed {
-                continue;
-            }
-            let mut candidate_machine = self.machines[machine_index].clone();
-            let mut candidate_actors = actors.clone();
-            let mut candidate_blackboard = blackboard.clone();
-            let mut candidate_id_source = id_source.clone();
-            let mut candidate_output = StateMachineTickOutput::default();
-            let mut available_events = events.to_vec();
-            let mut visited = BTreeSet::new();
-            let mut microsteps = 0_u32;
-            let mut failed = None;
-            loop {
-                if candidate_machine.completed {
-                    break;
-                }
-                let fingerprint = machine_fingerprint(
-                    &candidate_machine,
-                    &candidate_actors,
-                    &candidate_blackboard,
-                    &candidate_id_source,
-                    &available_events,
-                );
-                if !visited.insert(fingerprint) {
-                    failed = Some(Diagnostic::blocking(
-                        "ASTRA_RUNTIME_STATE_MACHINE_CYCLE",
-                        "state machine repeated the same deterministic microstep state",
-                    ));
-                    break;
-                }
-                if microsteps >= 1024 {
-                    failed = Some(
-                        Diagnostic::blocking(
-                            "ASTRA_RUNTIME_STATE_MACHINE_BUDGET",
-                            "state machine exceeded the microstep budget",
-                        )
-                        .with_field("max_microsteps", 1024_u32),
-                    );
-                    break;
-                }
-                let Some((transition, failure_source, trigger_event_index)) = find_transition(
-                    &candidate_machine,
-                    &available_events,
-                    &candidate_actors,
-                    &candidate_blackboard,
-                ) else {
-                    break;
-                };
-                let trigger_event =
-                    trigger_event_index.and_then(|index| available_events.get(index).cloned());
-                debug!(
+        let waves = build_conflict_waves(&self.machines, actions);
+        for wave in waves {
+            let base_id_source = id_source.clone();
+            let mut candidates = if worker_count > 1 && wave.len() > 1 {
+                execute_parallel_wave(
+                    &wave,
+                    worker_count,
+                    &self.machines,
                     step,
-                    machine_id = ?candidate_machine.definition.id,
-                    from_state = ?transition.from,
-                    to_state = ?transition.to,
-                    microstep = microsteps,
-                    action_count = transition.actions.len(),
-                    "state_machine.transition.match"
-                );
-                let mut transition_failed = None;
-                for invocation in &transition.actions {
+                    events,
+                    actors,
+                    blackboard,
+                    actions,
+                    &base_id_source,
+                )
+            } else {
+                wave.iter()
+                    .map(|machine_index| {
+                        execute_machine_caught(
+                            *machine_index,
+                            &self.machines[*machine_index],
+                            step,
+                            events,
+                            actors,
+                            blackboard,
+                            actions,
+                            &base_id_source,
+                        )
+                    })
+                    .collect()
+            };
+            candidates.sort_by_key(|candidate| candidate.machine_index);
+            for candidate in candidates {
+                if let Some(diagnostic) = candidate.failed {
                     debug!(
                         step,
-                        machine_id = ?candidate_machine.definition.id,
-                        action_id = %invocation.action_id,
-                        "state_machine.action.start"
+                        machine_id = ?candidate.machine.definition.id,
+                        current_state = ?candidate.machine.current_state,
+                        diagnostic_code = %diagnostic.code,
+                        "state_machine.transition.rollback"
                     );
-                    let Some(action) = actions.get(&invocation.action_id) else {
-                        transition_failed = Some(Diagnostic::blocking(
-                            "ASTRA_RUNTIME_ACTION_MISSING",
-                            format!("missing action {}", invocation.action_id),
-                        ));
-                        warn!(
-                            step,
-                            machine_id = ?candidate_machine.definition.id,
-                            action_id = %invocation.action_id,
-                            diagnostic_code = "ASTRA_RUNTIME_ACTION_MISSING",
-                            "state_machine.action.missing"
-                        );
-                        break;
-                    };
-                    let mut next_id = || candidate_id_source.next_id();
-                    let mut ctx = DeterministicActionContext::new(
-                        step,
-                        &mut next_id,
-                        &mut candidate_actors,
-                        &mut candidate_blackboard,
-                        &mut candidate_output.events,
-                        &mut candidate_output.presentation,
-                        &mut candidate_output.awaits,
-                        &mut candidate_output.delayed_events,
-                        &mut candidate_output.delayed_cancellations,
-                        &mut candidate_output.mutations,
-                        &mut candidate_output.effects,
-                        invocation.action_id.clone(),
-                        trigger_event.clone(),
-                    );
-                    match action.run(&mut ctx, &invocation.input) {
-                        Ok(trace) => {
-                            debug!(
-                                step,
-                                machine_id = ?candidate_machine.definition.id,
-                                action_id = %trace.action_id,
-                                "state_machine.action.end"
-                            );
-                            candidate_output.trace.push(trace);
-                        }
-                        Err(err) => {
-                            let diagnostic = match err {
-                                RuntimeError::Diagnostic(diagnostic) => diagnostic,
-                                RuntimeError::Message(message) => Diagnostic::blocking(
-                                    "ASTRA_RUNTIME_ACTION_FAILED",
-                                    format!("{} failed: {message}", invocation.action_id),
-                                ),
-                            };
-                            let diagnostic_code = diagnostic.code.clone();
-                            transition_failed = Some(diagnostic);
-                            warn!(
-                                step,
-                                machine_id = ?candidate_machine.definition.id,
-                                action_id = %invocation.action_id,
-                                diagnostic_code = %diagnostic_code,
-                                "state_machine.action.failed"
-                            );
-                            break;
-                        }
-                    }
+                    output.diagnostics.push(diagnostic);
+                    continue;
                 }
-                if let Some(mut diagnostic) = transition_failed {
-                    if let Some(source) = failure_source {
-                        diagnostic.source = Some(source);
-                    }
-                    failed = Some(diagnostic);
-                    break;
-                }
-                if let Some(index) = trigger_event_index {
-                    available_events.remove(index);
-                }
-                candidate_machine.current_state = transition.to;
-                if state_is_terminal(&candidate_machine, candidate_machine.current_state) {
-                    candidate_machine.completed = true;
-                }
-                microsteps += 1;
-            }
-
-            if let Some(diagnostic) = failed {
+                candidate.actor_delta.commit(actors);
+                candidate.blackboard_delta.commit(blackboard);
+                *id_source = candidate.id_source;
+                self.trace.extend(candidate.output.trace.iter().cloned());
+                output.append(candidate.output);
+                self.machines[candidate.machine_index] = candidate.machine;
                 debug!(
                     step,
-                    machine_id = ?candidate_machine.definition.id,
-                    current_state = ?candidate_machine.current_state,
-                    diagnostic_code = %diagnostic.code,
-                    "state_machine.transition.rollback"
+                    machine_id = ?self.machines[candidate.machine_index].definition.id,
+                    current_state = ?self.machines[candidate.machine_index].current_state,
+                    microsteps = candidate.microsteps,
+                    "state_machine.transition.commit"
                 );
-                output.diagnostics.push(diagnostic);
-                continue;
             }
-
-            *actors = candidate_actors;
-            *blackboard = candidate_blackboard;
-            *id_source = candidate_id_source;
-            self.trace.extend(candidate_output.trace.iter().cloned());
-            output.append(candidate_output);
-            self.machines[machine_index] = candidate_machine;
-            debug!(
-                step,
-                machine_id = ?self.machines[machine_index].definition.id,
-                current_state = ?self.machines[machine_index].current_state,
-                microsteps,
-                "state_machine.transition.commit"
-            );
         }
         output
     }
@@ -463,11 +368,417 @@ impl StateMachineStore {
     }
 }
 
-fn find_transition(
+#[derive(Clone)]
+struct MachineAccessPlan {
+    serial: bool,
+    reads: BTreeSet<ActionResourceKey>,
+    writes: BTreeSet<ActionResourceKey>,
+}
+
+struct MachineCandidate {
+    machine_index: usize,
+    machine: StateMachineInstance,
+    actor_delta: ActorStoreDelta,
+    blackboard_delta: BlackboardDelta,
+    id_source: StableIdGenerator,
+    output: StateMachineTickOutput,
+    microsteps: u32,
+    failed: Option<Diagnostic>,
+}
+
+fn build_conflict_waves(
+    machines: &[StateMachineInstance],
+    actions: &ActionRegistry,
+) -> Vec<Vec<usize>> {
+    let mut waves = Vec::new();
+    let mut current = Vec::new();
+    let mut current_plans = Vec::new();
+    for (machine_index, machine) in machines.iter().enumerate() {
+        if machine.completed {
+            continue;
+        }
+        let plan = machine_access_plan(machine, actions);
+        let conflicts = plan.serial
+            || current_plans
+                .iter()
+                .any(|current_plan| access_conflicts(&plan, current_plan));
+        if conflicts && !current.is_empty() {
+            waves.push(std::mem::take(&mut current));
+            current_plans.clear();
+        }
+        if plan.serial {
+            waves.push(vec![machine_index]);
+        } else {
+            current.push(machine_index);
+            current_plans.push(plan);
+        }
+    }
+    if !current.is_empty() {
+        waves.push(current);
+    }
+    waves
+}
+
+fn machine_access_plan(
     machine: &StateMachineInstance,
+    actions: &ActionRegistry,
+) -> MachineAccessPlan {
+    let mut plan = MachineAccessPlan {
+        serial: false,
+        reads: BTreeSet::new(),
+        writes: BTreeSet::new(),
+    };
+    for invocation in machine
+        .definition
+        .transitions
+        .iter()
+        .flat_map(|transition| &transition.actions)
+    {
+        let Some(descriptor) = actions.descriptor(&invocation.action_id) else {
+            plan.serial = true;
+            continue;
+        };
+        plan.serial |= descriptor.execution == ActionExecutionClass::Serial;
+        plan.reads.extend(descriptor.access.reads);
+        plan.writes.extend(descriptor.access.writes);
+    }
+    plan
+}
+
+fn access_conflicts(left: &MachineAccessPlan, right: &MachineAccessPlan) -> bool {
+    left.serial
+        || right.serial
+        || resource_sets_conflict(&left.writes, &right.writes)
+        || resource_sets_conflict(&left.writes, &right.reads)
+        || resource_sets_conflict(&left.reads, &right.writes)
+}
+
+fn resource_sets_conflict(
+    left: &BTreeSet<ActionResourceKey>,
+    right: &BTreeSet<ActionResourceKey>,
+) -> bool {
+    left.iter()
+        .any(|left| right.iter().any(|right| resource_keys_overlap(left, right)))
+}
+
+fn resource_keys_overlap(left: &ActionResourceKey, right: &ActionResourceKey) -> bool {
+    left == right
+        || matches!(
+            (left, right),
+            (
+                ActionResourceKey::ActorStore,
+                ActionResourceKey::ComponentSchema(_)
+            ) | (
+                ActionResourceKey::ComponentSchema(_),
+                ActionResourceKey::ActorStore
+            ) | (
+                ActionResourceKey::Blackboard,
+                ActionResourceKey::BlackboardKey(_)
+            ) | (
+                ActionResourceKey::BlackboardKey(_),
+                ActionResourceKey::Blackboard
+            )
+        )
+}
+
+fn resource_is_declared(
+    declared: &BTreeSet<ActionResourceKey>,
+    observed: &ActionResourceKey,
+) -> bool {
+    declared
+        .iter()
+        .any(|resource| resource_keys_overlap(resource, observed))
+}
+
+fn validate_observed_access(
+    action_id: &str,
+    declared: &crate::ActionAccess,
+    observed: &crate::ActionAccess,
+) -> Result<(), Diagnostic> {
+    if let Some(resource) = observed.reads.iter().find(|resource| {
+        !resource_is_declared(&declared.reads, resource)
+            && !resource_is_declared(&declared.writes, resource)
+    }) {
+        return Err(Diagnostic::blocking(
+            "ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED",
+            "action performed an undeclared deterministic read",
+        )
+        .with_field("action_id", action_id)
+        .with_field("access_mode", "read")
+        .with_field("resource", format!("{resource:?}")));
+    }
+    if let Some(resource) = observed
+        .writes
+        .iter()
+        .find(|resource| !resource_is_declared(&declared.writes, resource))
+    {
+        return Err(Diagnostic::blocking(
+            "ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED",
+            "action performed an undeclared deterministic write",
+        )
+        .with_field("action_id", action_id)
+        .with_field("access_mode", "write")
+        .with_field("resource", format!("{resource:?}")));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_parallel_wave(
+    wave: &[usize],
+    worker_count: usize,
+    machines: &[StateMachineInstance],
+    step: u64,
     events: &[RuntimeEvent],
     actors: &ActorStore,
     blackboard: &Blackboard,
+    actions: &ActionRegistry,
+    id_source: &StableIdGenerator,
+) -> Vec<MachineCandidate> {
+    let workers = worker_count.max(1).min(wave.len());
+    let chunk_size = wave.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        let handles = wave
+            .chunks(chunk_size)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|machine_index| {
+                            execute_machine_caught(
+                                *machine_index,
+                                &machines[*machine_index],
+                                step,
+                                events,
+                                actors,
+                                blackboard,
+                                actions,
+                                id_source,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .flat_map(|handle| {
+                handle
+                    .join()
+                    .expect("execute_machine_caught contains provider action panics")
+            })
+            .collect()
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_machine_caught(
+    machine_index: usize,
+    machine: &StateMachineInstance,
+    step: u64,
+    events: &[RuntimeEvent],
+    actors: &ActorStore,
+    blackboard: &Blackboard,
+    actions: &ActionRegistry,
+    id_source: &StableIdGenerator,
+) -> MachineCandidate {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        execute_machine(
+            machine_index,
+            machine,
+            step,
+            events,
+            actors,
+            blackboard,
+            actions,
+            id_source,
+        )
+    }))
+    .unwrap_or_else(|_| MachineCandidate {
+        machine_index,
+        machine: machine.clone(),
+        actor_delta: ActorStoreOverlay::new(actors).into_delta(),
+        blackboard_delta: BlackboardOverlay::new(blackboard).into_delta(),
+        id_source: id_source.clone(),
+        output: StateMachineTickOutput::default(),
+        microsteps: 0,
+        failed: Some(Diagnostic::blocking(
+            "ASTRA_RUNTIME_ACTION_PANIC",
+            "runtime action panicked while executing a deterministic candidate",
+        )),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_machine(
+    machine_index: usize,
+    machine: &StateMachineInstance,
+    step: u64,
+    events: &[RuntimeEvent],
+    actors: &ActorStore,
+    blackboard: &Blackboard,
+    actions: &ActionRegistry,
+    id_source: &StableIdGenerator,
+) -> MachineCandidate {
+    let mut candidate_machine = machine.clone();
+    let mut candidate_actors = ActorStoreOverlay::new(actors);
+    let mut candidate_blackboard = BlackboardOverlay::new(blackboard);
+    let mut candidate_id_source = id_source.clone();
+    let mut candidate_output = StateMachineTickOutput::default();
+    let mut available_events = events.to_vec();
+    let mut visited = BTreeSet::new();
+    let mut microsteps = 0_u32;
+    let mut failed = None;
+    loop {
+        if candidate_machine.completed {
+            break;
+        }
+        let fingerprint = machine_fingerprint(
+            &candidate_machine,
+            &candidate_actors,
+            &candidate_blackboard,
+            &candidate_id_source,
+            &available_events,
+        );
+        if !visited.insert(fingerprint) {
+            failed = Some(Diagnostic::blocking(
+                "ASTRA_RUNTIME_STATE_MACHINE_CYCLE",
+                "state machine repeated the same deterministic microstep state",
+            ));
+            break;
+        }
+        if microsteps >= 1024 {
+            failed = Some(
+                Diagnostic::blocking(
+                    "ASTRA_RUNTIME_STATE_MACHINE_BUDGET",
+                    "state machine exceeded the microstep budget",
+                )
+                .with_field("max_microsteps", 1024_u32),
+            );
+            break;
+        }
+        let Some((transition, failure_source, trigger_event_index)) = find_transition(
+            &candidate_machine,
+            &available_events,
+            &candidate_actors,
+            &candidate_blackboard,
+        ) else {
+            break;
+        };
+        let trigger_event =
+            trigger_event_index.and_then(|index| available_events.get(index).cloned());
+        debug!(
+            step,
+            machine_id = ?candidate_machine.definition.id,
+            from_state = ?transition.from,
+            to_state = ?transition.to,
+            microstep = microsteps,
+            action_count = transition.actions.len(),
+            "state_machine.transition.match"
+        );
+        let mut transition_failed = None;
+        for invocation in &transition.actions {
+            let Some(action) = actions.get(&invocation.action_id) else {
+                transition_failed = Some(Diagnostic::blocking(
+                    "ASTRA_RUNTIME_ACTION_MISSING",
+                    format!("missing action {}", invocation.action_id),
+                ));
+                break;
+            };
+            let descriptor = action.descriptor();
+            let mut stable_ids_used = 0_u32;
+            let mut next_id = || {
+                stable_ids_used = stable_ids_used.saturating_add(1);
+                candidate_id_source.next_id()
+            };
+            let mut ctx = DeterministicActionContext::new(
+                step,
+                &mut next_id,
+                &mut candidate_actors,
+                &mut candidate_blackboard,
+                &mut candidate_output.events,
+                &mut candidate_output.presentation,
+                &mut candidate_output.awaits,
+                &mut candidate_output.delayed_events,
+                &mut candidate_output.delayed_cancellations,
+                &mut candidate_output.mutations,
+                &mut candidate_output.effects,
+                invocation.action_id.clone(),
+                trigger_event.clone(),
+            );
+            let action_result = action.run(&mut ctx, &invocation.input);
+            let observed_access = ctx.observed_access();
+            drop(ctx);
+            if let Err(diagnostic) = validate_observed_access(
+                &invocation.action_id,
+                &descriptor.access,
+                &observed_access,
+            ) {
+                transition_failed = Some(diagnostic);
+                break;
+            }
+            if stable_ids_used > descriptor.stable_id_reservation {
+                transition_failed = Some(
+                    Diagnostic::blocking(
+                        "ASTRA_RUNTIME_ACTION_ID_RESERVATION_EXCEEDED",
+                        "action consumed more StableIds than declared",
+                    )
+                    .with_field("action_id", &invocation.action_id)
+                    .with_field(
+                        "stable_id_reservation",
+                        descriptor.stable_id_reservation.to_string(),
+                    )
+                    .with_field("stable_ids_used", stable_ids_used.to_string()),
+                );
+                break;
+            }
+            match action_result {
+                Ok(trace) => candidate_output.trace.push(trace),
+                Err(err) => {
+                    transition_failed = Some(match err {
+                        RuntimeError::Diagnostic(diagnostic) => diagnostic,
+                        RuntimeError::Message(message) => Diagnostic::blocking(
+                            "ASTRA_RUNTIME_ACTION_FAILED",
+                            format!("{} failed: {message}", invocation.action_id),
+                        ),
+                    });
+                    break;
+                }
+            }
+        }
+        if let Some(mut diagnostic) = transition_failed {
+            if let Some(source) = failure_source {
+                diagnostic.source = Some(source);
+            }
+            failed = Some(diagnostic);
+            break;
+        }
+        if let Some(index) = trigger_event_index {
+            available_events.remove(index);
+        }
+        candidate_machine.current_state = transition.to;
+        if state_is_terminal(&candidate_machine, candidate_machine.current_state) {
+            candidate_machine.completed = true;
+        }
+        microsteps += 1;
+    }
+    MachineCandidate {
+        machine_index,
+        machine: candidate_machine,
+        actor_delta: candidate_actors.into_delta(),
+        blackboard_delta: candidate_blackboard.into_delta(),
+        id_source: candidate_id_source,
+        output: candidate_output,
+        microsteps,
+        failed,
+    }
+}
+
+fn find_transition(
+    machine: &StateMachineInstance,
+    events: &[RuntimeEvent],
+    actors: &dyn ActorStoreAccess,
+    blackboard: &dyn BlackboardAccess,
 ) -> Option<(TransitionDefinition, Option<SourceRef>, Option<usize>)> {
     let actor_snapshots = actors.actor_snapshots();
     let mut best: Option<(&TransitionDefinition, Option<usize>)> = None;
@@ -508,18 +819,19 @@ fn find_transition(
 
 fn machine_fingerprint(
     machine: &StateMachineInstance,
-    actors: &ActorStore,
-    blackboard: &Blackboard,
+    actors: &dyn ActorStoreAccess,
+    blackboard: &dyn BlackboardAccess,
     id_source: &StableIdGenerator,
     events: &[RuntimeEvent],
 ) -> astra_core::Hash128 {
     let actor_fingerprint = actors.deterministic_fingerprint();
+    let blackboard_fingerprint = blackboard.deterministic_fingerprint();
     astra_core::Hash128::from_blake3(
         &postcard::to_allocvec(&(
             machine.current_state,
             machine.completed,
             actor_fingerprint,
-            blackboard,
+            blackboard_fingerprint,
             id_source,
             events,
         ))
@@ -583,7 +895,7 @@ impl GuardExpr {
         &self,
         event: Option<&RuntimeEvent>,
         actors: &[crate::ActorSnapshot],
-        blackboard: &Blackboard,
+        blackboard: &dyn BlackboardAccess,
     ) -> bool {
         match self {
             GuardExpr::Always => true,

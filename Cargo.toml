@@ -28,6 +28,7 @@ members = [
     "Engine/Source/Runtime/astra-engine",
     "Engine/Source/Runtime/astra-plugin-abi",
     "Engine/Source/Runtime/astra-plugin",
+    "Engine/Source/Runtime/astra-worker-budget",
     "Engine/Source/Runtime/astra-player-core",
     "Engine/Source/Runtime/astra-headless-protocol",
     "Engine/Source/Runtime/astra-product-host",

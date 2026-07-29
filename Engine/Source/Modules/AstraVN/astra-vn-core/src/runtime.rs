@@ -20,6 +20,7 @@ pub struct VnRuntime {
     compiled: Arc<CompiledStory>,
     index: Arc<VnRuntimeIndex>,
     state: VnRuntimeState,
+    mutation_journal: BTreeMap<(String, String), Option<i64>>,
 }
 
 #[derive(Debug)]
@@ -57,6 +58,10 @@ impl ValidatedVnRuntimeState {
 pub struct VnRuntimeIndex {
     story_hash: Hash128,
     state_ids: BTreeSet<String>,
+    state_ordinals: BTreeMap<String, u32>,
+    states_by_ordinal: Vec<String>,
+    command_ordinals: BTreeMap<String, u32>,
+    commands_by_ordinal: Vec<String>,
     commands_by_state: BTreeMap<String, Vec<(usize, usize)>>,
     story_by_state: BTreeMap<String, String>,
 }
@@ -83,7 +88,7 @@ impl VnRuntimeIndex {
                 }
             }
         }
-        let commands_by_state = compiled
+        let commands_by_state: BTreeMap<String, Vec<(usize, usize)>> = compiled
             .states
             .iter()
             .map(|(state_id, state)| {
@@ -99,9 +104,31 @@ impl VnRuntimeIndex {
                 (state_id.clone(), commands)
             })
             .collect();
+        let states_by_ordinal = compiled.states.keys().cloned().collect::<Vec<_>>();
+        let state_ordinals = states_by_ordinal
+            .iter()
+            .enumerate()
+            .map(|(ordinal, id)| (id.clone(), ordinal as u32))
+            .collect();
+        let commands_by_ordinal = compiled
+            .states
+            .values()
+            .flat_map(|state| state.scenes.iter())
+            .flat_map(|scene| scene.commands.iter())
+            .map(compiled_command_id)
+            .collect::<Vec<_>>();
+        let command_ordinals = commands_by_ordinal
+            .iter()
+            .enumerate()
+            .map(|(ordinal, id)| (id.clone(), ordinal as u32))
+            .collect();
         Ok(Self {
             story_hash: compiled.story_hash,
             state_ids: compiled.states.keys().cloned().collect(),
+            state_ordinals,
+            states_by_ordinal,
+            command_ordinals,
+            commands_by_ordinal,
             commands_by_state,
             story_by_state,
         })
@@ -116,6 +143,85 @@ impl VnRuntimeIndex {
         }
         Ok(())
     }
+
+    pub fn encode_read_state(&self, values: &BTreeSet<String>) -> Result<Vec<u64>, VnError> {
+        encode_ordinals(
+            values,
+            &self.command_ordinals,
+            "ASTRA_VN_READ_STATE_COMMAND_UNKNOWN",
+        )
+    }
+
+    pub fn decode_read_state(&self, bits: &[u64]) -> Result<BTreeSet<String>, VnError> {
+        decode_ordinals(
+            bits,
+            &self.commands_by_ordinal,
+            "ASTRA_VN_READ_STATE_BITS_INVALID",
+        )
+    }
+
+    pub fn encode_route_coverage(&self, values: &BTreeSet<String>) -> Result<Vec<u64>, VnError> {
+        encode_ordinals(
+            values,
+            &self.state_ordinals,
+            "ASTRA_VN_ROUTE_COVERAGE_STATE_UNKNOWN",
+        )
+    }
+
+    pub fn decode_route_coverage(&self, bits: &[u64]) -> Result<BTreeSet<String>, VnError> {
+        decode_ordinals(
+            bits,
+            &self.states_by_ordinal,
+            "ASTRA_VN_ROUTE_COVERAGE_BITS_INVALID",
+        )
+    }
+}
+
+fn encode_ordinals(
+    values: &BTreeSet<String>,
+    ordinals: &BTreeMap<String, u32>,
+    diagnostic: &'static str,
+) -> Result<Vec<u64>, VnError> {
+    let mut bits = vec![0_u64; ordinals.len().div_ceil(64)];
+    for value in values {
+        let ordinal = *ordinals.get(value).ok_or_else(|| {
+            VnError::diagnostic(
+                diagnostic,
+                "runtime history references an unknown stable id",
+            )
+        })? as usize;
+        bits[ordinal / 64] |= 1_u64 << (ordinal % 64);
+    }
+    Ok(bits)
+}
+
+fn decode_ordinals(
+    bits: &[u64],
+    values: &[String],
+    diagnostic: &'static str,
+) -> Result<BTreeSet<String>, VnError> {
+    let expected_words = values.len().div_ceil(64);
+    if bits.len() != expected_words {
+        return Err(VnError::diagnostic(
+            diagnostic,
+            "runtime history bitset has an invalid word count",
+        ));
+    }
+    if let Some(last) = bits.last() {
+        let used = values.len() % 64;
+        if used != 0 && last >> used != 0 {
+            return Err(VnError::diagnostic(
+                diagnostic,
+                "runtime history bitset contains out-of-range ordinals",
+            ));
+        }
+    }
+    Ok(values
+        .iter()
+        .enumerate()
+        .filter(|(ordinal, _)| bits[ordinal / 64] & (1_u64 << (ordinal % 64)) != 0)
+        .map(|(_, value)| value.clone())
+        .collect())
 }
 
 impl VnRuntime {
@@ -162,8 +268,8 @@ impl VnRuntime {
                 route_flags: Default::default(),
                 wait_sequence: 0,
                 pending_wait: None,
-                text_reveal: None,
             },
+            mutation_journal: BTreeMap::new(),
         })
     }
 
@@ -198,6 +304,7 @@ impl VnRuntime {
             compiled,
             index,
             state,
+            mutation_journal: BTreeMap::new(),
         })
     }
 
@@ -288,7 +395,7 @@ impl VnRuntime {
             before_state_hash = %before,
             "AstraVN player command started"
         );
-        let before_variables = self.state.variables.clone();
+        self.mutation_journal.clear();
         let mut presentation = Vec::new();
         let mut reached = BTreeSet::new();
         match command {
@@ -298,7 +405,6 @@ impl VnRuntime {
                 self.state.system_stack.clear();
                 self.state.pending_choice = None;
                 self.state.pending_wait = None;
-                self.state.text_reveal = None;
                 self.state.route_coverage.insert(state_id.clone());
                 self.record_route_flag(VnRouteFlagKind::Launch, "launch", &state_id);
                 reached.insert(state_id);
@@ -308,76 +414,13 @@ impl VnRuntime {
                 if self.state.system.reading_mode == crate::ReadingMode::Hidden {
                     self.state.system.reading_mode = crate::ReadingMode::Manual;
                 } else {
-                    if self
-                        .state
-                        .text_reveal
-                        .as_ref()
-                        .is_some_and(|reveal| !reveal.complete())
-                    {
-                        if let Some(reveal) = self.state.text_reveal.as_mut() {
-                            reveal.visible_graphemes = reveal.text_graphemes;
+                    match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
+                        Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
+                            self.state.pending_wait = None;
+                            self.run_until_blocked(&mut presentation, &mut reached)?;
                         }
-                    } else {
-                        match self.state.pending_wait.as_ref().map(|wait| wait.kind) {
-                            Some(VnWaitKind::Dialogue | VnWaitKind::Input) => {
-                                self.state.pending_wait = None;
-                                self.run_until_blocked(&mut presentation, &mut reached)?;
-                            }
-                            None => self.run_until_blocked(&mut presentation, &mut reached)?,
-                            Some(_) => {}
-                        }
-                    }
-                }
-            }
-            VnPlayerCommand::ConfigureTextReveal {
-                command_id,
-                text_key,
-                text_graphemes,
-                graphemes_per_second,
-            } => {
-                let wait = self.state.pending_wait.as_ref().ok_or_else(|| {
-                    VnError::diagnostic(
-                        "ASTRA_VN_TEXT_REVEAL_WAIT",
-                        "text reveal requires a pending dialogue wait",
-                    )
-                })?;
-                if wait.kind != VnWaitKind::Dialogue
-                    || wait.command_id != command_id
-                    || text_key.is_empty()
-                    || graphemes_per_second == 0
-                    || self
-                        .state
-                        .backlog
-                        .last()
-                        .is_none_or(|entry| entry.command_id != command_id || entry.key != text_key)
-                {
-                    return Err(VnError::diagnostic("ASTRA_VN_TEXT_REVEAL_CONFIGURATION", "text reveal configuration is invalid or does not match the pending dialogue"));
-                }
-                self.state.text_reveal = Some(crate::VnTextRevealState {
-                    command_id,
-                    text_key,
-                    text_graphemes,
-                    visible_graphemes: 0,
-                    elapsed_ns: 0,
-                    graphemes_per_second,
-                });
-            }
-            VnPlayerCommand::TickTextReveal { delta_ns } => {
-                if let Some(reveal) = self.state.text_reveal.as_mut() {
-                    if !reveal.complete() {
-                        reveal.elapsed_ns =
-                            reveal.elapsed_ns.checked_add(delta_ns).ok_or_else(|| {
-                                VnError::diagnostic(
-                                    "ASTRA_VN_TEXT_REVEAL_CLOCK",
-                                    "text reveal clock overflowed",
-                                )
-                            })?;
-                        let visible = (u128::from(reveal.elapsed_ns)
-                            * u128::from(reveal.graphemes_per_second))
-                            / 1_000_000_000u128;
-                        reveal.visible_graphemes = u32::try_from(visible)
-                            .unwrap_or(u32::MAX)
-                            .min(reveal.text_graphemes);
+                        None => self.run_until_blocked(&mut presentation, &mut reached)?,
+                        Some(_) => {}
                     }
                 }
             }
@@ -467,23 +510,10 @@ impl VnRuntime {
                                 op,
                                 value,
                             } => {
-                                let entry = self
-                                    .state
-                                    .variables
-                                    .entry(scope)
-                                    .or_default()
-                                    .entry(key)
-                                    .or_default();
-                                *entry = match op {
+                                self.mutate_variable(scope, key, |current| match op {
                                     MutationOp::Set => Some(value),
-                                    MutationOp::Add => entry.checked_add(value),
-                                    MutationOp::Sub => entry.checked_sub(value),
-                                }
-                                .ok_or_else(|| {
-                                    VnError::diagnostic(
-                                        "ASTRA_VN_SYSTEM_ACTION_MUTATION_OVERFLOW",
-                                        "system action mutation overflowed i64",
-                                    )
+                                    MutationOp::Add => current.checked_add(value),
+                                    MutationOp::Sub => current.checked_sub(value),
                                 })?;
                             }
                             crate::SystemActionEffect::Jump { target } => {
@@ -666,7 +696,7 @@ impl VnRuntime {
             .collect();
         let audio = presentation.iter().filter_map(vn_audio_command).collect();
         let timeline_tasks = presentation.iter().filter_map(vn_timeline_task).collect();
-        let mutations = variable_mutations(&before_variables, &self.state.variables);
+        let mutations = self.variable_mutations();
         Ok(PendingVnStepOutput(VnStepOutput {
             schema: "astra.vn.step_output.v1".to_string(),
             next_cursor: self.state.cursor.clone(),
@@ -781,7 +811,6 @@ impl VnRuntime {
                         format!("dialogue:{id}"),
                         id,
                     ))?;
-                    self.state.text_reveal = None;
                     return Ok(());
                 }
                 CompiledCommand::Choice { id, key, options } => {
@@ -911,18 +940,11 @@ impl VnRuntime {
                     ..
                 } => {
                     self.advance_cursor()?;
-                    let entry = self
-                        .state
-                        .variables
-                        .entry(scope)
-                        .or_default()
-                        .entry(key)
-                        .or_default();
-                    match op {
-                        MutationOp::Set => *entry = value,
-                        MutationOp::Add => *entry += value,
-                        MutationOp::Sub => *entry -= value,
-                    }
+                    self.mutate_variable(scope, key, |current| match op {
+                        MutationOp::Set => Some(value),
+                        MutationOp::Add => current.checked_add(value),
+                        MutationOp::Sub => current.checked_sub(value),
+                    })?;
                 }
                 CompiledCommand::SystemPage { id, page, .. } => {
                     let entry = self
@@ -1334,6 +1356,55 @@ impl VnRuntime {
             SkipMode::All => true,
         }
     }
+
+    fn mutate_variable(
+        &mut self,
+        scope: String,
+        key: String,
+        update: impl FnOnce(i64) -> Option<i64>,
+    ) -> Result<(), VnError> {
+        let before = self
+            .state
+            .variables
+            .get(&scope)
+            .and_then(|values| values.get(&key))
+            .copied();
+        self.mutation_journal
+            .entry((scope.clone(), key.clone()))
+            .or_insert(before);
+        let after = update(before.unwrap_or_default()).ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_MUTATION_OVERFLOW",
+                "variable mutation overflowed i64",
+            )
+        })?;
+        self.state
+            .variables
+            .entry(scope)
+            .or_default()
+            .insert(key, after);
+        Ok(())
+    }
+
+    fn variable_mutations(&self) -> Vec<crate::VnMutationRecord> {
+        self.mutation_journal
+            .iter()
+            .filter_map(|((scope, key), before)| {
+                let after = self
+                    .state
+                    .variables
+                    .get(scope)
+                    .and_then(|values| values.get(key))
+                    .copied();
+                (*before != after).then(|| crate::VnMutationRecord {
+                    scope: scope.clone(),
+                    key: key.clone(),
+                    before: *before,
+                    after,
+                })
+            })
+            .collect()
+    }
 }
 
 /// A reducer output whose after-state hash must be finalized from the exact
@@ -1473,51 +1544,6 @@ fn vn_timeline_task(command: &PresentationCommand) -> Option<crate::VnTimelineTa
         command_id,
         command: command.clone(),
     })
-}
-
-fn variable_mutations(
-    before: &BTreeMap<String, BTreeMap<String, i64>>,
-    after: &BTreeMap<String, BTreeMap<String, i64>>,
-) -> Vec<crate::VnMutationRecord> {
-    let scopes = before
-        .keys()
-        .chain(after.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut mutations = Vec::new();
-    for scope in scopes {
-        let keys = before
-            .get(&scope)
-            .into_iter()
-            .flat_map(|values| values.keys())
-            .chain(
-                after
-                    .get(&scope)
-                    .into_iter()
-                    .flat_map(|values| values.keys()),
-            )
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        for key in keys {
-            let previous = before
-                .get(&scope)
-                .and_then(|values| values.get(&key))
-                .copied();
-            let current = after
-                .get(&scope)
-                .and_then(|values| values.get(&key))
-                .copied();
-            if previous != current {
-                mutations.push(crate::VnMutationRecord {
-                    scope: scope.clone(),
-                    key,
-                    before: previous,
-                    after: current,
-                });
-            }
-        }
-    }
-    mutations
 }
 
 fn route_flag_kind_id(kind: VnRouteFlagKind) -> &'static str {

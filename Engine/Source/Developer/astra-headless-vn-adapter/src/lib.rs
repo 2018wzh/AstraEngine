@@ -148,7 +148,7 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
             sink.bind_surface(logical_surface, surface)
                 .map_err(|error| binding("surface.bind", error))?;
             let mut executor = PlayerHostCommandExecutor::new(sink);
-            let mut source = NativeVnHostCommandSource::from_package_with_asset_cache(
+            let mut source = NativeVnHostCommandSource::from_package_with_options(
                 &package,
                 VnRunConfig {
                     profile: request.profile,
@@ -157,8 +157,13 @@ impl ProductAdapterFactory for NativeVnProductAdapterFactory {
                 request.width,
                 request.height,
                 logical_surface,
-                asset_cache_bytes,
-                glyph_cache_bytes,
+                astra_player_vn::NativeVnHostOpenOptions {
+                    max_asset_cache_bytes: asset_cache_bytes,
+                    max_glyph_cache_bytes: glyph_cache_bytes,
+                    runtime_execution:
+                        astra_player_vn::NativeVnRuntimeExecution::evidence_parallel()
+                            .map_err(|error| binding("runtime.execution", error))?,
+                },
             )
             .map_err(|error| binding("runtime.open", error))?;
             source.set_ui_host_performance_sampling_enabled(performance_observer.is_some());
@@ -597,7 +602,11 @@ impl NativeVnHeadlessSession {
                 .source
                 .as_mut()
                 .ok_or_else(|| ProductHostError::Input("product session is shut down".into()))?;
-            if self.media.skip_active_videos(source) {
+            if self
+                .media
+                .skip_active_videos(source)
+                .map_err(|error| ProductHostError::Input(error.to_string()))?
+            {
                 return Ok(());
             }
         }

@@ -97,6 +97,10 @@
       "status": "instrumented",
       "reason": "world, state machine, save and replay lifecycle"
     },
+    "astra-worker-budget": {
+      "status": "not_applicable",
+      "reason": "pure bounded scheduling primitive with lifecycle events emitted by its instrumented host owners"
+    },
     "astra-engine": {
       "status": "not_applicable",
       "reason": "pure facade that only re-exports EngineCore crates"
@@ -175,7 +179,7 @@
     },
     "astra-platform-headless": {
       "status": "instrumented",
-      "reason": "Headless host session and resource lifecycle"
+      "reason": "Headless host session, private video spool and resource lifecycle"
     },
     "astra-headless-test": {
       "status": "not_applicable",

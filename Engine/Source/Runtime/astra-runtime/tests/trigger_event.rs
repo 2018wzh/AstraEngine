@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use astra_core::StableId;
 use astra_runtime::{
-    ActionDescriptor, ActionInvocation, ActionTrace, BlackboardValue, ComponentId,
-    DeterministicActionContext, EventPayload, EventSource, GuardExpr, RuntimeAction, RuntimeConfig,
-    RuntimeWorld, StateDefinition, StateMachineDefinition, TickInput, TransitionDefinition,
+    ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
+    ActionTrace, BlackboardValue, ComponentId, DeterministicActionContext, EventPayload,
+    EventSource, GuardExpr, RuntimeAction, RuntimeConfig, RuntimeWorld, StateDefinition,
+    StateMachineDefinition, TickInput, TransitionDefinition,
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,11 +74,17 @@ struct CaptureTriggerAction;
 
 impl RuntimeAction for CaptureTriggerAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.test.capture_trigger".to_string(),
-            input_schema: "astra.test.capture_trigger.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            "astra.test.capture_trigger",
+            "astra.test.capture_trigger.v1",
+            "astra.action_trace.v1",
+            ActionExecutionClass::ParallelTransactional,
+            ActionAccess::new(
+                [ActionResourceKey::EventQueue],
+                [ActionResourceKey::Blackboard],
+            ),
+            0,
+        )
     }
 
     fn run(
@@ -173,11 +180,20 @@ struct IncrementComponentAction {
 
 impl RuntimeAction for IncrementComponentAction {
     fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            id: "astra.test.increment_component".to_string(),
-            input_schema: "astra.test.increment_component.v1".to_string(),
-            output_schema: "astra.action_trace.v1".to_string(),
-        }
+        ActionDescriptor::declared(
+            "astra.test.increment_component",
+            "astra.test.increment_component.v1",
+            "astra.action_trace.v1",
+            ActionExecutionClass::ParallelTransactional,
+            ActionAccess::new(
+                [ActionResourceKey::ActorStore],
+                [
+                    ActionResourceKey::ActorStore,
+                    ActionResourceKey::MutationLog,
+                ],
+            ),
+            0,
+        )
     }
 
     fn run(

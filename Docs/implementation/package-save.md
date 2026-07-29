@@ -106,7 +106,7 @@ Minimum save sections:
 - `runtime.world`
 - `migration.manifest`
 
-Runtime save 可以携带模块 extra sections。NativeVN product provider 对外只输出一个 `runtime.world` section，schema 为 `astra.runtime.save_blob.v2`、codec 为 `Raw`。它的 payload 是上述 Runtime save container；VN runtime/policy 作为 typed component 与完整 queue、mutation/effect trace 一起保存在内部 `runtime.world` snapshot。`astra-vn-save` 的 `vn.runtime_state`/`vn.policy_state` 只保留为局部/reference 数据类型，不能进入 Player 权威 save/restore 主路径。
+Runtime save 可以携带模块 extra sections。NativeVN product provider 对外只输出一个 `runtime.world` section，schema 为 `astra.runtime.save_blob.v3`、codec 为 `Raw`。它的 payload 是上述 Runtime save container；VN runtime/policy 作为 typed component 与完整 queue、mutation/effect trace 一起保存在内部 `runtime.world` snapshot。v2 不提供兼容读取；`astra-vn-save` 的 `vn.runtime_state`/`vn.policy_state` 只保留为局部/reference 数据类型，不能进入 Player 权威 save/restore 主路径。
 
 以下 section 是后续模块接入点，缺 provider 时不得伪造 payload：
 

@@ -1,8 +1,9 @@
-use astra_core::Hash256;
+use astra_core::{Hash256, StableId};
 use astra_runtime::{
-    EngineModuleSlot, EventPayload, ModuleBindingContext, OrderedTickIngress, PackageHandle,
-    PlayerInput, ProviderReplayOutput, RuntimeConfig, RuntimeWorld, TickIngress, TickInput,
-    TickMode, TickRequest, ValidatedModuleBinding,
+    AwaitKind, AwaitReplayPolicy, AwaitToken, AwaitTokenId, EngineModuleSlot, EventId,
+    EventPayload, EventSource, ModuleBindingContext, OrderedTickIngress, PackageHandle,
+    PlayerInput, ProviderReplayOutput, RuntimeConfig, RuntimeEvent, RuntimeWorld, TickIngress,
+    TickInput, TickMode, TickRequest, ValidatedModuleBinding,
 };
 
 fn input(step: u64, seed: u64) -> TickInput {
@@ -257,7 +258,36 @@ fn tick_rolls_back_all_prior_ingress_when_provider_output_is_invalid() {
         PackageHandle::default(),
     )
     .unwrap();
+    world.schedule_event(
+        1,
+        EventSource::Runtime,
+        EventPayload::new("delayed.must_restore"),
+    );
     let checkpoint = postcard::to_allocvec(&world.snapshot()).unwrap();
+    let payload = b"valid".to_vec();
+    let valid_output = ProviderReplayOutput {
+        provider_id: "provider.fixture".to_string(),
+        session_id: "session.fixture".to_string(),
+        schema: "provider.output.v1".to_string(),
+        payload_hash: Hash256::from_sha256(&payload),
+        payload,
+        events: vec![RuntimeEvent {
+            id: EventId(StableId::deterministic_v7(7, 1, 1)),
+            source: EventSource::Runtime,
+            step: 1,
+            sequence: 0,
+            payload: EventPayload::new("provider.must_rollback"),
+        }],
+        presentation: vec![],
+        awaits: vec![AwaitToken {
+            token_id: AwaitTokenId(StableId::deterministic_v7(7, 2, 1)),
+            kind: AwaitKind::Custom("rollback".into()),
+            requested_at_step: 1,
+            deterministic_timeout_step: None,
+            replay_policy: AwaitReplayPolicy::RecordedResult,
+        }],
+        effects: vec![],
+    };
     let error = world
         .tick(TickRequest::live(
             input(1, 41),
@@ -271,6 +301,10 @@ fn tick_rolls_back_all_prior_ingress_when_provider_output_is_invalid() {
                 },
                 OrderedTickIngress {
                     sequence: 2,
+                    payload: TickIngress::LiveProviderOutput(valid_output),
+                },
+                OrderedTickIngress {
+                    sequence: 3,
                     payload: TickIngress::LiveProviderOutput(ProviderReplayOutput {
                         provider_id: "provider.fixture".to_string(),
                         session_id: "session.fixture".to_string(),

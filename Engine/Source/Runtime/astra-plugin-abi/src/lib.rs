@@ -639,11 +639,58 @@ pub struct RuntimeProbeReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeTickIntegrityMode {
+    Shipping,
+    Evidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeExecutorKind {
+    Serial,
+    Parallel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeExecutorConfig {
+    pub kind: RuntimeExecutorKind,
+    pub worker_count: u8,
+}
+
+impl RuntimeExecutorConfig {
+    pub const fn serial() -> Self {
+        Self {
+            kind: RuntimeExecutorKind::Serial,
+            worker_count: 1,
+        }
+    }
+
+    pub const fn parallel(worker_count: u8) -> Self {
+        Self {
+            kind: RuntimeExecutorKind::Parallel,
+            worker_count,
+        }
+    }
+
+    pub fn validate(self) -> Result<(), &'static str> {
+        if !(1..=8).contains(&self.worker_count)
+            || (self.kind == RuntimeExecutorKind::Serial && self.worker_count != 1)
+        {
+            return Err("ASTRA_RUNTIME_EXECUTOR_CONFIG: executor worker count or kind is invalid");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeOpenRequest {
     pub target_id: String,
     pub profile: String,
     pub locale: String,
     pub seed: u64,
+    pub integrity_mode: RuntimeTickIntegrityMode,
+    pub executor: RuntimeExecutorConfig,
     pub package_hash: String,
     pub sections: Vec<RuntimeSectionPayload>,
 }
@@ -672,6 +719,29 @@ pub struct RuntimeProviderInstanceReport {
 pub struct RuntimeProviderCall {
     pub instance_id: ProviderInstanceId,
     pub payload: Vec<u8>,
+}
+
+/// Opaque provider-owned handle for one opened gameplay runtime session.
+///
+/// The host must never derive meaning from this value or use it as a pointer.
+/// Handles are scoped to one provider instance and become invalid immediately
+/// after a successful shutdown.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+pub struct RuntimeProviderSessionHandle(pub u64);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderSessionCall {
+    pub instance_id: ProviderInstanceId,
+    pub session_handle: RuntimeProviderSessionHandle,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RuntimeProviderSessionOpenReport {
+    pub session_handle: RuntimeProviderSessionHandle,
+    pub report: RuntimeOpenReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1045,6 +1115,7 @@ pub struct FfiRuntimeProviderResult {
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiRuntimeProviderRegistration {
+    pub abi_version: u32,
     pub provider_id: RString,
     pub runtime_id: RString,
     pub capability: RString,
@@ -1061,7 +1132,7 @@ pub struct FfiRuntimeProviderRegistration {
     #[sabi(unsafe_opaque_field)]
     pub probe: FfiRuntimeProviderInvoke,
     #[sabi(unsafe_opaque_field)]
-    pub open: FfiRuntimeProviderInvoke,
+    pub open_session: FfiRuntimeProviderInvoke,
     #[sabi(unsafe_opaque_field)]
     pub step: FfiRuntimeProviderInvoke,
     #[sabi(unsafe_opaque_field)]
@@ -1078,17 +1149,27 @@ pub struct FfiRuntimeProviderRegistration {
     pub editor_metadata: FfiRuntimeProviderInvoke,
 }
 
+#[cfg(feature = "ffi")]
+pub const PRODUCT_RUNTIME_PROVIDER_ABI_VERSION: u32 = 2;
+
 #[repr(C)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub struct FfiActionRegistration {
+    pub abi_version: u32,
     pub provider_id: RString,
     pub action_id: RString,
     pub input_schema: RString,
     pub output_schema: RString,
+    /// JSON-encoded host `ActionDescriptor` including access declarations,
+    /// execution class, and StableId reservation.
+    pub descriptor_json: RVec<u8>,
     #[sabi(unsafe_opaque_field)]
     pub invoke: FfiActionInvoke,
 }
+
+#[cfg(feature = "ffi")]
+pub const ACTION_PLUGIN_ABI_VERSION: u32 = 2;
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
@@ -1157,6 +1238,7 @@ mod tests {
         };
         let descriptor_json = serde_json::to_vec(&descriptor).unwrap();
         let registration = FfiRuntimeProviderRegistration {
+            abi_version: PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
             provider_id: RString::from(NATIVE_VN_PROVIDER_ID),
             runtime_id: RString::from(NATIVE_VN_RUNTIME_ID),
             capability: RString::from("runtime.native_vn"),
@@ -1168,7 +1250,7 @@ mod tests {
             destroy_instance: ok_runtime_provider_call,
             prepare: ok_runtime_provider_call,
             probe: ok_runtime_provider_call,
-            open: ok_runtime_provider_call,
+            open_session: ok_runtime_provider_call,
             step: ok_runtime_provider_call,
             save: ok_runtime_provider_call,
             restore: ok_runtime_provider_call,
@@ -1188,6 +1270,10 @@ mod tests {
         assert_eq!(GAME_RUNTIME_PROVIDER_SLOT, "game_runtime_provider");
         assert_eq!(plugin.runtime_providers.len(), 1);
         assert_eq!(registration.provider_id.as_str(), NATIVE_VN_PROVIDER_ID);
+        assert_eq!(
+            registration.abi_version,
+            PRODUCT_RUNTIME_PROVIDER_ABI_VERSION
+        );
         assert!(registration.packaged);
         let roundtrip: ProductRuntimeDescriptor =
             serde_json::from_slice(registration.descriptor_json.as_slice()).unwrap();

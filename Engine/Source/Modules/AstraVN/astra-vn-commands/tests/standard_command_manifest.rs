@@ -8,7 +8,7 @@ fn standard_command_manifest_validates_compiled_presentation_usage() {
 story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
-    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback #@id movie.opening
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end fallback:asset:/movie/op_fallback interrupt:reject #@id movie.opening
     voice asset:asset:/voice/hero0001 sync:text #@id voice.hero.0001
     text key:opening.line speaker:hero #@id line.opening
 "#,
@@ -29,7 +29,7 @@ fn compiler_blocks_missing_movie_fallback_before_manifest_generation() {
 story main #@id story.main
 state prologue #@id state.prologue
   scene opening #@id scene.opening
-    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end #@id movie.opening
+    movie layer:video.opening asset:asset:/movie/op end:wait fence:movie.opening.end interrupt:reject #@id movie.opening
 "#,
     )], Default::default())
     .unwrap_err();

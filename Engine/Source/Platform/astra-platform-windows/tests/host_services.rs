@@ -118,6 +118,7 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::OneShot,
                 bytes: b"not-an-mp4".to_vec(),
             },
         )
@@ -141,6 +142,7 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
                 coded_width: None,
                 coded_height: None,
                 keyframe: true,
+                stream_action: astra_platform::DecodeStreamAction::OneShot,
                 bytes: include_bytes!("../../../../Fixtures/PublicDomainMedia/flower.mp4").to_vec(),
             },
         )

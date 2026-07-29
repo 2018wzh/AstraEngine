@@ -13,6 +13,7 @@ abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../astra-core" }
 astra-plugin-abi = { path = "../astra-plugin-abi", default-features = false }
 astra-runtime = { path = "../astra-runtime" }
+astra-worker-budget = { path = "../astra-worker-budget" }
 libloading = { workspace = true, optional = true }
 postcard.workspace = true
 schemars.workspace = true

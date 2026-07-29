@@ -33,6 +33,7 @@ mod compare;
 mod performance_e2;
 mod product_performance;
 mod product_performance_input;
+mod session_batch;
 
 #[global_allocator]
 static ASTRA_ALLOCATOR: astra_observability::TrackingAllocator =
@@ -84,6 +85,14 @@ enum Command {
         performance_warmup_frames: u64,
         #[arg(long, default_value_t = 1, requires = "performance_budget")]
         performance_start_sequence: u64,
+        #[arg(long, default_value_t = 8)]
+        worker_limit: usize,
+    },
+    RunBatch {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        report: PathBuf,
     },
     Serve {
         #[arg(long)]
@@ -114,6 +123,16 @@ enum Command {
         viewport_width: u32,
         #[arg(long, default_value_t = 600)]
         viewport_height: u32,
+        #[arg(long, default_value = "disabled")]
+        video_decode: String,
+        #[arg(long, default_value_t = 512 * 1024 * 1024)]
+        max_decode_output_bytes: u64,
+        #[arg(long, default_value_t = 192 * 1024 * 1024)]
+        max_decoded_cache_bytes: u64,
+        #[arg(long, default_value_t = 256 * 1024 * 1024)]
+        max_gpu_resource_bytes: u64,
+        #[arg(long, default_value_t = 18_000)]
+        max_video_frames: u64,
         #[arg(long)]
         manifest_only: bool,
         #[arg(long)]
@@ -261,26 +280,31 @@ async fn main() {
             performance_trace_manifest,
             performance_warmup_frames,
             performance_start_sequence,
-        } => {
-            run(RunRequest {
-                profile_path: &profile,
-                package_path: &package,
-                input_path: &input,
-                artifact_root: &artifact_root,
-                checkpoint_config: checkpoint_config.as_deref(),
-                build_identity: &build_identity,
-                gpu,
-                source_profile: source_profile.as_deref(),
-                source_root: source_root.as_deref(),
-                performance_budget: performance_budget.as_deref(),
-                performance_report: performance_report.as_deref(),
-                performance_trace: performance_trace.as_deref(),
-                performance_trace_manifest: performance_trace_manifest.as_deref(),
-                performance_warmup_frames,
-                performance_start_sequence,
-            })
-            .await
-        }
+            worker_limit,
+        } => match astra_plugin::WorkerBudgetBroker::global_with_limit(worker_limit) {
+            Ok(_) => {
+                run(RunRequest {
+                    profile_path: &profile,
+                    package_path: &package,
+                    input_path: &input,
+                    artifact_root: &artifact_root,
+                    checkpoint_config: checkpoint_config.as_deref(),
+                    build_identity: &build_identity,
+                    gpu,
+                    source_profile: source_profile.as_deref(),
+                    source_root: source_root.as_deref(),
+                    performance_budget: performance_budget.as_deref(),
+                    performance_report: performance_report.as_deref(),
+                    performance_trace: performance_trace.as_deref(),
+                    performance_trace_manifest: performance_trace_manifest.as_deref(),
+                    performance_warmup_frames,
+                    performance_start_sequence,
+                })
+                .await
+            }
+            Err(error) => Err(error.to_string()),
+        },
+        Command::RunBatch { manifest, report } => session_batch::run(&manifest, &report).await,
         Command::BootstrapTestEnv {
             output,
             build_identity,
@@ -293,6 +317,11 @@ async fn main() {
             namespace,
             viewport_width,
             viewport_height,
+            video_decode,
+            max_decode_output_bytes,
+            max_decoded_cache_bytes,
+            max_gpu_resource_bytes,
+            max_video_frames,
             manifest_only,
             output,
             build_identity,
@@ -304,6 +333,11 @@ async fn main() {
             &namespace,
             viewport_width,
             viewport_height,
+            &video_decode,
+            max_decode_output_bytes,
+            max_decoded_cache_bytes,
+            max_gpu_resource_bytes,
+            max_video_frames,
             manifest_only,
             &output,
             &build_identity,
@@ -2359,6 +2393,11 @@ fn prepare_product_profile(
     namespace: &str,
     viewport_width: u32,
     viewport_height: u32,
+    video_decode: &str,
+    max_decode_output_bytes: u64,
+    max_decoded_cache_bytes: u64,
+    max_gpu_resource_bytes: u64,
+    max_video_frames: u64,
     manifest_only: bool,
     output: &Path,
     build_identity: &Path,
@@ -2367,6 +2406,11 @@ fn prepare_product_profile(
         || product_profile.trim().is_empty()
         || id.trim().is_empty()
         || namespace.trim().is_empty()
+        || video_decode.trim().is_empty()
+        || max_decode_output_bytes == 0
+        || max_decoded_cache_bytes == 0
+        || max_gpu_resource_bytes == 0
+        || max_video_frames == 0
         || viewport_width == 0
         || viewport_height == 0
     {
@@ -2400,6 +2444,11 @@ fn prepare_product_profile(
     profile.product_profile = product_profile.to_string();
     profile.viewport_width = viewport_width;
     profile.viewport_height = viewport_height;
+    profile.providers.video_decode = video_decode.to_string();
+    profile.max_decode_output_bytes = max_decode_output_bytes;
+    profile.max_decoded_cache_bytes = max_decoded_cache_bytes;
+    profile.max_gpu_resource_bytes = max_gpu_resource_bytes;
+    profile.max_video_frames = max_video_frames;
     profile.artifacts.namespace = namespace.to_string();
     if manifest_only {
         profile.artifacts.retention = astra_platform::HeadlessArtifactRetention::ManifestOnly;

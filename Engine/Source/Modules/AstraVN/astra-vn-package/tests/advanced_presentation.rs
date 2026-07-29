@@ -13,7 +13,7 @@ state prologue #@id state.prologue
     camera target:main zoom:1.05 #@id camera.push
     timeline id:tl.enter target:hero property:opacity keyframes:0=0,300=1 join:block fence:tl.enter.done fallback:flat budget_ms:2 #@id timeline.enter
     timeline id:tl.enter action:cancel reason:replace_target #@id timeline.cancel
-    movie layer:video_fx asset:asset:/movie/light fallback:asset:/movie/light_fallback #@id movie.light
+    movie layer:video_fx asset:asset:/movie/light fallback:asset:/movie/light_fallback interrupt:reject #@id movie.light
     voice asset:asset:/voice/hero sync:text #@id voice.hero
     effect text:line.hello filter:astra.filter.bloom fallback:filter_missing budget_ms:2 #@id effect.reveal
     text key:hello speaker:hero #@id line.hello

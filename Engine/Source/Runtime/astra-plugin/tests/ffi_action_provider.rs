@@ -98,7 +98,7 @@ fn ffi_action_provider_registers_executes_and_unloads() {
         .unwrap();
 
     world.emit_event(EventSource::Scenario, EventPayload::new("fixture.start"));
-    world
+    let tick = world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -108,6 +108,11 @@ fn ffi_action_provider_registers_executes_and_unloads() {
             Vec::new(),
         ))
         .unwrap();
+    assert!(
+        tick.diagnostics.is_empty(),
+        "fixture action tick diagnostics: {:?}",
+        tick.diagnostics
+    );
 
     assert_eq!(
         world.snapshot().blackboard.get("fixture.action"),

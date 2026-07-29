@@ -45,7 +45,9 @@ Provider 输出只能是可序列化 effect list、await token、presentation/au
 - `probe` 校验 package sections、target/profile、scenario refs 和 player route model。
 - `open` 创建 session-owned `RuntimeWorld`、VN Actor、typed VN/policy components、runtime cursor、policy state 和 flat story StateMachine。
 - `step` 把 launch、advance、choose、system page、wait completion 等输入编码成 RuntimeEvent，由 `astra.vn.step` action 推进 dialogue、choice、system story、wait、presentation、audio、timeline 和 mutation。
-- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v2` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。
+- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v3` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。v2 不提供迁移入口。
+
+Runtime v3 的 Action descriptor 强制包含 execution class、read/write set 和 StableId reservation。FFI Action ABI v2 传递完整 descriptor JSON；metadata 不一致、pure action 声明写入、StableId 声明不闭合、effect 越权或实际 ID 消耗超额都会产生 blocking diagnostic。AstraVN reducer 按实际写入记录 variable mutation journal；backlog、read-state、route coverage 和 voice replay 使用固定 64 条 chunk、stable ordinal/bitset 与历史 root，普通 step 只替换 hot state 和变化的尾 chunk，save/checkpoint 才物化完整 v3 state。Runtime tick 的 Actor、Blackboard、Event、Await 和 DelayedEvent 已切换 inverse journal，conflict-DAG 在明确的 1/2/4/8 worker 配置下并行无冲突 machine。
 - `package_sections` 继续输出 `vn.*` sections。
 - `release_checks` 继续声明 `vn.commercial_baseline`、`vn.system_ui_profile`、`vn.advanced_presentation`、`player.full_playable` 等 check。
 
@@ -54,6 +56,20 @@ VN Core 保持 dialogue、choice、backlog、save/load、read-state 和 voice re
 当前 FFI adapter 有显式 provider instance registry。`create_instance`、`destroy_instance`、`open`、`step`、`save`、`restore` 和 `shutdown` 都调用同一真实 provider 路径；in-process provider 也必须实现真实 instance lifecycle，host 不提供默认成功实现。Host 在 create/open 部分失败时 rollback，校验 instance/session identity、连续 fixed step、1..=1 秒 delta、session seed、live/restore mode、output/save section schema/hash/bounds，并阻断 live provider replay。Restore report 回传 snapshot step/seed，下一 tick 只能使用一次 `RestoreContinuation`，随后恢复 `Live`。Provider panic、错误、malformed output 和 timeout 会进入 poisoned lifecycle。timeout 返回前先等待 blocking worker drain；调用方随后用 `cleanup_after_failure` shutdown 全部 session 并 destroy instance。`open` 从请求中的 `vn.compiled_story` section 解码 story，不能创建未绑定 session。外部 dylib 的分发、签名和版本协商仍留给插件发布工作，不影响当前 ABI lifecycle 行为证据。
 
 Release validator 从 package 内的 `vn.compiled_story` 执行 package-bound lifecycle conformance，并记录 state/event/presentation hash。Runtime replay 另存 hash-validated `ProviderReplayOutput`，回放阶段不调用 FFI 或 in-process provider。
+
+## Concurrent Session Migration
+
+Runtime 已新增 `ProductRuntimeProviderFactory`、`ProductRuntimeSession` 和 `ConcurrentProductRuntimeHost`。Factory 只持有 instance control state；`open` 返回独占 session object，每条 session 使用容量 32 的 ordered mailbox、fixed-step authority 和 poison state，不再经过全局 `ProductRuntimeHost` mutex。不同 session 可以同时进入有界 worker，同一 session 的 `step/save/restore/shutdown` 严格 FIFO、单飞。`NativeVnRuntimeProviderFactory` 与 `AstraEmuRuntimeProviderFactory` 已把每条 session 隔离到独立 `RuntimeWorld`。
+
+`astra-headless run-batch` 从 `astra.headless_session_batch.v2` manifest 启动最多八个独立 `astra-headless run` 子进程。每条 job 声明 `route`、`replay` 或 `performance` 类型，以及独立 concurrent/serial artifact root、timeout、package/input/profile/build identity。只有 `performance` job 必须声明 performance budget、warmup 和 measurement start；route/replay job 若夹带 performance 配置会 fail closed。Runner 先生成同身份串行 baseline，再执行公平排队的 concurrent batch；报告 `astra.headless_session_batch_report.v2` 按 session id 稳定排序，记录 output identity 对比、排队/执行时间、批次 wall time、吞吐、worker 利用率和串行 baseline；performance job 另记录每 session CPU/E2E p95/p99 与 private-memory peak。任一 session 失败或超时不会取消已开始任务，但 identity mismatch 或任一失败会使批次最终 blocking。
+
+旧同步 `ProductRuntimeHost` 暂时只保留给仍需迁移的 dynamic FFI/shipping host 调用点，不代表 Provider ABI v1 仍受支持；ABI DTO、save 与 action contract 已硬切 v2/v3。删除同步 facade 仍需同身份 Headless batch 与 Windows Player evidence，因此当前状态保持 `IN_PROGRESS`。
+
+## Presentation 与资源流水线
+
+`ProductStageDirector` 持有序列化 `PresentationCoordinator`，其 Character、Background、Text、Video region 从同一 snapshot 产生 delta并按稳定 sequence 合并。命令必须显式声明 `queue`、`replace_from_current`、`snap_then_start` 或 `reject`；跨 region layer 写冲突、非法 queue activation 和 fence drift fail closed。TextRegion 拥有 layout/reveal/auto timer/window 逻辑，第一次点击只完成 reveal；VideoRegion 记录 Prebuffering/Playing/Ended/Failed 和逻辑播放点，设备 decoder/GPU handle 不进入 snapshot。
+
+CosmicText shaping 使用 worker-local `FontSystem`/`SwashCache`、分片 single-flight cache；图片预取、audio/video decode 和 region preparation 从同一 `WorkerBudgetBroker` 租赁额度。静态 RGBA 在 `UploadTexture` command 取得 `Arc` 后立即从 CPU asset cache 释放，保留 manifest、hash 和尺寸；device loss 清空 texture/glyph residency与 retained draw cache，下一帧从 package manifest 重建。
 
 ## AstraEMU Provider
 

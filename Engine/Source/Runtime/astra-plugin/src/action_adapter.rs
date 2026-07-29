@@ -1,8 +1,8 @@
 use abi_stable::std_types::RVec;
 use astra_core::Diagnostic;
 use astra_runtime::{
-    ActionCallRequest, ActionCallResult, ActionDescriptor, ActionTrace, DeterministicActionContext,
-    RuntimeAction, RuntimeError, RuntimeWorld,
+    ActionCallRequest, ActionCallResult, ActionDescriptor, ActionEffect, ActionResourceKey,
+    ActionTrace, DeterministicActionContext, RuntimeAction, RuntimeError, RuntimeWorld,
 };
 use std::collections::BTreeMap;
 use tracing::{debug, warn};
@@ -17,16 +17,36 @@ pub struct LoadedFfiAction {
 }
 
 impl LoadedFfiAction {
-    pub fn from_registration(registration: FfiActionRegistration) -> Self {
-        Self {
-            provider_id: registration.provider_id.to_string(),
-            descriptor: ActionDescriptor {
-                id: registration.action_id.to_string(),
-                input_schema: registration.input_schema.to_string(),
-                output_schema: registration.output_schema.to_string(),
-            },
-            invoke: registration.invoke,
+    pub fn from_registration(registration: FfiActionRegistration) -> Result<Self, PluginError> {
+        if registration.abi_version != astra_plugin_abi::ACTION_PLUGIN_ABI_VERSION {
+            return Err(PluginError::Load(format!(
+                "ASTRA_PLUGIN_ACTION_ABI_VERSION: action {} uses ABI {}, expected {}",
+                registration.action_id,
+                registration.abi_version,
+                astra_plugin_abi::ACTION_PLUGIN_ABI_VERSION
+            )));
         }
+        let descriptor: ActionDescriptor =
+            serde_json::from_slice(registration.descriptor_json.as_slice()).map_err(|error| {
+                PluginError::Load(format!(
+                    "ASTRA_PLUGIN_ACTION_DESCRIPTOR_DECODE: action {}: {error}",
+                    registration.action_id
+                ))
+            })?;
+        if descriptor.id != registration.action_id.as_str()
+            || descriptor.input_schema != registration.input_schema.as_str()
+            || descriptor.output_schema != registration.output_schema.as_str()
+        {
+            return Err(PluginError::Load(
+                "ASTRA_PLUGIN_ACTION_DESCRIPTOR_IDENTITY: action registration metadata does not match descriptor"
+                    .to_string(),
+            ));
+        }
+        Ok(Self {
+            provider_id: registration.provider_id.to_string(),
+            descriptor,
+            invoke: registration.invoke,
+        })
     }
 
     pub fn provider_id(&self) -> &str {
@@ -102,6 +122,7 @@ impl RuntimeAction for FfiRuntimeAction {
                     "plugin.action.ok"
                 );
                 for effect in effects {
+                    validate_effect_access(&self.descriptor, &effect)?;
                     ctx.apply_effect(effect)?;
                 }
                 Ok(trace)
@@ -117,4 +138,51 @@ impl RuntimeAction for FfiRuntimeAction {
             })),
         }
     }
+}
+
+fn validate_effect_access(
+    descriptor: &ActionDescriptor,
+    effect: &ActionEffect,
+) -> Result<(), RuntimeError> {
+    let required = match effect {
+        ActionEffect::SetBlackboard { .. } => vec![ActionResourceKey::Blackboard],
+        ActionEffect::CreateActor { .. } | ActionEffect::AttachComponent { .. } => vec![
+            ActionResourceKey::ActorStore,
+            ActionResourceKey::StableIdSource,
+        ],
+        ActionEffect::ReplaceComponent { .. }
+        | ActionEffect::PatchComponentMap { .. }
+        | ActionEffect::RemoveActor { .. }
+        | ActionEffect::DetachComponent { .. } => vec![
+            ActionResourceKey::ActorStore,
+            ActionResourceKey::MutationLog,
+        ],
+        ActionEffect::EmitEvent { .. } => vec![
+            ActionResourceKey::EventQueue,
+            ActionResourceKey::StableIdSource,
+        ],
+        ActionEffect::Presentation { .. } => vec![ActionResourceKey::Presentation],
+        ActionEffect::Await { .. } => vec![ActionResourceKey::AwaitQueue],
+        ActionEffect::ScheduleDelayedEvent { .. } => vec![
+            ActionResourceKey::DelayedEventQueue,
+            ActionResourceKey::StableIdSource,
+        ],
+        ActionEffect::CancelDelayedEvent { .. } => {
+            vec![ActionResourceKey::DelayedEventQueue]
+        }
+    };
+    if let Some(resource) = required
+        .into_iter()
+        .find(|resource| !descriptor.access.writes.contains(resource))
+    {
+        return Err(RuntimeError::diagnostic(
+            Diagnostic::blocking(
+                "ASTRA_RUNTIME_ACTION_ACCESS_UNDECLARED",
+                "plugin action returned an effect outside its declared write set",
+            )
+            .with_field("action_id", &descriptor.id)
+            .with_field("resource", format!("{resource:?}")),
+        ));
+    }
+    Ok(())
 }

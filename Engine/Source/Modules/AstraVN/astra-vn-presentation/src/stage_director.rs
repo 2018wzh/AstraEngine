@@ -1,17 +1,20 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use astra_core::{Diagnostic, Hash128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AspectRatio, AudioControl, AudioCue, FixedScalar, MovieLoopMode, StageBlendMode,
-    StageClipPolicy, StageCommand, StageFitMode, StageLayerKind, StagePlacement, StageViewport,
-    TimelineCommand, TimelineSpec, VnAudioBus, VnError, VnMovieEndBehavior, VnPresentationEasing,
-    VnPresentationProviderManifest, VnTimelineJoinPolicy,
+    AspectRatio, AudioControl, AudioCue, BackgroundRegionCommand, CharacterRegionCommand,
+    FixedScalar, MovieLoopMode, PresentationCommandEnvelope, PresentationCoordinator,
+    PresentationInterruptPolicy, PresentationRegionCommand, StageBlendMode, StageClipPolicy,
+    StageCommand, StageFitMode, StageLayerKind, StagePlacement, StageViewport,
+    TextAdvanceDisposition, TextRegionCommand, TimelineCommand, TimelineSpec, VideoRegionCommand,
+    VnAudioBus, VnError, VnMovieEndBehavior, VnPresentationEasing, VnPresentationProviderManifest,
+    VnTextRevealState, VnTimelineJoinPolicy,
 };
 
-pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v6";
+pub const PRODUCT_STAGE_STATE_SCHEMA: &str = "astra.vn.product_stage_state.v7";
 const MAX_FRAME_DELTA_NS: u64 = 1_000_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -141,6 +144,10 @@ pub struct ProductStageDirector {
     timelines: BTreeMap<String, ActiveTimeline>,
     completed_timelines: BTreeSet<String>,
     shake: Option<ActiveShake>,
+    coordinator: PresentationCoordinator,
+    queued_region_commands: BTreeMap<String, StageCommand>,
+    queued_stage_commands: VecDeque<StageCommand>,
+    next_region_sequence: u64,
 }
 
 impl ProductStageDirector {
@@ -185,6 +192,10 @@ impl ProductStageDirector {
             timelines: BTreeMap::new(),
             completed_timelines: BTreeSet::new(),
             shake: None,
+            coordinator: PresentationCoordinator::default(),
+            queued_region_commands: BTreeMap::new(),
+            queued_stage_commands: VecDeque::new(),
+            next_region_sequence: 1,
         })
     }
 
@@ -206,7 +217,94 @@ impl ProductStageDirector {
     }
 
     pub fn requires_frame_tick(&self) -> bool {
-        !self.tweens.is_empty() || !self.timelines.is_empty() || self.shake.is_some()
+        !self.tweens.is_empty()
+            || !self.timelines.is_empty()
+            || self.shake.is_some()
+            || self
+                .coordinator
+                .state()
+                .text
+                .active
+                .as_ref()
+                .is_some_and(|text| !text.reveal_complete())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn configure_text(
+        &mut self,
+        command_id: String,
+        text_key: String,
+        speaker: Option<String>,
+        window: Option<String>,
+        grapheme_count: u32,
+        graphemes_per_second: u16,
+        interrupt: PresentationInterruptPolicy,
+    ) -> Result<(), VnError> {
+        let sequence = self.next_region_sequence;
+        self.next_region_sequence = self.next_region_sequence.checked_add(1).ok_or_else(|| {
+            stage_error(
+                "ASTRA_VN_STAGE_REGION_SEQUENCE",
+                "presentation region sequence overflowed",
+            )
+        })?;
+        self.coordinator.apply_batch(
+            &[PresentationCommandEnvelope {
+                fixed_step: self.state.frame_index,
+                sequence,
+                command_id,
+                interrupt,
+                fence: None,
+                payload: PresentationRegionCommand::Text(TextRegionCommand {
+                    text_key,
+                    speaker,
+                    window,
+                    grapheme_count,
+                    graphemes_per_second,
+                }),
+            }],
+            1,
+        )?;
+        Ok(())
+    }
+
+    pub fn text_reveal_state(&self) -> Option<VnTextRevealState> {
+        self.coordinator
+            .state()
+            .text
+            .active
+            .as_ref()
+            .map(|text| VnTextRevealState {
+                command_id: text.command_id.clone(),
+                text_key: text.text_key.clone(),
+                text_graphemes: text.grapheme_count,
+                visible_graphemes: text.visible_graphemes,
+                elapsed_ns: text.elapsed_ns,
+                graphemes_per_second: text.graphemes_per_second,
+            })
+    }
+
+    pub fn request_text_advance(&mut self) -> TextAdvanceDisposition {
+        self.coordinator.request_text_advance()
+    }
+
+    pub fn complete_text_layout(&mut self, command_id: &str) -> Result<(), VnError> {
+        self.coordinator.complete_text_layout(command_id)
+    }
+
+    pub fn acknowledge_story_advance(&mut self) -> Result<(), VnError> {
+        self.coordinator.acknowledge_story_advance()
+    }
+
+    pub fn start_video(&mut self, layer: &str) -> Result<(), VnError> {
+        self.coordinator.start_video(&format!("movie.{layer}"))
+    }
+
+    pub fn complete_video(&mut self, layer: &str) -> Result<Vec<String>, VnError> {
+        self.coordinator.complete_video(&format!("movie.{layer}"))
+    }
+
+    pub fn fail_video(&mut self, layer: &str) -> Result<Option<String>, VnError> {
+        self.coordinator.fail_video(&format!("movie.{layer}"))
     }
 
     pub fn apply(&mut self, command: &StageCommand) -> Result<Vec<StageDirectorOutput>, VnError> {
@@ -224,7 +322,30 @@ impl ProductStageDirector {
         let mut next = self.clone();
         let mut outputs = Vec::new();
         for command in commands {
-            outputs.push(next.apply_inner(command)?);
+            let Some(envelope) = next.region_envelope(command)? else {
+                outputs.push(next.apply_inner(command)?);
+                continue;
+            };
+            let command_id = envelope.command_id.clone();
+            let deltas = next.coordinator.apply_batch(&[envelope], 1)?;
+            let applied = deltas
+                .iter()
+                .any(|delta| delta.applied_commands.iter().any(|id| id == &command_id));
+            if applied {
+                outputs.push(next.apply_inner(command)?);
+            } else {
+                if next
+                    .queued_region_commands
+                    .insert(command_id, command.clone())
+                    .is_some()
+                {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_REGION_QUEUE_DUPLICATE",
+                        "presentation coordinator returned a duplicate queued command id",
+                    ));
+                }
+                outputs.push(Vec::new());
+            }
         }
         next.validate_state()?;
         Ok((next, outputs))
@@ -238,7 +359,29 @@ impl ProductStageDirector {
             ));
         }
         let mut next = self.clone();
-        let output = next.tick_inner(delta_ns)?;
+        let mut output = next.tick_inner(delta_ns)?;
+        output.extend(next.coordinator.tick(delta_ns)?.into_iter().map(|id| {
+            StageDirectorOutput::FenceCompleted {
+                kind: "presentation.region".to_string(),
+                id,
+            }
+        }));
+        for command_id in next.coordinator.take_activated_commands() {
+            let command = next
+                .queued_region_commands
+                .remove(&command_id)
+                .ok_or_else(|| {
+                    stage_error(
+                        "ASTRA_VN_STAGE_REGION_QUEUE_STATE",
+                        "presentation coordinator activated an unknown stage command",
+                    )
+                })?;
+            output.extend(next.apply_inner(&command)?);
+        }
+        let queued = std::mem::take(&mut next.queued_stage_commands);
+        for command in queued {
+            output.extend(next.apply_inner(&command)?);
+        }
         *self = next;
         Ok(output)
     }
@@ -267,6 +410,144 @@ impl ProductStageDirector {
         Ok(restored)
     }
 
+    fn region_envelope(
+        &mut self,
+        command: &StageCommand,
+    ) -> Result<Option<PresentationCommandEnvelope>, VnError> {
+        let (interrupt, fence, payload) = match command {
+            StageCommand::Background {
+                asset,
+                layer,
+                preset,
+                duration_ms,
+                interrupt,
+            } => (
+                *interrupt,
+                None,
+                PresentationRegionCommand::Background(BackgroundRegionCommand {
+                    layer: layer.clone(),
+                    asset: Some(asset.clone()),
+                    duration_ns: duration_ns(self.resolve_duration(
+                        command.kind(),
+                        preset.as_deref(),
+                        *duration_ms,
+                    )?)?,
+                }),
+            ),
+            StageCommand::Show {
+                id,
+                asset,
+                pose,
+                layer,
+                preset,
+                interrupt,
+                ..
+            } => (
+                *interrupt,
+                None,
+                PresentationRegionCommand::Character(CharacterRegionCommand {
+                    character_id: id.clone(),
+                    asset: asset.clone(),
+                    pose: pose.clone(),
+                    layer: layer.clone(),
+                    visible: true,
+                    duration_ns: duration_ns(self.resolve_duration(
+                        command.kind(),
+                        preset.as_deref(),
+                        0,
+                    )?)?,
+                }),
+            ),
+            StageCommand::Hide {
+                id,
+                preset,
+                duration_ms,
+                interrupt,
+            } => {
+                let entity = self.entity(id)?;
+                (
+                    *interrupt,
+                    None,
+                    PresentationRegionCommand::Character(CharacterRegionCommand {
+                        character_id: id.clone(),
+                        asset: entity.asset.clone(),
+                        pose: entity.pose.clone(),
+                        layer: entity.layer.clone(),
+                        visible: false,
+                        duration_ns: duration_ns(self.resolve_duration(
+                            command.kind(),
+                            preset.as_deref(),
+                            *duration_ms,
+                        )?)?,
+                    }),
+                )
+            }
+            StageCommand::Move {
+                id,
+                duration_ms,
+                preset,
+                interrupt,
+                ..
+            } => {
+                let entity = self.entity(id)?;
+                (
+                    *interrupt,
+                    None,
+                    PresentationRegionCommand::Character(CharacterRegionCommand {
+                        character_id: id.clone(),
+                        asset: entity.asset.clone(),
+                        pose: entity.pose.clone(),
+                        layer: entity.layer.clone(),
+                        visible: entity.visible,
+                        duration_ns: duration_ns(self.resolve_duration(
+                            command.kind(),
+                            preset.as_deref(),
+                            *duration_ms,
+                        )?)?,
+                    }),
+                )
+            }
+            StageCommand::Movie {
+                layer,
+                asset,
+                loop_mode,
+                end,
+                fence,
+                fallback,
+                interrupt,
+                ..
+            } => (
+                *interrupt,
+                fence.clone(),
+                PresentationRegionCommand::Video(VideoRegionCommand {
+                    session_id: format!("movie.{layer}"),
+                    layer: layer.clone(),
+                    asset: asset.clone(),
+                    logical_start_ns: 0,
+                    loop_mode: *loop_mode,
+                    end_behavior: *end,
+                    fallback: fallback.clone(),
+                }),
+            ),
+            _ => return Ok(None),
+        };
+        let sequence = self.next_region_sequence;
+        self.next_region_sequence = self.next_region_sequence.checked_add(1).ok_or_else(|| {
+            stage_error(
+                "ASTRA_VN_STAGE_REGION_SEQUENCE",
+                "presentation region sequence overflowed",
+            )
+        })?;
+        Ok(Some(PresentationCommandEnvelope {
+            fixed_step: self.state.frame_index,
+            sequence,
+            command_id: format!("stage.region.{sequence}"),
+            interrupt,
+            fence,
+            payload,
+        }))
+    }
+
     fn apply_inner(&mut self, command: &StageCommand) -> Result<Vec<StageDirectorOutput>, VnError> {
         tracing::trace!(
             event = "vn.presentation.director.apply",
@@ -274,6 +555,9 @@ impl ProductStageDirector {
             frame_index = self.state.frame_index,
             "typed presentation command entered the product stage director"
         );
+        if !self.prepare_interrupt(command)? {
+            return Ok(Vec::new());
+        }
         match command {
             StageCommand::Preload { asset } => {
                 if !self.state.preloaded_assets.insert(asset.clone()) {
@@ -346,11 +630,21 @@ impl ProductStageDirector {
                 layer,
                 preset,
                 duration_ms,
+                interrupt,
             } => {
                 self.require_layer(layer, &[StageLayerKind::Background])?;
                 let duration =
                     self.resolve_duration(command.kind(), preset.as_deref(), *duration_ms)?;
                 let id = format!("background.{layer}");
+                let start_opacity = if *interrupt == PresentationInterruptPolicy::ReplaceFromCurrent
+                {
+                    self.state
+                        .entities
+                        .get(&id)
+                        .map_or(FixedScalar::ZERO, |entity| entity.opacity)
+                } else {
+                    FixedScalar::ZERO
+                };
                 self.state.entities.insert(
                     id.clone(),
                     ProductStageEntity {
@@ -364,7 +658,7 @@ impl ProductStageDirector {
                         opacity: if duration == 0 {
                             FixedScalar::ONE
                         } else {
-                            FixedScalar::ZERO
+                            start_opacity
                         },
                         visible: true,
                     },
@@ -373,7 +667,7 @@ impl ProductStageDirector {
                     self.schedule_tween(StageTween::new(
                         TweenTarget::Entity(id),
                         TweenProperty::Opacity,
-                        FixedScalar::ZERO,
+                        start_opacity,
                         FixedScalar::ONE,
                         duration,
                         self.resolve_easing(command.kind(), preset.as_deref())?,
@@ -390,6 +684,7 @@ impl ProductStageDirector {
                 fit,
                 opacity,
                 preset,
+                interrupt,
             } => {
                 self.require_layer(
                     layer,
@@ -404,6 +699,15 @@ impl ProductStageDirector {
                 let y = FixedScalar {
                     millionths: i64::from(self.state.viewport.height) * 1_000_000,
                 };
+                let start_opacity = if *interrupt == PresentationInterruptPolicy::ReplaceFromCurrent
+                {
+                    self.state
+                        .entities
+                        .get(id)
+                        .map_or(FixedScalar::ZERO, |entity| entity.opacity)
+                } else {
+                    FixedScalar::ZERO
+                };
                 self.state.entities.insert(
                     id.clone(),
                     ProductStageEntity {
@@ -417,7 +721,7 @@ impl ProductStageDirector {
                         opacity: if duration == 0 {
                             *opacity
                         } else {
-                            FixedScalar::ZERO
+                            start_opacity
                         },
                         visible: true,
                     },
@@ -426,7 +730,7 @@ impl ProductStageDirector {
                     self.schedule_tween(StageTween::new(
                         TweenTarget::Entity(id.clone()),
                         TweenProperty::Opacity,
-                        FixedScalar::ZERO,
+                        start_opacity,
                         *opacity,
                         duration,
                         self.resolve_easing(command.kind(), preset.as_deref())?,
@@ -438,6 +742,7 @@ impl ProductStageDirector {
                 id,
                 preset,
                 duration_ms,
+                ..
             } => {
                 let entity = self.entity(id)?.clone();
                 let duration =
@@ -457,7 +762,9 @@ impl ProductStageDirector {
                     )?);
                 }
             }
-            StageCommand::ClearLayer { layer, duration_ms } => {
+            StageCommand::ClearLayer {
+                layer, duration_ms, ..
+            } => {
                 self.require_layer(
                     layer,
                     &[
@@ -531,6 +838,7 @@ impl ProductStageDirector {
                 y,
                 duration_ms,
                 preset,
+                ..
             } => {
                 let entity = self.entity(id)?.clone();
                 let duration =
@@ -613,6 +921,7 @@ impl ProductStageDirector {
                 end,
                 fence,
                 fallback,
+                ..
             } => {
                 self.require_layer(layer, &[StageLayerKind::Video])?;
                 let movie = ProductStageMovie {
@@ -1098,6 +1407,103 @@ impl ProductStageDirector {
         self.tweens.retain(|active| &active.target != target);
     }
 
+    fn prepare_interrupt(&mut self, command: &StageCommand) -> Result<bool, VnError> {
+        let Some((policy, targets, coordinator_owned)) = self.interrupt_targets(command) else {
+            return Ok(true);
+        };
+        let active = self
+            .tweens
+            .iter()
+            .any(|tween| targets.iter().any(|target| target == &tween.target));
+        if !active {
+            return Ok(true);
+        }
+        match policy {
+            PresentationInterruptPolicy::Queue => {
+                if coordinator_owned {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_REGION_COORDINATOR_DIVERGENCE",
+                        "region coordinator activated a queued command while its stage tween remained active",
+                    ));
+                }
+                if self.queued_stage_commands.len() >= 4_096 {
+                    return Err(stage_error(
+                        "ASTRA_VN_STAGE_COMMAND_QUEUE_LIMIT",
+                        "stage command queue exceeds its serialized bound",
+                    ));
+                }
+                self.queued_stage_commands.push_back(command.clone());
+                Ok(false)
+            }
+            PresentationInterruptPolicy::Reject => Err(stage_error(
+                "ASTRA_VN_STAGE_INTERRUPT_REJECTED",
+                "stage command conflicts with an active authored transition",
+            )),
+            PresentationInterruptPolicy::ReplaceFromCurrent => {
+                self.tweens
+                    .retain(|tween| !targets.iter().any(|target| target == &tween.target));
+                Ok(true)
+            }
+            PresentationInterruptPolicy::SnapThenStart => {
+                let completing = self
+                    .tweens
+                    .iter()
+                    .filter(|tween| targets.iter().any(|target| target == &tween.target))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                self.tweens
+                    .retain(|tween| !targets.iter().any(|target| target == &tween.target));
+                let mut remove = BTreeSet::new();
+                for tween in completing {
+                    self.apply_property(&tween.target, tween.property, tween.end)?;
+                    if tween.remove_entity {
+                        if let TweenTarget::Entity(id) = tween.target {
+                            remove.insert(id);
+                        }
+                    }
+                }
+                for id in remove {
+                    self.state.entities.remove(&id);
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    fn interrupt_targets(
+        &self,
+        command: &StageCommand,
+    ) -> Option<(PresentationInterruptPolicy, Vec<TweenTarget>, bool)> {
+        match command {
+            StageCommand::Background {
+                layer, interrupt, ..
+            } => Some((
+                *interrupt,
+                vec![TweenTarget::Entity(format!("background.{layer}"))],
+                true,
+            )),
+            StageCommand::Show { id, interrupt, .. }
+            | StageCommand::Hide { id, interrupt, .. }
+            | StageCommand::Move { id, interrupt, .. } => {
+                Some((*interrupt, vec![TweenTarget::Entity(id.clone())], true))
+            }
+            StageCommand::ClearLayer {
+                layer, interrupt, ..
+            } => Some((
+                *interrupt,
+                self.state
+                    .entities
+                    .values()
+                    .filter(|entity| entity.layer == *layer)
+                    .map(|entity| TweenTarget::Entity(entity.id.clone()))
+                    .collect(),
+                false,
+            )),
+            StageCommand::Movie { interrupt, .. } => Some((*interrupt, Vec::new(), true)),
+            _ => None,
+        }
+    }
+
     fn require_configured(&self) -> Result<(), VnError> {
         if self.state.configured {
             Ok(())
@@ -1235,6 +1641,17 @@ fn validate_viewport(viewport: StageViewport) -> Result<(), VnError> {
         ));
     }
     Ok(())
+}
+
+fn duration_ns(duration_ms: u32) -> Result<u64, VnError> {
+    u64::from(duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or_else(|| {
+            stage_error(
+                "ASTRA_VN_STAGE_REGION_DURATION",
+                "presentation region duration overflowed",
+            )
+        })
 }
 
 fn placement_x(placement: StagePlacement, width: u32) -> Result<FixedScalar, VnError> {

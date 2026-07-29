@@ -4,9 +4,12 @@ use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeEditorMetadata, RuntimeOpenReport,
     RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareReport, RuntimePrepareRequest,
     RuntimeProviderCall, RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest,
-    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
-    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
-    RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    RuntimeProviderInstanceReport, RuntimeProviderSessionCall, RuntimeProviderSessionHandle,
+    RuntimeProviderSessionOpenReport, RuntimeRestoreReport, RuntimeRestoreRequest,
+    RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput,
+    RuntimeTickIntegrityMode, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_vn_runtime_provider::{compile_astra_project, AstraSource, NativeVnRuntimeProvider};
 use serde::{de::DeserializeOwned, Serialize};
@@ -23,6 +26,10 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
     let registration = NativeVnRuntimeProvider::ffi_registration();
     assert_eq!(registration.provider_id.as_str(), "astra.runtime.native_vn");
     assert_eq!(registration.runtime_id.as_str(), "native_vn");
+    assert_eq!(
+        registration.abi_version,
+        PRODUCT_RUNTIME_PROVIDER_ABI_VERSION
+    );
     assert_eq!(
         registration.descriptor_schema.as_str(),
         PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA
@@ -54,14 +61,16 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
     )
     .unwrap();
     let compiled_bytes = postcard::to_allocvec(&compiled.story).unwrap();
-    let open = invoke_call::<_, RuntimeOpenReport>(
-        registration.open,
+    let opened = invoke_call::<_, RuntimeProviderSessionOpenReport>(
+        registration.open_session,
         &instance_id,
         &RuntimeOpenRequest {
             target_id: "nativevn-game".to_string(),
             profile: "classic".to_string(),
             locale: "zh-Hans".to_string(),
             seed: 41,
+            integrity_mode: RuntimeTickIntegrityMode::Evidence,
+            executor: astra_plugin_abi::RuntimeExecutorConfig::parallel(4),
             package_hash: "sha256:fixture".to_string(),
             sections: vec![RuntimeSectionPayload {
                 section_id: "vn.story".to_string(),
@@ -73,9 +82,11 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
             }],
         },
     );
-    let step = invoke_call::<_, RuntimeStepOutput>(
+    let open: RuntimeOpenReport = opened.report;
+    let step = invoke_session_call::<_, RuntimeStepOutput>(
         registration.step,
         &instance_id,
+        opened.session_handle,
         &RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
@@ -92,9 +103,10 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
         .iter()
         .any(|output| output.domain == RuntimeOutputDomain::Presentation));
 
-    let save = invoke_call::<_, RuntimeSaveSections>(
+    let save = invoke_session_call::<_, RuntimeSaveSections>(
         registration.save,
         &instance_id,
+        opened.session_handle,
         &RuntimeSaveRequest {
             session_id: open.session_id.clone(),
             slot: "slot.ffi".to_string(),
@@ -102,15 +114,16 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
     );
     assert_eq!(save.sections.len(), 1);
     assert_eq!(save.sections[0].section_id, "runtime.world");
-    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v2");
+    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v3");
     assert!(save
         .sections
         .iter()
         .all(RuntimeSectionPayload::validate_hash));
 
-    let restore = invoke_call::<_, RuntimeRestoreReport>(
+    let restore = invoke_session_call::<_, RuntimeRestoreReport>(
         registration.restore,
         &instance_id,
+        opened.session_handle,
         &RuntimeRestoreRequest {
             session_id: open.session_id.clone(),
             sections: save.sections,
@@ -120,9 +133,10 @@ fn native_vn_runtime_provider_ffi_runs_a_real_session_lifecycle() {
     assert_eq!(restore.restored_fixed_step, 1);
     assert_eq!(restore.session_seed, 41);
 
-    let shutdown = invoke_call::<_, RuntimeShutdownReport>(
+    let shutdown = invoke_session_call::<_, RuntimeShutdownReport>(
         registration.shutdown,
         &instance_id,
+        opened.session_handle,
         &GameRuntimeSessionId(open.session_id.0),
     );
     assert_eq!(shutdown.status, "shutdown");
@@ -152,6 +166,22 @@ fn invoke_call<T: Serialize, R: DeserializeOwned>(
         callback,
         &RuntimeProviderCall {
             instance_id: instance_id.clone(),
+            payload: serde_json::to_vec(request).unwrap(),
+        },
+    )
+}
+
+fn invoke_session_call<T: Serialize, R: DeserializeOwned>(
+    callback: astra_plugin_abi::FfiRuntimeProviderInvoke,
+    instance_id: &ProviderInstanceId,
+    session_handle: RuntimeProviderSessionHandle,
+    request: &T,
+) -> R {
+    invoke(
+        callback,
+        &RuntimeProviderSessionCall {
+            instance_id: instance_id.clone(),
+            session_handle,
             payload: serde_json::to_vec(request).unwrap(),
         },
     )

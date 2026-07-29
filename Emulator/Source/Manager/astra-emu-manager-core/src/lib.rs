@@ -30,7 +30,9 @@ pub use patch::{
     PatchVfsReader, TrustedPatchRuntime,
 };
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
-pub use runtime_provider::{AstraEmuRuntimeProvider, EmuCaseProfile, EmuStepPayload};
+pub use runtime_provider::{
+    AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory, EmuCaseProfile, EmuStepPayload,
+};
 pub use scanner::{
     DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,
     LibraryScanner, ScanLimits, SourceScanError, DEFAULT_DISCOVERY_DESCRIPTORS,
