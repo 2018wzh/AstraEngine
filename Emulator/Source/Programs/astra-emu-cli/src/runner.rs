@@ -2009,8 +2009,8 @@ async fn execute_sequence(
                         .capture_surface(surface)
                         .await
                         .map_err(|error| error.to_string())?;
-                    if captured.width != *width
-                        || captured.height != *height
+                    if captured.width != width
+                        || captured.height != height
                         || captured.rgba8.as_ref() != rgba8.as_slice()
                     {
                         return Err("ASTRA_EMU_HEADLESS_CHECKPOINT_CAPTURE_MISMATCH".into());
