@@ -1,0 +1,131 @@
+// Icon system built on Font Awesome 6 Free — Solid (SIL OFL 1.1 license).
+//
+// The Solid font binary is embedded at compile time by importing the .ttf below;
+// slint-build generates the renderer font-registration call automatically, so no
+// runtime registration is needed in the Rust host. fontdb indexes the face under
+// its typographic family name "Font Awesome 6 Free" (nameID 16).
+//
+// Every glyph is referenced by codepoint through the `Icons` global so no
+// language-specific text is ever used as an icon, keeping the UI ready for
+// internationalization.
+
+import "../../assets/fonts/fa-solid-900.ttf";
+import { Theme } from "../theme.slint";
+
+// Font family under which the embedded icon font is registered.
+export global IconFont {
+    out property <string> family: "Font Awesome 6 Free";
+}
+
+// A standalone icon glyph. Inherits Text so font-size / color / alignment can be
+// set at the usage site exactly like the plain Text elements it replaces.
+export component Icon inherits Text {
+    in property <string> glyph;
+    text: root.glyph;
+    font-family: IconFont.family;
+    font-weight: 900;
+}
+
+// Font Awesome 6 Free — Solid codepoints used across the UI.
+export global Icons {
+    // Navigation / shell
+    out property <string> gamepad: "\u{f11b}";
+    out property <string> folder: "\u{f07b}";
+    out property <string> folder-open: "\u{f07c}";
+    out property <string> file: "\u{f15b}";
+    out property <string> gear: "\u{f013}";
+    out property <string> circle-info: "\u{f05a}";
+    out property <string> sun: "\u{f185}";
+    out property <string> moon: "\u{f186}";
+
+    // Settings categories
+    out property <string> language: "\u{f1ab}";
+    out property <string> database: "\u{f1c0}";
+    out property <string> funnel: "\u{f0b0}";
+    out property <string> puzzle-piece: "\u{f12e}";
+    out property <string> keyboard: "\u{f11c}";
+    out property <string> palette: "\u{f53f}";
+
+    // Actions / state
+    out property <string> xmark: "\u{f00d}";
+    out property <string> check: "\u{f00c}";
+    out property <string> arrow-up: "\u{f062}";
+    out property <string> chevron-right: "\u{f054}";
+    out property <string> chevron-down: "\u{f078}";
+    out property <string> window-minimize: "\u{f2d1}";
+    out property <string> expand: "\u{f424}";
+    out property <string> resize: "\u{f0b2}";
+}
+
+// Icon-only square button (e.g. the VFS "navigate up" toolbar action).
+export component IconButton inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 40px;
+    height: 32px;
+    border-radius: Theme.radius-sm;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: !root.enabled
+        ? Theme.surface-raised
+        : (area.pressed ? Theme.primary-muted : (area.has-hover ? Theme.card-hover : Theme.surface-raised));
+    opacity: root.enabled ? 1 : 0.45;
+
+    Icon {
+        glyph: root.glyph;
+        font-size: 14px;
+        color: Theme.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Label button with a leading check glyph shown while `checked` is true.
+// Replaces the legacy "✓ Label" / "Label ✓" text pattern with a real icon.
+export component CheckButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: content.preferred-width;
+    height: 32px;
+    border-radius: Theme.radius-sm;
+    background: !root.enabled
+        ? transparent
+        : (area.pressed ? Theme.primary-muted : (area.has-hover ? Theme.card-hover : transparent));
+    opacity: root.enabled ? 1 : 0.45;
+
+    content := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 7px;
+        alignment: start;
+
+        if root.checked : Icon {
+            glyph: Icons.check;
+            font-size: 12px;
+            color: Theme.primary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}

@@ -36,6 +36,20 @@ pub struct VfsAuditSummary {
     pub manifest_hash: Hash256,
 }
 
+/// Read-only description of one resource inside a VFS mount set.
+/// Used by the manager UI to render the VFS browser tree and previews.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VfsResourceInfo {
+    /// Slash-separated relative path inside the mount root.
+    pub path: String,
+    pub byte_size: u64,
+    /// "base" for files coming from the game directory, "overlay" for
+    /// runtime-installed overlay resources.
+    pub source_layer: String,
+    /// Absolute on-disk path for base resources; empty for overlays.
+    pub resolve_path: String,
+}
+
 #[derive(Default)]
 pub struct DesktopVfsRegistry {
     mounts: Mutex<BTreeMap<String, DesktopVfsMount>>,
@@ -169,6 +183,40 @@ impl DesktopVfsRegistry {
         if let Ok(mut mounts) = self.mounts.lock() {
             mounts.remove(mount_set_id);
         }
+    }
+
+    /// Flat, sorted listing of every resource in the mount set
+    /// (base files plus installed overlays). Read-only UI support.
+    pub fn list_resources(&self, mount_set_id: &str) -> Result<Vec<VfsResourceInfo>, String> {
+        let mounts = self
+            .mounts
+            .lock()
+            .map_err(|_| "ASTRA_EMU_VFS_REGISTRY_LOCK")?;
+        let mount = mounts
+            .get(mount_set_id)
+            .ok_or("ASTRA_EMU_VFS_MOUNT_MISSING")?;
+        let mut resources = Vec::new();
+        for bound in mount.files.values() {
+            let path = relative_path_string(&bound.relative)
+                .map_err(|_| "ASTRA_EMU_VFS_PATH_INVALID")?;
+            let resolve_path = mount.root.join(&bound.relative).to_string_lossy().into_owned();
+            resources.push(VfsResourceInfo {
+                path,
+                byte_size: bound.byte_size,
+                source_layer: "base".into(),
+                resolve_path,
+            });
+        }
+        for (path, bytes) in &mount.overlays {
+            resources.push(VfsResourceInfo {
+                path: path.clone(),
+                byte_size: bytes.len() as u64,
+                source_layer: "overlay".into(),
+                resolve_path: String::new(),
+            });
+        }
+        resources.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(resources)
     }
 
     pub fn access_metrics(&self, mount_set_id: &str) -> Result<VfsAccessMetrics, String> {

@@ -1,0 +1,376 @@
+// AstraEMU Manager - main entry.
+// Assembles theme, sidebar navigation, pages and the game view.
+// Exports ManagerWindow with the full public API consumed by the Rust adapter.
+
+import { AboutSlint, Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { Theme } from "./theme.slint";
+import { Sidebar, BottomNav } from "./components/sidebar.slint";
+import { GameCard } from "./components/cover-card.slint";
+import { VfsEntry, VfsPreview } from "./components/file-tree.slint";
+import { MatchReview } from "./settings/metadata.slint";
+import { LibraryPage } from "./pages/library.slint";
+import { AboutPage } from "./pages/about.slint";
+import { SettingsPage } from "./pages/settings.slint";
+import { VfsBrowserPage } from "./pages/vfs-browser.slint";
+import { GameViewPage } from "./pages/game-view.slint";
+
+export { GameCard, MatchReview, VfsEntry, VfsPreview }
+
+export component ManagerWindow inherits Window {
+    title: "AstraEMU Manager";
+    background: Theme.background;
+    min-width: 360px;
+    min-height: 640px;
+    preferred-width: 1280px;
+    preferred-height: 800px;
+
+    // Safe area / usable region
+    property <length> usable-x: root.safe-area-insets.left;
+    property <length> usable-y: root.safe-area-insets.top;
+    property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
+    property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
+    property <bool> desktop-mode: root.usable-width >= 840px;
+
+    // ===== Navigation =====
+    in-out property <string> current-page: "library";
+
+    // ===== Theme / appearance =====
+    in-out property <bool> theme-dark <=> Theme.dark-mode;
+    in-out property <int> grid-columns: 3;
+
+    // ===== Library =====
+    in property <[GameCard]> games;
+    in-out property <string> selected-case-id;
+    in-out property <string> search-query;
+    in property <string> endpoint-identity;
+    in property <string> model-identity;
+    in-out property <string> selected-nls;
+    in property <string> selected-title;
+    in property <string> selected-family;
+    in property <string> selected-play-time;
+    in property <string> selected-vfs-status;
+
+    // ===== Global diagnostic =====
+    in property <string> global-diagnostic;
+
+    // ===== Game view =====
+    in property <image> stage-frame;
+    in-out property <float> stage-native-width: 1024;
+    in-out property <float> stage-native-height: 768;
+    in-out property <bool> game-active: false;
+
+    // ===== Overlay panels (game view) =====
+    in-out property <bool> translation-overlay-active: false;
+    in-out property <bool> diagnostics-overlay-active: false;
+    in-out property <bool> patches-overlay-active: false;
+    in-out property <bool> filters-overlay-active: false;
+    in-out property <string> filter-preset: "none";
+    in property <string> diagnostics-summary;
+    in property <string> patches-summary;
+    in property <string> patch-mode: "no_patch";
+
+    // ===== Translation =====
+    in property <string> translation-source;
+    in property <string> translation-output;
+    in property <string> translation-status;
+    in property <string> translation-endpoint;
+    in property <string> translation-model;
+    in property <string> translation-scope;
+    in-out property <string> translation-endpoint-kind: "ecnu";
+    in-out property <string> translation-profile-endpoint;
+    in-out property <string> translation-profile-protocol: "responses";
+    in-out property <string> translation-profile-model;
+    in-out property <string> translation-target-language: "zh-CN";
+    in-out property <int> translation-context-sentences: 10;
+    in-out property <int> translation-body-limit-bytes: 16384;
+    in-out property <int> translation-timeout-ms: 30000;
+    in-out property <string> translation-background;
+    in-out property <string> translation-glossary;
+    in-out property <string> translation-secret-input;
+    in property <bool> translation-consent-present;
+    in-out property <bool> translation-persistent-cache;
+
+    // ===== Metadata =====
+    in property <[MatchReview]> match-reviews;
+    in-out property <bool> vndb-consent;
+    in-out property <bool> bangumi-consent;
+    in-out property <bool> sensitive-covers;
+    in-out property <string> metadata-provider: "vndb";
+    in-out property <string> external-id-input;
+    in-out property <string> bangumi-token-input;
+    in-out property <string> bangumi-play-status: "doing";
+    in-out property <int> bangumi-rating: 1;
+    in-out property <string> bangumi-note;
+    in property <string> bangumi-sync-summary;
+
+    // ===== VFS browser =====
+    in property <[VfsEntry]> vfs-entries;
+    in property <VfsPreview> vfs-preview;
+    in property <bool> vfs-has-preview: false;
+    in property <string> vfs-selected-path;
+    in property <string> vfs-current-dir: "/";
+    in property <string> vfs-mount-summary;
+
+    // ===== Input config =====
+    in-out property <string> confirm-key: "return";
+    in-out property <string> cancel-key: "escape";
+    in-out property <float> touch-sensitivity: 50;
+    in-out property <bool> gamepad-enabled: true;
+    in-out property <string> gamepad-deadzone: "medium";
+
+    // ===== About =====
+    in property <string> version;
+    in property <string> build-identity;
+
+    // ===== Settings navigation =====
+    in-out property <string> settings-category: "translation";
+
+    // ===== Legacy page flags (kept for adapter compatibility) =====
+    in-out property <bool> about-active: false;
+    in-out property <bool> settings-active: false;
+    in-out property <bool> metadata-active: false;
+
+    // ===== Callbacks =====
+    callback launch(string);
+    callback select-case(string);
+    callback search(string);
+    callback configure-nls(string);
+    callback game-input(string, bool, float);
+    callback leave-game();
+    callback open-diagnostics();
+    callback open-translation();
+    callback open-patches();
+    callback open-filters();
+    callback rescan();
+    callback open-settings();
+    callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
+    callback grant-translation-consent();
+    callback set-translation-cache(bool);
+    callback reset-translation();
+    callback set-filter-preset(string);
+    callback set-patch-mode(string);
+    callback refresh-metadata(string);
+    callback accept-match(string);
+    callback reject-match(string);
+    callback unlink-identity(string);
+    callback link-external-id(string, string);
+    callback set-metadata-consent(string, bool, string);
+    callback set-sensitive-cover-policy(string, bool);
+    callback update-bangumi-play-status(string, int, string);
+    // New callbacks
+    callback navigate(string);
+    callback toggle-theme();
+    callback open-vfs();
+    callback save-input-config(string, string, float, bool, string);
+    callback set-grid-columns(int);
+    callback vfs-select-entry(string);
+    callback vfs-toggle-expand(string);
+    callback vfs-navigate-up();
+    callback vfs-refresh();
+    callback vfs-export-file(string);
+    callback vfs-copy-path(string);
+
+    // ===== Game view (overlays everything when active) =====
+    if root.game-active : GameViewPage {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        z: 10;
+
+        stage-frame: root.stage-frame;
+        stage-native-width <=> root.stage-native-width;
+        stage-native-height <=> root.stage-native-height;
+        game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
+        leave-game => { root.leave-game(); }
+
+        translation-overlay-active <=> root.translation-overlay-active;
+        diagnostics-overlay-active <=> root.diagnostics-overlay-active;
+        patches-overlay-active <=> root.patches-overlay-active;
+        filters-overlay-active <=> root.filters-overlay-active;
+        filter-preset <=> root.filter-preset;
+        diagnostics-summary: root.diagnostics-summary;
+        global-diagnostic: root.global-diagnostic;
+        patches-summary: root.patches-summary;
+        set-patch-mode(mode) => { root.set-patch-mode(mode); }
+        set-filter-preset(preset) => { root.set-filter-preset(preset); }
+
+        translation-source: root.translation-source;
+        translation-output: root.translation-output;
+        translation-status: root.translation-status;
+        translation-endpoint: root.translation-endpoint;
+        translation-model: root.translation-model;
+        translation-scope: root.translation-scope;
+        reset-translation => { root.reset-translation(); }
+    }
+
+    // ===== Manager shell (hidden while game is active) =====
+    if !root.game-active : HorizontalLayout {
+        x: root.usable-x;
+        y: root.usable-y;
+        width: root.usable-width;
+        height: root.usable-height;
+        spacing: 0px;
+
+        // Desktop sidebar
+        if root.desktop-mode : Sidebar {
+            current-page: root.current-page;
+            dark-mode: root.theme-dark;
+            navigate(page) => { root.navigate(page); }
+            toggle-theme => { root.toggle-theme(); }
+        }
+
+        // Content column
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 0px;
+
+            // Page content
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+
+                if root.current-page == "library" : LibraryPage {
+                    games: root.games;
+                    selected-case-id <=> root.selected-case-id;
+                    search-query <=> root.search-query;
+                    endpoint-identity: root.endpoint-identity;
+                    model-identity: root.model-identity;
+                    selected-nls <=> root.selected-nls;
+                    selected-title: root.selected-title;
+                    selected-family: root.selected-family;
+                    selected-play-time: root.selected-play-time;
+                    selected-vfs-status: root.selected-vfs-status;
+                    bangumi-play-status <=> root.bangumi-play-status;
+                    bangumi-rating <=> root.bangumi-rating;
+                    bangumi-note <=> root.bangumi-note;
+                    bangumi-sync-summary: root.bangumi-sync-summary;
+                    grid-columns: root.grid-columns;
+                    desktop-mode: root.desktop-mode;
+                    launch(id) => { root.launch(id); }
+                    select-case(id) => { root.select-case(id); }
+                    search(query) => { root.search(query); }
+                    configure-nls(nls) => { root.configure-nls(nls); }
+                    rescan => { root.rescan(); }
+                    open-vfs => { root.open-vfs(); }
+                    update-bangumi-play-status(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
+                }
+
+                if root.current-page == "vfs" : VfsBrowserPage {
+                    entries: root.vfs-entries;
+                    preview: root.vfs-preview;
+                    has-preview: root.vfs-has-preview;
+                    selected-path: root.vfs-selected-path;
+                    current-dir: root.vfs-current-dir;
+                    mount-summary: root.vfs-mount-summary;
+                    desktop-mode: root.desktop-mode;
+                    select-entry(path) => { root.vfs-select-entry(path); }
+                    toggle-expand(path) => { root.vfs-toggle-expand(path); }
+                    navigate-up => { root.vfs-navigate-up(); }
+                    refresh => { root.vfs-refresh(); }
+                    export-file(path) => { root.vfs-export-file(path); }
+                    copy-path(path) => { root.vfs-copy-path(path); }
+                }
+
+                if root.current-page == "settings" : SettingsPage {
+                    category <=> root.settings-category;
+                    desktop-mode: root.desktop-mode;
+
+                    // Translation
+                    endpoint-kind <=> root.translation-endpoint-kind;
+                    endpoint <=> root.translation-profile-endpoint;
+                    protocol <=> root.translation-profile-protocol;
+                    model <=> root.translation-profile-model;
+                    target-language <=> root.translation-target-language;
+                    context-sentences <=> root.translation-context-sentences;
+                    body-limit-bytes <=> root.translation-body-limit-bytes;
+                    timeout-ms <=> root.translation-timeout-ms;
+                    background-context <=> root.translation-background;
+                    glossary <=> root.translation-glossary;
+                    secret-input <=> root.translation-secret-input;
+                    consent-present: root.translation-consent-present;
+                    persistent-cache <=> root.translation-persistent-cache;
+                    has-selected-case: root.selected-case-id != "";
+                    save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
+                        root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
+                    }
+                    grant-translation-consent => { root.grant-translation-consent(); }
+                    set-translation-cache(enabled) => { root.set-translation-cache(enabled); }
+
+                    // Metadata
+                    match-reviews: root.match-reviews;
+                    selected-case-id: root.selected-case-id;
+                    vndb-consent <=> root.vndb-consent;
+                    bangumi-consent <=> root.bangumi-consent;
+                    sensitive-covers <=> root.sensitive-covers;
+                    metadata-provider <=> root.metadata-provider;
+                    external-id-input <=> root.external-id-input;
+                    bangumi-token-input <=> root.bangumi-token-input;
+                    refresh-metadata(provider) => { root.refresh-metadata(provider); }
+                    accept-match(id) => { root.accept-match(id); }
+                    reject-match(id) => { root.reject-match(id); }
+                    unlink-identity(provider) => { root.unlink-identity(provider); }
+                    link-external-id(provider, id) => { root.link-external-id(provider, id); }
+                    set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
+                    set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
+
+                    // Filters
+                    filter-preset <=> root.filter-preset;
+                    set-filter-preset(preset) => { root.set-filter-preset(preset); }
+
+                    // Patches
+                    patches-summary: root.patches-summary;
+                    patch-mode: root.patch-mode;
+                    set-patch-mode(mode) => { root.set-patch-mode(mode); }
+
+                    // Input
+                    confirm-key <=> root.confirm-key;
+                    cancel-key <=> root.cancel-key;
+                    touch-sensitivity <=> root.touch-sensitivity;
+                    gamepad-enabled <=> root.gamepad-enabled;
+                    gamepad-deadzone <=> root.gamepad-deadzone;
+                    save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
+                        root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
+                    }
+
+                    // Appearance
+                    dark-mode: root.theme-dark;
+                    grid-columns <=> root.grid-columns;
+                    toggle-theme => { root.toggle-theme(); }
+                    set-grid-columns(cols) => { root.set-grid-columns(cols); }
+                }
+
+                if root.current-page == "about" : AboutPage {
+                    version: root.version;
+                    build-identity: root.build-identity;
+                }
+            }
+
+            // Mobile bottom navigation
+            if !root.desktop-mode : BottomNav {
+                current-page: root.current-page;
+                navigate(page) => { root.navigate(page); }
+            }
+        }
+    }
+
+    // ===== Global diagnostic banner =====
+    if root.global-diagnostic != "" : Rectangle {
+        x: root.usable-x + 12px;
+        y: root.usable-y + root.usable-height - self.height - 12px;
+        width: root.usable-width - 24px;
+        min-height: 44px;
+        background: #dd5b1b1b;
+        border-radius: Theme.radius;
+        z: 100;
+
+        Text {
+            text: root.global-diagnostic;
+            color: Theme.danger;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            x: 12px;
+            width: parent.width - 24px;
+        }
+    }
+}

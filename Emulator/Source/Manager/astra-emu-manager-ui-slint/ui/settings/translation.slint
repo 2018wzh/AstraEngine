@@ -1,0 +1,132 @@
+// Translation settings sub-page - migrated from legacy TranslationSettings.
+
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+export component TranslationSettingsPage inherits Rectangle {
+    in-out property <string> endpoint-kind;
+    in-out property <string> endpoint;
+    in-out property <string> protocol;
+    in-out property <string> model;
+    in-out property <string> target-language;
+    in-out property <int> context-sentences;
+    in-out property <int> body-limit-bytes;
+    in-out property <int> timeout-ms;
+    in-out property <string> background-context;
+    in-out property <string> glossary;
+    in-out property <string> secret-input;
+    in property <bool> consent-present;
+    in-out property <bool> persistent-cache;
+    in property <bool> has-selected-case;
+    callback save(string, string, string, string, string, int, int, int, string, string, string);
+    callback grant-consent();
+    callback set-cache(bool);
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            SettingsSectionHeader { title: "Provider profile"; }
+
+            Text {
+                text: "The endpoint, protocol and model are explicit. AstraEMU never switches them after a failure.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            Text { text: "Endpoint kind"; color: Theme.text-muted; font-size: 12px; }
+            ComboBox {
+                model: ["ecnu", "openai", "third_party"];
+                current-index: root.endpoint-kind == "openai" ? 1 : root.endpoint-kind == "third_party" ? 2 : 0;
+                selected(value) => { root.endpoint-kind = value; }
+            }
+
+            Text { text: "HTTPS API base URL"; color: Theme.text-muted; font-size: 12px; }
+            LineEdit { text <=> root.endpoint; placeholder-text: "https://…/v1"; }
+
+            Text { text: "Protocol"; color: Theme.text-muted; font-size: 12px; }
+            ComboBox {
+                model: ["responses", "chat_completions"];
+                current-index: root.protocol == "chat_completions" ? 1 : 0;
+                selected(value) => { root.protocol = value; }
+            }
+
+            Text { text: "Model"; color: Theme.text-muted; font-size: 12px; }
+            LineEdit { text <=> root.model; placeholder-text: "Required; no implicit default"; }
+
+            Text { text: "Target language"; color: Theme.text-muted; font-size: 12px; }
+            LineEdit { text <=> root.target-language; placeholder-text: "zh-CN"; }
+
+            Text { text: "Context sentences (0–32)"; color: Theme.text-muted; font-size: 12px; }
+            SpinBox { value <=> root.context-sentences; minimum: 0; maximum: 32; }
+
+            Text { text: "Maximum request body bytes (1–16384)"; color: Theme.text-muted; font-size: 12px; }
+            SpinBox { value <=> root.body-limit-bytes; minimum: 1; maximum: 16384; step-size: 256; }
+
+            Text { text: "Timeout milliseconds (1000–120000)"; color: Theme.text-muted; font-size: 12px; }
+            SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
+
+            Text { text: "Character and world background"; color: Theme.text-muted; font-size: 12px; }
+            TextEdit { text <=> root.background-context; min-height: 96px; placeholder-text: "Optional context supplied with each request"; wrap: word-wrap; }
+
+            Text { text: "Glossary (one source = target pair per line)"; color: Theme.text-muted; font-size: 12px; }
+            TextEdit { text <=> root.glossary; min-height: 112px; placeholder-text: "character name = translated name"; wrap: word-wrap; }
+
+            Text { text: "API credential"; color: Theme.text-muted; font-size: 12px; }
+            LineEdit { text <=> root.secret-input; input-type: password; placeholder-text: "Leave blank to keep the platform-stored credential"; }
+
+            Button {
+                text: "Save provider profile";
+                clicked => {
+                    root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model,
+                        root.target-language, root.context-sentences, root.body-limit-bytes,
+                        root.timeout-ms, root.background-context, root.glossary, root.secret-input);
+                    root.secret-input = "";
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Network consent"; }
+
+            Text {
+                text: root.consent-present
+                    ? "Granted globally. Changing the profile does not prompt again."
+                    : "Translation sends the current line, up to the configured recent context, background and glossary to the displayed endpoint and model. Consent is global and does not expire automatically.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            if !root.consent-present : Button {
+                text: "Grant global translation consent";
+                clicked => { root.grant-consent(); }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Per-game persistence"; }
+
+            CheckBox {
+                enabled: root.has-selected-case;
+                checked <=> root.persistent-cache;
+                text: root.has-selected-case ? "Store source and translation in local SQLite for the selected game" : "Select a game to configure persistent cache";
+                toggled => { root.set-cache(self.checked); }
+            }
+
+            Text {
+                text: "Session cache remains enabled even when persistence is off.";
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

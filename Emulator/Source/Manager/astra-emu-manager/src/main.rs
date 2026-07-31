@@ -19,7 +19,7 @@ mod video_executor;
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     env,
     io::Cursor,
     path::PathBuf,
@@ -43,10 +43,13 @@ use astra_emu_manager_core::{
     LibraryScanner, MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord,
     PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader, ProviderConsentRecord,
     ScanLimits, SourceGrant, TranslationCacheRecord, TranslationConsent, TranslationProfileRecord,
-    TrustedPatchRuntime,
+    TrustedPatchRuntime, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
-use astra_emu_manager_ui_slint::{GameCardViewModel, ManagerViewModel};
+use astra_emu_manager_ui_slint::{
+    AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
+    VfsEntryViewModel, VfsPreviewViewModel,
+};
 use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, MatchInput,
     MetadataProviderId, MetadataSearchQuery,
@@ -901,13 +904,17 @@ struct AstraEmuManagerController {
     metadata: MetadataRuntime,
     metadata_request_sequence: u64,
     bangumi_sync_summary: String,
+    vfs_current_dir: String,
+    vfs_expanded: BTreeSet<String>,
+    vfs_selected_path: String,
+    input_config: InputConfigViewModel,
+    appearance: AppearanceViewModel,
 }
 
 struct MountedPatchReader {
     vfs: Arc<VfsRegistry>,
     mount_set_id: String,
 }
-
 impl PatchVfsReader for MountedPatchReader {
     fn read(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, PatchDiagnostic> {
         self.vfs
@@ -917,6 +924,56 @@ impl PatchVfsReader for MountedPatchReader {
                 message: "trusted patch VFS read failed".into(),
             })
     }
+}
+
+/// In-memory directory node used to render the VFS tree from a flat listing.
+#[derive(Default)]
+struct VfsTreeNode {
+    dirs: BTreeMap<String, VfsTreeNode>,
+    files: Vec<VfsResourceInfo>,
+}
+
+/// Human-readable byte size (e.g. "1.4 MB", "320 B").
+fn human_size(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= MIB {
+        format!("{:.1} MB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Hex summary of the leading bytes for binary previews.
+fn hex_dump(bytes: &[u8]) -> String {
+    const PREVIEW_BYTES: usize = 256;
+    let preview = &bytes[..bytes.len().min(PREVIEW_BYTES)];
+    let mut lines = Vec::new();
+    for (index, chunk) in preview.chunks(16).enumerate() {
+        let hex = chunk
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ascii: String = chunk
+            .iter()
+            .map(|byte| {
+                let ch = *byte as char;
+                if ch.is_ascii_graphic() || ch == ' ' {
+                    ch
+                } else {
+                    '.'
+                }
+            })
+            .collect();
+        lines.push(format!("{:08x}  {hex:<47}  {ascii}", index * 16));
+    }
+    if bytes.len() > PREVIEW_BYTES {
+        lines.push(format!("… ({} more bytes)", bytes.len() - PREVIEW_BYTES));
+    }
+    lines.join("\n")
 }
 
 impl AstraEmuManagerController {
@@ -943,6 +1000,11 @@ impl AstraEmuManagerController {
             metadata,
             metadata_request_sequence: 0,
             bangumi_sync_summary: "Not synchronized".into(),
+            vfs_current_dir: "/".into(),
+            vfs_expanded: BTreeSet::new(),
+            vfs_selected_path: String::new(),
+            input_config: InputConfigViewModel::default(),
+            appearance: AppearanceViewModel::default(),
         })
     }
 
@@ -955,6 +1017,149 @@ impl AstraEmuManagerController {
             "metadata-{action}-{}",
             self.metadata_request_sequence
         ))
+    }
+
+    // ===== VFS browser support (read-only) =====
+
+    /// Flat resource listing for the active mount set (empty when no game is mounted).
+    fn vfs_resources(&self) -> Vec<VfsResourceInfo> {
+        let Some(mount_set_id) = self.active_mount_set_id.as_deref() else {
+            return Vec::new();
+        };
+        self.vfs.list_resources(mount_set_id).unwrap_or_default()
+    }
+
+    fn vfs_mount_summary(&self, resource_count: usize) -> String {
+        match self.active_mount_set_id.as_deref() {
+            Some(mount_set_id) => format!("Mount set {mount_set_id} · {resource_count} resources"),
+            None => "No active mount set. Launch a game to browse its files.".into(),
+        }
+    }
+
+    /// Visible tree rows for the current directory and expansion state.
+    fn vfs_tree_view(&self, resources: &[VfsResourceInfo]) -> Vec<VfsEntryViewModel> {
+        let mut root = VfsTreeNode::default();
+        for resource in resources {
+            let segments = resource
+                .path
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>();
+            if segments.is_empty() {
+                continue;
+            }
+            let mut node = &mut root;
+            for segment in &segments[..segments.len() - 1] {
+                node = node.dirs.entry((*segment).to_owned()).or_default();
+            }
+            node.files.push(resource.clone());
+        }
+        let scope = self.vfs_current_dir.trim_matches('/');
+        let mut scope_node = &root;
+        if !scope.is_empty() {
+            for segment in scope.split('/') {
+                match scope_node.dirs.get(segment) {
+                    Some(node) => scope_node = node,
+                    None => return Vec::new(),
+                }
+            }
+        }
+        let scope_prefix = if scope.is_empty() {
+            String::new()
+        } else {
+            format!("{scope}/")
+        };
+        let mut entries = Vec::new();
+        Self::flatten_vfs_node(scope_node, &scope_prefix, 0, &self.vfs_expanded, &mut entries);
+        entries
+    }
+
+    fn flatten_vfs_node(
+        node: &VfsTreeNode,
+        prefix: &str,
+        depth: i32,
+        expanded: &BTreeSet<String>,
+        out: &mut Vec<VfsEntryViewModel>,
+    ) {
+        for (name, child) in &node.dirs {
+            let path = format!("{prefix}{name}");
+            let is_expanded = expanded.contains(&path);
+            out.push(VfsEntryViewModel {
+                path: path.clone(),
+                name: name.clone(),
+                is_dir: true,
+                size_display: String::new(),
+                source_layer: String::new(),
+                expanded: is_expanded,
+                depth,
+            });
+            if is_expanded {
+                Self::flatten_vfs_node(child, &format!("{path}/"), depth + 1, expanded, out);
+            }
+        }
+        for resource in &node.files {
+            let name = resource
+                .path
+                .rsplit('/')
+                .next()
+                .unwrap_or(resource.path.as_str())
+                .to_owned();
+            out.push(VfsEntryViewModel {
+                path: resource.path.clone(),
+                name,
+                is_dir: false,
+                size_display: human_size(resource.byte_size),
+                source_layer: resource.source_layer.clone(),
+                expanded: false,
+                depth,
+            });
+        }
+    }
+
+    /// Content preview for the selected file (text / image / binary hex).
+    fn vfs_preview_for(&self, resources: &[VfsResourceInfo]) -> Option<VfsPreviewViewModel> {
+        let mount_set_id = self.active_mount_set_id.as_deref()?;
+        let selected = self.vfs_selected_path.trim_matches('/');
+        if selected.is_empty() {
+            return None;
+        }
+        let resource = resources.iter().find(|item| item.path == selected)?;
+        let lower = resource.path.to_ascii_lowercase();
+        let is_image = ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
+            .iter()
+            .any(|extension| lower.ends_with(&format!(".{extension}")));
+        let mut kind = "binary";
+        let mut text_content = String::new();
+        let mut hex_summary = String::new();
+        let mut image_uri = String::new();
+        if is_image && !resource.resolve_path.is_empty() {
+            kind = "image";
+            image_uri = resource.resolve_path.clone();
+        } else {
+            let bytes = self
+                .vfs
+                .read_file(mount_set_id, &resource.path, 64 * 1024)
+                .ok()?;
+            match std::str::from_utf8(&bytes) {
+                Ok(text) => {
+                    kind = "text";
+                    text_content = text.chars().take(8000).collect();
+                }
+                Err(_) => {
+                    hex_summary = hex_dump(&bytes);
+                }
+            }
+        }
+        Some(VfsPreviewViewModel {
+            path: resource.path.clone(),
+            kind: kind.into(),
+            text_content,
+            hex_summary,
+            image_uri,
+            size_display: human_size(resource.byte_size),
+            source_layer: resource.source_layer.clone(),
+            resolve_path: resource.resolve_path.clone(),
+        })
     }
 
     fn selected_metadata_context(
@@ -1705,6 +1910,8 @@ impl ManagerController for AstraEmuManagerController {
                     family: case.family_override.unwrap_or_else(|| "Auto probe".into()),
                     cover_uri,
                     diagnostic: String::new(),
+                    play_time: String::new(),
+                    last_played: String::new(),
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -1825,6 +2032,20 @@ impl ManagerController for AstraEmuManagerController {
                     .ok()
                     .flatten()
             });
+        let vfs_resources = self.vfs_resources();
+        let vfs_entries = self.vfs_tree_view(&vfs_resources);
+        let vfs_preview = self.vfs_preview_for(&vfs_resources);
+        let vfs_mount_summary = self.vfs_mount_summary(vfs_resources.len());
+        let selected_game = self
+            .selected_case_id
+            .as_deref()
+            .and_then(|case_id| games.iter().find(|game| game.case_id == case_id));
+        let selected_title = selected_game
+            .map(|game| game.title.clone())
+            .unwrap_or_default();
+        let selected_family = selected_game
+            .map(|game| game.family.clone())
+            .unwrap_or_default();
         Ok(ManagerViewModel {
             games,
             match_reviews,
@@ -1908,6 +2129,25 @@ impl ManagerController for AstraEmuManagerController {
                 .and_then(|value| value.note)
                 .unwrap_or_default(),
             bangumi_sync_summary: self.bangumi_sync_summary.clone(),
+            // ===== New fields (UI redesign) =====
+            selected_title,
+            selected_family,
+            selected_play_time: String::new(),
+            selected_vfs_status: if self.active_mount_set_id.is_some() {
+                "Mounted".into()
+            } else {
+                "Not mounted".into()
+            },
+            current_page: String::new(),
+            vfs_entries,
+            vfs_preview,
+            vfs_selected_path: self.vfs_selected_path.clone(),
+            vfs_current_dir: self.vfs_current_dir.clone(),
+            vfs_mount_summary,
+            input_config: self.input_config.clone(),
+            appearance: self.appearance.clone(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            build_identity: format!("astra-emu-manager {}", env!("CARGO_PKG_VERSION")),
         })
     }
 
@@ -2583,6 +2823,103 @@ impl ManagerController for AstraEmuManagerController {
             .try_borrow_mut()
             .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
             .reset_translation()
+    }
+
+    // ===== UI redesign: theme / appearance / input =====
+
+    fn set_theme(&mut self, dark: bool) -> Result<(), String> {
+        self.appearance.theme_dark = dark;
+        Ok(())
+    }
+
+    fn set_grid_columns(&mut self, columns: i32) -> Result<(), String> {
+        self.appearance.grid_columns = columns.clamp(2, 6);
+        Ok(())
+    }
+
+    fn save_input_config(
+        &mut self,
+        confirm_key: &str,
+        cancel_key: &str,
+        touch_sensitivity: f32,
+        gamepad_enabled: bool,
+        gamepad_deadzone: &str,
+    ) -> Result<(), String> {
+        self.input_config.confirm_key = confirm_key.to_owned();
+        self.input_config.cancel_key = cancel_key.to_owned();
+        self.input_config.touch_sensitivity = touch_sensitivity.clamp(10.0, 100.0);
+        self.input_config.gamepad_enabled = gamepad_enabled;
+        self.input_config.gamepad_deadzone = gamepad_deadzone.to_owned();
+        Ok(())
+    }
+
+    // ===== UI redesign: VFS browser (read-only) =====
+
+    fn vfs_browse(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        let path = path.trim_matches('/');
+        if !path.is_empty() {
+            let resources = self.vfs_resources();
+            let is_dir = resources
+                .iter()
+                .any(|resource| resource.path.starts_with(&format!("{path}/")));
+            if is_dir {
+                self.vfs_current_dir = path.to_owned();
+            } else {
+                self.vfs_selected_path = path.to_owned();
+            }
+        }
+        self.model()
+    }
+
+    fn vfs_toggle_expand(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        let path = path.trim_matches('/');
+        if !self.vfs_expanded.remove(path) {
+            self.vfs_expanded.insert(path.to_owned());
+        }
+        self.model()
+    }
+
+    fn vfs_navigate_up(&mut self) -> Result<ManagerViewModel, String> {
+        let current = self.vfs_current_dir.trim_matches('/').to_owned();
+        self.vfs_current_dir = match current.rfind('/') {
+            Some(index) => current[..index].to_owned(),
+            None => String::new(),
+        };
+        self.model()
+    }
+
+    fn vfs_refresh(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+
+    fn export_vfs_file(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        let mount_set_id = self
+            .active_mount_set_id
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_VFS_NO_MOUNT".to_owned())?;
+        let path = path.trim_matches('/');
+        let bytes = self
+            .vfs
+            .read_file(&mount_set_id, path, 256 * 1024 * 1024)
+            .map_err(|error| error.code().to_owned())?;
+        let file_name = path
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("export.bin");
+        let export_dir = self.data_dir.join("exports");
+        std::fs::create_dir_all(&export_dir)
+            .map_err(|_| "ASTRA_EMU_VFS_EXPORT_DIRECTORY_CREATE".to_owned())?;
+        let destination = export_dir.join(file_name);
+        std::fs::write(&destination, &bytes)
+            .map_err(|_| "ASTRA_EMU_VFS_EXPORT_WRITE".to_owned())?;
+        self.diagnostic = format!("Exported {path} to {}", destination.to_string_lossy());
+        self.model()
+    }
+
+    fn copy_vfs_path(&mut self, _path: &str) -> Result<(), String> {
+        // Clipboard access is platform-specific; the path is already visible in the UI.
+        Ok(())
     }
 }
 

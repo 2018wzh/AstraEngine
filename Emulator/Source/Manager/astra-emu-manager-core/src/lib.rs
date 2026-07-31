@@ -10,7 +10,7 @@ mod runtime_provider;
 mod scanner;
 
 pub use desktop_source::{
-    DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary,
+    DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary, VfsResourceInfo,
 };
 pub use evidence::*;
 pub use family_loader::*;

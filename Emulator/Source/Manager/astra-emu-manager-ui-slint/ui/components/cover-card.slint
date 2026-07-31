@@ -1,0 +1,96 @@
+// Game cover card component - evolved from the legacy CoverCard.
+
+import { Theme } from "../theme.slint";
+
+export struct GameCard {
+    case-id: string,
+    title: string,
+    family: string,
+    cover-uri: string,
+    cover: image,
+    diagnostic: string,
+    play-time: string,
+    last-played: string,
+}
+
+export component CoverCard inherits Rectangle {
+    in property <GameCard> game;
+    in property <bool> selected: false;
+    callback activated(string);
+
+    background: selected ? Theme.card-hover : Theme.surface-raised;
+    border-radius: Theme.radius;
+    border-width: selected || card-focus.has-focus ? 2px : 0px;
+    border-color: Theme.primary;
+    accessible-role: button;
+    accessible-id: "library-case-" + game.case-id;
+    accessible-label: game.title + ", " + game.family;
+    accessible-description: game.diagnostic == "" ? "Launchable legacy game" : game.diagnostic;
+    accessible-action-default => { root.activated(game.case-id); }
+    min-width: 148px;
+    min-height: 224px;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+
+        Rectangle {
+            background: #313846;
+            border-radius: Theme.radius-sm;
+            min-height: 142px;
+
+            if game.cover-uri != "" : Image {
+                source: game.cover;
+                image-fit: cover;
+            }
+            if game.cover-uri == "" : Text {
+                text: "NO COVER";
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: game.title;
+            color: Theme.text;
+            font-weight: 600;
+            overflow: elide;
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: game.family;
+                color: Theme.text-muted;
+                font-size: 12px;
+            }
+            if game.play-time != "" : Text {
+                text: "· " + game.play-time;
+                color: Theme.text-muted;
+                font-size: 11px;
+            }
+        }
+
+        if game.diagnostic != "" : Text {
+            text: game.diagnostic;
+            color: Theme.danger;
+            font-size: 11px;
+            overflow: elide;
+        }
+    }
+
+    card-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.activated(game.case-id);
+                return accept;
+            }
+            return reject;
+        }
+
+        TouchArea {
+            clicked => { root.activated(game.case-id); }
+        }
+    }
+}

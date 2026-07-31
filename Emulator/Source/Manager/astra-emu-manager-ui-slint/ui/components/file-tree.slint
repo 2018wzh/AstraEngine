@@ -1,0 +1,215 @@
+// VFS file tree and list components for the file browser page.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icon, Icons } from "./icons.slint";
+
+export struct VfsEntry {
+    path: string,
+    name: string,
+    is-dir: bool,
+    size-display: string,
+    source-layer: string,
+    expanded: bool,
+    depth: int,
+}
+
+export struct VfsPreview {
+    path: string,
+    kind: string,
+    text-content: string,
+    hex-summary: string,
+    image-data: image,
+    size-display: string,
+    source-layer: string,
+    resolve-path: string,
+}
+
+// Single file tree row
+export component FileTreeRow inherits Rectangle {
+    in property <VfsEntry> entry;
+    in property <bool> selected: false;
+    callback activated(string);
+    callback toggle-expand(string);
+
+    height: 32px;
+    background: selected ? Theme.primary-muted : (row-area.has-hover ? Theme.card-hover : transparent);
+    border-radius: 6px;
+
+    HorizontalLayout {
+        padding-left: 8px + entry.depth * 18px;
+        padding-right: 8px;
+        spacing: 6px;
+        alignment: start;
+
+        // Expand/collapse indicator for directories
+        if entry.is-dir : Rectangle {
+            width: 14px;
+            height: parent.height;
+
+            Icon {
+                glyph: entry.expanded ? Icons.chevron-down : Icons.chevron-right;
+                color: Theme.text-muted;
+                font-size: 10px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+
+            TouchArea {
+                clicked => { root.toggle-expand(root.entry.path); }
+            }
+        }
+        if !entry.is-dir : Rectangle { width: 14px; }
+
+        // File/folder icon
+        Icon {
+            glyph: entry.is-dir ? Icons.folder : Icons.file;
+            color: entry.is-dir ? Theme.primary : Theme.text-muted;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            width: 20px;
+        }
+
+        // Name
+        Text {
+            text: entry.name;
+            color: Theme.text;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        // Size display for files
+        if !entry.is-dir && entry.size-display != "" : Text {
+            text: entry.size-display;
+            color: Theme.text-muted;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+
+        // Source layer badge
+        if entry.source-layer != "" : Rectangle {
+            width: layer-text.preferred-width + 12px;
+            height: 18px;
+            border-radius: 9px;
+            background: Theme.primary-muted;
+
+            layer-text := Text {
+                text: entry.source-layer;
+                color: Theme.primary;
+                font-size: 10px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    row-area := TouchArea {
+        clicked => { root.activated(root.entry.path); }
+    }
+}
+
+// File preview panel
+export component FilePreviewPanel inherits Rectangle {
+    in property <VfsPreview> preview;
+    in property <bool> has-preview: false;
+
+    background: Theme.surface;
+    border-radius: Theme.radius;
+
+    if !has-preview : VerticalLayout {
+        alignment: center;
+
+        Text {
+            text: "选择文件以预览内容";
+            color: Theme.text-muted;
+            font-size: 14px;
+            horizontal-alignment: center;
+        }
+    }
+
+    if has-preview : VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        // File path header
+        Text {
+            text: preview.path;
+            color: Theme.text;
+            font-size: 14px;
+            font-weight: 600;
+            overflow: elide;
+        }
+
+        // Meta info
+        HorizontalLayout {
+            spacing: 16px;
+
+            Text {
+                text: "大小: " + preview.size-display;
+                color: Theme.text-muted;
+                font-size: 12px;
+            }
+            Text {
+                text: "来源层: " + preview.source-layer;
+                color: Theme.text-muted;
+                font-size: 12px;
+            }
+            Text {
+                text: "类型: " + preview.kind;
+                color: Theme.text-muted;
+                font-size: 12px;
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.divider; }
+
+        // Content preview area
+        if preview.kind == "text" : ScrollView {
+            vertical-stretch: 1;
+            mouse-drag-pan-enabled: true;
+
+            Text {
+                text: preview.text-content;
+                color: Theme.text;
+                font-size: 12px;
+                wrap: no-wrap;
+            }
+        }
+
+        if preview.kind == "image" : Rectangle {
+            vertical-stretch: 1;
+            background: #313846;
+            border-radius: Theme.radius-sm;
+
+            Image {
+                source: preview.image-data;
+                image-fit: contain;
+            }
+        }
+
+        if preview.kind == "binary" : ScrollView {
+            vertical-stretch: 1;
+            mouse-drag-pan-enabled: true;
+
+            Text {
+                text: preview.hex-summary;
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: no-wrap;
+            }
+        }
+
+        // Resolve path footer
+        Rectangle { height: 1px; background: Theme.divider; }
+
+        Text {
+            text: "Resolve: " + preview.resolve-path;
+            color: Theme.text-muted;
+            font-size: 11px;
+            overflow: elide;
+        }
+    }
+}

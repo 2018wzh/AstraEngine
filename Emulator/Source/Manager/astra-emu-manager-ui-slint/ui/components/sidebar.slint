@@ -1,0 +1,220 @@
+// Sidebar grouped navigation component.
+// Desktop: left sidebar with icon+text grouped items.
+// Mobile: hidden (replaced by bottom nav in main.slint).
+
+import { Theme } from "../theme.slint";
+import { Icon, Icons } from "./icons.slint";
+
+component SidebarItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 40px;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.primary-muted : (item-area.pressed ? Theme.card-hover : transparent);
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: start;
+
+        Icon {
+            glyph: icon;
+            font-size: 16px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            width: 22px;
+            color: active ? Theme.primary : Theme.text-muted;
+        }
+
+        Text {
+            text: label;
+            color: active ? Theme.primary : Theme.text;
+            font-size: 14px;
+            font-weight: active ? 600 : 400;
+            vertical-alignment: center;
+        }
+    }
+
+    item-area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <string> current-page: "library";
+    in property <bool> dark-mode: true;
+    callback navigate(string);
+    callback toggle-theme();
+
+    background: Theme.sidebar-bg;
+    border-width: 0px;
+    width: Theme.sidebar-width;
+
+    VerticalLayout {
+        padding-top: 20px;
+        padding-bottom: 16px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 4px;
+
+        // App title
+        Text {
+            text: "AstraEMU";
+            color: Theme.text;
+            font-size: 20px;
+            font-weight: 700;
+            horizontal-alignment: left;
+        }
+
+        Rectangle { height: 12px; }
+
+        // Group: 游戏
+        Text {
+            text: "游戏";
+            color: Theme.text-muted;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        SidebarItem {
+            label: "游戏库";
+            icon: Icons.gamepad;
+            active: current-page == "library";
+            clicked => { root.navigate("library"); }
+        }
+
+        SidebarItem {
+            label: "VFS 浏览器";
+            icon: Icons.folder;
+            active: current-page == "vfs";
+            clicked => { root.navigate("vfs"); }
+        }
+
+        Rectangle { height: 8px; }
+
+        // Group: 系统
+        Text {
+            text: "系统";
+            color: Theme.text-muted;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        SidebarItem {
+            label: "设置";
+            icon: Icons.gear;
+            active: current-page == "settings";
+            clicked => { root.navigate("settings"); }
+        }
+
+        Rectangle { height: 8px; }
+
+        // Group: 关于
+        Text {
+            text: "关于";
+            color: Theme.text-muted;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        SidebarItem {
+            label: "关于 AstraEMU";
+            icon: Icons.circle-info;
+            active: current-page == "about";
+            clicked => { root.navigate("about"); }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        // Theme toggle at bottom
+        Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+        Rectangle { height: 8px; }
+
+        SidebarItem {
+            label: dark-mode ? "浅色模式" : "深色模式";
+            icon: dark-mode ? Icons.sun : Icons.moon;
+            active: false;
+            clicked => { root.toggle-theme(); }
+        }
+    }
+}
+
+component BottomNavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> active: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+
+        Icon {
+            glyph: icon;
+            font-size: 20px;
+            horizontal-alignment: center;
+            color: active ? Theme.primary : Theme.text-muted;
+        }
+        Text {
+            text: label;
+            font-size: 10px;
+            color: active ? Theme.primary : Theme.text-muted;
+            horizontal-alignment: center;
+            font-weight: active ? 600 : 400;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// Bottom navigation bar for mobile layout
+export component BottomNav inherits Rectangle {
+    in property <string> current-page: "library";
+    callback navigate(string);
+
+    background: Theme.surface;
+    height: 56px;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+
+        BottomNavItem {
+            label: "游戏库";
+            icon: Icons.gamepad;
+            active: current-page == "library";
+            clicked => { root.navigate("library"); }
+        }
+        BottomNavItem {
+            label: "VFS";
+            icon: Icons.folder;
+            active: current-page == "vfs";
+            clicked => { root.navigate("vfs"); }
+        }
+        BottomNavItem {
+            label: "设置";
+            icon: Icons.gear;
+            active: current-page == "settings";
+            clicked => { root.navigate("settings"); }
+        }
+        BottomNavItem {
+            label: "关于";
+            icon: Icons.circle-info;
+            active: current-page == "about";
+            clicked => { root.navigate("about"); }
+        }
+    }
+}
