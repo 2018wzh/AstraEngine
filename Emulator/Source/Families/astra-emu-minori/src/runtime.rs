@@ -306,7 +306,7 @@ pub enum MinoriEffectViolation {
     UnsupportedKind,
     SecondarySlot,
     OperandCount { count: u8 },
-    ResourceSequence,
+    ResourceSequence { count: u8 },
     Timing,
     Timeline,
 }
@@ -705,7 +705,9 @@ fn execute_effect(
     }
     if tokens.len() != 1 {
         return Err(MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::ResourceSequence,
+            violation: MinoriEffectViolation::ResourceSequence {
+                count: u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?,
+            },
         });
     }
     // The native command parser binds operand zero to the effect kind.  The
@@ -1604,15 +1606,15 @@ mod tests {
             ),
             (
                 b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence,
+                MinoriEffectViolation::ResourceSequence { count: 4 },
             ),
             (
                 b".effect CrossFade2 first.png:second.png 320 0\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence,
+                MinoriEffectViolation::ResourceSequence { count: 4 },
             ),
             (
                 b".effect CrossFade2 first.png:second.png 320 100 1\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence,
+                MinoriEffectViolation::ResourceSequence { count: 5 },
             ),
         ] {
             let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -1639,7 +1641,7 @@ mod tests {
             ),
             (
                 b".effect CrossFade2 * 320 100\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence,
+                MinoriEffectViolation::ResourceSequence { count: 4 },
             ),
         ];
         for (source, violation) in cases {
