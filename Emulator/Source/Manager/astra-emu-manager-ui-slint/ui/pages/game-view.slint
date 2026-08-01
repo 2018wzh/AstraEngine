@@ -1,0 +1,328 @@
+// Game view page - full-screen stage + auto-hiding toolbar + floating overlay panels.
+
+import { Button } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { CheckButton } from "../components/icons.slint";
+import { FloatingPanel } from "../components/floating-panel.slint";
+
+export component GameViewPage inherits Rectangle {
+    // Stage
+    in property <image> stage-frame;
+    in-out property <float> stage-native-width: 1024;
+    in-out property <float> stage-native-height: 768;
+    callback game-input(string, bool, float);
+    callback leave-game();
+
+    // Overlay panel visibility
+    in-out property <bool> translation-overlay-active: false;
+    in-out property <bool> diagnostics-overlay-active: false;
+    in-out property <bool> patches-overlay-active: false;
+    in-out property <bool> filters-overlay-active: false;
+    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
+
+    // Toolbar auto-hide: visible while pointer is near the top edge
+    property <length> last-pointer-y: 0px;
+    property <bool> toolbar-hover: root.last-pointer-y < 60px;
+
+    // Translation panel state
+    in-out property <length> translation-x: 20px;
+    in-out property <length> translation-y: 80px;
+    in-out property <bool> translation-collapsed: false;
+    in property <string> translation-source;
+    in property <string> translation-output;
+    in property <string> translation-status;
+    in property <string> translation-endpoint;
+    in property <string> translation-model;
+    in property <string> translation-scope;
+    callback reset-translation();
+
+    // Diagnostics panel state
+    in-out property <length> diagnostics-x: 40px;
+    in-out property <length> diagnostics-y: 120px;
+    in-out property <bool> diagnostics-collapsed: false;
+    in property <string> diagnostics-summary;
+    in property <string> global-diagnostic;
+
+    // Patches panel state
+    in-out property <length> patches-x: 60px;
+    in-out property <length> patches-y: 160px;
+    in-out property <bool> patches-collapsed: false;
+    in property <string> patches-summary;
+    callback set-patch-mode(string);
+
+    // Filters panel state
+    in-out property <length> filters-x: 80px;
+    in-out property <length> filters-y: 200px;
+    in-out property <bool> filters-collapsed: false;
+    in-out property <string> filter-preset: "none";
+    callback set-filter-preset(string);
+
+    background: black;
+    init => { game-focus.focus(); }
+
+    // Game stage image
+    Image {
+        source: root.stage-frame;
+        width: parent.width;
+        height: parent.height;
+        image-fit: contain;
+        accessible-label: "Legacy game stage";
+    }
+
+    // Game input focus scope
+    game-focus := FocusScope {
+        key-pressed(event) => {
+            if root.overlay-active { return reject; }
+            if event.text == Key.Return { root.game-input("confirm", true, 1); return accept; }
+            if event.text == Key.Escape { root.game-input("cancel", true, 1); return accept; }
+            if event.text == Key.UpArrow { root.game-input("up", true, 1); return accept; }
+            if event.text == Key.DownArrow { root.game-input("down", true, 1); return accept; }
+            if event.text == Key.LeftArrow { root.game-input("left", true, 1); return accept; }
+            if event.text == Key.RightArrow { root.game-input("right", true, 1); return accept; }
+            if event.text == " " { root.game-input("space", true, 1); return accept; }
+            return reject;
+        }
+        key-released(event) => {
+            if root.overlay-active { return reject; }
+            if event.text == Key.Return { root.game-input("confirm", false, 0); return accept; }
+            if event.text == Key.Escape { root.game-input("cancel", false, 0); return accept; }
+            if event.text == Key.UpArrow { root.game-input("up", false, 0); return accept; }
+            if event.text == Key.DownArrow { root.game-input("down", false, 0); return accept; }
+            if event.text == Key.LeftArrow { root.game-input("left", false, 0); return accept; }
+            if event.text == Key.RightArrow { root.game-input("right", false, 0); return accept; }
+            if event.text == " " { root.game-input("space", false, 0); return accept; }
+            return reject;
+        }
+
+        TouchArea {
+            moved => {
+                root.last-pointer-y = self.mouse-y;
+                root.game-input("pointer.x", true, self.mouse-x / root.width * root.stage-native-width);
+                root.game-input("pointer.y", true, self.mouse-y / root.height * root.stage-native-height);
+            }
+            clicked => {
+                root.game-input("pointer.x", true, self.mouse-x / root.width * root.stage-native-width);
+                root.game-input("pointer.y", true, self.mouse-y / root.height * root.stage-native-height);
+                root.game-input("pointer.primary", true, 1);
+                root.game-input("pointer.primary", false, 0);
+            }
+            scroll-event(event) => {
+                root.game-input("wheel", false, event.delta-y / 1px);
+                return accept;
+            }
+        }
+    }
+
+    // Auto-hiding top toolbar (shows on hover near top)
+    toolbar-area := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 60px;
+        z: 50;
+
+        Rectangle {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: 48px;
+            background: #cc1a1d24;
+            border-radius: Theme.radius;
+            opacity: root.toolbar-hover ? 1 : 0;
+
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 6px;
+
+                Button {
+                    text: "Back";
+                    clicked => { root.leave-game(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                CheckButton {
+                    label: "Translation";
+                    checked: root.translation-overlay-active;
+                    clicked => {
+                        root.diagnostics-overlay-active = false;
+                        root.patches-overlay-active = false;
+                        root.filters-overlay-active = false;
+                        root.translation-overlay-active = !root.translation-overlay-active;
+                    }
+                }
+                CheckButton {
+                    label: "Diagnostics";
+                    checked: root.diagnostics-overlay-active;
+                    clicked => {
+                        root.translation-overlay-active = false;
+                        root.patches-overlay-active = false;
+                        root.filters-overlay-active = false;
+                        root.diagnostics-overlay-active = !root.diagnostics-overlay-active;
+                    }
+                }
+                CheckButton {
+                    label: "Patches";
+                    checked: root.patches-overlay-active;
+                    clicked => {
+                        root.translation-overlay-active = false;
+                        root.diagnostics-overlay-active = false;
+                        root.filters-overlay-active = false;
+                        root.patches-overlay-active = !root.patches-overlay-active;
+                    }
+                }
+                CheckButton {
+                    label: "Filters";
+                    checked: root.filters-overlay-active;
+                    clicked => {
+                        root.translation-overlay-active = false;
+                        root.diagnostics-overlay-active = false;
+                        root.patches-overlay-active = false;
+                        root.filters-overlay-active = !root.filters-overlay-active;
+                    }
+                }
+            }
+        }
+    }
+
+    // Floating panels
+    if root.translation-overlay-active : FloatingPanel {
+        panel-title: "Translation";
+        panel-x <=> root.translation-x;
+        panel-y <=> root.translation-y;
+        collapsed <=> root.translation-collapsed;
+        panel-width: 400px;
+        panel-height: 340px;
+        z: 60;
+        close => { root.translation-overlay-active = false; }
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: root.translation-endpoint + " · " + root.translation-model;
+                color: Theme.text-muted;
+                font-size: 11px;
+                overflow: elide;
+            }
+            Text {
+                text: root.translation-scope;
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.translation-source == "" ? "Waiting for dialogue…" : root.translation-source;
+                color: Theme.text;
+                wrap: word-wrap;
+                font-size: 13px;
+            }
+            Rectangle { height: 1px; background: Theme.divider; }
+            Text {
+                text: root.translation-output;
+                color: Theme.primary;
+                wrap: word-wrap;
+                vertical-stretch: 1;
+                font-size: 14px;
+            }
+            Text {
+                text: root.translation-status;
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+            Button {
+                text: "Resume translation";
+                clicked => { root.reset-translation(); }
+            }
+        }
+    }
+
+    if root.diagnostics-overlay-active : FloatingPanel {
+        panel-title: "Runtime diagnostics";
+        panel-x <=> root.diagnostics-x;
+        panel-y <=> root.diagnostics-y;
+        collapsed <=> root.diagnostics-collapsed;
+        panel-width: 380px;
+        panel-height: 240px;
+        z: 60;
+        close => { root.diagnostics-overlay-active = false; }
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: root.diagnostics-summary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 13px;
+            }
+            Text {
+                text: root.global-diagnostic == "" ? "No blocking diagnostic." : root.global-diagnostic;
+                color: root.global-diagnostic == "" ? Theme.primary : Theme.danger;
+                wrap: word-wrap;
+                font-size: 13px;
+            }
+        }
+    }
+
+    if root.patches-overlay-active : FloatingPanel {
+        panel-title: "Trusted patches";
+        panel-x <=> root.patches-x;
+        panel-y <=> root.patches-y;
+        collapsed <=> root.patches-collapsed;
+        panel-width: 380px;
+        panel-height: 240px;
+        z: 60;
+        close => { root.patches-overlay-active = false; }
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: root.patches-summary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 13px;
+            }
+            Button {
+                text: "Use explicit no-patch mode";
+                clicked => { root.set-patch-mode("no_patch"); }
+            }
+            Button {
+                text: "Require trusted astraemu.patch.luau";
+                clicked => { root.set-patch-mode("trusted"); }
+            }
+        }
+    }
+
+    if root.filters-overlay-active : FloatingPanel {
+        panel-title: "Final-frame filter";
+        panel-x <=> root.filters-x;
+        panel-y <=> root.filters-y;
+        collapsed <=> root.filters-collapsed;
+        panel-width: 380px;
+        panel-height: 280px;
+        z: 60;
+        close => { root.filters-overlay-active = false; }
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: "FVP does not expose stable layer metadata, so per-layer bindings are blocked and only final-frame presets are available.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+            CheckButton { label: "Off"; checked: root.filter-preset == "none"; clicked => { root.set-filter-preset("none"); } }
+            CheckButton { label: "Grayscale"; checked: root.filter-preset == "grayscale"; clicked => { root.set-filter-preset("grayscale"); } }
+            CheckButton { label: "CRT Soft"; checked: root.filter-preset == "crt-soft"; clicked => { root.set-filter-preset("crt-soft"); } }
+            CheckButton { label: "Warm"; checked: root.filter-preset == "warm"; clicked => { root.set-filter-preset("warm"); } }
+        }
+    }
+}

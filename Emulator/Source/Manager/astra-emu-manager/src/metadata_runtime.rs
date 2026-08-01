@@ -1,9 +1,9 @@
 use std::{sync::mpsc, thread, time::Duration};
 
 use astra_emu_metadata::{
-    BangumiPlayUpdate, BangumiProvider, BangumiProviderConfig, CoverAsset, MetadataLicenseManifest,
-    MetadataProvider, MetadataProviderId, MetadataRecord, MetadataSearchQuery, ReleaseUse,
-    VndbProvider, VndbProviderConfig,
+    BangumiPlayUpdate, BangumiProvider, BangumiProviderConfig, CompatibilityClient,
+    CompatibilityFetch, CoverAsset, MetadataLicenseManifest, MetadataProvider, MetadataProviderId,
+    MetadataRecord, MetadataSearchQuery, ReleaseUse, VndbProvider, VndbProviderConfig,
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -13,6 +13,12 @@ pub enum MetadataCommandKind {
     Search(MetadataSearchQuery),
     Fetch(String),
     SyncBangumi(BangumiPlayUpdate),
+    /// Refresh the central compatibility database. Not tied to a provider; the
+    /// command's `provider` field is a placeholder for this variant.
+    RefreshCompatibility {
+        source_url: String,
+        cached_hash: Option<String>,
+    },
 }
 
 #[derive(Debug)]
@@ -33,6 +39,7 @@ pub enum MetadataPayload {
         cover: Option<CoverAsset>,
     },
     BangumiPlaySynced,
+    Compatibility(CompatibilityFetch),
 }
 
 #[derive(Debug)]
@@ -112,6 +119,19 @@ fn worker(
 }
 
 async fn execute(command: &MetadataCommand) -> Result<MetadataPayload, String> {
+    if let MetadataCommandKind::RefreshCompatibility {
+        source_url,
+        cached_hash,
+    } = &command.kind
+    {
+        let client = CompatibilityClient::new(source_url, Duration::from_secs(20))
+            .map_err(|error| error.to_string())?;
+        let fetch = client
+            .fetch(true, cached_hash.as_deref(), None)
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(MetadataPayload::Compatibility(fetch));
+    }
     match command.provider {
         MetadataProviderId::Vndb => {
             let provider = VndbProvider::new(VndbProviderConfig {
@@ -177,5 +197,8 @@ async fn execute_provider(
             })
         }
         MetadataCommandKind::SyncBangumi(_) => Err("ASTRA_EMU_METADATA_PROVIDER_MISMATCH".into()),
+        MetadataCommandKind::RefreshCompatibility { .. } => {
+            Err("ASTRA_EMU_METADATA_PROVIDER_MISMATCH".into())
+        }
     }
 }

@@ -183,6 +183,12 @@ iOS 工程由 `Emulator/Platforms/iOS/project.yml` 生成。Xcode build phase �
 
 FVP 的固定行为基线是 rfvp `0.5.0` commit `3b5ea6c96a925c12f95aef8554905e8fecbc77c3`。`python Tools/verify_fvp_parity.py --reference .tmp/rfvp-reference` 只在本地受控环境运行：工具校验 reference revision，在临时 detached worktree 中执行 observer trace，并输出 `astra.frame_parity_report.v1`。CI 不联网拉取 RFVP。synthetic trace 只覆盖 parser/VM/Variant/context；实际游戏还要逐帧比较 semantic/RGBA/video PTS，并按固定音频容差检查 PCM。首差异保留前 30 帧和后 60 帧，任何自动比较失败都不能由人工审查覆盖。
 
+## AstraEMU 兼容性数据仓
+
+AstraEMU 社区兼容性库是独立维护的只读数据仓，经 GitHub Pages 托管为静态 JSON（schema `astra.emu.compatibility.v1`），不进入本仓 workspace、依赖图或 release gate。数据仓 CI 用 `astra-emu-metadata` 的 `compatibility_json_schema()` 导出的 JSON Schema 校验文档；Rust 类型是 schema 真源，修改分级或字段必须先改 `compatibility.rs` 再重新导出。格式与边界见 [Data Formats](../contracts/data-formats.md) 的社区兼容性库节。
+
+Manager 默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖。拉取复用 metadata network-consent gate（启用 VNDB 或 Bangumi 网络访问后才允许），只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步。相关 observability 事件为 `emu.compatibility.fetch`、`astra.emu.compatibility.cache`/`match`/`diagnostic` 与 `astra.emu.play.session_start`/`session_end`，字段只含 work_id、hash、status、diagnostic code 和计数，不含商业文本或本地路径。数据仓本身不在本计划交付范围，由用户单独创建维护。
+
 ## 日志命令
 
 `astra-headless` 把 machine-readable protocol/report 写到 stdout，日志固定写到 stderr。通过 `ASTRA_LOG` 调整过滤器：

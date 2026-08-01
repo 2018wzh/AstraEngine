@@ -7,7 +7,7 @@ use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevisi
 use astra_core::Hash256;
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
 use astra_emu_manager_core::{
-    CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError,
+    CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError, VfsResourceInfo,
 };
 
 use crate::android_platform::{self, AndroidDocumentEntry};
@@ -129,6 +129,37 @@ impl AndroidVfsRegistry {
         if let Ok(mut mounts) = self.mounts.lock() {
             mounts.remove(mount_set_id);
         }
+    }
+
+    /// Flat, sorted listing of every resource in the mount set
+    /// (bound documents plus installed overlays). Read-only UI support.
+    pub fn list_resources(&self, mount_set_id: &str) -> Result<Vec<VfsResourceInfo>, String> {
+        let mounts = self
+            .mounts
+            .lock()
+            .map_err(|_| "ASTRA_EMU_ANDROID_VFS_LOCK")?;
+        let mount = mounts
+            .get(mount_set_id)
+            .ok_or("ASTRA_EMU_VFS_MOUNT_MISSING")?;
+        let mut resources = Vec::new();
+        for (path, bound) in &mount.files {
+            resources.push(VfsResourceInfo {
+                path: path.clone(),
+                byte_size: bound.byte_size,
+                source_layer: "base".into(),
+                resolve_path: String::new(),
+            });
+        }
+        for (path, bytes) in &mount.overlays {
+            resources.push(VfsResourceInfo {
+                path: path.clone(),
+                byte_size: bytes.len() as u64,
+                source_layer: "overlay".into(),
+                resolve_path: String::new(),
+            });
+        }
+        resources.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(resources)
     }
 }
 

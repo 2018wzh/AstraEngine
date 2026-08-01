@@ -1,0 +1,394 @@
+// Game library page - cover grid, search, inspector (desktop 3-column / mobile 2-column).
+
+import { Button, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { GameCard, CoverCard } from "../components/cover-card.slint";
+
+export struct PlaySession {
+    start-time: string,
+    duration: string,
+    ended-by: string,
+}
+
+component InspectorRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    height: 20px;
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Text {
+            text: label;
+            color: Theme.text-muted;
+            font-size: 12px;
+            width: 70px;
+        }
+        Text {
+            text: value;
+            color: Theme.text;
+            font-size: 12px;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+    }
+}
+
+// Bangumi collection progress for the selected game. Lives in the library so the
+// status is always tied to the currently selected case rather than a global page.
+component BangumiProgressSection inherits VerticalLayout {
+    in-out property <string> play-status: "doing";
+    in-out property <int> rating: 1;
+    in-out property <string> note;
+    in property <string> sync-summary;
+    in property <bool> has-case;
+    callback sync(string, int, string);
+
+    spacing: 8px;
+
+    Text {
+        text: "Bangumi progress";
+        color: Theme.text;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    ComboBox {
+        model: ["wish", "doing", "collect", "on_hold", "dropped"];
+        current-index: root.play-status == "wish" ? 0 : root.play-status == "collect" ? 2 : root.play-status == "on_hold" ? 3 : root.play-status == "dropped" ? 4 : 1;
+        selected(value) => { root.play-status = value; }
+    }
+
+    SpinBox { value <=> root.rating; minimum: 1; maximum: 10; }
+
+    TextEdit {
+        text <=> root.note;
+        placeholder-text: "Private note (maximum 1024 characters)";
+        min-height: 80px;
+    }
+
+    Button {
+        enabled: root.has-case;
+        text: "Sync play status";
+        clicked => { root.sync(root.play-status, root.rating, root.note); }
+    }
+
+    Text {
+        text: root.sync-summary;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+        font-size: 12px;
+    }
+}
+
+export component LibraryPage inherits Rectangle {
+    in property <[GameCard]> games;
+    in-out property <string> selected-case-id;
+    in-out property <string> search-query;
+    in property <string> endpoint-identity;
+    in property <string> model-identity;
+    in-out property <string> selected-nls;
+    in property <string> selected-title;
+    in property <string> selected-family;
+    in property <string> selected-play-time;
+    in property <string> selected-last-played;
+    in property <string> selected-vfs-status;
+    in property <[PlaySession]> play-history;
+    in-out property <string> library-sort: "title";
+    // Compatibility: filter mode, sync summary and inspector details.
+    in-out property <string> compatibility-filter: "all";
+    in property <string> compatibility-sync-summary;
+    in property <string> selected-compatibility-status;
+    in property <string> selected-compatibility-notes;
+    in property <string> selected-compatibility-updated;
+    in property <string> selected-compatibility-provider;
+    in-out property <string> bangumi-play-status: "doing";
+    in-out property <int> bangumi-rating: 1;
+    in-out property <string> bangumi-note;
+    in property <string> bangumi-sync-summary;
+    in property <int> grid-columns: 3;
+    in property <bool> desktop-mode: true;
+    callback launch(string);
+    callback select-case(string);
+    callback search(string);
+    callback configure-nls(string);
+    callback rescan();
+    callback open-vfs();
+    callback set-library-sort(string);
+    callback refresh-compatibility();
+    callback set-compatibility-filter(string);
+    callback update-bangumi-play-status(string, int, string);
+
+    background: Theme.background;
+
+    // Desktop layout: grid + inspector
+    if root.desktop-mode : HorizontalLayout {
+        spacing: 0px;
+
+        // Main grid area
+        VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                LineEdit {
+                    text <=> root.search-query;
+                    placeholder-text: "Search library";
+                    horizontal-stretch: 1;
+                    edited => { root.search(self.text); }
+                }
+
+                Button {
+                    text: "Rescan";
+                    clicked => { root.rescan(); }
+                }
+
+                ComboBox {
+                    model: ["Sort: Title", "Sort: Recent played", "Sort: Play time"];
+                    current-index: root.library-sort == "recent" ? 1 : root.library-sort == "play_time" ? 2 : 0;
+                    selected(value) => { root.set-library-sort(value == "Sort: Recent played" ? "recent" : value == "Sort: Play time" ? "play_time" : "title"); }
+                }
+
+                ComboBox {
+                    model: ["Compat: All", "Compat: Perfect", "Compat: Completable", "Compat: Flawed", "Compat: Boot only", "Compat: Unplayable", "Compat: Unknown"];
+                    current-index: root.compatibility-filter == "perfect" ? 1 : root.compatibility-filter == "completable" ? 2 : root.compatibility-filter == "flawed" ? 3 : root.compatibility-filter == "boot_only" ? 4 : root.compatibility-filter == "unplayable" ? 5 : root.compatibility-filter == "unknown" ? 6 : 0;
+                    selected(value) => { root.set-compatibility-filter(value == "Compat: Perfect" ? "perfect" : value == "Compat: Completable" ? "completable" : value == "Compat: Flawed" ? "flawed" : value == "Compat: Boot only" ? "boot_only" : value == "Compat: Unplayable" ? "unplayable" : value == "Compat: Unknown" ? "unknown" : "all"); }
+                }
+
+                Button {
+                    text: "Refresh compat";
+                    clicked => { root.refresh-compatibility(); }
+                }
+            }
+
+            ScrollView {
+                mouse-drag-pan-enabled: true;
+
+                GridLayout {
+                    spacing: 12px;
+
+                    for game[index] in games: CoverCard {
+                        row: Math.floor(index / root.grid-columns);
+                        col: Math.mod(index, root.grid-columns);
+                        game: game;
+                        selected: game.case-id == root.selected-case-id;
+                        activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                    }
+                }
+            }
+        }
+
+        // Inspector panel
+        Rectangle {
+            width: 300px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+
+                Text {
+                    text: root.selected-case-id == "" ? "Select a game" : (root.selected-title != "" ? root.selected-title : root.selected-case-id);
+                    color: Theme.text;
+                    font-size: 18px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+
+                ScrollView {
+                    mouse-drag-pan-enabled: true;
+
+                    VerticalLayout {
+                        spacing: 10px;
+
+                        if root.selected-case-id != "" : VerticalLayout {
+                            spacing: 6px;
+
+                            InspectorRow { label: "Family"; value: root.selected-family; }
+                            InspectorRow { label: "Case ID"; value: root.selected-case-id; }
+                            if root.selected-play-time != "" : InspectorRow { label: "Play time"; value: root.selected-play-time; }
+                            if root.selected-last-played != "" : InspectorRow { label: "Last played"; value: root.selected-last-played; }
+                            if root.selected-vfs-status != "" : InspectorRow { label: "VFS"; value: root.selected-vfs-status; }
+                        }
+
+                        if root.selected-case-id != "" && root.play-history.length > 0 : VerticalLayout {
+                            spacing: 4px;
+
+                            Text { text: "Play history"; color: Theme.text; font-size: 13px; font-weight: 600; }
+
+                            for session in root.play-history : HorizontalLayout {
+                                spacing: 6px;
+
+                                Text { text: session.start-time; color: Theme.text-muted; font-size: 11px; width: 132px; overflow: elide; }
+                                Text { text: session.duration; color: Theme.text; font-size: 11px; }
+                                Text { text: session.ended-by; color: Theme.text-muted; font-size: 11px; horizontal-stretch: 1; overflow: elide; }
+                            }
+                        }
+
+                        if root.selected-case-id != "" : VerticalLayout {
+                            spacing: 6px;
+
+                            Text { text: "Compatibility"; color: Theme.text; font-size: 13px; font-weight: 600; }
+                            InspectorRow { label: "Status"; value: root.selected-compatibility-status == "" ? "Not listed" : root.selected-compatibility-status; }
+                            if root.selected-compatibility-provider != "" : InspectorRow { label: "Source"; value: root.selected-compatibility-provider; }
+                            if root.selected-compatibility-updated != "" : InspectorRow { label: "Updated"; value: root.selected-compatibility-updated; }
+                            if root.selected-compatibility-notes != "" : Text {
+                                text: root.selected-compatibility-notes;
+                                color: Theme.text-muted;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: Theme.divider; }
+
+                        Text { text: "Endpoint: " + root.endpoint-identity; color: Theme.text-muted; wrap: word-wrap; font-size: 12px; }
+                        Text { text: "Model: " + root.model-identity; color: Theme.text-muted; wrap: word-wrap; font-size: 12px; }
+
+                        Text { text: "FVP text encoding"; color: Theme.text-muted; font-size: 12px; }
+                        ComboBox {
+                            enabled: root.selected-case-id != "";
+                            model: ["Not configured", "shift_jis", "gbk", "utf8"];
+                            current-index: root.selected-nls == "shift_jis" ? 1 : root.selected-nls == "gbk" ? 2 : root.selected-nls == "utf8" ? 3 : 0;
+                            selected(value) => { if value != "Not configured" { root.configure-nls(value); } }
+                        }
+
+                        Rectangle { height: 1px; background: Theme.divider; }
+
+                        BangumiProgressSection {
+                            play-status <=> root.bangumi-play-status;
+                            rating <=> root.bangumi-rating;
+                            note <=> root.bangumi-note;
+                            sync-summary: root.bangumi-sync-summary;
+                            has-case: root.selected-case-id != "";
+                            sync(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
+                        }
+                    }
+                }
+
+                // Quick actions
+                VerticalLayout {
+                    spacing: 8px;
+
+                    Button {
+                        enabled: root.selected-case-id != "";
+                        text: "Launch";
+                        clicked => { root.launch(root.selected-case-id); }
+                    }
+                    Button {
+                        enabled: root.selected-case-id != "";
+                        text: "Open VFS";
+                        clicked => { root.open-vfs(); }
+                    }
+
+                    if root.compatibility-sync-summary != "" : Text {
+                        text: root.compatibility-sync-summary;
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+
+    // Mobile layout: 2-column grid + bottom action bar
+    if !root.desktop-mode : VerticalLayout {
+        padding-top: 12px;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-bottom: 8px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            LineEdit {
+                text <=> root.search-query;
+                placeholder-text: "Search library";
+                horizontal-stretch: 1;
+                edited => { root.search(self.text); }
+            }
+
+            Button {
+                text: "Scan";
+                clicked => { root.rescan(); }
+            }
+        }
+
+        ScrollView {
+            mouse-drag-pan-enabled: true;
+
+            GridLayout {
+                spacing: 10px;
+
+                for game[index] in games: CoverCard {
+                    row: Math.floor(index / 2);
+                    col: Math.mod(index, 2);
+                    game: game;
+                    selected: game.case-id == root.selected-case-id;
+                    activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                }
+            }
+        }
+
+        if root.selected-case-id != "" : Rectangle {
+            background: Theme.surface-raised;
+            border-radius: Theme.radius;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+
+                        Text {
+                            text: root.selected-title != "" ? root.selected-title : root.selected-case-id;
+                            color: Theme.text;
+                            wrap: word-wrap;
+                            font-weight: 600;
+                        }
+                        Text {
+                            text: root.selected-family;
+                            color: Theme.text-muted;
+                            font-size: 12px;
+                        }
+                    }
+
+                    ComboBox {
+                        model: ["Not configured", "shift_jis", "gbk", "utf8"];
+                        current-index: root.selected-nls == "shift_jis" ? 1 : root.selected-nls == "gbk" ? 2 : root.selected-nls == "utf8" ? 3 : 0;
+                        selected(value) => { if value != "Not configured" { root.configure-nls(value); } }
+                    }
+
+                    Button {
+                        text: "Launch";
+                        clicked => { root.launch(root.selected-case-id); }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.divider; }
+
+                BangumiProgressSection {
+                    play-status <=> root.bangumi-play-status;
+                    rating <=> root.bangumi-rating;
+                    note <=> root.bangumi-note;
+                    sync-summary: root.bangumi-sync-summary;
+                    has-case: root.selected-case-id != "";
+                    sync(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,31 @@
+// AstraEMU unified theme system.
+// Replaces the legacy Tokens global with dark/light semantic tokens.
+
+export global Theme {
+    in-out property <bool> dark-mode: true;
+
+    // Semantic color tokens
+    out property <color> background: dark-mode ? #111318 : #f5f6f8;
+    out property <color> surface: dark-mode ? #1a1d24 : #ffffff;
+    out property <color> surface-raised: dark-mode ? #232832 : #eef1f5;
+    out property <color> surface-overlay: dark-mode ? #ee1a1d24 : #eeffffff;
+    out property <color> primary: dark-mode ? #91caff : #1668dc;
+    out property <color> on-primary: dark-mode ? #05233a : #ffffff;
+    out property <color> primary-muted: dark-mode ? #3a5a7a : #b3d4fc;
+    out property <color> text: dark-mode ? #e4e7ec : #1a1d24;
+    out property <color> text-muted: dark-mode ? #aeb5c2 : #5f6672;
+    out property <color> danger: dark-mode ? #ffb4ab : #d32f2f;
+    out property <color> success: dark-mode ? #a5d6a7 : #2e7d32;
+    out property <color> border: dark-mode ? #2e3440 : #dde1e6;
+    out property <color> divider: dark-mode ? #455064 : #e0e3e8;
+    out property <color> sidebar-bg: dark-mode ? #1a1d24 : #ffffff;
+    out property <color> card-hover: dark-mode ? #2a3040 : #e8ecf2;
+
+    // Spacing and shape tokens
+    out property <length> radius: 12px;
+    out property <length> radius-sm: 8px;
+    out property <length> spacing: 12px;
+    out property <length> spacing-lg: 18px;
+    out property <length> spacing-sm: 8px;
+    out property <length> sidebar-width: 220px;
+}

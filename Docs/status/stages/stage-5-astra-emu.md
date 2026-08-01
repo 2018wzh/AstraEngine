@@ -161,15 +161,15 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Goal:** Manager 能按固定 family 优先级自动 probe case，并允许用户用 profile 手动覆盖。
 
-## S5-METADATA-01 作品识别、元数据与 Bangumi 游玩状态
+## S5-METADATA-01 作品识别、元数据、游玩记录与兼容性库
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** 本地扫描与 family probe 保持独立，同时建立作品级身份、VNDB/Bangumi metadata provider、可解释确认队列和 Bangumi 收藏状态同步。
+**Goal:** 本地扫描与 family probe 保持独立，同时建立作品级身份、VNDB/Bangumi metadata provider、可解释确认队列、Bangumi 收藏状态同步、本地游玩时间/历史统计与社区中央兼容性库匹配。
 
-**Target Paths:** `Emulator/Source/Providers/astra-emu-metadata/`、`Emulator/Source/Manager/astra-emu-manager-core/src/identity.rs`、`Emulator/Source/Manager/astra-emu-manager/src/metadata_runtime.rs`、`Emulator/Source/Manager/astra-emu-manager-ui-slint/`
+**Target Paths:** `Emulator/Source/Providers/astra-emu-metadata/`、`Emulator/Source/Providers/astra-emu-metadata/src/compatibility.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/identity.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/play_record.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/compatibility_cache.rs`、`Emulator/Source/Manager/astra-emu-manager/src/metadata_runtime.rs`、`Emulator/Source/Manager/astra-emu-manager-ui-slint/`
 
-**Current Evidence:** Library v6 work/installation/external identity/snapshot/candidate/decision/scan run/consent/Bangumi state schema、v5 本地迁移、七 family discovery descriptor、版本化 fingerprint、`vn`/`bangumi-api` provider adapter、matcher、封面策略、后台 Manager command queue 和 Scan Review 状态模型已经接入。局部 crate check 与 provider unit test 属于 E1；离线 HTTP contract fixture、完整 Manager UI 自动化、正式 release license gate 和 Windows/Android E3 仍未闭合，因此不能标记 `DONE`。
+**Current Evidence:** Library v7 在 v6 work/installation/external identity/snapshot/candidate/decision/scan run/consent/Bangumi state 基础上新增 `play_session`、`compatibility_entry_cache`、`compatibility_sync_state` 三张表；`play_record.rs` 提供会话开启/结算/崩溃残留结算与 SQL 聚合统计，`compatibility_cache.rs` 提供缓存替换、同步状态与按 `external_identity` join 的匹配。`astra-emu-metadata/src/compatibility.rs` 定义五级 `astra.emu.compatibility.v1` schema（Rust 类型为真源，`schemars` 导出 JSON Schema）、HTTPS-only 拉取客户端与 SHA-256 增量同步。Manager 在 launch/leave_game/shutdown 埋点计时，经 `MetadataRuntime` worker 刷新兼容性并 materialize 到本地缓存；Slint UI 提供封面卡适配徽章、按分级筛选、inspector 兼容性详情与 Settings → Compatibility 子页。迁移、play session 聚合、崩溃结算、兼容性匹配 join、serde 往返与 JSON Schema 导出的 unit/跨模块测试属于 E1/E2；真实网络拉取、中央数据仓、完整 Manager UI 自动化、正式 release license gate 和 Windows/Android E3 仍未闭合，因此不能标记 `DONE`。
 
 **Done Evidence:** v5 回滚迁移、离线 provider contract fixture、取消与恢复、冲突确认、拒绝记忆、手动 ID、封面边界、Bangumi 收藏更新、桌面/窄屏 UI、商业 VNDB license gate 和 observability redaction 全部通过；在线或 UI fixture 最高只计 E2。
 

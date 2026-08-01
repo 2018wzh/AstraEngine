@@ -1,0 +1,107 @@
+// Patches settings sub-page - extracted from legacy patches overlay.
+
+import { Button, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+component PatchModeRow inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in property <string> mode-id;
+    in property <bool> active: false;
+    callback selected(string);
+
+    min-height: 64px;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.primary-muted : (mode-area.has-hover ? Theme.card-hover : transparent);
+    border-width: active ? 1px : 0px;
+    border-color: Theme.primary;
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 10px;
+
+        Icon {
+            glyph: active ? Icons.check : "";
+            color: Theme.primary;
+            font-size: 16px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            width: 22px;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+
+            Text {
+                text: label;
+                color: active ? Theme.primary : Theme.text;
+                font-size: 14px;
+                font-weight: active ? 600 : 400;
+            }
+            Text {
+                text: description;
+                color: Theme.text-muted;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    mode-area := TouchArea {
+        clicked => { root.selected(root.mode-id); }
+    }
+}
+
+export component PatchSettingsPage inherits Rectangle {
+    in property <string> patches-summary;
+    in property <string> patch-mode: "no_patch";
+    callback set-patch-mode(string);
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            SettingsSectionHeader { title: "Trusted patches"; }
+
+            Text {
+                text: root.patches-summary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            SettingsDivider {}
+
+            Text {
+                text: "Patch mode";
+                color: Theme.text;
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            PatchModeRow {
+                label: "No patch";
+                description: "Run the game without any Luau patch overlay.";
+                mode-id: "no_patch";
+                active: root.patch-mode == "no_patch";
+                selected(id) => { root.set-patch-mode(id); }
+            }
+
+            PatchModeRow {
+                label: "Trusted";
+                description: "Require a signed astraemu.patch.luau from the game directory.";
+                mode-id: "trusted";
+                active: root.patch-mode == "trusted";
+                selected(id) => { root.set-patch-mode(id); }
+            }
+        }
+    }
+}

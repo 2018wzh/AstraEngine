@@ -19,7 +19,7 @@ mod video_executor;
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     env,
     io::Cursor,
     path::PathBuf,
@@ -31,9 +31,8 @@ use std::{
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
-    LegacyProbeRequest, LegacyRenderFrameV1, LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx,
-    LegacyStepBudget, LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVfsReader,
-    LegacyVideoCommandV1, LegacyWaitRequest,
+    LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
+    LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_fvp::FvpVfsFamilyFactory;
@@ -42,25 +41,24 @@ use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
     AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord,
-    EmuCaseProfile, EmuStepPayload, ExternalIdentityRecord, GrantedSourceReader, Library,
-    LibraryScanner, MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord,
-    PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader, ProviderConsentRecord,
-    ScanLimits, SourceGrant, TranslationCacheRecord, TranslationConsent, TranslationProfileRecord,
-    TrustedPatchRuntime,
+    CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, EmuStepPayload,
+    ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
+    MatchDecisionRecord, MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction,
+    PatchVfsReader, ProviderConsentRecord, ScanLimits, SourceGrant, TranslationCacheRecord,
+    TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
-use astra_emu_manager_ui_slint::{GameCardViewModel, ManagerViewModel};
+use astra_emu_manager_ui_slint::{
+    AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
+    PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
+};
 use astra_emu_metadata::{
-    match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, MatchInput,
-    MetadataProviderId, MetadataSearchQuery,
+    match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityFetch, CoverAsset,
+    MatchInput, MetadataProviderId, MetadataSearchQuery, DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
-};
-use astra_media::{
-    DecodeBindingContext, DecodeKind as MediaDecodeKind, DecodeOutput as MediaDecodeOutput,
-    DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
 };
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
@@ -136,7 +134,6 @@ struct RuntimeBridge {
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
     render_frames: VecDeque<LegacyRenderFrameV1>,
-    image_decoders: DecodeProviderRegistry,
     audio: Option<HostAudioExecutor>,
     video: HostVideoExecutor,
     text_captures: VecDeque<LegacyEphemeralText>,
@@ -152,16 +149,11 @@ impl RuntimeBridge {
         let family = FamilyHostConfig::from_process()?.create_provider(vfs.clone())?;
         let mut provider = AstraEmuRuntimeProvider::new(family)?;
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
-        let mut image_decoders = DecodeProviderRegistry::default();
-        image_decoders
-            .register(Box::new(ImageDecodeProvider))
-            .map_err(|error| error.to_string())?;
         Ok(Self {
             provider,
             active: None,
             terminal: false,
             render_frames: VecDeque::new(),
-            image_decoders,
             audio: None,
             video: HostVideoExecutor::default(),
             text_captures: VecDeque::new(),
@@ -447,23 +439,6 @@ impl RuntimeBridge {
                 .map_err(|error| error.to_string())?;
             for effect in &family_output.effects {
                 match effect {
-                    LegacyEffect::Presentation {
-                        command, payload, ..
-                    } if command == "astra.emu.render_resource_frame.v1" => {
-                        let resource_frame =
-                            postcard::from_bytes::<LegacyRenderResourceFrameV1>(payload)
-                                .map_err(|_| "ASTRA_EMU_RENDER_RESOURCE_FRAME_DECODE".to_owned())?;
-                        let frame = materialize_resource_frame(
-                            &mut self.provider,
-                            &self.image_decoders,
-                            &active.session_id,
-                            resource_frame,
-                        )?;
-                        if self.render_frames.len() >= 3 {
-                            return Err("ASTRA_EMU_RENDER_FRAME_QUEUE_OVERFLOW".into());
-                        }
-                        self.render_frames.push_back(frame);
-                    }
                     LegacyEffect::Presentation {
                         command, payload, ..
                     } if command == "astra.emu.render_frame.v1" => {
@@ -804,82 +779,6 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
     Ok((text_hooks, media_hooks, effects))
 }
 
-fn materialize_resource_frame(
-    provider: &mut AstraEmuRuntimeProvider,
-    image_decoders: &DecodeProviderRegistry,
-    session_id: &GameRuntimeSessionId,
-    resource_frame: LegacyRenderResourceFrameV1,
-) -> Result<LegacyRenderFrameV1, String> {
-    resource_frame
-        .validate()
-        .map_err(|error| error.to_string())?;
-    let mut texture_updates = Vec::with_capacity(resource_frame.texture_resources.len());
-    for resource in resource_frame.texture_resources {
-        if resource.decoded_format != LegacyTextureFormat::Rgba8 {
-            return Err("ASTRA_EMU_RENDER_IMAGE_FORMAT_UNSUPPORTED".into());
-        }
-        let bytes = provider.read_session_resource(
-            session_id,
-            &resource.resource_uri,
-            1024 * 1024 * 1024,
-        )?;
-        if Hash256::from_sha256(&bytes) != resource.encoded_hash {
-            return Err("ASTRA_EMU_RENDER_IMAGE_RESOURCE_IDENTITY".into());
-        }
-        let profile = "emu-manager-image-v1";
-        let decoded = image_decoders
-            .decode(
-                &DecodeRequest {
-                    kind: MediaDecodeKind::Image,
-                    codec: resource.codec,
-                    bytes,
-                    profile: profile.into(),
-                },
-                &DecodeBindingContext::shipping("astra.decode.image", "manager", profile),
-            )
-            .map_err(|error| error.to_string())?;
-        let MediaDecodeOutput::CpuBuffer {
-            bytes,
-            format,
-            hash,
-        } = decoded.output
-        else {
-            return Err("ASTRA_EMU_RENDER_IMAGE_CPU_BUFFER_REQUIRED".into());
-        };
-        if format != "rgba8" || Hash256::from_sha256(&bytes) != hash {
-            return Err("ASTRA_EMU_RENDER_IMAGE_DECODE_IDENTITY".into());
-        }
-        let expected = usize::try_from(resource.decoded_width)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(resource.decoded_height)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height))
-            })
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or_else(|| "ASTRA_EMU_RENDER_IMAGE_DIMENSION_OVERFLOW".to_owned())?;
-        if bytes.len() != expected {
-            return Err("ASTRA_EMU_RENDER_IMAGE_DIMENSION_MISMATCH".into());
-        }
-        texture_updates.push(LegacyTextureUpdateV1 {
-            texture_id: resource.texture_id,
-            width: resource.decoded_width,
-            height: resource.decoded_height,
-            format: resource.decoded_format,
-            content_hash: hash,
-            pixels: bytes,
-        });
-    }
-    let frame = LegacyRenderFrameV1 {
-        width: resource_frame.width,
-        height: resource_frame.height,
-        texture_updates,
-        draws: resource_frame.draws,
-    };
-    frame.validate().map_err(|error| error.to_string())?;
-    Ok(frame)
-}
-
 fn apply_audio_media_hook(
     command: &mut LegacyAudioCommandV1,
     hooks: &BTreeMap<String, String>,
@@ -1003,19 +902,26 @@ struct AstraEmuManagerController {
     _family_vfs_registry: Arc<LegacyVfsFamilyRegistry>,
     runtime: Rc<RefCell<RuntimeBridge>>,
     active_mount_set_id: Option<String>,
+    active_play_session: Option<String>,
+    library_sort: String,
+    compatibility_filter: String,
     data_dir: PathBuf,
     patch_summary: String,
     pending_patch_actions: Vec<PatchHostAction>,
     metadata: MetadataRuntime,
     metadata_request_sequence: u64,
     bangumi_sync_summary: String,
+    vfs_current_dir: String,
+    vfs_expanded: BTreeSet<String>,
+    vfs_selected_path: String,
+    input_config: InputConfigViewModel,
+    appearance: AppearanceViewModel,
 }
 
 struct MountedPatchReader {
     vfs: Arc<VfsRegistry>,
     mount_set_id: String,
 }
-
 impl PatchVfsReader for MountedPatchReader {
     fn read(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, PatchDiagnostic> {
         self.vfs
@@ -1027,13 +933,126 @@ impl PatchVfsReader for MountedPatchReader {
     }
 }
 
+/// In-memory directory node used to render the VFS tree from a flat listing.
+#[derive(Default)]
+struct VfsTreeNode {
+    dirs: BTreeMap<String, VfsTreeNode>,
+    files: Vec<VfsResourceInfo>,
+}
+
+/// Human-readable byte size (e.g. "1.4 MB", "320 B").
+fn human_size(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= MIB {
+        format!("{:.1} MB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Human-readable play duration (e.g. "12h 5m", "8m", "45s").
+fn human_duration(ms: i64) -> String {
+    let total_seconds = (ms / 1000).max(0);
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        format!("{total_seconds}s")
+    }
+}
+
+/// Relative timestamp such as "3d ago", "2h ago", "5m ago" or "just now".
+fn human_relative(unix_ms: i64, now_ms: i64) -> String {
+    let delta_seconds = ((now_ms - unix_ms) / 1000).max(0);
+    let days = delta_seconds / 86_400;
+    let hours = delta_seconds / 3600;
+    let minutes = delta_seconds / 60;
+    if days > 0 {
+        format!("{days}d ago")
+    } else if hours > 0 {
+        format!("{hours}h ago")
+    } else if minutes > 0 {
+        format!("{minutes}m ago")
+    } else {
+        "just now".into()
+    }
+}
+
+/// Human-readable compatibility grade label for inspector display. The raw
+/// snake_case status (used for badge coloring / filtering) maps to a label.
+fn compatibility_status_label(status: &str) -> String {
+    match status {
+        "perfect" => "Perfect".into(),
+        "completable" => "Completable".into(),
+        "flawed" => "Flawed".into(),
+        "boot_only" => "Boot only".into(),
+        "unplayable" => "Unplayable".into(),
+        other => other.to_owned(),
+    }
+}
+
+/// Map a compatibility fetch error to a short, symbol-safe diagnostic code
+/// persisted in `compatibility_sync_state` (no free-form text / local paths).
+fn compatibility_diagnostic_code(error: &str) -> &'static str {
+    if error.contains("CONSENT") {
+        "consent"
+    } else if error.contains("SCHEMA") {
+        "schema"
+    } else if error.contains("BOUNDS") {
+        "bounds"
+    } else if error.contains("SOURCE_URL") {
+        "source-url"
+    } else {
+        "network"
+    }
+}
+
+/// Hex summary of the leading bytes for binary previews.
+fn hex_dump(bytes: &[u8]) -> String {
+    const PREVIEW_BYTES: usize = 256;
+    let preview = &bytes[..bytes.len().min(PREVIEW_BYTES)];
+    let mut lines = Vec::new();
+    for (index, chunk) in preview.chunks(16).enumerate() {
+        let hex = chunk
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ascii: String = chunk
+            .iter()
+            .map(|byte| {
+                let ch = *byte as char;
+                if ch.is_ascii_graphic() || ch == ' ' {
+                    ch
+                } else {
+                    '.'
+                }
+            })
+            .collect();
+        lines.push(format!("{:08x}  {hex:<47}  {ascii}", index * 16));
+    }
+    if bytes.len() > PREVIEW_BYTES {
+        lines.push(format!("… ({} more bytes)", bytes.len() - PREVIEW_BYTES));
+    }
+    lines.join("\n")
+}
+
 impl AstraEmuManagerController {
     fn open() -> Result<Self, String> {
         let data_dir = platform_data_dir()?;
         std::fs::create_dir_all(&data_dir)
             .map_err(|_| "ASTRA_EMU_PLATFORM_DATA_DIRECTORY_CREATE".to_owned())?;
-        let library =
+        let mut library =
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
+        if let Ok(now) = unix_time_ms() {
+            let _ = library.settle_abandoned_sessions(now);
+        }
         let vfs = Arc::new(VfsRegistry::default());
         let mut family_vfs_registry = LegacyVfsFamilyRegistry::default();
         family_vfs_registry
@@ -1053,12 +1072,20 @@ impl AstraEmuManagerController {
             _family_vfs_registry: Arc::new(family_vfs_registry),
             runtime,
             active_mount_set_id: None,
+            active_play_session: None,
+            library_sort: "title".into(),
+            compatibility_filter: "all".into(),
             data_dir,
             patch_summary: "Explicit no-patch mode is active.".into(),
             pending_patch_actions: Vec::new(),
             metadata,
             metadata_request_sequence: 0,
             bangumi_sync_summary: "Not synchronized".into(),
+            vfs_current_dir: "/".into(),
+            vfs_expanded: BTreeSet::new(),
+            vfs_selected_path: String::new(),
+            input_config: InputConfigViewModel::default(),
+            appearance: AppearanceViewModel::default(),
         })
     }
 
@@ -1071,6 +1098,155 @@ impl AstraEmuManagerController {
             "metadata-{action}-{}",
             self.metadata_request_sequence
         ))
+    }
+
+    // ===== VFS browser support (read-only) =====
+
+    /// Flat resource listing for the active mount set (empty when no game is mounted).
+    fn vfs_resources(&self) -> Vec<VfsResourceInfo> {
+        let Some(mount_set_id) = self.active_mount_set_id.as_deref() else {
+            return Vec::new();
+        };
+        self.vfs.list_resources(mount_set_id).unwrap_or_default()
+    }
+
+    fn vfs_mount_summary(&self, resource_count: usize) -> String {
+        match self.active_mount_set_id.as_deref() {
+            Some(mount_set_id) => format!("Mount set {mount_set_id} · {resource_count} resources"),
+            None => "No active mount set. Launch a game to browse its files.".into(),
+        }
+    }
+
+    /// Visible tree rows for the current directory and expansion state.
+    fn vfs_tree_view(&self, resources: &[VfsResourceInfo]) -> Vec<VfsEntryViewModel> {
+        let mut root = VfsTreeNode::default();
+        for resource in resources {
+            let segments = resource
+                .path
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>();
+            if segments.is_empty() {
+                continue;
+            }
+            let mut node = &mut root;
+            for segment in &segments[..segments.len() - 1] {
+                node = node.dirs.entry((*segment).to_owned()).or_default();
+            }
+            node.files.push(resource.clone());
+        }
+        let scope = self.vfs_current_dir.trim_matches('/');
+        let mut scope_node = &root;
+        if !scope.is_empty() {
+            for segment in scope.split('/') {
+                match scope_node.dirs.get(segment) {
+                    Some(node) => scope_node = node,
+                    None => return Vec::new(),
+                }
+            }
+        }
+        let scope_prefix = if scope.is_empty() {
+            String::new()
+        } else {
+            format!("{scope}/")
+        };
+        let mut entries = Vec::new();
+        Self::flatten_vfs_node(
+            scope_node,
+            &scope_prefix,
+            0,
+            &self.vfs_expanded,
+            &mut entries,
+        );
+        entries
+    }
+
+    fn flatten_vfs_node(
+        node: &VfsTreeNode,
+        prefix: &str,
+        depth: i32,
+        expanded: &BTreeSet<String>,
+        out: &mut Vec<VfsEntryViewModel>,
+    ) {
+        for (name, child) in &node.dirs {
+            let path = format!("{prefix}{name}");
+            let is_expanded = expanded.contains(&path);
+            out.push(VfsEntryViewModel {
+                path: path.clone(),
+                name: name.clone(),
+                is_dir: true,
+                size_display: String::new(),
+                source_layer: String::new(),
+                expanded: is_expanded,
+                depth,
+            });
+            if is_expanded {
+                Self::flatten_vfs_node(child, &format!("{path}/"), depth + 1, expanded, out);
+            }
+        }
+        for resource in &node.files {
+            let name = resource
+                .path
+                .rsplit('/')
+                .next()
+                .unwrap_or(resource.path.as_str())
+                .to_owned();
+            out.push(VfsEntryViewModel {
+                path: resource.path.clone(),
+                name,
+                is_dir: false,
+                size_display: human_size(resource.byte_size),
+                source_layer: resource.source_layer.clone(),
+                expanded: false,
+                depth,
+            });
+        }
+    }
+
+    /// Content preview for the selected file (text / image / binary hex).
+    fn vfs_preview_for(&self, resources: &[VfsResourceInfo]) -> Option<VfsPreviewViewModel> {
+        let mount_set_id = self.active_mount_set_id.as_deref()?;
+        let selected = self.vfs_selected_path.trim_matches('/');
+        if selected.is_empty() {
+            return None;
+        }
+        let resource = resources.iter().find(|item| item.path == selected)?;
+        let lower = resource.path.to_ascii_lowercase();
+        let is_image = ["png", "jpg", "jpeg", "webp", "gif", "bmp"]
+            .iter()
+            .any(|extension| lower.ends_with(&format!(".{extension}")));
+        let mut kind = "binary";
+        let mut text_content = String::new();
+        let mut hex_summary = String::new();
+        let mut image_uri = String::new();
+        if is_image && !resource.resolve_path.is_empty() {
+            kind = "image";
+            image_uri = resource.resolve_path.clone();
+        } else {
+            let bytes = self
+                .vfs
+                .read_file(mount_set_id, &resource.path, 64 * 1024)
+                .ok()?;
+            match std::str::from_utf8(&bytes) {
+                Ok(text) => {
+                    kind = "text";
+                    text_content = text.chars().take(8000).collect();
+                }
+                Err(_) => {
+                    hex_summary = hex_dump(&bytes);
+                }
+            }
+        }
+        Some(VfsPreviewViewModel {
+            path: resource.path.clone(),
+            kind: kind.into(),
+            text_content,
+            hex_summary,
+            image_uri,
+            size_display: human_size(resource.byte_size),
+            source_layer: resource.source_layer.clone(),
+            resolve_path: resource.resolve_path.clone(),
+        })
     }
 
     fn selected_metadata_context(
@@ -1141,6 +1317,10 @@ impl AstraEmuManagerController {
                 request_id = %completion.request_id,
                 success = completion.result.is_ok()
             );
+            if completion.request_id.starts_with("metadata-compatibility-") {
+                self.apply_compatibility_completion(completion.result)?;
+                continue;
+            }
             match completion.result {
                 Ok(payload) => self.apply_metadata_payload(
                     &completion.request_id,
@@ -1170,6 +1350,61 @@ impl AstraEmuManagerController {
             }
         }
         Ok(changed)
+    }
+
+    /// Materialize a completed compatibility refresh into the local cache, or
+    /// record a diagnostic on failure. Never disturbs unrelated metadata state.
+    fn apply_compatibility_completion(
+        &mut self,
+        result: Result<MetadataPayload, String>,
+    ) -> Result<(), String> {
+        let now = unix_time_ms()?;
+        match result {
+            Ok(MetadataPayload::Compatibility(fetch)) => match fetch {
+                CompatibilityFetch::NotModified => {
+                    self.diagnostic = "Compatibility database unchanged.".into();
+                }
+                CompatibilityFetch::Updated {
+                    database,
+                    response_hash,
+                } => {
+                    let entries = database
+                        .entries
+                        .iter()
+                        .map(|entry| CompatibilityCacheEntry {
+                            provider: entry.provider.clone(),
+                            remote_id: entry.remote_id.clone(),
+                            status: entry.status.as_str().to_owned(),
+                            notes: entry.notes.clone(),
+                            entry_updated_unix_ms: entry.updated_at_unix_ms,
+                            fetched_at_unix_ms: now,
+                        })
+                        .collect::<Vec<_>>();
+                    let entry_count = entries.len();
+                    self.library
+                        .replace_compatibility_cache(
+                            &entries,
+                            &CompatibilitySyncState {
+                                source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+                                response_hash,
+                                last_fetched_unix_ms: now,
+                                diagnostic_code: None,
+                            },
+                        )
+                        .map_err(|error| error.to_string())?;
+                    self.diagnostic = format!("Compatibility updated: {entry_count} entries.");
+                }
+            },
+            Ok(_) => {}
+            Err(error) => {
+                let code = compatibility_diagnostic_code(&error);
+                self.library
+                    .record_compatibility_diagnostic(DEFAULT_COMPATIBILITY_SOURCE_URL, code, now)
+                    .map_err(|library_error| library_error.to_string())?;
+                self.diagnostic = error;
+            }
+        }
+        Ok(())
     }
 
     fn apply_metadata_payload(
@@ -1301,6 +1536,9 @@ impl AstraEmuManagerController {
                 self.bangumi_sync_summary = "Bangumi play status synchronized.".into();
                 self.diagnostic.clear();
             }
+            // Compatibility refreshes are handled in `apply_compatibility_completion`
+            // before reaching this point; ignore if one ever arrives here.
+            MetadataPayload::Compatibility(_) => {}
         }
         Ok(())
     }
@@ -1763,6 +2001,7 @@ fn persist_remote_cover(
 
 impl ManagerController for AstraEmuManagerController {
     fn model(&self) -> Result<ManagerViewModel, String> {
+        let now_ms = unix_time_ms().unwrap_or(0);
         let translation_profile = self
             .library
             .translation_profile()
@@ -1815,15 +2054,91 @@ impl ManagerController for AstraEmuManagerController {
                             .into_owned()
                     })
                     .unwrap_or_default();
-                Ok(GameCardViewModel {
-                    case_id: case.case_identity,
-                    title: display_title,
-                    family: case.family_override.unwrap_or_else(|| "Auto probe".into()),
-                    cover_uri,
-                    diagnostic: String::new(),
-                })
+                let (play_time, last_played, last_played_ms, duration_ms) = match work.as_ref() {
+                    Some(work) => {
+                        let stats = self
+                            .library
+                            .play_stats(&work.work_id)
+                            .map_err(|error| error.to_string())?;
+                        let play_time = if stats.total_duration_ms > 0 {
+                            human_duration(stats.total_duration_ms)
+                        } else {
+                            String::new()
+                        };
+                        let last_played = stats
+                            .last_played_unix_ms
+                            .map(|timestamp| human_relative(timestamp, now_ms))
+                            .unwrap_or_default();
+                        (
+                            play_time,
+                            last_played,
+                            stats.last_played_unix_ms.unwrap_or(0),
+                            stats.total_duration_ms,
+                        )
+                    }
+                    None => (String::new(), String::new(), 0, 0),
+                };
+                let compatibility_status = match work.as_ref() {
+                    Some(work) => self
+                        .library
+                        .compatibility_match(&work.work_id)
+                        .map_err(|error| error.to_string())?
+                        .map(|matched| matched.status)
+                        .unwrap_or_default(),
+                    None => String::new(),
+                };
+                Ok((
+                    last_played_ms,
+                    duration_ms,
+                    GameCardViewModel {
+                        case_id: case.case_identity,
+                        title: display_title,
+                        family: case.family_override.unwrap_or_else(|| "Auto probe".into()),
+                        cover_uri,
+                        diagnostic: String::new(),
+                        play_time,
+                        last_played,
+                        compatibility_status,
+                    },
+                ))
             })
             .collect::<Result<Vec<_>, String>>()?;
+        let mut games = games
+            .into_iter()
+            .filter(|(_, _, card)| match self.compatibility_filter.as_str() {
+                "all" => true,
+                "unknown" => card.compatibility_status.is_empty(),
+                filter => card.compatibility_status == filter,
+            })
+            .collect::<Vec<_>>();
+        match self.library_sort.as_str() {
+            "recent" => games.sort_by(|left, right| {
+                right.0.cmp(&left.0).then_with(|| {
+                    left.2
+                        .title
+                        .to_lowercase()
+                        .cmp(&right.2.title.to_lowercase())
+                })
+            }),
+            "play_time" => games.sort_by(|left, right| {
+                right.1.cmp(&left.1).then_with(|| {
+                    left.2
+                        .title
+                        .to_lowercase()
+                        .cmp(&right.2.title.to_lowercase())
+                })
+            }),
+            _ => games.sort_by(|left, right| {
+                left.2
+                    .title
+                    .to_lowercase()
+                    .cmp(&right.2.title.to_lowercase())
+            }),
+        }
+        let games = games
+            .into_iter()
+            .map(|(_, _, card)| card)
+            .collect::<Vec<_>>();
         let selected_nls = self
             .selected_case_id
             .as_deref()
@@ -1941,6 +2256,104 @@ impl ManagerController for AstraEmuManagerController {
                     .ok()
                     .flatten()
             });
+        let vfs_resources = self.vfs_resources();
+        let vfs_entries = self.vfs_tree_view(&vfs_resources);
+        let vfs_preview = self.vfs_preview_for(&vfs_resources);
+        let vfs_mount_summary = self.vfs_mount_summary(vfs_resources.len());
+        let selected_game = self
+            .selected_case_id
+            .as_deref()
+            .and_then(|case_id| games.iter().find(|game| game.case_id == case_id));
+        let selected_title = selected_game
+            .map(|game| game.title.clone())
+            .unwrap_or_default();
+        let selected_family = selected_game
+            .map(|game| game.family.clone())
+            .unwrap_or_default();
+        let selected_play_time = selected_game
+            .map(|game| game.play_time.clone())
+            .unwrap_or_default();
+        let selected_last_played = selected_game
+            .map(|game| game.last_played.clone())
+            .unwrap_or_default();
+        let play_history = self
+            .selected_case_id
+            .as_deref()
+            .map(|case_id| {
+                let work = self
+                    .library
+                    .work_for_case(case_id)
+                    .map_err(|error| error.to_string())?;
+                let sessions = match work {
+                    Some(work) => self
+                        .library
+                        .session_history(&work.work_id)
+                        .map_err(|error| error.to_string())?,
+                    None => Vec::new(),
+                };
+                Ok::<Vec<PlaySessionViewModel>, String>(
+                    sessions
+                        .into_iter()
+                        .filter(|session| session.end_unix_ms.is_some())
+                        .take(8)
+                        .map(|session| PlaySessionViewModel {
+                            start_time: human_relative(session.start_unix_ms, now_ms),
+                            duration: human_duration(session.duration_ms),
+                            ended_by: session.ended_by,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let selected_compatibility = self
+            .selected_case_id
+            .as_deref()
+            .map(|case_id| {
+                let work = self
+                    .library
+                    .work_for_case(case_id)
+                    .map_err(|error| error.to_string())?;
+                match work {
+                    Some(work) => self
+                        .library
+                        .compatibility_match(&work.work_id)
+                        .map_err(|error| error.to_string()),
+                    None => Ok(None),
+                }
+            })
+            .transpose()?
+            .flatten();
+        let selected_compatibility_status = selected_compatibility
+            .as_ref()
+            .map(|matched| compatibility_status_label(&matched.status))
+            .unwrap_or_default();
+        let selected_compatibility_notes = selected_compatibility
+            .as_ref()
+            .and_then(|matched| matched.notes.clone())
+            .unwrap_or_default();
+        let selected_compatibility_updated = selected_compatibility
+            .as_ref()
+            .map(|matched| human_relative(matched.entry_updated_unix_ms, now_ms))
+            .unwrap_or_default();
+        let selected_compatibility_provider = selected_compatibility
+            .as_ref()
+            .map(|matched| matched.provider.clone())
+            .unwrap_or_default();
+        let compatibility_sync_summary = self
+            .library
+            .compatibility_sync_state()
+            .map_err(|error| error.to_string())?
+            .map(|state| {
+                let entry_count = self.library.compatibility_cache_entry_count().unwrap_or(0);
+                let fetched = human_relative(state.last_fetched_unix_ms, now_ms);
+                let mut summary = format!("Compat DB · {entry_count} entries · fetched {fetched}");
+                if let Some(code) = state.diagnostic_code {
+                    summary.push_str(&format!(" · {code}"));
+                }
+                summary
+            })
+            .unwrap_or_default();
         Ok(ManagerViewModel {
             games,
             match_reviews,
@@ -2024,8 +2437,35 @@ impl ManagerController for AstraEmuManagerController {
                 .and_then(|value| value.note)
                 .unwrap_or_default(),
             bangumi_sync_summary: self.bangumi_sync_summary.clone(),
-            vfs_summary: "Mounted archive tree, stat, search and paged reads are provided by LegacyVfsViewer after a case session opens.".into(),
-            vfs_preview: "Select an entry to request a bounded text, image, audio or hex preview.".into(),
+            // ===== New fields (UI redesign) =====
+            selected_title,
+            selected_family,
+            selected_play_time,
+            selected_last_played,
+            play_history,
+            library_sort: self.library_sort.clone(),
+            compatibility_filter: self.compatibility_filter.clone(),
+            compatibility_source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+            compatibility_sync_summary,
+            selected_compatibility_status,
+            selected_compatibility_notes,
+            selected_compatibility_updated,
+            selected_compatibility_provider,
+            selected_vfs_status: if self.active_mount_set_id.is_some() {
+                "Mounted".into()
+            } else {
+                "Not mounted".into()
+            },
+            current_page: String::new(),
+            vfs_entries,
+            vfs_preview,
+            vfs_selected_path: self.vfs_selected_path.clone(),
+            vfs_current_dir: self.vfs_current_dir.clone(),
+            vfs_mount_summary,
+            input_config: self.input_config.clone(),
+            appearance: self.appearance.clone(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            build_identity: format!("astra-emu-manager {}", env!("CARGO_PKG_VERSION")),
         })
     }
 
@@ -2040,6 +2480,60 @@ impl ManagerController for AstraEmuManagerController {
         }
         self.selected_case_id = Some(case_id.to_owned());
         self.diagnostic.clear();
+        self.model()
+    }
+
+    fn set_library_sort(&mut self, mode: &str) -> Result<ManagerViewModel, String> {
+        if !matches!(mode, "title" | "recent" | "play_time") {
+            return Err("ASTRA_EMU_LIBRARY_SORT_INVALID".into());
+        }
+        self.library_sort = mode.to_owned();
+        self.model()
+    }
+
+    fn set_compatibility_filter(&mut self, filter: &str) -> Result<ManagerViewModel, String> {
+        if !matches!(
+            filter,
+            "all" | "perfect" | "completable" | "flawed" | "boot_only" | "unplayable" | "unknown"
+        ) {
+            return Err("ASTRA_EMU_COMPATIBILITY_FILTER_INVALID".into());
+        }
+        self.compatibility_filter = filter.to_owned();
+        self.model()
+    }
+
+    /// Queue a background refresh of the central compatibility database. Gated
+    /// on metadata network consent (any provider). Incremental: the cached
+    /// content hash is sent so an unchanged source yields NotModified.
+    fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
+        let network_consent = ["vndb", "bangumi"].into_iter().any(|provider| {
+            self.library
+                .provider_consent(provider)
+                .ok()
+                .flatten()
+                .is_some_and(|value| value.network_enabled)
+        });
+        if !network_consent {
+            return Err("ASTRA_EMU_COMPATIBILITY_CONSENT_REQUIRED".into());
+        }
+        let cached_hash = self
+            .library
+            .compatibility_sync_state()
+            .map_err(|error| error.to_string())?
+            .map(|state| state.response_hash);
+        let request_id = self.next_metadata_request("compatibility")?;
+        self.metadata.submit(MetadataCommand {
+            request_id,
+            case_identity: String::new(),
+            provider: MetadataProviderId::Vndb,
+            access_token: None,
+            allow_sensitive_cover: false,
+            kind: MetadataCommandKind::RefreshCompatibility {
+                source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+                cached_hash,
+            },
+        })?;
+        self.diagnostic = "Compatibility refresh queued".into();
         self.model()
     }
 
@@ -2630,6 +3124,11 @@ impl ManagerController for AstraEmuManagerController {
             }
             return Err(error);
         }
+        let session = self
+            .library
+            .start_play_session(&case.case_identity, unix_time_ms()?)
+            .map_err(|error| error.to_string())?;
+        self.active_play_session = Some(session);
         self.diagnostic.clear();
         self.model()
     }
@@ -2646,6 +3145,11 @@ impl ManagerController for AstraEmuManagerController {
         };
         if let Some(mount_set_id) = self.active_mount_set_id.take() {
             self.vfs.unbind(&mount_set_id);
+        }
+        if let Some(session) = self.active_play_session.take() {
+            if let Ok(now) = unix_time_ms() {
+                let _ = self.library.end_play_session(&session, now, "leave");
+            }
         }
         for record in writes {
             self.library
@@ -2701,6 +3205,103 @@ impl ManagerController for AstraEmuManagerController {
             .try_borrow_mut()
             .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
             .reset_translation()
+    }
+
+    // ===== UI redesign: theme / appearance / input =====
+
+    fn set_theme(&mut self, dark: bool) -> Result<(), String> {
+        self.appearance.theme_dark = dark;
+        Ok(())
+    }
+
+    fn set_grid_columns(&mut self, columns: i32) -> Result<(), String> {
+        self.appearance.grid_columns = columns.clamp(2, 6);
+        Ok(())
+    }
+
+    fn save_input_config(
+        &mut self,
+        confirm_key: &str,
+        cancel_key: &str,
+        touch_sensitivity: f32,
+        gamepad_enabled: bool,
+        gamepad_deadzone: &str,
+    ) -> Result<(), String> {
+        self.input_config.confirm_key = confirm_key.to_owned();
+        self.input_config.cancel_key = cancel_key.to_owned();
+        self.input_config.touch_sensitivity = touch_sensitivity.clamp(10.0, 100.0);
+        self.input_config.gamepad_enabled = gamepad_enabled;
+        self.input_config.gamepad_deadzone = gamepad_deadzone.to_owned();
+        Ok(())
+    }
+
+    // ===== UI redesign: VFS browser (read-only) =====
+
+    fn vfs_browse(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        let path = path.trim_matches('/');
+        if !path.is_empty() {
+            let resources = self.vfs_resources();
+            let is_dir = resources
+                .iter()
+                .any(|resource| resource.path.starts_with(&format!("{path}/")));
+            if is_dir {
+                self.vfs_current_dir = path.to_owned();
+            } else {
+                self.vfs_selected_path = path.to_owned();
+            }
+        }
+        self.model()
+    }
+
+    fn vfs_toggle_expand(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        let path = path.trim_matches('/');
+        if !self.vfs_expanded.remove(path) {
+            self.vfs_expanded.insert(path.to_owned());
+        }
+        self.model()
+    }
+
+    fn vfs_navigate_up(&mut self) -> Result<ManagerViewModel, String> {
+        let current = self.vfs_current_dir.trim_matches('/').to_owned();
+        self.vfs_current_dir = match current.rfind('/') {
+            Some(index) => current[..index].to_owned(),
+            None => String::new(),
+        };
+        self.model()
+    }
+
+    fn vfs_refresh(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+
+    fn export_vfs_file(&mut self, path: &str) -> Result<ManagerViewModel, String> {
+        let mount_set_id = self
+            .active_mount_set_id
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_VFS_NO_MOUNT".to_owned())?;
+        let path = path.trim_matches('/');
+        let bytes = self
+            .vfs
+            .read_file(&mount_set_id, path, 256 * 1024 * 1024)
+            .map_err(|error| error.code().to_owned())?;
+        let file_name = path
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("export.bin");
+        let export_dir = self.data_dir.join("exports");
+        std::fs::create_dir_all(&export_dir)
+            .map_err(|_| "ASTRA_EMU_VFS_EXPORT_DIRECTORY_CREATE".to_owned())?;
+        let destination = export_dir.join(file_name);
+        std::fs::write(&destination, &bytes)
+            .map_err(|_| "ASTRA_EMU_VFS_EXPORT_WRITE".to_owned())?;
+        self.diagnostic = format!("Exported {path} to {}", destination.to_string_lossy());
+        self.model()
+    }
+
+    fn copy_vfs_path(&mut self, _path: &str) -> Result<(), String> {
+        // Clipboard access is platform-specific; the path is already visible in the UI.
+        Ok(())
     }
 }
 

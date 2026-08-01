@@ -1,0 +1,195 @@
+// VFS file browser page - read-only tree + content preview + export.
+
+import { Button, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { IconButton, Icons } from "../components/icons.slint";
+import { VfsEntry, VfsPreview, FileTreeRow, FilePreviewPanel } from "../components/file-tree.slint";
+
+export component VfsBrowserPage inherits Rectangle {
+    in property <[VfsEntry]> entries;
+    in property <VfsPreview> preview;
+    in property <bool> has-preview: false;
+    in property <string> selected-path;
+    in property <string> current-dir: "/";
+    in property <string> mount-summary: "";
+    in property <bool> desktop-mode: true;
+    callback select-entry(string);
+    callback toggle-expand(string);
+    callback navigate-up();
+    callback refresh();
+    callback export-file(string);
+    callback copy-path(string);
+
+    background: Theme.background;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Toolbar
+        Rectangle {
+            height: 52px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 8px;
+
+                IconButton {
+                    glyph: Icons.arrow-up;
+                    enabled: root.current-dir != "/";
+                    clicked => { root.navigate-up(); }
+                }
+
+                // Breadcrumb path
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: Theme.radius-sm;
+                    background: Theme.surface-raised;
+
+                    Text {
+                        text: root.current-dir;
+                        color: Theme.text;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        x: 12px;
+                        width: parent.width - 24px;
+                        overflow: elide;
+                    }
+                }
+
+                Button {
+                    text: "Refresh";
+                    clicked => { root.refresh(); }
+                }
+
+                Button {
+                    text: "Copy path";
+                    enabled: root.selected-path != "";
+                    clicked => { root.copy-path(root.selected-path); }
+                }
+
+                Button {
+                    text: "Export";
+                    enabled: root.selected-path != "";
+                    clicked => { root.export-file(root.selected-path); }
+                }
+            }
+        }
+
+        // Mount summary bar
+        if root.mount-summary != "" : Rectangle {
+            height: 32px;
+            background: Theme.surface-raised;
+
+            Text {
+                text: root.mount-summary;
+                color: Theme.text-muted;
+                font-size: 11px;
+                vertical-alignment: center;
+                x: 14px;
+                width: parent.width - 28px;
+                overflow: elide;
+            }
+        }
+
+        // Main content
+        if root.desktop-mode : HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 0px;
+
+            // File tree (left)
+            Rectangle {
+                width: 340px;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                ScrollView {
+                    mouse-drag-pan-enabled: true;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+
+                        for entry in root.entries: FileTreeRow {
+                            entry: entry;
+                            selected: entry.path == root.selected-path;
+                            activated(path) => { root.select-entry(path); }
+                            toggle-expand(path) => { root.toggle-expand(path); }
+                        }
+
+                        if root.entries.length == 0 : Rectangle {
+                            height: 80px;
+
+                            Text {
+                                text: "No VFS entries mounted.\nLaunch a game to populate the virtual filesystem.";
+                                color: Theme.text-muted;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Preview (right)
+            FilePreviewPanel {
+                horizontal-stretch: 1;
+                preview: root.preview;
+                has-preview: root.has-preview;
+            }
+        }
+
+        // Mobile: stacked layout
+        if !root.desktop-mode : VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 0px;
+
+            // File list
+            Rectangle {
+                vertical-stretch: 1;
+                background: Theme.surface;
+
+                ScrollView {
+                    mouse-drag-pan-enabled: true;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+
+                        for entry in root.entries: FileTreeRow {
+                            entry: entry;
+                            selected: entry.path == root.selected-path;
+                            activated(path) => { root.select-entry(path); }
+                            toggle-expand(path) => { root.toggle-expand(path); }
+                        }
+
+                        if root.entries.length == 0 : Rectangle {
+                            height: 80px;
+
+                            Text {
+                                text: "No VFS entries mounted.";
+                                color: Theme.text-muted;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Preview below (when selected)
+            if root.has-preview : FilePreviewPanel {
+                height: 260px;
+                preview: root.preview;
+                has-preview: root.has-preview;
+            }
+        }
+    }
+}

@@ -1,0 +1,151 @@
+// Appearance/theme settings sub-page (new).
+
+import { ScrollView, Slider } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+component GridColButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    width: 44px;
+    height: 36px;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.primary : Theme.surface-raised;
+    border-width: active ? 0px : 1px;
+    border-color: Theme.border;
+
+    Text {
+        text: label;
+        color: active ? Theme.on-primary : Theme.text;
+        font-size: 14px;
+        font-weight: active ? 700 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+component ColorSwatch inherits Rectangle {
+    in property <color> color-value;
+    in property <string> label;
+
+    width: 56px;
+    border-radius: Theme.radius-sm;
+    background: color-value;
+    border-width: 1px;
+    border-color: Theme.border;
+
+    Text {
+        text: label;
+        color: Theme.text;
+        font-size: 9px;
+        horizontal-alignment: center;
+        vertical-alignment: bottom;
+    }
+}
+
+export component AppearanceSettingsPage inherits Rectangle {
+    in property <bool> dark-mode: true;
+    in-out property <int> grid-columns: 3;
+    callback toggle-theme();
+    callback set-grid-columns(int);
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            SettingsSectionHeader { title: "Theme"; }
+
+            // Theme mode selector
+            Rectangle {
+                height: 56px;
+                border-radius: Theme.radius-sm;
+                background: Theme.surface-raised;
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 12px;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+
+                        Text {
+                            text: "Color mode";
+                            color: Theme.text;
+                            font-size: 14px;
+                        }
+                        Text {
+                            text: dark-mode ? "Dark" : "Light";
+                            color: Theme.text-muted;
+                            font-size: 12px;
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    // Toggle button
+                    Rectangle {
+                        width: 52px;
+                        height: 28px;
+                        border-radius: 14px;
+                        background: dark-mode ? Theme.primary : Theme.border;
+                        y: (parent.height - self.height) / 2;
+
+                        Rectangle {
+                            x: dark-mode ? parent.width - self.width - 3px : 3px;
+                            y: 3px;
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 11px;
+                            background: white;
+                        }
+
+                        TouchArea {
+                            clicked => { root.toggle-theme(); }
+                        }
+                    }
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Library layout"; }
+
+            Text { text: "Cover grid columns (desktop)"; color: Theme.text-muted; font-size: 12px; }
+            HorizontalLayout {
+                spacing: 10px;
+
+                GridColButton { label: "2"; active: root.grid-columns == 2; clicked => { root.set-grid-columns(2); } }
+                GridColButton { label: "3"; active: root.grid-columns == 3; clicked => { root.set-grid-columns(3); } }
+                GridColButton { label: "4"; active: root.grid-columns == 4; clicked => { root.set-grid-columns(4); } }
+                GridColButton { label: "5"; active: root.grid-columns == 5; clicked => { root.set-grid-columns(5); } }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Preview"; }
+
+            // Color preview swatches
+            HorizontalLayout {
+                spacing: 8px;
+                height: 40px;
+
+                ColorSwatch { color-value: Theme.background; label: "BG"; }
+                ColorSwatch { color-value: Theme.surface; label: "Surface"; }
+                ColorSwatch { color-value: Theme.primary; label: "Primary"; }
+                ColorSwatch { color-value: Theme.text; label: "Text"; }
+                ColorSwatch { color-value: Theme.danger; label: "Danger"; }
+            }
+        }
+    }
+}

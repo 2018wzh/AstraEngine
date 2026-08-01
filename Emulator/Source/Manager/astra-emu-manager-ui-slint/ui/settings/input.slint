@@ -1,0 +1,100 @@
+// Input/gamepad configuration settings sub-page (new).
+
+import { ComboBox, ScrollView, Slider } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+export component InputSettingsPage inherits Rectangle {
+    in-out property <string> confirm-key: "return";
+    in-out property <string> cancel-key: "escape";
+    in-out property <float> touch-sensitivity: 50;
+    in-out property <bool> gamepad-enabled: true;
+    in-out property <string> gamepad-deadzone: "medium";
+    callback save-input-config(string, string, float, bool, string);
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            SettingsSectionHeader { title: "Keyboard mapping"; }
+
+            Text { text: "Confirm key"; color: Theme.text-muted; font-size: 12px; }
+            ComboBox {
+                model: ["return", "space", "e"];
+                current-index: root.confirm-key == "space" ? 1 : root.confirm-key == "e" ? 2 : 0;
+                selected(value) => { root.confirm-key = value; }
+            }
+
+            Text { text: "Cancel key"; color: Theme.text-muted; font-size: 12px; }
+            ComboBox {
+                model: ["escape", "backspace", "q"];
+                current-index: root.cancel-key == "backspace" ? 1 : root.cancel-key == "q" ? 2 : 0;
+                selected(value) => { root.cancel-key = value; }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Touch input"; }
+
+            Text { text: "Touch sensitivity"; color: Theme.text-muted; font-size: 12px; }
+            HorizontalLayout {
+                spacing: 10px;
+                Slider {
+                    minimum: 10;
+                    maximum: 100;
+                    value <=> root.touch-sensitivity;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: round(root.touch-sensitivity) + "%";
+                    color: Theme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    width: 40px;
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Gamepad"; }
+
+            Text { text: "Gamepad support"; color: Theme.text-muted; font-size: 12px; }
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: root.gamepad-enabled ? "Enabled" : "Disabled";
+                    color: Theme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                ComboBox {
+                    model: ["enabled", "disabled"];
+                    current-index: root.gamepad-enabled ? 0 : 1;
+                    selected(value) => { root.gamepad-enabled = value == "enabled"; }
+                }
+            }
+
+            Text { text: "Analog deadzone"; color: Theme.text-muted; font-size: 12px; }
+            ComboBox {
+                model: ["low", "medium", "high"];
+                current-index: root.gamepad-deadzone == "low" ? 0 : root.gamepad-deadzone == "high" ? 2 : 1;
+                selected(value) => { root.gamepad-deadzone = value; }
+            }
+
+            SettingsDivider {}
+
+            Text {
+                text: "Changes are applied immediately to the active game session.";
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

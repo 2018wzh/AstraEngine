@@ -192,6 +192,36 @@ ONNX ModelBundle package section 复用同一个 `AstraContainerHeader + Section
 
 Bundled、on-demand 和 external 分发只改变 package source，不改变读取接口。Provider 通过 Package reader 和 VFS mount 获取 section ref；Release Gate 校验 mount、hash、codec、encryption、runtime vendor cache 和平台 profile，不允许 Shipping provider 读取 loose file 或绝对路径。
 
+## AstraEMU Manager 社区兼容性库与本地记录
+
+AstraEMU Manager 的作品级数据分两类：社区维护的只读兼容性库（网络 JSON）和 Manager 本地 SQLite 记录。两者都不进入 package/save/release report，也不携带商业 payload、正文或本地绝对路径。
+
+### 社区兼容性库 `astra.emu.compatibility.v1`
+
+中央兼容性库是一份静态 JSON 文档，由社区在独立数据仓维护并经 GitHub Pages 托管，Manager 只读拉取。Rust 类型是 schema 真源，经 `schemars` 导出 JSON Schema：
+
+| Rust 类型 | 角色 |
+| --- | --- |
+| `CompatibilityDatabase` | 文档根，`schema` 必须等于 `astra.emu.compatibility.v1`，含 `generated_at_unix_ms` 与 `entries` |
+| `CompatibilityEntry` | 单条记录，按 `(provider, remote_id)` 标识；`provider` 只允许 `bangumi`/`vndb`，`remote_id` 是 Bangumi subject id 或 VNDB `v123` |
+| `CompatibilityStatus` | 五级适配分级 `perfect`/`completable`/`flawed`/`boot_only`/`unplayable`（完美运行/可通关/有瑕疵/仅能启动/无法运行） |
+
+校验边界：`entries` 不超过 100,000 条，payload 不超过 8 MiB，`remote_id` 非空且不超过 64 字符，`notes` 不超过 1024 字符，`reporter` 不超过 128 字符；schema 版本、provider 或边界不符必须 blocking。拉取受 metadata network-consent gate 约束，只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步，命中缓存或 HTTP 304 返回 `NotModified`。
+
+JSON Schema 由 `astra-emu-metadata` 的 `compatibility_json_schema()` 从 Rust 类型导出，供数据仓在 CI 中校验文档；默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖；数据仓由用户单独创建维护。匹配按 work 的 `external_identity(provider, remote_id)` join 本地缓存，无匹配返回未知，不显示徽章。
+
+### Manager 本地 SQLite 记录（Library v7）
+
+Library v7 迁移在 Manager 本地库新增三张表，只记录计时与兼容性缓存：
+
+| 表 | 用途 |
+| --- | --- |
+| `play_session` | 游玩会话，记录 work_id、case_identity、start/end_unix_ms、duration_ms 与 ended_by（`active`/`leave`/`shutdown`/`crash`）；崩溃残留会话在恢复时按上次已知时间结算 |
+| `compatibility_entry_cache` | 兼容性库本地只读缓存，按 `(provider, remote_id)` 主键 |
+| `compatibility_sync_state` | 单例同步状态，记录 source_url、response_hash、last_fetched_unix_ms 与 diagnostic_code |
+
+游玩统计经 SQL 聚合派生（`SUM(duration_ms)`/`MAX(start_unix_ms)`/`COUNT`），不另存冗余汇总字段。
+
 ## Migration
 
 每个 schema 使用显式 migrator：

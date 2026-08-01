@@ -1,0 +1,153 @@
+// Metadata settings sub-page - migrated from legacy metadata-active page.
+
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+export struct MatchReview {
+    candidate-id: string,
+    case-id: string,
+    provider: string,
+    remote-id: string,
+    title: string,
+    aliases: string,
+    release-date: string,
+    developer: string,
+    evidence: string,
+    score-millis: int,
+    diagnostic: string,
+}
+
+export component MetadataSettingsPage inherits Rectangle {
+    in property <[MatchReview]> match-reviews;
+    in property <string> selected-case-id;
+    in-out property <bool> vndb-consent;
+    in-out property <bool> bangumi-consent;
+    in-out property <bool> sensitive-covers;
+    in-out property <string> metadata-provider: "vndb";
+    in-out property <string> external-id-input;
+    in-out property <string> bangumi-token-input;
+    callback refresh-metadata(string);
+    callback accept-match(string);
+    callback reject-match(string);
+    callback unlink-identity(string);
+    callback link-external-id(string, string);
+    callback set-metadata-consent(string, bool, string);
+    callback set-sensitive-cover-policy(string, bool);
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            SettingsSectionHeader { title: "Provider consent"; }
+
+            CheckBox {
+                checked <=> root.vndb-consent;
+                text: "Enable VNDB metadata network access";
+                toggled => { root.set-metadata-consent("vndb", self.checked, ""); }
+            }
+
+            CheckBox {
+                checked <=> root.bangumi-consent;
+                text: "Enable Bangumi metadata and collection access";
+                toggled => { root.set-metadata-consent("bangumi", self.checked, root.bangumi-token-input); root.bangumi-token-input = ""; }
+            }
+
+            LineEdit {
+                text <=> root.bangumi-token-input;
+                input-type: password;
+                placeholder-text: "Bangumi access token (stored by the platform secret store)";
+            }
+
+            CheckBox {
+                checked <=> root.sensitive-covers;
+                text: "Allow sensitive covers for the selected provider";
+                toggled => { root.set-sensitive-cover-policy(root.metadata-provider, self.checked); }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Manual verified identity"; }
+
+            ComboBox {
+                model: ["vndb", "bangumi"];
+                current-index: root.metadata-provider == "bangumi" ? 1 : 0;
+                selected(value) => { root.metadata-provider = value; }
+            }
+
+            LineEdit {
+                text <=> root.external-id-input;
+                placeholder-text: root.metadata-provider == "vndb" ? "v123" : "subject id";
+            }
+
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    enabled: root.selected-case-id != "";
+                    text: "Validate and link";
+                    clicked => { root.link-external-id(root.metadata-provider, root.external-id-input); }
+                }
+                Button {
+                    enabled: root.selected-case-id != "";
+                    text: "Refresh";
+                    clicked => { root.refresh-metadata(root.metadata-provider); }
+                }
+                Button {
+                    enabled: root.selected-case-id != "";
+                    text: "Unlink";
+                    clicked => { root.unlink-identity(root.metadata-provider); }
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Review queue"; }
+
+            for item in root.match-reviews: Rectangle {
+                min-height: 150px;
+                background: Theme.surface-raised;
+                border-radius: Theme.radius;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 4px;
+
+                    Text {
+                        text: item.provider + " " + item.remote-id + " · " + item.title;
+                        color: Theme.text;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: item.aliases + " · " + item.release-date + " · " + item.developer;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                    Text {
+                        text: item.evidence;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                    if item.diagnostic != "" : Text {
+                        text: item.diagnostic;
+                        color: Theme.danger;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button { text: "Accept"; clicked => { root.accept-match(item.candidate-id); } }
+                        Button { text: "Reject"; clicked => { root.reject-match(item.candidate-id); } }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,88 @@
+// Compatibility settings sub-page - central community compatibility database.
+// Read-only source + explicit refresh. Network access reuses the metadata
+// consent gate (enable VNDB or Bangumi network access under Metadata).
+
+import { Button, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+export component CompatibilitySettingsPage inherits Rectangle {
+    in property <string> source-url;
+    in property <string> sync-summary;
+    in property <bool> network-consent;
+    callback refresh-compatibility();
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            SettingsSectionHeader { title: "Compatibility database"; }
+
+            HorizontalLayout {
+                spacing: 8px;
+
+                Icon {
+                    glyph: Icons.clipboard-check;
+                    color: Theme.primary;
+                    font-size: 15px;
+                    vertical-alignment: center;
+                    width: 20px;
+                }
+                Text {
+                    text: "Community-maintained VN adaptation grades (Perfect, Completable, Flawed, Boot only, Unplayable).";
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                    font-size: 12px;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Text {
+                text: "Source";
+                color: Theme.text;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            Text {
+                text: root.source-url == "" ? "Not configured" : root.source-url;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            SettingsDivider {}
+
+            Text {
+                text: "Sync status";
+                color: Theme.text;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            Text {
+                text: root.sync-summary == "" ? "Never fetched." : root.sync-summary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            Button {
+                text: "Refresh compatibility";
+                enabled: root.network-consent;
+                clicked => { root.refresh-compatibility(); }
+            }
+
+            if !root.network-consent : Text {
+                text: "Enable network access for VNDB or Bangumi under Metadata to refresh the compatibility database.";
+                color: Theme.danger;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+        }
+    }
+}

@@ -1,0 +1,101 @@
+// Settings category card and row components for the settings center.
+
+import { Theme } from "../theme.slint";
+import { Icon } from "./icons.slint";
+
+// A settings category item in the left panel
+export component SettingsCategoryItem inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <string> description;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 64px;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.primary-muted : (cat-area.has-hover ? Theme.card-hover : transparent);
+    border-width: active ? 1px : 0px;
+    border-color: Theme.primary;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
+        alignment: start;
+
+        Icon {
+            glyph: icon;
+            font-size: 22px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            width: 30px;
+            color: active ? Theme.primary : Theme.text-muted;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+
+            Text {
+                text: label;
+                color: active ? Theme.primary : Theme.text;
+                font-size: 14px;
+                font-weight: active ? 600 : 500;
+            }
+            Text {
+                text: description;
+                color: Theme.text-muted;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+
+    cat-area := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// A settings section header within a sub-page
+export component SettingsSectionHeader inherits Rectangle {
+    in property <string> title;
+
+    height: 36px;
+
+    Text {
+        text: title;
+        color: Theme.text;
+        font-size: 16px;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+}
+
+// A labeled settings row with a control area
+export component SettingsRow inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+
+    min-height: hint != "" ? 56px : 44px;
+
+    VerticalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 2px;
+        alignment: center;
+
+        Text {
+            text: label;
+            color: Theme.text-muted;
+            font-size: 12px;
+        }
+
+        @children
+    }
+}
+
+// A divider line between settings sections
+export component SettingsDivider inherits Rectangle {
+    height: 1px;
+    background: Theme.divider;
+}

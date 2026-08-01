@@ -1,0 +1,101 @@
+// About page - app info, third-party licenses, AboutSlint widget.
+
+import { AboutSlint, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+export component AboutPage inherits Rectangle {
+    in property <string> version: "";
+    in property <string> build-identity: "";
+
+    background: Theme.background;
+
+    ScrollView {
+        mouse-drag-pan-enabled: true;
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+
+            // App header
+            VerticalLayout {
+                spacing: 6px;
+                alignment: center;
+
+                Text {
+                    text: "AstraEMU";
+                    color: Theme.text;
+                    font-size: 28px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Legacy visual novel runtime manager";
+                    color: Theme.text-muted;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                }
+                if version != "" : Text {
+                    text: "Version " + version;
+                    color: Theme.text-muted;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+                if build-identity != "" : Text {
+                    text: build-identity;
+                    color: Theme.text-muted;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "About"; }
+
+            Text {
+                text: "AstraEMU is a manager and runtime host for legacy visual novel engines. It provides auto probing, trusted Luau patching, text translation, metadata integration and a unified library experience.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 13px;
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Slint"; }
+
+            Rectangle {
+                background: Theme.surface;
+                border-radius: Theme.radius;
+                min-height: 120px;
+
+                AboutSlint { }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Third-party notices"; }
+
+            Text {
+                text: "Slint 1.17.1 — Royalty-free Desktop, Mobile, and Web Applications License 2.0.\nThe top-level About page displays the official AboutSlint widget.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            Text {
+                text: "wgpu 29.0.4 — MIT / Apache-2.0\nwinit 0.30 — Apache-2.0";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+
+            Text {
+                text: "Font Awesome 6 Free (Solid) — SIL OFL 1.1. Embedded as the UI icon font.";
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                font-size: 12px;
+            }
+        }
+    }
+}

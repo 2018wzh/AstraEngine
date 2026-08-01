@@ -108,6 +108,63 @@ pub trait ManagerController: 'static {
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
         Ok(None)
     }
+    // ===== UI redesign callbacks (default implementations keep existing
+    // controllers source-compatible until they opt in) =====
+    /// Sidebar / bottom navigation. Pure UI state; the host applies the page
+    /// switch directly and forwards the event here for optional persistence.
+    fn navigate(&mut self, _page: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn set_theme(&mut self, _dark: bool) -> Result<(), String> {
+        Ok(())
+    }
+    fn set_grid_columns(&mut self, _columns: i32) -> Result<(), String> {
+        Ok(())
+    }
+    /// Library sort mode: "title" | "recent" | "play_time". Default keeps the
+    /// existing ordering and simply re-renders.
+    fn set_library_sort(&mut self, _mode: &str) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    /// Compatibility filter: "all" | "perfect" | "completable" | "flawed" |
+    /// "boot_only" | "unplayable" | "unknown". Default re-renders unchanged.
+    fn set_compatibility_filter(&mut self, _filter: &str) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    /// Queue a compatibility database refresh. Default: not configured.
+    fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_COMPATIBILITY_NOT_CONFIGURED".into())
+    }
+    fn save_input_config(
+        &mut self,
+        _confirm_key: &str,
+        _cancel_key: &str,
+        _touch_sensitivity: f32,
+        _gamepad_enabled: bool,
+        _gamepad_deadzone: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    /// VFS browser: select a file (preview) or enter a directory. An empty
+    /// path keeps the current directory and only refreshes the view.
+    fn vfs_browse(&mut self, _path: &str) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn vfs_toggle_expand(&mut self, _path: &str) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn vfs_navigate_up(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn vfs_refresh(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn export_vfs_file(&mut self, _path: &str) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_VFS_EXPORT_NOT_CONFIGURED".into())
+    }
+    fn copy_vfs_path(&mut self, _path: &str) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -442,9 +499,162 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let settings_weak = adapter.window().as_weak();
     adapter.window().on_open_settings(move || {
         if let Some(window) = settings_weak.upgrade() {
+            window.set_current_page("settings".into());
             window.set_about_active(false);
             window.set_settings_active(true);
         }
+    });
+    // ===== Navigation / theme / appearance =====
+    let navigate_weak = adapter.window().as_weak();
+    let navigate_controller = controller.clone();
+    adapter.window().on_navigate(move |page| {
+        if let Some(window) = navigate_weak.upgrade() {
+            window.set_current_page(page.clone());
+        }
+        let _ = navigate_controller.borrow_mut().navigate(page.as_str());
+    });
+    let theme_weak = adapter.window().as_weak();
+    let theme_controller = controller.clone();
+    adapter.window().on_toggle_theme(move || {
+        if let Some(window) = theme_weak.upgrade() {
+            let dark = !window.get_theme_dark();
+            window.set_theme_dark(dark);
+            let _ = theme_controller.borrow_mut().set_theme(dark);
+        }
+    });
+    let grid_weak = adapter.window().as_weak();
+    let grid_controller = controller.clone();
+    adapter.window().on_set_grid_columns(move |columns| {
+        if let Some(window) = grid_weak.upgrade() {
+            let _ = grid_controller.borrow_mut().set_grid_columns(columns);
+            window.set_grid_columns(columns);
+        }
+    });
+    let sort_weak = adapter.window().as_weak();
+    let sort_controller = controller.clone();
+    let sort_adapter = adapter.clone();
+    adapter.window().on_set_library_sort(move |mode| {
+        let Some(window) = sort_weak.upgrade() else {
+            return;
+        };
+        match sort_controller.borrow_mut().set_library_sort(mode.as_str()) {
+            Ok(model) => sort_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let compat_filter_weak = adapter.window().as_weak();
+    let compat_filter_controller = controller.clone();
+    let compat_filter_adapter = adapter.clone();
+    adapter.window().on_set_compatibility_filter(move |filter| {
+        let Some(window) = compat_filter_weak.upgrade() else {
+            return;
+        };
+        match compat_filter_controller
+            .borrow_mut()
+            .set_compatibility_filter(filter.as_str())
+        {
+            Ok(model) => compat_filter_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let compat_refresh_weak = adapter.window().as_weak();
+    let compat_refresh_controller = controller.clone();
+    let compat_refresh_adapter = adapter.clone();
+    adapter.window().on_refresh_compatibility(move || {
+        let Some(window) = compat_refresh_weak.upgrade() else {
+            return;
+        };
+        match compat_refresh_controller
+            .borrow_mut()
+            .refresh_compatibility()
+        {
+            Ok(model) => compat_refresh_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let input_config_weak = adapter.window().as_weak();
+    let input_config_controller = controller.clone();
+    adapter.window().on_save_input_config(
+        move |confirm_key, cancel_key, touch_sensitivity, gamepad_enabled, gamepad_deadzone| {
+            let result = input_config_controller.borrow_mut().save_input_config(
+                confirm_key.as_str(),
+                cancel_key.as_str(),
+                touch_sensitivity,
+                gamepad_enabled,
+                gamepad_deadzone.as_str(),
+            );
+            if let Err(error) = result {
+                if let Some(window) = input_config_weak.upgrade() {
+                    window.set_global_diagnostic(error.into());
+                }
+            }
+        },
+    );
+    // ===== VFS browser =====
+    let open_vfs_weak = adapter.window().as_weak();
+    let open_vfs_controller = controller.clone();
+    let open_vfs_adapter = adapter.clone();
+    adapter.window().on_open_vfs(move || {
+        if let Some(window) = open_vfs_weak.upgrade() {
+            window.set_current_page("vfs".into());
+        }
+        match open_vfs_controller.borrow_mut().vfs_browse("") {
+            Ok(model) => open_vfs_adapter.apply(&model),
+            Err(error) => {
+                if let Some(window) = open_vfs_weak.upgrade() {
+                    window.set_global_diagnostic(error.into());
+                }
+            }
+        }
+    });
+    macro_rules! vfs_model_callback {
+        ($on:ident, $method:ident) => {{
+            let weak = adapter.window().as_weak();
+            let callback_controller = controller.clone();
+            let callback_adapter = adapter.clone();
+            adapter.window().$on(move |path| {
+                let result = callback_controller.borrow_mut().$method(path.as_str());
+                if let Some(window) = weak.upgrade() {
+                    match result {
+                        Ok(model) => callback_adapter.apply(&model),
+                        Err(error) => window.set_global_diagnostic(error.into()),
+                    }
+                }
+            });
+        }};
+    }
+    vfs_model_callback!(on_vfs_select_entry, vfs_browse);
+    vfs_model_callback!(on_vfs_toggle_expand, vfs_toggle_expand);
+    vfs_model_callback!(on_vfs_export_file, export_vfs_file);
+    let vfs_up_weak = adapter.window().as_weak();
+    let vfs_up_controller = controller.clone();
+    let vfs_up_adapter = adapter.clone();
+    adapter.window().on_vfs_navigate_up(move || {
+        let result = vfs_up_controller.borrow_mut().vfs_navigate_up();
+        if let Some(window) = vfs_up_weak.upgrade() {
+            match result {
+                Ok(model) => vfs_up_adapter.apply(&model),
+                Err(error) => window.set_global_diagnostic(error.into()),
+            }
+        }
+    });
+    let vfs_refresh_weak = adapter.window().as_weak();
+    let vfs_refresh_controller = controller.clone();
+    let vfs_refresh_adapter = adapter.clone();
+    adapter.window().on_vfs_refresh(move || {
+        let result = vfs_refresh_controller.borrow_mut().vfs_refresh();
+        if let Some(window) = vfs_refresh_weak.upgrade() {
+            match result {
+                Ok(model) => vfs_refresh_adapter.apply(&model),
+                Err(error) => window.set_global_diagnostic(error.into()),
+            }
+        }
+    });
+    let copy_path_controller = controller.clone();
+    adapter.window().on_vfs_copy_path(move |path| {
+        let _ = copy_path_controller
+            .borrow_mut()
+            .copy_vfs_path(path.as_str());
     });
     macro_rules! metadata_callback {
         ($callback:ident, $method:ident, |$($arg:ident),*|) => {{

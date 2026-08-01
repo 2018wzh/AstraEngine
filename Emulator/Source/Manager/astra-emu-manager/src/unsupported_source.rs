@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
 use astra_emu_manager_core::{
-    CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError,
+    CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError, VfsResourceInfo,
 };
 
 /// Compile-time adapter for platforms whose document-provider integration is
@@ -25,6 +25,10 @@ impl UnsupportedVfsRegistry {
     }
 
     pub fn unbind(&self, _mount_set_id: &str) {}
+
+    pub fn list_resources(&self, _mount_set_id: &str) -> Result<Vec<VfsResourceInfo>, String> {
+        Err("PLATFORM_NOT_IMPLEMENTED: source grant provider is unavailable".into())
+    }
 }
 
 impl LegacyVfsReader for UnsupportedVfsRegistry {

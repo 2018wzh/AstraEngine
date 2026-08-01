@@ -1,0 +1,383 @@
+// Settings center - category list (left) + sub-page (right).
+// Extensible: add a new category item and corresponding sub-page component.
+
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Icons } from "../components/icons.slint";
+import { SettingsCategoryItem } from "../components/settings-card.slint";
+import { MatchReview, MetadataSettingsPage } from "../settings/metadata.slint";
+import { TranslationSettingsPage } from "../settings/translation.slint";
+import { FilterSettingsPage } from "../settings/filters.slint";
+import { PatchSettingsPage } from "../settings/patches.slint";
+import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
+import { InputSettingsPage } from "../settings/input.slint";
+import { AppearanceSettingsPage } from "../settings/appearance.slint";
+
+component MobileCategoryChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    width: chip-text.preferred-width + 28px;
+    height: 34px;
+    border-radius: 17px;
+    background: active ? Theme.primary : Theme.surface-raised;
+
+    chip-text := Text {
+        text: label;
+        color: active ? Theme.on-primary : Theme.text;
+        font-size: 13px;
+        font-weight: active ? 600 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component SettingsPage inherits Rectangle {
+    // Navigation
+    in-out property <string> category: "translation";
+    in property <bool> desktop-mode: true;
+
+    // Translation
+    in-out property <string> endpoint-kind;
+    in-out property <string> endpoint;
+    in-out property <string> protocol;
+    in-out property <string> model;
+    in-out property <string> target-language;
+    in-out property <int> context-sentences;
+    in-out property <int> body-limit-bytes;
+    in-out property <int> timeout-ms;
+    in-out property <string> background-context;
+    in-out property <string> glossary;
+    in-out property <string> secret-input;
+    in property <bool> consent-present;
+    in-out property <bool> persistent-cache;
+    in property <bool> has-selected-case;
+    callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
+    callback grant-translation-consent();
+    callback set-translation-cache(bool);
+
+    // Metadata
+    in property <[MatchReview]> match-reviews;
+    in property <string> selected-case-id;
+    in-out property <bool> vndb-consent;
+    in-out property <bool> bangumi-consent;
+    in-out property <bool> sensitive-covers;
+    in-out property <string> metadata-provider;
+    in-out property <string> external-id-input;
+    in-out property <string> bangumi-token-input;
+    callback refresh-metadata(string);
+    callback accept-match(string);
+    callback reject-match(string);
+    callback unlink-identity(string);
+    callback link-external-id(string, string);
+    callback set-metadata-consent(string, bool, string);
+    callback set-sensitive-cover-policy(string, bool);
+
+    // Filters
+    in-out property <string> filter-preset;
+    callback set-filter-preset(string);
+
+    // Compatibility
+    in property <string> compatibility-source-url;
+    in property <string> compatibility-sync-summary;
+    callback refresh-compatibility();
+
+    // Patches
+    in property <string> patches-summary;
+    in property <string> patch-mode;
+    callback set-patch-mode(string);
+
+    // Input
+    in-out property <string> confirm-key;
+    in-out property <string> cancel-key;
+    in-out property <float> touch-sensitivity;
+    in-out property <bool> gamepad-enabled;
+    in-out property <string> gamepad-deadzone;
+    callback save-input-config(string, string, float, bool, string);
+
+    // Appearance
+    in property <bool> dark-mode;
+    in-out property <int> grid-columns;
+    callback toggle-theme();
+    callback set-grid-columns(int);
+
+    background: Theme.background;
+
+    // Desktop: category sidebar + content
+    if root.desktop-mode : HorizontalLayout {
+        spacing: 0px;
+
+        // Category list
+        Rectangle {
+            width: 240px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.border;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 6px;
+
+                Text {
+                    text: "Settings";
+                    color: Theme.text;
+                    font-size: 20px;
+                    font-weight: 700;
+                }
+
+                Rectangle { height: 8px; }
+
+                SettingsCategoryItem {
+                    label: "Translation";
+                    icon: Icons.language;
+                    description: "Provider, model, glossary";
+                    active: root.category == "translation";
+                    clicked => { root.category = "translation"; }
+                }
+                SettingsCategoryItem {
+                    label: "Metadata";
+                    icon: Icons.database;
+                    description: "VNDB, Bangumi, identity";
+                    active: root.category == "metadata";
+                    clicked => { root.category = "metadata"; }
+                }
+                SettingsCategoryItem {
+                    label: "Compatibility";
+                    icon: Icons.clipboard-check;
+                    description: "Community VN grades";
+                    active: root.category == "compatibility";
+                    clicked => { root.category = "compatibility"; }
+                }
+                SettingsCategoryItem {
+                    label: "Filters";
+                    icon: Icons.funnel;
+                    description: "Final-frame presets";
+                    active: root.category == "filters";
+                    clicked => { root.category = "filters"; }
+                }
+                SettingsCategoryItem {
+                    label: "Patches";
+                    icon: Icons.puzzle-piece;
+                    description: "Trusted Luau patches";
+                    active: root.category == "patches";
+                    clicked => { root.category = "patches"; }
+                }
+                SettingsCategoryItem {
+                    label: "Input";
+                    icon: Icons.keyboard;
+                    description: "Keyboard, gamepad, touch";
+                    active: root.category == "input";
+                    clicked => { root.category = "input"; }
+                }
+                SettingsCategoryItem {
+                    label: "Appearance";
+                    icon: Icons.palette;
+                    description: "Theme, layout";
+                    active: root.category == "appearance";
+                    clicked => { root.category = "appearance"; }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+
+        // Content area
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+
+            if root.category == "translation" : TranslationSettingsPage {
+                endpoint-kind <=> root.endpoint-kind;
+                endpoint <=> root.endpoint;
+                protocol <=> root.protocol;
+                model <=> root.model;
+                target-language <=> root.target-language;
+                context-sentences <=> root.context-sentences;
+                body-limit-bytes <=> root.body-limit-bytes;
+                timeout-ms <=> root.timeout-ms;
+                background-context <=> root.background-context;
+                glossary <=> root.glossary;
+                secret-input <=> root.secret-input;
+                consent-present: root.consent-present;
+                persistent-cache <=> root.persistent-cache;
+                has-selected-case: root.has-selected-case;
+                save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
+                    root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
+                }
+                grant-consent => { root.grant-translation-consent(); }
+                set-cache(enabled) => { root.set-translation-cache(enabled); }
+            }
+
+            if root.category == "metadata" : MetadataSettingsPage {
+                match-reviews: root.match-reviews;
+                selected-case-id: root.selected-case-id;
+                vndb-consent <=> root.vndb-consent;
+                bangumi-consent <=> root.bangumi-consent;
+                sensitive-covers <=> root.sensitive-covers;
+                metadata-provider <=> root.metadata-provider;
+                external-id-input <=> root.external-id-input;
+                bangumi-token-input <=> root.bangumi-token-input;
+                refresh-metadata(provider) => { root.refresh-metadata(provider); }
+                accept-match(id) => { root.accept-match(id); }
+                reject-match(id) => { root.reject-match(id); }
+                unlink-identity(provider) => { root.unlink-identity(provider); }
+                link-external-id(provider, id) => { root.link-external-id(provider, id); }
+                set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
+                set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
+            }
+
+            if root.category == "filters" : FilterSettingsPage {
+                filter-preset <=> root.filter-preset;
+                set-filter-preset(preset) => { root.set-filter-preset(preset); }
+            }
+
+            if root.category == "compatibility" : CompatibilitySettingsPage {
+                source-url: root.compatibility-source-url;
+                sync-summary: root.compatibility-sync-summary;
+                network-consent: root.vndb-consent || root.bangumi-consent;
+                refresh-compatibility => { root.refresh-compatibility(); }
+            }
+
+            if root.category == "patches" : PatchSettingsPage {
+                patches-summary: root.patches-summary;
+                patch-mode: root.patch-mode;
+                set-patch-mode(mode) => { root.set-patch-mode(mode); }
+            }
+
+            if root.category == "input" : InputSettingsPage {
+                confirm-key <=> root.confirm-key;
+                cancel-key <=> root.cancel-key;
+                touch-sensitivity <=> root.touch-sensitivity;
+                gamepad-enabled <=> root.gamepad-enabled;
+                gamepad-deadzone <=> root.gamepad-deadzone;
+                save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
+                    root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
+                }
+            }
+
+            if root.category == "appearance" : AppearanceSettingsPage {
+                dark-mode: root.dark-mode;
+                grid-columns <=> root.grid-columns;
+                toggle-theme => { root.toggle-theme(); }
+                set-grid-columns(cols) => { root.set-grid-columns(cols); }
+            }
+        }
+    }
+
+    // Mobile: vertical category chips + content below
+    if !root.desktop-mode : VerticalLayout {
+        spacing: 0px;
+
+        // Horizontal category chips
+        Rectangle {
+            height: 52px;
+            background: Theme.surface;
+
+            ScrollView {
+                horizontal-stretch: 1;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    alignment: start;
+
+                    MobileCategoryChip { label: "Translation"; active: root.category == "translation"; clicked => { root.category = "translation"; } }
+                    MobileCategoryChip { label: "Metadata"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
+                    MobileCategoryChip { label: "Compatibility"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
+                    MobileCategoryChip { label: "Filters"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
+                    MobileCategoryChip { label: "Patches"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
+                    MobileCategoryChip { label: "Input"; active: root.category == "input"; clicked => { root.category = "input"; } }
+                    MobileCategoryChip { label: "Appearance"; active: root.category == "appearance"; clicked => { root.category = "appearance"; } }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.divider; }
+
+        // Content
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            if root.category == "translation" : TranslationSettingsPage {
+                endpoint-kind <=> root.endpoint-kind;
+                endpoint <=> root.endpoint;
+                protocol <=> root.protocol;
+                model <=> root.model;
+                target-language <=> root.target-language;
+                context-sentences <=> root.context-sentences;
+                body-limit-bytes <=> root.body-limit-bytes;
+                timeout-ms <=> root.timeout-ms;
+                background-context <=> root.background-context;
+                glossary <=> root.glossary;
+                secret-input <=> root.secret-input;
+                consent-present: root.consent-present;
+                persistent-cache <=> root.persistent-cache;
+                has-selected-case: root.has-selected-case;
+                save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
+                    root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
+                }
+                grant-consent => { root.grant-translation-consent(); }
+                set-cache(enabled) => { root.set-translation-cache(enabled); }
+            }
+
+            if root.category == "metadata" : MetadataSettingsPage {
+                match-reviews: root.match-reviews;
+                selected-case-id: root.selected-case-id;
+                vndb-consent <=> root.vndb-consent;
+                bangumi-consent <=> root.bangumi-consent;
+                sensitive-covers <=> root.sensitive-covers;
+                metadata-provider <=> root.metadata-provider;
+                external-id-input <=> root.external-id-input;
+                bangumi-token-input <=> root.bangumi-token-input;
+                refresh-metadata(provider) => { root.refresh-metadata(provider); }
+                accept-match(id) => { root.accept-match(id); }
+                reject-match(id) => { root.reject-match(id); }
+                unlink-identity(provider) => { root.unlink-identity(provider); }
+                link-external-id(provider, id) => { root.link-external-id(provider, id); }
+                set-metadata-consent(provider, enabled, secret) => { root.set-metadata-consent(provider, enabled, secret); }
+                set-sensitive-cover-policy(provider, enabled) => { root.set-sensitive-cover-policy(provider, enabled); }
+            }
+
+            if root.category == "filters" : FilterSettingsPage {
+                filter-preset <=> root.filter-preset;
+                set-filter-preset(preset) => { root.set-filter-preset(preset); }
+            }
+
+            if root.category == "compatibility" : CompatibilitySettingsPage {
+                source-url: root.compatibility-source-url;
+                sync-summary: root.compatibility-sync-summary;
+                network-consent: root.vndb-consent || root.bangumi-consent;
+                refresh-compatibility => { root.refresh-compatibility(); }
+            }
+
+            if root.category == "patches" : PatchSettingsPage {
+                patches-summary: root.patches-summary;
+                patch-mode: root.patch-mode;
+                set-patch-mode(mode) => { root.set-patch-mode(mode); }
+            }
+
+            if root.category == "input" : InputSettingsPage {
+                confirm-key <=> root.confirm-key;
+                cancel-key <=> root.cancel-key;
+                touch-sensitivity <=> root.touch-sensitivity;
+                gamepad-enabled <=> root.gamepad-enabled;
+                gamepad-deadzone <=> root.gamepad-deadzone;
+                save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
+                    root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
+                }
+            }
+
+            if root.category == "appearance" : AppearanceSettingsPage {
+                dark-mode: root.dark-mode;
+                grid-columns <=> root.grid-columns;
+                toggle-theme => { root.toggle-theme(); }
+                set-grid-columns(cols) => { root.set-grid-columns(cols); }
+            }
+        }
+    }
+}

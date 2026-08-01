@@ -1,0 +1,171 @@
+// Draggable, resizable, collapsible floating panel container.
+// Used for game overlay panels (translation, diagnostics, patches, filters).
+
+import { Theme } from "../theme.slint";
+import { Icon, Icons } from "./icons.slint";
+
+export component FloatingPanel inherits Rectangle {
+    in property <string> panel-title;
+    in-out property <bool> collapsed: false;
+    in-out property <length> panel-x: 20px;
+    in-out property <length> panel-y: 80px;
+    in-out property <length> panel-width: 380px;
+    in-out property <length> panel-height: 320px;
+    callback close();
+
+    x: panel-x;
+    y: panel-y;
+    width: panel-width;
+    height: collapsed ? 44px : panel-height;
+    background: Theme.surface-overlay;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.border;
+    clip: true;
+
+    // Shadow simulation
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: parent.width - 4px;
+        height: parent.height - 4px;
+        border-radius: Theme.radius;
+        background: transparent;
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Title bar (drag handle)
+        Rectangle {
+            height: 44px;
+            background: Theme.surface-raised;
+            border-radius: Theme.radius;
+
+            // Drag handling on title bar (declared first so buttons stay clickable)
+            drag-area := TouchArea {
+                property <length> start-x;
+                property <length> start-y;
+                property <length> origin-x;
+                property <length> origin-y;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down {
+                        self.start-x = self.mouse-x;
+                        self.start-y = self.mouse-y;
+                        self.origin-x = root.panel-x;
+                        self.origin-y = root.panel-y;
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        root.panel-x = self.origin-x + (self.mouse-x - self.start-x);
+                        root.panel-y = self.origin-y + (self.mouse-y - self.start-y);
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 8px;
+                spacing: 8px;
+
+                Text {
+                    text: panel-title;
+                    color: Theme.text;
+                    font-size: 14px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                // Collapse toggle
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 6px;
+                    background: collapse-area.pressed ? Theme.card-hover : transparent;
+
+                    Icon {
+                        glyph: collapsed ? Icons.expand : Icons.window-minimize;
+                        color: Theme.text-muted;
+                        font-size: 14px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    collapse-area := TouchArea {
+                        clicked => { root.collapsed = !root.collapsed; }
+                    }
+                }
+
+                // Close button
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 6px;
+                    background: close-area.pressed ? Theme.danger : transparent;
+
+                    Icon {
+                        glyph: Icons.xmark;
+                        color: close-area.pressed ? Theme.on-primary : Theme.text-muted;
+                        font-size: 13px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    close-area := TouchArea {
+                        clicked => { root.close(); }
+                    }
+                }
+            }
+        }
+
+        // Content area (hidden when collapsed)
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            visible: !collapsed;
+
+            @children
+        }
+    }
+
+    // Resize handle (bottom-right corner)
+    if !collapsed : Rectangle {
+        x: parent.width - 16px;
+        y: parent.height - 16px;
+        width: 16px;
+        height: 16px;
+
+        Icon {
+            glyph: Icons.resize;
+            color: Theme.text-muted;
+            font-size: 10px;
+            horizontal-alignment: right;
+            vertical-alignment: bottom;
+        }
+
+        resize-area := TouchArea {
+            property <length> start-x;
+            property <length> start-y;
+            property <length> origin-w;
+            property <length> origin-h;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    self.start-x = self.mouse-x;
+                    self.start-y = self.mouse-y;
+                    self.origin-w = root.panel-width;
+                    self.origin-h = root.panel-height;
+                }
+            }
+            moved => {
+                if self.pressed {
+                    root.panel-width = max(280px, self.origin-w + (self.mouse-x - self.start-x));
+                    root.panel-height = max(180px, self.origin-h + (self.mouse-y - self.start-y));
+                }
+            }
+        }
+    }
+}
