@@ -302,7 +302,7 @@ pub enum MinoriEffectViolation {
     Tokenization,
     UnsupportedKind,
     SecondarySlot,
-    OperandCount,
+    OperandCount { count: u8 },
     ResourceSequence,
     Timing,
     Timeline,
@@ -690,7 +690,9 @@ fn execute_effect(
         })?;
     if tokens.len() < 2 || tokens.len() > 5 {
         return Err(MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::OperandCount,
+            violation: MinoriEffectViolation::OperandCount {
+                count: u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?,
+            },
         });
     }
     if tokens[0] != "CrossFade2" {
@@ -1700,7 +1702,7 @@ mod tests {
         let cases = [
             (
                 b".effect CrossFade2\r\n".as_slice(),
-                MinoriEffectViolation::OperandCount,
+                MinoriEffectViolation::OperandCount { count: 1 },
             ),
             (
                 b".effect CrossFade2 * 320 100\r\n".as_slice(),
