@@ -4,12 +4,14 @@ Minori 游戏以多个 `.paz` archive 分区保存资源。`夏空のペルセ�
 
 | Archive | 观测大小 | 预期内容 |
 | --- | ---: | --- |
+| `bg.paz` + A–J | 3347405076 | 背景资源；主包加十个连续分卷 |
+| `bgm.paz` | 285294348 | BGM |
 | `scr.paz` | 1914452 | 脚本 `.sc`、流程和文本引用 |
 | `st.paz` | 852999948 | 背景、立绘和事件图 |
 | `sys.paz` | 32418204 | UI、字体、系统图 |
 | `se.paz` | 13554180 | SE |
 | `voice.paz` | 326048276 | voice |
-| `mov.paz` | 0 | 当前样本未使用 movie payload |
+| `mov.paz` | 882835526 | movie |
 
 ## 解析模型
 
@@ -19,17 +21,36 @@ PAZ reader 采用三段式：
 2. 使用外部 key config 解开 TOC。key 来源只能是命令行、用户配置或 case manifest。
 3. 对 entry payload 执行 per-file transform、zlib inflate 或 raw passthrough。
 
+## 证据分层
+
+| 结论 | 来源 | 状态 |
+| --- | --- | --- |
+| v1+ index size 位于 `0x20`，经 scheme XOR 后必须 8 字节对齐；index 使用 Blowfish | GARbro `ArcPAZ` contract | 已实现，并由八个真实 index 复核 |
+| entry descriptor 含 name、offset、unpacked/stored/aligned size 和 packed flag | GARbro contract | 已实现并做 bounds/duplicate 检查 |
+| v1/v2 使用 CP932 派生 entry key，v2 按 CRC32 派生 RC4 skip | GARbro contract | 纯 Rust `MinoriPazDecryptProvider` 已实现 |
+| packed entry 解密后执行 zlib | GARbro contract | 已实现 |
+| `.pazA` 至 `.pazZ` 是连续逻辑分卷 | GARbro contract | 已实现；空分卷和后缀缺口阻断 |
+| Blowfish block 由两个 little-endian `u32` word 组成 | GARbro contract + 本地样本 | 已实现，并由八个真实 index 复核 |
+| `mov` entry 不要求 8 字节对齐；movie 分支使用独立 transform | GARbro contract + 本地样本 | 已实现，5 个真实 descriptor 通过 |
+| packed entry 解压结果可能带不超过 16 字节的全零尾部 | 本地样本观察 | 仅在可证明全零时裁剪；非零或更长尾部阻断 |
+| 当前样本八包可完成 mount preflight | 本地样本 | 已成立，共 14502 个 entry；`bg` 的 11 卷连续读取通过 |
+| 当前样本八包 decoded full verify | 本地样本 | 已通过；43818 次 range read、6624958365 个 decoded bytes，cache 关闭 |
+
+mount 使用 `minori:/<role>/<entry>`。source hash 与各 entry encrypted hash 在同一次有界顺序流中计算，避免先哈希全包再逐 entry 随机重读；跨分卷 entry 仍保持同一逻辑范围。绝对路径、`..`、重复 URI/entry id、重叠 encrypted range、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
+
 ## Lookup
 
 Core 按 archive role 建立 VFS：
 
 ```text
 script -> scr.paz
+background -> bg.paz + volumes
+bgm -> bgm.paz
 stage/image -> st.paz
 system -> sys.paz
 se -> se.paz
 voice -> voice.paz
-movie -> mov.paz 或 loose file
+movie -> mov.paz
 patch -> *.mys / *.acr / 外部只读 mount
 ```
 

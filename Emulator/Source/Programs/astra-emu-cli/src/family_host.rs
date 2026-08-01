@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use astra_core::Hash256;
 use astra_emu_family_api::{LegacyRuntimeProvider, LegacyVfsReader, LEGACY_FAMILY_ABI_FINGERPRINT};
 use astra_emu_manager_core::{
     DynamicFamilyLoader, Ed25519FamilySignatureVerifier, FamilyPluginGate, FamilyPluginManifest,
@@ -13,31 +14,48 @@ use astra_emu_manager_core::{
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
 pub struct CliFamilyHostConfig {
+    family_id: String,
     manifest_path: PathBuf,
     library_path: PathBuf,
 }
 
 impl CliFamilyHostConfig {
-    pub fn installed_for_executable(executable: &Path) -> Result<Self, String> {
+    pub fn installed_for_executable(executable: &Path, family_id: &str) -> Result<Self, String> {
+        validate_family_id(family_id)?;
         let install_root = executable.parent().ok_or("ASTRA_EMU_INSTALL_ROOT")?;
-        let family_root = install_root.join("families").join("fvp");
+        let family_root = install_root.join("families").join(family_id);
         Ok(Self {
+            family_id: family_id.into(),
             manifest_path: family_root.join("manifest.json"),
-            library_path: family_root.join(platform_library_name()),
+            library_path: family_root.join(platform_library_name(family_id)?),
         })
     }
 
-    pub fn with_paths(manifest_path: PathBuf, library_path: PathBuf) -> Self {
-        Self {
+    pub fn with_paths(
+        family_id: &str,
+        manifest_path: PathBuf,
+        library_path: PathBuf,
+    ) -> Result<Self, String> {
+        validate_family_id(family_id)?;
+        Ok(Self {
+            family_id: family_id.into(),
             manifest_path,
             library_path,
-        }
+        })
     }
 
     pub fn create_provider(
         &self,
         vfs: Arc<dyn LegacyVfsReader>,
     ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
+        self.create_provider_with_identity(vfs)
+            .map(|(provider, _)| provider)
+    }
+
+    pub fn create_provider_with_identity(
+        &self,
+        vfs: Arc<dyn LegacyVfsReader>,
+    ) -> Result<(Box<dyn LegacyRuntimeProvider>, Hash256), String> {
         let metadata =
             fs::metadata(&self.manifest_path).map_err(|_| "ASTRA_EMU_FAMILY_MANIFEST_READ")?;
         if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_MANIFEST_BYTES {
@@ -62,7 +80,7 @@ impl CliFamilyHostConfig {
             FamilyPluginGate {
                 engine_version: env!("CARGO_PKG_VERSION").into(),
                 rustc_fingerprint: env!("ASTRA_EMU_CLI_RUSTC_FINGERPRINT").into(),
-                feature_fingerprint: env!("ASTRA_EMU_FVP_FEATURE_FINGERPRINT").into(),
+                feature_fingerprint: expected_feature_fingerprint(&self.family_id)?.into(),
                 abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
                 target: env!("ASTRA_EMU_TARGET").into(),
                 allowed_signers: BTreeSet::from([signer.to_owned()]),
@@ -71,24 +89,53 @@ impl CliFamilyHostConfig {
             },
             Arc::new(verifier),
         );
+        let binary_hash = manifest.binary_hash;
         loader
             .load(
                 &self.library_path,
                 manifest,
-                "astra.emu.cli.family.fvp".into(),
+                format!("astra.emu.cli.family.{}", self.family_id),
                 vfs,
             )
-            .map(|provider| Box::new(provider) as Box<dyn LegacyRuntimeProvider>)
+            .map(|provider| {
+                (
+                    Box::new(provider) as Box<dyn LegacyRuntimeProvider>,
+                    binary_hash,
+                )
+            })
             .map_err(|error| error.to_string())
     }
 }
 
-fn platform_library_name() -> &'static Path {
-    if cfg!(target_os = "windows") {
-        Path::new("astra_emu_fvp.dll")
-    } else if cfg!(target_os = "macos") {
-        Path::new("libastra_emu_fvp.dylib")
-    } else {
-        Path::new("libastra_emu_fvp.so")
+fn validate_family_id(family_id: &str) -> Result<(), String> {
+    match family_id {
+        "fvp" | "minori" => Ok(()),
+        _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
     }
+}
+
+fn expected_feature_fingerprint(family_id: &str) -> Result<&'static str, String> {
+    match family_id {
+        "fvp" => Ok(env!("ASTRA_EMU_FVP_FEATURE_FINGERPRINT")),
+        "minori" => Ok(env!("ASTRA_EMU_MINORI_FEATURE_FINGERPRINT")),
+        _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
+    }
+}
+
+fn platform_library_name(family_id: &str) -> Result<&'static Path, String> {
+    Ok(
+        match (
+            family_id,
+            cfg!(target_os = "windows"),
+            cfg!(target_os = "macos"),
+        ) {
+            ("fvp", true, _) => Path::new("astra_emu_fvp.dll"),
+            ("fvp", false, true) => Path::new("libastra_emu_fvp.dylib"),
+            ("fvp", false, false) => Path::new("libastra_emu_fvp.so"),
+            ("minori", true, _) => Path::new("astra_emu_minori.dll"),
+            ("minori", false, true) => Path::new("libastra_emu_minori.dylib"),
+            ("minori", false, false) => Path::new("libastra_emu_minori.so"),
+            _ => return Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
+        },
+    )
 }

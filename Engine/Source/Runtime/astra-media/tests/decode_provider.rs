@@ -8,6 +8,11 @@ use serde_json::Value;
 #[astra_headless_test::test]
 fn decode_provider_selection_is_profile_bound_not_load_order() {
     let mut registry = DecodeProviderRegistry::default();
+    assert!(ImageDecodeProvider
+        .capability()
+        .codecs
+        .iter()
+        .any(|codec| codec == "bmp"));
     registry.register(Box::new(ImageDecodeProvider)).unwrap();
     registry
         .register(Box::new(SyntheticPlatformDecodeProvider::new(
@@ -32,10 +37,7 @@ fn decode_provider_selection_is_profile_bound_not_load_order() {
 
     let image =
         DecodeBindingContext::shipping("astra.decode.image", "native-game", "desktop-release");
-    assert!(registry.select(&request, &image).is_err());
-    let selected = registry
-        .select(&request, &image.with_declared_fallback())
-        .unwrap();
+    let selected = registry.select(&request, &image).unwrap();
     assert_eq!(selected.provider_id, "astra.decode.image");
 
     assert!(registry

@@ -566,6 +566,110 @@ pub enum LegacyEffect {
     },
 }
 
+/// Host-neutral, plaintext-free layout contract for an ephemeral text lease.
+/// The family owns the original layout semantics while the host owns shaping,
+/// glyph resources, and rendering through its explicitly selected providers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextPresentationV1 {
+    pub layout_id: String,
+    pub language: String,
+    pub font_families: Vec<String>,
+    pub body: LegacyTextRegionV1,
+    pub speaker: Option<LegacyTextRegionV1>,
+    pub rgba: [u8; 4],
+}
+
+/// Associates a plaintext-free layout with the single-use text lease emitted
+/// in the same ordered effect batch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextPresentationLeaseV1 {
+    pub lease_id: String,
+    pub presentation: LegacyTextPresentationV1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextRegionV1 {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub max_lines: u32,
+}
+
+impl LegacyTextPresentationV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("text_layout_id", &self.layout_id)?;
+        if self.language.trim().is_empty()
+            || self.language.len() > 64
+            || self.font_families.is_empty()
+            || self.font_families.len() > 8
+            || self.font_families.iter().any(|family| {
+                family.trim().is_empty()
+                    || family.len() > 128
+                    || family.chars().any(char::is_control)
+            })
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_BINDING",
+                "text language or explicit font family binding is invalid",
+            ));
+        }
+        self.body.validate("body")?;
+        if let Some(speaker) = self.speaker {
+            speaker.validate("speaker")?;
+        }
+        if self.rgba[3] == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_COLOR",
+                "text color must have non-zero alpha",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl LegacyTextPresentationLeaseV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("text_presentation_lease_id", &self.lease_id)?;
+        self.presentation.validate()
+    }
+}
+
+impl LegacyTextRegionV1 {
+    fn validate(self, region: &'static str) -> Result<(), LegacyProviderError> {
+        if self.x < 0
+            || self.y < 0
+            || self.width == 0
+            || self.height == 0
+            || self.width > 16_384
+            || self.height > 16_384
+            || !self.font_size.is_finite()
+            || !self.line_height.is_finite()
+            || !(1.0..=512.0).contains(&self.font_size)
+            || self.line_height < self.font_size
+            || self.line_height > 1024.0
+            || self.max_lines == 0
+            || self.max_lines > 256
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_REGION",
+                format!("text {region} layout region is invalid"),
+            ));
+        }
+        let right = i64::from(self.x) + i64::from(self.width);
+        let bottom = i64::from(self.y) + i64::from(self.height);
+        if right > i64::from(i32::MAX) || bottom > i64::from(i32::MAX) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_REGION",
+                format!("text {region} layout region overflows"),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Host-neutral GPU presentation packet. Family providers may emit this as the postcard payload
 /// of a `Presentation` effect whose command is `astra.emu.render_frame.v1`. It deliberately owns
 /// no window, device, queue, texture, or callback; the host uploads resource deltas to its own
@@ -576,6 +680,29 @@ pub struct LegacyRenderFrameV1 {
     pub height: u32,
     pub texture_updates: Vec<LegacyTextureUpdateV1>,
     pub draws: Vec<LegacyDrawV1>,
+}
+
+/// Resource-backed presentation packet. Unlike [`LegacyRenderFrameV1`], this
+/// contract never serializes decoded commercial pixels. The host resolves each
+/// URI through the active family session, verifies the encoded identity, and
+/// decodes it through an explicitly bound media provider before rendering.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyRenderResourceFrameV1 {
+    pub width: u32,
+    pub height: u32,
+    pub texture_resources: Vec<LegacyTextureResourceV1>,
+    pub draws: Vec<LegacyDrawV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextureResourceV1 {
+    pub texture_id: u32,
+    pub resource_uri: String,
+    pub codec: String,
+    pub encoded_hash: Hash256,
+    pub decoded_width: u32,
+    pub decoded_height: u32,
+    pub decoded_format: LegacyTextureFormat,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -807,12 +934,33 @@ fn valid_audio_gain(value: f32) -> bool {
 }
 
 fn validate_vfs_uri(value: &str) -> Result<(), LegacyProviderError> {
+    let valid_scheme = |scheme: &str| {
+        !scheme.is_empty()
+            && scheme.len() <= 64
+            && scheme.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || (index > 0 && matches!(byte, b'+' | b'-' | b'.'))
+            })
+    };
+    let path = if let Some((scheme, path)) = value.split_once(":/") {
+        if !valid_scheme(scheme) || value[scheme.len() + 2..].contains(':') {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_URI",
+                "VFS URI has an invalid scheme",
+            ));
+        }
+        path
+    } else {
+        value
+    };
     if value.is_empty()
         || value.len() > 4096
-        || value.starts_with('/')
-        || value.contains(':')
-        || value
-            .replace('\\', "/")
+        || path.is_empty()
+        || path.starts_with('/')
+        || path.contains(':')
+        || path.contains('\\')
+        || path
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == "..")
     {
@@ -888,35 +1036,105 @@ impl LegacyRenderFrameV1 {
                 "render texture uploads exceed the per-step bound",
             ));
         }
-        for draw in &self.draws {
-            if draw
-                .vertices
-                .iter()
-                .flat_map(|vertex| {
-                    vertex
-                        .position
-                        .iter()
-                        .chain(&vertex.tex_coord)
-                        .chain(&vertex.color)
-                })
-                .any(|value| !value.is_finite())
-            {
+        validate_render_draws(&self.draws)
+    }
+}
+
+impl LegacyRenderResourceFrameV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_render_dimensions_and_counts(
+            self.width,
+            self.height,
+            self.texture_resources.len(),
+            self.draws.len(),
+        )?;
+        let mut ids = BTreeSet::new();
+        for resource in &self.texture_resources {
+            if !ids.insert(resource.texture_id) {
                 return Err(LegacyProviderError::invalid(
-                    "ASTRA_EMU_RENDER_VERTEX_INVALID",
-                    "render vertices must contain only finite values",
+                    "ASTRA_EMU_RENDER_TEXTURE_DUPLICATE",
+                    "a resource frame contains duplicate texture resources",
                 ));
             }
-            if let Some(scissor) = draw.scissor {
-                if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
-                    return Err(LegacyProviderError::invalid(
-                        "ASTRA_EMU_RENDER_SCISSOR_INVALID",
-                        "render scissor must be positive and within the stage",
-                    ));
-                }
+            validate_vfs_uri(&resource.resource_uri)?;
+            if resource.codec.is_empty()
+                || resource.codec.len() > 32
+                || resource.codec.bytes().any(|byte| {
+                    !byte.is_ascii_lowercase() && !byte.is_ascii_digit() && byte != b'-'
+                })
+                || !(1..=16_384).contains(&resource.decoded_width)
+                || !(1..=16_384).contains(&resource.decoded_height)
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_RENDER_RESOURCE_DESCRIPTOR",
+                    "render resource codec or decoded dimensions are invalid",
+                ));
             }
         }
-        Ok(())
+        if self
+            .draws
+            .iter()
+            .any(|draw| !ids.contains(&draw.texture_id))
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_RENDER_TEXTURE_MISSING",
+                "a resource frame draw references an undeclared texture",
+            ));
+        }
+        validate_render_draws(&self.draws)
     }
+}
+
+fn validate_render_dimensions_and_counts(
+    width: u32,
+    height: u32,
+    texture_count: usize,
+    draw_count: usize,
+) -> Result<(), LegacyProviderError> {
+    if !(1..=8192).contains(&width) || !(1..=8192).contains(&height) {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_RENDER_DIMENSIONS",
+            "render dimensions are outside supported bounds",
+        ));
+    }
+    if texture_count > MAX_RENDER_TEXTURE_UPDATES || draw_count > MAX_RENDER_DRAWS {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_RENDER_COUNT_BOUNDS",
+            "render resource or draw count exceeds bounds",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_render_draws(draws: &[LegacyDrawV1]) -> Result<(), LegacyProviderError> {
+    for draw in draws {
+        if draw
+            .vertices
+            .iter()
+            .flat_map(|vertex| {
+                vertex
+                    .position
+                    .iter()
+                    .chain(&vertex.tex_coord)
+                    .chain(&vertex.color)
+            })
+            .any(|value| !value.is_finite())
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_RENDER_VERTEX_INVALID",
+                "render vertices must contain only finite values",
+            ));
+        }
+        if let Some(scissor) = draw.scissor {
+            if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_RENDER_SCISSOR_INVALID",
+                    "render scissor must be positive and within the stage",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl LegacyEffect {
@@ -1251,6 +1469,45 @@ mod tests {
     }
 
     #[test]
+    fn resource_frame_is_uri_bound_and_rejects_undeclared_draw_textures() {
+        let draw = LegacyDrawV1 {
+            texture_id: 7,
+            vertices: [LegacyVertexV1 {
+                position: [0.0, 0.0],
+                tex_coord: [0.0, 0.0],
+                color: [1.0; 4],
+            }; 4],
+            blend: LegacyBlendMode::Alpha,
+            scissor: None,
+        };
+        let frame = LegacyRenderResourceFrameV1 {
+            width: 1280,
+            height: 720,
+            texture_resources: vec![LegacyTextureResourceV1 {
+                texture_id: 7,
+                resource_uri: "minori:/bg/title.png".into(),
+                codec: "png".into(),
+                encoded_hash: Hash256::from_sha256(b"encoded"),
+                decoded_width: 1280,
+                decoded_height: 720,
+                decoded_format: LegacyTextureFormat::Rgba8,
+            }],
+            draws: vec![draw.clone()],
+        };
+        frame.validate().unwrap();
+        round_trip(&frame);
+        let invalid = LegacyRenderResourceFrameV1 {
+            texture_resources: Vec::new(),
+            draws: vec![draw],
+            ..frame
+        };
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            "ASTRA_EMU_RENDER_TEXTURE_MISSING"
+        );
+    }
+
+    #[test]
     fn step_output_rejects_duplicate_or_invalid_waits() {
         let output = LegacyStepOutput {
             status: LegacyRuntimeStatus::Awaiting,
@@ -1414,6 +1671,78 @@ mod tests {
                 playback_id: "movie.test".into(),
             },
         ]);
+    }
+
+    #[test]
+    fn text_presentation_requires_explicit_bounded_font_and_regions() {
+        let valid = LegacyTextPresentationV1 {
+            layout_id: "family.message".into(),
+            language: "ja-JP".into(),
+            font_families: vec!["Noto Sans JP".into()],
+            body: LegacyTextRegionV1 {
+                x: 160,
+                y: 568,
+                width: 960,
+                height: 112,
+                font_size: 26.0,
+                line_height: 32.0,
+                max_lines: 3,
+            },
+            speaker: None,
+            rgba: [255, 255, 255, 255],
+        };
+        valid.validate().unwrap();
+        LegacyTextPresentationLeaseV1 {
+            lease_id: "lease.test".into(),
+            presentation: valid.clone(),
+        }
+        .validate()
+        .unwrap();
+
+        let mut missing_font = valid.clone();
+        missing_font.font_families.clear();
+        assert_eq!(
+            missing_font.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_LAYOUT_BINDING"
+        );
+
+        let mut transparent = valid.clone();
+        transparent.rgba[3] = 0;
+        assert_eq!(
+            transparent.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_LAYOUT_COLOR"
+        );
+
+        let mut invalid_region = valid;
+        invalid_region.body.line_height = 20.0;
+        assert_eq!(
+            invalid_region.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_LAYOUT_REGION"
+        );
+    }
+
+    #[test]
+    fn media_resource_validation_accepts_stable_family_uris_and_blocks_traversal() {
+        LegacyAudioCommandV1::LoadResource {
+            stream_id: 1,
+            encoding: LegacyAudioEncoding::Ogg,
+            resource_uri: "minori:/bgm/theme.ogg".into(),
+        }
+        .validate()
+        .unwrap();
+        for resource_uri in [
+            "minori:/bgm/../secret.ogg",
+            "Minori:/bgm/theme.ogg",
+            "minori:/bgm\\theme.ogg",
+        ] {
+            assert!(LegacyAudioCommandV1::LoadResource {
+                stream_id: 1,
+                encoding: LegacyAudioEncoding::Ogg,
+                resource_uri: resource_uri.into(),
+            }
+            .validate()
+            .is_err());
+        }
     }
 
     fn round_trip<T>(value: &T)

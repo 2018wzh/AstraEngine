@@ -22,9 +22,12 @@ pub struct CpuStageRasterizer {
 }
 
 impl CpuStageRasterizer {
-    pub fn render(&mut self, frame: LegacyRenderFrameV1) -> Result<Vec<u8>, String> {
+    pub fn prepare(
+        &mut self,
+        mut frame: LegacyRenderFrameV1,
+    ) -> Result<LegacyRenderFrameV1, String> {
         frame.validate().map_err(|error| error.to_string())?;
-        for update in frame.texture_updates {
+        for update in std::mem::take(&mut frame.texture_updates) {
             let content_hash = Hash256::from_sha256(&update.pixels);
             if content_hash != update.content_hash {
                 return Err("ASTRA_EMU_HEADLESS_TEXTURE_HASH".into());
@@ -52,13 +55,6 @@ impl CpuStageRasterizer {
         }
         self.width = frame.width;
         self.height = frame.height;
-        self.rgba8 = vec![0; checked_len(frame.width, frame.height, 4)?];
-        for alpha in self.rgba8[3..].iter_mut().step_by(4) {
-            *alpha = 255;
-        }
-        for draw in &frame.draws {
-            self.draw(draw)?;
-        }
         self.textures.retain(|texture_id, _| {
             *texture_id == u32::MAX
                 || frame
@@ -66,6 +62,28 @@ impl CpuStageRasterizer {
                     .iter()
                     .any(|draw| draw.texture_id == *texture_id)
         });
+        Ok(frame)
+    }
+
+    pub fn render(&mut self, frame: LegacyRenderFrameV1) -> Result<Vec<u8>, String> {
+        let frame = self.prepare(frame)?;
+        self.render_prepared(&frame)
+    }
+
+    pub fn render_prepared(&mut self, frame: &LegacyRenderFrameV1) -> Result<Vec<u8>, String> {
+        if !frame.texture_updates.is_empty()
+            || frame.width != self.width
+            || frame.height != self.height
+        {
+            return Err("ASTRA_EMU_HEADLESS_FRAME_NOT_PREPARED".into());
+        }
+        self.rgba8 = vec![0; checked_len(frame.width, frame.height, 4)?];
+        for alpha in self.rgba8[3..].iter_mut().step_by(4) {
+            *alpha = 255;
+        }
+        for draw in &frame.draws {
+            self.draw(draw)?;
+        }
         Ok(std::mem::take(&mut self.rgba8))
     }
 
@@ -372,6 +390,51 @@ mod tests {
             .unwrap();
         assert_eq!(first, second);
         assert_eq!(&first[..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn prepared_unsampled_frames_preserve_texture_state_for_later_raster() {
+        let pixels = vec![12, 34, 56, 255];
+        let draw = LegacyDrawV1 {
+            texture_id: 9,
+            vertices: [
+                vertex(0.0, 0.0, 0.0, 0.0),
+                vertex(1.0, 0.0, 1.0, 0.0),
+                vertex(0.0, 1.0, 0.0, 1.0),
+                vertex(1.0, 1.0, 1.0, 1.0),
+            ],
+            blend: LegacyBlendMode::Alpha,
+            scissor: None,
+        };
+        let mut rasterizer = CpuStageRasterizer::default();
+        let _skipped = rasterizer
+            .prepare(LegacyRenderFrameV1 {
+                width: 1,
+                height: 1,
+                texture_updates: vec![LegacyTextureUpdateV1 {
+                    texture_id: 9,
+                    width: 1,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    content_hash: Hash256::from_sha256(&pixels),
+                    pixels,
+                }],
+                draws: vec![draw.clone()],
+            })
+            .unwrap();
+        let sampled = rasterizer
+            .prepare(LegacyRenderFrameV1 {
+                width: 1,
+                height: 1,
+                texture_updates: Vec::new(),
+                draws: vec![draw],
+            })
+            .unwrap();
+
+        assert_eq!(
+            rasterizer.render_prepared(&sampled).unwrap(),
+            vec![12, 34, 56, 255]
+        );
     }
 
     #[test]

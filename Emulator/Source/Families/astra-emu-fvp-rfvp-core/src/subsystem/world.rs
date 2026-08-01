@@ -483,6 +483,14 @@ impl GameData {
         self.inputs_manager.set_mouse_in(in_screen);
     }
 
+    pub fn inject_pointer_button(&mut self, button: KeyCode, pressed: bool) {
+        if pressed {
+            self.inputs_manager.notify_mouse_down(button);
+        } else {
+            self.inputs_manager.notify_mouse_up(button);
+        }
+    }
+
     pub fn inject_wheel(&mut self, value: i32) {
         self.inputs_manager.notify_mouse_wheel(value);
     }

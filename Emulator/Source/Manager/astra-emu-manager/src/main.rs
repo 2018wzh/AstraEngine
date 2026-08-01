@@ -31,9 +31,12 @@ use std::{
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
-    LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
+    LegacyProbeRequest, LegacyRenderFrameV1, LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx,
+    LegacyStepBudget, LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyWaitRequest,
 };
+use astra_emu_family_support::LegacyVfsFamilyRegistry;
+use astra_emu_fvp::FvpVfsFamilyFactory;
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
@@ -51,8 +54,13 @@ use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, MatchInput,
     MetadataProviderId, MetadataSearchQuery,
 };
+use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
+};
+use astra_media::{
+    DecodeBindingContext, DecodeKind as MediaDecodeKind, DecodeOutput as MediaDecodeOutput,
+    DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
 };
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
@@ -128,6 +136,7 @@ struct RuntimeBridge {
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
     render_frames: VecDeque<LegacyRenderFrameV1>,
+    image_decoders: DecodeProviderRegistry,
     audio: Option<HostAudioExecutor>,
     video: HostVideoExecutor,
     text_captures: VecDeque<LegacyEphemeralText>,
@@ -143,11 +152,16 @@ impl RuntimeBridge {
         let family = FamilyHostConfig::from_process()?.create_provider(vfs.clone())?;
         let mut provider = AstraEmuRuntimeProvider::new(family)?;
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
+        let mut image_decoders = DecodeProviderRegistry::default();
+        image_decoders
+            .register(Box::new(ImageDecodeProvider))
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             provider,
             active: None,
             terminal: false,
             render_frames: VecDeque::new(),
+            image_decoders,
             audio: None,
             video: HostVideoExecutor::default(),
             text_captures: VecDeque::new(),
@@ -433,6 +447,23 @@ impl RuntimeBridge {
                 .map_err(|error| error.to_string())?;
             for effect in &family_output.effects {
                 match effect {
+                    LegacyEffect::Presentation {
+                        command, payload, ..
+                    } if command == "astra.emu.render_resource_frame.v1" => {
+                        let resource_frame =
+                            postcard::from_bytes::<LegacyRenderResourceFrameV1>(payload)
+                                .map_err(|_| "ASTRA_EMU_RENDER_RESOURCE_FRAME_DECODE".to_owned())?;
+                        let frame = materialize_resource_frame(
+                            &mut self.provider,
+                            &self.image_decoders,
+                            &active.session_id,
+                            resource_frame,
+                        )?;
+                        if self.render_frames.len() >= 3 {
+                            return Err("ASTRA_EMU_RENDER_FRAME_QUEUE_OVERFLOW".into());
+                        }
+                        self.render_frames.push_back(frame);
+                    }
                     LegacyEffect::Presentation {
                         command, payload, ..
                     } if command == "astra.emu.render_frame.v1" => {
@@ -773,6 +804,82 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
     Ok((text_hooks, media_hooks, effects))
 }
 
+fn materialize_resource_frame(
+    provider: &mut AstraEmuRuntimeProvider,
+    image_decoders: &DecodeProviderRegistry,
+    session_id: &GameRuntimeSessionId,
+    resource_frame: LegacyRenderResourceFrameV1,
+) -> Result<LegacyRenderFrameV1, String> {
+    resource_frame
+        .validate()
+        .map_err(|error| error.to_string())?;
+    let mut texture_updates = Vec::with_capacity(resource_frame.texture_resources.len());
+    for resource in resource_frame.texture_resources {
+        if resource.decoded_format != LegacyTextureFormat::Rgba8 {
+            return Err("ASTRA_EMU_RENDER_IMAGE_FORMAT_UNSUPPORTED".into());
+        }
+        let bytes = provider.read_session_resource(
+            session_id,
+            &resource.resource_uri,
+            1024 * 1024 * 1024,
+        )?;
+        if Hash256::from_sha256(&bytes) != resource.encoded_hash {
+            return Err("ASTRA_EMU_RENDER_IMAGE_RESOURCE_IDENTITY".into());
+        }
+        let profile = "emu-manager-image-v1";
+        let decoded = image_decoders
+            .decode(
+                &DecodeRequest {
+                    kind: MediaDecodeKind::Image,
+                    codec: resource.codec,
+                    bytes,
+                    profile: profile.into(),
+                },
+                &DecodeBindingContext::shipping("astra.decode.image", "manager", profile),
+            )
+            .map_err(|error| error.to_string())?;
+        let MediaDecodeOutput::CpuBuffer {
+            bytes,
+            format,
+            hash,
+        } = decoded.output
+        else {
+            return Err("ASTRA_EMU_RENDER_IMAGE_CPU_BUFFER_REQUIRED".into());
+        };
+        if format != "rgba8" || Hash256::from_sha256(&bytes) != hash {
+            return Err("ASTRA_EMU_RENDER_IMAGE_DECODE_IDENTITY".into());
+        }
+        let expected = usize::try_from(resource.decoded_width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(resource.decoded_height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "ASTRA_EMU_RENDER_IMAGE_DIMENSION_OVERFLOW".to_owned())?;
+        if bytes.len() != expected {
+            return Err("ASTRA_EMU_RENDER_IMAGE_DIMENSION_MISMATCH".into());
+        }
+        texture_updates.push(LegacyTextureUpdateV1 {
+            texture_id: resource.texture_id,
+            width: resource.decoded_width,
+            height: resource.decoded_height,
+            format: resource.decoded_format,
+            content_hash: hash,
+            pixels: bytes,
+        });
+    }
+    let frame = LegacyRenderFrameV1 {
+        width: resource_frame.width,
+        height: resource_frame.height,
+        texture_updates,
+        draws: resource_frame.draws,
+    };
+    frame.validate().map_err(|error| error.to_string())?;
+    Ok(frame)
+}
+
 fn apply_audio_media_hook(
     command: &mut LegacyAudioCommandV1,
     hooks: &BTreeMap<String, String>,
@@ -893,6 +1000,7 @@ struct AstraEmuManagerController {
     search_query: String,
     diagnostic: String,
     vfs: Arc<VfsRegistry>,
+    _family_vfs_registry: Arc<LegacyVfsFamilyRegistry>,
     runtime: Rc<RefCell<RuntimeBridge>>,
     active_mount_set_id: Option<String>,
     data_dir: PathBuf,
@@ -927,6 +1035,13 @@ impl AstraEmuManagerController {
         let library =
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
         let vfs = Arc::new(VfsRegistry::default());
+        let mut family_vfs_registry = LegacyVfsFamilyRegistry::default();
+        family_vfs_registry
+            .register(Arc::new(FvpVfsFamilyFactory))
+            .map_err(|error| error.to_string())?;
+        family_vfs_registry
+            .register(Arc::new(MinoriVfsFamilyFactory))
+            .map_err(|error| error.to_string())?;
         let runtime = Rc::new(RefCell::new(RuntimeBridge::new(vfs.clone())?));
         let metadata = MetadataRuntime::start()?;
         Ok(Self {
@@ -935,6 +1050,7 @@ impl AstraEmuManagerController {
             search_query: String::new(),
             diagnostic: String::new(),
             vfs,
+            _family_vfs_registry: Arc::new(family_vfs_registry),
             runtime,
             active_mount_set_id: None,
             data_dir,
@@ -1908,6 +2024,8 @@ impl ManagerController for AstraEmuManagerController {
                 .and_then(|value| value.note)
                 .unwrap_or_default(),
             bangumi_sync_summary: self.bangumi_sync_summary.clone(),
+            vfs_summary: "Mounted archive tree, stat, search and paged reads are provided by LegacyVfsViewer after a case session opens.".into(),
+            vfs_preview: "Select an entry to request a bounded text, image, audio or hex preview.".into(),
         })
     }
 

@@ -92,6 +92,50 @@ fn hash(bytes: &[u8]) -> String {
 }
 
 #[tokio::test]
+async fn surface_without_a_submission_can_be_destroyed() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = HeadlessHostProfile::reference(
+        "headless-test",
+        "com.example.empty-surface",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    let root = temp.path().join("artifacts");
+    let session = HeadlessPlatformFactory::new(&root, temp.path())
+        .start(profile.into())
+        .await
+        .unwrap();
+    let client = session.client;
+    let window = client
+        .create_window(WindowRequest {
+            title: "Empty Surface".into(),
+            width: 2,
+            height: 2,
+            visible: false,
+        })
+        .await
+        .unwrap();
+    let surface = client
+        .create_surface(SurfaceRequest {
+            window,
+            width: 2,
+            height: 2,
+        })
+        .await
+        .unwrap();
+
+    client.destroy_surface(surface).await.unwrap();
+    client.destroy_window(window).await.unwrap();
+    client.shutdown().await.unwrap();
+
+    let manifest: ArtifactManifest =
+        serde_json::from_slice(&fs::read(root.join("artifact-manifest.json")).unwrap()).unwrap();
+    manifest.validate().unwrap();
+    assert_eq!(manifest.submitted_frame_count, 0);
+    assert_eq!(manifest.rasterized_frame_count, 0);
+}
+
+#[tokio::test]
 async fn checkpoint_policy_validates_every_scene_and_rasterizes_only_first_and_final() {
     let temp = tempfile::tempdir().unwrap();
     let profile = HeadlessHostProfile::reference(
@@ -152,6 +196,66 @@ async fn checkpoint_policy_validates_every_scene_and_rasterizes_only_first_and_f
         manifest.submitted_scene_stream_hash,
         manifest.rasterized_frame_stream_hash
     );
+}
+
+#[tokio::test]
+async fn checkpoint_retention_hashes_frames_without_persisting_every_frame() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut profile = HeadlessHostProfile::reference(
+        "headless-test",
+        "com.example.checkpoint-retention",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    profile.artifacts.retention = HeadlessArtifactRetention::Checkpoints;
+    let root = temp.path().join("artifacts");
+    let session = HeadlessPlatformFactory::new(&root, temp.path())
+        .start(profile.into())
+        .await
+        .unwrap();
+    let client = session.client;
+    let window = client
+        .create_window(WindowRequest {
+            title: "Checkpoint retention".into(),
+            width: 2,
+            height: 2,
+            visible: false,
+        })
+        .await
+        .unwrap();
+    let surface = client
+        .create_surface(SurfaceRequest {
+            window,
+            width: 2,
+            height: 2,
+        })
+        .await
+        .unwrap();
+    client
+        .present_rgba(
+            surface,
+            RgbaFrame {
+                sequence: 1,
+                width: 2,
+                height: 2,
+                rgba8: vec![255; 16],
+            },
+        )
+        .await
+        .unwrap();
+    client.destroy_surface(surface).await.unwrap();
+    client.destroy_window(window).await.unwrap();
+    client.shutdown().await.unwrap();
+
+    let manifest: ArtifactManifest =
+        serde_json::from_slice(&fs::read(root.join("artifact-manifest.json")).unwrap()).unwrap();
+    manifest.validate().unwrap();
+    assert_eq!(manifest.rasterized_frame_count, 1);
+    assert!(manifest.artifacts.iter().all(|artifact| !matches!(
+        artifact,
+        astra_headless_protocol::ArtifactEntry::Frame { .. }
+    )));
+    assert!(!root.join("frames/frame-0000000001.png").exists());
 }
 
 #[tokio::test]

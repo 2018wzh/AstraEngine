@@ -1,0 +1,17 @@
+[package]
+name = "astra-emu-family-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

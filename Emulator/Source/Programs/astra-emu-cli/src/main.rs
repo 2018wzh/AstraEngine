@@ -1,20 +1,9 @@
 use std::path::PathBuf;
 
 use astra_emu_cli::{run_headless, run_native, HeadlessLaunch, NativeLaunch};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum EngineType {
-    Fvp,
-}
-
-impl EngineType {
-    fn id(self) -> &'static str {
-        match self {
-            Self::Fvp => "fvp",
-        }
-    }
-}
+mod vfs;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -28,12 +17,16 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Inspect, verify, extract, or mount a family-owned legacy VFS.
+    Vfs(vfs::VfsArgs),
     /// Launch the selected family directly in an overlay-free native game host.
     Run {
-        #[arg(long, value_enum)]
-        engine: EngineType,
+        #[arg(long)]
+        family: String,
         #[arg(long)]
         game_dir: PathBuf,
+        #[arg(long)]
+        mount_profile: PathBuf,
         #[arg(long)]
         entry: Option<String>,
         #[arg(long, requires = "family_library")]
@@ -46,10 +39,12 @@ enum CliCommand {
     },
     /// Run the same AstraEMU RuntimeWorld/provider path on astra-platform-headless.
     Headless {
-        #[arg(long, value_enum)]
-        engine: EngineType,
+        #[arg(long)]
+        family: String,
         #[arg(long)]
         game_dir: PathBuf,
+        #[arg(long)]
+        mount_profile: PathBuf,
         #[arg(long)]
         entry: Option<String>,
         #[arg(long)]
@@ -74,9 +69,18 @@ enum CliCommand {
             value_parser = ["all", "checkpoints", "final", "manifest-only"]
         )]
         artifact_retention: String,
+        /// Raster and present one out of every N fixed steps; parity runs must use 1.
+        #[arg(long, default_value_t = 1)]
+        frame_sample_interval: u64,
         /// Stream and hash every visible resource after the gameplay run.
         #[arg(long, default_value_t = false)]
         audit_all_resources: bool,
+        /// Restore an identity-bound local-private Headless continuation snapshot.
+        #[arg(long)]
+        resume_snapshot: Option<PathBuf>,
+        /// Atomically export an identity-bound local-private continuation snapshot.
+        #[arg(long)]
+        snapshot_output: Option<PathBuf>,
     },
 }
 
@@ -86,9 +90,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     observability.role = astra_observability::HostRole::Cli;
     let _observability = astra_observability::init_host(observability)?;
     match Cli::parse().command {
+        CliCommand::Vfs(arguments) => vfs::run(arguments)?,
         CliCommand::Run {
-            engine,
+            family,
             game_dir,
+            mount_profile,
             entry,
             family_manifest,
             family_library,
@@ -96,13 +102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             tracing::info!(
                 event = "astra_emu_cli_native_launch_started",
-                engine = engine.id()
+                family = family.as_str()
             );
-            if engine.id() != "fvp" {
-                return Err("ASTRA_EMU_CLI_ENGINE_UNSUPPORTED".into());
-            }
             run_native(NativeLaunch {
+                family_id: family.clone(),
                 game_dir,
+                mount_profile,
                 entry,
                 family_manifest,
                 family_library,
@@ -111,12 +116,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
             tracing::info!(
                 event = "astra_emu_cli_native_launch_completed",
-                engine = engine.id()
+                family = family.as_str()
             );
         }
         CliCommand::Headless {
-            engine,
+            family,
             game_dir,
+            mount_profile,
             entry,
             input,
             artifacts,
@@ -127,17 +133,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             video_provider,
             verify_snapshot,
             artifact_retention,
+            frame_sample_interval,
             audit_all_resources,
+            resume_snapshot,
+            snapshot_output,
         } => {
-            if engine.id() != "fvp" {
-                return Err("ASTRA_EMU_CLI_ENGINE_UNSUPPORTED".into());
-            }
             tracing::info!(
                 event = "astra_emu_cli_headless_started",
-                engine = engine.id()
+                family = family.as_str()
             );
             let report = run_headless(HeadlessLaunch {
+                family_id: family.clone(),
                 game_dir,
+                mount_profile,
                 entry,
                 input_path: input,
                 artifact_root: artifacts,
@@ -148,12 +156,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 video_provider,
                 verify_snapshot,
                 artifact_retention,
+                frame_sample_interval,
                 audit_all_resources,
+                resume_snapshot,
+                snapshot_output,
             })
             .await?;
             tracing::info!(
                 event = "astra_emu_cli_headless_completed",
-                engine = engine.id(),
+                family = family.as_str(),
                 fixed_steps = report.fixed_steps,
                 presented_frames = report.presented_frames,
                 terminal = report.terminal_reached
@@ -162,4 +173,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_minori_command_is_not_accepted() {
+        assert!(Cli::try_parse_from(["astra-emu-cli", "minori"]).is_err());
+    }
+
+    #[test]
+    fn generic_vfs_command_requires_explicit_family_and_profile() {
+        assert!(Cli::try_parse_from(["astra-emu-cli", "vfs", "verify"]).is_err());
+    }
+
+    #[test]
+    fn runtime_commands_hard_cut_from_engine_to_family_and_mount_profile() {
+        assert!(Cli::try_parse_from([
+            "astra-emu-cli",
+            "headless",
+            "--engine",
+            "fvp",
+            "--game-dir",
+            "game",
+            "--input",
+            "input.jsonl",
+            "--artifacts",
+            "artifacts"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "astra-emu-cli",
+            "headless",
+            "--family",
+            "minori",
+            "--game-dir",
+            "game",
+            "--input",
+            "input.jsonl",
+            "--artifacts",
+            "artifacts"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "astra-emu-cli",
+            "headless",
+            "--family",
+            "minori",
+            "--game-dir",
+            "game",
+            "--mount-profile",
+            "mount.yaml",
+            "--input",
+            "input.jsonl",
+            "--artifacts",
+            "artifacts"
+        ])
+        .is_ok());
+    }
 }

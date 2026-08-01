@@ -64,8 +64,11 @@ members = [
     "Engine/Plugins/Fixtures/vn-extension-provider",
     "Engine/Plugins/Fixtures/ui-component-provider",
     "Emulator/Source/FamilyApi/astra-emu-family-api",
+    "Emulator/Source/FamilyCore/astra-emu-family-core",
+    "Emulator/Source/FamilySupport/astra-emu-family-support",
     "Emulator/Source/Families/astra-emu-fvp-rfvp-core",
     "Emulator/Source/Families/astra-emu-fvp",
+    "Emulator/Source/Families/astra-emu-minori",
     "Emulator/Source/Manager/astra-emu-manager-core",
     "Emulator/Source/Providers/astra-emu-translation-openai-compatible",
     "Emulator/Source/Providers/astra-emu-metadata",
@@ -75,6 +78,7 @@ members = [
     "Emulator/Source/Programs/astra-emu-evidence",
     "Emulator/Source/Programs/astra-emu-family-package",
     "Emulator/Source/Programs/astra-emu-cli",
+    "Emulator/Source/Programs/astra-emu-minori-cli",
 ]
 exclude = [
     "Emulator/Source/Families/anzu-hal",
@@ -98,6 +102,7 @@ abi_stable = "0.11"
 ashpd = { version = "=0.12.3", default-features = false, features = ["tokio"] }
 base64 = "0.22"
 binrw = "0.15"
+blowfish = "=0.10.0"
 blake3 = "1"
 camino = { version = "1", features = ["serde1"] }
 clap = { version = "4", features = ["derive"] }
@@ -106,6 +111,8 @@ cosmic-text = "=0.18.2"
 cpal = "0.17"
 directories = "6"
 dunce = "1"
+flate2 = "=1.1.9"
+fuser = "=0.17.0"
 ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast"] }
 encoding_rs = "0.8"
 filetime = "0.2"
@@ -122,6 +129,7 @@ image = { version = "0.25", default-features = false, features = [
     "png",
     "jpeg",
     "webp",
+    "bmp",
 ] }
 indexmap = { version = "2", features = ["serde"] }
 js-sys = "0.3"
@@ -130,6 +138,7 @@ android-activity = { version = "0.6.1", features = ["native-activity", "game-act
 ndk = "0.9.0"
 object = { version = "0.37.3", default-features = false, features = ["read"] }
 libloading = "0.8"
+lru = "=0.18.1"
 libc = "0.2"
 logos = "0.16.1"
 mlua = { version = "0.10", features = ["luau", "vendored", "serialize"] }
@@ -145,6 +154,7 @@ proptest = "1.11.0"
 pollster = "0.4"
 proc-macro2 = "1"
 quote = "1"
+rc4 = "=0.2.0"
 reqwest = { version = "0.13.4", default-features = false, features = [
     "json",
     "rustls",

@@ -8,7 +8,6 @@ mod patch;
 mod probe;
 mod runtime_provider;
 mod scanner;
-
 pub use desktop_source::{
     DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary,
 };
