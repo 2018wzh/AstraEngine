@@ -1,5 +1,17 @@
 # Minori 移植日志
 
+## 2026-08-01
+
+### 原程序选择命令复核
+
+通过原版 `ScriptPool` command registry、`CommandSelect` vtable、parser 与选择 UI 创建路径交叉确认：`.select` 最多接受四个 positional option；每个 option 按第一个 `:` 切为显示文本和目标字段。UI 也只接受一至四项。
+
+当前不能从这些事实推出右侧字段必然是 label，也不能确认选择后写入变量、直接跳转还是经额外 script state 间接分派。runtime 因此保持 fail-closed，不把 `select` 变成猜测性的跳转。后续需要从选择确认回调追到脚本 runner，再用本地样本的脱敏 control-flow evidence 验证。
+
+同轮加入 `astra.emu.route_coverage.v1`。Minori runtime 仅发出由 script identity、command ordinal 和 opcode 派生的 coverage id；Host/E3 只保存 namespace、聚合 hash 与计数，不保存 URI、正文、operand 或资源内容。Windows 原生 E3 预检可以校验这一信号，但完整路线尚未产生 terminal 和 coverage 的授权基线，不能据此声明 E3。
+
+`astra-emu-cli run/headless` 的准备阶段不再为 FVP 保留 desktop reader 分支。两个当前 family 均经显式注册的 `LegacyVfsFamilyFactory` 挂载，并统一以 `LegacyMountedVfsReaderAdapter` 向 runtime plugin 提供资源、范围读取审计和 full verify。启动 entry 必须由调用方给出已挂载的完整 URI；缺失或不属于 manifest 的 URI 直接阻断，不能按扩展名或扫描顺序猜测脚本。
+
 ## 2026-07-21
 
 ### 目标
