@@ -301,6 +301,7 @@ pub enum MinoriRuntimeError {
 pub enum MinoriEffectViolation {
     Tokenization,
     UnsupportedKind,
+    SecondarySlot,
     OperandCount,
     ResourceSequence,
     Timing,
@@ -649,6 +650,13 @@ fn execute_control(
         "transition" => execute_transition(command, state),
         "stage" => execute_stage(command, state),
         "effect" => execute_effect(command, state),
+        // The original command registration routes `.effect2` through the
+        // same parser but binds it to a separate compositor slot. It must not
+        // overwrite the primary timeline until dual-slot composition and
+        // snapshot semantics are implemented together.
+        "effect2" => Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::SecondarySlot,
+        }),
         "panel" => execute_panel(command, state),
         "chain" => {
             let ScControlFlow::Chain { target } = &command.control_flow else {
@@ -1713,6 +1721,25 @@ mod tests {
                 MinoriRuntimeError::Effect { violation }
             );
         }
+    }
+
+    #[test]
+    fn effect2_is_a_verified_secondary_slot_boundary() {
+        let source = b".effect2 CrossFade2 first.png:second.png 320 100\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.step(1, 4).unwrap_err(),
+            MinoriRuntimeError::Effect {
+                violation: MinoriEffectViolation::SecondarySlot,
+            }
+        );
     }
 
     #[test]
