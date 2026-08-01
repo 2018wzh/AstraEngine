@@ -1,6 +1,7 @@
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -47,6 +48,29 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
         }
         self.assertFalse(build_astraemu_desktop.has_absolute_path(value))
         self.assertNotIn("path", json.dumps(value).lower())
+
+    def test_family_library_name_is_target_and_family_specific(self):
+        self.assertEqual(
+            build_astraemu_desktop.family_library_name("minori", "x86_64-pc-windows-msvc"),
+            "astra_emu_minori.dll",
+        )
+        self.assertEqual(
+            build_astraemu_desktop.family_library_name("fvp", "x86_64-unknown-linux-gnu"),
+            "libastra_emu_fvp.so",
+        )
+
+    def test_copy_notice_uses_an_explicit_family_name_and_rejects_collisions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            source = root / "THIRD_PARTY_NOTICES.md"
+            source.write_text("notice", encoding="utf-8")
+            output = root / "output"
+            output.mkdir()
+            build_astraemu_desktop.copy_notice(source, output, "MINORI_THIRD_PARTY_NOTICES.md")
+            self.assertEqual((output / "MINORI_THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8"), "notice")
+            with self.assertRaises(SystemExit) as raised:
+                build_astraemu_desktop.copy_notice(source, output, "MINORI_THIRD_PARTY_NOTICES.md")
+            self.assertEqual(str(raised.exception), "ASTRA_EMU_DESKTOP_NOTICE_COLLISION")
 
 
 if __name__ == "__main__":

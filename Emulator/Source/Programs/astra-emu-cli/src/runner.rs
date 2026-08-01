@@ -5269,7 +5269,7 @@ impl<'a> RuntimeDriver<'a> {
                     let rgba8 = self.rasterizer.render_prepared(frame)?;
                     self.raster_timings_ns.push(elapsed_ns(raster_started)?);
                     self.record_perfetto_phase("scene.cpu_oracle", 4, raster_started)?;
-                    self.base_frame = Some((width, height, rgba8));
+                    self.set_underlay_frame(width, height, rgba8);
                     self.visual_dirty = false;
                 }
             }
@@ -5288,6 +5288,34 @@ impl<'a> RuntimeDriver<'a> {
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
         Ok(())
+    }
+
+    fn resolve_text_underlay(&mut self) -> Result<(u32, u32, Vec<u8>), String> {
+        if let Some(underlay) = &self.underlay_frame {
+            return Ok(underlay.clone());
+        }
+        if !self.visual_dirty {
+            return Err("ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING".into());
+        }
+        let frame = self
+            .pending_render_frame
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
+        let (width, height) = frame.dimensions();
+        let raster_started = Instant::now();
+        let rgba8 = self.rasterizer.render_prepared(frame)?;
+        self.raster_timings_ns.push(elapsed_ns(raster_started)?);
+        self.record_perfetto_phase("scene.cpu_oracle", 4, raster_started)?;
+        self.set_underlay_frame(width, height, rgba8);
+        self.visual_dirty = false;
+        self.underlay_frame
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING".to_owned())
+    }
+
+    fn set_underlay_frame(&mut self, width: u32, height: u32, rgba8: Vec<u8>) {
+        self.underlay_frame = Some((width, height, rgba8.clone()));
+        self.base_frame = Some((width, height, rgba8));
     }
 
     async fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {

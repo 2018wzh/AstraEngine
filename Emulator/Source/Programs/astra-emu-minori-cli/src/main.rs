@@ -40,6 +40,16 @@ enum Command {
         #[arg(long)]
         game_dir: PathBuf,
     },
+    RecoverGarbroProfile {
+        #[arg(long)]
+        formats: PathBuf,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        game_dir: PathBuf,
+        #[arg(long)]
+        private_patch: PathBuf,
+    },
     CensusScripts {
         #[arg(long)]
         game_dir: PathBuf,
@@ -62,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let action = match &command {
         Command::ScanArchives { .. } => "scan_archives",
         Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
+        Command::RecoverGarbroProfile { .. } => "recover_garbro_profile",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
     };
@@ -77,6 +88,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             title,
             game_dir,
         } => importer::import(&formats, &title, &game_dir),
+        Command::RecoverGarbroProfile {
+            formats,
+            title,
+            game_dir,
+            private_patch,
+        } => importer::recover_profile(&formats, &title, &game_dir, &private_patch),
         Command::CensusScripts {
             game_dir,
             mount_profile,

@@ -2,6 +2,13 @@
 
 ## 2026-08-01
 
+### 安装包 E2 回归：同 tick underlay 与输入 wire format
+
+- 为所有 family 通用的 desktop packager 增加显式 `--family` 选择；Minori 包包含该 family 的已签名动态库、manifest 和独立第三方 notice。FVP 不再是路径或文件名假设。
+- 首次从安装包启动真实样本时，旧私有输入文件因 externally-tagged event、PascalCase button state 和字面量 `\\n` 被严格拒绝。按当前 `astra.user_input_sequence.v1` 重新序列化后才继续；reader 没有接受旧 wire format 的兼容分支。
+- 发现并修复 Headless 的有序合成缺口：`render_resource_frame` 与文本 capture 位于同一 runtime step 时，Host 过去在 effect 循环结束后才把资源帧栅格化，且没有写入 `underlay_frame`，导致 `ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING`。现在只会从该 step 已提交的显式 render frame 生成 underlay；没有 render frame 仍保持 blocking，不生成替代画面。
+- 修复后，安装包对授权样本完成一轮 local-private Headless E2：400 fixed ticks、12 个提交帧、1 个 checkpoint、snapshot 校验通过、无 runtime diagnostic。该轮只观测入口初始演出，未发送未验证的对话推进或选项输入，因而不是 terminal route、完整视觉审查或 Windows E3。
+
 ### 原程序选择命令复核
 
 通过原版 `ScriptPool` command registry、`CommandSelect` vtable、parser 与选择 UI 创建路径交叉确认：`.select` 最多接受四个 positional option；每个 option 按第一个 `:` 切为显示文本和目标字段。UI 也只接受一至四项。

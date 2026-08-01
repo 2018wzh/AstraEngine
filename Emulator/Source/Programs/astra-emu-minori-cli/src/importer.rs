@@ -2,11 +2,12 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::{Read, Write},
-    path::Path,
+    path::{Component, Path},
 };
 
 use astra_emu_family_support::{
-    enforce_private_file_permissions, LegacyVfsMountProfile, VFS_MOUNT_PROFILE_SCHEMA,
+    enforce_private_file_permissions, load_private_profile, LegacyVfsMountProfile,
+    VFS_MOUNT_PROFILE_SCHEMA,
 };
 use astra_emu_minori::{
     MinoriCacheOptions, MinoriFamilyOptions, MinoriPrivateProfilePayload, MinoriRolePrivateProfile,
@@ -30,17 +31,18 @@ struct ImportedRole {
     version: i32,
 }
 
+struct ImportMaterial {
+    private_bytes: Vec<u8>,
+    patch: String,
+    profile_bytes: Vec<u8>,
+}
+
 pub fn import(
     formats: &Path,
     title: &str,
     game_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if title.is_empty() || title.len() > 512 {
-        return Err("ASTRA_EMU_GARBRO_TITLE".into());
-    }
-    if !game_dir.is_dir() {
-        return Err("ASTRA_EMU_GARBRO_GAME_DIRECTORY".into());
-    }
+    validate_request(title, game_dir)?;
     let patch_path = game_dir.join(PATCH_NAME);
     let profile_path = game_dir.join(PROFILE_NAME);
     let patch_temp = game_dir.join(format!(".{PATCH_NAME}.tmp"));
@@ -51,6 +53,92 @@ pub fn import(
     {
         return Err("ASTRA_EMU_GARBRO_OUTPUT_EXISTS".into());
     }
+    let material = import_material(formats, title, PATCH_NAME)?;
+    write_new_private(&patch_temp, material.patch.as_bytes())?;
+    if let Err(error) = write_new_private(&profile_temp, &material.profile_bytes) {
+        rollback(&[&patch_temp])?;
+        return Err(error);
+    }
+    if let Err(error) = fs::rename(&patch_temp, &patch_path) {
+        rollback(&[&patch_temp, &profile_temp])?;
+        return Err(error.into());
+    }
+    if let Err(error) = fs::rename(&profile_temp, &profile_path) {
+        rollback(&[&profile_temp, &patch_path])?;
+        return Err(error.into());
+    }
+    println!("{{\"schema\":\"astra.emu.minori.garbro_import.v2\",\"status\":\"passed\"}}");
+    Ok(())
+}
+
+pub fn recover_profile(
+    formats: &Path,
+    title: &str,
+    game_dir: &Path,
+    private_patch: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validate_request(title, game_dir)?;
+    let private_patch = private_patch_relative(private_patch)?;
+    let patch_path = game_dir.join(&private_patch);
+    let profile_path = game_dir.join(PROFILE_NAME);
+    let patch_temp = game_dir.join(format!(".{PATCH_NAME}.tmp"));
+    let profile_temp = game_dir.join(format!(".{PROFILE_NAME}.tmp"));
+    if !patch_path.is_file() {
+        return Err("ASTRA_EMU_GARBRO_PATCH_MISSING".into());
+    }
+    if [&profile_path, &patch_temp, &profile_temp]
+        .into_iter()
+        .any(|path| path.exists())
+    {
+        return Err("ASTRA_EMU_GARBRO_OUTPUT_EXISTS".into());
+    }
+    let material = import_material(formats, title, &private_patch)?;
+    let loaded = load_private_profile(&patch_path, "minori.paz", MINORI_PRIVATE_PROFILE_SCHEMA)
+        .map_err(|_| "ASTRA_EMU_GARBRO_PATCH_VERIFY")?;
+    if loaded.payload() != material.private_bytes {
+        return Err("ASTRA_EMU_GARBRO_PATCH_MISMATCH".into());
+    }
+    write_new_private(&profile_temp, &material.profile_bytes)?;
+    if let Err(error) = fs::rename(&profile_temp, &profile_path) {
+        rollback(&[&profile_temp])?;
+        return Err(error.into());
+    }
+    println!(
+        "{{\"schema\":\"astra.emu.minori.garbro_profile_recovery.v1\",\"status\":\"passed\"}}"
+    );
+    Ok(())
+}
+
+fn private_patch_relative(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.extension().and_then(|extension| extension.to_str()) != Some("luau")
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("ASTRA_EMU_GARBRO_PATCH_PATH".into());
+    }
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "ASTRA_EMU_GARBRO_PATCH_PATH".into())
+}
+
+fn validate_request(title: &str, game_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if title.is_empty() || title.len() > 512 {
+        return Err("ASTRA_EMU_GARBRO_TITLE".into());
+    }
+    if !game_dir.is_dir() {
+        return Err("ASTRA_EMU_GARBRO_GAME_DIRECTORY".into());
+    }
+    Ok(())
+}
+
+fn import_material(
+    formats: &Path,
+    title: &str,
+    private_patch: &str,
+) -> Result<ImportMaterial, Box<dyn std::error::Error>> {
     let bytes = fs::read(formats)?;
     if bytes.len() < 12 || &bytes[..8] != b"GARbroDB" {
         return Err("ASTRA_EMU_GARBRO_HEADER".into());
@@ -120,26 +208,15 @@ pub fn import(
         family_id: "minori".into(),
         mount_id: "minori-main".into(),
         prefix: "minori:/".into(),
-        private_patch: Some(PATCH_NAME.into()),
+        private_patch: Some(private_patch.into()),
         family_options_schema: MINORI_FAMILY_OPTIONS_SCHEMA.into(),
         family_options: serde_json::to_value(options)?,
     };
-    let profile_bytes = serde_yaml::to_string(&profile)?.into_bytes();
-    write_new_private(&patch_temp, patch.as_bytes())?;
-    if let Err(error) = write_new_private(&profile_temp, &profile_bytes) {
-        rollback(&[&patch_temp])?;
-        return Err(error);
-    }
-    if let Err(error) = fs::rename(&patch_temp, &patch_path) {
-        rollback(&[&patch_temp, &profile_temp])?;
-        return Err(error.into());
-    }
-    if let Err(error) = fs::rename(&profile_temp, &profile_path) {
-        rollback(&[&profile_temp, &patch_path])?;
-        return Err(error.into());
-    }
-    println!("{{\"schema\":\"astra.emu.minori.garbro_import.v2\",\"status\":\"passed\"}}");
-    Ok(())
+    Ok(ImportMaterial {
+        private_bytes,
+        patch,
+        profile_bytes: serde_yaml::to_string(&profile)?.into_bytes(),
+    })
 }
 
 fn write_new_private(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
@@ -444,7 +521,8 @@ fn array_bytes(
 
 #[cfg(test)]
 mod tests {
-    use super::{import, PATCH_NAME};
+    use super::{import, recover_profile, PATCH_NAME, PROFILE_NAME};
+    use std::path::Path;
 
     #[test]
     fn existing_output_blocks_before_formats_are_read() {
@@ -452,5 +530,46 @@ mod tests {
         std::fs::write(game.path().join(PATCH_NAME), b"private").unwrap();
         let error = import(&game.path().join("missing.dat"), "title", game.path()).unwrap_err();
         assert_eq!(error.to_string(), "ASTRA_EMU_GARBRO_OUTPUT_EXISTS");
+    }
+
+    #[test]
+    fn profile_recovery_requires_an_existing_private_patch() {
+        let game = tempfile::tempdir().unwrap();
+        let error = recover_profile(
+            &game.path().join("missing.dat"),
+            "title",
+            game.path(),
+            Path::new(PATCH_NAME),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "ASTRA_EMU_GARBRO_PATCH_MISSING");
+    }
+
+    #[test]
+    fn profile_recovery_never_overwrites_an_existing_profile() {
+        let game = tempfile::tempdir().unwrap();
+        std::fs::write(game.path().join(PATCH_NAME), b"private").unwrap();
+        std::fs::write(game.path().join(PROFILE_NAME), b"private").unwrap();
+        let error = recover_profile(
+            &game.path().join("missing.dat"),
+            "title",
+            game.path(),
+            Path::new(PATCH_NAME),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "ASTRA_EMU_GARBRO_OUTPUT_EXISTS");
+    }
+
+    #[test]
+    fn profile_recovery_rejects_non_relative_patch_paths_before_format_read() {
+        let game = tempfile::tempdir().unwrap();
+        let error = recover_profile(
+            &game.path().join("missing.dat"),
+            "title",
+            game.path(),
+            Path::new("../outside.luau"),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "ASTRA_EMU_GARBRO_PATCH_PATH");
     }
 }

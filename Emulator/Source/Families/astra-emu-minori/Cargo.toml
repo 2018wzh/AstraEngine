@@ -45,3 +45,8 @@ tempfile.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 serde_json.workspace = true
 sha2.workspace = true
+
+[package.metadata.astra]
+format_contract = "https://github.com/morkt/GARbro"
+format_contract_revision = "b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0"
+license_notice = "THIRD_PARTY_NOTICES.md"

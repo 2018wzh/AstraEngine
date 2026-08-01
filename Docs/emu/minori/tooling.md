@@ -16,6 +16,8 @@ cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount
 
 Minori 专用导入与脚本研究放在独立 CLI：
 
+当根目录的旧 patch 已存在而对应 mount profile 缺失时，可使用 `recover-garbro-profile` 恢复 profile。调用方必须显式提供相对游戏根的 data-only private patch；工具以当前 GARbro scheme 重建私有 payload 后与该 patch 的注册 payload 做精确字节比较。只在 profile 和临时目标都不存在且比较一致时原子写入 profile；不覆盖 patch、不转换旧 decoder callback patch，也不输出 key、payload 或本地路径。
+
 ```sh
 cargo run -p astra-emu-minori-cli -- scan-archives --game-dir <case-root>
 cargo run -p astra-emu-minori-cli -- import-garbro-scheme --formats <Formats.dat> --title <title> --game-dir <case-root>
@@ -26,6 +28,8 @@ cargo run -p astra-emu-minori-cli -- census-media --game-dir <case-root> --mount
 `scan-archives` 递归识别 `.paz` 与 `.pazA` 至 `.pazZ`，阻断 symlink、空文件、重复 role/part 和不连续分卷。输出只包含 role、文件数、字节数和 inventory hash，不写本地路径或 payload。当前样本结果为 8 个逻辑 archive、18 个物理文件、5742470010 bytes，required role set 完整匹配。
 
 `import-garbro-scheme` 使用纯 Rust 两阶段 NRBF reader，只接受预期的 Musica/PAZ graph。它原子生成 data-only `astraemu.patch.luau` 与 `astraemu.minori.mount.yaml`；任一目标或临时文件已存在即阻断，成对提交失败会回滚本次新文件。Luau 只调用 `astra.family.register_private_profile` 注册 opaque key/policy payload，不参与 index 或 entry 解密。key 不进入 YAML、stdout、report 或日志。
+
+Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged `event` 形状，例如键盘输入使用 `{"type":"keyboard","state":"pressed",...}`，退出使用 `{"type":"shutdown"}`。旧 externally-tagged 的 `{"Keyboard":...}`、PascalCase button state 与裸 `"Shutdown"` 会以 `ASTRA_EMU_HEADLESS_INPUT_PARSE` 阻断；调用方必须重新序列化同一物理事件，不能让 reader 兼容两种 wire format。
 
 当前合法样本已通过真实导入、八包 14502-entry manifest v2 full verify，以及 89 脚本的 payload-free census。full verify 共执行 43818 次 range read、读取 6624958365 个 decoded bytes；该轮显式关闭 cache。八包 cache identity 复核因平台缓存卷空间不足保持 blocking。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
 
