@@ -918,6 +918,13 @@ impl HostState {
                 })();
                 let _ = reply.send(result);
             }
+            HostCommand::InjectSurfaceDeviceLoss { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "surface.test.inject_device_loss",
+                    "Headless is an E2 test host and does not emulate native device loss",
+                )));
+            }
             HostCommand::DestroySurface { surface, reply } => {
                 let capture =
                     self.profile.readback_policy == HeadlessReadbackPolicy::RasterizedFrames;
@@ -1102,6 +1109,13 @@ impl HostState {
                     }
                 });
                 let _ = reply.send(result);
+            }
+            HostCommand::InjectAudioDeviceLoss { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "audio.test.inject_device_loss",
+                    "Headless is an E2 test host and does not emulate native device loss",
+                )));
             }
             HostCommand::CloseAudio { output, reply } => {
                 let result = (|| {

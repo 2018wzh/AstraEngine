@@ -36,6 +36,7 @@ use astra_media::{
     DecodeProviderRegistry, DecodeRequest, DecodedVideoFrame, DecodedVideoStream,
     ImageDecodeProvider, MediaError, SymphoniaAudioStreamDecoder, DECODED_VIDEO_STREAM_SCHEMA,
 };
+use astra_observability::{PerfettoTraceConfig, PerfettoTraceWriter};
 use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput,
     GamepadControl as PlatformGamepadControl, HeadlessArtifactPolicy, HeadlessArtifactRetention,
@@ -101,6 +102,7 @@ pub struct NativeLaunch {
     pub family_manifest: Option<PathBuf>,
     pub family_library: Option<PathBuf>,
     pub enable_audio: bool,
+    pub perfetto_trace: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -589,6 +591,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             },
             resume: None,
             frame_sample_interval: 1,
+            perfetto_trace: launch.perfetto_trace.clone(),
         },
     )?;
     let mut viewport = NativeViewport {
@@ -627,6 +630,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         }
     };
     let fixed_step = driver.fixed_step;
+    let perfetto_cleanup = driver.finish_perfetto();
     let audio_cleanup = std::mem::take(&mut driver.audio)
         .shutdown(&host.client)
         .await
@@ -650,6 +654,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .map_err(|error| error.to_string());
     prepared.evidence.cleanup();
     let cleanup_errors = [
+        ("perfetto", perfetto_cleanup),
         ("audio", audio_cleanup),
         ("runtime", runtime_cleanup),
         ("surface", surface_cleanup),
@@ -1266,6 +1271,11 @@ fn elapsed_ns(started: Instant) -> Result<u64, String> {
         .map_err(|_| "ASTRA_EMU_HEADLESS_TIMING_OVERFLOW".to_owned())
 }
 
+fn elapsed_ns_since(origin: Instant, timestamp: Instant) -> Result<u64, String> {
+    u64::try_from(timestamp.duration_since(origin).as_nanos())
+        .map_err(|_| "ASTRA_EMU_NATIVE_PERFETTO_TIMING_OVERFLOW".to_owned())
+}
+
 fn duration_distribution(mut samples: Vec<u64>) -> HeadlessDurationDistributionV1 {
     if samples.is_empty() {
         return HeadlessDurationDistributionV1 {
@@ -1711,6 +1721,7 @@ struct RuntimeDriver<'a> {
     pending_waits: BTreeMap<String, PendingWait>,
     rasterizer: CpuStageRasterizer,
     pending_render_frame: Option<LegacyRenderFrameV1>,
+    queued_visual_hash: Option<Hash256>,
     visual_dirty: bool,
     image_decoders: DecodeProviderRegistry,
     text_presenter: BoundTextPresenter,
@@ -1738,6 +1749,7 @@ struct RuntimeDriver<'a> {
     raster_timings_ns: Vec<u64>,
     media_timings_ns: Vec<u64>,
     present_timings_ns: Vec<u64>,
+    perfetto: Option<NativePerfettoCapture>,
 }
 
 #[derive(Clone, Copy)]
@@ -1754,6 +1766,76 @@ struct RuntimeDriverConfig<'a> {
     text: TextProviderBinding<'a>,
     resume: Option<HeadlessDriverResumeV1>,
     frame_sample_interval: u64,
+    perfetto_trace: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativePerfettoPhase {
+    name: &'static str,
+    track: u32,
+    fixed_step: u64,
+    start_ns: u64,
+    duration_ns: u64,
+}
+
+struct NativePerfettoCapture {
+    started: Instant,
+    output_path: PathBuf,
+    phases: Vec<NativePerfettoPhase>,
+}
+
+impl NativePerfettoCapture {
+    fn new(output_path: PathBuf) -> Self {
+        Self {
+            started: Instant::now(),
+            output_path,
+            phases: Vec::new(),
+        }
+    }
+
+    fn record(
+        &mut self,
+        name: &'static str,
+        track: u32,
+        fixed_step: u64,
+        started: Instant,
+    ) -> Result<(), String> {
+        self.phases.push(NativePerfettoPhase {
+            name,
+            track,
+            fixed_step,
+            start_ns: elapsed_ns_since(self.started, started)?,
+            duration_ns: elapsed_ns(started)?,
+        });
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<(), String> {
+        if self.phases.is_empty() {
+            return Err("ASTRA_EMU_NATIVE_PERFETTO_NO_SAMPLES".into());
+        }
+        self.phases
+            .sort_by_key(|phase| (phase.start_ns, phase.track));
+        let mut writer = PerfettoTraceWriter::create(PerfettoTraceConfig::production(
+            self.output_path,
+            "astra-emu-cli-native",
+        ))
+        .map_err(|error| error.to_string())?;
+        for phase in self.phases {
+            writer
+                .complete(
+                    "astra.emu.native",
+                    phase.name,
+                    phase.track,
+                    Some(phase.fixed_step),
+                    phase.start_ns,
+                    phase.duration_ns,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        writer.finish().map_err(|error| error.to_string())?;
+        Ok(())
+    }
 }
 
 struct ExecutionConfig<'a> {
@@ -1981,6 +2063,7 @@ async fn execute_sequence(
             text: config.text,
             resume: config.resume_driver,
             frame_sample_interval: config.frame_sample_interval,
+            perfetto_trace: None,
         },
     )?;
     driver.restore_pending_video().await?;
@@ -2139,6 +2222,24 @@ async fn execute_sequence(
 }
 
 impl<'a> RuntimeDriver<'a> {
+    fn record_perfetto_phase(
+        &mut self,
+        name: &'static str,
+        track: u32,
+        started: Instant,
+    ) -> Result<(), String> {
+        if let Some(perfetto) = self.perfetto.as_mut() {
+            perfetto.record(name, track, self.fixed_step, started)?;
+        }
+        Ok(())
+    }
+
+    fn finish_perfetto(&mut self) -> Result<(), String> {
+        self.perfetto
+            .take()
+            .map_or(Ok(()), NativePerfettoCapture::finish)
+    }
+
     fn new(
         runtime: &'a mut AstraEmuRuntimeProvider,
         session_id: GameRuntimeSessionId,
@@ -2165,6 +2266,7 @@ impl<'a> RuntimeDriver<'a> {
             pending_waits: BTreeMap::new(),
             rasterizer: CpuStageRasterizer::default(),
             pending_render_frame: None,
+            queued_visual_hash: None,
             visual_dirty: false,
             image_decoders,
             text_presenter: BoundTextPresenter::new(
@@ -2196,6 +2298,7 @@ impl<'a> RuntimeDriver<'a> {
             raster_timings_ns: Vec::new(),
             media_timings_ns: Vec::new(),
             present_timings_ns: Vec::new(),
+            perfetto: config.perfetto_trace.map(NativePerfettoCapture::new),
         };
         if let Some(resume) = config.resume {
             driver.fixed_step = resume.fixed_step;
@@ -2438,6 +2541,7 @@ impl<'a> RuntimeDriver<'a> {
             .map_err(|_| "ASTRA_EMU_HEADLESS_STEP_PAYLOAD".to_owned())?,
         })?;
         self.runtime_timings_ns.push(elapsed_ns(runtime_started)?);
+        self.record_perfetto_phase("runtime_step", 1, runtime_started)?;
         self.next_step_mode = RuntimeStepMode::Live;
         self.fixed_step = next_step;
         let mut rendered = false;
@@ -2596,6 +2700,7 @@ impl<'a> RuntimeDriver<'a> {
                                 self.text_presenter
                                     .render(&underlay, &text, &presentation)?;
                             self.raster_timings_ns.push(elapsed_ns(text_started)?);
+                            self.record_perfetto_phase("text_raster", 4, text_started)?;
                             for hash in presented.layout_hashes {
                                 self.state_trace
                                     .extend_from_slice(hash.to_string().as_bytes());
@@ -2619,12 +2724,14 @@ impl<'a> RuntimeDriver<'a> {
             return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_ORPHANED".into());
         }
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
+        self.record_perfetto_phase("effect_dispatch", 2, effect_started)?;
         let media_started = Instant::now();
         if self.audio_enabled {
             self.audio.pump(self.platform).await?;
         }
         let video_changed = self.advance_video().await?;
         self.media_timings_ns.push(elapsed_ns(media_started)?);
+        self.record_perfetto_phase("media", 3, media_started)?;
         let presentation_changed = rendered || video_changed;
         let sample_due = self.fixed_step.is_multiple_of(self.frame_sample_interval);
         if sample_due && (self.visual_dirty || video_changed) {
@@ -2638,12 +2745,14 @@ impl<'a> RuntimeDriver<'a> {
                 let raster_started = Instant::now();
                 let rgba8 = self.rasterizer.render_prepared(frame)?;
                 self.raster_timings_ns.push(elapsed_ns(raster_started)?);
+                self.record_perfetto_phase("raster", 4, raster_started)?;
                 self.base_frame = Some((width, height, rgba8));
                 self.visual_dirty = false;
             }
             let present_started = Instant::now();
             self.present().await?;
             self.present_timings_ns.push(elapsed_ns(present_started)?);
+            self.record_perfetto_phase("present", 5, present_started)?;
         }
         if presentation_changed {
             for wait in self.pending_waits.values_mut() {
@@ -2658,7 +2767,20 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn queue_render_frame(&mut self, frame: LegacyRenderFrameV1) -> Result<(), String> {
+        // The FVP adapter may publish its complete visual state on every VM tick. A
+        // byte-identical packet cannot change the platform surface, so keep the
+        // content identity host-local and avoid re-rasterizing/re-presenting it.
+        // This is intentionally before `prepare`: it neither changes the provider
+        // packet nor exposes resource pixels in logs, save data, or evidence.
+        let visual_hash = Hash256::from_sha256(
+            &postcard::to_allocvec(&frame)
+                .map_err(|_| "ASTRA_EMU_NATIVE_RENDER_FRAME_ENCODE".to_owned())?,
+        );
+        if self.queued_visual_hash == Some(visual_hash) {
+            return Ok(());
+        }
         self.pending_render_frame = Some(self.rasterizer.prepare(frame)?);
+        self.queued_visual_hash = Some(visual_hash);
         self.visual_dirty = true;
         Ok(())
     }

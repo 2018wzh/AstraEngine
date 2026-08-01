@@ -243,6 +243,8 @@ export component ManagerWindow inherits Window {
     callback search(string);
     callback configure-nls(string);
     callback game-input(string, bool, float);
+    callback save-game();
+    callback restore-game();
     callback leave-game();
     callback open-diagnostics();
     callback open-translation();
@@ -308,6 +310,8 @@ export component ManagerWindow inherits Window {
                 if event.text == Key.LeftArrow { root.game-input("left", true, 1); return accept; }
                 if event.text == Key.RightArrow { root.game-input("right", true, 1); return accept; }
                 if event.text == " " { root.game-input("space", true, 1); return accept; }
+                if event.text == Key.F5 { root.save-game(); return accept; }
+                if event.text == Key.F9 { root.restore-game(); return accept; }
                 return reject;
             }
             key-released(event) => {

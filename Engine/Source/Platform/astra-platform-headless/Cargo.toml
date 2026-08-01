@@ -15,7 +15,10 @@ astra-core = { path = "../../Runtime/astra-core" }
 astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-media = { path = "../../Runtime/astra-media" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
-astra-platform = { path = "../astra-platform" }
+# Headless is publish=false test infrastructure.  It must consume the same
+# test-driver command enum as the native Windows E3 driver so Cargo feature
+# unification cannot leave its host loop non-exhaustive.
+astra-platform = { path = "../astra-platform", features = ["platform-test-driver"] }
 astra-platform-common = { path = "../astra-platform-common" }
 astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 image.workspace = true

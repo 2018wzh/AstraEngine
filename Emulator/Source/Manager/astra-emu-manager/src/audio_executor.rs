@@ -6,16 +6,19 @@ use std::{
     },
 };
 
+use astra_core::Hash256;
 use astra_emu_family_api::{LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat};
-use astra_media::{
-    DecodeKind, DecodeOutput, DecodeProvider, DecodeRequest, PlayerDecodedAudio,
-    SymphoniaAudioDecodeProvider,
-};
+use astra_media::{open_symphonia_audio_stream, PlayerDecodedAudio};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 pub(crate) const MAX_RESOURCE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_CONVERTED_SAMPLES: usize = 32 * 1024 * 1024;
+// Resource-backed legacy music follows the same 512 MiB converted-audio
+// ceiling as the Headless E2 host.  Keep the smaller working-set limit above
+// for submitted/movie PCM; those paths are incrementally supplied by their
+// producers and must not acquire an archive-sized allocation.
+const MAX_RESOURCE_CONVERTED_SAMPLES: usize = 128 * 1024 * 1024;
 const TARGET_BUFFERED_FRAMES: usize = 8_192;
 const RENDER_CHUNK_FRAMES: usize = 1_024;
 const MAX_LOADED_STREAMS: usize = 512;
@@ -36,6 +39,9 @@ pub(crate) struct HostAudioExecutor {
     master_volume: f32,
     stream_error: Arc<std::sync::atomic::AtomicBool>,
     observed_underflows: u64,
+    meter_peak: f32,
+    meter_energy: f64,
+    meter_samples: u64,
 }
 
 struct NativeAudioProducer(Producer<f32>);
@@ -177,6 +183,9 @@ impl HostAudioExecutor {
             master_volume: 1.0,
             stream_error,
             observed_underflows: 0,
+            meter_peak: 0.0,
+            meter_energy: 0.0,
+            meter_samples: 0,
         })
     }
 
@@ -357,8 +366,20 @@ impl HostAudioExecutor {
             // queue; only underflows while a voice is active are fatal.
             self.observed_underflows = underflows;
         } else if underflows > self.observed_underflows {
+            let newly_observed = underflows - self.observed_underflows;
             self.observed_underflows = underflows;
-            return Err("ASTRA_EMU_AUDIO_CALLBACK_UNDERFLOW".into());
+            // Archive-backed resource preparation is currently synchronous on the
+            // Manager event loop.  A device callback can therefore consume the
+            // already submitted queue before the next pump opportunity.  This is
+            // observable audio degradation, not a renderer invariant violation:
+            // retain the count for E3 evidence and let the host refill instead of
+            // terminating the game window from the presentation boundary.
+            tracing::warn!(
+                event = "astra.emu.audio.callback_underflow",
+                newly_observed,
+                total_underflows = underflows,
+                active_voice_count = self.voices.len()
+            );
         }
         let consumed = self.telemetry.consumed_samples();
         let target = TARGET_BUFFERED_FRAMES as u64;
@@ -372,6 +393,14 @@ impl HostAudioExecutor {
                 .unwrap_or(RENDER_CHUNK_FRAMES)
                 .min(RENDER_CHUNK_FRAMES);
             let samples = self.mix(frames)?;
+            for sample in &samples {
+                self.meter_peak = self.meter_peak.max(sample.abs());
+                self.meter_energy += f64::from(*sample) * f64::from(*sample);
+            }
+            self.meter_samples = self
+                .meter_samples
+                .checked_add(samples.len() as u64)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_METER_COUNTER_OVERFLOW".to_owned())?;
             self.producer
                 .push_samples(&samples)
                 .map_err(|_| "ASTRA_EMU_AUDIO_QUEUE_OVERFLOW".to_owned())?;
@@ -389,6 +418,25 @@ impl HostAudioExecutor {
         Ok(())
     }
 
+    pub(crate) fn meter_hash(&self) -> Hash256 {
+        Hash256::from_sha256(
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                self.submitted_samples,
+                self.telemetry.consumed_samples(),
+                self.telemetry.underflows(),
+                self.meter_peak.to_bits(),
+                self.meter_energy.to_bits(),
+                self.meter_samples
+            )
+            .as_bytes(),
+        )
+    }
+
+    pub(crate) fn has_audible_output(&self) -> bool {
+        self.meter_samples > 0 && self.meter_peak.is_finite() && self.meter_peak > 0.0
+    }
+
     pub(crate) fn reset(&mut self) -> Result<(), String> {
         if self.started {
             self._stream
@@ -401,6 +449,9 @@ impl HostAudioExecutor {
         self.voices.clear();
         self.master_volume = 1.0;
         self.observed_underflows = self.telemetry.underflows();
+        self.meter_peak = 0.0;
+        self.meter_energy = 0.0;
+        self.meter_samples = 0;
         Ok(())
     }
 
@@ -415,21 +466,20 @@ impl HostAudioExecutor {
             return Err("ASTRA_EMU_AUDIO_LOADED_STREAM_BUDGET".into());
         }
         let codec = codec_name(encoding, resource_uri, &bytes)?;
-        let decoded = SymphoniaAudioDecodeProvider
-            .decode(&DecodeRequest {
-                kind: DecodeKind::Audio,
-                codec,
-                bytes,
-                profile: "astra.emu.fvp.audio.v1".into(),
-            })
-            .map_err(|_| "ASTRA_EMU_AUDIO_DECODE_FAILED".to_owned())?;
-        let DecodeOutput::CpuBuffer { bytes, format, .. } = decoded.output else {
-            return Err("ASTRA_EMU_AUDIO_DECODE_OUTPUT".into());
-        };
-        let audio = PlayerDecodedAudio::parse(&format, &bytes, MAX_CONVERTED_SAMPLES)
-            .map_err(|error| error.to_string())?
-            .convert_to(self.sample_rate, self.channels, MAX_CONVERTED_SAMPLES)
+        let audio = decode_resource_audio(codec, bytes, MAX_RESOURCE_CONVERTED_SAMPLES)?
+            .convert_to(
+                self.sample_rate,
+                self.channels,
+                MAX_RESOURCE_CONVERTED_SAMPLES,
+            )
             .map_err(|error| error.to_string())?;
+        tracing::info!(
+            event = "astra.emu.audio.resource_loaded",
+            stream_id,
+            sample_rate = audio.sample_rate,
+            channels = audio.channels,
+            decoded_samples = audio.samples.len()
+        );
         self.voices.remove(&stream_id);
         self.streaming_formats.remove(&stream_id);
         self.loaded.insert(stream_id, Arc::new(audio));
@@ -591,6 +641,48 @@ impl HostAudioExecutor {
         }
         Ok(output)
     }
+}
+
+fn decode_resource_audio(
+    codec: String,
+    bytes: Vec<u8>,
+    max_samples: usize,
+) -> Result<PlayerDecodedAudio, String> {
+    let mut decoder = open_symphonia_audio_stream(
+        &codec,
+        Arc::from(bytes),
+        (max_samples * std::mem::size_of::<f32>()) as u64,
+    )
+    .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_OPEN_FAILED".to_owned())?;
+    let mut pcm_s16le = Vec::new();
+    let mut format = None;
+    while let Some(chunk) = decoder
+        .next_chunk()
+        .map_err(|_| "ASTRA_EMU_AUDIO_STREAM_DECODE_FAILED".to_owned())?
+    {
+        let chunk_format = (chunk.sample_rate, chunk.channels);
+        if chunk_format.0 == 0
+            || chunk_format.1 == 0
+            || format.is_some_and(|value| value != chunk_format)
+        {
+            return Err("ASTRA_EMU_AUDIO_STREAM_DECODE_FORMAT".into());
+        }
+        format = Some(chunk_format);
+        pcm_s16le
+            .len()
+            .checked_add(chunk.pcm_s16le.len())
+            .filter(|length| *length <= max_samples * std::mem::size_of::<i16>())
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_DECODE_BUDGET".to_owned())?;
+        pcm_s16le.extend_from_slice(&chunk.pcm_s16le);
+    }
+    let (sample_rate, channels) =
+        format.ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_DECODE_EMPTY".to_owned())?;
+    PlayerDecodedAudio::parse(
+        &format!("pcm_s16le:{sample_rate}:{channels}"),
+        &pcm_s16le,
+        max_samples,
+    )
+    .map_err(|error| error.to_string())
 }
 
 impl HostAudioExecutor {

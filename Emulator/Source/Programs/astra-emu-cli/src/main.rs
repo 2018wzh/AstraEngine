@@ -36,6 +36,9 @@ enum CliCommand {
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
+        /// Write a local-private Perfetto Trace Event file for this native Windows run.
+        #[arg(long)]
+        perfetto_trace: Option<PathBuf>,
     },
     /// Run the same AstraEMU RuntimeWorld/provider path on astra-platform-headless.
     Headless {
@@ -99,6 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             family_manifest,
             family_library,
             enable_audio,
+            perfetto_trace,
         } => {
             tracing::info!(
                 event = "astra_emu_cli_native_launch_started",
@@ -112,6 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 family_manifest,
                 family_library,
                 enable_audio,
+                perfetto_trace,
             })
             .await?;
             tracing::info!(

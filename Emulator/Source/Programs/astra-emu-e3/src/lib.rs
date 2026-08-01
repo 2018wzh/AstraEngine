@@ -4,9 +4,11 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use astra_core::Hash256;
+use astra_emu_manager_core::EmuPlatformRunEvidenceV1;
 use astra_headless_protocol::{ButtonState, InputMessage, PhysicalInput, PointerButton};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +30,9 @@ pub struct ManagerE3Manifest {
     pub timeout_ms: u64,
     pub stage_width: u32,
     pub stage_height: u32,
+    pub expected_package_hash: String,
+    #[serde(default)]
+    pub expected_profile_hash: Option<String>,
     pub expected_terminal_hash: String,
     #[serde(default)]
     pub expected_coverage: Vec<String>,
@@ -39,16 +44,34 @@ pub struct ManagerE3Report {
     pub schema: String,
     pub status: String,
     pub build_identity_hash: String,
-    pub profile_hash: String,
-    pub package_hash: String,
+    pub profile_hash: Option<String>,
+    pub package_hash: Option<String>,
+    pub session_hash: Option<String>,
     pub input_sequence_hash: String,
     pub input_count: u64,
     pub visual_trace_hash: String,
     pub consumed_input_trace_hash: Option<String>,
     pub audio_meter_hash: Option<String>,
     pub route_terminal_hash: Option<String>,
+    pub snapshot_hash: Option<String>,
+    pub coverage_hash: Option<String>,
     pub lifecycle_steps: Vec<String>,
     pub diagnostic_codes: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct ManagerObservations {
+    profile_hash: Option<String>,
+    package_hash: Option<String>,
+    session_hash: Option<String>,
+    consumed_input_trace_hash: Option<String>,
+    audio_meter_hash: Option<String>,
+    audio_non_silent: bool,
+    route_terminal_hash: Option<String>,
+    shutdown_completed: bool,
+    snapshot_hash: Option<String>,
+    snapshot_restored: bool,
+    coverage_hash: Option<String>,
 }
 
 pub fn run_from_args(mut args: impl Iterator<Item = OsString>) -> Result<(), String> {
@@ -81,6 +104,9 @@ pub fn load_manifest(path: &Path) -> Result<ManagerE3Manifest, String> {
 }
 
 pub fn validate_manifest(value: &ManagerE3Manifest) -> Result<(), String> {
+    let mut expected_coverage = value.expected_coverage.clone();
+    expected_coverage.sort();
+    expected_coverage.dedup();
     if value.schema != MANIFEST_SCHEMA
         || !value.manager_executable.is_absolute()
         || !value.authorized_source_directory.is_absolute()
@@ -93,9 +119,15 @@ pub fn validate_manifest(value: &ManagerE3Manifest) -> Result<(), String> {
         || value.timeout_ms > 30 * 60 * 1000
         || value.stage_width == 0
         || value.stage_height == 0
+        || !valid_hash(&value.expected_package_hash)
+        || value
+            .expected_profile_hash
+            .as_deref()
+            .is_some_and(|hash| !valid_hash(hash))
         || !valid_hash(&value.expected_terminal_hash)
         || value.expected_coverage.is_empty()
         || value.expected_coverage.iter().any(|id| !safe_symbol(id))
+        || value.expected_coverage != expected_coverage
     {
         return Err("ASTRA_EMU_E3_MANIFEST_INVALID".into());
     }
@@ -230,11 +262,23 @@ fn run_windows(manifest: ManagerE3Manifest) -> Result<(), String> {
     let mut visual = Vec::new();
     let mut lifecycle_steps = vec!["manager_started".into()];
     let replay_result = (|| -> Result<(), String> {
-        let window = WindowsTestDriver::wait_for_process_window(
-            child.id(),
-            Duration::from_millis(manifest.timeout_ms),
-        )
-        .map_err(|error| error.to_string())?;
+        let window_deadline = Instant::now() + Duration::from_millis(manifest.timeout_ms);
+        let window = loop {
+            if let Some(window) = WindowsTestDriver::find_process_window(child.id()) {
+                break window;
+            }
+            if child
+                .try_wait()
+                .map_err(|_| "ASTRA_EMU_E3_MANAGER_WAIT".to_owned())?
+                .is_some()
+            {
+                return Err("ASTRA_EMU_E3_MANAGER_EXITED_BEFORE_WINDOW".into());
+            }
+            if Instant::now() >= window_deadline {
+                return Err("ASTRA_EMU_E3_WINDOW_TIMEOUT".into());
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
         lifecycle_steps.push("window_created".into());
         window.focus().map_err(|error| error.to_string())?;
         lifecycle_steps.push("window_focused".into());
@@ -257,6 +301,11 @@ fn run_windows(manifest: ManagerE3Manifest) -> Result<(), String> {
             if start.elapsed() > Duration::from_millis(manifest.timeout_ms) {
                 diagnostics.push("ASTRA_EMU_E3_TIMEOUT".into());
                 return Ok(());
+            }
+            if matches!(message.event, PhysicalInput::Shutdown) {
+                window.request_close().map_err(|error| error.to_string())?;
+                lifecycle_steps.push("close_requested".into());
+                break;
             }
             dispatch_input(
                 &window,
@@ -285,38 +334,73 @@ fn run_windows(manifest: ManagerE3Manifest) -> Result<(), String> {
         lifecycle_steps.push("input_replay_completed".into());
         Ok(())
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    let shutdown_deadline = Instant::now() + Duration::from_millis(manifest.timeout_ms);
+    let exited_normally = loop {
+        if child
+            .try_wait()
+            .map_err(|_| "ASTRA_EMU_E3_MANAGER_WAIT".to_owned())?
+            .is_some()
+        {
+            break true;
+        }
+        if Instant::now() >= shutdown_deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            diagnostics.push("ASTRA_EMU_E3_SHUTDOWN_TIMEOUT".into());
+            break false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    if exited_normally {
+        lifecycle_steps.push("manager_shutdown".into());
+    }
     if let Err(error) = replay_result {
         diagnostics.push(error);
     }
-    // The Manager currently has no public save/restore, terminal, coverage, or audio-meter
-    // report surface. Keep the harness fail-closed until those observations are implemented.
-    diagnostics.push("ASTRA_EMU_E3_MANAGER_OBSERVABILITY_INCOMPLETE".into());
-    tracing::warn!(
-        event = "astra.emu.e3.blocked",
-        diagnostic_code = "ASTRA_EMU_E3_MANAGER_OBSERVABILITY_INCOMPLETE"
-    );
+    let observations =
+        read_manager_observations(&data_root.join("diagnostics").join("astra.jsonl"))
+            .unwrap_or_else(|diagnostic| {
+                diagnostics.push(diagnostic);
+                ManagerObservations::default()
+            });
+    validate_observations(&manifest, &observations, &mut diagnostics);
+    if observations.snapshot_hash.is_some() {
+        lifecycle_steps.push("save".into());
+    }
+    if observations.snapshot_restored {
+        lifecycle_steps.push("restore".into());
+    }
+    if observations.session_hash.is_some() {
+        lifecycle_steps.push("open".into());
+    }
+    if observations.consumed_input_trace_hash.is_some() {
+        lifecycle_steps.push("step".into());
+    }
+    lifecycle_steps.push("create".into());
+    lifecycle_steps.sort();
+    lifecycle_steps.dedup();
+    let evidence_complete = diagnostics.is_empty();
+    let build_identity_hash = Hash256::from_sha256(
+        &fs::read(&manifest.manager_executable)
+            .map_err(|_| "ASTRA_EMU_E3_MANAGER_READ".to_owned())?,
+    )
+    .to_string();
+    let status = if evidence_complete { "pass" } else { "blocked" };
     let report = ManagerE3Report {
         schema: REPORT_SCHEMA.into(),
-        status: "blocked".into(),
-        build_identity_hash: Hash256::from_sha256(
-            &fs::read(&manifest.manager_executable)
-                .map_err(|_| "ASTRA_EMU_E3_MANAGER_READ".to_owned())?,
-        )
-        .to_string(),
-        profile_hash: Hash256::from_sha256(
-            &serde_json::to_vec(&manifest)
-                .map_err(|_| "ASTRA_EMU_E3_MANIFEST_SERIALIZE".to_owned())?,
-        )
-        .to_string(),
-        package_hash: Hash256::from_sha256(manifest.entry.as_bytes()).to_string(),
+        status: status.into(),
+        build_identity_hash: build_identity_hash.clone(),
+        profile_hash: observations.profile_hash,
+        package_hash: observations.package_hash,
+        session_hash: observations.session_hash,
         input_sequence_hash: input_hash.to_string(),
         input_count: messages.len() as u64,
         visual_trace_hash: Hash256::from_sha256(&visual).to_string(),
-        consumed_input_trace_hash: None,
-        audio_meter_hash: None,
-        route_terminal_hash: None,
+        consumed_input_trace_hash: observations.consumed_input_trace_hash,
+        audio_meter_hash: observations.audio_meter_hash,
+        route_terminal_hash: observations.route_terminal_hash,
+        snapshot_hash: observations.snapshot_hash,
+        coverage_hash: observations.coverage_hash,
         lifecycle_steps,
         diagnostic_codes: diagnostics,
     };
@@ -326,7 +410,204 @@ fn run_windows(manifest: ManagerE3Manifest) -> Result<(), String> {
             .map_err(|_| "ASTRA_EMU_E3_REPORT_SERIALIZE".to_owned())?,
     )
     .map_err(|_| "ASTRA_EMU_E3_REPORT_WRITE".to_owned())?;
-    Err("ASTRA_EMU_E3_BLOCKED".into())
+    if !evidence_complete {
+        tracing::warn!(
+            event = "astra.emu.e3.blocked",
+            diagnostic_code = "ASTRA_EMU_E3_EVIDENCE_INCOMPLETE"
+        );
+        return Err("ASTRA_EMU_E3_BLOCKED".into());
+    }
+    let platform_evidence = platform_evidence(&report)?;
+    fs::write(
+        manifest.output_directory.join("platform-run-evidence.json"),
+        serde_json::to_vec_pretty(&platform_evidence)
+            .map_err(|_| "ASTRA_EMU_E3_REPORT_SERIALIZE".to_owned())?,
+    )
+    .map_err(|_| "ASTRA_EMU_E3_REPORT_WRITE".to_owned())?;
+    tracing::info!(event = "astra.emu.e3.completed", evidence_level = "E3");
+    Ok(())
+}
+
+fn platform_evidence(report: &ManagerE3Report) -> Result<EmuPlatformRunEvidenceV1, String> {
+    let parse = |value: Option<&String>| {
+        value
+            .ok_or_else(|| "ASTRA_EMU_E3_MANAGER_IDENTITY_INVALID".to_owned())
+            .and_then(|value| {
+                Hash256::from_str(value)
+                    .map_err(|_| "ASTRA_EMU_E3_MANAGER_IDENTITY_INVALID".to_owned())
+            })
+    };
+    Ok(EmuPlatformRunEvidenceV1 {
+        schema: "astra.emu.platform_run_evidence.v1".into(),
+        platform: "windows".into(),
+        architecture: "x86_64".into(),
+        host_kind: "native".into(),
+        build_identity_hash: Hash256::from_str(&report.build_identity_hash)
+            .map_err(|_| "ASTRA_EMU_E3_MANAGER_IDENTITY_INVALID".to_owned())?,
+        profile_hash: parse(report.profile_hash.as_ref())?,
+        package_hash: parse(report.package_hash.as_ref())?,
+        session_id_hash: parse(report.session_hash.as_ref())?,
+        input_sequence_hash: Hash256::from_str(&report.input_sequence_hash)
+            .map_err(|_| "ASTRA_EMU_E3_MANAGER_IDENTITY_INVALID".to_owned())?,
+        consumed_input_trace_hash: parse(report.consumed_input_trace_hash.as_ref())?,
+        visual_trace_hash: Hash256::from_str(&report.visual_trace_hash)
+            .map_err(|_| "ASTRA_EMU_E3_MANAGER_IDENTITY_INVALID".to_owned())?,
+        audio_meter_hash: parse(report.audio_meter_hash.as_ref())?,
+        route_terminal_hash: parse(report.route_terminal_hash.as_ref())?,
+        lifecycle_steps: report.lifecycle_steps.clone(),
+        evidence_level: "E3".into(),
+        status: "pass".into(),
+        diagnostic_codes: Vec::new(),
+    })
+}
+
+fn read_manager_observations(path: &Path) -> Result<ManagerObservations, String> {
+    let bytes = fs::read(path).map_err(|_| "ASTRA_EMU_E3_MANAGER_LOG_MISSING".to_owned())?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_INPUT_BYTES {
+        return Err("ASTRA_EMU_E3_MANAGER_LOG_BOUNDS".into());
+    }
+    let mut consumed = Vec::new();
+    let mut observations = ManagerObservations::default();
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let event: astra_observability::LogEventV1 = serde_json::from_slice(line)
+            .map_err(|_| "ASTRA_EMU_E3_MANAGER_LOG_PARSE".to_owned())?;
+        match event.event.as_str() {
+            "astra.emu.manager.session_opened" => {
+                observations.session_hash = log_hash(&event, "session_hash")?;
+                observations.package_hash = log_hash(&event, "package_hash")?;
+                observations.profile_hash = log_hash(&event, "profile_hash")?;
+            }
+            "astra.emu.manager.input_consumed" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                let hash = event
+                    .fields
+                    .get("input_hash")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|hash| valid_hash(hash))
+                    .ok_or_else(|| "ASTRA_EMU_E3_CONSUMED_INPUT_INVALID".to_owned())?;
+                consumed.extend_from_slice(hash.as_bytes());
+            }
+            "astra.emu.manager.audio_meter_observed" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                observations.audio_meter_hash = event
+                    .fields
+                    .get("audio_meter_hash")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|hash| valid_hash(hash))
+                    .map(str::to_owned);
+                observations.audio_non_silent = event
+                    .fields
+                    .get("audio_non_silent")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+            }
+            "astra.emu.manager.terminal_observed" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                observations.route_terminal_hash = event
+                    .fields
+                    .get("terminal_hash")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|hash| valid_hash(hash))
+                    .map(str::to_owned);
+            }
+            "astra.emu.manager.snapshot_saved" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                observations.snapshot_hash = log_hash(&event, "snapshot_hash")?;
+            }
+            "astra.emu.manager.snapshot_restored" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                if observations.snapshot_hash.as_deref()
+                    != log_hash(&event, "snapshot_hash")?.as_deref()
+                {
+                    return Err("ASTRA_EMU_E3_SNAPSHOT_IDENTITY_MISMATCH".into());
+                }
+                observations.snapshot_restored = true;
+            }
+            "astra.emu.manager.coverage_observed" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                observations.coverage_hash = log_hash(&event, "coverage_hash")?;
+            }
+            "astra.emu.manager.shutdown_completed" => {
+                verify_event_session(&event, observations.session_hash.as_deref())?;
+                observations.shutdown_completed = true;
+            }
+            _ => {}
+        }
+    }
+    if !consumed.is_empty() {
+        observations.consumed_input_trace_hash = Some(Hash256::from_sha256(&consumed).to_string());
+    }
+    Ok(observations)
+}
+
+fn verify_event_session(
+    event: &astra_observability::LogEventV1,
+    expected: Option<&str>,
+) -> Result<(), String> {
+    if log_hash(event, "session_hash")?.as_deref() != expected {
+        return Err("ASTRA_EMU_E3_SESSION_IDENTITY_DRIFT".into());
+    }
+    Ok(())
+}
+
+fn log_hash(
+    event: &astra_observability::LogEventV1,
+    field: &str,
+) -> Result<Option<String>, String> {
+    event
+        .fields
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|hash| valid_hash(hash))
+        .map(str::to_owned)
+        .ok_or_else(|| "ASTRA_EMU_E3_MANAGER_IDENTITY_INVALID".to_owned())
+        .map(Some)
+}
+
+fn validate_observations(
+    manifest: &ManagerE3Manifest,
+    observations: &ManagerObservations,
+    diagnostics: &mut Vec<String>,
+) {
+    if observations.consumed_input_trace_hash.is_none() {
+        diagnostics.push("ASTRA_EMU_E3_INPUT_NOT_CONSUMED".into());
+    }
+    if observations.profile_hash.is_none()
+        || observations.package_hash.is_none()
+        || observations.session_hash.is_none()
+    {
+        diagnostics.push("ASTRA_EMU_E3_IDENTITY_MISSING".into());
+    }
+    if observations.package_hash.as_deref() != Some(manifest.expected_package_hash.as_str())
+        || manifest
+            .expected_profile_hash
+            .as_deref()
+            .is_some_and(|expected| observations.profile_hash.as_deref() != Some(expected))
+    {
+        diagnostics.push("ASTRA_EMU_E3_PACKAGE_OR_PROFILE_IDENTITY_MISMATCH".into());
+    }
+    if observations.audio_meter_hash.is_none() || !observations.audio_non_silent {
+        diagnostics.push("ASTRA_EMU_E3_AUDIO_METER_MISSING".into());
+    }
+    if observations.route_terminal_hash.as_deref() != Some(manifest.expected_terminal_hash.as_str())
+    {
+        diagnostics.push("ASTRA_EMU_E3_TERMINAL_IDENTITY_MISMATCH".into());
+    }
+    if !observations.shutdown_completed {
+        diagnostics.push("ASTRA_EMU_E3_SHUTDOWN_EVIDENCE_MISSING".into());
+    }
+    let expected_coverage_hash =
+        Hash256::from_sha256(format!("{}\n", manifest.expected_coverage.join("\n")).as_bytes())
+            .to_string();
+    if observations.coverage_hash.as_deref() != Some(expected_coverage_hash.as_str()) {
+        diagnostics.push("ASTRA_EMU_E3_COVERAGE_EVIDENCE_MISSING".into());
+    }
+    if observations.snapshot_hash.is_none() || !observations.snapshot_restored {
+        diagnostics.push("ASTRA_EMU_E3_SNAPSHOT_EVIDENCE_MISSING".into());
+    }
 }
 
 #[cfg(windows)]
@@ -389,6 +670,8 @@ fn virtual_key(key: &str) -> Result<u16, String> {
         "ArrowLeft" | "Left" => Ok(0x25),
         "ArrowRight" | "Right" => Ok(0x27),
         "Space" => Ok(0x20),
+        "F5" => Ok(0x74),
+        "F9" => Ok(0x78),
         _ => Err("ASTRA_EMU_E3_KEY_UNSUPPORTED".into()),
     }
 }
@@ -416,6 +699,25 @@ fn hash_input(messages: &[InputMessage]) -> Result<Hash256, String> {
 mod tests {
     use super::*;
     use astra_headless_protocol::USER_INPUT_SEQUENCE_SCHEMA;
+    use std::collections::BTreeMap;
+
+    fn log_event(event: &str, fields: &[(&str, String)]) -> astra_observability::LogEventV1 {
+        astra_observability::LogEventV1 {
+            schema: astra_observability::LOG_EVENT_SCHEMA.into(),
+            timestamp: "2026-08-01T00:00:00Z".into(),
+            level: "info".into(),
+            target: "astra_emu_manager".into(),
+            event: event.into(),
+            session_id: "test".into(),
+            process_role: "manager".into(),
+            thread_label: "main".into(),
+            span_stack: Vec::new(),
+            fields: fields
+                .iter()
+                .map(|(key, value)| ((*key).into(), serde_json::Value::String(value.clone())))
+                .collect::<BTreeMap<_, _>>(),
+        }
+    }
 
     #[test]
     fn rejects_unsafe_entry_and_empty_coverage() {
@@ -434,6 +736,8 @@ mod tests {
             timeout_ms: 1,
             stage_width: 1,
             stage_height: 1,
+            expected_package_hash: format!("sha256:{}", "0".repeat(64)),
+            expected_profile_hash: None,
             expected_terminal_hash: format!("sha256:{}", "0".repeat(64)),
             expected_coverage: vec![],
         };
@@ -459,5 +763,108 @@ mod tests {
     fn terminal_hash_must_be_lowercase_sha256() {
         assert!(valid_hash(&format!("sha256:{}", "a".repeat(64))));
         assert!(!valid_hash(&format!("sha256:{}", "A".repeat(64))));
+    }
+
+    #[test]
+    fn manager_observations_require_matching_snapshot_and_collect_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("astra.jsonl");
+        let hash = format!("sha256:{}", "1".repeat(64));
+        let events = [
+            log_event(
+                "astra.emu.manager.session_opened",
+                &[
+                    ("session_hash", hash.clone()),
+                    ("package_hash", hash.clone()),
+                    ("profile_hash", hash.clone()),
+                ],
+            ),
+            log_event(
+                "astra.emu.manager.input_consumed",
+                &[("session_hash", hash.clone()), ("input_hash", hash.clone())],
+            ),
+            log_event(
+                "astra.emu.manager.audio_meter_observed",
+                &[
+                    ("session_hash", hash.clone()),
+                    ("audio_meter_hash", hash.clone()),
+                ],
+            ),
+            log_event(
+                "astra.emu.manager.terminal_observed",
+                &[
+                    ("session_hash", hash.clone()),
+                    ("terminal_hash", hash.clone()),
+                ],
+            ),
+            log_event(
+                "astra.emu.manager.snapshot_saved",
+                &[
+                    ("session_hash", hash.clone()),
+                    ("snapshot_hash", hash.clone()),
+                ],
+            ),
+            log_event(
+                "astra.emu.manager.snapshot_restored",
+                &[
+                    ("session_hash", hash.clone()),
+                    ("snapshot_hash", hash.clone()),
+                ],
+            ),
+            log_event(
+                "astra.emu.manager.coverage_observed",
+                &[
+                    ("session_hash", hash.clone()),
+                    ("coverage_hash", hash.clone()),
+                ],
+            ),
+            log_event(
+                "astra.emu.manager.shutdown_completed",
+                &[("session_hash", hash.clone())],
+            ),
+        ];
+        let mut bytes = Vec::new();
+        for event in events {
+            bytes.extend_from_slice(&serde_json::to_vec(&event).unwrap());
+            bytes.push(b'\n');
+        }
+        fs::write(&path, bytes).unwrap();
+        let observations = read_manager_observations(&path).unwrap();
+        assert_eq!(observations.profile_hash.as_deref(), Some(hash.as_str()));
+        assert!(observations.consumed_input_trace_hash.is_some());
+        assert!(observations.snapshot_restored);
+        assert!(observations.shutdown_completed);
+    }
+
+    #[test]
+    fn platform_evidence_is_a_windows_e3_record() {
+        let hash = format!("sha256:{}", "2".repeat(64));
+        let report = ManagerE3Report {
+            schema: REPORT_SCHEMA.into(),
+            status: "pass".into(),
+            build_identity_hash: hash.clone(),
+            profile_hash: Some(hash.clone()),
+            package_hash: Some(hash.clone()),
+            session_hash: Some(hash.clone()),
+            input_sequence_hash: hash.clone(),
+            input_count: 3,
+            visual_trace_hash: hash.clone(),
+            consumed_input_trace_hash: Some(hash.clone()),
+            audio_meter_hash: Some(hash.clone()),
+            route_terminal_hash: Some(hash.clone()),
+            snapshot_hash: Some(hash.clone()),
+            coverage_hash: Some(hash),
+            lifecycle_steps: vec![
+                "create".into(),
+                "open".into(),
+                "step".into(),
+                "save".into(),
+                "restore".into(),
+                "shutdown".into(),
+            ],
+            diagnostic_codes: Vec::new(),
+        };
+        let evidence = platform_evidence(&report).unwrap();
+        astra_emu_manager_core::validate_platform_evidence(&evidence, "windows").unwrap();
     }
 }

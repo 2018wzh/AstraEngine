@@ -8,6 +8,7 @@
   "timeout_ms": 300000,
   "stage_width": 1024,
   "stage_height": 768,
+  "expected_package_hash": "sha256:replace-with-64-lowercase-hex-digest",
   "expected_terminal_hash": "sha256:replace-with-64-lowercase-hex-digest",
   "expected_coverage": [
     "replace-with-sanitized-coverage-id"

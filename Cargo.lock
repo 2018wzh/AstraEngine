@@ -847,6 +847,7 @@ name = "astra-emu-e3"
 version = "0.1.0"
 dependencies = [
  "astra-core",
+ "astra-emu-manager-core",
  "astra-headless-protocol",
  "astra-observability",
  "astra-platform-windows",

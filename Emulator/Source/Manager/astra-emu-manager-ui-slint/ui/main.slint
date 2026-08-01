@@ -148,6 +148,8 @@ export component ManagerWindow inherits Window {
     callback search(string);
     callback configure-nls(string);
     callback game-input(string, bool, float);
+    callback save-game();
+    callback restore-game();
     callback leave-game();
     callback open-diagnostics();
     callback open-translation();
@@ -197,6 +199,8 @@ export component ManagerWindow inherits Window {
         stage-native-width <=> root.stage-native-width;
         stage-native-height <=> root.stage-native-height;
         game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
+        save-game => { root.save-game(); }
+        restore-game => { root.restore-game(); }
         leave-game => { root.leave-game(); }
 
         translation-overlay-active <=> root.translation-overlay-active;

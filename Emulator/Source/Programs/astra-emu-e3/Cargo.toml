@@ -16,6 +16,7 @@ path = "src/main.rs"
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
+astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

@@ -335,7 +335,7 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
             width: 1,
             height: 1,
             hash: Hash256::from_sha256(&texture_bytes),
-            rgba8: texture_bytes,
+            rgba8: texture_bytes.into(),
         },
     };
     let draws = vec![

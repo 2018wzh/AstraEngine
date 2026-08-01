@@ -6,34 +6,39 @@ use std::{
 
 use astra_platform::{PlatformError, PlatformErrorCode};
 use windows::{
+    core::BOOL,
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, RECT},
+        Foundation::{HWND, LPARAM, POINT, RECT, WPARAM},
         Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleBitmap,
-            CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits,
-            ReleaseDC, SRCCOPY, SelectObject,
+            BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC,
+            DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER,
+            BI_RGB, DIB_RGB_COLORS, SRCCOPY,
         },
         UI::{
             Input::KeyboardAndMouse::{
-                INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-                KEYEVENTF_KEYUP, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+                SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
+                KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
                 MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-                MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput, VIRTUAL_KEY,
+                MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, MOUSE_EVENT_FLAGS,
+                VIRTUAL_KEY,
             },
             WindowsAndMessaging::{
                 EnumWindows, GetClientRect, GetForegroundWindow, GetSystemMetrics,
                 GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-                SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-                SW_RESTORE, SetForegroundWindow, ShowWindow,
+                PostMessageW, SetForegroundWindow, ShowWindow, SM_CXVIRTUALSCREEN,
+                SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, WM_CLOSE,
             },
         },
     },
-    core::BOOL,
 };
 
 pub struct WindowsTestDriver;
 
 impl WindowsTestDriver {
+    pub fn find_process_window(process_id: u32) -> Option<TestWindow> {
+        find_window(process_id, None).map(|window| TestWindow { window })
+    }
+
     pub fn wait_for_window(
         process_id: u32,
         title: &str,
@@ -58,8 +63,8 @@ impl WindowsTestDriver {
     ) -> Result<TestWindow, PlatformError> {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            if let Some(window) = find_window(process_id, None) {
-                return Ok(TestWindow { window });
+            if let Some(window) = Self::find_process_window(process_id) {
+                return Ok(window);
             }
             thread::sleep(Duration::from_millis(20));
         }
@@ -215,6 +220,20 @@ impl TestWindow {
             ));
         }
         send_mouse(0, 0, delta_y, MOUSEEVENTF_WHEEL)
+    }
+
+    /// Requests the application's normal close path after a physical input transcript completes.
+    /// This is deliberately distinct from process termination so shutdown evidence remains valid.
+    pub fn request_close(&self) -> Result<(), PlatformError> {
+        unsafe { PostMessageW(Some(self.window), WM_CLOSE, WPARAM(0), LPARAM(0)) }.map_err(
+            |_| {
+                driver_error(
+                    "test_driver.window.close",
+                    "test driver could not request window close",
+                )
+            },
+        )?;
+        Ok(())
     }
 
     pub fn capture_rgba(&self) -> Result<TestCapturedFrame, PlatformError> {

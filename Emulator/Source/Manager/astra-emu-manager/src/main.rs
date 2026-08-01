@@ -65,7 +65,8 @@ use astra_emu_translation_openai_compatible::{
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeOpenRequest, RuntimeOutputDomain,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
+    RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
 };
 use image::GenericImageView;
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
@@ -129,6 +130,8 @@ fn platform_grant_kind() -> &'static str {
 
 struct ActiveRuntimeSession {
     session_id: GameRuntimeSessionId,
+    package_hash: Hash256,
+    profile_hash: Hash256,
     fixed_step: u64,
     fixed_delta_ns: u64,
     seed: u64,
@@ -136,6 +139,9 @@ struct ActiveRuntimeSession {
     await_sequence: u64,
     input_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
+    saved_sections: Option<RuntimeSaveSections>,
+    coverage_opcodes: BTreeMap<String, u64>,
+    coverage_syscalls: u64,
     next_tick: Instant,
 }
 
@@ -200,20 +206,26 @@ impl RuntimeBridge {
         }
         let (text_hooks, media_hooks, deterministic_effects) =
             validate_patch_actions(patch_actions)?;
-        let case_fingerprint: Hash256 = case
+        let package_hash: Hash256 = case
             .content_hash
             .parse()
             .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
+        let mut family_options = profile.family_options;
+        let script_fingerprint: Hash256 = family_options
+            .remove("fvp.hcb_content_hash")
+            .ok_or_else(|| "ASTRA_EMU_FVP_HCB_IDENTITY_MISSING".to_owned())?
+            .parse()
+            .map_err(|_| "ASTRA_EMU_FVP_HCB_IDENTITY_INVALID".to_owned())?;
         let emu_profile = EmuCaseProfile {
             schema: "astra.emu.case_profile.v1".into(),
             family_id: "fvp".into(),
-            case_fingerprint,
+            case_fingerprint: script_fingerprint,
             script_uri: case.relative_path.clone(),
             fixed_delta_ns: profile.fixed_delta_ns,
             compatibility_profile: profile.compatibility_profile,
             mount_set_id: mount_set_id.clone(),
             permission_policy_id: "astra.emu.desktop.user_grant.v1".into(),
-            family_options: profile.family_options,
+            family_options,
         };
         let bytes = postcard::to_allocvec(&emu_profile).map_err(|error| error.to_string())?;
         let section = RuntimeSectionPayload {
@@ -224,7 +236,8 @@ impl RuntimeBridge {
             hash: Hash256::from_sha256(&bytes),
             bytes,
         };
-        let seed = u64::from_le_bytes(case_fingerprint.as_bytes()[..8].try_into().unwrap());
+        let profile_hash = section.hash;
+        let seed = u64::from_le_bytes(package_hash.as_bytes()[..8].try_into().unwrap());
         let audio = HostAudioExecutor::open()?;
         let translation = TranslationRuntime::open(
             translation_config,
@@ -252,7 +265,9 @@ impl RuntimeBridge {
             }
         }
         self.active = Some(ActiveRuntimeSession {
-            session_id: open.session_id,
+            session_id: open.session_id.clone(),
+            package_hash,
+            profile_hash,
             fixed_step: 0,
             fixed_delta_ns: emu_profile.fixed_delta_ns,
             seed,
@@ -260,8 +275,17 @@ impl RuntimeBridge {
             await_sequence: 0,
             input_sequence: 0,
             pending_inputs: Vec::new(),
+            saved_sections: None,
+            coverage_opcodes: BTreeMap::new(),
+            coverage_syscalls: 0,
             next_tick: Instant::now(),
         });
+        tracing::info!(
+            event = "astra.emu.manager.session_opened",
+            session_hash = %Hash256::from_sha256(open.session_id.0.as_bytes()),
+            package_hash = %package_hash,
+            profile_hash = %profile_hash
+        );
         self.audio = Some(audio);
         self.translation = Some(translation);
         self.text_hooks = text_hooks;
@@ -296,11 +320,21 @@ impl RuntimeBridge {
             LegacyProbeRequest {
                 root_mount_id: mount_set_id.into(),
                 candidate_uris: vec![case.relative_path.clone()],
-                marker_hashes: vec![package_hash],
+                // `case.content_hash` is the discovery fingerprint for the whole authorized
+                // installation. FVP returns the bounded HCB content identity here, so passing
+                // the former as a marker would deterministically reject every real game.
+                marker_hashes: Vec::new(),
                 max_entries: 1,
                 max_metadata_bytes: 512 * 1024 * 1024,
             },
         )?;
+        tracing::info!(
+            event = "astra.emu.manager.fvp_probe",
+            confidence_permyriad = report.confidence_permyriad,
+            marker_count = report.markers.len(),
+            blocker_count = report.blockers.len(),
+            hcb_content_hash = %report.content_identity
+        );
         if report.confidence_permyriad != 10_000 || !report.blockers.is_empty() {
             return Err("ASTRA_EMU_FVP_PROBE_BLOCKED".into());
         }
@@ -334,6 +368,10 @@ impl RuntimeBridge {
             compatibility_profile: "rfvp-v1".into(),
             family_options: [
                 ("fvp.nls".into(), nls[0].into()),
+                (
+                    "fvp.hcb_content_hash".into(),
+                    report.content_identity.to_string(),
+                ),
                 ("fvp.stage_width".into(), stage_width.to_string()),
                 ("fvp.stage_height".into(), stage_height.to_string()),
                 ("patch.mode".into(), "no_patch".into()),
@@ -411,6 +449,7 @@ impl RuntimeBridge {
             );
             tracing::debug!(
                 event = "astra.emu.manager.input_consumed",
+                session_hash = %Hash256::from_sha256(active.session_id.0.as_bytes()),
                 fixed_step = next_step,
                 input_count = input_edges.len(),
                 input_hash = %input_hash
@@ -439,6 +478,7 @@ impl RuntimeBridge {
         active.next_tick += Duration::from_nanos(active.fixed_delta_ns);
         let mut audio_commands = Vec::new();
         let mut video_commands = Vec::new();
+        let mut last_family_state_hash = None;
         for envelope in &output.outputs {
             if envelope.domain == RuntimeOutputDomain::Presentation
                 && envelope.schema == "astra.emu.render_frame.v1"
@@ -469,6 +509,20 @@ impl RuntimeBridge {
                     SchemaVersion::new(1, 0, 0),
                 )
                 .map_err(|error| error.to_string())?;
+            last_family_state_hash = Some(family_output.state_hash);
+            active.coverage_syscalls = active
+                .coverage_syscalls
+                .checked_add(family_output.coverage.syscalls)
+                .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
+            for trace in &family_output.trace {
+                let count = active
+                    .coverage_opcodes
+                    .entry(trace.opcode.clone())
+                    .or_insert(0);
+                *count = count
+                    .checked_add(1)
+                    .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
+            }
             for effect in &family_output.effects {
                 match effect {
                     LegacyEffect::Presentation {
@@ -596,10 +650,13 @@ impl RuntimeBridge {
             .poll()?;
         self.terminal = output.status == "terminal";
         if self.terminal {
+            let terminal_state_hash = last_family_state_hash
+                .ok_or_else(|| "ASTRA_EMU_TERMINAL_STATE_HASH_MISSING".to_owned())?;
             let terminal_hash =
-                Hash256::from_sha256(format!("{}:{next_step}", output.status).as_bytes());
+                Hash256::from_sha256(format!("{terminal_state_hash}:{next_step}").as_bytes());
             tracing::info!(
                 event = "astra.emu.manager.terminal_observed",
+                session_hash = %Hash256::from_sha256(active.session_id.0.as_bytes()),
                 fixed_step = next_step,
                 output_count = output.outputs.len(),
                 terminal_hash = %terminal_hash
@@ -613,10 +670,22 @@ impl RuntimeBridge {
             .active
             .take()
             .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        let session_hash = Hash256::from_sha256(active.session_id.0.as_bytes());
+        let coverage_ids = active.coverage_opcodes.keys().cloned().collect::<Vec<_>>();
+        let coverage_hash =
+            Hash256::from_sha256(format!("{}\n", coverage_ids.join("\n")).as_bytes());
         self.provider.shutdown(active.session_id)?;
         if let Some(mut audio) = self.audio.take() {
+            let audio_meter_hash = audio.meter_hash();
+            let audio_non_silent = audio.has_audible_output();
             self.video.reset(&mut audio)?;
             audio.reset()?;
+            tracing::info!(
+                event = "astra.emu.manager.audio_meter_observed",
+                session_hash = %session_hash,
+                audio_meter_hash = %audio_meter_hash,
+                audio_non_silent
+            );
         }
         self.terminal = false;
         self.render_frames.clear();
@@ -625,6 +694,95 @@ impl RuntimeBridge {
         self.text_hooks.clear();
         self.media_hooks.clear();
         self.suspended = false;
+        tracing::info!(
+            event = "astra.emu.manager.coverage_observed",
+            session_hash = %session_hash,
+            coverage_hash = %coverage_hash,
+            opcode_count = coverage_ids.len(),
+            syscall_count = active.coverage_syscalls
+        );
+        tracing::info!(
+            event = "astra.emu.manager.shutdown_completed",
+            session_hash = %session_hash,
+            package_hash = %active.package_hash,
+            profile_hash = %active.profile_hash
+        );
+        Ok(())
+    }
+
+    fn save_game(&mut self) -> Result<(), String> {
+        let session_id = self
+            .active
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?
+            .session_id
+            .clone();
+        let sections = self.provider.save(RuntimeSaveRequest {
+            session_id: session_id.clone(),
+            slot: "manager-user-slot".into(),
+        })?;
+        if sections.session_id != session_id
+            || sections.sections.is_empty()
+            || !sections.diagnostics.is_empty()
+        {
+            return Err("ASTRA_EMU_SAVE_EVIDENCE_INVALID".into());
+        }
+        let snapshot_hash = Hash256::from_sha256(
+            &postcard::to_allocvec(&sections)
+                .map_err(|_| "ASTRA_EMU_SAVE_OBSERVATION_SERIALIZE".to_owned())?,
+        );
+        self.active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?
+            .saved_sections = Some(sections);
+        tracing::info!(
+            event = "astra.emu.manager.snapshot_saved",
+            session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
+            snapshot_hash = %snapshot_hash
+        );
+        Ok(())
+    }
+
+    fn restore_game(&mut self) -> Result<(), String> {
+        let (session_id, sections) = {
+            let active = self
+                .active
+                .as_ref()
+                .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+            (
+                active.session_id.clone(),
+                active
+                    .saved_sections
+                    .clone()
+                    .ok_or_else(|| "ASTRA_EMU_SAVE_SLOT_MISSING".to_owned())?,
+            )
+        };
+        let snapshot_hash = Hash256::from_sha256(
+            &postcard::to_allocvec(&sections)
+                .map_err(|_| "ASTRA_EMU_RESTORE_OBSERVATION_SERIALIZE".to_owned())?,
+        );
+        let restored = self.provider.restore(RuntimeRestoreRequest {
+            session_id: session_id.clone(),
+            sections: sections.sections,
+        })?;
+        if restored.session_id != session_id
+            || restored.status != "restored"
+            || !restored.diagnostics.is_empty()
+        {
+            return Err("ASTRA_EMU_RESTORE_EVIDENCE_INVALID".into());
+        }
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        active.fixed_step = restored.restored_fixed_step;
+        active.next_tick = Instant::now() + Duration::from_nanos(active.fixed_delta_ns);
+        tracing::info!(
+            event = "astra.emu.manager.snapshot_restored",
+            session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
+            snapshot_hash = %snapshot_hash,
+            restored_step = restored.restored_fixed_step
+        );
         Ok(())
     }
 
@@ -3267,6 +3425,24 @@ impl ManagerController for AstraEmuManagerController {
             .queue_input(control, pressed, value)
     }
 
+    fn save_game(&mut self) -> Result<ManagerViewModel, String> {
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .save_game()?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
+    fn restore_game(&mut self) -> Result<ManagerViewModel, String> {
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .restore_game()?;
+        self.diagnostic.clear();
+        self.model()
+    }
+
     fn reset_translation(&mut self) -> Result<(), String> {
         self.runtime
             .try_borrow_mut()
@@ -3424,8 +3600,34 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(not(target_os = "android"))]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run_application()
+fn main() -> std::process::ExitCode {
+    match run_application() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(
+                event = "astra.emu.manager.fatal",
+                diagnostic_code = %startup_diagnostic_code(error.as_ref())
+            );
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn startup_diagnostic_code(error: &(dyn std::error::Error + 'static)) -> String {
+    let text = error.to_string();
+    let Some(start) = text.find("ASTRA_") else {
+        return "ASTRA_EMU_MANAGER_STARTUP_FAILED".into();
+    };
+    let code = text[start..]
+        .bytes()
+        .take_while(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
+        .collect::<Vec<_>>();
+    let code = String::from_utf8(code).unwrap_or_default();
+    if code.starts_with("ASTRA_") && code.len() <= 128 {
+        code
+    } else {
+        "ASTRA_EMU_MANAGER_STARTUP_FAILED".into()
+    }
 }
 
 #[cfg(target_os = "android")]

@@ -60,6 +60,8 @@ pub trait ManagerController: 'static {
     fn set_patch_mode(&mut self, mode: &str) -> Result<ManagerViewModel, String>;
     fn reset_translation(&mut self) -> Result<(), String>;
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String>;
+    fn save_game(&mut self) -> Result<ManagerViewModel, String>;
+    fn restore_game(&mut self) -> Result<ManagerViewModel, String>;
     fn rescan(&mut self) -> Result<ManagerViewModel, String>;
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn leave_game(&mut self) -> Result<ManagerViewModel, String>;
@@ -283,6 +285,30 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 leave_adapter.apply(&model);
                 window.set_game_active(false);
             }
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let save_weak = adapter.window().as_weak();
+    let save_controller = controller.clone();
+    let save_adapter = adapter.clone();
+    adapter.window().on_save_game(move || {
+        let Some(window) = save_weak.upgrade() else {
+            return;
+        };
+        match save_controller.borrow_mut().save_game() {
+            Ok(model) => save_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let restore_weak = adapter.window().as_weak();
+    let restore_controller = controller.clone();
+    let restore_adapter = adapter.clone();
+    adapter.window().on_restore_game(move || {
+        let Some(window) = restore_weak.upgrade() else {
+            return;
+        };
+        match restore_controller.borrow_mut().restore_game() {
+            Ok(model) => restore_adapter.apply(&model),
             Err(error) => window.set_global_diagnostic(error.into()),
         }
     });
