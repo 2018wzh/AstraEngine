@@ -50,6 +50,9 @@ pub struct PazEntryDescriptor {
     pub archive_role: String,
     pub entry_id: String,
     pub name: String,
+    /// Original CP932 index bytes, retained only in the mount session for
+    /// key derivation. Re-encoding a decoded Unicode name can change a key.
+    pub crypto_name: Vec<u8>,
     pub offset: u64,
     pub unpacked_size: u64,
     pub stored_size: u64,
@@ -240,14 +243,7 @@ impl MinoriPazDecryptProvider {
                 }
                 return Ok(bytes);
             }
-            let material = format!("{} {:08X} ", entry.name.to_lowercase(), entry.unpacked_size);
-            let (entry_key, _, malformed) = SHIFT_JIS.encode(&material);
-            if malformed || entry_key.is_empty() {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_RC4_KEY",
-                    "video RC4 key cannot be encoded as CP932",
-                ));
-            }
+            let entry_key = entry_key_material(entry, None)?;
             let key = (0..256)
                 .map(|index| video_key[index] ^ entry_key[index % entry_key.len()])
                 .collect::<Vec<_>>();
@@ -276,19 +272,7 @@ impl MinoriPazDecryptProvider {
         bytes = blowfish_decrypt(&scheme.data_key, &bytes)?;
         if version > 0 && password_for_entry(entry, scheme).is_some() {
             let password = password_for_entry(entry, scheme).unwrap_or_default();
-            let material = format!(
-                "{} {:08X} {}",
-                entry.name.to_lowercase(),
-                entry.unpacked_size,
-                password
-            );
-            let (key, _, malformed) = SHIFT_JIS.encode(&material);
-            if malformed || key.is_empty() {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_RC4_KEY",
-                    "entry RC4 key cannot be encoded as CP932",
-                ));
-            }
+            let key = entry_key_material(entry, Some(password))?;
             let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
                 error(
                     "ASTRA_EMU_MINORI_RC4_KEY",
@@ -907,7 +891,7 @@ fn parse_archive_index(
     };
     let mut entries = Vec::with_capacity(count);
     for index in 0..count {
-        let name = read_c_string(&mut cursor)?;
+        let (name, crypto_name) = read_c_string(&mut cursor)?;
         let offset = read_u64(&mut cursor)?;
         let unpacked_size = read_u32(&mut cursor)? as u64;
         let stored_size = read_u32(&mut cursor)? as u64;
@@ -939,6 +923,7 @@ fn parse_archive_index(
             archive_role: source.role.clone(),
             entry_id: format!("{}:{index}", source.role),
             name,
+            crypto_name,
             offset,
             unpacked_size,
             stored_size,
@@ -972,7 +957,7 @@ fn normalize_entry_name(name: &str) -> Result<String, PazError> {
     Ok(normalized)
 }
 
-fn read_c_string(cursor: &mut Cursor<&[u8]>) -> Result<String, PazError> {
+fn read_c_string(cursor: &mut Cursor<&[u8]>) -> Result<(String, Vec<u8>), PazError> {
     let start = cursor.position() as usize;
     let bytes = cursor.get_ref();
     let end = bytes[start..]
@@ -991,7 +976,8 @@ fn read_c_string(cursor: &mut Cursor<&[u8]>) -> Result<String, PazError> {
             "PAZ entry name exceeds the configured limit",
         ));
     }
-    let (text, _, malformed) = SHIFT_JIS.decode(&bytes[start..end]);
+    let crypto_name = bytes[start..end].to_vec();
+    let (text, _, malformed) = SHIFT_JIS.decode(&crypto_name);
     if malformed {
         return Err(error(
             "ASTRA_EMU_MINORI_INDEX_ENCODING",
@@ -999,7 +985,7 @@ fn read_c_string(cursor: &mut Cursor<&[u8]>) -> Result<String, PazError> {
         ));
     }
     cursor.set_position((end + 1) as u64);
-    Ok(text.into_owned())
+    Ok((text.into_owned(), crypto_name))
 }
 
 fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, PazError> {
@@ -1420,6 +1406,38 @@ fn password_for_entry<'a>(
     }
 }
 
+fn entry_key_material(
+    entry: &PazEntryDescriptor,
+    password: Option<&str>,
+) -> Result<Vec<u8>, PazError> {
+    if entry.crypto_name.is_empty() {
+        return Err(error(
+            "ASTRA_EMU_MINORI_RC4_KEY",
+            "entry CP932 name bytes are unavailable for RC4 derivation",
+        ));
+    }
+    let mut key = entry
+        .crypto_name
+        .iter()
+        .map(|byte| byte.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    key.extend_from_slice(format!(" {:08X} ", entry.unpacked_size).as_bytes());
+    if let Some(password) = password {
+        let (encoded, _, malformed) = SHIFT_JIS.encode(password);
+        if malformed {
+            return Err(error(
+                "ASTRA_EMU_MINORI_RC4_KEY",
+                "entry password cannot be encoded as CP932",
+            ));
+        }
+        key.extend_from_slice(encoded.as_ref());
+    }
+    if key.is_empty() {
+        return Err(error("ASTRA_EMU_MINORI_RC4_KEY", "entry RC4 key is empty"));
+    }
+    Ok(key)
+}
+
 fn decrypt_bytes(
     provider: &MinoriPazDecryptProvider,
     descriptor: MinoriDecryptDescriptor,
@@ -1681,6 +1699,7 @@ mod tests {
             archive_role: "bg".into(),
             entry_id: id.into(),
             name: format!("{id}.bin"),
+            crypto_name: format!("{id}.bin").into_bytes(),
             offset,
             unpacked_size: size,
             stored_size: size,
@@ -1695,6 +1714,7 @@ mod tests {
             archive_role: "mov".into(),
             entry_id: "mov:0".into(),
             name: name.into(),
+            crypto_name: name.as_bytes().to_vec(),
             offset: 0,
             unpacked_size: size,
             stored_size: size,
@@ -1788,6 +1808,20 @@ mod tests {
                 .decrypt_entry_chunk(0, &entry, 0, &encrypted)
                 .unwrap(),
             plaintext
+        );
+    }
+
+    #[test]
+    fn entry_rc4_material_preserves_raw_cp932_name_bytes() {
+        let mut entry = movie_fixture_entry("decoded-name.avi", 0x2a, (0u8..=255).collect());
+        entry.crypto_name = vec![b'A', 0x81, 0x5c, b'Z', b'.', b'A', b'V', b'I'];
+
+        assert_eq!(
+            entry_key_material(&entry, None).unwrap(),
+            [b'a', 0x81, 0x5c, b'z', b'.', b'a', b'v', b'i']
+                .into_iter()
+                .chain(b" 0000002A ".iter().copied())
+                .collect::<Vec<_>>()
         );
     }
     #[test]
