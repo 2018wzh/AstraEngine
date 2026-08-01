@@ -286,8 +286,8 @@ pub enum MinoriRuntimeError {
     ChainTarget,
     #[error("ASTRA_EMU_MINORI_RUNTIME_AUDIO_RESOURCE: audio resource specification is invalid")]
     AudioResource,
-    #[error("ASTRA_EMU_MINORI_RUNTIME_EFFECT: effect operands or timeline are invalid")]
-    Effect,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_EFFECT: effect schema is not verified ({violation:?})")]
+    Effect { violation: MinoriEffectViolation },
     #[error(
         "ASTRA_EMU_MINORI_RUNTIME_PANEL: panel schema is not verified (operand_count={operand_count}, mode={mode:?})"
     )]
@@ -295,6 +295,15 @@ pub enum MinoriRuntimeError {
         operand_count: u8,
         mode: Option<u32>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinoriEffectViolation {
+    Tokenization,
+    UnsupportedKind,
+    ResourceSequence,
+    Timing,
+    Timeline,
 }
 
 /// Reproduces the bounded part of the original audio resource parser:
@@ -658,10 +667,21 @@ fn execute_effect(
     command: &ScCommand,
     state: &mut MinoriRuntimeState,
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MinoriRuntimeError::Effect)?;
-    if tokens.len() < 2 || tokens.len() > 5 || tokens[0] != "CrossFade2" {
-        return Err(MinoriRuntimeError::Effect);
+    let tokens =
+        tokenize_operands(&command.raw_operands, command.span.offset as usize).map_err(|_| {
+            MinoriRuntimeError::Effect {
+                violation: MinoriEffectViolation::Tokenization,
+            }
+        })?;
+    if tokens.len() < 2 || tokens.len() > 5 {
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::ResourceSequence,
+        });
+    }
+    if tokens[0] != "CrossFade2" {
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::UnsupportedKind,
+        });
     }
     let resources = tokens[1]
         .split(':')
@@ -675,13 +695,17 @@ fn execute_effect(
         })
         .collect::<Result<Vec<_>, MinoriRuntimeError>>()?;
     if resources.len() < 2 || resources.len() > 64 || resources.iter().all(Option::is_none) {
-        return Err(MinoriRuntimeError::Effect);
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::ResourceSequence,
+        });
     }
     let alpha_step = parse_effect_integer(tokens.get(2), -1)?;
     let interval_ms = parse_effect_integer(tokens.get(3), -1)?;
     let unused = parse_effect_integer(tokens.get(4), -1)?;
     if alpha_step <= 0 || interval_ms <= 0 || unused != -1 {
-        return Err(MinoriRuntimeError::Effect);
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        });
     }
     let mut effect = MinoriEffectState {
         kind: MinoriEffectKind::CrossFade2,
@@ -689,8 +713,12 @@ fn execute_effect(
         current_index: 0,
         next_index: 1,
         alpha_255: 0,
-        alpha_step: u32::try_from(alpha_step).map_err(|_| MinoriRuntimeError::Effect)?,
-        interval_ms: u32::try_from(interval_ms).map_err(|_| MinoriRuntimeError::Effect)?,
+        alpha_step: u32::try_from(alpha_step).map_err(|_| MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        })?,
+        interval_ms: u32::try_from(interval_ms).map_err(|_| MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        })?,
         elapsed_ns: 0,
         visible_current_index: 0,
         visible_next_index: 1,
@@ -701,7 +729,9 @@ fn execute_effect(
     effect.alpha_255 = effect.alpha_step;
     state.effect = Some(effect);
     next_effect_sequence(state)?;
-    let mut frame = effect_frame(state.effect.as_ref().ok_or(MinoriRuntimeError::Effect)?)?;
+    let mut frame = effect_frame(state.effect.as_ref().ok_or(MinoriRuntimeError::Effect {
+        violation: MinoriEffectViolation::Timeline,
+    })?)?;
     frame.alpha_255 = 0;
     frame.sequence = state.effect_sequence;
     Ok(Some(MinoriVmEvent::Effect(frame)))
@@ -754,7 +784,9 @@ fn execute_panel(
 
 fn parse_effect_integer(token: Option<&String>, default: i32) -> Result<i32, MinoriRuntimeError> {
     token.map_or(Ok(default), |value| {
-        value.parse().map_err(|_| MinoriRuntimeError::Effect)
+        value.parse().map_err(|_| MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        })
     })
 }
 
@@ -767,19 +799,28 @@ fn next_effect_index(current: u32, len: usize) -> Result<u32, MinoriRuntimeError
 }
 
 fn effect_frame(effect: &MinoriEffectState) -> Result<MinoriEffectFrame, MinoriRuntimeError> {
-    let current = usize::try_from(effect.current_index).map_err(|_| MinoriRuntimeError::Effect)?;
-    let next = usize::try_from(effect.next_index).map_err(|_| MinoriRuntimeError::Effect)?;
+    let current =
+        usize::try_from(effect.current_index).map_err(|_| MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timeline,
+        })?;
+    let next = usize::try_from(effect.next_index).map_err(|_| MinoriRuntimeError::Effect {
+        violation: MinoriEffectViolation::Timeline,
+    })?;
     Ok(MinoriEffectFrame {
         sequence: 0,
         current_resource_uri: effect
             .resources
             .get(current)
-            .ok_or(MinoriRuntimeError::Effect)?
+            .ok_or(MinoriRuntimeError::Effect {
+                violation: MinoriEffectViolation::Timeline,
+            })?
             .clone(),
         next_resource_uri: effect
             .resources
             .get(next)
-            .ok_or(MinoriRuntimeError::Effect)?
+            .ok_or(MinoriRuntimeError::Effect {
+                violation: MinoriEffectViolation::Timeline,
+            })?
             .clone(),
         alpha_255: effect.alpha_255.min(255) as u16,
     })
@@ -1594,11 +1635,23 @@ mod tests {
 
     #[test]
     fn crossfade2_rejects_unknown_modes_and_invalid_timeline_values() {
-        for source in [
-            b".effect CrossFade first.png:second.png 320 100\r\n".as_slice(),
-            b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
-            b".effect CrossFade2 first.png:second.png 320 0\r\n".as_slice(),
-            b".effect CrossFade2 first.png:second.png 320 100 1\r\n".as_slice(),
+        for (source, violation) in [
+            (
+                b".effect CrossFade first.png:second.png 320 100\r\n".as_slice(),
+                MinoriEffectViolation::UnsupportedKind,
+            ),
+            (
+                b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
+                MinoriEffectViolation::Timing,
+            ),
+            (
+                b".effect CrossFade2 first.png:second.png 320 0\r\n".as_slice(),
+                MinoriEffectViolation::Timing,
+            ),
+            (
+                b".effect CrossFade2 first.png:second.png 320 100 1\r\n".as_slice(),
+                MinoriEffectViolation::Timing,
+            ),
         ] {
             let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
             let mut vm = MinoriVm::new(
@@ -1608,7 +1661,10 @@ mod tests {
                 1,
             )
             .unwrap();
-            assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::Effect);
+            assert_eq!(
+                vm.step(1).unwrap_err(),
+                MinoriRuntimeError::Effect { violation }
+            );
         }
     }
 

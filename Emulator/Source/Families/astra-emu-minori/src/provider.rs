@@ -1868,7 +1868,7 @@ fn runtime_error(error: MinoriRuntimeError) -> LegacyProviderError {
         MinoriRuntimeError::NativeSaveFormat => "ASTRA_EMU_MINORI_NATIVE_SAVE_FORMAT",
         MinoriRuntimeError::ChainTarget => "ASTRA_EMU_MINORI_RUNTIME_CHAIN",
         MinoriRuntimeError::AudioResource => "ASTRA_EMU_MINORI_RUNTIME_AUDIO_RESOURCE",
-        MinoriRuntimeError::Effect => "ASTRA_EMU_MINORI_RUNTIME_EFFECT",
+        MinoriRuntimeError::Effect { .. } => "ASTRA_EMU_MINORI_RUNTIME_EFFECT",
         MinoriRuntimeError::Panel { .. } => "ASTRA_EMU_MINORI_RUNTIME_PANEL",
     };
     LegacyProviderError::invalid(code, error.to_string())
