@@ -19,7 +19,7 @@ Any v6 snapshot is a migration-rejection input and is never restored.
 
 `transition` 只配置后续 stage，不自行提交替代帧。`stage` 按已确认顺序更新前景、背景和 stand state。family effect 只保存 VFS URI、编码 hash、尺寸与绘制指令；Headless/Manager Host 通过 session resource channel 读取编码数据，并交给显式绑定的 Astra `DecodeProviderRegistry`。解码后的 RGBA 只存在于 Host 临时渲染帧，不进入 effect、snapshot 或 report，也没有 Minori 私有 renderer。stand position 尚未证明为像素坐标，因此含 stand 的 stage 会返回 `ASTRA_EMU_MINORI_STAGE_STAND_POSITION`。
 
-原程序 parser 将第一个 `effect` operand 绑定为 effect id，第二个 operand 才是可选的冒号分隔资源规格；其后最多三个 operand 以 C 整数读取，缺省值为 `-1`。已在真实执行路径确认 `.effect CrossFade2` 的单 operand 形式：原对象接收空资源规格、替换首层 effect slot，但不会解析出 resource frame。runtime 明确清除活动 effect 并递增确定性 sequence，不提交替代帧或自交叉淡入。带资源或数值配置的 `CrossFade2` 尚未完成对象时钟、资源解析与混合语义闭合，继续以 `ASTRA_EMU_MINORI_RUNTIME_EFFECT` 阻断。`.effect` 与 `.effect2` 的解析对象相同，但原程序各自持有独立 effect slot；当前只实现前者，后者继续阻断，不能覆盖首层 state。
+原程序 parser 将第一个 `effect` operand 绑定为 effect id，第二个 operand 才是可选的冒号分隔资源规格；其后最多三个 operand 以 C 整数读取，缺省值为 `-1`。已在真实执行路径确认 `.effect CrossFade2` 的单 operand 形式：原对象接收空资源规格、替换首层 effect slot，但不会解析出 resource frame。runtime 明确清除活动 effect 并递增确定性 sequence，不提交替代帧或自交叉淡入。四 operand 形式则由原对象逐项解析资源，并将后两个整数分别作为 alpha 增量与更新间隔；只有至少两个已解析资源才进入双帧路径。runtime 以同一固定时钟累计间隔、在一次更新中提交当前帧后增加 alpha，并在达到阈值后推进相邻资源。`.effect` 与 `.effect2` 的解析对象相同，但原程序各自持有独立 effect slot；当前只实现前者，后者继续阻断，不能覆盖首层 state。
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 0 分支不会加载 panel asset，因此 runtime 清除当前可见 panel 并重发同一演出层；mode 1 分支选择 `msgPanel.png`，并把它作为最上层 resource-frame 与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 

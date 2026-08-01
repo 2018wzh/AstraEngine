@@ -703,7 +703,7 @@ fn execute_effect(
             violation: MinoriEffectViolation::UnsupportedKind,
         });
     }
-    if tokens.len() != 1 {
+    if tokens.len() != 1 && tokens.len() != 4 {
         return Err(MinoriRuntimeError::Effect {
             violation: MinoriEffectViolation::ResourceSequence {
                 count: u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?,
@@ -716,11 +716,64 @@ fn execute_effect(
     // numeric fields.  It replaces the active effect but resolves no resource
     // frame.  Preserve that zero-frame state rather than inventing a frame or
     // a self-crossfade.
-    state.effect = None;
+    if tokens.len() == 1 {
+        state.effect = None;
+        next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::EffectCleared {
+            sequence: state.effect_sequence,
+        }));
+    }
+    let resources = tokens[1]
+        .split(':')
+        .map(|resource| {
+            if resource == "*" {
+                return Err(MinoriRuntimeError::Effect {
+                    violation: MinoriEffectViolation::ResourceSequence { count: 4 },
+                });
+            }
+            validate_scene_filename(resource)?;
+            Ok(Some(format!("minori:/bg/{resource}")))
+        })
+        .collect::<Result<Vec<_>, MinoriRuntimeError>>()?;
+    if resources.len() < 2 || resources.len() > 64 {
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::ResourceSequence { count: 4 },
+        });
+    }
+    let alpha_step = tokens[2]
+        .parse::<u32>()
+        .map_err(|_| MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        })?;
+    let interval_ms = tokens[3]
+        .parse::<u32>()
+        .map_err(|_| MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        })?;
+    if alpha_step == 0 || interval_ms == 0 {
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Timing,
+        });
+    }
+    state.effect = Some(MinoriEffectState {
+        kind: MinoriEffectKind::CrossFade2,
+        resources,
+        current_index: 0,
+        next_index: 1,
+        alpha_255: 0,
+        alpha_step,
+        interval_ms,
+        elapsed_ns: 0,
+        visible_current_index: 0,
+        visible_next_index: 1,
+        visible_alpha_255: 0,
+    });
     next_effect_sequence(state)?;
-    Ok(Some(MinoriVmEvent::EffectCleared {
-        sequence: state.effect_sequence,
-    }))
+    let mut frame = effect_frame(state.effect.as_ref().ok_or(MinoriRuntimeError::Effect {
+        violation: MinoriEffectViolation::Timeline,
+    })?)?;
+    frame.sequence = state.effect_sequence;
+    Ok(Some(MinoriVmEvent::Effect(frame)))
 }
 
 fn execute_panel(
@@ -1606,11 +1659,11 @@ mod tests {
             ),
             (
                 b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence { count: 4 },
+                MinoriEffectViolation::Timing,
             ),
             (
                 b".effect CrossFade2 first.png:second.png 320 0\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence { count: 4 },
+                MinoriEffectViolation::Timing,
             ),
             (
                 b".effect CrossFade2 first.png:second.png 320 100 1\r\n".as_slice(),
