@@ -922,7 +922,16 @@ impl HostState {
                 let capture =
                     self.profile.readback_policy == HeadlessReadbackPolicy::RasterizedFrames;
                 let result = self
-                    .materialize_surface(surface, capture)
+                    .surfaces
+                    .get(surface)
+                    .map(|state| state.pending.is_some() || state.frame.is_some())
+                    .and_then(|has_submitted_frame| {
+                        if has_submitted_frame {
+                            self.materialize_surface(surface, capture).map(|_| ())
+                        } else {
+                            Ok(())
+                        }
+                    })
                     .and_then(|_| self.flush_gpu_profile(surface))
                     .and_then(|_| self.surfaces.remove(surface))
                     .and_then(|s| {
