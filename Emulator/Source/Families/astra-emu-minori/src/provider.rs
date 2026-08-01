@@ -1023,7 +1023,19 @@ fn append_resource_layer(
             "effect alpha is outside the normalized bound",
         ));
     }
-    let bytes = vfs.read_file(mount_set_id, resource_uri, MAX_RESOURCE_BYTES)?;
+    let bytes = vfs
+        .read_file(mount_set_id, resource_uri, MAX_RESOURCE_BYTES)
+        .map_err(|error| {
+            tracing::debug!(
+                target: "astra_emu_minori::resource",
+                event = "astra_emu_minori_resource_read_failed",
+                resource_identity = %Hash256::from_sha256(resource_uri.as_bytes()),
+                texture_id,
+                diagnostic = %error.code(),
+                "resource read failed"
+            );
+            error
+        })?;
     let image_reader = image::ImageReader::new(Cursor::new(bytes.as_slice()))
         .with_guessed_format()
         .map_err(|_| {
