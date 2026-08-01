@@ -4,6 +4,7 @@ use std::{
 };
 
 use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
+use astra_core::Hash256;
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
 use astra_emu_family_core::{LegacyMountedVfs, LegacyVfsNodeKind};
 
@@ -93,7 +94,18 @@ impl LegacyMountedVfsReaderAdapter {
         uri: &str,
     ) -> Result<(ByteSourceStat, astra_emu_family_core::LegacyVfsStat, u32), LegacyProviderError>
     {
-        let stat = self.vfs.stat(uri).map_err(core_error)?;
+        let resource_identity = Hash256::from_sha256(uri.as_bytes());
+        let stat = self.vfs.stat(uri).map_err(|error| {
+            let error = core_error(error);
+            tracing::debug!(
+                target: "astra_emu_family_support::runtime_vfs",
+                event = "astra_emu_vfs_runtime_stat_failed",
+                resource_identity = %resource_identity,
+                diagnostic = %error.code(),
+                "runtime VFS stat failed"
+            );
+            error
+        })?;
         if stat.kind != LegacyVfsNodeKind::File {
             return Err(invalid(
                 "ASTRA_EMU_VFS_RUNTIME_FILE_REQUIRED",
@@ -107,10 +119,18 @@ impl LegacyMountedVfsReaderAdapter {
             .iter()
             .position(|entry| entry.uri == uri)
             .ok_or_else(|| {
-                invalid(
+                let error = invalid(
                     "ASTRA_EMU_VFS_RUNTIME_MANIFEST_ENTRY",
                     "runtime VFS file is absent from the validated manifest",
-                )
+                );
+                tracing::debug!(
+                    target: "astra_emu_family_support::runtime_vfs",
+                    event = "astra_emu_vfs_runtime_manifest_lookup_failed",
+                    resource_identity = %resource_identity,
+                    diagnostic = %error.code(),
+                    "runtime VFS manifest lookup failed"
+                );
+                error
             })
             .and_then(|index| {
                 u32::try_from(index).map_err(|_| {
