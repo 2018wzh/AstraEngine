@@ -228,6 +228,9 @@ impl MinoriPazDecryptProvider {
                 )
             })?;
             if version == 0 {
+                // The v0 index table maps plaintext byte -> encrypted byte.  Build
+                // its inverse before transforming the entry stream, matching GARbro's
+                // preprocessed `MovKey` contract.
                 let mut table = [0u8; 256];
                 for (index, value) in video_key.iter().enumerate() {
                     table[*value as usize] = index as u8;
@@ -548,12 +551,14 @@ impl MinoriMountedVfs {
             private_profile_hash: self.decrypt_provider.private_profile_hash(),
             decrypt_provider_id: self.decrypt_provider.provider_id().into(),
             descriptor_schema_hash: self.decrypt_provider.descriptor_schema_hash(),
-            codec_identity: if entry.descriptor.packed {
-                "paz-zlib-v1"
-            } else {
-                "paz-raw-v1"
-            }
-            .into(),
+            codec_identity: format!(
+                "{MINORI_READER_ID}:{}",
+                if entry.descriptor.packed {
+                    "zlib"
+                } else {
+                    "raw"
+                }
+            ),
         };
         if let Some(bytes) = self
             .cache
@@ -1621,6 +1626,18 @@ mod tests {
                 index_size_xor: if version == 0 { 0 } else { 0x5a5a5a5a },
             })
             .collect();
+        let provider = mount_fixture_provider();
+        MinoriMountedVfs::mount(
+            "fixture",
+            "minori:/",
+            configs,
+            provider,
+            Hash256::from_sha256(b"fixture-mount-profile"),
+        )
+        .unwrap()
+    }
+
+    fn mount_fixture_provider() -> Arc<MinoriPazDecryptProvider> {
         let roles = REQUIRED_ARCHIVE_ROLES
             .into_iter()
             .map(|role| {
@@ -1640,17 +1657,9 @@ mod tests {
                 )
             })
             .collect();
-        let provider = Arc::new(
+        Arc::new(
             MinoriPazDecryptProvider::new(Hash256::from_sha256(b"fixture-profile"), roles).unwrap(),
-        );
-        MinoriMountedVfs::mount(
-            "fixture",
-            "minori:/",
-            configs,
-            provider,
-            Hash256::from_sha256(b"fixture-mount-profile"),
         )
-        .unwrap()
     }
 
     fn blowfish_encrypt(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
@@ -1678,6 +1687,20 @@ mod tests {
             aligned_size: size,
             packed: false,
             video_key: None,
+        }
+    }
+
+    fn movie_fixture_entry(name: &str, size: u64, video_key: Vec<u8>) -> PazEntryDescriptor {
+        PazEntryDescriptor {
+            archive_role: "mov".into(),
+            entry_id: "mov:0".into(),
+            name: name.into(),
+            offset: 0,
+            unpacked_size: size,
+            stored_size: size,
+            aligned_size: size,
+            packed: false,
+            video_key: Some(video_key),
         }
     }
 
@@ -1744,6 +1767,27 @@ mod tests {
         assert_eq!(
             normalize_entry_name("../secret.sc").unwrap_err().code(),
             "ASTRA_EMU_MINORI_ENTRY_PATH"
+        );
+    }
+
+    #[test]
+    fn v0_movie_inverts_the_index_substitution_table() {
+        let provider = mount_fixture_provider();
+        let movie_key = (0u8..=255)
+            .map(|byte| byte.wrapping_add(1))
+            .collect::<Vec<_>>();
+        let plaintext = b"RIFF";
+        let encrypted = plaintext
+            .iter()
+            .map(|byte| byte.wrapping_add(1))
+            .collect::<Vec<_>>();
+        let entry = movie_fixture_entry("fixture.avi", plaintext.len() as u64, movie_key);
+
+        assert_eq!(
+            provider
+                .decrypt_entry_chunk(0, &entry, 0, &encrypted)
+                .unwrap(),
+            plaintext
         );
     }
     #[test]
