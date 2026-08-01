@@ -636,9 +636,15 @@ impl MinoriMountedVfs {
 
     fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
         validate_legacy_vfs_uri(&self.prefix, uri)?;
-        self.entries
-            .get(uri)
-            .ok_or_else(|| error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found"))
+        self.entries.get(uri).ok_or_else(|| {
+            tracing::debug!(
+                target: "astra_emu_minori::paz",
+                event = "astra_emu_minori_vfs_entry_lookup_failed",
+                resource_identity = %Hash256::from_sha256(uri.as_bytes()),
+                "mounted PAZ entry lookup failed"
+            );
+            error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found")
+        })
     }
 }
 
