@@ -6,26 +6,29 @@ use std::{
 
 use astra_platform::{PlatformError, PlatformErrorCode};
 use windows::{
-    core::BOOL,
     Win32::{
-        Foundation::{HWND, LPARAM, RECT},
+        Foundation::{HWND, LPARAM, POINT, RECT},
         Graphics::Gdi::{
-            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-            GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
-            DIB_RGB_COLORS, SRCCOPY,
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleBitmap,
+            CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits,
+            ReleaseDC, SRCCOPY, SelectObject,
         },
         UI::{
             Input::KeyboardAndMouse::{
-                SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-                KEYEVENTF_KEYUP, VIRTUAL_KEY,
+                INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+                KEYEVENTF_KEYUP, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+                MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+                MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput, VIRTUAL_KEY,
             },
             WindowsAndMessaging::{
-                EnumWindows, GetClientRect, GetForegroundWindow, GetWindowTextLengthW,
-                GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow,
-                ShowWindow, SW_RESTORE,
+                EnumWindows, GetClientRect, GetForegroundWindow, GetSystemMetrics,
+                GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+                SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+                SW_RESTORE, SetForegroundWindow, ShowWindow,
             },
         },
     },
+    core::BOOL,
 };
 
 pub struct WindowsTestDriver;
@@ -101,8 +104,117 @@ impl TestWindow {
     }
 
     pub fn send_key(&self, virtual_key: u16) -> Result<(), PlatformError> {
-        send_keyboard(virtual_key, KEYBD_EVENT_FLAGS::default())?;
-        send_keyboard(virtual_key, KEYEVENTF_KEYUP)
+        self.send_key_state(virtual_key, true)?;
+        self.send_key_state(virtual_key, false)
+    }
+
+    /// Sends a real OS keyboard transition. Callers that replay an input sequence must preserve
+    /// its pressed/released edges instead of synthesizing a click for every keyboard event.
+    pub fn send_key_state(&self, virtual_key: u16, pressed: bool) -> Result<(), PlatformError> {
+        send_keyboard(
+            virtual_key,
+            if pressed {
+                KEYBD_EVENT_FLAGS::default()
+            } else {
+                KEYEVENTF_KEYUP
+            },
+        )
+    }
+
+    /// Moves the real OS cursor to a client-relative coordinate. The coordinate must be inside
+    /// the visible client region so a test cannot silently target another window.
+    pub fn move_pointer(&self, x: u32, y: u32) -> Result<(), PlatformError> {
+        let mut rect = RECT::default();
+        unsafe {
+            GetClientRect(self.window, &mut rect).map_err(|_| {
+                driver_error(
+                    "test_driver.pointer.client_rect",
+                    "client rect query failed",
+                )
+            })?;
+        }
+        let width = u32::try_from((rect.right - rect.left).max(0)).map_err(|_| {
+            driver_error("test_driver.pointer.client_rect", "client area is invalid")
+        })?;
+        let height = u32::try_from((rect.bottom - rect.top).max(0)).map_err(|_| {
+            driver_error("test_driver.pointer.client_rect", "client area is invalid")
+        })?;
+        if width == 0 || height == 0 || x >= width || y >= height {
+            return Err(driver_error(
+                "test_driver.pointer.bounds",
+                "pointer coordinate is outside the client area",
+            ));
+        }
+        let mut point = POINT {
+            x: x as i32,
+            y: y as i32,
+        };
+        unsafe {
+            if !ClientToScreen(self.window, &mut point).as_bool() {
+                return Err(driver_error(
+                    "test_driver.pointer.client_to_screen",
+                    "client coordinate conversion failed",
+                ));
+            }
+        }
+        let (left, top, virtual_width, virtual_height) = unsafe {
+            (
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN),
+            )
+        };
+        if virtual_width <= 0 || virtual_height <= 0 {
+            return Err(driver_error(
+                "test_driver.pointer.desktop",
+                "virtual desktop bounds are invalid",
+            ));
+        }
+        let absolute_x = normalize_absolute_coordinate(point.x, left, virtual_width)?;
+        let absolute_y = normalize_absolute_coordinate(point.y, top, virtual_height)?;
+        send_mouse(
+            absolute_x,
+            absolute_y,
+            0,
+            MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+        )
+    }
+
+    pub fn send_primary_button(&self, pressed: bool) -> Result<(), PlatformError> {
+        send_mouse(
+            0,
+            0,
+            0,
+            if pressed {
+                MOUSEEVENTF_LEFTDOWN
+            } else {
+                MOUSEEVENTF_LEFTUP
+            },
+        )
+    }
+
+    pub fn send_secondary_button(&self, pressed: bool) -> Result<(), PlatformError> {
+        send_mouse(
+            0,
+            0,
+            0,
+            if pressed {
+                MOUSEEVENTF_RIGHTDOWN
+            } else {
+                MOUSEEVENTF_RIGHTUP
+            },
+        )
+    }
+
+    pub fn send_wheel(&self, delta_y: i32) -> Result<(), PlatformError> {
+        if delta_y == 0 {
+            return Err(driver_error(
+                "test_driver.pointer.wheel",
+                "wheel delta must be non-zero",
+            ));
+        }
+        send_mouse(0, 0, delta_y, MOUSEEVENTF_WHEEL)
     }
 
     pub fn capture_rgba(&self) -> Result<TestCapturedFrame, PlatformError> {
@@ -256,6 +368,74 @@ fn send_keyboard(virtual_key: u16, flags: KEYBD_EVENT_FLAGS) -> Result<(), Platf
     Ok(())
 }
 
+fn normalize_absolute_coordinate(
+    value: i32,
+    offset: i32,
+    extent: i32,
+) -> Result<i32, PlatformError> {
+    let relative = value
+        .checked_sub(offset)
+        .ok_or_else(|| driver_error("test_driver.pointer.desktop", "coordinate overflow"))?;
+    if relative < 0 || relative >= extent {
+        return Err(driver_error(
+            "test_driver.pointer.desktop",
+            "client coordinate is outside the virtual desktop",
+        ));
+    }
+    let scaled = i64::from(relative) * 65_535 / i64::from((extent - 1).max(1));
+    i32::try_from(scaled).map_err(|_| {
+        driver_error(
+            "test_driver.pointer.desktop",
+            "normalized coordinate overflow",
+        )
+    })
+}
+
+fn send_mouse(
+    dx: i32,
+    dy: i32,
+    mouse_data: i32,
+    flags: MOUSE_EVENT_FLAGS,
+) -> Result<(), PlatformError> {
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                mouseData: mouse_data as u32,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+    if sent != 1 {
+        return Err(driver_error(
+            "test_driver.input.send",
+            "test driver could not send mouse input",
+        ));
+    }
+    Ok(())
+}
+
 fn driver_error(operation: &'static str, message: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::InvalidState, operation, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_absolute_coordinate;
+
+    #[test]
+    fn absolute_pointer_coordinates_are_bounded_and_normalized() {
+        assert_eq!(normalize_absolute_coordinate(100, 100, 200).unwrap(), 0);
+        assert_eq!(
+            normalize_absolute_coordinate(299, 100, 200).unwrap(),
+            65_535
+        );
+        assert!(normalize_absolute_coordinate(99, 100, 200).is_err());
+        assert!(normalize_absolute_coordinate(300, 100, 200).is_err());
+    }
 }

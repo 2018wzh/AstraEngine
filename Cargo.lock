@@ -843,6 +843,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-emu-e3"
+version = "0.1.0"
+dependencies = [
+ "astra-core",
+ "astra-headless-protocol",
+ "astra-observability",
+ "astra-platform-windows",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "astra-emu-evidence"
 version = "0.1.0"
 dependencies = [

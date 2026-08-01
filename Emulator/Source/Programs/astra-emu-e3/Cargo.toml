@@ -1,0 +1,27 @@
+[package]
+name = "astra-emu-e3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "astra-emu-e3"
+path = "src/main.rs"
+
+[dependencies]
+astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows", features = ["platform-test-driver"] }
+
+[dev-dependencies]
+tempfile.workspace = true

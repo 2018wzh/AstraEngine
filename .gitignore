@@ -3,6 +3,7 @@ __pycache__
 node_modules/
 target/
 .tmp/
+Emulator/Automation/.local/
 .astra-cache/
 Examples/TsuiNoSora/.local/
 Examples/NativeVN/.local/

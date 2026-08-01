@@ -76,6 +76,7 @@ members = [
     "Emulator/Source/Manager/astra-emu-manager",
     "Emulator/Source/Programs/astra-emu-schema",
     "Emulator/Source/Programs/astra-emu-evidence",
+    "Emulator/Source/Programs/astra-emu-e3",
     "Emulator/Source/Programs/astra-emu-family-package",
     "Emulator/Source/Programs/astra-emu-cli",
     "Emulator/Source/Programs/astra-emu-minori-cli",

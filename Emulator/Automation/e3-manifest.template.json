@@ -1,0 +1,15 @@
+{
+  "schema": "astra.emu.manager_e3_manifest.v1",
+  "manager_executable": "replace-with-absolute-manager-executable",
+  "authorized_source_directory": "replace-with-absolute-authorized-source-directory",
+  "entry": "game/start.hcb",
+  "input": "replace-with-absolute-astra.user_input_sequence.v1-jsonl",
+  "output_directory": "replace-with-absolute-private-output-directory",
+  "timeout_ms": 300000,
+  "stage_width": 1024,
+  "stage_height": 768,
+  "expected_terminal_hash": "sha256:replace-with-64-lowercase-hex-digest",
+  "expected_coverage": [
+    "replace-with-sanitized-coverage-id"
+  ]
+}

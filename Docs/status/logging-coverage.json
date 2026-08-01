@@ -277,6 +277,10 @@
       "status": "instrumented",
       "reason": "Manager host, platform source, renderer, audio and input lifecycle"
     },
+    "astra-emu-e3": {
+      "status": "instrumented",
+      "reason": "external Windows Manager E3 lifecycle, physical input dispatch and fail-closed evidence collection"
+    },
     "astra-emu-cli": {
       "status": "instrumented",
       "reason": "explicit native launch and headless provider/session/artifact lifecycle"

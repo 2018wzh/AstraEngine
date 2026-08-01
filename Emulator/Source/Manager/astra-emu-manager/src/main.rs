@@ -80,9 +80,26 @@ use video_executor::{HostVideoExecutor, HostVideoFrame};
 
 #[cfg(not(target_os = "android"))]
 fn platform_data_dir() -> Result<PathBuf, String> {
+    if let Some(path) = resolve_platform_data_dir_override(env::var_os("ASTRA_EMU_DATA_DIR"))? {
+        return Ok(path);
+    }
     directories::ProjectDirs::from("dev", "AstraEngine", "AstraEMU")
         .map(|directories| directories.data_dir().to_path_buf())
         .ok_or_else(|| "ASTRA_EMU_PLATFORM_DATA_DIRECTORY_UNAVAILABLE".into())
+}
+
+#[cfg(not(target_os = "android"))]
+fn resolve_platform_data_dir_override(
+    override_root: Option<std::ffi::OsString>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(override_root) = override_root else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(override_root);
+    if !path.is_absolute() {
+        return Err("ASTRA_EMU_PLATFORM_DATA_DIRECTORY_INVALID".into());
+    }
+    Ok(Some(path))
 }
 
 #[cfg(target_os = "android")]
@@ -386,6 +403,19 @@ impl RuntimeBridge {
                 sequence: active.await_sequence,
             });
         }
+        let input_edges = std::mem::take(&mut active.pending_inputs);
+        if !input_edges.is_empty() {
+            let input_hash = Hash256::from_sha256(
+                &postcard::to_allocvec(&input_edges)
+                    .map_err(|_| "ASTRA_EMU_INPUT_OBSERVATION_SERIALIZE".to_owned())?,
+            );
+            tracing::debug!(
+                event = "astra.emu.manager.input_consumed",
+                fixed_step = next_step,
+                input_count = input_edges.len(),
+                input_hash = %input_hash
+            );
+        }
         let output = self.provider.step(RuntimeStepInput {
             session_id: active.session_id.clone(),
             fixed_step: next_step,
@@ -394,7 +424,7 @@ impl RuntimeBridge {
             mode: RuntimeStepMode::Live,
             action: "emu.step".into(),
             payload: serde_json::to_value(EmuStepPayload {
-                input_edges: std::mem::take(&mut active.pending_inputs),
+                input_edges,
                 await_results,
                 provider_results: Vec::new(),
                 budget: LegacyStepBudget {
@@ -565,6 +595,16 @@ impl RuntimeBridge {
             .ok_or_else(|| "ASTRA_EMU_TRANSLATION_RUNTIME_MISSING".to_owned())?
             .poll()?;
         self.terminal = output.status == "terminal";
+        if self.terminal {
+            let terminal_hash =
+                Hash256::from_sha256(format!("{}:{next_step}", output.status).as_bytes());
+            tracing::info!(
+                event = "astra.emu.manager.terminal_observed",
+                fixed_step = next_step,
+                output_count = output.outputs.len(),
+                terminal_hash = %terminal_hash
+            );
+        }
         Ok(true)
     }
 
@@ -640,6 +680,12 @@ impl RuntimeBridge {
             value,
             sequence: active.input_sequence,
         };
+        tracing::trace!(
+            event = "astra.emu.manager.input_queued",
+            input_sequence = edge.sequence,
+            control = %edge.control,
+            pressed = edge.pressed
+        );
         active.pending_inputs.push(edge);
         Ok(())
     }
@@ -3402,7 +3448,7 @@ use audio_executor::HostAudioExecutor;
 mod manager_tests {
     use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 
-    use crate::normalize_legacy_input_value;
+    use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
 
     use astra_emu_manager_core::{
         CancellationToken, GrantedSourceEntry, GrantedSourceReader, Library, LibraryScanner,
@@ -3469,6 +3515,15 @@ mod manager_tests {
         assert_eq!(normalize_legacy_input_value("confirm", 1.25).unwrap(), 1.25);
         assert!(normalize_legacy_input_value("pointer.x", f32::NAN).is_err());
         assert!(normalize_legacy_input_value("pointer.y", i32::MAX as f32).is_err());
+    }
+
+    #[test]
+    fn e3_data_directory_override_must_be_absolute() {
+        assert!(resolve_platform_data_dir_override(Some("relative-e3-state".into())).is_err());
+        assert_eq!(
+            resolve_platform_data_dir_override(Some(std::env::temp_dir().into())).unwrap(),
+            Some(std::env::temp_dir())
+        );
     }
 
     #[test]
