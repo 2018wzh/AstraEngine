@@ -9,6 +9,11 @@
 - 发现并修复 Headless 的有序合成缺口：`render_resource_frame` 与文本 capture 位于同一 runtime step 时，Host 过去在 effect 循环结束后才把资源帧栅格化，且没有写入 `underlay_frame`，导致 `ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING`。现在只会从该 step 已提交的显式 render frame 生成 underlay；没有 render frame 仍保持 blocking，不生成替代画面。
 - 修复后，安装包对授权样本完成一轮 local-private Headless E2：400 fixed ticks、12 个提交帧、1 个 checkpoint、snapshot 校验通过、无 runtime diagnostic。该轮只观测入口初始演出，未发送未验证的对话推进或选项输入，因而不是 terminal route、完整视觉审查或 Windows E3。
 
+### 输入等待观测与后续语句边界
+
+- Headless runner 现在为活动的输入等待写入 `runtime.awaiting_input` 观测值。它只哈希已排序的物理输入 mask，不携带 await token、脚本位置、正文或资源名；输入序列可以据此在固定 tick 上发出同 tick 的 press/release，而不依赖未受约束的时间猜测。
+- 该观测已让私有输入回归越过首个消息等待，随后在未完整实现的 `.panel` 语义处得到 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。本次命中的是单 operand、`mode=0`；错误只包含 operand 数量和可解析的数值 mode，便于收集脱敏证据。`mode=0` 的原程序状态变更尚未重新取得可用 IDA session 复核，因而没有把它猜作默认 panel、隐藏操作或过渡操作。
+
 ### 原程序选择命令复核
 
 通过原版 `ScriptPool` command registry、`CommandSelect` vtable、parser 与选择 UI 创建路径交叉确认：`.select` 最多接受四个 positional option；每个 option 按第一个 `:` 切为显示文本和目标字段。UI 也只接受一至四项。

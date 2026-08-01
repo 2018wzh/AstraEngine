@@ -288,8 +288,13 @@ pub enum MinoriRuntimeError {
     AudioResource,
     #[error("ASTRA_EMU_MINORI_RUNTIME_EFFECT: effect operands or timeline are invalid")]
     Effect,
-    #[error("ASTRA_EMU_MINORI_RUNTIME_PANEL: panel operands or mode are invalid")]
-    Panel,
+    #[error(
+        "ASTRA_EMU_MINORI_RUNTIME_PANEL: panel schema is not verified (operand_count={operand_count}, mode={mode:?})"
+    )]
+    Panel {
+        operand_count: u8,
+        mode: Option<u32>,
+    },
 }
 
 /// Reproduces the bounded part of the original audio resource parser:
@@ -706,17 +711,33 @@ fn execute_panel(
     command: &ScCommand,
     state: &mut MinoriRuntimeState,
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
-    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
-        .map_err(|_| MinoriRuntimeError::Panel)?;
+    let tokens =
+        tokenize_operands(&command.raw_operands, command.span.offset as usize).map_err(|_| {
+            MinoriRuntimeError::Panel {
+                operand_count: 0,
+                mode: None,
+            }
+        })?;
+    let mode = tokens.first().and_then(|value| value.parse::<u32>().ok());
+    let operand_count = u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?;
     let [mode] = tokens.as_slice() else {
-        return Err(MinoriRuntimeError::Panel);
+        return Err(MinoriRuntimeError::Panel {
+            operand_count,
+            mode,
+        });
     };
-    let mode = mode.parse::<u32>().map_err(|_| MinoriRuntimeError::Panel)?;
+    let mode = mode.parse::<u32>().map_err(|_| MinoriRuntimeError::Panel {
+        operand_count,
+        mode: None,
+    })?;
     // The original CMessagePanel switch maps mode 1 to the default
     // `msgPanel.png` resource. Other modes, the secondary transition operand,
     // and filename overrides remain blocked until their behavior is verified.
     if mode != 1 {
-        return Err(MinoriRuntimeError::Panel);
+        return Err(MinoriRuntimeError::Panel {
+            operand_count,
+            mode: Some(mode),
+        });
     }
     state.panel = Some(MinoriPanelState {
         mode,
@@ -1480,7 +1501,10 @@ mod tests {
             vm.state().panel
         );
 
-        for source in [b".panel 0\r\n".as_slice(), b".panel 1 -1\r\n".as_slice()] {
+        for (source, operand_count, mode) in [
+            (b".panel 0\r\n".as_slice(), 1, Some(0)),
+            (b".panel 1 -1\r\n".as_slice(), 2, Some(1)),
+        ] {
             let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
             let mut vm = MinoriVm::new(
                 "minori:/scr/fixture.sc".into(),
@@ -1489,7 +1513,13 @@ mod tests {
                 1,
             )
             .unwrap();
-            assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::Panel);
+            assert_eq!(
+                vm.step(1).unwrap_err(),
+                MinoriRuntimeError::Panel {
+                    operand_count,
+                    mode,
+                }
+            );
         }
     }
 

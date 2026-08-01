@@ -31,6 +31,8 @@ cargo run -p astra-emu-minori-cli -- census-media --game-dir <case-root> --mount
 
 Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged `event` 形状，例如键盘输入使用 `{"type":"keyboard","state":"pressed",...}`，退出使用 `{"type":"shutdown"}`。旧 externally-tagged 的 `{"Keyboard":...}`、PascalCase button state 与裸 `"Shutdown"` 会以 `ASTRA_EMU_HEADLESS_INPUT_PARSE` 阻断；调用方必须重新序列化同一物理事件，不能让 reader 兼容两种 wire format。
 
+脚本在等待输入时会暴露 host-owned 的 `runtime.awaiting_input` 观测值。它仅由等待所接受的物理输入 mask 聚合哈希，适合输入序列的 `await` 条件；不会输出 await token、脚本位置、商业文本或资源名。一次确认应将 press/release 排在同一 fixed tick，避免 release 在等待已解决后成为未消费 edge。
+
 当前合法样本已通过真实导入、八包 14502-entry manifest v2 full verify，以及 89 脚本的 payload-free census。full verify 共执行 43818 次 range read、读取 6624958365 个 decoded bytes；该轮显式关闭 cache。八包 cache identity 复核因平台缓存卷空间不足保持 blocking。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
 
 `census-media` 只检查 `bg`、`bgm`，逐 frame 调用生产 ANI/SQZ adapter，并用 `image` 验证 PNG。报告仅含格式、entry/frame、像素和尺寸聚合计数；不含 URI、文件名或像素。当前样本通过 4665-entry census：2655 PNG、1951 ANI（6723 frames）、9 SQZ（224 frames）、49 Ogg 和 1 个 metadata database。
