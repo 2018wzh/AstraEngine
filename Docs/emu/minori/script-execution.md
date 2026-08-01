@@ -19,7 +19,7 @@ Any v6 snapshot is a migration-rejection input and is never restored.
 
 `transition` 只配置后续 stage，不自行提交替代帧。`stage` 按已确认顺序更新前景、背景和 stand state。family effect 只保存 VFS URI、编码 hash、尺寸与绘制指令；Headless/Manager Host 通过 session resource channel 读取编码数据，并交给显式绑定的 Astra `DecodeProviderRegistry`。解码后的 RGBA 只存在于 Host 临时渲染帧，不进入 effect、snapshot 或 report，也没有 Minori 私有 renderer。stand position 尚未证明为像素坐标，因此含 stand 的 stage 会返回 `ASTRA_EMU_MINORI_STAGE_STAND_POSITION`。
 
-`effect CrossFade2` 的 handler 接收 effect id、冒号分隔的资源序列和两个时间参数；第三个整数沿用构造器默认值 `-1`。资源序列中的 `*` 是空帧。原效果对象按更新时间阈值推进 0..255 混合量，并在相邻资源之间循环。VM 用固定 `delta_ns` 更新同一状态，snapshot 同时保存下一次更新所需的 accumulator 与最后实际提交的 frame，避免 panel 叠加或恢复时反推可见 alpha；Host 仍只收到 resource-frame URI、hash、尺寸、顶点和 alpha。当前只接受 IDA 已确认的 `CrossFade2`，其他 effect id、非法资源、零时间参数或非默认第三参数均返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`。
+`effect CrossFade2` 的 handler 接收 effect id、冒号分隔的资源序列和两个时间参数；第三个整数沿用构造器默认值 `-1`。资源序列中的 `*` 是空帧。原效果对象按更新时间阈值推进 0..255 混合量，并在相邻资源之间循环；只有一个可解析资源时对象保持静态 presentation，不会自循环产生伪混合。VM 用固定 `delta_ns` 更新同一状态，snapshot 同时保存下一次更新所需的 accumulator 与最后实际提交的 frame，避免 panel 叠加或恢复时反推可见 alpha；Host 仍只收到 resource-frame URI、hash、尺寸、顶点和 alpha。当前只接受 IDA 已确认的 `CrossFade2`，其他 effect id、非法资源、零时间参数或非默认第三参数均返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`。
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 0 分支不会加载 panel asset，因此 runtime 清除当前可见 panel 并重发同一演出层；mode 1 分支选择 `msgPanel.png`，并把它作为最上层 resource-frame 与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 

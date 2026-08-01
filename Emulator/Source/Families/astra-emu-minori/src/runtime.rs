@@ -301,6 +301,7 @@ pub enum MinoriRuntimeError {
 pub enum MinoriEffectViolation {
     Tokenization,
     UnsupportedKind,
+    OperandCount,
     ResourceSequence,
     Timing,
     Timeline,
@@ -500,6 +501,12 @@ impl MinoriVm {
         let Some(effect) = self.state.effect.as_mut() else {
             return Ok(None);
         };
+        // The original CrossFade2 object only enables its transition path
+        // after it has resolved at least two source frames. A single source
+        // remains a static presentation and must not be wrapped onto itself.
+        if effect.resources.len() < 2 {
+            return Ok(None);
+        }
         effect.elapsed_ns = effect
             .elapsed_ns
             .checked_add(delta_ns)
@@ -675,7 +682,7 @@ fn execute_effect(
         })?;
     if tokens.len() < 2 || tokens.len() > 5 {
         return Err(MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::ResourceSequence,
+            violation: MinoriEffectViolation::OperandCount,
         });
     }
     if tokens[0] != "CrossFade2" {
@@ -694,7 +701,7 @@ fn execute_effect(
             }
         })
         .collect::<Result<Vec<_>, MinoriRuntimeError>>()?;
-    if resources.len() < 2 || resources.len() > 64 || resources.iter().all(Option::is_none) {
+    if resources.is_empty() || resources.len() > 64 || resources.iter().all(Option::is_none) {
         return Err(MinoriRuntimeError::Effect {
             violation: MinoriEffectViolation::ResourceSequence,
         });
@@ -707,11 +714,12 @@ fn execute_effect(
             violation: MinoriEffectViolation::Timing,
         });
     }
+    let has_transition_pair = resources.len() > 1;
     let mut effect = MinoriEffectState {
         kind: MinoriEffectKind::CrossFade2,
         resources,
         current_index: 0,
-        next_index: 1,
+        next_index: if has_transition_pair { 1 } else { 0 },
         alpha_255: 0,
         alpha_step: u32::try_from(alpha_step).map_err(|_| MinoriRuntimeError::Effect {
             violation: MinoriEffectViolation::Timing,
@@ -721,7 +729,7 @@ fn execute_effect(
         })?,
         elapsed_ns: 0,
         visible_current_index: 0,
-        visible_next_index: 1,
+        visible_next_index: if has_transition_pair { 1 } else { 0 },
         visible_alpha_255: 0,
     };
     // Creation immediately performs the first zero-alpha update in the
@@ -803,9 +811,15 @@ fn effect_frame(effect: &MinoriEffectState) -> Result<MinoriEffectFrame, MinoriR
         usize::try_from(effect.current_index).map_err(|_| MinoriRuntimeError::Effect {
             violation: MinoriEffectViolation::Timeline,
         })?;
-    let next = usize::try_from(effect.next_index).map_err(|_| MinoriRuntimeError::Effect {
-        violation: MinoriEffectViolation::Timeline,
-    })?;
+    let next = if effect.resources.len() > 1 {
+        Some(
+            usize::try_from(effect.next_index).map_err(|_| MinoriRuntimeError::Effect {
+                violation: MinoriEffectViolation::Timeline,
+            })?,
+        )
+    } else {
+        None
+    };
     Ok(MinoriEffectFrame {
         sequence: 0,
         current_resource_uri: effect
@@ -815,13 +829,18 @@ fn effect_frame(effect: &MinoriEffectState) -> Result<MinoriEffectFrame, MinoriR
                 violation: MinoriEffectViolation::Timeline,
             })?
             .clone(),
-        next_resource_uri: effect
-            .resources
-            .get(next)
-            .ok_or(MinoriRuntimeError::Effect {
-                violation: MinoriEffectViolation::Timeline,
-            })?
-            .clone(),
+        next_resource_uri: next
+            .map(|next| {
+                effect
+                    .resources
+                    .get(next)
+                    .ok_or(MinoriRuntimeError::Effect {
+                        violation: MinoriEffectViolation::Timeline,
+                    })
+                    .cloned()
+            })
+            .transpose()?
+            .flatten(),
         alpha_255: effect.alpha_255.min(255) as u16,
     })
 }
@@ -1555,12 +1574,12 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            clear_vm.step(1, 4).unwrap(),
+            clear_vm.step(1).unwrap(),
             Some(MinoriVmEvent::Panel { .. })
         ));
         assert!(clear_vm.state().panel.is_some());
         assert!(matches!(
-            clear_vm.step(2, 4).unwrap(),
+            clear_vm.step(2).unwrap(),
             Some(MinoriVmEvent::Panel { .. })
         ));
         assert_eq!(clear_vm.state().panel, None);
@@ -1666,6 +1685,56 @@ mod tests {
                 MinoriRuntimeError::Effect { violation }
             );
         }
+    }
+
+    #[test]
+    fn crossfade2_distinguishes_operand_count_from_resource_sequence() {
+        let cases = [
+            (
+                b".effect CrossFade2\r\n".as_slice(),
+                MinoriEffectViolation::OperandCount,
+            ),
+            (
+                b".effect CrossFade2 * 320 100\r\n".as_slice(),
+                MinoriEffectViolation::ResourceSequence,
+            ),
+        ];
+        for (source, violation) in cases {
+            let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+            let mut vm = MinoriVm::new(
+                "minori:/scr/fixture.sc".into(),
+                Hash256::from_sha256(source),
+                script,
+                1,
+            )
+            .unwrap();
+            assert_eq!(
+                vm.step(1).unwrap_err(),
+                MinoriRuntimeError::Effect { violation }
+            );
+        }
+    }
+
+    #[test]
+    fn crossfade2_single_resource_remains_a_static_presentation() {
+        let source = b".effect CrossFade2 only.png 320 100\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Effect(frame)) = vm.step(1).unwrap() else {
+            panic!("expected initial static effect frame")
+        };
+        assert_eq!(
+            frame.current_resource_uri.as_deref(),
+            Some("minori:/bg/only.png")
+        );
+        assert_eq!(frame.next_resource_uri, None);
+        assert_eq!(vm.advance_effect_clock(1_000_000_000).unwrap(), None);
     }
 
     #[test]
