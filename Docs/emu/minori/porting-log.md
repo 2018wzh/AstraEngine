@@ -69,6 +69,8 @@
 - 修正 positional tokenizer 与 input-await edge routing 后，真实八包 Headless 运行到 373 个 fixed tick：实际提交 9 帧，保存黑场、标题、可见 CrossFade2、panel 和前两条 message 六个 checkpoint，消费 16 条物理输入，snapshot round-trip 为 true，diagnostic 为 0。运行读取 10 个资源、35 次 range、4913549 bytes；两条 message frame hash 均与 panel 及彼此不同。人工查看确认日文字形完整可读，没有缺字方框、横向裁剪、拉伸或旧文本残留。该证据只关闭两条可见 message E2，不代表原版像素一致。
 - 公共 API 新增 `LegacyTextPresentationV1` 和 lease binding，只传递 language、显式字体 family、body/speaker region、字号、行高、行数和颜色。它通过现有 `Presentation` effect 发送，没有改动 `LegacyEffect` v1 的 postcard layout 或 ABI fingerprint。正文仍通过一次性 lease 传递，不进入 effect、snapshot、trace 或报告。Headless Host 使用现有 `CosmicTextLayoutProvider`、`TextRenderResourceOwner` 和 `astra-media-core` CPU Renderer2D，把 glyph 合成到最近的无文字 underlay；后续消息不会把上一条正文烘焙进背景。
 - IDA 已确认原程序消息字体默认值为 26 px，ruby 为 12 px，默认字体是 CP932 的 MS PGothic。移植按计划显式绑定仓库内 Noto Sans JP，不读取系统字体。首轮 body/speaker region 结合已确认的 panel 几何与外部截图结构制定，真实 checkpoint 检查前只算实现绑定，不声明原版精确坐标。
+- 真实原程序二进制中只有一个与已解包脚本集合相交、且没有脚本入边的 `.sc` 引用。它已作为 private Headless 实际入口，不再以先前的短链 `test.sc` 代替首路线入口。该入口的首个未覆盖命令为 `.movie`，其五个 operand 已由本地样本确认依次表达非零 movie id、资源名、宽、高和 `t`/`f` skip flag。
+- `.movie` 现生成 `LegacyVideoCommandV1::Play` 和同一 media id 的 `MediaFence`，复用公共 video command、Host media completion、snapshot state 和 VFS URI 绑定；资源、尺寸、重复播放与 stage identity 不匹配均阻断。没有引入 Minori 私有播放器或 codec fallback。
 
 ### 已确认事实
 
@@ -100,6 +102,7 @@
 - 真实 Headless 已到第二条可见 message，但只检查了选定帧，没有完成整个 effect 周期的逐帧节奏比较。`select`、普通 voice、其他 panel/effect 和后续主要演出仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
 - AstraEMU runner 同时输出专用 `astra.emu.headless_run_report.v2` 和公共 `astra.headless_run_report.v2`；两者绑定同一 manifest hash、输入、checkpoint 和 diagnostic 状态。真实八包 v24 已通过 `prepare-review`，模型按 bundle 查看 6 个 required checkpoint、首尾/最大差异选择，并检查 3 个完整 WAV 的时长、电平、静音与 clipping；`validate-review` 随后通过。该 review 只适用于 373-tick slice，不能覆盖完整路线或自动失败。
 - 尚无首条完整路线、全 movie codec inventory、完整 required checkpoint 集合或 Windows E3 证据。
+- 实际入口的首个 movie 为约 196 MiB，超过 family VFS 单次 64 MiB read 上限。现有 Headless video path 把它作为一个 512 MiB 整体 byte buffer 请求，触发 `ASTRA_EMU_VFS_RUNTIME_RANGE`。这不是可通过放宽 VFS 或整文件缓存解决的错误：必须先把公共 video path 改为有界 range-backed streaming reader，并完成该 AVI codec/container 的 pure-Rust provider inventory；在此之前真实路线在 movie fence 处保持 blocking。
 
 ### 本次测试
 

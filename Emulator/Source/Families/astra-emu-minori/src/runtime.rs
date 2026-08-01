@@ -228,6 +228,7 @@ pub enum MinoriVmEvent {
     Panel {
         sequence: u64,
     },
+    Movie(MinoriMovieState),
     Chain {
         target: String,
     },
@@ -291,6 +292,8 @@ pub enum MinoriRuntimeError {
     AudioResource,
     #[error("ASTRA_EMU_MINORI_RUNTIME_EFFECT: effect schema is not verified ({violation:?})")]
     Effect { violation: MinoriEffectViolation },
+    #[error("ASTRA_EMU_MINORI_RUNTIME_EFFECT_KIND: effect kind is not implemented (identity={identity})")]
+    UnsupportedEffectKind { identity: Hash256 },
     #[error(
         "ASTRA_EMU_MINORI_RUNTIME_PANEL: panel schema is not verified (operand_count={operand_count}, mode={mode:?})"
     )]
@@ -486,6 +489,9 @@ impl MinoriVm {
         if expected != token_id {
             return Err(MinoriRuntimeError::Waiting);
         }
+        if matches!(current, MinoriWaitState::Media { .. }) {
+            self.state.movie = None;
+        }
         self.state.wait = None;
         Ok(())
     }
@@ -661,6 +667,7 @@ fn execute_control(
             violation: MinoriEffectViolation::SecondarySlot,
         }),
         "panel" => execute_panel(command, state),
+        "movie" => execute_movie(command, state),
         "chain" => {
             let ScControlFlow::Chain { target } = &command.control_flow else {
                 return Err(MinoriRuntimeError::Operand);
@@ -681,6 +688,55 @@ fn execute_control(
     }
 }
 
+fn execute_movie(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::Operand)?;
+    let [movie_id, resource, width, height, skippable] = tokens.as_slice() else {
+        return Err(MinoriRuntimeError::Operand);
+    };
+    let movie_id = movie_id
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value != 0)
+        .ok_or(MinoriRuntimeError::Operand)?;
+    validate_scene_filename(resource)?;
+    let width = width
+        .parse::<u32>()
+        .ok()
+        .filter(|value| (1..=8192).contains(value))
+        .ok_or(MinoriRuntimeError::Operand)?;
+    let height = height
+        .parse::<u32>()
+        .ok()
+        .filter(|value| (1..=8192).contains(value))
+        .ok_or(MinoriRuntimeError::Operand)?;
+    let skippable = match skippable.as_str() {
+        "t" => true,
+        "f" => false,
+        _ => return Err(MinoriRuntimeError::Operand),
+    };
+    if state.movie.is_some() {
+        return Err(MinoriRuntimeError::State);
+    }
+    let media_id = format!("minori.movie.{movie_id}");
+    let token_id = format!("minori.wait.movie.{}", state.instruction_count);
+    let movie = MinoriMovieState {
+        media_id: media_id.clone(),
+        resource_uri: format!("minori:/mov/{resource}"),
+        width,
+        height,
+        skippable,
+        continuation_pts: 0,
+        fence_id: token_id.clone(),
+    };
+    state.movie = Some(movie.clone());
+    state.wait = Some(MinoriWaitState::Media { token_id, media_id });
+    Ok(Some(MinoriVmEvent::Movie(movie)))
+}
+
 fn execute_effect(
     command: &ScCommand,
     state: &mut MinoriRuntimeState,
@@ -698,9 +754,23 @@ fn execute_effect(
             },
         });
     }
+    if tokens[0] == "*" {
+        state.effect = None;
+        next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::EffectCleared {
+            sequence: state.effect_sequence,
+        }));
+    }
     if tokens[0] != "CrossFade2" {
-        return Err(MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::UnsupportedKind,
+        tracing::info!(
+            target: "astra_emu_minori::runtime",
+            event = "astra_emu_minori_effect_kind_unsupported",
+            effect_identity = %Hash256::from_sha256(tokens[0].as_bytes()),
+            operand_count = tokens.len(),
+            "Minori effect kind is not implemented"
+        );
+        return Err(MinoriRuntimeError::UnsupportedEffectKind {
+            identity: Hash256::from_sha256(tokens[0].as_bytes()),
         });
     }
     if tokens.len() != 1 && tokens.len() != 4 {
@@ -739,6 +809,9 @@ fn execute_effect(
     let resources = tokens[1]
         .split(':')
         .map(|resource| {
+            if resource == "*" {
+                return Ok(None);
+            }
             validate_scene_filename(resource)?;
             Ok(Some(format!("minori:/bg/{resource}")))
         })
@@ -1659,6 +1732,45 @@ mod tests {
     }
 
     #[test]
+    fn star_effect_kind_clears_the_active_effect() {
+        let source = b".effect *\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::EffectCleared { sequence: 1 })
+        );
+        assert_eq!(vm.state().effect, None);
+    }
+
+    #[test]
+    fn movie_opens_a_modal_media_wait_and_clears_it_on_completion() {
+        let source = b".movie 9989 op.avi 1280 720 t\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Movie(movie)) = vm.step(1, 4).unwrap() else {
+            panic!("expected movie event");
+        };
+        assert_eq!(movie.resource_uri, "minori:/mov/op.avi");
+        assert!(movie.skippable);
+        vm.resolve_wait(&movie.fence_id).unwrap();
+        assert_eq!(vm.state().movie, None);
+        assert_eq!(vm.state().wait, None);
+    }
+
+    #[test]
     fn crossfade2_star_resource_selection_replaces_the_active_effect_without_a_frame() {
         let source = b".effect CrossFade2 * 320 100\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -1680,12 +1792,47 @@ mod tests {
     }
 
     #[test]
+    fn crossfade2_preserves_an_empty_slot_inside_a_resource_sequence() {
+        let source = b".effect CrossFade2 first.png:* 320 100\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Effect(_))
+        ));
+        let effect = vm.state().effect.as_ref().expect("CrossFade2 effect state");
+        assert_eq!(effect.resources.len(), 2);
+        assert!(effect.resources[0].is_some());
+        assert_eq!(effect.resources[1], None);
+    }
+
+    #[test]
     fn crossfade2_rejects_unknown_kinds_and_unverified_resource_configuration() {
+        let unsupported_source = b".effect CrossFade first.png:second.png 320 100\r\n";
+        let unsupported_script =
+            parse_sc(unsupported_source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut unsupported_vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(unsupported_source),
+            unsupported_script,
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            unsupported_vm.step(1, 4).unwrap_err(),
+            MinoriRuntimeError::UnsupportedEffectKind {
+                identity: Hash256::from_sha256(b"CrossFade"),
+            }
+        );
+
         for (source, violation) in [
-            (
-                b".effect CrossFade first.png:second.png 320 100\r\n".as_slice(),
-                MinoriEffectViolation::UnsupportedKind,
-            ),
             (
                 b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
                 MinoriEffectViolation::Timing,

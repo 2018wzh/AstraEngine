@@ -605,7 +605,7 @@ impl MinoriMountedVfs {
             && decoded.len() - expected_size <= 16
             && decoded[expected_size..].iter().all(|byte| *byte == 0)
         {
-            tracing::debug!(
+            tracing::info!(
                 event = "astra_emu_minori_entry_zero_padding_removed",
                 archive_role = %entry.descriptor.archive_role,
                 entry_id = %entry.descriptor.entry_id,
@@ -635,9 +635,16 @@ impl MinoriMountedVfs {
     }
 
     fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
+        tracing::debug!(
+            target: "astra_emu_minori::paz",
+            event = "astra_emu_minori_vfs_entry_lookup_started",
+            resource_identity = %Hash256::from_sha256(uri.as_bytes()),
+            uri_length = uri.len(),
+            "mounted PAZ entry lookup started"
+        );
         validate_legacy_vfs_uri(&self.prefix, uri)?;
         self.entries.get(uri).ok_or_else(|| {
-            tracing::debug!(
+            tracing::info!(
                 target: "astra_emu_minori::paz",
                 event = "astra_emu_minori_vfs_entry_lookup_failed",
                 resource_identity = %Hash256::from_sha256(uri.as_bytes()),

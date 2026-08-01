@@ -16,14 +16,15 @@ use astra_emu_family_api::{
     LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport,
     LegacyStepInput, LegacyStepOutput, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
     LegacySurfaceFormatV9, LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry,
-    LegacyVertexV1, LegacyVfsReader, LegacyWaitRequest, LegacyWritableFileHostV1,
+    LegacyVertexV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
+    LegacyWritableFileHostV1,
     LegacyWritableFileRequestV1, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 
 use crate::{
-    parse_sc, MinoriAudioCommand, MinoriEffectFrame, MinoriRuntimeError, MinoriRuntimeState,
-    MinoriStageCommand, MinoriStageLayer, MinoriVm, MinoriVmEvent, MinoriWaitState,
-    ScOpcodeCatalog,
+    parse_sc, MinoriAudioCommand, MinoriEffectFrame, MinoriMovieState,
+    MinoriRuntimeError, MinoriRuntimeState, MinoriStageCommand, MinoriStageLayer, MinoriVm,
+    MinoriVmEvent, MinoriWaitState, ScOpcodeCatalog,
 };
 
 pub const MINORI_FAMILY_ID: &str = "minori";
@@ -524,6 +525,16 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 panel.value,
             )?);
         }
+        if let Some(MinoriVmEvent::Movie(movie)) = &event {
+            let movie = movie_presentation(
+                &vfs,
+                &session.mount_set_id,
+                session.stage_size,
+                movie,
+                after,
+            )?;
+            live.video.push(movie);
+        }
         let mut audio_command_count = 0u64;
         if let Some(MinoriVmEvent::Audio { commands }) = &event {
             for command in commands {
@@ -567,6 +578,10 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             Some(MinoriVmEvent::Wait(wait)) | Some(MinoriVmEvent::Message { wait, .. }) => {
                 vec![legacy_wait(wait)]
             }
+            Some(MinoriVmEvent::Movie(movie)) => vec![LegacyWaitRequest::MediaFence {
+                token_id: movie.fence_id.clone(),
+                media_id: movie.media_id.clone(),
+            }],
             _ => Vec::new(),
         };
         let status = match &event {
@@ -578,6 +593,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             Some(MinoriVmEvent::Stage(_)) => LegacyRuntimeStatus::Active,
             Some(MinoriVmEvent::Effect(_)) => LegacyRuntimeStatus::Active,
             Some(MinoriVmEvent::Panel { .. }) => LegacyRuntimeStatus::Active,
+            Some(MinoriVmEvent::Movie(_)) => LegacyRuntimeStatus::Awaiting,
             Some(MinoriVmEvent::Terminal) => LegacyRuntimeStatus::Terminal,
             None => LegacyRuntimeStatus::Active,
         };
@@ -593,6 +609,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     Some(MinoriVmEvent::Stage(_)) => Some("stage".into()),
                     Some(MinoriVmEvent::Effect(_)) => Some("effect".into()),
                     Some(MinoriVmEvent::Panel { .. }) => Some("panel".into()),
+                    Some(MinoriVmEvent::Movie(_)) => Some("movie".into()),
                     _ => None,
                 },
                 yield_reason: waits.first().map(|_| "wait".into()),
@@ -1711,6 +1728,47 @@ fn waiting_output(
     Ok(output)
 }
 
+fn movie_presentation(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    stage_size: Option<(u32, u32)>,
+    movie: &MinoriMovieState,
+    sequence: u64,
+) -> Result<LegacySequenced<LegacyVideoCommandV1>, LegacyProviderError> {
+    if stage_size != Some((movie.width, movie.height)) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_MOVIE_STAGE_IDENTITY",
+            "movie dimensions do not match the explicit runtime stage",
+        ));
+    }
+    let stat = vfs
+        .stat_file(mount_set_id, &movie.resource_uri)
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_MOVIE_RESOURCE",
+                "movie resource is unavailable",
+            )
+        })?;
+    if stat.len == 0 || stat.len > MAX_RESOURCE_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_MOVIE_RESOURCE",
+            "movie resource violates the bounded VFS contract",
+        ));
+    }
+    let command = LegacyVideoCommandV1::Play {
+        playback_id: movie.media_id.clone(),
+        resource_uri: movie.resource_uri.clone(),
+        mode: LegacyVideoMode::ModalWithAudio,
+        stage_width: movie.width,
+        stage_height: movie.height,
+    };
+    command.validate()?;
+    Ok(LegacySequenced {
+        sequence,
+        value: command,
+    })
+}
+
 fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
     match wait {
         MinoriWaitState::Time {
@@ -1899,6 +1957,7 @@ fn runtime_error(error: MinoriRuntimeError) -> LegacyProviderError {
         MinoriRuntimeError::ChainTarget => "ASTRA_EMU_MINORI_RUNTIME_CHAIN",
         MinoriRuntimeError::AudioResource => "ASTRA_EMU_MINORI_RUNTIME_AUDIO_RESOURCE",
         MinoriRuntimeError::Effect { .. } => "ASTRA_EMU_MINORI_RUNTIME_EFFECT",
+        MinoriRuntimeError::UnsupportedEffectKind { .. } => "ASTRA_EMU_MINORI_RUNTIME_EFFECT_KIND",
         MinoriRuntimeError::Panel { .. } => "ASTRA_EMU_MINORI_RUNTIME_PANEL",
     };
     LegacyProviderError::invalid(code, error.to_string())
