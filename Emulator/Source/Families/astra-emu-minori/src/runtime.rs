@@ -222,6 +222,9 @@ pub enum MinoriVmEvent {
     },
     Stage(MinoriStageCommand),
     Effect(MinoriEffectFrame),
+    EffectCleared {
+        sequence: u64,
+    },
     Panel {
         sequence: u64,
     },
@@ -688,7 +691,7 @@ fn execute_effect(
                 violation: MinoriEffectViolation::Tokenization,
             }
         })?;
-    if tokens.len() < 2 || tokens.len() > 5 {
+    if tokens.is_empty() || tokens.len() > 5 {
         return Err(MinoriRuntimeError::Effect {
             violation: MinoriEffectViolation::OperandCount {
                 count: u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?,
@@ -700,59 +703,22 @@ fn execute_effect(
             violation: MinoriEffectViolation::UnsupportedKind,
         });
     }
-    let resources = tokens[1]
-        .split(':')
-        .map(|resource| {
-            if resource == "*" {
-                Ok(None)
-            } else {
-                validate_scene_filename(resource)?;
-                Ok(Some(format!("minori:/bg/{resource}")))
-            }
-        })
-        .collect::<Result<Vec<_>, MinoriRuntimeError>>()?;
-    if resources.is_empty() || resources.len() > 64 || resources.iter().all(Option::is_none) {
+    if tokens.len() != 1 {
         return Err(MinoriRuntimeError::Effect {
             violation: MinoriEffectViolation::ResourceSequence,
         });
     }
-    let alpha_step = parse_effect_integer(tokens.get(2), -1)?;
-    let interval_ms = parse_effect_integer(tokens.get(3), -1)?;
-    let unused = parse_effect_integer(tokens.get(4), -1)?;
-    if alpha_step <= 0 || interval_ms <= 0 || unused != -1 {
-        return Err(MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::Timing,
-        });
-    }
-    let has_transition_pair = resources.len() > 1;
-    let mut effect = MinoriEffectState {
-        kind: MinoriEffectKind::CrossFade2,
-        resources,
-        current_index: 0,
-        next_index: if has_transition_pair { 1 } else { 0 },
-        alpha_255: 0,
-        alpha_step: u32::try_from(alpha_step).map_err(|_| MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::Timing,
-        })?,
-        interval_ms: u32::try_from(interval_ms).map_err(|_| MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::Timing,
-        })?,
-        elapsed_ns: 0,
-        visible_current_index: 0,
-        visible_next_index: if has_transition_pair { 1 } else { 0 },
-        visible_alpha_255: 0,
-    };
-    // Creation immediately performs the first zero-alpha update in the
-    // original effect object, then advances the accumulator.
-    effect.alpha_255 = effect.alpha_step;
-    state.effect = Some(effect);
+    // The native command parser binds operand zero to the effect kind.  The
+    // exercised original-script form supplies only that operand, so the
+    // CrossFade2 object receives an empty resource specification and default
+    // numeric fields.  It replaces the active effect but resolves no resource
+    // frame.  Preserve that zero-frame state rather than inventing a frame or
+    // a self-crossfade.
+    state.effect = None;
     next_effect_sequence(state)?;
-    let mut frame = effect_frame(state.effect.as_ref().ok_or(MinoriRuntimeError::Effect {
-        violation: MinoriEffectViolation::Timeline,
-    })?)?;
-    frame.alpha_255 = 0;
-    frame.sequence = state.effect_sequence;
-    Ok(Some(MinoriVmEvent::Effect(frame)))
+    Ok(Some(MinoriVmEvent::EffectCleared {
+        sequence: state.effect_sequence,
+    }))
 }
 
 fn execute_panel(
@@ -798,14 +764,6 @@ fn execute_panel(
     Ok(Some(MinoriVmEvent::Panel {
         sequence: state.effect_sequence,
     }))
-}
-
-fn parse_effect_integer(token: Option<&String>, default: i32) -> Result<i32, MinoriRuntimeError> {
-    token.map_or(Ok(default), |value| {
-        value.parse().map_err(|_| MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::Timing,
-        })
-    })
 }
 
 fn next_effect_index(current: u32, len: usize) -> Result<u32, MinoriRuntimeError> {
@@ -1614,8 +1572,8 @@ mod tests {
     }
 
     #[test]
-    fn crossfade2_keeps_the_verified_resource_and_timeline_state() {
-        let source = b".effect CrossFade2 first.png:second.png:*:* 320 100\r\n.end\r\n";
+    fn crossfade2_without_resource_configuration_replaces_the_active_effect() {
+        let source = b".effect CrossFade2\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let mut vm = MinoriVm::new(
             "minori:/scr/fixture.sc".into(),
@@ -1624,38 +1582,13 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Effect(frame)) = vm.step(1).unwrap() else {
-            panic!("expected effect frame")
-        };
         assert_eq!(
-            frame.current_resource_uri.as_deref(),
-            Some("minori:/bg/first.png")
+            vm.step(1).unwrap(),
+            Some(MinoriVmEvent::EffectCleared { sequence: 1 })
         );
-        assert_eq!(
-            frame.next_resource_uri.as_deref(),
-            Some("minori:/bg/second.png")
-        );
-        assert_eq!(frame.alpha_255, 0);
-        let effect = vm.state().effect.as_ref().unwrap();
-        assert_eq!(effect.alpha_step, 320);
-        assert_eq!(effect.interval_ms, 100);
-        assert_eq!(effect.resources.len(), 4);
-        assert_eq!(effect.visible_current_index, 0);
-        assert_eq!(effect.visible_next_index, 1);
-        assert_eq!(effect.visible_alpha_255, 0);
-
-        assert_eq!(vm.advance_effect_clock(99_000_000).unwrap(), None);
-        let repeated = vm.advance_effect_clock(1_000_000).unwrap().unwrap();
-        assert_eq!(
-            repeated.current_resource_uri.as_deref(),
-            Some("minori:/bg/second.png")
-        );
-        assert_eq!(repeated.next_resource_uri, None);
-        assert_eq!(repeated.alpha_255, 0);
-        let effect = vm.state().effect.as_ref().unwrap();
-        assert_eq!(effect.visible_current_index, 1);
-        assert_eq!(effect.visible_next_index, 2);
-        assert_eq!(effect.visible_alpha_255, 0);
+        assert_eq!(vm.state().effect, None);
+        assert_eq!(vm.state().effect_sequence, 1);
+        assert_eq!(vm.advance_effect_clock(1_000_000).unwrap(), None);
         let save = vm.encode_native_save().unwrap();
         let restored = MinoriVm::decode_native_save(&save).unwrap();
         assert_eq!(restored.effect, vm.state().effect);
@@ -1663,7 +1596,7 @@ mod tests {
     }
 
     #[test]
-    fn crossfade2_rejects_unknown_modes_and_invalid_timeline_values() {
+    fn crossfade2_rejects_unknown_kinds_and_unverified_resource_configuration() {
         for (source, violation) in [
             (
                 b".effect CrossFade first.png:second.png 320 100\r\n".as_slice(),
@@ -1671,15 +1604,15 @@ mod tests {
             ),
             (
                 b".effect CrossFade2 first.png:second.png 0 100\r\n".as_slice(),
-                MinoriEffectViolation::Timing,
+                MinoriEffectViolation::ResourceSequence,
             ),
             (
                 b".effect CrossFade2 first.png:second.png 320 0\r\n".as_slice(),
-                MinoriEffectViolation::Timing,
+                MinoriEffectViolation::ResourceSequence,
             ),
             (
                 b".effect CrossFade2 first.png:second.png 320 100 1\r\n".as_slice(),
-                MinoriEffectViolation::Timing,
+                MinoriEffectViolation::ResourceSequence,
             ),
         ] {
             let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -1698,11 +1631,11 @@ mod tests {
     }
 
     #[test]
-    fn crossfade2_distinguishes_operand_count_from_resource_sequence() {
+    fn crossfade2_rejects_missing_or_additional_operands() {
         let cases = [
             (
-                b".effect CrossFade2\r\n".as_slice(),
-                MinoriEffectViolation::OperandCount { count: 1 },
+                b".effect\r\n".as_slice(),
+                MinoriEffectViolation::OperandCount { count: 0 },
             ),
             (
                 b".effect CrossFade2 * 320 100\r\n".as_slice(),
@@ -1737,33 +1670,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1, 4).unwrap_err(),
+            vm.step(1).unwrap_err(),
             MinoriRuntimeError::Effect {
                 violation: MinoriEffectViolation::SecondarySlot,
             }
         );
-    }
-
-    #[test]
-    fn crossfade2_single_resource_remains_a_static_presentation() {
-        let source = b".effect CrossFade2 only.png 320 100\r\n";
-        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
-        let mut vm = MinoriVm::new(
-            "minori:/scr/fixture.sc".into(),
-            Hash256::from_sha256(source),
-            script,
-            1,
-        )
-        .unwrap();
-        let Some(MinoriVmEvent::Effect(frame)) = vm.step(1).unwrap() else {
-            panic!("expected initial static effect frame")
-        };
-        assert_eq!(
-            frame.current_resource_uri.as_deref(),
-            Some("minori:/bg/only.png")
-        );
-        assert_eq!(frame.next_resource_uri, None);
-        assert_eq!(vm.advance_effect_clock(1_000_000_000).unwrap(), None);
     }
 
     #[test]

@@ -14,6 +14,11 @@
 - Headless runner 现在为活动的输入等待写入 `runtime.awaiting_input` 观测值。它只哈希已排序的物理输入 mask，不携带 await token、脚本位置、正文或资源名；输入序列可以据此在固定 tick 上发出同 tick 的 press/release，而不依赖未受约束的时间猜测。
 - 该观测已让私有输入回归越过首个消息等待，并命中单 operand、`mode=0`。随后重新打开原程序的 IDA session：`CMessagePanel` 的 mode switch 中，case 0 不加载 panel asset，而 case 1 才加载 `msgPanel.png`。runtime 因此把 mode 0 表示为清除当前可见 panel，并重发无 panel 的资源帧；没有把它猜作默认 panel 或过渡操作。mode 2–10、第二个过渡参数和文件名覆盖仍保持 blocking。
 
+### Effect operand contract 修正
+
+- 新的安装包 E2 在通过 `.panel 0` 后命中 `.effect CrossFade2` 单 operand 形式。原程序 `CommandEffect` parser 证实第一个 operand 是 effect id，第二个 operand 才是可选的资源规格；后续三个整数缺省为 `-1`。此前把首个 operand 当作资源序列、把两个整数当作已确认时钟参数的实现与文档均已撤回。
+- 对该已确认的零资源 `CrossFade2`，原对象替换 primary effect slot，但没有解析出资源帧。runtime 以清除活动 effect、递增确定性 sequence 和不提交替代 presentation 表达同一状态，不生成自交叉淡入、静态替代帧或资源猜测。带资源或数值配置的 effect 仍是 blocking 边界，待对象 tick、资源解析和 composite contract 一并验证。
+
 ### 原程序选择命令复核
 
 通过原版 `ScriptPool` command registry、`CommandSelect` vtable、parser 与选择 UI 创建路径交叉确认：`.select` 最多接受四个 positional option；每个 option 按第一个 `:` 切为显示文本和目标字段。UI 也只接受一至四项。
@@ -54,8 +59,8 @@
 - `astra-emu-cli run/headless` 已硬切到 `--family` 与 `--mount-profile`，Minori 通过显式静态 factory registry 挂载八包，再加载签名动态 `cdylib`。旧 `--engine` 被 CLI parser 拒绝，未保留 alias 或 fallback。
 - Headless surface 在 runtime 尚未提交 scene 时可以正常销毁，不再让 `surface.capture` 清理错误掩盖 family 根因；没有为失败路径生成空白替代帧。
 - `stage` 只提交 `astra.emu.render_resource_frame.v1`：effect 保存 VFS URI、编码 hash、已验证尺寸和绘制指令，不保存商业像素。Headless 与 Manager 通过 session resource channel 取回编码数据，再交给唯一显式绑定的 Astra `DecodeProviderRegistry`；纯 Rust `ImageDecodeProvider` 是 packaged-eligible 主 provider，不走 fallback。Host 校验编码 hash、RGBA hash 和尺寸后才生成临时 `LegacyRenderFrameV1`。迁移后的真实八包运行前 5 个 fixed tick 已通过：入口 tail-chain、BGM、SE、全黑背景和竖排标题共提交 2 帧，两个 checkpoint 均为 1280×720，视觉发生变化，snapshot round-trip 与音频 artifact 同时成立。新旧路径的 checkpoint hash 与 visual trace hash 完全一致；截图与正文只留在 ignored 私有 artifact。
-- IDA 已闭合 `effect` handler 的参数传递和 `CrossFade2` 对象：第二个 operand 按 `:` 拆成资源序列，`*` 形成空帧；两个整数写入混合步进与更新时间阈值。对象在相邻资源间执行 0..255 像素混合并循环推进。VM 保存有界资源序列、更新 accumulator 和最后实际提交的 frame；Host 用同一 resource-frame/DecodeProvider 路径合成，不把像素写入 effect 或 snapshot。
-- 后续原程序对象审计确认，资源序列只有一个可解析资源时仍会构造对象，但不会启用相邻帧混合路径。runtime 因而保留该静态 presentation，不把资源自循环为伪 CrossFade；零资源和全空帧继续阻断。
+- 当时的 effect 实现依据合成 fixture 将首个 operand 后的字段解释为资源序列与时钟参数。该解释已被后续真实单 operand E2 与原程序 parser 推翻，现仅作为已撤回的研究记录保留；生产 runtime 不再使用该路径。
+- 资源规格的分隔、单资源对象行为、时钟参数和 frame composite 仍需以原程序对象生命周期与真实样本逐项闭合；当前不再把零资源或单资源情形解释为静态替代 presentation。
 - 命令注册与构造路径确认 `.effect`、`.effect2` 复用同一 `CommandEffect`，但由构造参数绑定到两个独立的原程序 effect slot。当前 runtime 只实现首个 slot；第二个 slot 仍保持 blocking，待把双层 timeline、composition 和 snapshot 一起接入后再开放，不能把 `.effect2` 合并到首层。
 - `.panel` parser、`CMessagePanel` 调用和 mode switch 已确认：最多接收两个整数和一个字符串，缺省值分别为 `0`、`-1` 和空串；mode 0 清除当前可见 panel，mode 1 选择 `msgPanel.png`，mode 与文件名分别以 `!panel_Mode`、`!panel_Filename` 进入存档。runtime 现实现无附加 operand 的 `.panel 0` 与 `.panel 1`；其他 mode、过渡参数和资源覆盖继续阻断。snapshot schema 随可见 effect frame 与 panel state升为 v6。
 - IDA 进一步确认 mode 1 的坐标计算：横坐标取 panel 全局 x，纵坐标为 viewport 高度减图片高度再加 64。真实资源为 263 px 高，因此 720p viewport 中从 y=521 开始绘制，底部 64 px 按原程序语义落在 viewport 外。首次视觉检查发现实现错误地把 panel 放在顶部；现已修正根因并用尺寸回归测试固定，不以视觉容差掩盖。
@@ -76,7 +81,7 @@
 | `if`/`wait` | 原程序反编译 | `if` 固定四个 token并支持 `!=/==/>/</>=/<=`；`wait` 参数按 10 ms timer tick 递减 |
 | tokenizer/`message` | 原程序反编译 + 本地样本 | 每个 space/tab 都切出一个位置，连续分隔符保留空字段；message 使用 id、voice、speaker 和拼接正文，短参数执行默认空更新 |
 | `stage`/`transition` | 原程序反编译 + 本地样本 + Headless | 前景/背景/坐标/stand pair 与 VFS role 已确认；普通 PNG stage 已进入 Astra presentation，stand position 和 transition 动画仍未知 |
-| `effect CrossFade2` | 原程序反编译 + 本地样本 + Headless | 冒号资源序列、空帧、混合步进、更新时间阈值和循环索引已进入确定性 state；真实可见帧已形成独立 checkpoint，其他 effect id 仍未知 |
+| `effect CrossFade2` | 原程序反编译 + 本地样本 + Headless | 已确认第一个 operand 是 effect id；真实单 operand 配置替换 primary slot 而没有资源帧。可选资源规格与数值字段尚未闭合，继续阻断 |
 | `panel` mode 0/1 | 原程序反编译 + 本地样本 + Headless | mode 0 清除可见 panel，mode 1 使用默认资源；存档字段、坐标公式和 effect 上层合成已确认。mode 2–10 与过渡参数未知 |
 | message 字体与 Host 路径 | 原程序反编译 + contract tests + Headless | 原程序默认正文 26 px、ruby 12 px；移植显式绑定 Noto Sans JP，并复用 CosmicText/Renderer2D；首条真实 checkpoint 已确认无缺字、横向裁剪或拉伸，不声明原版像素一致 |
 | BGM/SE resource operand | 原程序反编译 + 本地样本 | token 还包含由原程序解析的资源 metadata；必须先解析再绑定 VFS |

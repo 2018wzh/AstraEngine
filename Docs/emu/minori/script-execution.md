@@ -3,7 +3,7 @@
 The active Minori runtime section is `astra.emu.minori.runtime_state.v7`.
 Any v6 snapshot is a migration-rejection input and is never restored.
 
-当前已有受限 VM，执行 `set`、`setglobal`、`label`、`goto`、`if`、`wait`、`message`、BGM/SE、`playvoice *`、`transition`、无 stand 的 `stage`、`effect CrossFade2`、`.panel 0/1`、`chain` 和 `end`。状态保存 PC、local/global 变量、等待、消息身份、图层、transition、effect timeline、message panel、音频和系统页等字段，并通过 postcard snapshot round-trip 验证。`select`、非控制型 `playvoice`、stand position、其他 panel mode 和其余演出命令遇到执行路径时返回稳定 blocking diagnostic，不会被跳过。
+当前已有受限 VM，执行 `set`、`setglobal`、`label`、`goto`、`if`、`wait`、`message`、BGM/SE、`playvoice *`、`transition`、无 stand 的 `stage`、无资源配置的 `effect CrossFade2`、`.panel 0/1`、`chain` 和 `end`。状态保存 PC、local/global 变量、等待、消息身份、图层、transition、effect state、message panel、音频和系统页等字段，并通过 postcard snapshot round-trip 验证。`select`、非控制型 `playvoice`、stand position、带资源或数值配置的 effect、其他 panel mode 和其余演出命令遇到执行路径时返回稳定 blocking diagnostic，不会被跳过。
 
 `chain` 的语义已经由原程序反编译纠正。它不是 call，也没有 return frame；处理函数结束当前脚本，把参数写入全局 `NEXT`，随后由外层装载下一个脚本。运行时据此做尾链式 VFS 切换：目标只允许 `minori:/scr/` 根下的直接 `.sc` entry，脚本切换时清空 local 变量，保留 global 变量。路径穿越、缺 entry、解析失败和 hash 漂移都会毒化 session 并阻断执行。
 
@@ -19,7 +19,7 @@ Any v6 snapshot is a migration-rejection input and is never restored.
 
 `transition` 只配置后续 stage，不自行提交替代帧。`stage` 按已确认顺序更新前景、背景和 stand state。family effect 只保存 VFS URI、编码 hash、尺寸与绘制指令；Headless/Manager Host 通过 session resource channel 读取编码数据，并交给显式绑定的 Astra `DecodeProviderRegistry`。解码后的 RGBA 只存在于 Host 临时渲染帧，不进入 effect、snapshot 或 report，也没有 Minori 私有 renderer。stand position 尚未证明为像素坐标，因此含 stand 的 stage 会返回 `ASTRA_EMU_MINORI_STAGE_STAND_POSITION`。
 
-`effect CrossFade2` 的 handler 接收 effect id、冒号分隔的资源序列和两个时间参数；第三个整数沿用构造器默认值 `-1`。资源序列中的 `*` 是空帧。原效果对象按更新时间阈值推进 0..255 混合量，并在相邻资源之间循环；只有一个可解析资源时对象保持静态 presentation，不会自循环产生伪混合。`.effect` 与 `.effect2` 的解析对象相同，但原程序各自持有独立 effect slot；当前只实现前者，后者继续阻断，不能覆盖首层 state。VM 用固定 `delta_ns` 更新同一状态，snapshot 同时保存下一次更新所需的 accumulator 与最后实际提交的 frame，避免 panel 叠加或恢复时反推可见 alpha；Host 仍只收到 resource-frame URI、hash、尺寸、顶点和 alpha。当前只接受 IDA 已确认的 `CrossFade2`，其他 effect id、非法资源、零时间参数或非默认第三参数均返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`。
+原程序 parser 将第一个 `effect` operand 绑定为 effect id，第二个 operand 才是可选的冒号分隔资源规格；其后最多三个 operand 以 C 整数读取，缺省值为 `-1`。已在真实执行路径确认 `.effect CrossFade2` 的单 operand 形式：原对象接收空资源规格、替换首层 effect slot，但不会解析出 resource frame。runtime 明确清除活动 effect 并递增确定性 sequence，不提交替代帧或自交叉淡入。带资源或数值配置的 `CrossFade2` 尚未完成对象时钟、资源解析与混合语义闭合，继续以 `ASTRA_EMU_MINORI_RUNTIME_EFFECT` 阻断。`.effect` 与 `.effect2` 的解析对象相同，但原程序各自持有独立 effect slot；当前只实现前者，后者继续阻断，不能覆盖首层 state。
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 0 分支不会加载 panel asset，因此 runtime 清除当前可见 panel 并重发同一演出层；mode 1 分支选择 `msgPanel.png`，并把它作为最上层 resource-frame 与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 
@@ -59,7 +59,7 @@ Manager 只能接收 trace 和 presentation/audio command，不读取私有 VM �
 
 ## Save/Load
 
-Snapshot schema 当前为 `astra.emu.minori.runtime_state.v7`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、已提交 presentation layer、transition 配置、CrossFade2 timeline 与可见 frame、message panel、audio bus 的 URI/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
+Snapshot schema 当前为 `astra.emu.minori.runtime_state.v7`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、已提交 presentation layer、transition 配置、effect state、message panel、audio bus 的 URI/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
 
 ## Determinism
 
