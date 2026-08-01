@@ -3,7 +3,7 @@
 The active Minori runtime section is `astra.emu.minori.runtime_state.v7`.
 Any v6 snapshot is a migration-rejection input and is never restored.
 
-当前已有受限 VM，执行 `set`、`setglobal`、`label`、`goto`、`if`、`wait`、`message`、BGM/SE、`playvoice *`、`transition`、无 stand 的 `stage`、`effect CrossFade2`、`.panel 1`、`chain` 和 `end`。状态保存 PC、local/global 变量、等待、消息身份、图层、transition、effect timeline、message panel、音频和系统页等字段，并通过 postcard snapshot round-trip 验证。`select`、非控制型 `playvoice`、stand position、其他 panel mode 和其余演出命令遇到执行路径时返回稳定 blocking diagnostic，不会被跳过。
+当前已有受限 VM，执行 `set`、`setglobal`、`label`、`goto`、`if`、`wait`、`message`、BGM/SE、`playvoice *`、`transition`、无 stand 的 `stage`、`effect CrossFade2`、`.panel 0/1`、`chain` 和 `end`。状态保存 PC、local/global 变量、等待、消息身份、图层、transition、effect timeline、message panel、音频和系统页等字段，并通过 postcard snapshot round-trip 验证。`select`、非控制型 `playvoice`、stand position、其他 panel mode 和其余演出命令遇到执行路径时返回稳定 blocking diagnostic，不会被跳过。
 
 `chain` 的语义已经由原程序反编译纠正。它不是 call，也没有 return frame；处理函数结束当前脚本，把参数写入全局 `NEXT`，随后由外层装载下一个脚本。运行时据此做尾链式 VFS 切换：目标只允许 `minori:/scr/` 根下的直接 `.sc` entry，脚本切换时清空 local 变量，保留 global 变量。路径穿越、缺 entry、解析失败和 hash 漂移都会毒化 session 并阻断执行。
 
@@ -21,7 +21,7 @@ Any v6 snapshot is a migration-rejection input and is never restored.
 
 `effect CrossFade2` 的 handler 接收 effect id、冒号分隔的资源序列和两个时间参数；第三个整数沿用构造器默认值 `-1`。资源序列中的 `*` 是空帧。原效果对象按更新时间阈值推进 0..255 混合量，并在相邻资源之间循环。VM 用固定 `delta_ns` 更新同一状态，snapshot 同时保存下一次更新所需的 accumulator 与最后实际提交的 frame，避免 panel 叠加或恢复时反推可见 alpha；Host 仍只收到 resource-frame URI、hash、尺寸、顶点和 alpha。当前只接受 IDA 已确认的 `CrossFade2`，其他 effect id、非法资源、零时间参数或非默认第三参数均返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT`。
 
-`.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 1 分支选择 `msgPanel.png`。当前 runtime 只接受精确的 `.panel 1`，把 `minori:/sys/msgPanel.png` 作为最上层 resource-frame，并与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 0、2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
+`.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 0 分支不会加载 panel asset，因此 runtime 清除当前可见 panel 并重发同一演出层；mode 1 分支选择 `msgPanel.png`，并把它作为最上层 resource-frame 与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 
 全包 census 已确认 89 个脚本、33728 行、33695 个 command 和 29 个 command token，catalog 范围内 unknown opcode 为 0。资源契约迁移后，签名动态 Minori plugin 已通过真实八包 Headless E2 的前 373 个 fixed tick：入口 tail-chain、BGM、SE、黑底 stage、竖排标题 stage、6 秒 wait、可见 CrossFade2、`.panel 1` 和前两条 message 都成功。运行实际提交 9 帧，形成 6 个不同 checkpoint，snapshot round-trip 成立且 diagnostic 为 0。用于完成 input await 的物理按键会在 Host 生成唯一 await result 后被消费，不再重复进入尚未验证的 family raw-input channel。人工检查确认两条日文正文没有缺字、横向裁剪、拉伸或旧文本残留。该证据不代表完整 effect 周期、路线、系统 UI 或 transition 动画完成。
 

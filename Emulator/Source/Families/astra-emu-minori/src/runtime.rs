@@ -730,19 +730,22 @@ fn execute_panel(
         operand_count,
         mode: None,
     })?;
-    // The original CMessagePanel switch maps mode 1 to the default
-    // `msgPanel.png` resource. Other modes, the secondary transition operand,
-    // and filename overrides remain blocked until their behavior is verified.
-    if mode != 1 {
-        return Err(MinoriRuntimeError::Panel {
-            operand_count,
-            mode: Some(mode),
-        });
-    }
-    state.panel = Some(MinoriPanelState {
-        mode,
-        resource_uri: "minori:/sys/msgPanel.png".into(),
-    });
+    // The original CMessagePanel switch has an asset-free case 0 and loads
+    // `msgPanel.png` only in case 1. Case 0 therefore clears the currently
+    // visible panel; it is not a request to draw a default panel.
+    state.panel = match mode {
+        0 => None,
+        1 => Some(MinoriPanelState {
+            mode,
+            resource_uri: "minori:/sys/msgPanel.png".into(),
+        }),
+        _ => {
+            return Err(MinoriRuntimeError::Panel {
+                operand_count,
+                mode: Some(mode),
+            });
+        }
+    };
     next_effect_sequence(state)?;
     Ok(Some(MinoriVmEvent::Panel {
         sequence: state.effect_sequence,
@@ -1501,10 +1504,27 @@ mod tests {
             vm.state().panel
         );
 
-        for (source, operand_count, mode) in [
-            (b".panel 0\r\n".as_slice(), 1, Some(0)),
-            (b".panel 1 -1\r\n".as_slice(), 2, Some(1)),
-        ] {
+        let clear_source = b".panel 1\r\n.panel 0\r\n";
+        let clear_script = parse_sc(clear_source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut clear_vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(clear_source),
+            clear_script,
+            1,
+        )
+        .unwrap();
+        assert!(matches!(
+            clear_vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Panel { .. })
+        ));
+        assert!(clear_vm.state().panel.is_some());
+        assert!(matches!(
+            clear_vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::Panel { .. })
+        ));
+        assert_eq!(clear_vm.state().panel, None);
+
+        for (source, operand_count, mode) in [(b".panel 1 -1\r\n".as_slice(), 2, Some(1))] {
             let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
             let mut vm = MinoriVm::new(
                 "minori:/scr/fixture.sc".into(),
