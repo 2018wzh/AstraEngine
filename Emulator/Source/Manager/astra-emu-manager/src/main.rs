@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 #[cfg(target_os = "android")]
 mod android_platform;
 #[cfg(target_os = "android")]
@@ -627,10 +629,10 @@ impl RuntimeBridge {
                 | "pointer.primary"
                 | "pointer.secondary"
                 | "wheel"
-        ) || !value.is_finite()
-        {
+        ) {
             return Err("ASTRA_EMU_INPUT_INVALID".into());
         }
+        let value = normalize_legacy_input_value(control, value)?;
         active.input_sequence = active.input_sequence.saturating_add(1);
         let edge = LegacyInputEdge {
             control: control.to_owned(),
@@ -710,6 +712,25 @@ impl RuntimeBridge {
             self.filter_preset
         )
     }
+}
+
+/// Converts platform pixel/scroll coordinates to the integral legacy input contract.
+///
+/// Slint exposes physical pointer coordinates as scalar values. FVP's ABI deliberately
+/// accepts only finite i32 coordinates, so quantization happens once at the Manager
+/// boundary rather than letting a valid desktop gesture terminate the render loop.
+fn normalize_legacy_input_value(control: &str, value: f32) -> Result<f32, String> {
+    if !value.is_finite() {
+        return Err("ASTRA_EMU_INPUT_INVALID".into());
+    }
+    if !matches!(control, "pointer.x" | "pointer.y" | "wheel") {
+        return Ok(value);
+    }
+    let quantized = value.round();
+    if quantized < i32::MIN as f32 || quantized >= i32::MAX as f32 {
+        return Err("ASTRA_EMU_INPUT_INTEGER_BOUNDS".into());
+    }
+    Ok(quantized)
 }
 
 impl Drop for RuntimeBridge {
@@ -3381,6 +3402,8 @@ use audio_executor::HostAudioExecutor;
 mod manager_tests {
     use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 
+    use crate::normalize_legacy_input_value;
+
     use astra_emu_manager_core::{
         CancellationToken, GrantedSourceEntry, GrantedSourceReader, Library, LibraryScanner,
         PatchHostAction, ScanLimits, SourceGrant, SourceScanError,
@@ -3430,6 +3453,22 @@ mod manager_tests {
         assert!(parse_glossary("missing separator").is_err());
         assert!(parse_glossary("Alice=A\nAlice=B").is_err());
         assert!(parse_glossary("=empty").is_err());
+    }
+
+    #[test]
+    fn platform_pointer_and_wheel_input_is_quantized_before_entering_fvp() {
+        assert_eq!(
+            normalize_legacy_input_value("pointer.x", 17.49).unwrap(),
+            17.0
+        );
+        assert_eq!(
+            normalize_legacy_input_value("pointer.y", 17.5).unwrap(),
+            18.0
+        );
+        assert_eq!(normalize_legacy_input_value("wheel", -2.6).unwrap(), -3.0);
+        assert_eq!(normalize_legacy_input_value("confirm", 1.25).unwrap(), 1.25);
+        assert!(normalize_legacy_input_value("pointer.x", f32::NAN).is_err());
+        assert!(normalize_legacy_input_value("pointer.y", i32::MAX as f32).is_err());
     }
 
     #[test]
