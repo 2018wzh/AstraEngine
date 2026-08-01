@@ -539,6 +539,13 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                             ));
                         }
                         Err(error) => {
+                            tracing::debug!(
+                                target: "astra_emu_minori::resource",
+                                event = "astra_emu_minori_audio_resource_stat_failed",
+                                resource_identity = %Hash256::from_sha256(resource_uri.as_bytes()),
+                                diagnostic = %error.code(),
+                                "audio resource stat failed"
+                            );
                             session.poisoned = true;
                             return Err(error);
                         }
@@ -1120,7 +1127,18 @@ fn load_script(
 ) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
     let script_uri = format!("minori:/scr/{target}");
     validate_script_uri(&script_uri)?;
-    let bytes = vfs.read_file(mount_set_id, &script_uri, MAX_SCRIPT_BYTES)?;
+    let bytes = vfs
+        .read_file(mount_set_id, &script_uri, MAX_SCRIPT_BYTES)
+        .map_err(|error| {
+            tracing::debug!(
+                target: "astra_emu_minori::resource",
+                event = "astra_emu_minori_chain_script_read_failed",
+                resource_identity = %Hash256::from_sha256(script_uri.as_bytes()),
+                diagnostic = %error.code(),
+                "chain script read failed"
+            );
+            error
+        })?;
     let script_hash = Hash256::from_sha256(&bytes);
     let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
     Ok((script_uri, script_hash, script))
