@@ -723,14 +723,22 @@ fn execute_effect(
             sequence: state.effect_sequence,
         }));
     }
+    // `SECrossFade2` tokenizes this field before resource resolution.  A
+    // standalone `*` is therefore a valid empty resource selection, not a
+    // filename.  Its resource lookup produces no frame objects, so the new
+    // effect replaces the old primary slot without emitting a presentation.
+    // Keep it distinct from a malformed sequence and do not turn it into a
+    // guessed background URI.
+    if tokens[1] == "*" {
+        state.effect = None;
+        next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::EffectCleared {
+            sequence: state.effect_sequence,
+        }));
+    }
     let resources = tokens[1]
         .split(':')
         .map(|resource| {
-            if resource == "*" {
-                return Err(MinoriRuntimeError::Effect {
-                    violation: MinoriEffectViolation::ResourceSequence { count: 4 },
-                });
-            }
             validate_scene_filename(resource)?;
             Ok(Some(format!("minori:/bg/{resource}")))
         })
@@ -1651,6 +1659,27 @@ mod tests {
     }
 
     #[test]
+    fn crossfade2_star_resource_selection_replaces_the_active_effect_without_a_frame() {
+        let source = b".effect CrossFade2 * 320 100\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::EffectCleared { sequence: 1 })
+        );
+        assert_eq!(vm.state().effect, None);
+        assert_eq!(vm.state().effect_sequence, 1);
+        assert_eq!(vm.advance_effect_clock(1_000_000).unwrap(), None);
+    }
+
+    #[test]
     fn crossfade2_rejects_unknown_kinds_and_unverified_resource_configuration() {
         for (source, violation) in [
             (
@@ -1693,8 +1722,8 @@ mod tests {
                 MinoriEffectViolation::OperandCount { count: 0 },
             ),
             (
-                b".effect CrossFade2 * 320 100\r\n".as_slice(),
-                MinoriEffectViolation::ResourceSequence { count: 4 },
+                b".effect CrossFade2 * 320 100 1\r\n".as_slice(),
+                MinoriEffectViolation::ResourceSequence { count: 5 },
             ),
         ];
         for (source, violation) in cases {
