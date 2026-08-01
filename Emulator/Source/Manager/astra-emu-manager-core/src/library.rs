@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
@@ -361,6 +361,38 @@ impl Library {
         if version == 5 {
             crate::identity::migrate_v6(&tx)?;
             tx.pragma_update(None, "user_version", 6)?;
+            version = 6;
+        }
+        if version == 6 {
+            tx.execute_batch(
+                "CREATE TABLE play_session (
+                    session_id TEXT PRIMARY KEY NOT NULL,
+                    work_id TEXT NOT NULL REFERENCES library_work(work_id) ON DELETE CASCADE,
+                    case_identity TEXT NOT NULL,
+                    start_unix_ms INTEGER NOT NULL,
+                    end_unix_ms,
+                    duration_ms INTEGER NOT NULL DEFAULT 0 CHECK(duration_ms >= 0),
+                    ended_by TEXT NOT NULL DEFAULT 'active'
+                 );
+                 CREATE INDEX play_session_work_start ON play_session(work_id, start_unix_ms);
+                 CREATE TABLE compatibility_entry_cache (
+                    provider TEXT NOT NULL,
+                    remote_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    notes TEXT,
+                    entry_updated_unix_ms INTEGER NOT NULL,
+                    fetched_at_unix_ms INTEGER NOT NULL,
+                    PRIMARY KEY(provider, remote_id)
+                 );
+                 CREATE TABLE compatibility_sync_state (
+                    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+                    source_url TEXT NOT NULL,
+                    response_hash TEXT NOT NULL,
+                    last_fetched_unix_ms INTEGER NOT NULL,
+                    diagnostic_code TEXT
+                 );",
+            )?;
+            tx.pragma_update(None, "user_version", 7)?;
         }
         tx.commit()?;
         Ok(())
@@ -1094,6 +1126,63 @@ pub(crate) fn validate_relative_path(value: &str) -> Result<(), LibraryError> {
     Ok(())
 }
 
+/// Shared test helpers reused across core module tests (library, play record,
+/// compatibility cache). Keeps scan-based seeding in one place.
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::*;
+
+    pub(crate) fn open_library() -> Library {
+        Library::in_memory().unwrap()
+    }
+
+    /// Scan a single case into the library and return its derived work id.
+    pub(crate) fn seed_case(library: &mut Library, case_identity: &str) -> String {
+        library
+            .upsert_grant(&SourceGrant {
+                source_id: "grant-1".into(),
+                alias: "grant-1".into(),
+                platform_token: "opaque".into(),
+                token_kind: "desktop-bookmark".into(),
+                active: true,
+            })
+            .unwrap();
+        library
+            .apply_scan(
+                "grant-1",
+                &[ScanCandidate {
+                    source_id: "grant-1".into(),
+                    relative_path: format!("{case_identity}/start.hcb"),
+                    case_identity: case_identity.into(),
+                    content_hash: format!("hash-{case_identity}"),
+                    modified_ns: 1,
+                    byte_size: 2,
+                    title: case_identity.into(),
+                }],
+                &CancellationToken::default(),
+            )
+            .unwrap();
+        library
+            .work_for_case(case_identity)
+            .unwrap()
+            .expect("work row must exist after scan")
+            .work_id
+    }
+
+    /// Link an external identity to a work (manual provenance).
+    pub(crate) fn link_identity(library: &Library, work_id: &str, provider: &str, remote_id: &str) {
+        library
+            .connection
+            .execute(
+                "INSERT INTO external_identity(
+                     work_id, provider, remote_id, provenance, verified_at_unix_ms)
+                 VALUES(?1, ?2, ?3, 'manual', 0)",
+                rusqlite::params![work_id, provider, remote_id],
+            )
+            .unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1217,17 +1306,19 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         let table_count: i64 = library
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
-                 AND name IN ('cover_cache', 'source_diagnostic', 'case_runtime_profile', 'translation_profile')",
+                 AND name IN ('cover_cache', 'source_diagnostic', 'case_runtime_profile',
+                    'translation_profile', 'play_session', 'compatibility_entry_cache',
+                    'compatibility_sync_state')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(table_count, 4);
+        assert_eq!(table_count, 7);
     }
 
     #[test]
@@ -1277,5 +1368,117 @@ mod tests {
         };
         library.set_translation_profile(&profile).unwrap();
         assert_eq!(library.translation_profile().unwrap(), Some(profile));
+    }
+
+    fn scan_case(library: &mut Library, case_identity: &str) {
+        library.upsert_grant(&grant("grant-1")).unwrap();
+        library
+            .apply_scan(
+                "grant-1",
+                &[candidate("grant-1", case_identity, "game/start.hcb")],
+                &CancellationToken::default(),
+            )
+            .unwrap();
+    }
+
+    fn work_id_for(library: &Library, case_identity: &str) -> String {
+        library
+            .work_for_case(case_identity)
+            .unwrap()
+            .expect("work row must exist after scan")
+            .work_id
+    }
+
+    #[test]
+    fn play_session_records_duration_and_aggregates_stats() {
+        let mut library = Library::in_memory().unwrap();
+        scan_case(&mut library, "case-a");
+        let work_id = work_id_for(&library, "case-a");
+
+        let session = library.start_play_session("case-a", 1_000).unwrap();
+        // Active session is not counted in settled stats.
+        assert_eq!(library.play_stats(&work_id).unwrap().session_count, 0);
+
+        library.end_play_session(&session, 6_000, "leave").unwrap();
+        let stats = library.play_stats(&work_id).unwrap();
+        assert_eq!(stats.total_duration_ms, 5_000);
+        assert_eq!(stats.session_count, 1);
+        assert_eq!(stats.last_played_unix_ms, Some(1_000));
+
+        let history = library.session_history(&work_id).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].duration_ms, 5_000);
+        assert_eq!(history[0].ended_by, "leave");
+    }
+
+    #[test]
+    fn end_play_session_is_idempotent_and_clamps_negative_duration() {
+        let mut library = Library::in_memory().unwrap();
+        scan_case(&mut library, "case-a");
+        let work_id = work_id_for(&library, "case-a");
+
+        let session = library.start_play_session("case-a", 10_000).unwrap();
+        library.end_play_session(&session, 9_000, "leave").unwrap();
+        assert_eq!(library.play_stats(&work_id).unwrap().total_duration_ms, 0);
+
+        // Second end with a later timestamp must not overwrite the first.
+        library
+            .end_play_session(&session, 99_000, "shutdown")
+            .unwrap();
+        let history = library.session_history(&work_id).unwrap();
+        assert_eq!(history[0].ended_by, "leave");
+        assert_eq!(history[0].duration_ms, 0);
+
+        // Ending an unknown session is a no-op.
+        library
+            .end_play_session("psess-doesnotexist", 1, "leave")
+            .unwrap();
+    }
+
+    #[test]
+    fn settle_abandoned_sessions_closes_active_sessions_as_crash() {
+        let mut library = Library::in_memory().unwrap();
+        scan_case(&mut library, "case-a");
+        let work_id = work_id_for(&library, "case-a");
+
+        library.start_play_session("case-a", 1_000).unwrap();
+        assert_eq!(library.settle_abandoned_sessions(2_000).unwrap(), 1);
+        // Idempotent: nothing left active.
+        assert_eq!(library.settle_abandoned_sessions(3_000).unwrap(), 0);
+
+        let history = library.session_history(&work_id).unwrap();
+        assert_eq!(history[0].ended_by, "crash");
+        assert_eq!(history[0].duration_ms, 0);
+        assert_eq!(history[0].end_unix_ms, Some(2_000));
+    }
+
+    #[test]
+    fn recent_works_orders_by_last_played_desc() {
+        let mut library = Library::in_memory().unwrap();
+        library.upsert_grant(&grant("grant-1")).unwrap();
+        library
+            .apply_scan(
+                "grant-1",
+                &[
+                    candidate("grant-1", "case-a", "a/start.hcb"),
+                    candidate("grant-1", "case-b", "b/start.hcb"),
+                ],
+                &CancellationToken::default(),
+            )
+            .unwrap();
+
+        let first = library.start_play_session("case-a", 1_000).unwrap();
+        library.end_play_session(&first, 2_000, "leave").unwrap();
+        let second = library.start_play_session("case-b", 5_000).unwrap();
+        library.end_play_session(&second, 6_000, "leave").unwrap();
+
+        let recent = library.recent_works(10).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].work_id, work_id_for(&library, "case-b"));
+        assert_eq!(recent[1].work_id, work_id_for(&library, "case-a"));
+        assert_eq!(recent[0].total_duration_ms, 1_000);
+
+        // Limit is respected.
+        assert_eq!(library.recent_works(1).unwrap().len(), 1);
     }
 }

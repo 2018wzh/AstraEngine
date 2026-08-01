@@ -197,9 +197,13 @@ impl DesktopVfsRegistry {
             .ok_or("ASTRA_EMU_VFS_MOUNT_MISSING")?;
         let mut resources = Vec::new();
         for bound in mount.files.values() {
-            let path = relative_path_string(&bound.relative)
-                .map_err(|_| "ASTRA_EMU_VFS_PATH_INVALID")?;
-            let resolve_path = mount.root.join(&bound.relative).to_string_lossy().into_owned();
+            let path =
+                relative_path_string(&bound.relative).map_err(|_| "ASTRA_EMU_VFS_PATH_INVALID")?;
+            let resolve_path = mount
+                .root
+                .join(&bound.relative)
+                .to_string_lossy()
+                .into_owned();
             resources.push(VfsResourceInfo {
                 path,
                 byte_size: bound.byte_size,

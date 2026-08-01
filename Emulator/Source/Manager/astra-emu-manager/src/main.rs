@@ -39,20 +39,20 @@ use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
     AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord,
-    EmuCaseProfile, EmuStepPayload, ExternalIdentityRecord, GrantedSourceReader, Library,
-    LibraryScanner, MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord,
-    PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader, ProviderConsentRecord,
-    ScanLimits, SourceGrant, TranslationCacheRecord, TranslationConsent, TranslationProfileRecord,
-    TrustedPatchRuntime, VfsResourceInfo,
+    CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, EmuStepPayload,
+    ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
+    MatchDecisionRecord, MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction,
+    PatchVfsReader, ProviderConsentRecord, ScanLimits, SourceGrant, TranslationCacheRecord,
+    TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
     AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-    VfsEntryViewModel, VfsPreviewViewModel,
+    PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
 };
 use astra_emu_metadata::{
-    match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, MatchInput,
-    MetadataProviderId, MetadataSearchQuery,
+    match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityFetch, CoverAsset,
+    MatchInput, MetadataProviderId, MetadataSearchQuery, DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
@@ -898,6 +898,9 @@ struct AstraEmuManagerController {
     vfs: Arc<VfsRegistry>,
     runtime: Rc<RefCell<RuntimeBridge>>,
     active_mount_set_id: Option<String>,
+    active_play_session: Option<String>,
+    library_sort: String,
+    compatibility_filter: String,
     data_dir: PathBuf,
     patch_summary: String,
     pending_patch_actions: Vec<PatchHostAction>,
@@ -946,6 +949,66 @@ fn human_size(bytes: u64) -> String {
     }
 }
 
+/// Human-readable play duration (e.g. "12h 5m", "8m", "45s").
+fn human_duration(ms: i64) -> String {
+    let total_seconds = (ms / 1000).max(0);
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m")
+    } else {
+        format!("{total_seconds}s")
+    }
+}
+
+/// Relative timestamp such as "3d ago", "2h ago", "5m ago" or "just now".
+fn human_relative(unix_ms: i64, now_ms: i64) -> String {
+    let delta_seconds = ((now_ms - unix_ms) / 1000).max(0);
+    let days = delta_seconds / 86_400;
+    let hours = delta_seconds / 3600;
+    let minutes = delta_seconds / 60;
+    if days > 0 {
+        format!("{days}d ago")
+    } else if hours > 0 {
+        format!("{hours}h ago")
+    } else if minutes > 0 {
+        format!("{minutes}m ago")
+    } else {
+        "just now".into()
+    }
+}
+
+/// Human-readable compatibility grade label for inspector display. The raw
+/// snake_case status (used for badge coloring / filtering) maps to a label.
+fn compatibility_status_label(status: &str) -> String {
+    match status {
+        "perfect" => "Perfect".into(),
+        "completable" => "Completable".into(),
+        "flawed" => "Flawed".into(),
+        "boot_only" => "Boot only".into(),
+        "unplayable" => "Unplayable".into(),
+        other => other.to_owned(),
+    }
+}
+
+/// Map a compatibility fetch error to a short, symbol-safe diagnostic code
+/// persisted in `compatibility_sync_state` (no free-form text / local paths).
+fn compatibility_diagnostic_code(error: &str) -> &'static str {
+    if error.contains("CONSENT") {
+        "consent"
+    } else if error.contains("SCHEMA") {
+        "schema"
+    } else if error.contains("BOUNDS") {
+        "bounds"
+    } else if error.contains("SOURCE_URL") {
+        "source-url"
+    } else {
+        "network"
+    }
+}
+
 /// Hex summary of the leading bytes for binary previews.
 fn hex_dump(bytes: &[u8]) -> String {
     const PREVIEW_BYTES: usize = 256;
@@ -981,8 +1044,11 @@ impl AstraEmuManagerController {
         let data_dir = platform_data_dir()?;
         std::fs::create_dir_all(&data_dir)
             .map_err(|_| "ASTRA_EMU_PLATFORM_DATA_DIRECTORY_CREATE".to_owned())?;
-        let library =
+        let mut library =
             Library::open(data_dir.join("library.sqlite3")).map_err(|error| error.to_string())?;
+        if let Ok(now) = unix_time_ms() {
+            let _ = library.settle_abandoned_sessions(now);
+        }
         let vfs = Arc::new(VfsRegistry::default());
         let runtime = Rc::new(RefCell::new(RuntimeBridge::new(vfs.clone())?));
         let metadata = MetadataRuntime::start()?;
@@ -994,6 +1060,9 @@ impl AstraEmuManagerController {
             vfs,
             runtime,
             active_mount_set_id: None,
+            active_play_session: None,
+            library_sort: "title".into(),
+            compatibility_filter: "all".into(),
             data_dir,
             patch_summary: "Explicit no-patch mode is active.".into(),
             pending_patch_actions: Vec::new(),
@@ -1070,7 +1139,13 @@ impl AstraEmuManagerController {
             format!("{scope}/")
         };
         let mut entries = Vec::new();
-        Self::flatten_vfs_node(scope_node, &scope_prefix, 0, &self.vfs_expanded, &mut entries);
+        Self::flatten_vfs_node(
+            scope_node,
+            &scope_prefix,
+            0,
+            &self.vfs_expanded,
+            &mut entries,
+        );
         entries
     }
 
@@ -1230,6 +1305,10 @@ impl AstraEmuManagerController {
                 request_id = %completion.request_id,
                 success = completion.result.is_ok()
             );
+            if completion.request_id.starts_with("metadata-compatibility-") {
+                self.apply_compatibility_completion(completion.result)?;
+                continue;
+            }
             match completion.result {
                 Ok(payload) => self.apply_metadata_payload(
                     &completion.request_id,
@@ -1259,6 +1338,61 @@ impl AstraEmuManagerController {
             }
         }
         Ok(changed)
+    }
+
+    /// Materialize a completed compatibility refresh into the local cache, or
+    /// record a diagnostic on failure. Never disturbs unrelated metadata state.
+    fn apply_compatibility_completion(
+        &mut self,
+        result: Result<MetadataPayload, String>,
+    ) -> Result<(), String> {
+        let now = unix_time_ms()?;
+        match result {
+            Ok(MetadataPayload::Compatibility(fetch)) => match fetch {
+                CompatibilityFetch::NotModified => {
+                    self.diagnostic = "Compatibility database unchanged.".into();
+                }
+                CompatibilityFetch::Updated {
+                    database,
+                    response_hash,
+                } => {
+                    let entries = database
+                        .entries
+                        .iter()
+                        .map(|entry| CompatibilityCacheEntry {
+                            provider: entry.provider.clone(),
+                            remote_id: entry.remote_id.clone(),
+                            status: entry.status.as_str().to_owned(),
+                            notes: entry.notes.clone(),
+                            entry_updated_unix_ms: entry.updated_at_unix_ms,
+                            fetched_at_unix_ms: now,
+                        })
+                        .collect::<Vec<_>>();
+                    let entry_count = entries.len();
+                    self.library
+                        .replace_compatibility_cache(
+                            &entries,
+                            &CompatibilitySyncState {
+                                source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+                                response_hash,
+                                last_fetched_unix_ms: now,
+                                diagnostic_code: None,
+                            },
+                        )
+                        .map_err(|error| error.to_string())?;
+                    self.diagnostic = format!("Compatibility updated: {entry_count} entries.");
+                }
+            },
+            Ok(_) => {}
+            Err(error) => {
+                let code = compatibility_diagnostic_code(&error);
+                self.library
+                    .record_compatibility_diagnostic(DEFAULT_COMPATIBILITY_SOURCE_URL, code, now)
+                    .map_err(|library_error| library_error.to_string())?;
+                self.diagnostic = error;
+            }
+        }
+        Ok(())
     }
 
     fn apply_metadata_payload(
@@ -1390,6 +1524,9 @@ impl AstraEmuManagerController {
                 self.bangumi_sync_summary = "Bangumi play status synchronized.".into();
                 self.diagnostic.clear();
             }
+            // Compatibility refreshes are handled in `apply_compatibility_completion`
+            // before reaching this point; ignore if one ever arrives here.
+            MetadataPayload::Compatibility(_) => {}
         }
         Ok(())
     }
@@ -1852,6 +1989,7 @@ fn persist_remote_cover(
 
 impl ManagerController for AstraEmuManagerController {
     fn model(&self) -> Result<ManagerViewModel, String> {
+        let now_ms = unix_time_ms().unwrap_or(0);
         let translation_profile = self
             .library
             .translation_profile()
@@ -1904,17 +2042,91 @@ impl ManagerController for AstraEmuManagerController {
                             .into_owned()
                     })
                     .unwrap_or_default();
-                Ok(GameCardViewModel {
-                    case_id: case.case_identity,
-                    title: display_title,
-                    family: case.family_override.unwrap_or_else(|| "Auto probe".into()),
-                    cover_uri,
-                    diagnostic: String::new(),
-                    play_time: String::new(),
-                    last_played: String::new(),
-                })
+                let (play_time, last_played, last_played_ms, duration_ms) = match work.as_ref() {
+                    Some(work) => {
+                        let stats = self
+                            .library
+                            .play_stats(&work.work_id)
+                            .map_err(|error| error.to_string())?;
+                        let play_time = if stats.total_duration_ms > 0 {
+                            human_duration(stats.total_duration_ms)
+                        } else {
+                            String::new()
+                        };
+                        let last_played = stats
+                            .last_played_unix_ms
+                            .map(|timestamp| human_relative(timestamp, now_ms))
+                            .unwrap_or_default();
+                        (
+                            play_time,
+                            last_played,
+                            stats.last_played_unix_ms.unwrap_or(0),
+                            stats.total_duration_ms,
+                        )
+                    }
+                    None => (String::new(), String::new(), 0, 0),
+                };
+                let compatibility_status = match work.as_ref() {
+                    Some(work) => self
+                        .library
+                        .compatibility_match(&work.work_id)
+                        .map_err(|error| error.to_string())?
+                        .map(|matched| matched.status)
+                        .unwrap_or_default(),
+                    None => String::new(),
+                };
+                Ok((
+                    last_played_ms,
+                    duration_ms,
+                    GameCardViewModel {
+                        case_id: case.case_identity,
+                        title: display_title,
+                        family: case.family_override.unwrap_or_else(|| "Auto probe".into()),
+                        cover_uri,
+                        diagnostic: String::new(),
+                        play_time,
+                        last_played,
+                        compatibility_status,
+                    },
+                ))
             })
             .collect::<Result<Vec<_>, String>>()?;
+        let mut games = games
+            .into_iter()
+            .filter(|(_, _, card)| match self.compatibility_filter.as_str() {
+                "all" => true,
+                "unknown" => card.compatibility_status.is_empty(),
+                filter => card.compatibility_status == filter,
+            })
+            .collect::<Vec<_>>();
+        match self.library_sort.as_str() {
+            "recent" => games.sort_by(|left, right| {
+                right.0.cmp(&left.0).then_with(|| {
+                    left.2
+                        .title
+                        .to_lowercase()
+                        .cmp(&right.2.title.to_lowercase())
+                })
+            }),
+            "play_time" => games.sort_by(|left, right| {
+                right.1.cmp(&left.1).then_with(|| {
+                    left.2
+                        .title
+                        .to_lowercase()
+                        .cmp(&right.2.title.to_lowercase())
+                })
+            }),
+            _ => games.sort_by(|left, right| {
+                left.2
+                    .title
+                    .to_lowercase()
+                    .cmp(&right.2.title.to_lowercase())
+            }),
+        }
+        let games = games
+            .into_iter()
+            .map(|(_, _, card)| card)
+            .collect::<Vec<_>>();
         let selected_nls = self
             .selected_case_id
             .as_deref()
@@ -2046,6 +2258,90 @@ impl ManagerController for AstraEmuManagerController {
         let selected_family = selected_game
             .map(|game| game.family.clone())
             .unwrap_or_default();
+        let selected_play_time = selected_game
+            .map(|game| game.play_time.clone())
+            .unwrap_or_default();
+        let selected_last_played = selected_game
+            .map(|game| game.last_played.clone())
+            .unwrap_or_default();
+        let play_history = self
+            .selected_case_id
+            .as_deref()
+            .map(|case_id| {
+                let work = self
+                    .library
+                    .work_for_case(case_id)
+                    .map_err(|error| error.to_string())?;
+                let sessions = match work {
+                    Some(work) => self
+                        .library
+                        .session_history(&work.work_id)
+                        .map_err(|error| error.to_string())?,
+                    None => Vec::new(),
+                };
+                Ok::<Vec<PlaySessionViewModel>, String>(
+                    sessions
+                        .into_iter()
+                        .filter(|session| session.end_unix_ms.is_some())
+                        .take(8)
+                        .map(|session| PlaySessionViewModel {
+                            start_time: human_relative(session.start_unix_ms, now_ms),
+                            duration: human_duration(session.duration_ms),
+                            ended_by: session.ended_by,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let selected_compatibility = self
+            .selected_case_id
+            .as_deref()
+            .map(|case_id| {
+                let work = self
+                    .library
+                    .work_for_case(case_id)
+                    .map_err(|error| error.to_string())?;
+                match work {
+                    Some(work) => self
+                        .library
+                        .compatibility_match(&work.work_id)
+                        .map_err(|error| error.to_string()),
+                    None => Ok(None),
+                }
+            })
+            .transpose()?
+            .flatten();
+        let selected_compatibility_status = selected_compatibility
+            .as_ref()
+            .map(|matched| compatibility_status_label(&matched.status))
+            .unwrap_or_default();
+        let selected_compatibility_notes = selected_compatibility
+            .as_ref()
+            .and_then(|matched| matched.notes.clone())
+            .unwrap_or_default();
+        let selected_compatibility_updated = selected_compatibility
+            .as_ref()
+            .map(|matched| human_relative(matched.entry_updated_unix_ms, now_ms))
+            .unwrap_or_default();
+        let selected_compatibility_provider = selected_compatibility
+            .as_ref()
+            .map(|matched| matched.provider.clone())
+            .unwrap_or_default();
+        let compatibility_sync_summary = self
+            .library
+            .compatibility_sync_state()
+            .map_err(|error| error.to_string())?
+            .map(|state| {
+                let entry_count = self.library.compatibility_cache_entry_count().unwrap_or(0);
+                let fetched = human_relative(state.last_fetched_unix_ms, now_ms);
+                let mut summary = format!("Compat DB · {entry_count} entries · fetched {fetched}");
+                if let Some(code) = state.diagnostic_code {
+                    summary.push_str(&format!(" · {code}"));
+                }
+                summary
+            })
+            .unwrap_or_default();
         Ok(ManagerViewModel {
             games,
             match_reviews,
@@ -2132,7 +2428,17 @@ impl ManagerController for AstraEmuManagerController {
             // ===== New fields (UI redesign) =====
             selected_title,
             selected_family,
-            selected_play_time: String::new(),
+            selected_play_time,
+            selected_last_played,
+            play_history,
+            library_sort: self.library_sort.clone(),
+            compatibility_filter: self.compatibility_filter.clone(),
+            compatibility_source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+            compatibility_sync_summary,
+            selected_compatibility_status,
+            selected_compatibility_notes,
+            selected_compatibility_updated,
+            selected_compatibility_provider,
             selected_vfs_status: if self.active_mount_set_id.is_some() {
                 "Mounted".into()
             } else {
@@ -2162,6 +2468,60 @@ impl ManagerController for AstraEmuManagerController {
         }
         self.selected_case_id = Some(case_id.to_owned());
         self.diagnostic.clear();
+        self.model()
+    }
+
+    fn set_library_sort(&mut self, mode: &str) -> Result<ManagerViewModel, String> {
+        if !matches!(mode, "title" | "recent" | "play_time") {
+            return Err("ASTRA_EMU_LIBRARY_SORT_INVALID".into());
+        }
+        self.library_sort = mode.to_owned();
+        self.model()
+    }
+
+    fn set_compatibility_filter(&mut self, filter: &str) -> Result<ManagerViewModel, String> {
+        if !matches!(
+            filter,
+            "all" | "perfect" | "completable" | "flawed" | "boot_only" | "unplayable" | "unknown"
+        ) {
+            return Err("ASTRA_EMU_COMPATIBILITY_FILTER_INVALID".into());
+        }
+        self.compatibility_filter = filter.to_owned();
+        self.model()
+    }
+
+    /// Queue a background refresh of the central compatibility database. Gated
+    /// on metadata network consent (any provider). Incremental: the cached
+    /// content hash is sent so an unchanged source yields NotModified.
+    fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
+        let network_consent = ["vndb", "bangumi"].into_iter().any(|provider| {
+            self.library
+                .provider_consent(provider)
+                .ok()
+                .flatten()
+                .is_some_and(|value| value.network_enabled)
+        });
+        if !network_consent {
+            return Err("ASTRA_EMU_COMPATIBILITY_CONSENT_REQUIRED".into());
+        }
+        let cached_hash = self
+            .library
+            .compatibility_sync_state()
+            .map_err(|error| error.to_string())?
+            .map(|state| state.response_hash);
+        let request_id = self.next_metadata_request("compatibility")?;
+        self.metadata.submit(MetadataCommand {
+            request_id,
+            case_identity: String::new(),
+            provider: MetadataProviderId::Vndb,
+            access_token: None,
+            allow_sensitive_cover: false,
+            kind: MetadataCommandKind::RefreshCompatibility {
+                source_url: DEFAULT_COMPATIBILITY_SOURCE_URL.into(),
+                cached_hash,
+            },
+        })?;
+        self.diagnostic = "Compatibility refresh queued".into();
         self.model()
     }
 
@@ -2752,6 +3112,11 @@ impl ManagerController for AstraEmuManagerController {
             }
             return Err(error);
         }
+        let session = self
+            .library
+            .start_play_session(&case.case_identity, unix_time_ms()?)
+            .map_err(|error| error.to_string())?;
+        self.active_play_session = Some(session);
         self.diagnostic.clear();
         self.model()
     }
@@ -2768,6 +3133,11 @@ impl ManagerController for AstraEmuManagerController {
         };
         if let Some(mount_set_id) = self.active_mount_set_id.take() {
             self.vfs.unbind(&mount_set_id);
+        }
+        if let Some(session) = self.active_play_session.take() {
+            if let Ok(now) = unix_time_ms() {
+                let _ = self.library.end_play_session(&session, now, "leave");
+            }
         }
         for record in writes {
             self.library

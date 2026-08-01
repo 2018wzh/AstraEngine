@@ -8,13 +8,13 @@ import { Sidebar, BottomNav } from "./components/sidebar.slint";
 import { GameCard } from "./components/cover-card.slint";
 import { VfsEntry, VfsPreview } from "./components/file-tree.slint";
 import { MatchReview } from "./settings/metadata.slint";
-import { LibraryPage } from "./pages/library.slint";
+import { LibraryPage, PlaySession } from "./pages/library.slint";
 import { AboutPage } from "./pages/about.slint";
 import { SettingsPage } from "./pages/settings.slint";
 import { VfsBrowserPage } from "./pages/vfs-browser.slint";
 import { GameViewPage } from "./pages/game-view.slint";
 
-export { GameCard, MatchReview, VfsEntry, VfsPreview }
+export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession }
 
 export component ManagerWindow inherits Window {
     title: "AstraEMU Manager";
@@ -48,7 +48,19 @@ export component ManagerWindow inherits Window {
     in property <string> selected-title;
     in property <string> selected-family;
     in property <string> selected-play-time;
+    in property <string> selected-last-played;
     in property <string> selected-vfs-status;
+    in property <[PlaySession]> play-history;
+    in-out property <string> library-sort: "title";
+
+    // ===== Compatibility =====
+    in-out property <string> compatibility-filter: "all";
+    in property <string> compatibility-source-url;
+    in property <string> compatibility-sync-summary;
+    in property <string> selected-compatibility-status;
+    in property <string> selected-compatibility-notes;
+    in property <string> selected-compatibility-updated;
+    in property <string> selected-compatibility-provider;
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
@@ -143,6 +155,9 @@ export component ManagerWindow inherits Window {
     callback open-filters();
     callback rescan();
     callback open-settings();
+    callback set-library-sort(string);
+    callback refresh-compatibility();
+    callback set-compatibility-filter(string);
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
     callback set-translation-cache(bool);
@@ -240,7 +255,16 @@ export component ManagerWindow inherits Window {
                     selected-title: root.selected-title;
                     selected-family: root.selected-family;
                     selected-play-time: root.selected-play-time;
+                    selected-last-played: root.selected-last-played;
                     selected-vfs-status: root.selected-vfs-status;
+                    play-history: root.play-history;
+                    library-sort <=> root.library-sort;
+                    compatibility-filter <=> root.compatibility-filter;
+                    compatibility-sync-summary: root.compatibility-sync-summary;
+                    selected-compatibility-status: root.selected-compatibility-status;
+                    selected-compatibility-notes: root.selected-compatibility-notes;
+                    selected-compatibility-updated: root.selected-compatibility-updated;
+                    selected-compatibility-provider: root.selected-compatibility-provider;
                     bangumi-play-status <=> root.bangumi-play-status;
                     bangumi-rating <=> root.bangumi-rating;
                     bangumi-note <=> root.bangumi-note;
@@ -253,6 +277,9 @@ export component ManagerWindow inherits Window {
                     configure-nls(nls) => { root.configure-nls(nls); }
                     rescan => { root.rescan(); }
                     open-vfs => { root.open-vfs(); }
+                    set-library-sort(mode) => { root.set-library-sort(mode); }
+                    refresh-compatibility => { root.refresh-compatibility(); }
+                    set-compatibility-filter(filter) => { root.set-compatibility-filter(filter); }
                     update-bangumi-play-status(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
                 }
 
@@ -317,6 +344,11 @@ export component ManagerWindow inherits Window {
                     // Filters
                     filter-preset <=> root.filter-preset;
                     set-filter-preset(preset) => { root.set-filter-preset(preset); }
+
+                    // Compatibility
+                    compatibility-source-url: root.compatibility-source-url;
+                    compatibility-sync-summary: root.compatibility-sync-summary;
+                    refresh-compatibility => { root.refresh-compatibility(); }
 
                     // Patches
                     patches-summary: root.patches-summary;

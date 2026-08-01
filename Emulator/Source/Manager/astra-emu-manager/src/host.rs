@@ -121,6 +121,20 @@ pub trait ManagerController: 'static {
     fn set_grid_columns(&mut self, _columns: i32) -> Result<(), String> {
         Ok(())
     }
+    /// Library sort mode: "title" | "recent" | "play_time". Default keeps the
+    /// existing ordering and simply re-renders.
+    fn set_library_sort(&mut self, _mode: &str) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    /// Compatibility filter: "all" | "perfect" | "completable" | "flawed" |
+    /// "boot_only" | "unplayable" | "unknown". Default re-renders unchanged.
+    fn set_compatibility_filter(&mut self, _filter: &str) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    /// Queue a compatibility database refresh. Default: not configured.
+    fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_COMPATIBILITY_NOT_CONFIGURED".into())
+    }
     fn save_input_config(
         &mut self,
         _confirm_key: &str,
@@ -516,11 +530,52 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             window.set_grid_columns(columns);
         }
     });
+    let sort_weak = adapter.window().as_weak();
+    let sort_controller = controller.clone();
+    let sort_adapter = adapter.clone();
+    adapter.window().on_set_library_sort(move |mode| {
+        let Some(window) = sort_weak.upgrade() else {
+            return;
+        };
+        match sort_controller.borrow_mut().set_library_sort(mode.as_str()) {
+            Ok(model) => sort_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let compat_filter_weak = adapter.window().as_weak();
+    let compat_filter_controller = controller.clone();
+    let compat_filter_adapter = adapter.clone();
+    adapter.window().on_set_compatibility_filter(move |filter| {
+        let Some(window) = compat_filter_weak.upgrade() else {
+            return;
+        };
+        match compat_filter_controller
+            .borrow_mut()
+            .set_compatibility_filter(filter.as_str())
+        {
+            Ok(model) => compat_filter_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let compat_refresh_weak = adapter.window().as_weak();
+    let compat_refresh_controller = controller.clone();
+    let compat_refresh_adapter = adapter.clone();
+    adapter.window().on_refresh_compatibility(move || {
+        let Some(window) = compat_refresh_weak.upgrade() else {
+            return;
+        };
+        match compat_refresh_controller
+            .borrow_mut()
+            .refresh_compatibility()
+        {
+            Ok(model) => compat_refresh_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
     let input_config_weak = adapter.window().as_weak();
     let input_config_controller = controller.clone();
-    adapter
-        .window()
-        .on_save_input_config(move |confirm_key, cancel_key, touch_sensitivity, gamepad_enabled, gamepad_deadzone| {
+    adapter.window().on_save_input_config(
+        move |confirm_key, cancel_key, touch_sensitivity, gamepad_enabled, gamepad_deadzone| {
             let result = input_config_controller.borrow_mut().save_input_config(
                 confirm_key.as_str(),
                 cancel_key.as_str(),
@@ -533,7 +588,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     window.set_global_diagnostic(error.into());
                 }
             }
-        });
+        },
+    );
     // ===== VFS browser =====
     let open_vfs_weak = adapter.window().as_weak();
     let open_vfs_controller = controller.clone();
@@ -596,7 +652,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     });
     let copy_path_controller = controller.clone();
     adapter.window().on_vfs_copy_path(move |path| {
-        let _ = copy_path_controller.borrow_mut().copy_vfs_path(path.as_str());
+        let _ = copy_path_controller
+            .borrow_mut()
+            .copy_vfs_path(path.as_str());
     });
     macro_rules! metadata_callback {
         ($callback:ident, $method:ident, |$($arg:ident),*|) => {{

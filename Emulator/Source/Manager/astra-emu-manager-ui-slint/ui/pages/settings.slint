@@ -9,6 +9,7 @@ import { MatchReview, MetadataSettingsPage } from "../settings/metadata.slint";
 import { TranslationSettingsPage } from "../settings/translation.slint";
 import { FilterSettingsPage } from "../settings/filters.slint";
 import { PatchSettingsPage } from "../settings/patches.slint";
+import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
 import { InputSettingsPage } from "../settings/input.slint";
 import { AppearanceSettingsPage } from "../settings/appearance.slint";
 
@@ -79,6 +80,11 @@ export component SettingsPage inherits Rectangle {
     in-out property <string> filter-preset;
     callback set-filter-preset(string);
 
+    // Compatibility
+    in property <string> compatibility-source-url;
+    in property <string> compatibility-sync-summary;
+    callback refresh-compatibility();
+
     // Patches
     in property <string> patches-summary;
     in property <string> patch-mode;
@@ -137,6 +143,13 @@ export component SettingsPage inherits Rectangle {
                     description: "VNDB, Bangumi, identity";
                     active: root.category == "metadata";
                     clicked => { root.category = "metadata"; }
+                }
+                SettingsCategoryItem {
+                    label: "Compatibility";
+                    icon: Icons.clipboard-check;
+                    description: "Community VN grades";
+                    active: root.category == "compatibility";
+                    clicked => { root.category = "compatibility"; }
                 }
                 SettingsCategoryItem {
                     label: "Filters";
@@ -221,6 +234,13 @@ export component SettingsPage inherits Rectangle {
                 set-filter-preset(preset) => { root.set-filter-preset(preset); }
             }
 
+            if root.category == "compatibility" : CompatibilitySettingsPage {
+                source-url: root.compatibility-source-url;
+                sync-summary: root.compatibility-sync-summary;
+                network-consent: root.vndb-consent || root.bangumi-consent;
+                refresh-compatibility => { root.refresh-compatibility(); }
+            }
+
             if root.category == "patches" : PatchSettingsPage {
                 patches-summary: root.patches-summary;
                 patch-mode: root.patch-mode;
@@ -267,6 +287,7 @@ export component SettingsPage inherits Rectangle {
 
                     MobileCategoryChip { label: "Translation"; active: root.category == "translation"; clicked => { root.category = "translation"; } }
                     MobileCategoryChip { label: "Metadata"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
+                    MobileCategoryChip { label: "Compatibility"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
                     MobileCategoryChip { label: "Filters"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
                     MobileCategoryChip { label: "Patches"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
                     MobileCategoryChip { label: "Input"; active: root.category == "input"; clicked => { root.category = "input"; } }
@@ -325,6 +346,13 @@ export component SettingsPage inherits Rectangle {
             if root.category == "filters" : FilterSettingsPage {
                 filter-preset <=> root.filter-preset;
                 set-filter-preset(preset) => { root.set-filter-preset(preset); }
+            }
+
+            if root.category == "compatibility" : CompatibilitySettingsPage {
+                source-url: root.compatibility-source-url;
+                sync-summary: root.compatibility-sync-summary;
+                network-consent: root.vndb-consent || root.bangumi-consent;
+                refresh-compatibility => { root.refresh-compatibility(); }
             }
 
             if root.category == "patches" : PatchSettingsPage {

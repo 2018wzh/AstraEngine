@@ -1,4 +1,5 @@
 mod bangumi;
+mod compatibility;
 mod cover;
 mod license;
 mod matcher;
@@ -6,6 +7,11 @@ mod model;
 mod vndb;
 
 pub use bangumi::{BangumiProvider, BangumiProviderConfig};
+pub use compatibility::{
+    compatibility_json_schema, parse_compatibility_response, CompatibilityClient,
+    CompatibilityDatabase, CompatibilityEntry, CompatibilityError, CompatibilityFetch,
+    CompatibilityStatus, COMPATIBILITY_SCHEMA_VERSION, DEFAULT_COMPATIBILITY_SOURCE_URL,
+};
 pub use cover::{CoverFetcher, CoverPolicy};
 pub use license::{MetadataLicenseManifest, ReleaseUse};
 pub use matcher::{match_metadata, normalize_title, MatchInput, MATCHER_VERSION};

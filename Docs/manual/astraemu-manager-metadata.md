@@ -13,3 +13,13 @@ Manager 扫描授权目录时，只读取 discovery descriptor 声明的入口�
 作品已经关联 Bangumi 后，可设置 `wish`、`doing`、`collect`、`on_hold` 或 `dropped`，填写 1 到 10 分和私密备注，再点击 **Sync play status**。Manager 先保存本地待同步状态，再把请求交给后台 worker。成功时间和失败 diagnostic 都会持久化；429、401、超时或 schema mismatch 不会触发无限重试，需要用户显式重试。
 
 VNDB 默认只适用于 development/non-commercial profile。商业构建必须在 release manifest 中提供明确的 VNDB commercial license ID；缺失时 `emu.metadata_license` 必须阻断发布。当前正式 release gate 仍在 `IN_PROGRESS`，不能把 provider unit test 当作商业发布许可证明。
+
+## 游玩时间与历史
+
+Manager 在启动游戏时开启一条游玩会话，离开游戏或关闭 Manager 时结算，并写入本地 Library。封面卡和 inspector 显示累计游玩时长和最近游玩时间；inspector 还提供逐条会话历史。如果上一次会话因崩溃未正常结算，Manager 会在恢复时按上次已知时间补结算，不会丢失也不会重复计时。游玩记录只保存在本地，不上传，也不进入发布报告。
+
+## 社区兼容性库
+
+选中游戏后，封面卡右上角的徽章表示社区适配分级：完美运行、可通关、有瑕疵、仅能启动、无法运行；未收录的作品不显示徽章。兼容性数据来自社区维护的中央只读库，按作品已关联的 VNDB/Bangumi ID 匹配。
+
+首次使用前，先在 **Metadata** 启用 VNDB 或 Bangumi 的网络访问；兼容性刷新复用同一 consent gate。打开 **Settings → Compatibility** 可查看源地址与同步状态，并点击 **Refresh compatibility** 手动拉取。库未变更时返回未修改，不重复下载；拉取失败会记录稳定 diagnostic，不会无限重试。库页顶部的筛选可按适配分级过滤封面卡。兼容性缓存只读且只保存在本地，社区经数据仓 PR 维护条目。

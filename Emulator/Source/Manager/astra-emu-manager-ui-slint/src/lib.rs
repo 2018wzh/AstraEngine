@@ -13,6 +13,17 @@ pub struct GameCardViewModel {
     pub diagnostic: String,
     pub play_time: String,
     pub last_played: String,
+    /// Compatibility grade: "" | "perfect" | "completable" | "flawed" |
+    /// "boot_only" | "unplayable".
+    pub compatibility_status: String,
+}
+
+/// One finished play session row shown in the inspector history list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaySessionViewModel {
+    pub start_time: String,
+    pub duration: String,
+    pub ended_by: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,7 +142,24 @@ pub struct ManagerViewModel {
     pub selected_title: String,
     pub selected_family: String,
     pub selected_play_time: String,
+    pub selected_last_played: String,
     pub selected_vfs_status: String,
+    /// Finished play sessions for the selected game, most recent first.
+    pub play_history: Vec<PlaySessionViewModel>,
+    /// Library sort mode: "title" | "recent" | "play_time".
+    pub library_sort: String,
+    /// Compatibility filter: "all" | "perfect" | "completable" | "flawed" |
+    /// "boot_only" | "unplayable" | "unknown".
+    pub compatibility_filter: String,
+    /// Configured compatibility database source URL (read-only in the UI).
+    pub compatibility_source_url: String,
+    /// Human-readable compatibility sync state (last fetch / entry count).
+    pub compatibility_sync_summary: String,
+    /// Compatibility details for the selected game.
+    pub selected_compatibility_status: String,
+    pub selected_compatibility_notes: String,
+    pub selected_compatibility_updated: String,
+    pub selected_compatibility_provider: String,
     /// Navigation. Empty `current_page` means "do not change the current page".
     pub current_page: String,
     /// VFS browser state.
@@ -154,6 +182,7 @@ pub struct SlintManagerAdapter {
     games: Rc<VecModel<GameCard>>,
     reviews: Rc<VecModel<MatchReview>>,
     vfs_entries: Rc<VecModel<VfsEntry>>,
+    play_history: Rc<VecModel<PlaySession>>,
 }
 
 impl SlintManagerAdapter {
@@ -162,14 +191,17 @@ impl SlintManagerAdapter {
         let games = Rc::new(VecModel::default());
         let reviews = Rc::new(VecModel::default());
         let vfs_entries = Rc::new(VecModel::default());
+        let play_history = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
         window.set_match_reviews(ModelRc::from(reviews.clone()));
         window.set_vfs_entries(ModelRc::from(vfs_entries.clone()));
+        window.set_play_history(ModelRc::from(play_history.clone()));
         Ok(Self {
             window,
             games,
             reviews,
             vfs_entries,
+            play_history,
         })
     }
 
@@ -190,6 +222,7 @@ impl SlintManagerAdapter {
                 diagnostic: SharedString::from(&game.diagnostic),
                 play_time: SharedString::from(&game.play_time),
                 last_played: SharedString::from(&game.last_played),
+                compatibility_status: SharedString::from(&game.compatibility_status),
             })
             .collect::<Vec<_>>();
         self.games.set_vec(cards);
@@ -237,6 +270,37 @@ impl SlintManagerAdapter {
             .set_selected_family(model.selected_family.as_str().into());
         self.window
             .set_selected_play_time(model.selected_play_time.as_str().into());
+        self.window
+            .set_selected_last_played(model.selected_last_played.as_str().into());
+        self.window
+            .set_library_sort(model.library_sort.as_str().into());
+        self.window
+            .set_compatibility_filter(model.compatibility_filter.as_str().into());
+        self.window
+            .set_compatibility_source_url(model.compatibility_source_url.as_str().into());
+        self.window
+            .set_compatibility_sync_summary(model.compatibility_sync_summary.as_str().into());
+        self.window
+            .set_selected_compatibility_status(model.selected_compatibility_status.as_str().into());
+        self.window
+            .set_selected_compatibility_notes(model.selected_compatibility_notes.as_str().into());
+        self.window.set_selected_compatibility_updated(
+            model.selected_compatibility_updated.as_str().into(),
+        );
+        self.window.set_selected_compatibility_provider(
+            model.selected_compatibility_provider.as_str().into(),
+        );
+        self.play_history.set_vec(
+            model
+                .play_history
+                .iter()
+                .map(|session| PlaySession {
+                    start_time: session.start_time.as_str().into(),
+                    duration: session.duration.as_str().into(),
+                    ended_by: session.ended_by.as_str().into(),
+                })
+                .collect::<Vec<_>>(),
+        );
         self.window
             .set_selected_vfs_status(model.selected_vfs_status.as_str().into());
         self.window
@@ -360,7 +424,7 @@ impl SlintManagerAdapter {
 mod tests {
     use super::{
         AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-        MatchReviewViewModel, VfsEntryViewModel, VfsPreviewViewModel,
+        MatchReviewViewModel, PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
     };
 
     fn assert_contract_is_send_sync<T: Send + Sync>() {}
@@ -374,5 +438,6 @@ mod tests {
         assert_contract_is_send_sync::<VfsPreviewViewModel>();
         assert_contract_is_send_sync::<InputConfigViewModel>();
         assert_contract_is_send_sync::<AppearanceViewModel>();
+        assert_contract_is_send_sync::<PlaySessionViewModel>();
     }
 }

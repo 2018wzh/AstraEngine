@@ -1,3 +1,4 @@
+mod compatibility_cache;
 mod desktop_source;
 mod evidence;
 mod family_loader;
@@ -5,10 +6,14 @@ mod filter;
 mod identity;
 mod library;
 mod patch;
+mod play_record;
 mod probe;
 mod runtime_provider;
 mod scanner;
 
+pub use compatibility_cache::{
+    CompatibilityCacheEntry, CompatibilityMatch, CompatibilitySyncState,
+};
 pub use desktop_source::{
     DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary, VfsResourceInfo,
 };
@@ -29,6 +34,7 @@ pub use patch::{
     PatchContext, PatchDiagnostic, PatchEffectIntent, PatchExecution, PatchHostAction,
     PatchVfsReader, TrustedPatchRuntime,
 };
+pub use play_record::{PlaySessionRecord, PlayStats, RecentWorkRecord};
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
 pub use runtime_provider::{
     AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory, EmuCaseProfile, EmuStepPayload,

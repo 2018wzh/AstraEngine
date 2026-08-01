@@ -11,6 +11,8 @@ export struct GameCard {
     diagnostic: string,
     play-time: string,
     last-played: string,
+    // Compatibility grade: "" | "perfect" | "completable" | "flawed" | "boot_only" | "unplayable".
+    compatibility-status: string,
 }
 
 export component CoverCard inherits Rectangle {
@@ -49,6 +51,33 @@ export component CoverCard inherits Rectangle {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
+
+            // Compatibility badge overlay (top-right of the cover).
+            if game.compatibility-status != "" : Rectangle {
+                x: parent.width - self.width - 6px;
+                y: 6px;
+                width: badge-label.preferred-width + 12px;
+                height: 18px;
+                border-radius: 4px;
+                background: game.compatibility-status == "perfect" ? #2ea043
+                    : game.compatibility-status == "completable" ? #1f6feb
+                    : game.compatibility-status == "flawed" ? #d29922
+                    : game.compatibility-status == "boot_only" ? #db6d28
+                    : #da3633;
+
+                badge-label := Text {
+                    text: game.compatibility-status == "perfect" ? "Perfect"
+                        : game.compatibility-status == "completable" ? "Completable"
+                        : game.compatibility-status == "flawed" ? "Flawed"
+                        : game.compatibility-status == "boot_only" ? "Boot only"
+                        : "Unplayable";
+                    color: #ffffff;
+                    font-size: 10px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
 
         Text {
@@ -70,6 +99,13 @@ export component CoverCard inherits Rectangle {
                 color: Theme.text-muted;
                 font-size: 11px;
             }
+        }
+
+        if game.last-played != "" : Text {
+            text: game.last-played;
+            color: Theme.text-muted;
+            font-size: 11px;
+            overflow: elide;
         }
 
         if game.diagnostic != "" : Text {
