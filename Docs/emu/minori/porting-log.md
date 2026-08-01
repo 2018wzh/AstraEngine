@@ -18,6 +18,7 @@
 
 - 新的安装包 E2 在通过 `.panel 0` 后命中 `.effect CrossFade2` 单 operand 形式。原程序 `CommandEffect` parser 证实第一个 operand 是 effect id，第二个 operand 才是可选的资源规格；后续三个整数缺省为 `-1`。此前把首个 operand 当作资源序列、把两个整数当作已确认时钟参数的实现与文档均已撤回。
 - 对该已确认的零资源 `CrossFade2`，原对象替换 primary effect slot，但没有解析出资源帧。runtime 以清除活动 effect、递增确定性 sequence 和不提交替代 presentation 表达同一状态，不生成自交叉淡入、静态替代帧或资源猜测。带资源或数值配置的 effect 仍是 blocking 边界，待对象 tick、资源解析和 composite contract 一并验证。
+- 同一真实 Headless E2 随后命中四 operand 的 `CrossFade2`。原程序 parser 与对象初始化交叉确认其形态为 effect id、冒号分隔资源规格和两个直接保存的整数；只有至少两个解析资源才打开双帧路径。两个整数在对象 update/composite 中的含义尚未闭合，runtime 继续阻断，不沿用合成 fixture 的命名或步进推测。
 
 ### 原程序选择命令复核
 
