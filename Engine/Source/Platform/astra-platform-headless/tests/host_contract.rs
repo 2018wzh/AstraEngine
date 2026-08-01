@@ -6,7 +6,7 @@ use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
 #[cfg(feature = "ffmpeg-vcpkg")]
 use astra_platform::DecodeOutput;
 use astra_platform::{
-    AudioOutputRequest, AudioPacket, DecodeKind, HeadlessHostProfile, HeadlessReadbackPolicy,
+    AudioOutputRequest, AudioPacket, DecodeKind, HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy,
     HeadlessRenderPolicy, PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest,
     PlatformErrorCode, PlatformHostFactory, RgbaFrame, SceneFrame, SurfaceRequest, WindowRequest,
 };

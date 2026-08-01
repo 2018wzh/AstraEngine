@@ -525,7 +525,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         seed,
         integrity_mode: RuntimeTickIntegrityMode::Evidence,
         executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
-        package_hash: case.content_hash.clone(),
+        package_hash: game_identity_hash.to_string(),
         sections: vec![section],
     })?;
     let mut host_profile = astra_platform::PlatformHostProfile::windows_release(
@@ -760,7 +760,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
         seed,
         integrity_mode: RuntimeTickIntegrityMode::Evidence,
         executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
-        package_hash: case.content_hash.clone(),
+        package_hash: game_identity_hash.to_string(),
         sections: vec![section],
     })?;
     let resume_identity = HeadlessResumeIdentity {
