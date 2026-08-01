@@ -251,8 +251,8 @@ pub enum FamilyPluginLoadError {
     BinaryRead,
     #[error("ASTRA_EMU_FAMILY_SIGNATURE: {0}")]
     Signature(String),
-    #[error("ASTRA_EMU_FAMILY_ABI_LOAD")]
-    AbiLoad,
+    #[error("ASTRA_EMU_FAMILY_ABI_LOAD:{0}")]
+    AbiLoad(&'static str),
     #[error("ASTRA_EMU_FAMILY_PROVIDER: {0}")]
     Provider(String),
 }
@@ -291,8 +291,8 @@ impl DynamicFamilyLoader {
         }
         self.signature_verifier
             .verify_official_signature(&binary, &manifest)?;
-        let library =
-            unsafe { Library::new(path.as_ref()) }.map_err(|_| FamilyPluginLoadError::AbiLoad)?;
+        let library = unsafe { Library::new(path.as_ref()) }
+            .map_err(|_| FamilyPluginLoadError::AbiLoad("library"))?;
         let module = unsafe { root_module(&library)? };
         let descriptor: LegacyFamilyPluginDescriptor = (module.descriptor())(RVec::new())
             .decode()
@@ -303,7 +303,7 @@ impl DynamicFamilyLoader {
         let host_token = format!("emu.vfs.{}", Hash256::from_sha256(instance_id.as_bytes()));
         let mut readers = vfs_readers()
             .lock()
-            .map_err(|_| FamilyPluginLoadError::AbiLoad)?;
+            .map_err(|_| FamilyPluginLoadError::AbiLoad("vfs_registry"))?;
         if readers.insert(host_token.clone(), vfs).is_some() {
             return Err(FamilyPluginLoadError::Manifest(
                 "host VFS token collision".into(),
@@ -684,8 +684,8 @@ pub fn family_base_identity_hash(
 pub fn inspect_dynamic_family_descriptor(
     path: impl AsRef<Path>,
 ) -> Result<LegacyFamilyPluginDescriptor, FamilyPluginLoadError> {
-    let library =
-        unsafe { Library::new(path.as_ref()) }.map_err(|_| FamilyPluginLoadError::AbiLoad)?;
+    let library = unsafe { Library::new(path.as_ref()) }
+        .map_err(|_| FamilyPluginLoadError::AbiLoad("library"))?;
     let module = unsafe { root_module(&library)? };
     let descriptor: LegacyFamilyPluginDescriptor = (module.descriptor())(RVec::new())
         .decode()
@@ -718,13 +718,13 @@ unsafe fn root_module(
 ) -> Result<AstraLegacyFamilyModuleRef, FamilyPluginLoadError> {
     let header = library
         .get::<AbiHeaderRef>(ROOT_MODULE_LOADER_NAME_WITH_NUL.as_bytes())
-        .map_err(|_| FamilyPluginLoadError::AbiLoad)?;
+        .map_err(|_| FamilyPluginLoadError::AbiLoad("root_symbol"))?;
     let header = (*header)
         .upgrade()
-        .map_err(|_| FamilyPluginLoadError::AbiLoad)?;
+        .map_err(|_| FamilyPluginLoadError::AbiLoad("abi_header"))?;
     header
         .init_root_module::<AstraLegacyFamilyModuleRef>()
-        .map_err(|_| FamilyPluginLoadError::AbiLoad)
+        .map_err(|_| FamilyPluginLoadError::AbiLoad("root_init"))
 }
 
 fn vfs_readers() -> &'static Mutex<BTreeMap<String, Arc<dyn LegacyVfsReader>>> {
@@ -873,7 +873,13 @@ mod tests {
             .nth(4)
             .expect("manager core must remain inside the workspace");
         let status = Command::new("cargo")
-            .args(["build", "-p", "astra-emu-fvp"])
+            .args([
+                "build",
+                "-p",
+                "astra-emu-fvp",
+                "--features",
+                "dynamic-plugin-export",
+            ])
             .current_dir(root)
             .status()
             .expect("cargo must be available to build the package-bound fixture");
