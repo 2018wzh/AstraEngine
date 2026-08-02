@@ -259,6 +259,19 @@ impl HeadlessHostProfile {
         })?;
         Ok(astra_core::Hash256::from_sha256(&bytes).to_string())
     }
+
+    /// Hashes only the performance policy. Runtime package, build, and
+    /// artifact-session identities are bound by the evidence report and trace
+    /// manifest, so they must not invalidate a reusable performance budget.
+    pub fn performance_policy_hash(&self) -> Result<String, PlatformError> {
+        let mut policy = self.clone();
+        policy.package_id.clear();
+        policy.build_fingerprint.clear();
+        policy.package_hash.clear();
+        policy.artifacts.namespace.clear();
+        policy.artifacts.required_checkpoints.clear();
+        policy.hash()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

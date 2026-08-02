@@ -965,6 +965,11 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         .map_err(|error| error.to_string())?
         .parse()
         .map_err(|_| "ASTRA_EMU_HEADLESS_PROFILE_HASH".to_owned())?;
+    let performance_profile_hash: Hash256 = host_profile
+        .performance_policy_hash()
+        .map_err(|error| error.to_string())?
+        .parse()
+        .map_err(|_| "ASTRA_EMU_HEADLESS_PERFORMANCE_PROFILE_HASH".to_owned())?;
     let performance_memory_baseline = launch
         .performance
         .as_ref()
@@ -1137,7 +1142,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             artifacts,
             &launch,
             &host_profile,
-            profile_hash,
+            performance_profile_hash,
             build_identity_hash,
             game_identity_hash,
             family_binary_hash,
