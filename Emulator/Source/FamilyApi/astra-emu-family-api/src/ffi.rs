@@ -12,7 +12,7 @@ use crate::{
     LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacySnapshotEnvelope, LegacyStepInput,
 };
 
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v4";
+pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v5";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyProviderInstanceRequest {
@@ -165,6 +165,14 @@ impl FfiLegacyResult {
 pub type FfiLegacyInvoke = extern "C" fn(RVec<u8>) -> FfiLegacyResult;
 pub type FfiLegacyVfsCall = extern "C" fn(RString, RVec<u8>) -> FfiLegacyResult;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyVfsEnumerateCall {
+    pub mount_set_id: String,
+    pub root: String,
+    pub extension_without_dot: String,
+    pub max_entries: u32,
+}
+
 #[repr(C)]
 #[derive(Clone, StableAbi)]
 pub struct FfiLegacyHostServices {
@@ -173,6 +181,8 @@ pub struct FfiLegacyHostServices {
     pub stat_vfs: FfiLegacyVfsCall,
     #[sabi(unsafe_opaque_field)]
     pub read_vfs_range: FfiLegacyVfsCall,
+    #[sabi(unsafe_opaque_field)]
+    pub enumerate_vfs: FfiLegacyVfsCall,
 }
 
 impl core::fmt::Debug for FfiLegacyHostServices {

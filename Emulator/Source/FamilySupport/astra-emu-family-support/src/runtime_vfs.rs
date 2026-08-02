@@ -5,7 +5,7 @@ use std::{
 
 use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
 use astra_core::Hash256;
-use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
+use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
 use astra_emu_family_core::{LegacyMountedVfs, LegacyVfsNodeKind};
 
 /// Adapts an in-process family mount to the ABI-safe runtime reader contract.
@@ -208,6 +208,56 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
             content_hash: Hash256::from_sha256(&read.bytes),
             bytes: read.bytes,
         })
+    }
+
+    fn enumerate_by_extension(
+        &self,
+        mount_set_id: &str,
+        root: &str,
+        extension_without_dot: &str,
+        max_entries: u32,
+    ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+        self.validate_mount(mount_set_id)?;
+        if max_entries == 0 || max_entries > 100_000 {
+            return Err(invalid(
+                "ASTRA_EMU_VFS_RUNTIME_ENUM_BOUNDS",
+                "enumeration limit is outside the supported bounds",
+            ));
+        }
+        if root.contains('\0')
+            || extension_without_dot.is_empty()
+            || extension_without_dot.contains('/')
+            || extension_without_dot.contains('\\')
+            || extension_without_dot.contains('\0')
+        {
+            return Err(invalid(
+                "ASTRA_EMU_VFS_RUNTIME_ENUM_ARGUMENT",
+                "enumeration root or extension is invalid",
+            ));
+        }
+        let normalized_root = root.trim_matches('/');
+        let suffix = format!(".{}", extension_without_dot.to_ascii_lowercase());
+        let mut files = Vec::new();
+        for entry in &self.vfs.manifest().entries {
+            let uri = &entry.uri;
+            let root_matches = normalized_root.is_empty()
+                || uri == normalized_root
+                || uri.starts_with(&format!("{normalized_root}/"));
+            if !root_matches || !uri.to_ascii_lowercase().ends_with(&suffix) {
+                continue;
+            }
+            if files.len() >= max_entries as usize {
+                return Err(invalid(
+                    "ASTRA_EMU_VFS_RUNTIME_ENUM_BOUNDS",
+                    "enumeration exceeded the negotiated entry limit",
+                ));
+            }
+            files.push(LegacyVfsListedFile {
+                uri: uri.clone(),
+                stat: self.stat_and_revision(uri)?.0,
+            });
+        }
+        Ok(files)
     }
 }
 

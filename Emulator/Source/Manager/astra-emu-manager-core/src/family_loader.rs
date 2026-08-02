@@ -319,6 +319,7 @@ impl DynamicFamilyLoader {
             host_token: host_token.clone().into(),
             stat_vfs: ffi_stat_vfs,
             read_vfs_range: ffi_read_vfs_range,
+            enumerate_vfs: ffi_enumerate_vfs,
         };
         if let Err(error) = (module.create_instance())(services, payload.into()).decode::<()>() {
             remove_vfs_reader(&host_token);
@@ -593,6 +594,31 @@ extern "C" fn ffi_read_vfs_range(host_token: RString, payload: RVec<u8>) -> FfiL
     })();
     match result {
         Ok(range) => FfiLegacyResult::success(&range),
+        Err(error) => FfiLegacyResult::failure(error),
+    }
+}
+
+extern "C" fn ffi_enumerate_vfs(host_token: RString, payload: RVec<u8>) -> FfiLegacyResult {
+    let result = (|| {
+        let call: LegacyVfsEnumerateCall = decode_ffi_request(payload)?;
+        let readers = vfs_readers().lock().map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_LOCK_POISONED",
+                "host VFS registry lock is poisoned",
+            )
+        })?;
+        let reader = readers.get(host_token.as_str()).ok_or_else(|| {
+            LegacyProviderError::invalid("ASTRA_EMU_VFS_HOST_TOKEN", "host VFS token is not active")
+        })?;
+        reader.enumerate_by_extension(
+            &call.mount_set_id,
+            &call.root,
+            &call.extension_without_dot,
+            call.max_entries,
+        )
+    })();
+    match result {
+        Ok(entries) => FfiLegacyResult::success(&entries),
         Err(error) => FfiLegacyResult::failure(error),
     }
 }

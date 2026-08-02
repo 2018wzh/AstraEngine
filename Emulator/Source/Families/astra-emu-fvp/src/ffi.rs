@@ -9,7 +9,8 @@ use astra_emu_family_api::{
     FfiLegacyEphemeralText, FfiLegacyHostServices, FfiLegacyResult, LegacyOpenCall,
     LegacyProbeCall, LegacyProviderError, LegacyProviderInstanceRequest, LegacyResourceReadCall,
     LegacyRestoreCall, LegacyRuntimeProvider, LegacySessionCall, LegacyStepCall,
-    LegacyTextLeaseCall, LegacyVfsRangeCall, LegacyVfsReader, LegacyVfsStatCall,
+    LegacyTextLeaseCall, LegacyVfsEnumerateCall, LegacyVfsListedFile, LegacyVfsRangeCall,
+    LegacyVfsReader, LegacyVfsStatCall,
 };
 
 use crate::FvpRuntimeProvider;
@@ -61,6 +62,32 @@ impl LegacyVfsReader for FfiVfsReader {
             ));
         }
         Ok(result)
+    }
+
+    fn enumerate_by_extension(
+        &self,
+        mount_set_id: &str,
+        root: &str,
+        extension_without_dot: &str,
+        max_entries: u32,
+    ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+        let payload = postcard::to_allocvec(&LegacyVfsEnumerateCall {
+            mount_set_id: mount_set_id.to_owned(),
+            root: root.to_owned(),
+            extension_without_dot: extension_without_dot.to_owned(),
+            max_entries,
+        })
+        .map_err(|error| LegacyProviderError::invalid("ASTRA_EMU_FFI_ENCODE", error.to_string()))?;
+        let entries: Vec<LegacyVfsListedFile> =
+            (self.services.enumerate_vfs)(self.services.host_token.clone(), payload.into())
+                .decode()?;
+        if entries.len() > max_entries as usize {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_FFI_VFS_ENUM_BOUNDS",
+                "host VFS returned more entries than requested",
+            ));
+        }
+        Ok(entries)
     }
 }
 

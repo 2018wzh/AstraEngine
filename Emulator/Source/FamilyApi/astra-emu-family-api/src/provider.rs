@@ -121,6 +121,22 @@ pub trait LegacyVfsReader: Send + Sync {
         max_bytes: u64,
     ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError>;
 
+    /// Lists only metadata for files matching one extension below `root`.
+    /// Dynamic family code must use this bounded host port instead of opening a
+    /// source directory or preloading a package.
+    fn enumerate_by_extension(
+        &self,
+        _mount_set_id: &str,
+        _root: &str,
+        _extension_without_dot: &str,
+        _max_entries: u32,
+    ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+        Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_VFS_ENUMERATE_UNSUPPORTED",
+            "the bound VFS does not expose bounded enumeration",
+        ))
+    }
+
     fn read_file(
         &self,
         mount_set_id: &str,
@@ -146,6 +162,12 @@ pub trait LegacyVfsReader: Send + Sync {
         )
         .map(|result| result.bytes)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyVfsListedFile {
+    pub uri: String,
+    pub stat: astra_byte_source::ByteSourceStat,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
