@@ -1049,7 +1049,7 @@ fn append_resource_layer(
     }
     let bytes = vfs
         .read_file(mount_set_id, resource_uri, MAX_RESOURCE_BYTES)
-        .map_err(|error| {
+        .inspect_err(|error| {
             tracing::debug!(
                 target: "astra_emu_minori::resource",
                 event = "astra_emu_minori_resource_read_failed",
@@ -1058,7 +1058,6 @@ fn append_resource_layer(
                 diagnostic = %error.code(),
                 "resource read failed"
             );
-            error
         })?;
     let image_reader = image::ImageReader::new(Cursor::new(bytes.as_slice()))
         .with_guessed_format()
@@ -1146,7 +1145,7 @@ fn load_script(
     validate_script_uri(&script_uri)?;
     let bytes = vfs
         .read_file(mount_set_id, &script_uri, MAX_SCRIPT_BYTES)
-        .map_err(|error| {
+        .inspect_err(|error| {
             tracing::debug!(
                 target: "astra_emu_minori::resource",
                 event = "astra_emu_minori_chain_script_read_failed",
@@ -1154,7 +1153,6 @@ fn load_script(
                 diagnostic = %error.code(),
                 "chain script read failed"
             );
-            error
         })?;
     let script_hash = Hash256::from_sha256(&bytes);
     let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;

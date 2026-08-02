@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }

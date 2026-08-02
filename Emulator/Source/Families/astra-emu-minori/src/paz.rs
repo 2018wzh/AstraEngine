@@ -582,7 +582,7 @@ impl MinoriMountedVfs {
             &encrypted,
         )?;
         decoded.truncate(entry.descriptor.stored_size as usize);
-        if entry.descriptor.packed {
+        if entry.descriptor.packed || entry.descriptor.archive_role != "mov" {
             let mut unpacked = Vec::with_capacity(entry.descriptor.unpacked_size as usize);
             ZlibDecoder::new(decoded.as_slice())
                 .read_to_end(&mut unpacked)
@@ -621,6 +621,89 @@ impl MinoriMountedVfs {
             cache.put(&identity, &decoded).map_err(cache_error)?;
         }
         Ok((decoded, false))
+    }
+
+    fn decoded_raw_entry_range(
+        &self,
+        entry: &MountedEntry,
+        offset: u64,
+        length: u64,
+    ) -> Result<Option<(Vec<u8>, bool)>, PazError> {
+        if entry.descriptor.packed {
+            return Ok(None);
+        }
+        let end = offset
+            .checked_add(length)
+            .ok_or_else(|| error("ASTRA_EMU_VFS_READ_OVERFLOW", "range read overflowed"))?;
+        if end > entry.descriptor.unpacked_size {
+            return Err(error(
+                "ASTRA_EMU_VFS_READ_BOUNDS",
+                "range read is outside the entry",
+            ));
+        }
+        let archive = &self.archives[entry.archive];
+        verify_source_unchanged(archive)?;
+        let identity = CacheIdentity {
+            family_id: "minori".into(),
+            source_hash: archive.hash,
+            entry_id: entry.descriptor.entry_id.clone(),
+            private_profile_hash: self.decrypt_provider.private_profile_hash(),
+            decrypt_provider_id: self.decrypt_provider.provider_id().into(),
+            descriptor_schema_hash: self.decrypt_provider.descriptor_schema_hash(),
+            codec_identity: format!("{MINORI_READER_ID}:raw"),
+        };
+        if let Some(bytes) = self
+            .cache
+            .as_ref()
+            .map(|cache| cache.get(&identity))
+            .transpose()
+            .map_err(cache_error)?
+            .flatten()
+        {
+            if bytes.len() as u64 != entry.descriptor.unpacked_size {
+                return Err(error(
+                    "ASTRA_EMU_MINORI_CACHE_SIZE",
+                    "cached plaintext size does not match the entry descriptor",
+                ));
+            }
+            let start = usize::try_from(offset).map_err(|_| {
+                error(
+                    "ASTRA_EMU_VFS_READ_BOUNDS",
+                    "range offset exceeds platform bounds",
+                )
+            })?;
+            let end = usize::try_from(end).map_err(|_| {
+                error(
+                    "ASTRA_EMU_VFS_READ_BOUNDS",
+                    "range end exceeds platform bounds",
+                )
+            })?;
+            return Ok(Some((bytes[start..end].to_vec(), true)));
+        }
+
+        let source_offset = entry
+            .descriptor
+            .offset
+            .checked_add(offset)
+            .ok_or_else(|| error("ASTRA_EMU_MINORI_SOURCE_BOUNDS", "entry range overflowed"))?;
+        let mut encrypted = read_source_range(archive, source_offset, length)?;
+        xor_byte(&mut encrypted, archive.xor_key);
+        let decoded = decrypt_bytes(
+            self.decrypt_provider.as_ref(),
+            MinoriDecryptDescriptor::Entry {
+                version: archive.version,
+                entry: entry.descriptor.clone(),
+                stream_offset: offset,
+            },
+            &encrypted,
+        )?;
+        if decoded.len() as u64 != length {
+            return Err(error(
+                "ASTRA_EMU_MINORI_DECRYPT_SIZE",
+                "raw entry range transform changed the requested length",
+            ));
+        }
+        Ok(Some((decoded, false)))
     }
 
     fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
@@ -755,6 +838,15 @@ impl LegacyMountedVfs for MinoriMountedVfs {
                 "ASTRA_EMU_VFS_READ_BOUNDS",
                 "range read is outside the entry",
             ));
+        }
+        if let Some((bytes, cache_hit)) = self.decoded_raw_entry_range(entry, offset, length)? {
+            return Ok(LegacyVfsReadResult {
+                uri: uri.into(),
+                offset,
+                bytes,
+                eof: end == entry.descriptor.unpacked_size,
+                cache_hit,
+            });
         }
         let (decoded, cache_hit) = self.decoded_entry(entry)?;
         let bytes = OwnedByteBuffer::from_owner(
@@ -1460,7 +1552,7 @@ fn decrypt_bytes(
                     "decrypt batch offset overflowed",
                 )
             })?;
-        let batch_descriptor = descriptor.with_stream_offset(batch_offset);
+        let batch_descriptor = descriptor.with_stream_offset(batch_offset)?;
         let payload = serde_json::to_vec(&batch_descriptor).map_err(|_| {
             error(
                 "ASTRA_EMU_MINORI_DESCRIPTOR",
@@ -1502,8 +1594,17 @@ fn decrypt_bytes(
 }
 
 impl MinoriDecryptDescriptor {
-    fn with_stream_offset(&self, stream_offset: u64) -> Self {
-        match self {
+    fn with_stream_offset(&self, stream_offset: u64) -> Result<Self, PazError> {
+        let stream_offset = self
+            .stream_offset()
+            .checked_add(stream_offset)
+            .ok_or_else(|| {
+                error(
+                    "ASTRA_EMU_MINORI_DECRYPT_OFFSET",
+                    "decrypt stream offset overflowed",
+                )
+            })?;
+        Ok(match self {
             Self::Index { role, version, .. } => Self::Index {
                 role: role.clone(),
                 version: *version,
@@ -1514,6 +1615,12 @@ impl MinoriDecryptDescriptor {
                 entry: entry.clone(),
                 stream_offset,
             },
+        })
+    }
+
+    fn stream_offset(&self) -> u64 {
+        match self {
+            Self::Index { stream_offset, .. } | Self::Entry { stream_offset, .. } => *stream_offset,
         }
     }
 }
@@ -1891,6 +1998,24 @@ mod tests {
                 .code(),
             "ASTRA_EMU_MINORI_SOURCE_CHANGED"
         );
+    }
+
+    #[test]
+    fn raw_movie_range_uses_the_entry_relative_transform_offset() {
+        let temp = tempfile::tempdir().unwrap();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            fs::write(
+                temp.path().join(format!("{role}.paz")),
+                fixture_archive(role, 0),
+            )
+            .unwrap();
+        }
+        let vfs = mount_fixture(temp.path(), 0);
+
+        let read = vfs.read_range("minori:/mov/mov.bin", 1, 6).unwrap();
+
+        assert_eq!(read.bytes, b"ixture");
+        assert!(!read.cache_hit);
     }
 
     #[test]

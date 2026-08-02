@@ -1743,7 +1743,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1, 4).unwrap(),
+            vm.step(1).unwrap(),
             Some(MinoriVmEvent::EffectCleared { sequence: 1 })
         );
         assert_eq!(vm.state().effect, None);
@@ -1760,7 +1760,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Movie(movie)) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Movie(movie)) = vm.step(1).unwrap() else {
             panic!("expected movie event");
         };
         assert_eq!(movie.resource_uri, "minori:/mov/op.avi");
@@ -1783,7 +1783,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            vm.step(1, 4).unwrap(),
+            vm.step(1).unwrap(),
             Some(MinoriVmEvent::EffectCleared { sequence: 1 })
         );
         assert_eq!(vm.state().effect, None);
@@ -1804,7 +1804,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            vm.step(1, 4).unwrap(),
+            vm.step(1).unwrap(),
             Some(MinoriVmEvent::Effect(_))
         ));
         let effect = vm.state().effect.as_ref().expect("CrossFade2 effect state");
@@ -1826,7 +1826,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            unsupported_vm.step(1, 4).unwrap_err(),
+            unsupported_vm.step(1).unwrap_err(),
             MinoriRuntimeError::UnsupportedEffectKind {
                 identity: Hash256::from_sha256(b"CrossFade"),
             }
