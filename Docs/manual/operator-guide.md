@@ -140,6 +140,8 @@ Windows 字形视觉回归由 `astra.windows_gpu_glyph_golden.v1` 绑定字体 r
 
 桌面发布包把 FVP 动态库与 `manifest.json` 放在 Manager 可执行文件旁的 `families/fvp/`。构建 Manager 时必须通过受控构建环境提供 `ASTRA_EMU_FAMILY_SIGNER_ID` 和对应的 `ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX`；缺失 trust root 时产品启动会阻断。签名私钥只从短生命周期环境变量读取，不写入仓库、manifest、日志或报告。descriptor 必须取自同一 target/profile 的 FVP build-script 输出；`native-sign` 会先加载成品动态库并逐字段比对 descriptor，再生成唯一 manifest authority：
 
+`astra-emu-cli` 默认只输出 `INFO` 及以上日志。受控排障可通过 `ASTRA_LOG` 提高过滤级别；例如 `ASTRA_LOG=astra_emu_cli::runner=debug` 会记录已验证 semantic scene commit 的 draw、资源操作和保留纹理计数，不输出资源内容、商业文本或宿主路径。
+
 ```bash
 ASTRA_EMU_FAMILY_SIGNING_KEY_HEX="${RELEASE_SIGNING_KEY}" \
 ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX="${RELEASE_PUBLIC_KEY}" \

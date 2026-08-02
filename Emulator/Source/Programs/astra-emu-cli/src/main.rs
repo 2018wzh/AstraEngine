@@ -89,7 +89,8 @@ enum CliCommand {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut observability = astra_observability::HostObservabilityConfig::for_cli("info");
+    let filter = std::env::var("ASTRA_LOG").unwrap_or_else(|_| "info".to_owned());
+    let mut observability = astra_observability::HostObservabilityConfig::for_cli(&filter);
     observability.role = astra_observability::HostRole::Cli;
     let _observability = astra_observability::init_host(observability)?;
     match Cli::parse().command {
