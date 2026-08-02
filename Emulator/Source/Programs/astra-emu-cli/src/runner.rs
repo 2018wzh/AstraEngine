@@ -2655,6 +2655,39 @@ impl<'a> RuntimeDriver<'a> {
                     SchemaVersion::new(1, 0, 0),
                 )
                 .map_err(|error| error.to_string())?;
+            let scene_commit_count = family
+                .effects
+                .iter()
+                .filter(|effect| {
+                    matches!(
+                        effect,
+                        LegacyEffect::Presentation { command, .. }
+                            if command == "astra.emu.scene_packet.v1"
+                    )
+                })
+                .count();
+            let video_command_count = family
+                .effects
+                .iter()
+                .filter(|effect| {
+                    matches!(
+                        effect,
+                        LegacyEffect::Presentation { command, .. }
+                            if command == "astra.emu.video_command.v1"
+                    )
+                })
+                .count();
+            tracing::debug!(
+                event = "astra_emu_headless_family_step",
+                fixed_step = next_step,
+                status = ?family.status,
+                effect_count = family.effects.len(),
+                scene_commit_count,
+                video_command_count,
+                wait_count = family.waits.len(),
+                diagnostic_count = family.diagnostics.len(),
+                "received validated legacy family step output"
+            );
             self.state_hash = family.state_hash;
             self.state_trace
                 .extend_from_slice(self.state_hash.to_string().as_bytes());
