@@ -2,7 +2,7 @@ use std::{
     collections::BTreeSet,
     fmt,
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::UNIX_EPOCH,
@@ -30,6 +30,7 @@ pub use owned_writable_buffer::OwnedWritableByteBuffer;
 
 pub const DEFAULT_MAX_RANGE_BYTES: u64 = 16 * 1024 * 1024;
 pub const AUDIT_CHUNK_BYTES: usize = 1024 * 1024;
+pub const DEFAULT_READER_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ByteSourceError {
@@ -100,6 +101,120 @@ pub trait BoundedByteSource: Send + Sync {
         range: ByteRange,
         max_bytes: u64,
     ) -> Result<RangeReadResult, ByteSourceError>;
+}
+
+/// A bounded, revision-pinned `Read + Seek` view over a range source.
+///
+/// It retains at most one caller-selected range buffer and never materializes
+/// the full source. This is intended for demuxers that consume seekable media
+/// while preserving the source's revision and range limits.
+pub struct BoundedByteSourceReader {
+    source: Arc<dyn BoundedByteSource>,
+    stat: ByteSourceStat,
+    cursor: u64,
+    buffer_offset: u64,
+    buffer: Vec<u8>,
+    buffer_bytes: usize,
+}
+
+impl BoundedByteSourceReader {
+    pub fn new(
+        source: Arc<dyn BoundedByteSource>,
+        buffer_bytes: usize,
+    ) -> Result<Self, ByteSourceError> {
+        if buffer_bytes == 0 || buffer_bytes as u64 > DEFAULT_MAX_RANGE_BYTES {
+            return Err(ByteSourceError::RangeLimit);
+        }
+        let stat = source.stat()?;
+        Ok(Self {
+            source,
+            stat,
+            cursor: 0,
+            buffer_offset: 0,
+            buffer: Vec::new(),
+            buffer_bytes,
+        })
+    }
+
+    pub fn stat(&self) -> ByteSourceStat {
+        self.stat
+    }
+
+    fn refill(&mut self) -> Result<(), ByteSourceError> {
+        if self.cursor >= self.stat.len {
+            self.buffer.clear();
+            self.buffer_offset = self.cursor;
+            return Ok(());
+        }
+        let length = (self.stat.len - self.cursor).min(self.buffer_bytes as u64);
+        let range = ByteRange {
+            offset: self.cursor,
+            len: length,
+        };
+        let read = self
+            .source
+            .read_range(self.stat.revision, range, self.buffer_bytes as u64)?;
+        if read.revision != self.stat.revision {
+            return Err(ByteSourceError::RevisionMismatch);
+        }
+        if read.range != range || read.bytes.len() as u64 != length {
+            return Err(ByteSourceError::ShortRead);
+        }
+        self.buffer_offset = range.offset;
+        self.buffer = read.bytes;
+        Ok(())
+    }
+
+    fn io_error(error: ByteSourceError) -> io::Error {
+        io::Error::new(io::ErrorKind::InvalidData, error)
+    }
+}
+
+impl Read for BoundedByteSourceReader {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        if output.is_empty() || self.cursor == self.stat.len {
+            return Ok(0);
+        }
+        let mut written = 0usize;
+        while written < output.len() && self.cursor < self.stat.len {
+            let buffer_end = self.buffer_offset.saturating_add(self.buffer.len() as u64);
+            if self.buffer.is_empty()
+                || self.cursor < self.buffer_offset
+                || self.cursor >= buffer_end
+            {
+                self.refill().map_err(Self::io_error)?;
+                continue;
+            }
+            let source_start = usize::try_from(self.cursor - self.buffer_offset)
+                .map_err(|_| Self::io_error(ByteSourceError::RangeOverflow))?;
+            let available = self.buffer.len() - source_start;
+            let copy = available.min(output.len() - written);
+            output[written..written + copy]
+                .copy_from_slice(&self.buffer[source_start..source_start + copy]);
+            written += copy;
+            self.cursor = self
+                .cursor
+                .checked_add(copy as u64)
+                .ok_or_else(|| Self::io_error(ByteSourceError::RangeOverflow))?;
+        }
+        Ok(written)
+    }
+}
+
+impl Seek for BoundedByteSourceReader {
+    fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+        let target = match from {
+            SeekFrom::Start(offset) => i128::from(offset),
+            SeekFrom::Current(offset) => i128::from(self.cursor) + i128::from(offset),
+            SeekFrom::End(offset) => i128::from(self.stat.len) + i128::from(offset),
+        };
+        if target < 0 || target > i128::from(self.stat.len) {
+            return Err(Self::io_error(ByteSourceError::RangeBounds));
+        }
+        self.cursor =
+            u64::try_from(target).map_err(|_| Self::io_error(ByteSourceError::RangeOverflow))?;
+        Ok(self.cursor)
+    }
 }
 
 pub struct FileByteSource {
@@ -371,5 +486,23 @@ mod tests {
             source.read_range(SourceRevision(2), ByteRange { offset: 0, len: 1 }, 16,),
             Err(ByteSourceError::RevisionMismatch)
         ));
+    }
+
+    #[astra_headless_test::test]
+    fn range_backed_reader_is_bounded_and_seekable() {
+        let source: Arc<dyn BoundedByteSource> =
+            Arc::new(MemoryByteSource::new(b"abcdefghij".to_vec()));
+        let mut reader = BoundedByteSourceReader::new(source, 3).unwrap();
+        let mut first = [0u8; 5];
+        reader.read_exact(&mut first).unwrap();
+        assert_eq!(&first, b"abcde");
+        reader.seek(SeekFrom::Current(-2)).unwrap();
+        let mut second = [0u8; 4];
+        reader.read_exact(&mut second).unwrap();
+        assert_eq!(&second, b"defg");
+        assert_eq!(reader.seek(SeekFrom::End(-2)).unwrap(), 8);
+        let mut tail = Vec::new();
+        reader.read_to_end(&mut tail).unwrap();
+        assert_eq!(tail, b"ij");
     }
 }

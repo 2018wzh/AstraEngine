@@ -3,7 +3,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
+use astra_byte_source::{
+    BoundedByteSource, ByteRange, ByteSourceError, ByteSourceStat, RangeReadResult, SourceRevision,
+};
 use astra_core::Hash256;
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
 use astra_emu_family_core::{LegacyMountedVfs, LegacyVfsNodeKind};
@@ -151,6 +153,69 @@ impl LegacyMountedVfsReaderAdapter {
     }
 }
 
+/// Binds one ABI-safe runtime VFS resource as a revision-pinned byte source.
+///
+/// The source is intentionally range-only: consumers pair it with
+/// `BoundedByteSourceReader` when a decoder needs `Read + Seek`, so no host
+/// path or whole-resource buffer crosses the family boundary.
+pub struct LegacyRuntimeVfsByteSource {
+    reader: Arc<dyn LegacyVfsReader>,
+    mount_set_id: String,
+    uri: String,
+}
+
+impl LegacyRuntimeVfsByteSource {
+    pub fn new(
+        reader: Arc<dyn LegacyVfsReader>,
+        mount_set_id: impl Into<String>,
+        uri: impl Into<String>,
+    ) -> Result<Self, LegacyProviderError> {
+        let mount_set_id = mount_set_id.into();
+        let uri = uri.into();
+        if mount_set_id.is_empty() || uri.is_empty() {
+            return Err(invalid(
+                "ASTRA_EMU_VFS_RUNTIME_SOURCE_ID",
+                "runtime VFS byte source identity is invalid",
+            ));
+        }
+        reader.stat_file(&mount_set_id, &uri)?;
+        Ok(Self {
+            reader,
+            mount_set_id,
+            uri,
+        })
+    }
+
+    fn source_error(error: LegacyProviderError) -> ByteSourceError {
+        ByteSourceError::Io(std::io::Error::other(error.code().to_owned()))
+    }
+}
+
+impl BoundedByteSource for LegacyRuntimeVfsByteSource {
+    fn stat(&self) -> Result<ByteSourceStat, ByteSourceError> {
+        self.reader
+            .stat_file(&self.mount_set_id, &self.uri)
+            .map_err(Self::source_error)
+    }
+
+    fn read_range(
+        &self,
+        expected_revision: SourceRevision,
+        range: ByteRange,
+        max_bytes: u64,
+    ) -> Result<RangeReadResult, ByteSourceError> {
+        self.reader
+            .read_file_range(
+                &self.mount_set_id,
+                &self.uri,
+                expected_revision,
+                range,
+                max_bytes,
+            )
+            .map_err(Self::source_error)
+    }
+}
+
 impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
     fn stat_file(
         &self,
@@ -289,6 +354,10 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
 
 #[cfg(test)]
 mod tests {
+    use std::{io::Read, sync::Arc};
+
+    use astra_byte_source::BoundedByteSourceReader;
+
     use crate::test_support::MemoryVfs;
 
     use super::*;
@@ -363,5 +432,23 @@ mod tests {
                 .code(),
             "ASTRA_EMU_VFS_RUNTIME_ENUM_ARGUMENT"
         );
+    }
+
+    #[test]
+    fn runtime_byte_source_reads_through_the_bound_reader() {
+        let vfs: Arc<dyn LegacyMountedVfs> = Arc::new(MemoryVfs::new(&[(
+            "test:/mov/clip.bin",
+            b"abcdef",
+            "movie",
+        )]));
+        let reader: Arc<dyn LegacyVfsReader> =
+            Arc::new(LegacyMountedVfsReaderAdapter::new("mount.test", vfs).unwrap());
+        let source = Arc::new(
+            LegacyRuntimeVfsByteSource::new(reader, "mount.test", "test:/mov/clip.bin").unwrap(),
+        );
+        let mut stream = BoundedByteSourceReader::new(source, 2).unwrap();
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"abcdef");
     }
 }
