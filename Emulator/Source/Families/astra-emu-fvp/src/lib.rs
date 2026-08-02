@@ -6,6 +6,7 @@ mod factory;
 mod ffi;
 mod hcb;
 mod hosted;
+pub mod hosted_host;
 mod media_decode;
 mod provider;
 mod vfs_audit;
