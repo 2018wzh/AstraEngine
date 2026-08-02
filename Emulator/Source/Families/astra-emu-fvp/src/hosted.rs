@@ -583,6 +583,7 @@ mod tests {
             scene,
             audio: Vec::<HostedAudioOperation>::new(),
             video: Vec::new(),
+            text: Vec::new(),
         }
     }
 

@@ -66,7 +66,6 @@ members = [
     "Emulator/Source/FamilyApi/astra-emu-family-api",
     "Emulator/Source/FamilyCore/astra-emu-family-core",
     "Emulator/Source/FamilySupport/astra-emu-family-support",
-    "Emulator/Source/Families/astra-emu-fvp-rfvp-core",
     "Emulator/Source/Families/astra-emu-fvp",
     "Emulator/Source/Families/astra-emu-minori",
     "Emulator/Source/Manager/astra-emu-manager-core",

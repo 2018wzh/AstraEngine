@@ -46,6 +46,7 @@ struct FvpSession {
     stage_height: u32,
     poisoned: bool,
     pending_movie: Option<PendingMovieV1>,
+    ephemeral_text: BTreeMap<String, LegacyEphemeralText>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,6 +375,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             stage_height,
             poisoned: false,
             pending_movie: None,
+            ephemeral_text: BTreeMap::new(),
         };
         self.sessions
             .insert(request.requested_session_id.0.clone(), session);
@@ -465,6 +467,36 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             });
             coverage.audio_commands = coverage.audio_commands.saturating_add(1);
         }
+        for (text_index, text) in delta.text.iter().enumerate() {
+            let byte_len = u32::try_from(text.text.len()).map_err(|_| {
+                session.poisoned = true;
+                invalid(
+                    "ASTRA_FVP_TEXT_CAPTURE_BOUNDS",
+                    "hosted text length cannot be represented by the ABI",
+                )
+            })?;
+            let lease_id = format!("fvp.text.{}.{}", input.tick_index, text_index);
+            let ephemeral = LegacyEphemeralText {
+                lease_id: lease_id.clone(),
+                text: text.text.clone(),
+                speaker: None,
+            };
+            if session.ephemeral_text.insert(lease_id.clone(), ephemeral).is_some() {
+                session.poisoned = true;
+                return Err(invalid(
+                    "ASTRA_FVP_TEXT_LEASE_DUPLICATE",
+                    "hosted text lease id collided inside one session",
+                ));
+            }
+            effects.push(LegacyEffect::TextCapture {
+                sequence: effects.len() as u64,
+                lease_id,
+                text_hash: Hash256::from_sha256(text.text.as_bytes()),
+                byte_len,
+                speaker_hash: None,
+                source_ref: format!("rfvp.text.slot.{}", text.slot),
+            });
+        }
         for command in video_commands_from_delta(&delta)
             .map_err(|error| invalid("ASTRA_FVP_VIDEO_DELTA", error.to_string()))?
         {
@@ -528,7 +560,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             invalid("ASTRA_FVP_STATE", error.to_string())
         })?;
         let output = LegacyStepOutput {
-            status: if session.runtime.quit_requested().map_err(|error| {
+            status: if session.runtime.is_terminal().map_err(|error| {
                 session.poisoned = true;
                 invalid("ASTRA_FVP_STATE", error.to_string())
             })? {
@@ -675,6 +707,9 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         session.stage_width = payload.stage_width;
         session.stage_height = payload.stage_height;
         session.pending_movie = payload.pending_movie.clone();
+        // Leases are deliberately not replayed. A restore starts a fresh host
+        // observation epoch, so pre-restore plaintext can never be fetched.
+        session.ephemeral_text.clear();
         session.poisoned = false;
         let state_hash = Hash256::from_sha256(
             &session
@@ -724,7 +759,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         validate_symbol("text_lease_id", lease_id)?;
         let session = self
             .sessions
-            .get(&session_id.0)
+            .get_mut(&session_id.0)
             .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
         if session.poisoned {
             return Err(invalid(
@@ -732,7 +767,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 "poisoned session cannot expose ephemeral text",
             ));
         }
-        Ok(None)
+        Ok(session.ephemeral_text.remove(lease_id))
     }
 
     fn read_session_resource(

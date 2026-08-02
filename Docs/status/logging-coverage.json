@@ -245,10 +245,6 @@
       "status": "instrumented",
       "reason": "trusted Luau, private profile, cache, verify, extract and viewer failure lifecycle"
     },
-    "astra-emu-fvp-rfvp-core": {
-      "status": "instrumented",
-      "reason": "FVP VM tick and context execution lifecycle"
-    },
     "astra-emu-fvp": {
       "status": "instrumented",
       "reason": "FVP provider session, step, media and snapshot lifecycle"

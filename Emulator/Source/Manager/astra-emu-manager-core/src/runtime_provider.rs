@@ -1266,11 +1266,31 @@ fn parse_package_hash(value: &str) -> Result<Hash256, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
+    use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
     use astra_emu_fvp::create_static_fvp_provider;
 
     struct MemoryVfs {
         script: Vec<u8>,
+        default_font: Vec<u8>,
+    }
+
+    impl MemoryVfs {
+        fn file(&self, mount_set_id: &str, uri: &str) -> Result<&[u8], LegacyProviderError> {
+            if mount_set_id != "mount.test" {
+                return Err(LegacyProviderError::invalid(
+                    "TEST_VFS_NOT_FOUND",
+                    "synthetic fixture mount is missing",
+                ));
+            }
+            match uri {
+                "script.hcb" => Ok(&self.script),
+                "default.ttf" => Ok(&self.default_font),
+                _ => Err(LegacyProviderError::invalid(
+                    "TEST_VFS_NOT_FOUND",
+                    "synthetic fixture path is missing",
+                )),
+            }
+        }
     }
 
     impl LegacyVfsReader for MemoryVfs {
@@ -1279,15 +1299,10 @@ mod tests {
             mount_set_id: &str,
             uri: &str,
         ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
-            if mount_set_id != "mount.test" || uri != "script.hcb" {
-                return Err(LegacyProviderError::invalid(
-                    "TEST_VFS_NOT_FOUND",
-                    "synthetic fixture path is missing",
-                ));
-            }
+            let bytes = self.file(mount_set_id, uri)?;
             Ok(astra_byte_source::ByteSourceStat {
-                len: self.script.len() as u64,
-                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(&self.script)),
+                len: bytes.len() as u64,
+                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(bytes)),
             })
         }
 
@@ -1309,8 +1324,8 @@ mod tests {
                     "synthetic fixture revision changed",
                 ));
             }
-            let bytes =
-                self.script[range.offset as usize..(range.offset + range.len) as usize].to_vec();
+            let bytes = self.file(mount_set_id, uri)?;
+            let bytes = bytes[range.offset as usize..(range.offset + range.len) as usize].to_vec();
             Ok(astra_byte_source::RangeReadResult {
                 range,
                 revision: stat.revision,
@@ -1318,13 +1333,46 @@ mod tests {
                 bytes,
             })
         }
+
+        fn enumerate_by_extension(
+            &self,
+            mount_set_id: &str,
+            root: &str,
+            extension_without_dot: &str,
+            max_entries: u32,
+        ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+            if root != "" || max_entries == 0 {
+                return Err(LegacyProviderError::invalid(
+                    "TEST_VFS_ENUMERATE",
+                    "synthetic fixture enumeration is invalid",
+                ));
+            }
+            match extension_without_dot {
+                "hcb" => Ok(vec![LegacyVfsListedFile {
+                    uri: "script.hcb".into(),
+                    stat: self.stat_file(mount_set_id, "script.hcb")?,
+                }]),
+                "bin" => Ok(Vec::new()),
+                _ => Err(LegacyProviderError::invalid(
+                    "TEST_VFS_ENUMERATE",
+                    "synthetic fixture extension is unsupported",
+                )),
+            }
+        }
     }
 
     #[test]
     fn fvp_product_provider_full_lifecycle_and_repeated_run_are_deterministic() {
         let script = terminal_hcb();
         let fingerprint = Hash256::from_sha256(&script);
-        let family = create_static_fvp_provider(Arc::new(MemoryVfs { script })).unwrap();
+        let family = create_static_fvp_provider(Arc::new(MemoryVfs {
+            script,
+            default_font: include_bytes!(
+                "../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf"
+            )
+            .to_vec(),
+        }))
+        .unwrap();
         let mut provider = AstraEmuRuntimeProvider::new(family).unwrap();
         let instance = ProviderInstanceId("emu.test.instance".into());
         provider.create_instance(instance.clone()).unwrap();
@@ -1403,7 +1451,7 @@ mod tests {
                 .unwrap(),
             })
             .unwrap();
-        assert_eq!(output.status, "terminal");
+        assert_eq!(output.status, "active");
         let family_output = output.outputs[0]
             .decode_postcard::<LegacyStepOutput>(
                 RuntimeOutputDomain::Effect,
@@ -1416,11 +1464,39 @@ mod tests {
             LegacyEffect::RuntimeEvent { event, payload, .. }
                 if event == "patch.synthetic" && payload == &[1, 2, 3]
         )));
-        let output_hashes = output
+        let mut output_hashes = output
             .outputs
             .iter()
             .map(|envelope| Hash256::from_sha256(envelope.bytes()))
             .collect::<Vec<_>>();
+        let second = provider
+            .step(RuntimeStepInput {
+                session_id: open.session_id.clone(),
+                fixed_step: 2,
+                delta_ns: 16_666_667,
+                session_seed: 17,
+                mode: RuntimeStepMode::Live,
+                action: "emu.step".into(),
+                payload: serde_json::to_value(EmuStepPayload {
+                    input_edges: vec![],
+                    await_results: vec![],
+                    provider_results: vec![],
+                    budget: LegacyStepBudget {
+                        max_instructions: 32,
+                        max_effects: 32,
+                        max_trace_entries: 32,
+                    },
+                })
+                .unwrap(),
+            })
+            .unwrap();
+        assert_eq!(second.status, "active");
+        output_hashes.extend(
+            second
+                .outputs
+                .iter()
+                .map(|envelope| Hash256::from_sha256(envelope.bytes())),
+        );
         let saved = provider
             .save(RuntimeSaveRequest {
                 session_id: open.session_id.clone(),
@@ -1433,7 +1509,7 @@ mod tests {
                 sections: saved.sections,
             })
             .unwrap();
-        assert_eq!(restored.restored_fixed_step, 1);
+        assert_eq!(restored.restored_fixed_step, 2);
         provider.shutdown(open.session_id).unwrap();
         output_hashes
     }

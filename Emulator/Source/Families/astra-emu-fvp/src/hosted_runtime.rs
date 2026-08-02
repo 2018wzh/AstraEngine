@@ -288,6 +288,11 @@ impl HostedFvpSession {
             .execute_result(|state| Ok::<_, HostedRuntimeError>(state.core.quit_requested()))?
     }
 
+    pub fn is_terminal(&self) -> Result<bool, HostedRuntimeError> {
+        self.worker
+            .execute_result(|state| Ok::<_, HostedRuntimeError>(state.core.is_terminal()))?
+    }
+
     pub fn shutdown(self) -> Result<(), HostedRuntimeError> {
         self.worker.shutdown().map_err(HostedRuntimeError::Worker)
     }

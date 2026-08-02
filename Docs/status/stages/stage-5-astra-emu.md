@@ -40,7 +40,7 @@ Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspa
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-FAMILY-01`、[EmulatorCore StateMachine Mapping](../../implementation/emulator-core-state-machine.md)
 
-**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`Emulator/Source/Families/astra-emu-fvp-rfvp-core/src/portable/vm.rs`、`Emulator/Source/Families/astra-emu-fvp/src/provider.rs`
+**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、pinned `rfvp` hosted fork、`Emulator/Source/Families/astra-emu-fvp/src/provider.rs`
 
 **Steps:**
 
@@ -359,7 +359,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Depends On:** `S5-FAMILY-01`、`S5-GAME-RUNTIME-01`、`S5-LEGACY-VFS-01`、`Docs/emu/fvp/implementation-checklist.md`
 
-**Target Paths:** `Emulator/Source/Families/astra-emu-fvp/`、`Emulator/Source/Families/astra-emu-fvp-rfvp-core/`、`Tools/verify_fvp_parity.py`
+**Target Paths:** `Emulator/Source/Families/astra-emu-fvp/`、pinned `rfvp` hosted fork、`Tools/verify_fvp_parity.py`
 
 **Steps:**
 

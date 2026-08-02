@@ -19,7 +19,7 @@
 
 ## 范围
 
-FVP 在 AstraEMU 中是 engine-native family plugin。Plugin 通过 `LegacyRuntimeProvider` session 持有 `.hcb` VM、`.bin` resolver、legacy syscall mapper、媒体解析状态和 save snapshot。Manager 通过 RuntimeWorld 接收本地结构化 trace、`PresentationCommand`、`AudioCommand`、`TextCaptureEvent` 和 `StateMachineTrace`。
+FVP 在 AstraEMU 中是 engine-native family plugin。Plugin 通过 `LegacyRuntimeProvider` session 驱动 thin fork 的 `HostedSession`；fork 返回一个有界语义 delta，Astra adapter 将其原子转换为 `ScenePacket`、媒体命令、可选本地 `TextCaptureEvent` 和 save snapshot。Manager 只经 `RuntimeWorld` 消费已验证 effect，不接触 RFVP 的平台对象或 VFS handle。
 
 FVP 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 rfvp 的单 family 主循环、no_std 约束或平台 host 细节变成公共 Runtime contract。
 
@@ -29,7 +29,7 @@ FVP 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也�
 
 - 文件名、大小、hash prefix、archive entry 数量和 media magic。
 - `.hcb` header metadata、syscall 名称和 opcode offset。
-- 本地结构化 VM trace，例如 `pc`、opcode、syscall name、参数类型和返回类型。
+- Evidence profile 下的本地 crash trace 摘要，例如 `pc`、opcode offset 和稳定诊断码；Shipping profile 不记录逐 opcode trace。
 
 不能保留：
 
