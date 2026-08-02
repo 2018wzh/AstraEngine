@@ -20,6 +20,8 @@ FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 f
 
 同日复用了既有本机排障中验证过的 12 条物理输入序列：恢复/focus、650 tick 前置、同 tick pointer move/primary down、下一 tick primary up，以及 1,256 与 1,260 tick checkpoint。当前签名动态 v5 Headless 运行完整消费该序列，在 1,261 fixed step、720 scene/raster frame 后通过 snapshot round-trip、正常 shutdown、受限 VFS 和非静音非削波 WAV artifact，且没有 diagnostic。两个转场 checkpoint 的图像 hash 相同，人工检查均为完整标题画面；因此该复跑只证明历史输入格式和当前 host 生命周期兼容，**不**把它计为菜单选择、路线推进或 RFVP parity 证据。后续真实路线验收必须先记录当前 build/profile 下经 host 消费且产生状态/画面变化的输入意图，再以独立 checkpoint 验证。
 
+该复跑暴露了 hosted-core 漏掉 `RfvpEvent::KeyDown`/`KeyUp` 到 `InputManager` 的映射：CLI 虽记录 `confirm` edge，fork 却只转发 pointer/wheel，因而键盘输入不能到达 VM。fork 已在 `461b799d9f86422f3fee16fbc245bbbeb1b9075d` 修复完整 FVP key-bit 映射并由 Astra 精确 pin。使用同一受控安装重新运行后，4,200 fixed step 的显式确认序列产生 814 scene/raster frame、2,840,000 audio frame、非静音非削波 WAV、完整标题菜单 checkpoint、snapshot round-trip 和零 diagnostic；随后以 pointer click 选择首个菜单项的 5,100 step run 产生 942 scene/raster frame、3,637,156 audio frame及多段非静音非削波 WAV，两个点击后 checkpoint 为完整黑场。后者已证明键盘/鼠标 edge 参与真实脚本、菜单状态和媒体链路，但黑场尚未区分为内容转场、等待还是视频阶段，不能作为正文视觉、route terminal 或视频 parity 结论。
+
 ## 不可跨越的边界
 
 ```text
