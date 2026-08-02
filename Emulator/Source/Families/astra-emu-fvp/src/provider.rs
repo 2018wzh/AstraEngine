@@ -1448,7 +1448,13 @@ fn format_error(error: crate::FvpFormatError) -> LegacyProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{hosted_host::HostedMemoryHost, hosted_worker::HostedSessionWorker};
     use rfvp::integration::{decode_runtime_snapshot as decode_rfvp_snapshot, RuntimeSnapshotV1};
+    use rfvp_hosted::{
+        host_api::{RfvpFileSystem, RfvpHost},
+        hosted::{HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStepInput},
+        script::parser::Nls as HostedNls,
+    };
 
     struct MemoryReader {
         script: Vec<u8>,
@@ -1516,6 +1522,84 @@ mod tests {
                 stat: self.stat_file(mount_set_id, "script.hcb")?,
             }])
         }
+    }
+
+    #[test]
+    fn hosted_session_boots_and_steps_on_the_thread_confined_worker() {
+        let script = terminal_hcb();
+        let files = BTreeMap::from([
+            ("script.hcb".into(), script),
+            (
+                "default.ttf".into(),
+                include_bytes!(
+                    "../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf"
+                )
+                .to_vec(),
+            ),
+        ]);
+        let worker = HostedSessionWorker::try_spawn(move || {
+            let mut host = HostedMemoryHost::new(files)
+                .map_err(|error| invalid("TEST_HOST", format!("{error:?}")))?;
+            let mut hcb_paths = Vec::new();
+            host.fs()
+                .enumerate_by_extension(".", "hcb", &mut |path, _| {
+                    hcb_paths.push(path.to_owned());
+                    Ok(())
+                })
+                .map_err(|error| invalid("TEST_ENUMERATE", format!("{error:?}")))?;
+            if hcb_paths != ["script.hcb"] {
+                return Err(invalid(
+                    "TEST_ENUMERATE",
+                    format!("unexpected HCB entries: {}", hcb_paths.join(",")),
+                ));
+            }
+            let font_len = host
+                .fs()
+                .metadata("default.ttf")
+                .map_err(|error| invalid("TEST_FONT", format!("{error:?}")))?
+                .len;
+            if font_len == 0 {
+                return Err(invalid("TEST_FONT", "default font is unexpectedly empty"));
+            }
+            let mut runtime = HostedSession::new(HostedConfig::default(), HostedLimits::default())
+                .map_err(|error| invalid("TEST_SESSION", format!("{error:?}")))?;
+            if let Err(error) = runtime.boot(
+                &mut host,
+                HostedBootConfig {
+                    asset_root: ".",
+                    hcb_extension: "hcb",
+                    max_hcb_bytes: MAX_FILE_BYTES,
+                    max_manifest_entries: MAX_CASE_FILES,
+                    nls: HostedNls::UTF8,
+                },
+            ) {
+                return Err(invalid(
+                    "TEST_BOOT",
+                    format!(
+                        "{error:?}: {}",
+                        runtime.core().last_error_detail().unwrap_or("no detail")
+                    ),
+                ));
+            }
+            Ok::<_, LegacyProviderError>((runtime, host))
+        })
+        .expect("hosted session must boot on its owner thread");
+        let delta = worker
+            .execute(|(runtime, host)| {
+                host.advance(16_666_667)
+                    .map_err(|error| invalid("TEST_CLOCK", format!("{error:?}")))?;
+                runtime
+                    .step(host, HostedStepInput::default())
+                    .map_err(|error| invalid("TEST_STEP", format!("{error:?}")))
+            })
+            .expect("worker must answer")
+            .expect("hosted step must succeed");
+        assert_eq!(delta.tick.frame_index, 1);
+        assert!(delta.scene.iter().any(|operation| matches!(
+            operation,
+            rfvp_hosted::hosted::HostedSceneOperation::Present
+        )));
+        worker.shutdown().expect("worker must stop");
     }
 
     #[test]
