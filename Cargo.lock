@@ -9347,11 +9347,12 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=29fb36039d6318e4f5d76b2ef9443a40126df9be#29fb36039d6318e4f5d76b2ef9443a40126df9be"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=77cd05f018ae124276887a37fec3eb71d4f40b4b#77cd05f018ae124276887a37fec3eb71d4f40b4b"
 dependencies = [
  "ab_glyph",
  "anyhow",
  "atomic_refcell",
+ "bincode 1.3.3",
  "bitflags 2.13.1",
  "bytemuck",
  "byteorder",
