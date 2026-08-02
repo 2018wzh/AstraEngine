@@ -279,6 +279,7 @@ mod tests {
             },
             scene,
             audio: Vec::<HostedAudioOperation>::new(),
+            video: Vec::new(),
         }
     }
 
@@ -316,5 +317,22 @@ mod tests {
         .expect_err("v1 packet cannot represent a partial texture update");
 
         assert_eq!(error, HostedAdapterError::PartialTextureUpdate(TextureId(9)));
+    }
+
+    #[test]
+    fn converts_video_as_a_vfs_resource_command() {
+        let mut input = delta(Vec::new());
+        input.video.push(HostedVideoOperation::Play {
+            resource_uri: "movie/opening.wmv".into(),
+            byte_len: 4_096,
+            modal_with_audio: true,
+            stage_width: 640,
+            stage_height: 480,
+        });
+        let commands = video_commands_from_delta(&input).expect("valid video resource converts");
+        assert!(matches!(
+            commands.as_slice(),
+            [LegacyVideoCommandV1::Play { resource_uri, .. }] if resource_uri == "movie/opening.wmv"
+        ));
     }
 }
