@@ -2228,7 +2228,11 @@ impl EmuHeadlessGpuObserver {
             .lock()
             .map_err(|_| "ASTRA_EMU_PERFORMANCE_GPU_OBSERVER_POISONED".to_owned())?;
         if samples.len() != self.expected_samples {
-            return Err("ASTRA_EMU_PERFORMANCE_GPU_SAMPLE_CADENCE_INVALID".into());
+            return Err(format!(
+                "ASTRA_EMU_PERFORMANCE_GPU_SAMPLE_CADENCE_INVALID:{}/{}",
+                samples.len(),
+                self.expected_samples
+            ));
         }
         Ok(std::mem::take(&mut *samples))
     }
