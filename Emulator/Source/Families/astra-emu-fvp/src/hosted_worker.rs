@@ -46,6 +46,17 @@ pub struct HostedSessionWorker<T: 'static> {
 }
 
 impl<T: 'static> HostedSessionWorker<T> {
+    /// Runs a fallible request in the worker and preserves both transport and
+    /// session errors without forcing provider code to nest reply channels.
+    pub fn execute_result<R: Send + 'static, E: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut T) -> Result<R, E> + Send + 'static,
+    ) -> Result<Result<R, E>, HostedWorkerError> {
+        self.execute(operation)
+    }
+}
+
+impl<T: 'static> HostedSessionWorker<T> {
     pub fn spawn(init: impl FnOnce() -> T + Send + 'static) -> Self {
         let (sender, receiver) = mpsc::channel();
         let join = thread::Builder::new()
