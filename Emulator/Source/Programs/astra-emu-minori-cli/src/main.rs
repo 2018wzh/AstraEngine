@@ -73,6 +73,9 @@ enum Command {
         /// Optional local-private path for the sanitized aggregate report.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Scan every movie entry through bounded VFS ranges instead of only its prefix.
+        #[arg(long)]
+        full_scan: bool,
     },
 }
 
@@ -120,7 +123,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             game_dir,
             mount_profile,
             output,
-        } => census_movies(&game_dir, &mount_profile, output.as_deref()),
+            full_scan,
+        } => census_movies(&game_dir, &mount_profile, output.as_deref(), full_scan),
     };
     if result.is_err() {
         tracing::error!(
@@ -420,7 +424,7 @@ fn census_media(
             _ => return Err("ASTRA_EMU_MINORI_MEDIA_FORMAT_UNKNOWN".into()),
         }
     }
-    let movie = collect_movie_container_census(&vfs)?;
+    let movie = collect_movie_container_census(&vfs, false)?;
     let report = serde_json::to_string(&serde_json::json!({
         "schema": "astra.emu.minori.media_census.v1",
         "entry_count": png_entries + ani_entries + sqz_entries + ogg_entries + database_entries,
@@ -449,11 +453,12 @@ fn census_movies(
     game_dir: &std::path::Path,
     profile: &std::path::Path,
     output: Option<&std::path::Path>,
+    full_scan: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = mount_minori(game_dir, profile)?;
     let report = serde_json::to_string(&serde_json::json!({
         "schema": "astra.emu.minori.movie_census.v1",
-        "movie": collect_movie_container_census(&vfs)?,
+        "movie": collect_movie_container_census(&vfs, full_scan)?,
     }))?;
     if let Some(output) = output {
         write_private_report(output, &report)?;
@@ -465,6 +470,7 @@ fn census_movies(
 
 fn collect_movie_container_census(
     vfs: &Arc<dyn astra_emu_family_core::LegacyMountedVfs>,
+    full_scan: bool,
 ) -> Result<MovieContainerCensus, Box<dyn std::error::Error>> {
     let mut movie = MovieContainerCensus::default();
     for entry in vfs
@@ -476,11 +482,6 @@ fn collect_movie_container_census(
         if entry.decoded_size == 0 {
             return Err("ASTRA_EMU_MINORI_MOVIE_EMPTY".into());
         }
-        let probe_length = entry.decoded_size.min(MOVIE_PROBE_BYTES);
-        let probe = vfs.read_range(&entry.uri, 0, probe_length)?.bytes;
-        if probe.len() as u64 != probe_length {
-            return Err("ASTRA_EMU_MINORI_MOVIE_PROBE_SHORT".into());
-        }
         movie.entry_count = movie
             .entry_count
             .checked_add(1)
@@ -489,10 +490,50 @@ fn collect_movie_container_census(
             .decoded_bytes
             .checked_add(entry.decoded_size)
             .ok_or("ASTRA_EMU_MINORI_MOVIE_TOTAL_SIZE")?;
-        let container = classify_movie_container(&probe);
+        let container = classify_movie_entry(vfs, entry, full_scan)?;
         *movie.containers.entry(container.into()).or_default() += 1;
     }
     Ok(movie)
+}
+
+fn classify_movie_entry(
+    vfs: &Arc<dyn astra_emu_family_core::LegacyMountedVfs>,
+    entry: &astra_emu_family_core::LegacyVfsEntry,
+    full_scan: bool,
+) -> Result<&'static str, Box<dyn std::error::Error>> {
+    let scan_limit = if full_scan {
+        entry.decoded_size
+    } else {
+        entry.decoded_size.min(MOVIE_PROBE_BYTES)
+    };
+    let mut offset = 0u64;
+    let mut tail = Vec::new();
+    while offset < scan_limit {
+        let length = (scan_limit - offset).min(MOVIE_PROBE_BYTES);
+        let bytes = vfs.read_range(&entry.uri, offset, length)?.bytes;
+        if bytes.len() as u64 != length {
+            return Err("ASTRA_EMU_MINORI_MOVIE_PROBE_SHORT".into());
+        }
+        let tail_length = tail.len();
+        let mut probe = tail;
+        probe.extend_from_slice(&bytes);
+        if let Some((kind, found_offset)) = find_movie_container(&probe) {
+            return Ok(classify_movie_container_at(
+                kind,
+                offset == 0 && found_offset == 0,
+            ));
+        }
+        const MOVIE_SIGNATURE_TAIL_BYTES: usize = 11;
+        let retain = probe.len().min(MOVIE_SIGNATURE_TAIL_BYTES);
+        tail = probe[probe.len() - retain..].to_vec();
+        offset = offset
+            .checked_add(length)
+            .ok_or("ASTRA_EMU_MINORI_MOVIE_SCAN_OFFSET")?;
+        if tail_length > MOVIE_SIGNATURE_TAIL_BYTES {
+            return Err("ASTRA_EMU_MINORI_MOVIE_SCAN_STATE".into());
+        }
+    }
+    Ok("unrecognized")
 }
 
 fn write_private_report(
@@ -527,22 +568,26 @@ struct MovieContainerCensus {
     containers: BTreeMap<String, u64>,
 }
 
+#[cfg(test)]
 fn classify_movie_container(header: &[u8]) -> &'static str {
     let Some((kind, offset)) = find_movie_container(header) else {
         return "unrecognized";
     };
-    if offset == 0 {
-        kind
-    } else {
-        match kind {
-            "avi" => "avi_wrapped",
-            "mpeg" => "mpeg_wrapped",
-            "asf" => "asf_wrapped",
-            "isobmff" => "isobmff_wrapped",
-            "matroska" => "matroska_wrapped",
-            "ogg" => "ogg_wrapped",
-            _ => "unrecognized",
-        }
+    classify_movie_container_at(kind, offset == 0)
+}
+
+fn classify_movie_container_at(kind: &'static str, at_start: bool) -> &'static str {
+    if at_start {
+        return kind;
+    }
+    match kind {
+        "avi" => "avi_wrapped",
+        "mpeg" => "mpeg_wrapped",
+        "asf" => "asf_wrapped",
+        "isobmff" => "isobmff_wrapped",
+        "matroska" => "matroska_wrapped",
+        "ogg" => "ogg_wrapped",
+        _ => "unrecognized",
     }
 }
 

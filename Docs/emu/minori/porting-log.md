@@ -8,15 +8,15 @@
 - `MINORI_READER_ID` 升级为 `astra.emu.minori.paz.v2`，并进入 plaintext cache 的 codec identity。旧 reader 写出的明文 cache 因而不会跨实现版本复用；新版本仍需由独立的真实 cache hit 轮次验证。
 - v1/v2 的 RC4 entry key 改由 index 中保留的原始 CP932 名称字节派生，仅对 ASCII 字节做格式要求的大小写归一化。这样避免 Unicode decode/re-encode 改变密钥；原始字节只驻留 mount session 的 opaque descriptor，不进入 save、report 或 cache identity。
 - 真实首路线已到达影片指令。公共 VFS 已提供 range-backed reader，Minori 对未压缩 movie entry 以 entry-relative transform 直接读取请求范围；它不再因首个 header probe 物化整个影片。压缩 entry 仍走完整、受上限的解压路径，不能冒充流式实现。
-- 原程序的影片启动路径按扩展名选择文件流媒体图。AstraEMU 不复用该系统路径：Minori host 只用有界 reader 读取固定 header，再依据容器识别结果要求显式的纯 Rust decoder binding。当前五项授权样本中仅一项在有界前缀后识别出 MPEG start code；其余四项继续返回 `ASTRA_EMU_MINORI_VIDEO_CONTAINER_UNRECOGNIZED`。这不是 E2 路线通过证据。
+- 原程序的影片启动路径按扩展名选择文件流媒体图。AstraEMU 不复用该系统路径：Minori host 只用有界 reader 与显式的纯 Rust decoder binding。私有全量有界扫描确认五项授权 movie 都在 wrapper 后包含 MPEG start code；此前固定 4 MiB probe 把四项误归为未知容器，不能再作为 codec 结论。runtime 现逐块扫描并保留跨块签名尾部，找到偏移后才交给 decoder，不物化完整媒体。这不是 E2 路线通过证据。
 
 ### MPEG 流式绑定
 
-- 已将已识别 MPEG entry 交给 `MpegRangeDecoder`：reader 只保留 64 KiB 输入块和最多 256 个待消费事件，帧与音频不物化为整片媒体或历史帧队列。MPEG start code 的前缀偏移在创建 decoder 时固定，VFS range transform 仍由 Minori mount session 执行。
+- 已将已识别 MPEG entry 交给 `MpegRangeDecoder`：reader 只保留 64 KiB 输入块和最多 256 个待消费事件，帧与音频不物化为整片媒体或历史帧队列。runtime 以 4 MiB 上限 VFS range chunk 扫描 wrapper，并保留三个字节处理跨块 start code；MPEG 前缀偏移在创建 decoder 时固定，VFS range transform 仍由 Minori mount session 执行。
 - 真实 Headless 重试暴露了通用 raw-range 路径错误地把非 movie entry 的任意子范围送入 Blowfish；这与 block cipher 的 8-byte 对齐契约冲突。现仅 movie 的 entry-relative RC4 transform 可走随机范围读取；其余 entry 强制回到完整 aligned decrypt 与 truncate 路径。GARbro `OpenEntry` 合同进一步确认 zlib 只由 index 的 `IsPacked` 决定，不可按 archive role 推断。合成 v0/v1/v2 fixture 现分别覆盖普通 unpacked random read、packed zlib read 和 movie RC4 range。
 - 视频 frame 的 PTS、尺寸、RGBA 长度与 sequence 都在进入 Renderer2D 前校验。音频 chunk 只接受有限的 mono/stereo、有限 sample、交错 frame 对齐与单调 PTS；pending event 和 mixer queue 都有独立上限。错误格式、时间倒退、队列超限或 identity 冲突均为 `ASTRA_EMU_MINORI_MPEG_*` blocking diagnostic。
 - MPEG 音频改为流式提交现有 Headless audio executor。它不走整片 decode 或私有 mixer；首次 chunk 必须精确匹配 host 显式 audio output format，之后格式漂移直接阻断。视频 EOF 只标记 audio EOS，media fence 会等待已提交音频 drain 后再完成。
-- 该轮仅有 range decoder、格式边界和 Headless binding 的定向 Rust 回归。尚未以授权样本完成 MPEG 影片的实际 Headless E2，也没有把四项未识别容器解释为 MPEG、WMV 或其他 codec。
+- 该轮仅有 range decoder、格式边界、跨块 wrapper 扫描和 Headless binding 的定向 Rust 回归。尚未以授权样本完成 MPEG 影片的实际 Headless E2；扫描签名不是完整 container/codec 解码成功证据。
 
 ## 2026-08-01
 
@@ -89,7 +89,7 @@
 - IDA 已确认原程序消息字体默认值为 26 px，ruby 为 12 px，默认字体是 CP932 的 MS PGothic。移植按计划显式绑定仓库内 Noto Sans JP，不读取系统字体。首轮 body/speaker region 结合已确认的 panel 几何与外部截图结构制定，真实 checkpoint 检查前只算实现绑定，不声明原版精确坐标。
 - 真实原程序二进制中只有一个与已解包脚本集合相交、且没有脚本入边的 `.sc` 引用。它已作为 private Headless 实际入口，不再以先前的短链 `test.sc` 代替首路线入口。该入口的首个未覆盖命令为 `.movie`，其五个 operand 已由本地样本确认依次表达非零 movie id、资源名、宽、高和 `t`/`f` skip flag。
 - `.movie` 现生成 `LegacyVideoCommandV1::Play` 和同一 media id 的 `MediaFence`，复用公共 video command、Host media completion、snapshot state 和 VFS URI 绑定；资源、尺寸、重复播放与 stage identity 不匹配均阻断。没有引入 Minori 私有播放器或 codec fallback。
-- 新增 `census-movies`：只对每个 movie 读取有界的前 4 MiB VFS probe，并以显式私有输出写入脱敏 aggregate。五个授权样本中有一项在前缀之后包含 MPEG start code，其余四项没有 AVI、MPEG、ASF、ISO-BMFF、Matroska 或 Ogg 的标准签名；因此不能按扩展名把它们统一绑定到现有 MPEG/WMV provider。该命令的 report 只含 entry 数、总 decoded bytes 和格式类别计数，不写 entry 名、header、路径或内容 hash。
+- 新增 `census-movies`：默认只对每个 movie 读取有界的前 4 MiB VFS probe；显式 local-private `--full-scan` 以相同 chunk 上限遍历完整 entry。全量扫描确认五项授权 movie 都在 wrapper 后包含 MPEG start code，修正了默认 probe 的不完整结论。该命令的 report 只含 entry 数、总 decoded bytes 和格式类别计数，不写 entry 名、header、路径或内容 hash。
 - 重新核对 GARbro 的 `MovPazArchive`：v1+ RC4 key 以“解码后的 entry name lower，再 CP932 编码”的字节序列构造。Rust reader 已替换此前的原始字节 ASCII lower 做法并加入 CP932 回归；真实五项的 format census 结论不变，故该差异不是当前未知容器的根因。
 
 ### 已确认事实
@@ -122,8 +122,8 @@
 - 真实 Headless 已到第二条可见 message，但只检查了选定帧，没有完成整个 effect 周期的逐帧节奏比较。`select`、普通 voice、其他 panel/effect 和后续主要演出仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
 - AstraEMU runner 同时输出专用 `astra.emu.headless_run_report.v2` 和公共 `astra.headless_run_report.v2`；两者绑定同一 manifest hash、输入、checkpoint 和 diagnostic 状态。真实八包 v24 已通过 `prepare-review`，模型按 bundle 查看 6 个 required checkpoint、首尾/最大差异选择，并检查 3 个完整 WAV 的时长、电平、静音与 clipping；`validate-review` 随后通过。该 review 只适用于 373-tick slice，不能覆盖完整路线或自动失败。
 - 尚无首条完整路线、全 movie codec inventory、完整 required checkpoint 集合或 Windows E3 证据。
-- 实际入口的首个 movie 为约 196 MiB，超过 family VFS 单次 64 MiB read 上限。Headless 现改用有界 range-backed reader，只探测开头而不整片读取或缓存；当前不再触发 `ASTRA_EMU_VFS_RUNTIME_RANGE`，而是在未知容器上 fail closed。仍需可验证的纯 Rust container/codec provider，真实路线在 movie fence 处保持 blocking。
-- 原始 movie extension 不是容器证明。现有 range-backed VFS census 在一项 entry 的前缀之后识别出 MPEG，另四项仍为 `unrecognized`；原程序只将文件交给 DirectShow file stream，未观察到 wrapper transform。MPEG entry 需要以相同的有界 offset 交给显式 pure-Rust provider；其余四项在取得可验证 container contract 前继续以 `ASTRA_EMU_MINORI_VIDEO_CONTAINER_UNRECOGNIZED` 阻断。不得以 FVP 的 MPEG/WMV decoder、平台媒体 API 或伪造 completion 继续路线。
+- 实际入口的首个 movie 为约 196 MiB，超过 family VFS 单次 64 MiB read 上限。Headless 现改用有界 range-backed reader，并在 wrapper 中逐块扫描 MPEG start code；当前不再触发 `ASTRA_EMU_VFS_RUNTIME_RANGE` 或以固定前缀错误判为未知容器。仍需由 decoder 的实际 frame/audio 输出验证 container 与 codec，真实路线在 movie fence 处保持 blocking。
+- 原始 movie extension 不是容器证明。私有全量 census 确认五项均为 `mpeg_wrapped`，但 start code 只说明候选 MPEG 流的偏移，不等于完整解码或播放。runtime 只会以相同有界 offset 交给显式 pure-Rust provider；解析、格式、时间线或 media fence 任一失败均阻断，不得使用 FVP decoder、平台媒体 API 或伪造 completion 继续路线。
 
 ### 本次测试
 
