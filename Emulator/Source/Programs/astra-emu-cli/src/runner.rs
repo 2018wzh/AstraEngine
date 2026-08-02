@@ -691,6 +691,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             resume: None,
             frame_sample_interval: 1,
             perfetto_trace: launch.perfetto_trace.clone(),
+            capture_performance_samples: false,
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
             synchronous_gpu_presents: false,
@@ -1025,6 +1026,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             presentation_substeps: (launch.presentation_rate_hz / 60) as u8,
             synchronous_gpu_presents: launch.presentation_rate_hz == 120,
             perfetto_trace: launch.perfetto_trace.clone(),
+            capture_performance_samples: launch.performance.is_some(),
         },
     )
     .await;
@@ -1131,7 +1133,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         &standard_report,
     )?;
     let performance = match (&launch.performance, performance_memory_baseline) {
-        (Some(artifacts), Some(memory_baseline)) => Some(finalize_headless_performance(
+        (Some(artifacts), Some(_)) => Some(finalize_headless_performance(
             artifacts,
             &launch,
             &host_profile,
@@ -1141,7 +1143,9 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             family_binary_hash,
             &open.session_id,
             &execution,
-            memory_baseline,
+            execution
+                .performance_memory_after_warmup
+                .ok_or("ASTRA_EMU_PERFORMANCE_WARMUP_MEMORY_MISSING")?,
             sample_process_memory().map_err(|error| error.to_string())?,
         )?),
         (None, None) => None,
@@ -2197,6 +2201,7 @@ struct ExecutionEvidence {
     runtime_samples_ns: Vec<u64>,
     presentation_samples_ns: Vec<u64>,
     gpu_samples: Vec<HeadlessGpuFrameSample>,
+    performance_memory_after_warmup: Option<astra_observability::ProcessMemorySample>,
     scene_full_resync_count: u64,
     audio_underflow_count: u64,
     perfetto_trace: Option<PerfettoTraceSummary>,
@@ -2679,6 +2684,8 @@ struct RuntimeDriver<'a> {
     media_timings_ns: Vec<u64>,
     present_timings_ns: Vec<u64>,
     perfetto: Option<NativePerfettoCapture>,
+    capture_performance_samples: bool,
+    performance_memory_after_warmup: Option<astra_observability::ProcessMemorySample>,
     scene_full_resync_count: u64,
 }
 
@@ -2697,6 +2704,7 @@ struct RuntimeDriverConfig<'a> {
     resume: Option<HeadlessDriverResumeV1>,
     frame_sample_interval: u64,
     perfetto_trace: Option<PathBuf>,
+    capture_performance_samples: bool,
     presentation: PresentationPath,
     presentation_substeps: u8,
     synchronous_gpu_presents: bool,
@@ -2789,6 +2797,7 @@ struct ExecutionConfig<'a> {
     presentation_substeps: u8,
     synchronous_gpu_presents: bool,
     perfetto_trace: Option<PathBuf>,
+    capture_performance_samples: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3007,6 +3016,7 @@ async fn execute_sequence(
             resume: config.resume_driver,
             frame_sample_interval: config.frame_sample_interval,
             perfetto_trace: config.perfetto_trace,
+            capture_performance_samples: config.capture_performance_samples,
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
             synchronous_gpu_presents: config.synchronous_gpu_presents,
@@ -3171,6 +3181,7 @@ async fn execute_sequence(
         runtime_samples_ns,
         presentation_samples_ns,
         gpu_samples: Vec::new(),
+        performance_memory_after_warmup: driver.performance_memory_after_warmup,
         scene_full_resync_count: driver.scene_full_resync_count,
         audio_underflow_count,
         perfetto_trace,
@@ -3276,6 +3287,8 @@ impl<'a> RuntimeDriver<'a> {
                 .perfetto_trace
                 .map(NativePerfettoCapture::new)
                 .transpose()?,
+            capture_performance_samples: config.capture_performance_samples,
+            performance_memory_after_warmup: None,
             scene_full_resync_count: 0,
         };
         if let Some(resume) = config.resume {
@@ -3884,6 +3897,12 @@ impl<'a> RuntimeDriver<'a> {
             .present_scene(self.surface, scene)
             .await
             .map_err(|error| error.to_string())?;
+        if self.capture_performance_samples
+            && self.present_sequence == PERFORMANCE_WARMUP_PRESENTATIONS as u64
+        {
+            self.performance_memory_after_warmup =
+                Some(sample_process_memory().map_err(|error| error.to_string())?);
+        }
         self.present_timings_ns.push(elapsed_ns(present_started)?);
         self.record_perfetto_phase("astra.emu.adapter.gpu_submit", 5, present_started)
     }
@@ -5860,6 +5879,7 @@ mod native_tests {
             runtime_samples_ns: Vec::new(),
             presentation_samples_ns: Vec::new(),
             gpu_samples: Vec::new(),
+            performance_memory_after_warmup: None,
             scene_full_resync_count: 0,
             audio_underflow_count: 0,
             perfetto_trace: None,
