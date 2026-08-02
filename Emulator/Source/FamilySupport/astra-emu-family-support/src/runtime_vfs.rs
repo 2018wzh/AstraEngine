@@ -312,4 +312,38 @@ mod tests {
             "ASTRA_EMU_VFS_RUNTIME_MOUNT_MISMATCH"
         );
     }
+
+    #[test]
+    fn bounded_enumeration_filters_without_opening_payloads() {
+        let vfs: Arc<dyn LegacyMountedVfs> = Arc::new(MemoryVfs::new(&[
+            ("test:/Sakura.hcb", b"hcb", "script"),
+            ("test:/graph.bin", b"pack", "archive"),
+            ("test:/movie/intro.bin", b"movie", "archive"),
+            ("test:/voice.ogg", b"ogg", "audio"),
+        ]));
+        let reader = LegacyMountedVfsReaderAdapter::new("mount.test", vfs).unwrap();
+
+        let bins = reader
+            .enumerate_by_extension("mount.test", "test:/", "bin", 2)
+            .unwrap();
+        assert_eq!(bins.len(), 2);
+        assert_eq!(bins[0].uri, "test:/graph.bin");
+        assert_eq!(bins[1].uri, "test:/movie/intro.bin");
+        assert_eq!(reader.access_metrics().unwrap().read_count, 0);
+
+        assert_eq!(
+            reader
+                .enumerate_by_extension("mount.test", "test:/", "bin", 1)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_RUNTIME_ENUM_BOUNDS"
+        );
+        assert_eq!(
+            reader
+                .enumerate_by_extension("mount.test", "test:/", "../bin", 2)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_RUNTIME_ENUM_ARGUMENT"
+        );
+    }
 }
