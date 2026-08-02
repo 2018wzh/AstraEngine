@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Instant,
 };
 
@@ -45,8 +45,7 @@ use astra_media_core::{
     BlendMode, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, TextureFrame,
 };
 use astra_observability::{
-    allocation_snapshot, sample_process_memory, AllocationSnapshot, PerfettoTraceConfig,
-    PerfettoTraceSummary, PerfettoTraceWriter,
+    sample_process_memory, PerfettoTraceConfig, PerfettoTraceSummary, PerfettoTraceWriter,
 };
 use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput,
@@ -57,7 +56,9 @@ use astra_platform::{
     PointerButton as PlatformPointerButton, RgbaFrame, SceneFrame, ScenePresentReceipt,
     SurfaceHandle, SurfaceRequest, TouchPhase as PlatformTouchPhase, WindowHandle, WindowRequest,
 };
-use astra_platform_headless::HeadlessPlatformFactory;
+use astra_platform_headless::{
+    HeadlessGpuFrameSample, HeadlessPerformanceObserver, HeadlessPlatformFactory,
+};
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeOpenRequest, RuntimeOutputDomain,
@@ -690,7 +691,6 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             resume: None,
             frame_sample_interval: 1,
             perfetto_trace: launch.perfetto_trace.clone(),
-            capture_performance_samples: false,
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
             synchronous_gpu_presents: false,
@@ -968,9 +968,18 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         .as_ref()
         .map(|_| sample_process_memory().map_err(|error| error.to_string()))
         .transpose()?;
-    let host = HeadlessPlatformFactory::new(&launch.artifact_root, &game_root)
+    let gpu_observer = launch.performance.as_ref().map(|_| {
+        Arc::new(EmuHeadlessGpuObserver::new(
+            (PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS) as usize,
+        ))
+    });
+    let mut host_factory = HeadlessPlatformFactory::new(&launch.artifact_root, &game_root)
         .with_input_sequence_hash(input.hash.to_string())
-        .with_gpu(true)
+        .with_gpu(true);
+    if let Some(observer) = &gpu_observer {
+        host_factory = host_factory.with_performance_observer(observer.clone());
+    }
+    let host = host_factory
         .start(host_profile.clone().into())
         .await
         .map_err(|error| error.to_string())?;
@@ -1015,7 +1024,6 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             presentation_substeps: (launch.presentation_rate_hz / 60) as u8,
             synchronous_gpu_presents: launch.presentation_rate_hz == 120,
             perfetto_trace: launch.perfetto_trace.clone(),
-            capture_performance_samples: launch.performance.is_some(),
         },
     )
     .await;
@@ -1044,7 +1052,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     }
     .await;
     prepared.evidence.cleanup();
-    let (execution, vfs_access, resource_audit) = match (result, cleanup) {
+    let (mut execution, vfs_access, resource_audit) = match (result, cleanup) {
         (Ok(evidence), Ok(())) => evidence,
         (Err(error), Ok(())) => return Err(error),
         (Ok(_), Err(cleanup)) => return Err(cleanup),
@@ -1054,6 +1062,9 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             ))
         }
     };
+    if let Some(observer) = gpu_observer {
+        execution.gpu_samples = observer.finish()?;
+    }
     if let Some(output) = &launch.snapshot_output {
         let exported = execution
             .resume_snapshot
@@ -1344,9 +1355,7 @@ fn finalize_headless_performance(
         != (PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS) as u64
         || execution.runtime_samples_ns.len() != execution.fixed_step as usize
         || execution.presentation_samples_ns.len() != execution.present_sequence as usize
-        || execution.allocation_bytes_samples.len() != execution.present_sequence as usize
-        || execution.allocation_count_samples.len() != execution.present_sequence as usize
-        || execution.gpu_upload_bytes_samples.len() != execution.present_sequence as usize
+        || execution.gpu_samples.len() != execution.present_sequence as usize
     {
         return Err("ASTRA_EMU_PERFORMANCE_SAMPLE_CADENCE_INVALID".into());
     }
@@ -1355,30 +1364,41 @@ fn finalize_headless_performance(
         .runtime_samples_ns
         .get(expected_runtime_warmup..)
         .ok_or("ASTRA_EMU_PERFORMANCE_RUNTIME_WARMUP_INVALID")?;
-    let presentation_samples = execution
-        .presentation_samples_ns
+    let gpu_samples = execution
+        .gpu_samples
         .get(PERFORMANCE_WARMUP_PRESENTATIONS..)
-        .ok_or("ASTRA_EMU_PERFORMANCE_PRESENTATION_WARMUP_INVALID")?;
-    let allocation_bytes = execution
-        .allocation_bytes_samples
-        .get(PERFORMANCE_WARMUP_PRESENTATIONS..)
-        .ok_or("ASTRA_EMU_PERFORMANCE_ALLOCATION_WARMUP_INVALID")?;
-    let allocation_count = execution
-        .allocation_count_samples
-        .get(PERFORMANCE_WARMUP_PRESENTATIONS..)
-        .ok_or("ASTRA_EMU_PERFORMANCE_ALLOCATION_WARMUP_INVALID")?;
-    let upload_bytes = execution
-        .gpu_upload_bytes_samples
-        .get(PERFORMANCE_WARMUP_PRESENTATIONS..)
-        .ok_or("ASTRA_EMU_PERFORMANCE_UPLOAD_WARMUP_INVALID")?;
+        .ok_or("ASTRA_EMU_PERFORMANCE_GPU_WARMUP_INVALID")?;
     if runtime_samples.len() != PERFORMANCE_MEASURED_PRESENTATIONS / 2
-        || presentation_samples.len() != PERFORMANCE_MEASURED_PRESENTATIONS
-        || allocation_bytes.len() != PERFORMANCE_MEASURED_PRESENTATIONS
-        || allocation_count.len() != PERFORMANCE_MEASURED_PRESENTATIONS
-        || upload_bytes.len() != PERFORMANCE_MEASURED_PRESENTATIONS
+        || gpu_samples.len() != PERFORMANCE_MEASURED_PRESENTATIONS
     {
         return Err("ASTRA_EMU_PERFORMANCE_MEASUREMENT_COUNT_INVALID".into());
     }
+    let presentation_samples = gpu_samples
+        .iter()
+        .map(|sample| {
+            sample
+                .scene_build_ns
+                .checked_add(sample.cpu_submit_ns)
+                .and_then(|value| value.checked_add(sample.gpu_duration_ns))
+                .ok_or("ASTRA_EMU_PERFORMANCE_PRESENTATION_DURATION_OVERFLOW")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let allocation_bytes = gpu_samples
+        .iter()
+        .map(|sample| sample.heap_allocation_bytes)
+        .collect::<Vec<_>>();
+    let allocation_count = gpu_samples
+        .iter()
+        .map(|sample| sample.heap_allocation_count)
+        .collect::<Vec<_>>();
+    let upload_bytes = gpu_samples
+        .iter()
+        .map(|sample| sample.upload_bytes)
+        .collect::<Vec<_>>();
+    let readback_bytes = gpu_samples
+        .iter()
+        .map(|sample| sample.readback_bytes)
+        .collect::<Vec<_>>();
     let budget: PerformanceBudget = serde_json::from_slice(
         &fs::read(&artifacts.budget_path)
             .map_err(|_| "ASTRA_EMU_PERFORMANCE_BUDGET_READ".to_owned())?,
@@ -1402,22 +1422,10 @@ fn finalize_headless_performance(
     };
     let mut recorder = PerformanceRecorder::new(budget).map_err(|error| error.to_string())?;
     record_performance_samples(&mut recorder, "runtime.fixed_tick_ns", runtime_samples)?;
-    record_performance_samples(&mut recorder, "presentation.e2e_ns", presentation_samples)?;
-    record_performance_samples(&mut recorder, "gpu.upload_bytes", upload_bytes)?;
-    record_performance_samples(&mut recorder, "heap.allocation_bytes", allocation_bytes)?;
-    record_performance_samples(&mut recorder, "heap.allocation_count", allocation_count)?;
-    let mut readback_bytes = vec![0_u64; PERFORMANCE_MEASURED_PRESENTATIONS];
-    for checkpoint in &execution.checkpoint_frames {
-        let sequence = usize::try_from(checkpoint.sequence)
-            .map_err(|_| "ASTRA_EMU_PERFORMANCE_READBACK_SEQUENCE_OVERFLOW")?;
-        if sequence > PERFORMANCE_WARMUP_PRESENTATIONS
-            && sequence <= PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS
-        {
-            let index = sequence - PERFORMANCE_WARMUP_PRESENTATIONS - 1;
-            readback_bytes[index] = u64::try_from(checkpoint.rgba8.len())
-                .map_err(|_| "ASTRA_EMU_PERFORMANCE_READBACK_BYTES_OVERFLOW")?;
-        }
-    }
+    record_performance_samples(&mut recorder, "presentation.e2e_ns", &presentation_samples)?;
+    record_performance_samples(&mut recorder, "gpu.upload_bytes", &upload_bytes)?;
+    record_performance_samples(&mut recorder, "heap.allocation_bytes", &allocation_bytes)?;
+    record_performance_samples(&mut recorder, "heap.allocation_count", &allocation_count)?;
     record_performance_samples(&mut recorder, "gpu.readback_bytes", &readback_bytes)?;
     let deadline_miss_count = runtime_samples
         .iter()
@@ -2187,13 +2195,76 @@ struct ExecutionEvidence {
     phase_timings: HeadlessPhaseTimingEvidenceV1,
     runtime_samples_ns: Vec<u64>,
     presentation_samples_ns: Vec<u64>,
-    allocation_bytes_samples: Vec<u64>,
-    allocation_count_samples: Vec<u64>,
-    gpu_upload_bytes_samples: Vec<u64>,
+    gpu_samples: Vec<HeadlessGpuFrameSample>,
     scene_full_resync_count: u64,
     audio_underflow_count: u64,
     perfetto_trace: Option<PerfettoTraceSummary>,
     resume_snapshot: Option<HeadlessResumeExport>,
+}
+
+/// Evidence-only receiver for the Headless GPU timestamp path.  The renderer
+/// remains the owner of GPU timings and allocation counters; this observer
+/// only transports its bounded, scalar samples back to the report writer.
+/// It deliberately has no Astra runtime state and is never installed for a
+/// Shipping run.
+#[derive(Debug)]
+struct EmuHeadlessGpuObserver {
+    expected_samples: usize,
+    samples: Mutex<Vec<HeadlessGpuFrameSample>>,
+}
+
+impl EmuHeadlessGpuObserver {
+    fn new(expected_samples: usize) -> Self {
+        Self {
+            expected_samples,
+            samples: Mutex::new(Vec::with_capacity(expected_samples)),
+        }
+    }
+
+    fn finish(&self) -> Result<Vec<HeadlessGpuFrameSample>, String> {
+        let mut samples = self
+            .samples
+            .lock()
+            .map_err(|_| "ASTRA_EMU_PERFORMANCE_GPU_OBSERVER_POISONED".to_owned())?;
+        if samples.len() != self.expected_samples {
+            return Err("ASTRA_EMU_PERFORMANCE_GPU_SAMPLE_CADENCE_INVALID".into());
+        }
+        Ok(std::mem::take(&mut *samples))
+    }
+}
+
+impl HeadlessPerformanceObserver for EmuHeadlessGpuObserver {
+    fn pace_gpu_frame(&self, _sequence: u64) -> Result<(), astra_platform::PlatformError> {
+        // The RuntimeDriver owns the fixed 60 Hz / presentation 120 Hz cadence.
+        // Sleeping here would alter the workload being measured.
+        Ok(())
+    }
+
+    fn bind_gpu_frame(&self, sequence: u64) -> Result<Option<u64>, astra_platform::PlatformError> {
+        Ok(Some(sequence))
+    }
+
+    fn record_gpu_frame(
+        &self,
+        sample: HeadlessGpuFrameSample,
+    ) -> Result<(), astra_platform::PlatformError> {
+        let mut samples = self.samples.lock().map_err(|_| {
+            astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "headless.performance.observer",
+                "GPU observer lock is poisoned",
+            )
+        })?;
+        if samples.len() >= self.expected_samples {
+            return Err(astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "headless.performance.observer",
+                "GPU sample capacity exceeded",
+            ));
+        }
+        samples.push(sample);
+        Ok(())
+    }
 }
 
 struct HeadlessResumeExport {
@@ -2452,22 +2523,6 @@ fn is_scene_resource_command(command: &SceneCommand) -> bool {
     )
 }
 
-fn scene_upload_bytes(scene: &SceneFrame) -> Result<u64, String> {
-    scene.commands.iter().try_fold(0_u64, |total, command| {
-        let bytes = match command {
-            SceneCommand::UploadTexture { frame, .. } => frame.rgba8.len(),
-            SceneCommand::UploadGlyph { glyph, .. } => glyph.pixels.len(),
-            _ => 0,
-        };
-        total
-            .checked_add(
-                u64::try_from(bytes)
-                    .map_err(|_| "ASTRA_EMU_PERFORMANCE_UPLOAD_BYTES_OVERFLOW".to_owned())?,
-            )
-            .ok_or_else(|| "ASTRA_EMU_PERFORMANCE_UPLOAD_BYTES_OVERFLOW".to_owned())
-    })
-}
-
 fn gpu_draw_commands(
     textures: &BTreeMap<u32, GpuSceneTexture>,
     draws: &[LegacyDrawV1],
@@ -2619,11 +2674,6 @@ struct RuntimeDriver<'a> {
     media_timings_ns: Vec<u64>,
     present_timings_ns: Vec<u64>,
     perfetto: Option<NativePerfettoCapture>,
-    allocation_last: Option<AllocationSnapshot>,
-    allocation_bytes_samples: Vec<u64>,
-    allocation_count_samples: Vec<u64>,
-    gpu_upload_bytes_samples: Vec<u64>,
-    capture_performance_samples: bool,
     scene_full_resync_count: u64,
 }
 
@@ -2642,7 +2692,6 @@ struct RuntimeDriverConfig<'a> {
     resume: Option<HeadlessDriverResumeV1>,
     frame_sample_interval: u64,
     perfetto_trace: Option<PathBuf>,
-    capture_performance_samples: bool,
     presentation: PresentationPath,
     presentation_substeps: u8,
     synchronous_gpu_presents: bool,
@@ -2735,7 +2784,6 @@ struct ExecutionConfig<'a> {
     presentation_substeps: u8,
     synchronous_gpu_presents: bool,
     perfetto_trace: Option<PathBuf>,
-    capture_performance_samples: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2954,7 +3002,6 @@ async fn execute_sequence(
             resume: config.resume_driver,
             frame_sample_interval: config.frame_sample_interval,
             perfetto_trace: config.perfetto_trace,
-            capture_performance_samples: config.capture_performance_samples,
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
             synchronous_gpu_presents: config.synchronous_gpu_presents,
@@ -3118,9 +3165,7 @@ async fn execute_sequence(
         phase_timings,
         runtime_samples_ns,
         presentation_samples_ns,
-        allocation_bytes_samples: std::mem::take(&mut driver.allocation_bytes_samples),
-        allocation_count_samples: std::mem::take(&mut driver.allocation_count_samples),
-        gpu_upload_bytes_samples: std::mem::take(&mut driver.gpu_upload_bytes_samples),
+        gpu_samples: Vec::new(),
         scene_full_resync_count: driver.scene_full_resync_count,
         audio_underflow_count,
         perfetto_trace,
@@ -3226,11 +3271,6 @@ impl<'a> RuntimeDriver<'a> {
                 .perfetto_trace
                 .map(NativePerfettoCapture::new)
                 .transpose()?,
-            allocation_last: config.capture_performance_samples.then(allocation_snapshot),
-            allocation_bytes_samples: Vec::new(),
-            allocation_count_samples: Vec::new(),
-            gpu_upload_bytes_samples: Vec::new(),
-            capture_performance_samples: config.capture_performance_samples,
             scene_full_resync_count: 0,
         };
         if let Some(resume) = config.resume {
@@ -3830,7 +3870,6 @@ impl<'a> RuntimeDriver<'a> {
 
     async fn present_scene_sync(&mut self, mut scene: SceneFrame) -> Result<(), String> {
         let present_started = Instant::now();
-        let upload_bytes = scene_upload_bytes(&scene)?;
         self.present_sequence = self
             .present_sequence
             .checked_add(1)
@@ -3841,33 +3880,7 @@ impl<'a> RuntimeDriver<'a> {
             .await
             .map_err(|error| error.to_string())?;
         self.present_timings_ns.push(elapsed_ns(present_started)?);
-        self.record_presentation_performance_sample(upload_bytes)?;
         self.record_perfetto_phase("astra.emu.adapter.gpu_submit", 5, present_started)
-    }
-
-    fn record_presentation_performance_sample(&mut self, upload_bytes: u64) -> Result<(), String> {
-        if !self.capture_performance_samples {
-            return Ok(());
-        }
-        let current = allocation_snapshot();
-        let previous = self
-            .allocation_last
-            .replace(current)
-            .ok_or_else(|| "ASTRA_EMU_PERFORMANCE_ALLOCATION_BASELINE_MISSING".to_owned())?;
-        self.allocation_bytes_samples.push(
-            current
-                .allocated_bytes
-                .checked_sub(previous.allocated_bytes)
-                .ok_or_else(|| "ASTRA_EMU_PERFORMANCE_ALLOCATION_COUNTER_REVERSED".to_owned())?,
-        );
-        self.allocation_count_samples.push(
-            current
-                .allocation_count
-                .checked_sub(previous.allocation_count)
-                .ok_or_else(|| "ASTRA_EMU_PERFORMANCE_ALLOCATION_COUNTER_REVERSED".to_owned())?,
-        );
-        self.gpu_upload_bytes_samples.push(upload_bytes);
-        Ok(())
     }
 
     fn queue_render_frame(&mut self, frame: LegacyRenderFrameV1) -> Result<(), String> {
@@ -5841,9 +5854,7 @@ mod native_tests {
             },
             runtime_samples_ns: Vec::new(),
             presentation_samples_ns: Vec::new(),
-            allocation_bytes_samples: Vec::new(),
-            allocation_count_samples: Vec::new(),
-            gpu_upload_bytes_samples: Vec::new(),
+            gpu_samples: Vec::new(),
             scene_full_resync_count: 0,
             audio_underflow_count: 0,
             perfetto_trace: None,
