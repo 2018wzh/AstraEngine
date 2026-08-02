@@ -4,13 +4,15 @@
 
 FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。它只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
-截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals/text、snapshot/restore、canonical state identity、最多 64 MiB 的 opaque snapshot bytes、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开；动态 provider 每 tick 只接收一个 hosted delta，转换为 `ScenePacket`、媒体命令、local-only text lease 和 `PreparedCommit`。`ScenePacket` translator 将 create/partial-update/destroy 转为有界资源操作，先验证完整事务再替换元数据；restore 后的纹理重建显式开始新的资源 epoch，Manager/WGPU 与 CLI CPU reference 都先清除旧资源、独立复验 commit，再写入各自资源存储；solid draw 使用保留的白色 sentinel texture，不借助平台 handle。`astra-emu-fvp` 已不再编译依赖本地 RFVP vendor core。旧 render-frame、逐 syscall journal 和逐 opcode 字符串 trace 不再参与 v5 provider。
+截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals/text、snapshot/restore、canonical state identity、最多 64 MiB 的 opaque snapshot bytes、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开；动态 provider 每 tick 只接收一个 hosted delta，转换为 `ScenePacket`、媒体命令、local-only text lease 和 `PreparedCommit`。named audio 在 fork 中只排入 source URI，资源字节由 adapter 后续经 session-bound host VFS 读取；RFVP core 不再通过内部或进程 VFS 读取这类资源。`ScenePacket` translator 将 create/partial-update/destroy 转为有界资源操作，先验证完整事务再替换元数据；restore 后的纹理重建显式开始新的资源 epoch，Manager/WGPU 与 CLI CPU reference 都先清除旧资源、独立复验 commit，再写入各自资源存储；solid draw 使用保留的白色 sentinel texture，不借助平台 handle。`astra-emu-fvp` 已不再编译依赖本地 RFVP vendor core。旧 render-frame、逐 syscall journal 和逐 opcode 字符串 trace 不再参与 v5 provider。
 
 本地公开 Win95 Painter sample 的 signed dynamic FVP v5 已通过 120 fixed step 的 Headless run：6 条物理输入均被 host 消费、4 个实际 CPU frame、一个 PNG checkpoint、VFS 2 资源/20 次 range-read、snapshot round-trip 和正常 host shutdown 均通过；人工查看 checkpoint，窗口、工具栏、调色板、画布与底部状态栏可见且无残缺。该输入序列未产生可见笔划，因此它只证明 input transport，不证明脚本交互语义。CPU reference 该次 step p95 为 11.22 ms，4 次 raster 的中位数为 248.12 ms；它用于确认 scene dedup 没有退化为逐 tick 全帧光栅化，不是 GPU 或 RFVP 对比结论。该 sample 无音频、未到脚本 terminal，也没有媒体、路线、性能 soak 或 Windows E3，所以只构成 hosted-v5 的局部 Headless E2/视觉证据，不能作为完成声明。
 
 另一个由公开无资源脚本生成的 signed dynamic FVP v5 Headless lifecycle case 已在 2 step 达到 `terminal`，并同时通过 snapshot round-trip、PNG checkpoint、正常 session shutdown 与 host shutdown。该 checkpoint 是预期的空黑 frame，只证明 `ExitMode(3)` 到 hosted terminal 的生命周期传播，不是产品视觉、路线或媒体证据。
 
 公开生成的 input case 将主按钮 edge 送入 hosted session，并在下一固定 step 将一个已分组的 64×64 tile 从黑色改为红色；其 3 step signed dynamic run 同时通过 snapshot round-trip、PNG checkpoint、terminal 与 shutdown。人工检查 checkpoint，左上角 tile 为红色且其余画面保持黑色。这是 physical input → VM → `ScenePacket` → CPU reference 的可见 E2，证明输入 transport 和语义提交；它不替代实际游戏路线、文本、媒体或平台 E3。
+
+公开生成的 audio case 以 `AudioLoad`/`AudioPlay` 请求一个 Ogg source URI，并在四个 `ThreadNext` 后停止；其 62 step signed dynamic run 通过 snapshot round-trip、checkpoint、shutdown 与 VFS resource policy，输出 49,600 个音频 frame 和两个真实 WAV artifact，audio meter hash 非空。它覆盖 RFVP named-audio → URI-only hosted delta → adapter session resource read → Headless decoder/output 的链路；这是局部媒体 E2，不等同于真实游戏音频、视频、PTS/route 或 Windows E3。
 
 ## 不可跨越的边界
 

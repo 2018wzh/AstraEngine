@@ -269,7 +269,7 @@ impl HostedFvpSession {
         self.worker.execute_result(move |state| {
             state
                 .core
-                .read_resource(&resource_uri, max_bytes)
+                .read_resource(&mut state.host, &resource_uri, max_bytes)
                 .map_err(HostedRuntimeError::Core)
         })?
     }
