@@ -1471,9 +1471,6 @@ fn finalize_headless_performance(
     let report = recorder
         .finalize(identity.clone(), 600_000_000)
         .map_err(|error| error.to_string())?;
-    if report.status != PerformanceStatus::Pass {
-        return Err("ASTRA_EMU_PERFORMANCE_BUDGET_BLOCKED".into());
-    }
     write_atomic_json(&artifacts.report_path, &report)?;
     let report_hash = Hash256::from_sha256(
         &fs::read(&artifacts.report_path)
@@ -1510,6 +1507,9 @@ fn finalize_headless_performance(
         &fs::read(&artifacts.trace_manifest_path)
             .map_err(|_| "ASTRA_EMU_PERFORMANCE_MANIFEST_READBACK".to_owned())?,
     );
+    if report.status != PerformanceStatus::Pass {
+        return Err("ASTRA_EMU_PERFORMANCE_BUDGET_BLOCKED".into());
+    }
     Ok(HeadlessPerformanceEvidence {
         report_hash,
         trace_manifest_hash,
