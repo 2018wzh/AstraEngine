@@ -630,7 +630,12 @@ impl MinoriMountedVfs {
         offset: u64,
         length: u64,
     ) -> Result<Option<(Vec<u8>, bool)>, PazError> {
-        if entry.descriptor.packed {
+        // Blowfish is a block transform over the full aligned stored entry.
+        // Only movie entries have the entry-relative RC4 transform that can
+        // safely service arbitrary VFS ranges.  A non-movie raw entry must
+        // therefore take the verified full-entry path below rather than feed
+        // an unaligned subrange into Blowfish.
+        if entry.descriptor.packed || entry.descriptor.archive_role != "mov" {
             return Ok(None);
         }
         let end = offset
@@ -1706,7 +1711,20 @@ mod tests {
     const FIXTURE_KEY: &[u8] = b"fixture-key";
 
     fn fixture_archive(role: &str, version: u8) -> Vec<u8> {
-        let payload = b"fixture\0";
+        let plaintext = b"fixture\0";
+        let mut stored = if role == "mov" {
+            plaintext.to_vec()
+        } else {
+            let mut encoder =
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(plaintext).unwrap();
+            encoder.finish().unwrap()
+        };
+        let stored_size = stored.len() as u32;
+        while !stored.len().is_multiple_of(8) {
+            stored.push(0);
+        }
+        let aligned_size = stored.len() as u32;
         let mut index = Vec::new();
         index.extend_from_slice(&1u32.to_le_bytes());
         if role == "mov" {
@@ -1715,9 +1733,9 @@ mod tests {
         index.extend_from_slice(format!("{role}.bin\0").as_bytes());
         let descriptor_offset = index.len();
         index.extend_from_slice(&0u64.to_le_bytes());
-        index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        index.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        index.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
+        index.extend_from_slice(&stored_size.to_le_bytes());
+        index.extend_from_slice(&aligned_size.to_le_bytes());
         index.extend_from_slice(&0i32.to_le_bytes());
         while !index.len().is_multiple_of(8) {
             index.push(0);
@@ -1729,11 +1747,11 @@ mod tests {
 
         let index = blowfish_encrypt(FIXTURE_KEY, &index);
         let payload = if role == "mov" && version > 0 {
-            movie_rc4_encrypt(format!("{role}.bin").as_bytes(), payload)
+            movie_rc4_encrypt(format!("{role}.bin").as_bytes(), &stored)
         } else if role == "mov" {
-            payload.to_vec()
+            stored
         } else {
-            blowfish_encrypt(FIXTURE_KEY, payload)
+            blowfish_encrypt(FIXTURE_KEY, &stored)
         };
         let mut archive = Vec::new();
         if version == 0 {
