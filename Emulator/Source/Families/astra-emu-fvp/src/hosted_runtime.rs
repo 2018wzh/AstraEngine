@@ -6,7 +6,9 @@
 
 use std::collections::BTreeMap;
 
-use astra_emu_family_api::{LegacyPreparedSceneCommitV1, LegacySceneResourceStateV1};
+use astra_emu_family_api::{
+    LegacyPreparedSceneCommitV1, LegacySceneResourceStateV1, LegacyVfsReader,
+};
 use rfvp_hosted::{
     hosted::{
         HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStepDelta,
@@ -34,6 +36,8 @@ pub enum HostedRuntimeError {
     ScriptUri,
     #[error("hosted case script conflicts with a supplied file")]
     ScriptCollision,
+    #[error("hosted core booted a different HCB than the session binding")]
+    ScriptBinding,
     #[error("hosted session initialization failed: {0}")]
     Initialization(String),
     #[error(transparent)]
@@ -110,6 +114,61 @@ impl HostedFvpSession {
                 },
             )
             .map_err(HostedRuntimeError::Core)?;
+            Ok::<_, HostedRuntimeError>(HostedState {
+                core,
+                host,
+                translator: HostedScenePacketTranslator::default(),
+            })
+        })
+        .map_err(map_start_error)?;
+        Ok(Self { worker })
+    }
+
+    /// Opens a dynamic session through the bounded host VFS port.  The
+    /// requested HCB is checked after boot because RFVP discovers scripts by
+    /// extension; accepting a different discovered script would break the
+    /// package binding even if both files are otherwise valid.
+    pub fn open_vfs(
+        reader: std::sync::Arc<dyn LegacyVfsReader>,
+        mount_set_id: String,
+        expected_script_uri: String,
+        nls: FvpNls,
+        stage_width: u32,
+        stage_height: u32,
+    ) -> Result<Self, HostedRuntimeError> {
+        let expected_script_uri = normalize_script_uri(&expected_script_uri)?;
+        let worker = HostedSessionWorker::try_spawn(move || {
+            let mut host = HostedMemoryHost::from_vfs(reader, mount_set_id)
+                .map_err(HostedRuntimeError::Core)?;
+            let mut core = HostedSession::new(
+                HostedConfig {
+                    virtual_width: stage_width,
+                    virtual_height: stage_height,
+                    ..HostedConfig::default()
+                },
+                HostedLimits::default(),
+            )
+            .map_err(HostedRuntimeError::Core)?;
+            core.set_trace_profile(HostedTraceProfile::Shipping)
+                .map_err(HostedRuntimeError::Core)?;
+            core.boot(
+                &mut host,
+                HostedBootConfig {
+                    asset_root: ".",
+                    hcb_extension: "hcb",
+                    max_hcb_bytes: MAX_HOSTED_HCB_BYTES,
+                    max_manifest_entries: MAX_HOSTED_CASE_FILES,
+                    nls: map_nls(nls),
+                },
+            )
+            .map_err(HostedRuntimeError::Core)?;
+            if core
+                .core()
+                .loaded_game()
+                .is_none_or(|loaded| loaded.hcb_path != expected_script_uri)
+            {
+                return Err(HostedRuntimeError::ScriptBinding);
+            }
             Ok::<_, HostedRuntimeError>(HostedState {
                 core,
                 host,
@@ -225,6 +284,20 @@ fn map_nls(nls: FvpNls) -> Nls {
         FvpNls::Gbk => Nls::GBK,
         FvpNls::Utf8 => Nls::UTF8,
     }
+}
+
+fn normalize_script_uri(uri: &str) -> Result<String, HostedRuntimeError> {
+    if !uri.ends_with(".hcb") || uri.is_empty() || uri.contains('\\') {
+        return Err(HostedRuntimeError::ScriptUri);
+    }
+    let uri = uri.strip_prefix("./").unwrap_or(uri);
+    if uri
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(HostedRuntimeError::ScriptUri);
+    }
+    Ok(uri.to_ascii_lowercase())
 }
 
 #[cfg(test)]
