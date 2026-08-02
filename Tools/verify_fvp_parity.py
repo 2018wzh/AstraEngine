@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import uuid
@@ -16,6 +15,16 @@ import uuid
 
 REVISION = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3"
 UPSTREAM = "https://github.com/xmoezzz/rfvp.git"
+HOSTED_REVISION = "eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0"
+HOSTED_FORK = "https://github.com/2018wzh/rfvp.git"
+# The vendor tree was intentionally removed.  Keep the small, synthetic
+# observer source in the pre-thin-fork commit so differential verification
+# remains reproducible without reviving a second RFVP implementation in Astra.
+OBSERVER_SOURCE_COMMIT = "1368f692"
+OBSERVER_SOURCE_PATH = (
+    "Emulator/Source/Families/astra-emu-fvp-rfvp-core/"
+    "src/bin/astra_fvp_parity_trace.rs"
+)
 
 
 def main() -> int:
@@ -37,41 +46,42 @@ def main() -> int:
         / "golden"
         / "rfvp-0.5.0-vm-trace.json"
     )
-    trace_source = (
-        root
-        / "Emulator"
-        / "Source"
-        / "Families"
-        / "astra-emu-fvp-rfvp-core"
-        / "src"
-        / "bin"
-        / "astra_fvp_parity_trace.rs"
-    )
-    require_file(trace_source, "ASTRA_EMU_FVP_PARITY_TRACE_SOURCE_MISSING")
+    observer_source = tracked_source(root, OBSERVER_SOURCE_COMMIT, OBSERVER_SOURCE_PATH)
     prepare_reference(reference)
+    hosted_reference = root / ".tmp" / "rfvp-hosted-parity-reference"
+    prepare_hosted_reference(hosted_reference)
 
     worktree_root = root / ".tmp" / "fvp-parity-worktrees"
     worktree_root.mkdir(parents=True, exist_ok=True)
-    worktree = worktree_root / uuid.uuid4().hex
-    run(["git", "-C", str(reference), "worktree", "add", "--detach", str(worktree), REVISION])
+    upstream_worktree = worktree_root / f"upstream-{uuid.uuid4().hex}"
+    hosted_worktree = worktree_root / f"hosted-{uuid.uuid4().hex}"
+    run([
+        "git", "-C", str(reference), "worktree", "add", "--detach",
+        str(upstream_worktree), REVISION,
+    ])
+    run([
+        "git", "-C", str(hosted_reference), "worktree", "add", "--detach",
+        str(hosted_worktree), HOSTED_REVISION,
+    ])
     try:
-        reference_bin = worktree / "crates" / "rfvp" / "src" / "bin"
-        reference_bin.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(trace_source, reference_bin / "astra_fvp_parity_trace.rs")
-
         target_root = root / ".tmp" / "fvp-parity-target"
-        derivative = run_trace(
+        install_observer(upstream_worktree, observer_source)
+        install_observer(hosted_worktree, observer_source)
+        hosted = run_trace(
             [
                 "cargo",
                 "run",
                 "--quiet",
                 "-p",
-                "astra-emu-fvp-rfvp-core",
+                "rfvp",
                 "--bin",
-                "astra-fvp-parity-trace",
+                "astra_fvp_parity_trace",
+                "--no-default-features",
+                "--features",
+                "native-video,zlib-flate2",
             ],
-            root,
-            target_root / "derivative",
+            hosted_worktree,
+            target_root / "hosted",
         )
         upstream = run_trace(
             [
@@ -87,16 +97,20 @@ def main() -> int:
                 "--features",
                 "native-video,zlib-flate2",
             ],
-            worktree,
+            upstream_worktree,
             target_root / "reference",
         )
     finally:
         run(
-            ["git", "-C", str(reference), "worktree", "remove", "--force", str(worktree)],
+            ["git", "-C", str(reference), "worktree", "remove", "--force", str(upstream_worktree)],
+            check=False,
+        )
+        run(
+            ["git", "-C", str(hosted_reference), "worktree", "remove", "--force", str(hosted_worktree)],
             check=False,
         )
 
-    if canonical(derivative) != canonical(upstream):
+    if canonical(hosted) != canonical(upstream):
         fail("ASTRA_EMU_FVP_PARITY_DIVERGENCE")
     if args.refresh_golden:
         write_atomic(golden, canonical(upstream) + b"\n")
@@ -106,7 +120,7 @@ def main() -> int:
         fail("ASTRA_EMU_FVP_PARITY_GOLDEN_DRIFT")
 
     digest = hashlib.sha256(canonical(upstream)).hexdigest()
-    fixture_digest = sha256_file(trace_source)
+    fixture_digest = hashlib.sha256(observer_source).hexdigest()
     if args.evidence_output:
         evidence_path = (root / args.evidence_output).resolve()
         ensure_descendant(evidence_path, root)
@@ -175,6 +189,45 @@ def prepare_reference(path: pathlib.Path) -> None:
     observed = capture(["git", "-C", str(path), "rev-parse", f"{REVISION}^{{commit}}"])
     if observed.strip() != REVISION:
         fail("ASTRA_EMU_FVP_REFERENCE_REVISION_MISSING")
+
+
+def prepare_hosted_reference(path: pathlib.Path) -> None:
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        run(["git", "clone", "--filter=blob:none", "--no-checkout", HOSTED_FORK, str(path)])
+    if not (path / ".git").exists():
+        fail("ASTRA_EMU_FVP_HOSTED_REFERENCE_NOT_GIT")
+    remote = capture(["git", "-C", str(path), "remote", "get-url", "origin"]).strip()
+    if normalize_remote(remote) != normalize_remote(HOSTED_FORK):
+        fail("ASTRA_EMU_FVP_HOSTED_REFERENCE_REMOTE_MISMATCH")
+    if subprocess.run(
+        ["git", "-C", str(path), "cat-file", "-e", f"{HOSTED_REVISION}^{{commit}}"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode != 0:
+        run(["git", "-C", str(path), "fetch", "origin", HOSTED_REVISION])
+    observed = capture(["git", "-C", str(path), "rev-parse", f"{HOSTED_REVISION}^{{commit}}"])
+    if observed.strip() != HOSTED_REVISION:
+        fail("ASTRA_EMU_FVP_HOSTED_REFERENCE_REVISION_MISSING")
+
+
+def tracked_source(root: pathlib.Path, revision: str, source_path: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(root), "show", f"{revision}:{source_path}"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode != 0 or not result.stdout:
+        fail("ASTRA_EMU_FVP_PARITY_OBSERVER_SOURCE_MISSING")
+    return result.stdout
+
+
+def install_observer(worktree: pathlib.Path, source: bytes) -> None:
+    destination = worktree / "crates" / "rfvp" / "src" / "bin" / "astra_fvp_parity_trace.rs"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source)
 
 
 def run_trace(command: list[str], cwd: pathlib.Path, target: pathlib.Path) -> object:

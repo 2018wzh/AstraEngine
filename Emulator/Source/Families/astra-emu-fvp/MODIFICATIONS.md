@@ -5,7 +5,10 @@ recorded in its `Cargo.toml`. Its upstream is
 [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp), fixed to
 `3b5ea6c96a925c12f95aef8554905e8fecbc77c3` (0.5.0). Upstream and the forked
 source are MPL-2.0; package release binds this record, the MPL-2.0 text, the
-source-offer identity, fork revision and family binary identity.
+source-offer identity, fork revision and family binary identity. Revision
+`eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0` restores the upstream standard
+RFVP dependency closure after hosted GraphBuff hashing made `sha2` mandatory
+for that existing module.
 
 The fork retains RFVP's file layout and platform applications. Its small,
 replayable patch stack starts at `0.5.0`, then retains the reviewed unmodified
