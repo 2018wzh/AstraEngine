@@ -81,6 +81,8 @@
 - IDA 已确认原程序消息字体默认值为 26 px，ruby 为 12 px，默认字体是 CP932 的 MS PGothic。移植按计划显式绑定仓库内 Noto Sans JP，不读取系统字体。首轮 body/speaker region 结合已确认的 panel 几何与外部截图结构制定，真实 checkpoint 检查前只算实现绑定，不声明原版精确坐标。
 - 真实原程序二进制中只有一个与已解包脚本集合相交、且没有脚本入边的 `.sc` 引用。它已作为 private Headless 实际入口，不再以先前的短链 `test.sc` 代替首路线入口。该入口的首个未覆盖命令为 `.movie`，其五个 operand 已由本地样本确认依次表达非零 movie id、资源名、宽、高和 `t`/`f` skip flag。
 - `.movie` 现生成 `LegacyVideoCommandV1::Play` 和同一 media id 的 `MediaFence`，复用公共 video command、Host media completion、snapshot state 和 VFS URI 绑定；资源、尺寸、重复播放与 stage identity 不匹配均阻断。没有引入 Minori 私有播放器或 codec fallback。
+- 新增 `census-movies`：只对每个 movie 读取有界的 64-byte VFS probe，并以显式私有输出写入脱敏 aggregate。五个授权样本 entry 都没有 AVI、MPEG、ASF、ISO-BMFF、Matroska 或 Ogg 的标准起始签名；因此不能按扩展名把它们绑定到现有 MPEG/WMV provider。该命令的 report 只含 entry 数、总 decoded bytes 和格式类别计数，不写 entry 名、header、路径或内容 hash。
+- 重新核对 GARbro 的 `MovPazArchive`：v1+ RC4 key 以“解码后的 entry name lower，再 CP932 编码”的字节序列构造。Rust reader 已替换此前的原始字节 ASCII lower 做法并加入 CP932 回归；真实五项的 format census 结论不变，故该差异不是当前未知容器的根因。
 
 ### 已确认事实
 
@@ -112,7 +114,8 @@
 - 真实 Headless 已到第二条可见 message，但只检查了选定帧，没有完成整个 effect 周期的逐帧节奏比较。`select`、普通 voice、其他 panel/effect 和后续主要演出仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
 - AstraEMU runner 同时输出专用 `astra.emu.headless_run_report.v2` 和公共 `astra.headless_run_report.v2`；两者绑定同一 manifest hash、输入、checkpoint 和 diagnostic 状态。真实八包 v24 已通过 `prepare-review`，模型按 bundle 查看 6 个 required checkpoint、首尾/最大差异选择，并检查 3 个完整 WAV 的时长、电平、静音与 clipping；`validate-review` 随后通过。该 review 只适用于 373-tick slice，不能覆盖完整路线或自动失败。
 - 尚无首条完整路线、全 movie codec inventory、完整 required checkpoint 集合或 Windows E3 证据。
-- 实际入口的首个 movie 为约 196 MiB，超过 family VFS 单次 64 MiB read 上限。现有 Headless video path 把它作为一个 512 MiB 整体 byte buffer 请求，触发 `ASTRA_EMU_VFS_RUNTIME_RANGE`。这不是可通过放宽 VFS 或整文件缓存解决的错误：必须先把公共 video path 改为有界 range-backed streaming reader，并完成该 AVI codec/container 的 pure-Rust provider inventory；在此之前真实路线在 movie fence 处保持 blocking。
+- 实际入口的首个 movie 为约 196 MiB，超过 family VFS 单次 64 MiB read 上限。Headless 现改用有界 range-backed reader，只探测开头而不整片读取或缓存；当前不再触发 `ASTRA_EMU_VFS_RUNTIME_RANGE`，而是在未知容器上 fail closed。仍需可验证的纯 Rust container/codec provider，真实路线在 movie fence 处保持 blocking。
+- 原始 movie extension 不是容器证明。现有 range-backed VFS preflight 对五项授权样本均得出 `unrecognized`；在确认原程序是否还执行 wrapper transform、或取得可验证的公开 container contract 前，movie fence 继续以 `ASTRA_EMU_MINORI_VIDEO_CONTAINER_UNRECOGNIZED` 阻断。不得以 FVP 的 MPEG/WMV decoder、平台媒体 API 或伪造 completion 继续路线。
 
 ### 本次测试
 

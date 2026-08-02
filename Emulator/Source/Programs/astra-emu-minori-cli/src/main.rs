@@ -61,6 +61,18 @@ enum Command {
         game_dir: PathBuf,
         #[arg(long)]
         mount_profile: PathBuf,
+        /// Optional local-private path for the sanitized aggregate report.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    CensusMovies {
+        #[arg(long)]
+        game_dir: PathBuf,
+        #[arg(long)]
+        mount_profile: PathBuf,
+        /// Optional local-private path for the sanitized aggregate report.
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -75,6 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::RecoverGarbroProfile { .. } => "recover_garbro_profile",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
+        Command::CensusMovies { .. } => "census_movies",
     };
     tracing::info!(event = "astra.emu.minori_cli.start", action);
     let result = match command {
@@ -101,7 +114,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::CensusMedia {
             game_dir,
             mount_profile,
-        } => census_media(&game_dir, &mount_profile),
+            output,
+        } => census_media(&game_dir, &mount_profile, output.as_deref()),
+        Command::CensusMovies {
+            game_dir,
+            mount_profile,
+            output,
+        } => census_movies(&game_dir, &mount_profile, output.as_deref()),
     };
     if result.is_err() {
         tracing::error!(
@@ -315,6 +334,7 @@ fn operand_text(operand: &ScOperand) -> Option<&str> {
 fn census_media(
     game_dir: &std::path::Path,
     profile: &std::path::Path,
+    output: Option<&std::path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let vfs = mount_minori(game_dir, profile)?;
     let mut png_entries = 0u64;
@@ -400,25 +420,129 @@ fn census_media(
             _ => return Err("ASTRA_EMU_MINORI_MEDIA_FORMAT_UNKNOWN".into()),
         }
     }
-    println!(
-        "{}",
-        serde_json::to_string(&serde_json::json!({
-            "schema": "astra.emu.minori.media_census.v1",
-            "entry_count": png_entries + ani_entries + sqz_entries + ogg_entries + database_entries,
-            "decoded_bytes": decoded_bytes,
-            "png_entries": png_entries,
-            "ani_entries": ani_entries,
-            "ani_frames": ani_frames,
-            "sqz_entries": sqz_entries,
-            "sqz_frames": sqz_frames,
-            "ogg_entries": ogg_entries,
-            "database_entries": database_entries,
-            "decoded_pixels": decoded_pixels,
-            "max_width": max_width,
-            "max_height": max_height,
-        }))?
-    );
+    let movie = collect_movie_container_census(&vfs)?;
+    let report = serde_json::to_string(&serde_json::json!({
+        "schema": "astra.emu.minori.media_census.v1",
+        "entry_count": png_entries + ani_entries + sqz_entries + ogg_entries + database_entries,
+        "decoded_bytes": decoded_bytes,
+        "png_entries": png_entries,
+        "ani_entries": ani_entries,
+        "ani_frames": ani_frames,
+        "sqz_entries": sqz_entries,
+        "sqz_frames": sqz_frames,
+        "ogg_entries": ogg_entries,
+        "database_entries": database_entries,
+        "decoded_pixels": decoded_pixels,
+        "max_width": max_width,
+        "max_height": max_height,
+        "movie": movie,
+    }))?;
+    if let Some(output) = output {
+        write_private_report(output, &report)?;
+    } else {
+        println!("{report}");
+    }
     Ok(())
+}
+
+fn census_movies(
+    game_dir: &std::path::Path,
+    profile: &std::path::Path,
+    output: Option<&std::path::Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let vfs = mount_minori(game_dir, profile)?;
+    let report = serde_json::to_string(&serde_json::json!({
+        "schema": "astra.emu.minori.movie_census.v1",
+        "movie": collect_movie_container_census(&vfs)?,
+    }))?;
+    if let Some(output) = output {
+        write_private_report(output, &report)?;
+    } else {
+        println!("{report}");
+    }
+    Ok(())
+}
+
+fn collect_movie_container_census(
+    vfs: &Arc<dyn astra_emu_family_core::LegacyMountedVfs>,
+) -> Result<MovieContainerCensus, Box<dyn std::error::Error>> {
+    let mut movie = MovieContainerCensus::default();
+    for entry in vfs
+        .manifest()
+        .entries
+        .iter()
+        .filter(|entry| entry.source_id == "mov")
+    {
+        if entry.decoded_size == 0 {
+            return Err("ASTRA_EMU_MINORI_MOVIE_EMPTY".into());
+        }
+        let probe_length = entry.decoded_size.min(MOVIE_PROBE_BYTES);
+        let probe = vfs.read_range(&entry.uri, 0, probe_length)?.bytes;
+        if probe.len() as u64 != probe_length {
+            return Err("ASTRA_EMU_MINORI_MOVIE_PROBE_SHORT".into());
+        }
+        movie.entry_count = movie
+            .entry_count
+            .checked_add(1)
+            .ok_or("ASTRA_EMU_MINORI_MOVIE_COUNT")?;
+        movie.decoded_bytes = movie
+            .decoded_bytes
+            .checked_add(entry.decoded_size)
+            .ok_or("ASTRA_EMU_MINORI_MOVIE_TOTAL_SIZE")?;
+        let container = classify_movie_container(&probe);
+        *movie.containers.entry(container.into()).or_default() += 1;
+    }
+    Ok(movie)
+}
+
+fn write_private_report(
+    path: &std::path::Path,
+    report: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if path.exists() {
+        return Err("ASTRA_EMU_MINORI_REPORT_EXISTS".into());
+    }
+    let parent = path.parent().ok_or("ASTRA_EMU_MINORI_REPORT_PATH")?;
+    if !parent.is_dir() {
+        return Err("ASTRA_EMU_MINORI_REPORT_PARENT".into());
+    }
+    let file_name = path.file_name().ok_or("ASTRA_EMU_MINORI_REPORT_PATH")?;
+    let temporary = parent.join(format!(".{}.tmp", file_name.to_string_lossy()));
+    if temporary.exists() {
+        return Err("ASTRA_EMU_MINORI_REPORT_TEMP_EXISTS".into());
+    }
+    std::fs::write(&temporary, report.as_bytes())?;
+    std::fs::rename(&temporary, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temporary);
+    })?;
+    Ok(())
+}
+
+const MOVIE_PROBE_BYTES: u64 = 64;
+
+#[derive(Debug, Default, Serialize)]
+struct MovieContainerCensus {
+    entry_count: u64,
+    decoded_bytes: u64,
+    containers: BTreeMap<String, u64>,
+}
+
+fn classify_movie_container(header: &[u8]) -> &'static str {
+    if header.len() >= 12 && &header[..4] == b"RIFF" && &header[8..12] == b"AVI " {
+        "avi"
+    } else if header.starts_with(&[0, 0, 1]) {
+        "mpeg"
+    } else if header.starts_with(&[0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11]) {
+        "asf"
+    } else if header.len() >= 8 && &header[4..8] == b"ftyp" {
+        "isobmff"
+    } else if header.starts_with(b"\x1A\x45\xDF\xA3") {
+        "matroska"
+    } else if header.starts_with(b"OggS") {
+        "ogg"
+    } else {
+        "unrecognized"
+    }
 }
 
 fn record_dimensions(
@@ -434,4 +558,36 @@ fn record_dimensions(
     *max_width = (*max_width).max(width);
     *max_height = (*max_height).max(height);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_movie_container, write_private_report};
+
+    #[test]
+    fn movie_container_inventory_classifies_only_explicit_signatures() {
+        assert_eq!(classify_movie_container(b"RIFF\0\0\0\0AVI "), "avi");
+        assert_eq!(classify_movie_container(&[0, 0, 1, 0xBA]), "mpeg");
+        assert_eq!(
+            classify_movie_container(&[0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11]),
+            "asf"
+        );
+        assert_eq!(classify_movie_container(b"\0\0\0\0ftypisom"), "isobmff");
+        assert_eq!(classify_movie_container(b"\x1A\x45\xDF\xA3"), "matroska");
+        assert_eq!(classify_movie_container(b"opaque"), "unrecognized");
+    }
+
+    #[test]
+    fn private_report_write_is_atomic_and_refuses_overwrite() {
+        let temporary = tempfile::tempdir().unwrap();
+        let report = temporary.path().join("report.json");
+
+        write_private_report(&report, "{\"schema\":\"test\"}").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&report).unwrap(),
+            "{\"schema\":\"test\"}"
+        );
+        assert!(write_private_report(&report, "again").is_err());
+        assert!(!temporary.path().join(".report.json.tmp").exists());
+    }
 }

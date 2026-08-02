@@ -51,7 +51,8 @@ pub struct PazEntryDescriptor {
     pub entry_id: String,
     pub name: String,
     /// Original CP932 index bytes, retained only in the mount session for
-    /// key derivation. Re-encoding a decoded Unicode name can change a key.
+    /// index traceability. RC4 material follows the GARbro contract: lower the
+    /// decoded name, then encode it as CP932.
     pub crypto_name: Vec<u8>,
     pub offset: u64,
     pub unpacked_size: u64,
@@ -1508,11 +1509,18 @@ fn entry_key_material(
             "entry CP932 name bytes are unavailable for RC4 derivation",
         ));
     }
-    let mut key = entry
-        .crypto_name
-        .iter()
-        .map(|byte| byte.to_ascii_lowercase())
-        .collect::<Vec<_>>();
+    // GARbro lowercases the decoded entry name, then encodes that string as
+    // CP932.  Lowercasing the original byte sequence is observably different
+    // for non-ASCII names and yields the wrong RC4 material.
+    let lowered_name = entry.name.to_lowercase();
+    let (encoded_name, _, malformed) = SHIFT_JIS.encode(&lowered_name);
+    if malformed {
+        return Err(error(
+            "ASTRA_EMU_MINORI_RC4_KEY",
+            "entry name cannot be encoded as CP932",
+        ));
+    }
+    let mut key = encoded_name.into_owned();
     key.extend_from_slice(format!(" {:08X} ", entry.unpacked_size).as_bytes());
     if let Some(password) = password {
         let (encoded, _, malformed) = SHIFT_JIS.encode(password);
@@ -1939,9 +1947,12 @@ mod tests {
     }
 
     #[test]
-    fn entry_rc4_material_preserves_raw_cp932_name_bytes() {
+    fn entry_rc4_material_reencodes_the_lowercased_cp932_name() {
         let mut entry = movie_fixture_entry("decoded-name.avi", 0x2a, (0u8..=255).collect());
         entry.crypto_name = vec![b'A', 0x81, 0x5c, b'Z', b'.', b'A', b'V', b'I'];
+        let (decoded_name, _, malformed) = SHIFT_JIS.decode(&entry.crypto_name);
+        assert!(!malformed);
+        entry.name = decoded_name.into_owned();
 
         assert_eq!(
             entry_key_material(&entry, None).unwrap(),
