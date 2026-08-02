@@ -1,4 +1,4 @@
-use std::{env, fs, process::Command};
+use std::{env, fs, path::Path, process::Command};
 
 use astra_emu_family_api::LEGACY_FAMILY_ABI_FINGERPRINT;
 use serde_json::json;
@@ -39,8 +39,10 @@ fn main() {
     } else {
         features.join(",").to_ascii_lowercase()
     };
-    let feature_identity =
-        format!("rfvp=3b5ea6c96a925c12f95aef8554905e8fecbc77c3;features={feature_identity}");
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let hosted_fork_revision = hosted_fork_revision(&manifest_path);
+    println!("cargo:rerun-if-changed={}", manifest_path.display());
+    let feature_identity = format!("rfvp={hosted_fork_revision};features={feature_identity}");
     let feature_fingerprint = format!("sha256.{}", hex_sha256(feature_identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_FVP_FEATURE_FINGERPRINT={feature_fingerprint}");
     let descriptor = json!({
@@ -70,4 +72,20 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn hosted_fork_revision(manifest_path: &Path) -> String {
+    let manifest = fs::read_to_string(manifest_path).expect("ASTRA_FVP_MANIFEST_READ_FAILED");
+    let prefix = "hosted_fork_revision = \"";
+    let revision = manifest
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(prefix))
+        .and_then(|value| value.strip_suffix('"'))
+        .expect("ASTRA_FVP_HOSTED_FORK_REVISION_MISSING");
+    assert!(
+        revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "ASTRA_FVP_HOSTED_FORK_REVISION_INVALID"
+    );
+    revision.to_owned()
 }

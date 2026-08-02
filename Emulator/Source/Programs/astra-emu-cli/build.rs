@@ -1,4 +1,4 @@
-use std::{env, process::Command};
+use std::{env, fs, path::Path, process::Command};
 
 use sha2::{Digest, Sha256};
 
@@ -31,7 +31,12 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_CLI_RUSTC_FINGERPRINT=sha256.{}",
         hex_sha256(identity.as_bytes())
     );
-    let features = "rfvp=3b5ea6c96a925c12f95aef8554905e8fecbc77c3;features=none";
+    let fvp_manifest =
+        Path::new(&env::var("CARGO_MANIFEST_DIR").expect("ASTRA_EMU_CLI_MANIFEST_DIR_MISSING"))
+            .join("../../Families/astra-emu-fvp/Cargo.toml");
+    let hosted_fork_revision = hosted_fork_revision(&fvp_manifest);
+    println!("cargo:rerun-if-changed={}", fvp_manifest.display());
+    let features = format!("rfvp={hosted_fork_revision};features=none");
     println!(
         "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(features.as_bytes())
@@ -63,4 +68,21 @@ fn hex_sha256(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn hosted_fork_revision(manifest_path: &Path) -> String {
+    let manifest =
+        fs::read_to_string(manifest_path).expect("ASTRA_EMU_CLI_FVP_MANIFEST_READ_FAILED");
+    let prefix = "hosted_fork_revision = \"";
+    let revision = manifest
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(prefix))
+        .and_then(|value| value.strip_suffix('"'))
+        .expect("ASTRA_EMU_CLI_HOSTED_FORK_REVISION_MISSING");
+    assert!(
+        revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "ASTRA_EMU_CLI_HOSTED_FORK_REVISION_INVALID"
+    );
+    revision.to_owned()
 }

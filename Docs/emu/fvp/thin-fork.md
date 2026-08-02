@@ -47,6 +47,7 @@ RuntimeWorld + platform renderer/audio/media
 2. 每个 patch 必须只修改相邻 RFVP 模块，并在提交前记录 upstream base、patch id、许可证来源和验证命令。
 3. Astra 的 Cargo dependency 只钉住已推送的 git revision；禁止再次 vendor RFVP 或使用浮动 branch/tag。
 4. 更新 upstream 时先在 fork rebase，运行 upstream 回归和 hosted-core 测试，再更新 Astra pin。不得把 Astra adapter 修改混入 fork rebase。
+5. dynamic FVP descriptor、CLI 和 Manager 的 feature fingerprint 都从 `astra-emu-fvp` manifest 的 `hosted_fork_revision` 读取；pin 更新若未同步进入这三个 identity，构建必须失败，不能继续签发把旧 revision 写入证据的 binary。
 
 ## 性能与正确性原则
 
