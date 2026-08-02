@@ -18,6 +18,8 @@ FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 f
 
 同一 build/profile 的 900 fixed step idle 延伸运行也通过：342 个 scene/raster frame、两个较晚 checkpoint、snapshot round-trip、正常 shutdown 和同一受限 VFS 账本均无 diagnostic。人工查看两个后期 checkpoint，标题淡入和静止阶段均完整，确认前述资源重发布在更长的 idle 段没有丢失纹理。该延伸仍没有路线输入、terminal、音频、视频或 soak 承诺，CPU reference 的 step p95 为 53.18 ms，只保留为本机 Evidence 趋势。
 
+同日复用了既有本机排障中验证过的 12 条物理输入序列：恢复/focus、650 tick 前置、同 tick pointer move/primary down、下一 tick primary up，以及 1,256 与 1,260 tick checkpoint。当前签名动态 v5 Headless 运行完整消费该序列，在 1,261 fixed step、720 scene/raster frame 后通过 snapshot round-trip、正常 shutdown、受限 VFS 和非静音非削波 WAV artifact，且没有 diagnostic。两个转场 checkpoint 的图像 hash 相同，人工检查均为完整标题画面；因此该复跑只证明历史输入格式和当前 host 生命周期兼容，**不**把它计为菜单选择、路线推进或 RFVP parity 证据。后续真实路线验收必须先记录当前 build/profile 下经 host 消费且产生状态/画面变化的输入意图，再以独立 checkpoint 验证。
+
 ## 不可跨越的边界
 
 ```text
