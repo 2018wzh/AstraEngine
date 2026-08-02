@@ -691,6 +691,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             resume: None,
             frame_sample_interval: 1,
             perfetto_trace: launch.perfetto_trace.clone(),
+            perfetto_rfvp_core: launch.family_id.as_str() == "fvp",
             capture_performance_samples: false,
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
@@ -2691,6 +2692,7 @@ struct RuntimeDriver<'a> {
     media_timings_ns: Vec<u64>,
     present_timings_ns: Vec<u64>,
     perfetto: Option<NativePerfettoCapture>,
+    perfetto_rfvp_core: bool,
     capture_performance_samples: bool,
     performance_memory_after_warmup: Option<astra_observability::ProcessMemorySample>,
     scene_full_resync_count: u64,
@@ -2711,6 +2713,7 @@ struct RuntimeDriverConfig<'a> {
     resume: Option<HeadlessDriverResumeV1>,
     frame_sample_interval: u64,
     perfetto_trace: Option<PathBuf>,
+    perfetto_rfvp_core: bool,
     capture_performance_samples: bool,
     presentation: PresentationPath,
     presentation_substeps: u8,
@@ -3023,6 +3026,7 @@ async fn execute_sequence(
             resume: config.resume_driver,
             frame_sample_interval: config.frame_sample_interval,
             perfetto_trace: config.perfetto_trace,
+            perfetto_rfvp_core: false,
             capture_performance_samples: config.capture_performance_samples,
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
@@ -3294,6 +3298,7 @@ impl<'a> RuntimeDriver<'a> {
                 .perfetto_trace
                 .map(NativePerfettoCapture::new)
                 .transpose()?,
+            perfetto_rfvp_core: config.perfetto_rfvp_core,
             capture_performance_samples: config.capture_performance_samples,
             performance_memory_after_warmup: None,
             scene_full_resync_count: 0,
@@ -3540,6 +3545,13 @@ impl<'a> RuntimeDriver<'a> {
             .map_err(|_| "ASTRA_EMU_HEADLESS_STEP_PAYLOAD".to_owned())?,
         })?;
         self.runtime_timings_ns.push(elapsed_ns(runtime_started)?);
+        if self.perfetto_rfvp_core {
+            // This is the measured dynamic hosted-provider call, including its
+            // ABI boundary. Fine-grained VM phases are emitted only when the
+            // hosted observer supplies them; this outer slice is never used as
+            // a substitute for those phase timings.
+            self.record_perfetto_phase("rfvp.core.provider_step", 6, runtime_started)?;
+        }
         self.record_perfetto_phase(
             "astra.emu.adapter.runtime_world_effects",
             1,
