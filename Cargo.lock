@@ -963,6 +963,7 @@ dependencies = [
  "na_mpeg2_decoder",
  "postcard",
  "proptest",
+ "rfvp",
  "schemars",
  "serde",
  "serde_json",
@@ -9341,6 +9342,34 @@ dependencies = [
  "wayland-protocols",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rfvp"
+version = "0.5.0"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=ba0158efc80a560ec2d5adb2c27d8504731b0c35#ba0158efc80a560ec2d5adb2c27d8504731b0c35"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "atomic_refcell",
+ "bitflags 2.13.1",
+ "bytemuck",
+ "byteorder",
+ "bytes",
+ "core_maths",
+ "encoding_rs",
+ "enum-map",
+ "glam 0.27.0",
+ "hashbrown 0.14.5",
+ "hecs",
+ "itertools 0.12.1",
+ "lazy_static",
+ "log 0.4.33",
+ "miniz_oxide 0.7.4",
+ "petitset",
+ "serde",
+ "spin",
+ "twofloat",
 ]
 
 [[package]]
