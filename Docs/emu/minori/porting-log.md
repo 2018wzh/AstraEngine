@@ -13,7 +13,7 @@
 ### MPEG 流式绑定
 
 - 已将已识别 MPEG entry 交给 `MpegRangeDecoder`：reader 只保留 64 KiB 输入块和最多 256 个待消费事件，帧与音频不物化为整片媒体或历史帧队列。MPEG start code 的前缀偏移在创建 decoder 时固定，VFS range transform 仍由 Minori mount session 执行。
-- 真实 Headless 重试暴露了通用 raw-range 路径错误地把非 movie entry 的任意子范围送入 Blowfish；这与 block cipher 的 8-byte 对齐契约冲突。现仅 movie 的 entry-relative RC4 transform 可走随机范围读取；其余 entry 强制回到完整 aligned decrypt、truncate 与 zlib 路径。合成 v0/v1/v2 fixture 已改为与该格式契约一致的非 movie zlib payload，并覆盖普通随机读取和 movie RC4 range 两条路径。
+- 真实 Headless 重试暴露了通用 raw-range 路径错误地把非 movie entry 的任意子范围送入 Blowfish；这与 block cipher 的 8-byte 对齐契约冲突。现仅 movie 的 entry-relative RC4 transform 可走随机范围读取；其余 entry 强制回到完整 aligned decrypt 与 truncate 路径。GARbro `OpenEntry` 合同进一步确认 zlib 只由 index 的 `IsPacked` 决定，不可按 archive role 推断。合成 v0/v1/v2 fixture 现分别覆盖普通 unpacked random read、packed zlib read 和 movie RC4 range。
 - 视频 frame 的 PTS、尺寸、RGBA 长度与 sequence 都在进入 Renderer2D 前校验。音频 chunk 只接受有限的 mono/stereo、有限 sample、交错 frame 对齐与单调 PTS；pending event 和 mixer queue 都有独立上限。错误格式、时间倒退、队列超限或 identity 冲突均为 `ASTRA_EMU_MINORI_MPEG_*` blocking diagnostic。
 - MPEG 音频改为流式提交现有 Headless audio executor。它不走整片 decode 或私有 mixer；首次 chunk 必须精确匹配 host 显式 audio output format，之后格式漂移直接阻断。视频 EOF 只标记 audio EOS，media fence 会等待已提交音频 drain 后再完成。
 - 该轮仅有 range decoder、格式边界和 Headless binding 的定向 Rust 回归。尚未以授权样本完成 MPEG 影片的实际 Headless E2，也没有把四项未识别容器解释为 MPEG、WMV 或其他 codec。

@@ -583,7 +583,7 @@ impl MinoriMountedVfs {
             &encrypted,
         )?;
         decoded.truncate(entry.descriptor.stored_size as usize);
-        if entry.descriptor.packed || entry.descriptor.archive_role != "mov" {
+        if entry.descriptor.packed {
             let mut unpacked = Vec::with_capacity(entry.descriptor.unpacked_size as usize);
             ZlibDecoder::new(decoded.as_slice())
                 .read_to_end(&mut unpacked)
@@ -1711,14 +1711,18 @@ mod tests {
     const FIXTURE_KEY: &[u8] = b"fixture-key";
 
     fn fixture_archive(role: &str, version: u8) -> Vec<u8> {
+        fixture_archive_with_packing(role, version, false)
+    }
+
+    fn fixture_archive_with_packing(role: &str, version: u8, packed: bool) -> Vec<u8> {
         let plaintext = b"fixture\0";
-        let mut stored = if role == "mov" {
-            plaintext.to_vec()
-        } else {
+        let mut stored = if packed {
             let mut encoder =
                 flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
             encoder.write_all(plaintext).unwrap();
             encoder.finish().unwrap()
+        } else {
+            plaintext.to_vec()
         };
         let stored_size = stored.len() as u32;
         while !stored.len().is_multiple_of(8) {
@@ -1736,7 +1740,7 @@ mod tests {
         index.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
         index.extend_from_slice(&stored_size.to_le_bytes());
         index.extend_from_slice(&aligned_size.to_le_bytes());
-        index.extend_from_slice(&0i32.to_le_bytes());
+        index.extend_from_slice(&(i32::from(packed)).to_le_bytes());
         while !index.len().is_multiple_of(8) {
             index.push(0);
         }
@@ -2102,5 +2106,29 @@ mod tests {
             let read = vfs.read_range("minori:/voice/voice.bin", 1, 6).unwrap();
             assert_eq!(read.bytes.as_slice(), b"ixture");
         }
+    }
+
+    #[test]
+    fn packed_entries_use_zlib_while_unpacked_entries_remain_raw() {
+        let temp = tempfile::tempdir().unwrap();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            fs::write(
+                temp.path().join(format!("{role}.paz")),
+                fixture_archive_with_packing(role, 2, role == "scr"),
+            )
+            .unwrap();
+        }
+        let vfs = mount_fixture(temp.path(), 2);
+
+        assert_eq!(
+            vfs.read_range("minori:/scr/scr.bin", 1, 6).unwrap().bytes,
+            b"ixture"
+        );
+        assert_eq!(
+            vfs.read_range("minori:/voice/voice.bin", 1, 6)
+                .unwrap()
+                .bytes,
+            b"ixture"
+        );
     }
 }
