@@ -16,6 +16,8 @@ FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 f
 
 2026-08-02 的授权本机安装 smoke 以签名动态 v5 family 完成 300 fixed step：170 个 scene commit/raster frame、两个 PNG checkpoint、同 session snapshot round-trip 和正常 shutdown 均通过，VFS 记录 14 个资源、55,011 次受限读取、41,648,158 bytes，且没有 blocking diagnostic。人工查看后一个 checkpoint，标题画面完整可见；前一个启动期 checkpoint 为空白，未被当作视觉通过项。该 run 没有路线输入、terminal、音频或视频证据，CPU reference 的 step p95 为 58.08 ms，只是 Evidence profile 下的本机趋势，不能视为性能放行、媒体 parity 或 Windows E3。
 
+同一 build/profile 的 900 fixed step idle 延伸运行也通过：342 个 scene/raster frame、两个较晚 checkpoint、snapshot round-trip、正常 shutdown 和同一受限 VFS 账本均无 diagnostic。人工查看两个后期 checkpoint，标题淡入和静止阶段均完整，确认前述资源重发布在更长的 idle 段没有丢失纹理。该延伸仍没有路线输入、terminal、音频、视频或 soak 承诺，CPU reference 的 step p95 为 53.18 ms，只保留为本机 Evidence 趋势。
+
 ## 不可跨越的边界
 
 ```text
