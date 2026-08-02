@@ -1,5 +1,6 @@
 pub mod family_host;
 pub mod input;
+pub mod mpeg_range;
 pub mod rasterizer;
 pub mod runner;
 

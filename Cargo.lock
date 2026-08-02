@@ -807,6 +807,7 @@ dependencies = [
  "hex",
  "image 0.25.10",
  "libc",
+ "na_mpeg2_decoder",
  "postcard",
  "rayon",
  "rfvp-astra-provider",
