@@ -664,6 +664,7 @@ impl WindowsNativeMediaSession {
                 sample_rate: packet.sample_rate,
                 channels: packet.channels,
                 max_buffered_frames: capacity,
+                start_paused: false,
             })
             .await?;
         if let Err(error) = self.client.pause_audio(handle).await {

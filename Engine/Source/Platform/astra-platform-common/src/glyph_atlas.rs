@@ -28,7 +28,7 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
     atlas: Option<GpuAtlas>,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    pipeline: wgpu::RenderPipeline,
+    pipelines: BlendPipelines,
     output: Option<CachedOutput>,
     vertex_buffer: Option<wgpu::Buffer>,
     vertex_capacity: u64,
@@ -54,6 +54,28 @@ struct CachedOutput {
     width: u32,
     height: u32,
     texture: wgpu::Texture,
+}
+
+/// Every semantic scene command shares the atlas and vertex format; only its
+/// compositor equation differs. Keeping these pipelines adjacent prevents a
+/// non-alpha legacy blend from falling back to a CPU framebuffer.
+struct BlendPipelines {
+    alpha: wgpu::RenderPipeline,
+    add: wgpu::RenderPipeline,
+    multiply: wgpu::RenderPipeline,
+}
+
+impl BlendPipelines {
+    fn select(&self, blend: BlendMode) -> Result<&wgpu::RenderPipeline, PlatformError> {
+        match blend {
+            BlendMode::Alpha => Ok(&self.alpha),
+            BlendMode::Add => Ok(&self.add),
+            BlendMode::Multiply => Ok(&self.multiply),
+            BlendMode::Screen => Err(invalid(
+                "screen blend is unsupported by the semantic GPU path",
+            )),
+        }
+    }
 }
 
 pub(crate) struct PreparedGlyphFrame {
@@ -330,6 +352,7 @@ struct MeshRun<'a> {
     indices: &'a [u32],
     texture_id: Option<&'a str>,
     opacity: f32,
+    blend: BlendMode,
     clip: RectI,
     transform: Transform2D,
 }
@@ -353,6 +376,7 @@ struct DrawBatch {
     first_vertex: u32,
     vertex_count: u32,
     clip: RectI,
+    blend: BlendMode,
 }
 
 impl WgpuGlyphAtlasRenderer {
@@ -382,13 +406,13 @@ impl WgpuGlyphAtlasRenderer {
     }
 
     fn new_internal(device: &wgpu::Device, reserved_side: Option<u32>) -> Self {
-        let (layout, sampler, pipeline) = create_pipeline(device);
+        let (layout, sampler, pipelines) = create_pipelines(device);
         Self {
             resources: BTreeMap::new(),
             atlas: None,
             layout,
             sampler,
-            pipeline,
+            pipelines,
             output: None,
             vertex_buffer: None,
             vertex_capacity: 0,
@@ -412,10 +436,10 @@ impl WgpuGlyphAtlasRenderer {
     }
 
     pub(super) fn recover(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        let (layout, sampler, pipeline) = create_pipeline(device);
+        let (layout, sampler, pipelines) = create_pipelines(device);
         self.layout = layout;
         self.sampler = sampler;
-        self.pipeline = pipeline;
+        self.pipelines = pipelines;
         self.atlas = self.reserved_side.map(|side| {
             create_reserved_gpu_atlas(device, queue, &self.layout, &self.sampler, side)
         });
@@ -742,7 +766,7 @@ impl WgpuGlyphAtlasRenderer {
                         || !insert_unique(&mut run_ids, id)
                         || !opacity.is_finite()
                         || !(0.0..=1.0).contains(opacity)
-                        || *blend != BlendMode::Alpha
+                        || *blend == BlendMode::Screen
                     {
                         return Err(invalid(
                             "glyph run identity, opacity, or blend mode is invalid",
@@ -948,6 +972,7 @@ impl WgpuGlyphAtlasRenderer {
                         indices,
                         texture_id: resolved_texture,
                         opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
+                        blend: *blend,
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
                             0,
                             0,
@@ -1369,10 +1394,10 @@ impl WgpuGlyphAtlasRenderer {
                 multiview_mask: None,
             });
             if let Some(vertex_buffer) = &self.vertex_buffer {
-                pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, active_bind_group, &[]);
                 pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 for batch in &self.draw_batches {
+                    pass.set_pipeline(self.pipelines.select(batch.blend)?);
                     pass.set_scissor_rect(
                         batch.clip.x as u32,
                         batch.clip.y as u32,
@@ -2719,6 +2744,10 @@ fn build_vertices(
             DrawPrimitive::Quads(index) => quad_runs[*index].clip,
             DrawPrimitive::Mesh(run) => run.clip,
         };
+        let blend = match primitive {
+            DrawPrimitive::Quads(_) => BlendMode::Alpha,
+            DrawPrimitive::Mesh(run) => run.blend,
+        };
         if clip.width == 0 || clip.height == 0 {
             continue;
         }
@@ -2832,6 +2861,7 @@ fn build_vertices(
                 first_vertex,
                 vertex_count: vertex_count - first_vertex,
                 clip,
+                blend,
             });
         }
     }
@@ -3062,9 +3092,9 @@ fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, Plat
     Ok(RectI::new(left, top, width, height))
 }
 
-fn create_pipeline(
+fn create_pipelines(
     device: &wgpu::Device,
-) -> (wgpu::BindGroupLayout, wgpu::Sampler, wgpu::RenderPipeline) {
+) -> (wgpu::BindGroupLayout, wgpu::Sampler, BlendPipelines) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("astra-glyph-atlas-layout"),
         entries: &[
@@ -3101,8 +3131,9 @@ fn create_pipeline(
         bind_group_layouts: &[Some(&layout)],
         immediate_size: 0,
     });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("astra-glyph-atlas-pipeline"),
+    let pipeline = |label, blend| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -3120,7 +3151,7 @@ fn create_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -3129,8 +3160,37 @@ fn create_pipeline(
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
-    });
-    (layout, sampler, pipeline)
+    })
+    };
+    let pipelines = BlendPipelines {
+        alpha: pipeline(
+            "astra-glyph-atlas-alpha-pipeline",
+            wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+        ),
+        add: pipeline(
+            "astra-glyph-atlas-add-pipeline",
+            wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            },
+        ),
+        multiply: pipeline(
+            "astra-glyph-atlas-multiply-pipeline",
+            wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Dst,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            },
+        ),
+    };
+    (layout, sampler, pipelines)
 }
 
 fn invalid(message: &'static str) -> PlatformError {

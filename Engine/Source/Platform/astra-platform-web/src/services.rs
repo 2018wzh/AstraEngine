@@ -187,6 +187,19 @@ impl WebAudioOutput {
                 as Box<dyn FnMut(web_sys::MessageEvent)>)
         };
         port.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        if request.start_paused {
+            let suspended = match context.suspend() {
+                Ok(promise) => JsFuture::from(promise).await.is_ok(),
+                Err(_) => false,
+            };
+            if !suspended || context.state() != web_sys::AudioContextState::Suspended {
+                let _ = node.disconnect();
+                if let Ok(promise) = context.close() {
+                    let _ = JsFuture::from(promise).await;
+                }
+                return Err(audio_error("audio.open"));
+            }
+        }
         Ok(Self {
             context,
             node,

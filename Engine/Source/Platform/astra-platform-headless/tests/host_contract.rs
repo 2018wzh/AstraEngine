@@ -823,6 +823,7 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
             sample_rate: 48_000,
             channels: 2,
             max_buffered_frames: 800,
+            start_paused: false,
         })
         .await
         .unwrap();
@@ -868,6 +869,7 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
             sample_rate: 48_000,
             channels: 2,
             max_buffered_frames: 800,
+            start_paused: false,
         })
         .await
         .unwrap();
@@ -1052,6 +1054,53 @@ async fn ffmpeg_video_stream_spools_complete_output_and_returns_one_frame_at_a_t
 }
 
 #[tokio::test]
+async fn initially_paused_audio_does_not_consume_before_priming_resume() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = HeadlessHostProfile::reference(
+        "headless-test",
+        "com.example.initial-paused-audio",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    let session = HeadlessPlatformFactory::new(temp.path().join("artifacts"), temp.path())
+        .start(profile.into())
+        .await
+        .unwrap();
+    let client = session.client;
+    let output = client
+        .open_audio_output(AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            max_buffered_frames: 480,
+            start_paused: true,
+        })
+        .await
+        .unwrap();
+    client
+        .submit_audio(
+            output,
+            AudioPacket {
+                sequence: 1,
+                channels: 2,
+                samples: vec![0.125; 960],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        client.query_audio(output).await.unwrap().consumed_samples,
+        0
+    );
+    client.resume_audio(output).await.unwrap();
+    assert_eq!(
+        client.query_audio(output).await.unwrap().consumed_samples,
+        960
+    );
+    client.close_audio(output).await.unwrap();
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
     let temp = tempfile::tempdir().unwrap();
     let profile = HeadlessHostProfile::reference(
@@ -1103,6 +1152,7 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
             sample_rate: 48_000,
             channels: 2,
             max_buffered_frames: 800,
+            start_paused: false,
         })
         .await
         .unwrap();
@@ -1139,6 +1189,7 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
             sample_rate: 48_000,
             channels: 2,
             max_buffered_frames: 800,
+            start_paused: false,
         })
         .await
         .unwrap();
@@ -1148,6 +1199,7 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
             sample_rate: 48_000,
             channels: 2,
             max_buffered_frames: 800,
+            start_paused: false,
         })
         .await
         .unwrap();

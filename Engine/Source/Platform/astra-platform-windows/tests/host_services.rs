@@ -29,6 +29,7 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
             sample_rate,
             channels,
             max_buffered_frames: 4_800,
+            start_paused: false,
         })
         .await
         .expect("open WASAPI output");
@@ -89,6 +90,7 @@ async fn windows_host_uses_real_wasapi_stream_and_wmf_decode_session() {
             sample_rate,
             channels,
             max_buffered_frames: 4_800,
+            start_paused: false,
         })
         .await
         .unwrap();

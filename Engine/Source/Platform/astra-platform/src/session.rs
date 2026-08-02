@@ -101,11 +101,36 @@ pub struct SceneFrame {
     pub semantics: Option<astra_ui_core::UiSemanticSnapshot>,
 }
 
+/// One bounded scene submission. Native hosts may poll this receipt while
+/// continuing simulation and audio scheduling; presentation failure remains
+/// observable and is never discarded.
+pub struct ScenePresentReceipt {
+    response: oneshot::Receiver<Result<(), PlatformError>>,
+}
+
+impl ScenePresentReceipt {
+    pub fn try_complete(&mut self) -> Result<bool, PlatformError> {
+        match self.response.try_recv() {
+            Ok(result) => result.map(|()| true),
+            Err(oneshot::error::TryRecvError::Empty) => Ok(false),
+            Err(oneshot::error::TryRecvError::Closed) => Err(queue_closed("surface.present_scene")),
+        }
+    }
+
+    pub async fn complete(self) -> Result<(), PlatformError> {
+        self.response
+            .await
+            .map_err(|_| queue_closed("surface.present_scene"))?
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioOutputRequest {
     pub sample_rate: u32,
     pub channels: u16,
     pub max_buffered_frames: usize,
+    /// Starts the device paused until its bounded producer has been primed.
+    pub start_paused: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -793,6 +818,14 @@ impl PlatformHostClient {
         surface: SurfaceHandle,
         frame: SceneFrame,
     ) -> Result<(), PlatformError> {
+        self.submit_scene(surface, frame)?.complete().await
+    }
+
+    pub fn submit_scene(
+        &self,
+        surface: SurfaceHandle,
+        frame: SceneFrame,
+    ) -> Result<ScenePresentReceipt, PlatformError> {
         validate_scene_frame(&frame, self.profile.limits().max_frame_bytes)?;
         self.ensure_running("surface.present_scene")?;
         let (reply, response) = oneshot::channel();
@@ -801,9 +834,7 @@ impl PlatformHostClient {
             frame,
             reply,
         })?;
-        response
-            .await
-            .map_err(|_| queue_closed("surface.present_scene"))?
+        Ok(ScenePresentReceipt { response })
     }
 
     #[cfg(feature = "platform-test-driver")]

@@ -990,7 +990,7 @@ impl HostState {
                             square_sum: 0.0,
                             peak: 0.0,
                             queued: Vec::new(),
-                            paused: false,
+                            paused: request.start_paused,
                             consumed: 0,
                             callback_count: 0,
                             underflow_count: 0,

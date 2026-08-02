@@ -148,6 +148,7 @@ impl PlatformCommandSink {
                         sample_rate: *sample_rate,
                         channels: *channels,
                         max_buffered_frames: *max_buffered_frames as usize,
+                        start_paused: false,
                     })
                     .await?;
                 insert_unique(&mut self.audio, *output, handle, "audio.open")?;

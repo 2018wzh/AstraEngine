@@ -1367,9 +1367,11 @@ mod macos {
                 }
             }
             .map_err(|_| host_error("audio.open", "CoreAudio output stream creation failed"))?;
-            stream
-                .play()
-                .map_err(|_| host_error("audio.open", "CoreAudio output stream could not start"))?;
+            if !request.start_paused {
+                stream.play().map_err(|_| {
+                    host_error("audio.open", "CoreAudio output stream could not start")
+                })?;
+            }
             Ok(Self {
                 stream,
                 producer,
@@ -1380,7 +1382,7 @@ mod macos {
                 sample_rate: request.sample_rate,
                 next_sequence: 1,
                 submitted_samples: 0,
-                paused: false,
+                paused: request.start_paused,
             })
         }
 
@@ -1467,6 +1469,7 @@ mod macos {
                 sample_rate: self.sample_rate,
                 channels: self.channels,
                 max_buffered_frames: 1,
+                start_paused: false,
             };
             let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
             loop {

@@ -82,6 +82,7 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
                     sample_rate: 48_000,
                     channels: 2,
                     max_buffered_frames: 4_800,
+                    start_paused: false,
                 })
                 .await
         }
@@ -216,6 +217,7 @@ fn audio_drain_timeout_covers_long_form_playback_and_callback_margin() {
         sample_rate: 48_000,
         channels: 2,
         max_buffered_frames: 4_096,
+        start_paused: false,
     };
 
     assert_eq!(
