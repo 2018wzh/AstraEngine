@@ -1,8 +1,9 @@
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use astra_emu_family_api::{
-    LegacyBlendMode, LegacyDrawV1, LegacyRenderFrameV1, LegacyTextureFormat, LegacyVertexV1,
-    LegacyVideoMode,
+    LegacyBlendMode, LegacyDrawV1, LegacyPreparedSceneCommitV1, LegacyRenderFrameV1,
+    LegacySceneResourceOperationV1, LegacySceneResourceStateV1, LegacyTextureFormat,
+    LegacyTextureUpdateV1, LegacyVertexV1, LegacyVideoMode,
 };
 use astra_emu_manager::{AstraUnderlayRenderer, TranslationOverlayView, WgpuFrameContext};
 use wgpu::util::DeviceExt;
@@ -32,6 +33,7 @@ pub(crate) struct StageGpu {
     filter_bind_group_layout: wgpu::BindGroupLayout,
     filter_pipeline: wgpu::RenderPipeline,
     textures: BTreeMap<u32, TextureResource>,
+    scene_resources: LegacySceneResourceStateV1,
     video_source: Option<Arc<[u8]>>,
 }
 
@@ -39,6 +41,9 @@ struct TextureResource {
     _texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     hash: String,
+    width: u32,
+    height: u32,
+    format: LegacyTextureFormat,
 }
 
 impl AstraUnderlayRenderer for ManagerStageRenderer {
@@ -84,7 +89,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
     }
 
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
-        let (frame, video, filter_preset) = {
+        let (frame, scene_commit, video, filter_preset) = {
             let mut runtime = self
                 .runtime
                 .try_borrow_mut()
@@ -94,11 +99,15 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             }
             (
                 runtime.take_latest_render_frame(),
+                runtime.take_latest_scene_commit(),
                 runtime.current_video_frame(),
                 runtime.filter_preset().to_owned(),
             )
         };
         if let Some(frame) = frame {
+            if scene_commit.is_some() {
+                return Err("ASTRA_EMU_PRESENTATION_PACKET_CONFLICT".into());
+            }
             if frame.width != self.stage_width || frame.height != self.stage_height {
                 self.texture = Some(create_stage_texture_with_dimensions(
                     context.device,
@@ -124,6 +133,39 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_STAGE_RENDERER_NOT_SETUP".to_owned())?;
             gpu.render(&context, texture, frame)?;
+            self.scene_initialized = true;
+            self.runtime
+                .try_borrow_mut()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .acknowledge_presentation();
+        }
+        if let Some(scene_commit) = scene_commit {
+            if scene_commit.packet.width != self.stage_width
+                || scene_commit.packet.height != self.stage_height
+            {
+                self.texture = Some(create_stage_texture_with_dimensions(
+                    context.device,
+                    scene_commit.packet.width,
+                    scene_commit.packet.height,
+                ));
+                self.scene_texture = Some(create_stage_texture_with_dimensions(
+                    context.device,
+                    scene_commit.packet.width,
+                    scene_commit.packet.height,
+                ));
+                self.stage_width = scene_commit.packet.width;
+                self.stage_height = scene_commit.packet.height;
+                self.texture_dirty = true;
+                self.scene_initialized = false;
+            }
+            let texture = self
+                .scene_texture
+                .as_ref()
+                .ok_or_else(|| "ASTRA_EMU_STAGE_RENDERER_NOT_SETUP".to_owned())?;
+            self.gpu
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_STAGE_RENDERER_NOT_SETUP".to_owned())?
+                .render_scene(&context, texture, scene_commit)?;
             self.scene_initialized = true;
             self.runtime
                 .try_borrow_mut()
@@ -244,6 +286,7 @@ impl StageGpu {
             filter_bind_group_layout,
             filter_pipeline,
             textures: BTreeMap::new(),
+            scene_resources: LegacySceneResourceStateV1::default(),
             video_source: None,
         }
     }
@@ -375,6 +418,82 @@ impl StageGpu {
         Ok(())
     }
 
+    /// Applies a prepared incremental packet without rebuilding the retained
+    /// texture set.  The backend independently re-prepares the packet before
+    /// any queue write, so a forged or stale `PreparedCommit` cannot mutate GPU
+    /// resources.
+    fn render_scene(
+        &mut self,
+        context: &WgpuFrameContext<'_>,
+        target: &wgpu::Texture,
+        commit: LegacyPreparedSceneCommitV1,
+    ) -> Result<(), String> {
+        let verified = self
+            .scene_resources
+            .prepare(commit.packet.clone())
+            .map_err(|error| format!("ASTRA_EMU_STAGE_SCENE_PREPARE:{}", error.code()))?;
+        if verified.next_resources != commit.next_resources {
+            return Err("ASTRA_EMU_STAGE_SCENE_COMMIT_MISMATCH".into());
+        }
+        for operation in &verified.packet.resources {
+            match operation {
+                LegacySceneResourceOperationV1::CreateTexture(texture) => self.upload(
+                    context,
+                    LegacyTextureUpdateV1 {
+                        texture_id: texture.texture_id,
+                        width: texture.width,
+                        height: texture.height,
+                        format: texture.format,
+                        content_hash: texture.content_hash,
+                        pixels: texture.pixels.clone(),
+                    },
+                )?,
+                LegacySceneResourceOperationV1::UpdateTexture(texture) => {
+                    self.upload_partial(context, texture)?;
+                }
+                LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
+                    self.textures.remove(texture_id);
+                }
+            }
+        }
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("astra.emu.stage.scene-encoder"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("astra.emu.stage.scene-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            for draw in &verified.packet.draws {
+                self.draw(
+                    context.device,
+                    &mut pass,
+                    draw,
+                    verified.packet.width,
+                    verified.packet.height,
+                )?;
+            }
+        }
+        context.queue.submit([encoder.finish()]);
+        self.scene_resources.commit(verified);
+        Ok(())
+    }
+
     fn upload(
         &mut self,
         context: &WgpuFrameContext<'_>,
@@ -466,6 +585,71 @@ impl StageGpu {
                 _texture: texture,
                 bind_group,
                 hash,
+                width: update.width,
+                height: update.height,
+                format: update.format,
+            },
+        );
+        Ok(())
+    }
+
+    fn upload_partial(
+        &mut self,
+        context: &WgpuFrameContext<'_>,
+        update: &astra_emu_family_api::LegacySceneTextureUpdateV1,
+    ) -> Result<(), String> {
+        let resource = self
+            .textures
+            .get(&update.texture_id)
+            .ok_or_else(|| "ASTRA_EMU_STAGE_TEXTURE_MISSING".to_owned())?;
+        if resource.width == 0
+            || resource.height == 0
+            || resource.format != update.format
+            || update
+                .x
+                .checked_add(update.width)
+                .is_none_or(|right| right > resource.width)
+            || update
+                .y
+                .checked_add(update.height)
+                .is_none_or(|bottom| bottom > resource.height)
+        {
+            return Err("ASTRA_EMU_STAGE_TEXTURE_REGION".into());
+        }
+        let rgba = to_rgba(update.format, &update.pixels)?;
+        let expected = usize::try_from(update.width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(update.height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "ASTRA_EMU_STAGE_TEXTURE_BOUNDS".to_owned())?;
+        if rgba.len() != expected {
+            return Err("ASTRA_EMU_STAGE_TEXTURE_LENGTH".into());
+        }
+        context.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &resource._texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: update.x,
+                    y: update.y,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(update.width * 4),
+                rows_per_image: Some(update.height),
+            },
+            wgpu::Extent3d {
+                width: update.width,
+                height: update.height,
+                depth_or_array_layers: 1,
             },
         );
         Ok(())
@@ -551,6 +735,9 @@ impl StageGpu {
                     _texture: texture,
                     bind_group,
                     hash: "host-video".into(),
+                    width: frame.width,
+                    height: frame.height,
+                    format: LegacyTextureFormat::Rgba8,
                 },
             );
             self.video_source = Some(Arc::clone(&frame.rgba8));
@@ -648,6 +835,22 @@ impl StageGpu {
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.draw(0..4, 0..1);
         Ok(())
+    }
+}
+
+fn to_rgba(format: LegacyTextureFormat, pixels: &[u8]) -> Result<Vec<u8>, String> {
+    match format {
+        LegacyTextureFormat::Rgba8 => Ok(pixels.to_vec()),
+        LegacyTextureFormat::LumaAlpha8 => {
+            if pixels.len() % 2 != 0 {
+                return Err("ASTRA_EMU_STAGE_TEXTURE_LENGTH".into());
+            }
+            let mut rgba = Vec::with_capacity(pixels.len().saturating_mul(2));
+            for pair in pixels.chunks_exact(2) {
+                rgba.extend_from_slice(&[pair[0], pair[0], pair[0], pair[1]]);
+            }
+            Ok(rgba)
+        }
     }
 }
 

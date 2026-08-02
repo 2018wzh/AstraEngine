@@ -33,8 +33,8 @@ use std::{
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
-    LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
+    LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx,
+    LegacyStepBudget, LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_fvp::FvpVfsFamilyFactory;
@@ -159,6 +159,7 @@ struct RuntimeBridge {
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
     render_frames: VecDeque<LegacyRenderFrameV1>,
+    scene_commits: VecDeque<LegacyPreparedSceneCommitV1>,
     audio: Option<HostAudioExecutor>,
     video: HostVideoExecutor,
     text_captures: VecDeque<LegacyEphemeralText>,
@@ -179,6 +180,7 @@ impl RuntimeBridge {
             active: None,
             terminal: false,
             render_frames: VecDeque::new(),
+            scene_commits: VecDeque::new(),
             audio: None,
             video: HostVideoExecutor::default(),
             text_captures: VecDeque::new(),
@@ -292,6 +294,7 @@ impl RuntimeBridge {
         self.media_hooks = media_hooks;
         self.terminal = false;
         self.render_frames.clear();
+        self.scene_commits.clear();
         self.text_captures.clear();
         Ok(())
     }
@@ -497,6 +500,26 @@ impl RuntimeBridge {
                 self.render_frames.push_back(frame);
                 continue;
             }
+            if envelope.domain == RuntimeOutputDomain::Presentation
+                && envelope.schema == "astra.emu.scene_packet.v1"
+            {
+                let commit = envelope
+                    .decode_postcard::<LegacyPreparedSceneCommitV1>(
+                        RuntimeOutputDomain::Presentation,
+                        "astra.emu.scene_packet.v1",
+                        SchemaVersion::new(1, 0, 0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                commit
+                    .packet
+                    .validate()
+                    .map_err(|error| error.to_string())?;
+                if self.scene_commits.len() >= 3 {
+                    return Err("ASTRA_EMU_SCENE_PACKET_QUEUE_OVERFLOW".into());
+                }
+                self.scene_commits.push_back(commit);
+                continue;
+            }
             if envelope.domain != RuntimeOutputDomain::Effect
                 || envelope.schema != "astra.emu.legacy_step_output.v1"
             {
@@ -689,6 +712,7 @@ impl RuntimeBridge {
         }
         self.terminal = false;
         self.render_frames.clear();
+        self.scene_commits.clear();
         self.text_captures.clear();
         self.translation = None;
         self.text_hooks.clear();
@@ -850,6 +874,10 @@ impl RuntimeBridge {
 
     fn take_latest_render_frame(&mut self) -> Option<LegacyRenderFrameV1> {
         self.render_frames.pop_front()
+    }
+
+    fn take_latest_scene_commit(&mut self) -> Option<LegacyPreparedSceneCommitV1> {
+        self.scene_commits.pop_front()
     }
 
     fn current_video_frame(&self) -> Option<HostVideoFrame> {

@@ -427,6 +427,10 @@ impl AstraEmuRuntimeProvider {
                     RuntimeOutputDomain::Presentation,
                     "astra.emu.render_frame.v1",
                 ),
+                schema(
+                    RuntimeOutputDomain::Presentation,
+                    "astra.emu.scene_packet.v1",
+                ),
                 schema(RuntimeOutputDomain::Audio, "astra.emu.audio_effect.v1"),
                 schema(RuntimeOutputDomain::Trace, "astra.emu.legacy_trace.v1"),
                 schema(
@@ -923,7 +927,10 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 matches!(
                     effect,
                     LegacyEffect::Presentation { command, .. }
-                        if command == "astra.emu.render_frame.v1"
+                        if matches!(
+                            command.as_str(),
+                            "astra.emu.render_frame.v1" | "astra.emu.scene_packet.v1"
+                        )
                 )
             })
             .map(|index| family_output.effects.remove(index))
