@@ -89,6 +89,12 @@ impl HostedMemoryHost {
             .ok_or(RfvpError::CapacityExceeded)?;
         Ok(())
     }
+
+    /// Deterministic session time exposed for hosted lifecycle validation.
+    /// It is deliberately a scalar rather than a platform clock handle.
+    pub fn elapsed_us(&self) -> u64 {
+        self.clock.now_us
+    }
 }
 
 impl RfvpHost for HostedMemoryHost {
@@ -386,5 +392,6 @@ mod tests {
         assert!(host.fs().open("../game.hcb").is_err());
         host.advance(16_667_000).expect("fixed clock advances");
         assert_eq!(host.clock().ticks_us(), 16_667);
+        assert_eq!(host.elapsed_us(), 16_667);
     }
 }
