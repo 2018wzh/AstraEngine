@@ -1493,6 +1493,29 @@ mod tests {
                 bytes,
             })
         }
+
+        fn enumerate_by_extension(
+            &self,
+            mount_set_id: &str,
+            root: &str,
+            extension_without_dot: &str,
+            max_entries: u32,
+        ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+            if mount_set_id != "mount.test"
+                || root != ""
+                || extension_without_dot != "hcb"
+                || max_entries == 0
+            {
+                return Err(invalid(
+                    "TEST_VFS_ENUMERATE",
+                    "fixture enumeration is invalid",
+                ));
+            }
+            Ok(vec![LegacyVfsListedFile {
+                uri: "script.hcb".into(),
+                stat: self.stat_file(mount_set_id, "script.hcb")?,
+            }])
+        }
     }
 
     #[test]

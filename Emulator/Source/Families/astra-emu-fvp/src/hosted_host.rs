@@ -183,8 +183,7 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
         } else {
             normalize(root)?
         };
-        let ext = ext.strip_prefix('.').ok_or(RfvpError::InvalidArgument)?;
-        if ext.is_empty() {
+        if ext.is_empty() || ext.starts_with('.') || ext.contains(['/', '\\']) {
             return Err(RfvpError::InvalidArgument);
         }
         match &self.source {
