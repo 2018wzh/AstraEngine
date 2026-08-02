@@ -81,7 +81,7 @@
 - IDA 已确认原程序消息字体默认值为 26 px，ruby 为 12 px，默认字体是 CP932 的 MS PGothic。移植按计划显式绑定仓库内 Noto Sans JP，不读取系统字体。首轮 body/speaker region 结合已确认的 panel 几何与外部截图结构制定，真实 checkpoint 检查前只算实现绑定，不声明原版精确坐标。
 - 真实原程序二进制中只有一个与已解包脚本集合相交、且没有脚本入边的 `.sc` 引用。它已作为 private Headless 实际入口，不再以先前的短链 `test.sc` 代替首路线入口。该入口的首个未覆盖命令为 `.movie`，其五个 operand 已由本地样本确认依次表达非零 movie id、资源名、宽、高和 `t`/`f` skip flag。
 - `.movie` 现生成 `LegacyVideoCommandV1::Play` 和同一 media id 的 `MediaFence`，复用公共 video command、Host media completion、snapshot state 和 VFS URI 绑定；资源、尺寸、重复播放与 stage identity 不匹配均阻断。没有引入 Minori 私有播放器或 codec fallback。
-- 新增 `census-movies`：只对每个 movie 读取有界的 64-byte VFS probe，并以显式私有输出写入脱敏 aggregate。五个授权样本 entry 都没有 AVI、MPEG、ASF、ISO-BMFF、Matroska 或 Ogg 的标准起始签名；因此不能按扩展名把它们绑定到现有 MPEG/WMV provider。该命令的 report 只含 entry 数、总 decoded bytes 和格式类别计数，不写 entry 名、header、路径或内容 hash。
+- 新增 `census-movies`：只对每个 movie 读取有界的前 4 MiB VFS probe，并以显式私有输出写入脱敏 aggregate。五个授权样本 entry 都没有 AVI、MPEG、ASF、ISO-BMFF、Matroska 或 Ogg 的标准签名；因此不能按扩展名把它们绑定到现有 MPEG/WMV provider。该命令的 report 只含 entry 数、总 decoded bytes 和格式类别计数，不写 entry 名、header、路径或内容 hash。
 - 重新核对 GARbro 的 `MovPazArchive`：v1+ RC4 key 以“解码后的 entry name lower，再 CP932 编码”的字节序列构造。Rust reader 已替换此前的原始字节 ASCII lower 做法并加入 CP932 回归；真实五项的 format census 结论不变，故该差异不是当前未知容器的根因。
 
 ### 已确认事实

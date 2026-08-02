@@ -518,7 +518,7 @@ fn write_private_report(
     Ok(())
 }
 
-const MOVIE_PROBE_BYTES: u64 = 64;
+const MOVIE_PROBE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Default, Serialize)]
 struct MovieContainerCensus {
@@ -528,21 +528,47 @@ struct MovieContainerCensus {
 }
 
 fn classify_movie_container(header: &[u8]) -> &'static str {
-    if header.len() >= 12 && &header[..4] == b"RIFF" && &header[8..12] == b"AVI " {
-        "avi"
-    } else if header.starts_with(&[0, 0, 1]) {
-        "mpeg"
-    } else if header.starts_with(&[0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11]) {
-        "asf"
-    } else if header.len() >= 8 && &header[4..8] == b"ftyp" {
-        "isobmff"
-    } else if header.starts_with(b"\x1A\x45\xDF\xA3") {
-        "matroska"
-    } else if header.starts_with(b"OggS") {
-        "ogg"
+    let Some((kind, offset)) = find_movie_container(header) else {
+        return "unrecognized";
+    };
+    if offset == 0 {
+        kind
     } else {
-        "unrecognized"
+        match kind {
+            "avi" => "avi_wrapped",
+            "mpeg" => "mpeg_wrapped",
+            "asf" => "asf_wrapped",
+            "isobmff" => "isobmff_wrapped",
+            "matroska" => "matroska_wrapped",
+            "ogg" => "ogg_wrapped",
+            _ => "unrecognized",
+        }
     }
+}
+
+fn find_movie_container(bytes: &[u8]) -> Option<(&'static str, usize)> {
+    for offset in 0..bytes.len() {
+        let remaining = &bytes[offset..];
+        if remaining.len() >= 12 && &remaining[..4] == b"RIFF" && &remaining[8..12] == b"AVI " {
+            return Some(("avi", offset));
+        }
+        if remaining.starts_with(&[0, 0, 1]) {
+            return Some(("mpeg", offset));
+        }
+        if remaining.starts_with(&[0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11]) {
+            return Some(("asf", offset));
+        }
+        if remaining.len() >= 8 && &remaining[4..8] == b"ftyp" {
+            return Some(("isobmff", offset));
+        }
+        if remaining.starts_with(b"\x1A\x45\xDF\xA3") {
+            return Some(("matroska", offset));
+        }
+        if remaining.starts_with(b"OggS") {
+            return Some(("ogg", offset));
+        }
+    }
+    None
 }
 
 fn record_dimensions(
@@ -574,6 +600,10 @@ mod tests {
         );
         assert_eq!(classify_movie_container(b"\0\0\0\0ftypisom"), "isobmff");
         assert_eq!(classify_movie_container(b"\x1A\x45\xDF\xA3"), "matroska");
+        assert_eq!(
+            classify_movie_container(b"opaqueRIFF\0\0\0\0AVI "),
+            "avi_wrapped"
+        );
         assert_eq!(classify_movie_container(b"opaque"), "unrecognized");
     }
 
