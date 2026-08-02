@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use astra_emu_family_api::LegacyPreparedSceneCommitV1;
+use astra_emu_family_api::{LegacyPreparedSceneCommitV1, LegacySceneResourceStateV1};
 use rfvp_hosted::{
     hosted::{
         HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStepDelta,
@@ -14,6 +14,7 @@ use rfvp_hosted::{
     },
     script::parser::Nls,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -25,6 +26,7 @@ use crate::{
 
 pub const MAX_HOSTED_CASE_FILES: usize = 65_536;
 pub const MAX_HOSTED_HCB_BYTES: usize = 512 * 1024 * 1024;
+const MAX_HOSTED_RUNTIME_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum HostedRuntimeError {
@@ -40,6 +42,8 @@ pub enum HostedRuntimeError {
     Core(rfvp_hosted::host_api::RfvpError),
     #[error("hosted scene delta is invalid: {0}")]
     Scene(String),
+    #[error("hosted snapshot is invalid")]
+    Snapshot,
 }
 
 struct HostedState {
@@ -47,6 +51,18 @@ struct HostedState {
     host: HostedMemoryHost,
     translator: HostedScenePacketTranslator,
 }
+
+/// Astra-owned envelope around the opaque fork snapshot.  The fork owns VM
+/// state while this boundary owns incremental scene resource metadata; both
+/// are required to resume the next semantic transaction faithfully.
+#[derive(Debug, Serialize, Deserialize)]
+struct HostedRuntimeSnapshotV1 {
+    version: u16,
+    core_bytes: Vec<u8>,
+    scene_resources: LegacySceneResourceStateV1,
+}
+
+const HOSTED_RUNTIME_SNAPSHOT_VERSION: u16 = 1;
 
 /// Sendable owner of one non-Send RFVP hosted-core session.
 pub struct HostedFvpSession {
@@ -128,20 +144,67 @@ impl HostedFvpSession {
 
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, HostedRuntimeError> {
         self.worker.execute_result(|state| {
-            state
+            let core_bytes = state
                 .core
                 .snapshot_bytes()
-                .map_err(HostedRuntimeError::Core)
+                .map_err(HostedRuntimeError::Core)?;
+            let bytes = bincode::serialize(&HostedRuntimeSnapshotV1 {
+                version: HOSTED_RUNTIME_SNAPSHOT_VERSION,
+                core_bytes,
+                scene_resources: state.translator.snapshot(),
+            })
+            .map_err(|_| HostedRuntimeError::Snapshot)?;
+            if bytes.len() > MAX_HOSTED_RUNTIME_SNAPSHOT_BYTES {
+                return Err(HostedRuntimeError::Snapshot);
+            }
+            Ok(bytes)
         })?
     }
 
     pub fn restore_bytes(&self, bytes: Vec<u8>) -> Result<(), HostedRuntimeError> {
         self.worker.execute_result(move |state| {
+            if bytes.is_empty() || bytes.len() > MAX_HOSTED_RUNTIME_SNAPSHOT_BYTES {
+                return Err(HostedRuntimeError::Snapshot);
+            }
+            let snapshot: HostedRuntimeSnapshotV1 =
+                bincode::deserialize(&bytes).map_err(|_| HostedRuntimeError::Snapshot)?;
+            if snapshot.version != HOSTED_RUNTIME_SNAPSHOT_VERSION {
+                return Err(HostedRuntimeError::Snapshot);
+            }
             state
                 .core
-                .restore_bytes(&bytes)
+                .restore_bytes(&snapshot.core_bytes)
+                .map_err(HostedRuntimeError::Core)?;
+            state.translator.restore(snapshot.scene_resources);
+            Ok(())
+        })?
+    }
+
+    pub fn read_resource(
+        &self,
+        resource_uri: String,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, HostedRuntimeError> {
+        self.worker.execute_result(move |state| {
+            state
+                .core
+                .read_resource(&resource_uri, max_bytes)
                 .map_err(HostedRuntimeError::Core)
         })?
+    }
+
+    pub fn complete_video(&self) -> Result<(), HostedRuntimeError> {
+        self.worker.execute_result(|state| {
+            state
+                .core
+                .complete_video()
+                .map_err(HostedRuntimeError::Core)
+        })?
+    }
+
+    pub fn quit_requested(&self) -> Result<bool, HostedRuntimeError> {
+        self.worker
+            .execute_result(|state| Ok::<_, HostedRuntimeError>(state.core.quit_requested()))?
     }
 
     pub fn shutdown(self) -> Result<(), HostedRuntimeError> {
@@ -194,6 +257,10 @@ mod tests {
         session
             .restore_bytes(snapshot)
             .expect("snapshot must restore");
+        assert!(!session
+            .quit_requested()
+            .expect("quit state must be readable"));
+        assert!(session.read_resource("missing.bin".into(), 16).is_err());
         session.shutdown().expect("worker must stop");
     }
 
