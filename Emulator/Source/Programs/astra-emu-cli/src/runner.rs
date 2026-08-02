@@ -919,6 +919,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     host_profile.viewport_width = launch.viewport_width;
     host_profile.viewport_height = launch.viewport_height;
     host_profile.tick_duration_ns = probe.runtime.fixed_delta_ns;
+    host_profile.presentation_rate_hz = launch.presentation_rate_hz;
     host_profile.providers.product_adapter = "astra.emu".into();
     host_profile.providers.video_decode = launch.video_provider.clone();
     // FVP Headless executes the same retained semantic GPU scene path as the
