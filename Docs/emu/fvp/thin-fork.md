@@ -10,6 +10,8 @@ FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 f
 
 另一个由公开无资源脚本生成的 signed dynamic FVP v5 Headless lifecycle case 已在 2 step 达到 `terminal`，并同时通过 snapshot round-trip、PNG checkpoint、正常 session shutdown 与 host shutdown。该 checkpoint 是预期的空黑 frame，只证明 `ExitMode(3)` 到 hosted terminal 的生命周期传播，不是产品视觉、路线或媒体证据。
 
+公开生成的 input case 将主按钮 edge 送入 hosted session，并在下一固定 step 将一个已分组的 64×64 tile 从黑色改为红色；其 3 step signed dynamic run 同时通过 snapshot round-trip、PNG checkpoint、terminal 与 shutdown。人工检查 checkpoint，左上角 tile 为红色且其余画面保持黑色。这是 physical input → VM → `ScenePacket` → CPU reference 的可见 E2，证明输入 transport 和语义提交；它不替代实际游戏路线、文本、媒体或平台 E3。
+
 ## 不可跨越的边界
 
 ```text
