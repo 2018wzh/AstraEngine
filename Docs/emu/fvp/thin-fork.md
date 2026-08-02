@@ -2,7 +2,7 @@
 
 ## 目的与当前状态
 
-FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。它只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
+FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。补丁基底固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）；为复用已验证的文本 surface 所有权实现，补丁栈还保留一个经审查、未改写的上游移植补丁 `a94fa18`。除此以外只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
 截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals/text、snapshot/restore、canonical state identity、最多 64 MiB 的 opaque snapshot bytes、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开；动态 provider 每 tick 只接收一个 hosted delta，转换为 `ScenePacket`、媒体命令、local-only text lease 和 `PreparedCommit`。named audio 在 fork 中只排入 source URI，资源字节由 adapter 后续经 session-bound host VFS 读取；RFVP core 不再通过内部或进程 VFS 读取这类资源。`ScenePacket` translator 将 create/partial-update/destroy 转为有界资源操作，先验证完整事务再替换元数据；restore 后的纹理重建显式开始新的资源 epoch，Manager/WGPU 与 CLI CPU reference 都先清除旧资源、独立复验 commit，再写入各自资源存储；solid draw 使用保留的白色 sentinel texture，不借助平台 handle。`astra-emu-fvp` 已不再编译依赖本地 RFVP vendor core。旧 render-frame、逐 syscall journal 和逐 opcode 字符串 trace 不再参与 v5 provider。
 
@@ -20,7 +20,7 @@ FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 f
 
 同日复用了既有本机排障中验证过的 12 条物理输入序列：恢复/focus、650 tick 前置、同 tick pointer move/primary down、下一 tick primary up，以及 1,256 与 1,260 tick checkpoint。当前签名动态 v5 Headless 运行完整消费该序列，在 1,261 fixed step、720 scene/raster frame 后通过 snapshot round-trip、正常 shutdown、受限 VFS 和非静音非削波 WAV artifact，且没有 diagnostic。两个转场 checkpoint 的图像 hash 相同，人工检查均为完整标题画面；因此该复跑只证明历史输入格式和当前 host 生命周期兼容，**不**把它计为菜单选择、路线推进或 RFVP parity 证据。后续真实路线验收必须先记录当前 build/profile 下经 host 消费且产生状态/画面变化的输入意图，再以独立 checkpoint 验证。
 
-该复跑暴露了 hosted-core 漏掉 `RfvpEvent::KeyDown`/`KeyUp` 到 `InputManager` 的映射：CLI 虽记录 `confirm` edge，fork 却只转发 pointer/wheel，因而键盘输入不能到达 VM。fork 已在 `461b799d9f86422f3fee16fbc245bbbeb1b9075d` 修复完整 FVP key-bit 映射并由 Astra 精确 pin。使用同一受控安装重新运行后，4,200 fixed step 的显式确认序列产生 814 scene/raster frame、2,840,000 audio frame、非静音非削波 WAV、完整标题菜单 checkpoint、snapshot round-trip 和零 diagnostic；随后以 pointer click 选择首个菜单项的 5,100 step run 产生 942 scene/raster frame、3,637,156 audio frame及多段非静音非削波 WAV，两个点击后 checkpoint 为完整黑场。后者已证明键盘/鼠标 edge 参与真实脚本、菜单状态和媒体链路，但黑场尚未区分为内容转场、等待还是视频阶段，不能作为正文视觉、route terminal 或视频 parity 结论。
+该复跑暴露了 hosted-core 漏掉 `RfvpEvent::KeyDown`/`KeyUp` 到 `InputManager` 的映射：CLI 虽记录 `confirm` edge，fork 却只转发 pointer/wheel，因而键盘输入不能到达 VM。fork 已在 `90af8f88cb10ccad70dfc74fa914c286993aaf3d` 修复完整 FVP key-bit 映射并由 Astra 精确 pin。使用同一受控安装重新运行后，4,200 fixed step 的显式确认序列产生 814 scene/raster frame、2,840,000 audio frame、非静音非削波 WAV、完整标题菜单 checkpoint、snapshot round-trip 和零 diagnostic；随后以 pointer click 选择首个菜单项的 5,100 step run 产生 942 scene/raster frame、3,637,156 audio frame及多段非静音非削波 WAV，两个点击后 checkpoint 为完整黑场。后者已证明键盘/鼠标 edge 参与真实脚本、菜单状态和媒体链路，但黑场尚未区分为内容转场、等待还是视频阶段，不能作为正文视觉、route terminal 或视频 parity 结论。
 
 ## 不可跨越的边界
 
@@ -43,7 +43,7 @@ RuntimeWorld + platform renderer/audio/media
 
 ## 更新与 rebase
 
-1. 在 fork 分支上逐个提交可审查 patch，标题使用 `[hosted]`。
+1. 在 fork 分支上逐个提交可审查 patch，标题使用 `[hosted]`。补丁顺序以 `0.5.0` 为基底；任何获准复用的上游成熟移植先单独记录来源、范围和理由，再置于 hosted patch 之前。
 2. 每个 patch 必须只修改相邻 RFVP 模块，并在提交前记录 upstream base、patch id、许可证来源和验证命令。
 3. Astra 的 Cargo dependency 只钉住已推送的 git revision；禁止再次 vendor RFVP 或使用浮动 branch/tag。
 4. 更新 upstream 时先在 fork rebase，运行 upstream 回归和 hosted-core 测试，再更新 Astra pin。不得把 Astra adapter 修改混入 fork rebase。

@@ -8,8 +8,9 @@ source are MPL-2.0; package release binds this record, the MPL-2.0 text, the
 source-offer identity, fork revision and family binary identity.
 
 The fork retains RFVP's file layout and platform applications. Its small,
-replayable patch stack adds only host-neutral `hosted` capability beside
-upstream modules:
+replayable patch stack starts at `0.5.0`, then retains the reviewed unmodified
+upstream portability patch `a94fa18` for bounded text-surface ownership before
+adding host-neutral `hosted` capability beside upstream modules:
 
 - `HostedSession` owns VM globals and transient text per session, accepts one
   bounded input batch, and returns one bounded semantic delta. It never sees
