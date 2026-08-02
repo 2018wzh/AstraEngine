@@ -9347,7 +9347,7 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=0ea3259efc753fbf1ae2cd1bf013ff700f4eee2c#0ea3259efc753fbf1ae2cd1bf013ff700f4eee2c"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=29fb36039d6318e4f5d76b2ef9443a40126df9be#29fb36039d6318e4f5d76b2ef9443a40126df9be"
 dependencies = [
  "ab_glyph",
  "anyhow",

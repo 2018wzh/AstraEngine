@@ -7,11 +7,12 @@
 use astra_core::Hash256;
 use astra_emu_family_api::{
     LegacyBlendMode, LegacyDrawV1, LegacyRenderFrameV1, LegacyScissorV1,
-    LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVertexV1,
+    LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVertexV1, LegacyVideoCommandV1,
+    LegacyVideoMode,
 };
 use rfvp_hosted::{
     host_api::{BlendMode, DrawSolidCommand, PixelFormat, TextureId},
-    hosted::{HostedSceneOperation, HostedStepDelta},
+    hosted::{HostedSceneOperation, HostedStepDelta, HostedVideoOperation},
 };
 
 const MAX_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
@@ -126,6 +127,46 @@ pub fn scene_packet_from_delta(
     }
 }
 
+/// Converts video deltas into host-resolved resource commands. Encoded bytes
+/// remain behind the active VFS policy and are not copied into an ABI packet.
+pub fn video_commands_from_delta(
+    delta: &HostedStepDelta,
+) -> Result<Vec<LegacyVideoCommandV1>, HostedAdapterError> {
+    delta
+        .video
+        .iter()
+        .enumerate()
+        .map(|(index, operation)| match operation {
+            HostedVideoOperation::Play {
+                resource_uri,
+                byte_len,
+                modal_with_audio,
+                stage_width,
+                stage_height,
+            } => {
+                if *byte_len == 0 || *byte_len > 512 * 1024 * 1024 {
+                    return Err(HostedAdapterError::VideoResourceBounds);
+                }
+                let command = LegacyVideoCommandV1::Play {
+                    playback_id: format!("rfvp-{}-{index}", delta.tick.frame_index),
+                    resource_uri: resource_uri.clone(),
+                    mode: if *modal_with_audio {
+                        LegacyVideoMode::ModalWithAudio
+                    } else {
+                        LegacyVideoMode::LayerNoAudio
+                    },
+                    stage_width: *stage_width,
+                    stage_height: *stage_height,
+                };
+                command
+                    .validate()
+                    .map_err(|error| HostedAdapterError::InvalidPacket(error.code().to_owned()))?;
+                Ok(command)
+            }
+        })
+        .collect()
+}
+
 fn push_texture(
     updates: &mut Vec<LegacyTextureUpdateV1>,
     bytes: &mut usize,
@@ -217,6 +258,8 @@ pub enum HostedAdapterError {
     UploadBudget,
     #[error("ASTRA_FVP_HOSTED_PACKET:{0}")]
     InvalidPacket(String),
+    #[error("ASTRA_FVP_HOSTED_VIDEO_RESOURCE_BOUNDS")]
+    VideoResourceBounds,
 }
 
 #[cfg(test)]
