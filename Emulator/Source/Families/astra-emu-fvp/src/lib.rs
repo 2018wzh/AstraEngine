@@ -5,6 +5,7 @@ mod factory;
 #[cfg(feature = "dynamic-plugin-export")]
 mod ffi;
 mod hcb;
+mod hosted;
 mod media_decode;
 mod provider;
 mod vfs_audit;
@@ -12,6 +13,7 @@ mod vfs_audit;
 pub use archive::*;
 pub use factory::*;
 pub use hcb::*;
+pub use hosted::*;
 pub use media_decode::*;
 pub use provider::*;
 
