@@ -61,7 +61,7 @@ RuntimeWorld + platform renderer/audio/media
 
 ## 当前性能证据
 
-本地授权样本的一次 clean Release GPU Headless 运行使用同一物理输入，在 DX12 集显 `wgpu_offscreen` 上完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation（其中前 1,200 个是 warmup）。运行报告为 v3：Runtime p99 为 2.63 ms、presentation p99 为 0.64 ms、CPU raster readback 为一个 checkpoint、snapshot round-trip 与所有输入消费通过、diagnostic 为零。该运行同时产出并可解析 183,000 条 Perfetto Trace Event，CPU raster phase 的样本数为零。它证明本次 60 FPS baseline 的单轮 E2；尚未形成签名 trace manifest，不替代三轮 release-reference 对照、10 分钟原生音频 soak、route/media PTS parity 或 Windows Manager E3。
+本地授权样本的一次 clean Release GPU Headless 运行使用同一物理输入，在 DX12 集显 `wgpu_offscreen` 上完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation（其中前 1,200 个是 warmup）。正式 `astra.performance_report.v1` 为 `pass`：Runtime p99 为 2.80 ms、presentation p99 为 0.65 ms、deadline miss 为零，稳态 upload/readback/renderer allocation p95 均为零，memory growth 为零；v3 报告绑定 performance report 与 trace manifest hash。该运行同时产出并可解析 183,000 条 Perfetto Trace Event，trace 丢失和截断均为零，CPU raster phase 的样本数为零。snapshot/restore 正确性由同一输入的独立预跑验证；性能段不在采样窗口执行该昂贵操作。它证明本次 60 FPS baseline 的单轮 E2；不替代三轮 release-reference 对照、10 分钟原生音频 soak、route/media PTS parity 或 Windows Manager E3。
 
 ## 迁移约束
 
