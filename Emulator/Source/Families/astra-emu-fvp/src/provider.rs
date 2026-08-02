@@ -440,6 +440,14 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             }
         };
         session.last_step = input.tick_index;
+        tracing::trace!(
+            event = "astra.emu.fvp.hosted_delta",
+            fixed_step = input.tick_index,
+            scene_operation_count = delta.scene.len(),
+            audio_operation_count = delta.audio.len(),
+            video_operation_count = delta.video.len(),
+            text_operation_count = delta.text.len()
+        );
 
         let mut effects = Vec::new();
         let mut waits = Vec::new();
