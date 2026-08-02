@@ -3,6 +3,29 @@ use std::{env, fs, path::Path, process::Command};
 use sha2::{Digest, Sha256};
 
 fn main() {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("ASTRA_EMU_CLI_MANIFEST_DIR_MISSING");
+    let source_root = git_output(&manifest_dir, ["rev-parse", "--show-toplevel"]);
+    let source_revision = git_output(&source_root, ["rev-parse", "HEAD"]);
+    assert!(
+        source_revision.len() == 40 && source_revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "ASTRA_EMU_CLI_SOURCE_REVISION_INVALID"
+    );
+    let source_dirty = !git_output(
+        &source_root,
+        ["status", "--porcelain", "--untracked-files=no"],
+    )
+    .is_empty();
+    for git_path in [
+        git_output(&source_root, ["rev-parse", "--git-path", "HEAD"]),
+        git_output(&source_root, ["rev-parse", "--git-path", "index"]),
+    ] {
+        println!("cargo:rerun-if-changed={git_path}");
+    }
+    println!("cargo:rustc-env=ASTRA_EMU_CLI_SOURCE_REVISION={source_revision}");
+    println!(
+        "cargo:rustc-env=ASTRA_EMU_CLI_SOURCE_DIRTY={}",
+        u8::from(source_dirty)
+    );
     let rustc = env::var_os("RUSTC").expect("ASTRA_EMU_CLI_BUILD_RUSTC_MISSING");
     let output = Command::new(rustc)
         .arg("-Vv")
@@ -31,9 +54,7 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_CLI_RUSTC_FINGERPRINT=sha256.{}",
         hex_sha256(identity.as_bytes())
     );
-    let fvp_manifest =
-        Path::new(&env::var("CARGO_MANIFEST_DIR").expect("ASTRA_EMU_CLI_MANIFEST_DIR_MISSING"))
-            .join("../../Families/astra-emu-fvp/Cargo.toml");
+    let fvp_manifest = Path::new(&manifest_dir).join("../../Families/astra-emu-fvp/Cargo.toml");
     let hosted_fork_revision = hosted_fork_revision(&fvp_manifest);
     println!("cargo:rerun-if-changed={}", fvp_manifest.display());
     let features = format!("rfvp={hosted_fork_revision};features=none");
@@ -61,6 +82,19 @@ fn main() {
         );
     }
     println!("cargo:rerun-if-env-changed=RUSTC");
+}
+
+fn git_output<const N: usize>(cwd: &str, arguments: [&str; N]) -> String {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args(arguments)
+        .output()
+        .expect("ASTRA_EMU_CLI_GIT_EXECUTION_FAILED");
+    assert!(output.status.success(), "ASTRA_EMU_CLI_GIT_QUERY_FAILED");
+    String::from_utf8(output.stdout)
+        .expect("ASTRA_EMU_CLI_GIT_OUTPUT_NOT_UTF8")
+        .trim()
+        .to_owned()
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {

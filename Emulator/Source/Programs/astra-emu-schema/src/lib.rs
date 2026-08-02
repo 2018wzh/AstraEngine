@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
-use astra_emu_cli::HeadlessRunReportV2;
+use astra_emu_cli::HeadlessRunReportV3;
 use astra_emu_family_api::{
     LegacyFamilyPluginDescriptor, LegacyProbeReport, LegacySnapshotEnvelope, LegacyStepInput,
     LegacyStepOutput,
@@ -18,7 +18,7 @@ pub fn schemas() -> BTreeMap<&'static str, RootSchema> {
     BTreeMap::from([
         (
             "astra-emu-headless-run-report.schema.json",
-            schema_for!(HeadlessRunReportV2),
+            schema_for!(HeadlessRunReportV3),
         ),
         (
             "android-native-plugin-manifest.schema.json",

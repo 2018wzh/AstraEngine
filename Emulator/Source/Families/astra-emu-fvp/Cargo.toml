@@ -19,7 +19,7 @@ astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
-rfvp-hosted = { package = "rfvp", git = "https://github.com/2018wzh/rfvp.git", rev = "90af8f88cb10ccad70dfc74fa914c286993aaf3d", default-features = false, features = ["hosted"] }
+rfvp-hosted = { package = "rfvp", git = "https://github.com/2018wzh/rfvp.git", rev = "754605114f359b8e7f6ec4b4c62168cc9df7c8f8", default-features = false, features = ["hosted"] }
 bincode = "1.3"
 encoding_rs.workspace = true
 postcard.workspace = true
@@ -45,5 +45,5 @@ sha2.workspace = true
 upstream = "https://github.com/xmoezzz/rfvp"
 upstream_revision = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3"
 hosted_fork = "https://github.com/2018wzh/rfvp"
-hosted_fork_revision = "90af8f88cb10ccad70dfc74fa914c286993aaf3d"
+hosted_fork_revision = "754605114f359b8e7f6ec4b4c62168cc9df7c8f8"
 license_notice = "THIRD_PARTY_NOTICES.md"

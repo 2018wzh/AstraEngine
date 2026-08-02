@@ -672,7 +672,18 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                     fixed_delta_ns: profile.fixed_delta_ns,
                     session_seed: request.seed,
                     compatibility_profile: profile.compatibility_profile,
-                    family_options: profile.family_options,
+                    family_options: {
+                        let mut options = profile.family_options;
+                        options.insert(
+                            "astra.hosted_trace_profile".into(),
+                            match request.integrity_mode {
+                                RuntimeTickIntegrityMode::Shipping => "shipping",
+                                RuntimeTickIntegrityMode::Evidence => "evidence",
+                            }
+                            .into(),
+                        );
+                        options
+                    },
                 },
             )
             .map_err(|error| error.to_string())?;

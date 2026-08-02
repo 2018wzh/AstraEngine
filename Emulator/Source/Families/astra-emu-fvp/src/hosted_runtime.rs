@@ -81,6 +81,7 @@ impl HostedFvpSession {
         nls: FvpNls,
         stage_width: u32,
         stage_height: u32,
+        trace_profile: HostedTraceProfile,
     ) -> Result<Self, HostedRuntimeError> {
         if !script_uri.ends_with(".hcb") {
             return Err(HostedRuntimeError::ScriptUri);
@@ -101,7 +102,7 @@ impl HostedFvpSession {
                 HostedLimits::default(),
             )
             .map_err(HostedRuntimeError::Core)?;
-            core.set_trace_profile(HostedTraceProfile::Shipping)
+            core.set_trace_profile(trace_profile)
                 .map_err(HostedRuntimeError::Core)?;
             if let Err(error) = core.boot(
                 &mut host,
@@ -140,6 +141,7 @@ impl HostedFvpSession {
         nls: FvpNls,
         stage_width: u32,
         stage_height: u32,
+        trace_profile: HostedTraceProfile,
     ) -> Result<Self, HostedRuntimeError> {
         let expected_script_uri = normalize_script_uri(&expected_script_uri)?;
         let worker = HostedSessionWorker::try_spawn(move || {
@@ -154,7 +156,7 @@ impl HostedFvpSession {
                 HostedLimits::default(),
             )
             .map_err(HostedRuntimeError::Core)?;
-            core.set_trace_profile(HostedTraceProfile::Shipping)
+            core.set_trace_profile(trace_profile)
                 .map_err(HostedRuntimeError::Core)?;
             if let Err(error) = core.boot(
                 &mut host,
@@ -355,6 +357,7 @@ mod tests {
             FvpNls::Utf8,
             1024,
             768,
+            HostedTraceProfile::Shipping,
         )
         .expect("hosted case must boot");
         let (delta, prepared) = session

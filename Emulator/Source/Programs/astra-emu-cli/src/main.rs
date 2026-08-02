@@ -1,9 +1,23 @@
 use std::path::PathBuf;
 
-use astra_emu_cli::{run_headless, run_native, HeadlessLaunch, NativeLaunch};
+use astra_emu_cli::{
+    run_headless, run_native, HeadlessLaunch, HeadlessPerformanceArtifacts, NativeLaunch,
+};
 use clap::{Parser, Subcommand};
 
 mod vfs;
+
+#[global_allocator]
+static ASTRA_EMU_ALLOCATOR: astra_observability::TrackingAllocator =
+    astra_observability::TrackingAllocator::new();
+
+fn parse_presentation_rate(value: &str) -> Result<u32, String> {
+    match value {
+        "60" => Ok(60),
+        "120" => Ok(120),
+        _ => Err("presentation rate must be 60 or 120".into()),
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -75,6 +89,24 @@ enum CliCommand {
         /// Raster and present one out of every N fixed steps; parity runs must use 1.
         #[arg(long, default_value_t = 1)]
         frame_sample_interval: u64,
+        /// Presentation cadence. The Runtime remains at 60 Hz; 120 Hz uses two
+        /// semantic GPU presentations per fixed step.
+        #[arg(long, default_value_t = 60, value_parser = parse_presentation_rate)]
+        presentation_rate_hz: u32,
+        #[arg(long)]
+        perfetto_trace: Option<PathBuf>,
+        /// A profile-bound shared performance budget. Requires all performance outputs.
+        #[arg(long, requires_all = ["performance_report", "performance_trace_manifest", "perfetto_trace"])]
+        performance_budget: Option<PathBuf>,
+        /// Local-private shared performance report output.
+        #[arg(long, requires_all = ["performance_budget", "performance_trace_manifest", "perfetto_trace"])]
+        performance_report: Option<PathBuf>,
+        /// Local-private manifest binding report and Perfetto trace identities.
+        #[arg(long, requires_all = ["performance_budget", "performance_report", "perfetto_trace"])]
+        performance_trace_manifest: Option<PathBuf>,
+        /// Warmup semantic presentations before the fixed 72,000-frame measurement.
+        #[arg(long, default_value_t = 1_200)]
+        performance_warmup_presentations: u64,
         /// Stream and hash every visible resource after the gameplay run.
         #[arg(long, default_value_t = false)]
         audit_all_resources: bool,
@@ -140,6 +172,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verify_snapshot,
             artifact_retention,
             frame_sample_interval,
+            presentation_rate_hz,
+            perfetto_trace,
+            performance_budget,
+            performance_report,
+            performance_trace_manifest,
+            performance_warmup_presentations,
             audit_all_resources,
             resume_snapshot,
             snapshot_output,
@@ -148,6 +186,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event = "astra_emu_cli_headless_started",
                 family = family.as_str()
             );
+            let performance = match (
+                performance_budget,
+                performance_report,
+                performance_trace_manifest,
+            ) {
+                (None, None, None) => None,
+                (Some(budget_path), Some(report_path), Some(trace_manifest_path)) => {
+                    Some(HeadlessPerformanceArtifacts {
+                        budget_path,
+                        report_path,
+                        trace_manifest_path,
+                        warmup_presentations: performance_warmup_presentations,
+                    })
+                }
+                _ => return Err("ASTRA_EMU_PERFORMANCE_ARTIFACT_SET_INCOMPLETE".into()),
+            };
             let report = run_headless(HeadlessLaunch {
                 family_id: family.clone(),
                 game_dir,
@@ -163,6 +217,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 verify_snapshot,
                 artifact_retention,
                 frame_sample_interval,
+                presentation_rate_hz,
+                perfetto_trace,
+                performance,
                 audit_all_resources,
                 resume_snapshot,
                 snapshot_output,

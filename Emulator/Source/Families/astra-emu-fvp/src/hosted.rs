@@ -646,6 +646,8 @@ mod tests {
             audio: Vec::<HostedAudioOperation>::new(),
             video: Vec::new(),
             text: Vec::new(),
+            logs: Vec::new(),
+            log_dropped_count: 0,
         }
     }
 

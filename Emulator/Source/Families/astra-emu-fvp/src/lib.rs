@@ -21,6 +21,7 @@ pub use media_decode::*;
 pub use provider::*;
 
 pub const RFVP_REFERENCE_REVISION: &str = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3";
+pub const RFVP_HOSTED_FORK_REVISION: &str = "754605114f359b8e7f6ec4b4c62168cc9df7c8f8";
 pub const FVP_FAMILY_ID: &str = "fvp";
 pub const FVP_PROVIDER_ID: &str = "astra.emu.family.fvp";
 
