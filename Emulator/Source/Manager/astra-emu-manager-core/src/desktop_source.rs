@@ -12,7 +12,7 @@ use astra_byte_source::{
     DEFAULT_MAX_RANGE_BYTES,
 };
 use astra_core::Hash256;
-use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
+use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
 use sha2::{Digest, Sha256};
 
 const MAX_ENUMERATED_ENTRIES: usize = 100_001;
@@ -527,6 +527,91 @@ impl LegacyVfsReader for DesktopVfsRegistry {
         self.record_access(mount_set_id, &uri.to_ascii_lowercase(), &result)?;
         Ok(result)
     }
+
+    fn enumerate_by_extension(
+        &self,
+        mount_set_id: &str,
+        root: &str,
+        extension_without_dot: &str,
+        max_entries: u32,
+    ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+        if max_entries == 0 || max_entries as usize > MAX_ENUMERATED_ENTRIES {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_ENUM_BOUNDS",
+                "VFS enumeration limit is outside the supported bounds",
+            ));
+        }
+        if extension_without_dot.is_empty() || extension_without_dot.contains(['/', '\\', '\0']) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_ENUM_ARGUMENT",
+                "VFS enumeration extension is invalid",
+            ));
+        }
+        if !root.is_empty() {
+            validate_relative_path(root).map_err(|_| {
+                LegacyProviderError::invalid(
+                    "ASTRA_EMU_VFS_ENUM_ARGUMENT",
+                    "VFS enumeration root is invalid",
+                )
+            })?;
+        }
+
+        let normalized_root = root.to_ascii_lowercase();
+        let suffix = format!(".{}", extension_without_dot.to_ascii_lowercase());
+        let mounts = self.mounts.lock().map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_REGISTRY_LOCK",
+                "desktop VFS registry lock is poisoned",
+            )
+        })?;
+        let mount = mounts.get(mount_set_id).ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_MOUNT_MISSING",
+                "desktop VFS mount is not active",
+            )
+        })?;
+
+        let matches_root = |path: &str| {
+            normalized_root.is_empty()
+                || path == normalized_root
+                || path
+                    .strip_prefix(&normalized_root)
+                    .is_some_and(|tail| tail.starts_with('/'))
+        };
+        let mut entries = BTreeMap::new();
+        for (uri, file) in &mount.files {
+            if matches_root(uri) && uri.ends_with(&suffix) {
+                entries.insert(
+                    uri.clone(),
+                    ByteSourceStat {
+                        len: file.byte_size,
+                        revision: file.revision.clone(),
+                    },
+                );
+            }
+        }
+        for (uri, bytes) in &mount.overlays {
+            if matches_root(uri) && uri.ends_with(&suffix) {
+                entries.insert(
+                    uri.clone(),
+                    ByteSourceStat {
+                        len: bytes.len() as u64,
+                        revision: SourceRevision(Hash256::from_sha256(bytes)),
+                    },
+                );
+            }
+        }
+        if entries.len() > max_entries as usize {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_ENUM_BOUNDS",
+                "VFS enumeration exceeded the requested entry bound",
+            ));
+        }
+        Ok(entries
+            .into_iter()
+            .map(|(uri, stat)| LegacyVfsListedFile { uri, stat })
+            .collect())
+    }
 }
 
 fn revision_from_metadata(metadata: &fs::Metadata) -> Result<SourceRevision, std::io::Error> {
@@ -803,5 +888,51 @@ mod tests {
         assert_eq!(first.bytes_read, 17);
         assert!(first.max_range_bytes <= AUDIT_RANGE_BYTES);
         assert!(!first.manifest_hash.to_string().contains("script.bin"));
+    }
+
+    #[test]
+    fn enumerates_extension_with_root_overlay_and_bounds() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("scripts")).unwrap();
+        fs::write(directory.path().join("scripts/PAINTER.HCB"), b"base").unwrap();
+        fs::write(directory.path().join("scripts/notes.txt"), b"ignored").unwrap();
+        let registry = DesktopVfsRegistry::default();
+        registry
+            .bind("mount.enumerate", directory.path().to_str().unwrap())
+            .unwrap();
+        registry
+            .install_overlays(
+                "mount.enumerate",
+                BTreeMap::from([
+                    ("scripts/painter.hcb".into(), b"overlay".to_vec()),
+                    ("scripts/extra.hcb".into(), b"extra".to_vec()),
+                ]),
+            )
+            .unwrap();
+
+        let entries = registry
+            .enumerate_by_extension("mount.enumerate", "scripts", "hcb", 2)
+            .unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| (entry.uri.as_str(), entry.stat.len))
+                .collect::<Vec<_>>(),
+            vec![("scripts/extra.hcb", 5), ("scripts/painter.hcb", 7)]
+        );
+        assert_eq!(
+            registry
+                .enumerate_by_extension("mount.enumerate", "scripts", "hcb", 1)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_ENUM_BOUNDS"
+        );
+        assert_eq!(
+            registry
+                .enumerate_by_extension("mount.enumerate", "scripts", "../hcb", 2)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_ENUM_ARGUMENT"
+        );
     }
 }

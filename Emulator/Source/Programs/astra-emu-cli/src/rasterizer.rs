@@ -33,17 +33,27 @@ impl CpuStageRasterizer {
         &mut self,
         commit: LegacyPreparedSceneCommitV1,
     ) -> Result<LegacyRenderFrameV1, String> {
-        let verified = self
-            .scene_resources
+        let mut resource_state = if commit.reset_resources {
+            LegacySceneResourceStateV1::default()
+        } else {
+            self.scene_resources.clone()
+        };
+        let verified = resource_state
             .prepare(commit.packet.clone())
             .map_err(|error| format!("ASTRA_EMU_HEADLESS_SCENE_PREPARE:{}", error.code()))?;
         if verified.next_resources != commit.next_resources {
             return Err("ASTRA_EMU_HEADLESS_SCENE_COMMIT_MISMATCH".into());
         }
+        let mut textures = if commit.reset_resources {
+            BTreeMap::new()
+        } else {
+            self.textures.clone()
+        };
         for operation in &verified.packet.resources {
             match operation {
                 LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                    self.insert_texture(
+                    Self::insert_texture_into(
+                        &mut textures,
                         texture.texture_id,
                         texture.width,
                         texture.height,
@@ -53,7 +63,8 @@ impl CpuStageRasterizer {
                     )?;
                 }
                 LegacySceneResourceOperationV1::UpdateTexture(texture) => {
-                    self.update_texture(
+                    Self::update_texture_into(
+                        &mut textures,
                         texture.texture_id,
                         texture.x,
                         texture.y,
@@ -65,21 +76,15 @@ impl CpuStageRasterizer {
                     )?;
                 }
                 LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
-                    self.textures.remove(texture_id);
+                    textures.remove(texture_id);
                 }
             }
         }
-        self.scene_resources.commit(verified.clone());
+        resource_state.commit(verified.clone());
+        self.scene_resources = resource_state;
+        self.textures = textures;
         self.width = verified.packet.width;
         self.height = verified.packet.height;
-        self.textures.retain(|texture_id, _| {
-            *texture_id == u32::MAX
-                || verified
-                    .packet
-                    .draws
-                    .iter()
-                    .any(|draw| draw.texture_id == *texture_id)
-        });
         Ok(LegacyRenderFrameV1 {
             width: verified.packet.width,
             height: verified.packet.height,
@@ -150,11 +155,31 @@ impl CpuStageRasterizer {
         pixels: &[u8],
         content_hash: Hash256,
     ) -> Result<(), String> {
+        Self::insert_texture_into(
+            &mut self.textures,
+            texture_id,
+            width,
+            height,
+            format,
+            pixels,
+            content_hash,
+        )
+    }
+
+    fn insert_texture_into(
+        textures: &mut BTreeMap<u32, Arc<Texture>>,
+        texture_id: u32,
+        width: u32,
+        height: u32,
+        format: LegacyTextureFormat,
+        pixels: &[u8],
+        content_hash: Hash256,
+    ) -> Result<(), String> {
         if Hash256::from_sha256(pixels) != content_hash {
             return Err("ASTRA_EMU_HEADLESS_TEXTURE_HASH".into());
         }
         let rgba8 = rgba8_pixels(width, height, format, pixels)?;
-        self.textures.insert(
+        textures.insert(
             texture_id,
             Arc::new(Texture {
                 width,
@@ -165,8 +190,8 @@ impl CpuStageRasterizer {
         Ok(())
     }
 
-    fn update_texture(
-        &mut self,
+    fn update_texture_into(
+        textures: &mut BTreeMap<u32, Arc<Texture>>,
         texture_id: u32,
         x: u32,
         y: u32,
@@ -179,8 +204,7 @@ impl CpuStageRasterizer {
         if Hash256::from_sha256(pixels) != content_hash {
             return Err("ASTRA_EMU_HEADLESS_TEXTURE_HASH".into());
         }
-        let previous = self
-            .textures
+        let previous = textures
             .get(&texture_id)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_MISSING".to_owned())?;
         let right = x
@@ -201,7 +225,11 @@ impl CpuStageRasterizer {
         for row in 0..height {
             let destination = usize::try_from(y + row)
                 .ok()
-                .and_then(|row| usize::try_from(previous.width).ok().and_then(|stride| row.checked_mul(stride)))
+                .and_then(|row| {
+                    usize::try_from(previous.width)
+                        .ok()
+                        .and_then(|stride| row.checked_mul(stride))
+                })
                 .and_then(|offset| usize::try_from(x).ok().and_then(|x| offset.checked_add(x)))
                 .and_then(|offset| offset.checked_mul(4))
                 .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
@@ -212,16 +240,23 @@ impl CpuStageRasterizer {
             next.rgba8[destination..destination + row_bytes]
                 .copy_from_slice(&update[source..source + row_bytes]);
         }
-        self.textures.insert(texture_id, Arc::new(next));
+        textures.insert(texture_id, Arc::new(next));
         Ok(())
     }
 
     fn draw(&mut self, draw: &LegacyDrawV1) -> Result<(), String> {
-        let texture = self
-            .textures
-            .get(&draw.texture_id)
-            .cloned()
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_MISSING".to_owned())?;
+        let texture = if draw.texture_id == u32::MAX {
+            Arc::new(Texture {
+                width: 1,
+                height: 1,
+                rgba8: vec![255, 255, 255, 255],
+            })
+        } else {
+            self.textures
+                .get(&draw.texture_id)
+                .cloned()
+                .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_MISSING".to_owned())?
+        };
         let (clip_x0, clip_y0, clip_x1, clip_y1) = if let Some(scissor) = draw.scissor {
             if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
                 return Err("ASTRA_EMU_HEADLESS_SCISSOR_INVALID".into());
@@ -494,9 +529,8 @@ fn encode_unorm(value: f32) -> u8 {
 #[cfg(test)]
 mod tests {
     use astra_emu_family_api::{
-        LegacyScenePacketV1, LegacySceneResourceOperationV1,
-        LegacySceneTextureCreateV1, LegacySceneTextureUpdateV1, LegacyTextureUpdateV1,
-        LegacyVertexV1,
+        LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneTextureCreateV1,
+        LegacySceneTextureUpdateV1, LegacyTextureUpdateV1, LegacyVertexV1,
     };
 
     use super::*;

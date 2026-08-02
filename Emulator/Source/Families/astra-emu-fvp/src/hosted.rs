@@ -26,6 +26,7 @@ const MAX_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct HostedScenePacketTranslator {
     resources: LegacySceneResourceStateV1,
+    rehydrate_resources: bool,
 }
 
 impl HostedScenePacketTranslator {
@@ -33,8 +34,13 @@ impl HostedScenePacketTranslator {
         self.resources.clone()
     }
 
-    pub fn restore(&mut self, resources: LegacySceneResourceStateV1) {
-        self.resources = resources;
+    pub fn restore(&mut self, _resources: LegacySceneResourceStateV1) {
+        // RFVP restore replays live texture creation through the hosted
+        // renderer port. The host-side resource cache is not persisted with
+        // the provider snapshot, so the next complete packet must establish
+        // a new resource epoch rather than collide with pre-restore metadata.
+        self.resources = LegacySceneResourceStateV1::default();
+        self.rehydrate_resources = true;
     }
 
     /// Converts and prepares one complete RFVP scene transaction.  Resource
@@ -143,11 +149,13 @@ impl HostedScenePacketTranslator {
                     resources,
                     draws,
                 };
-                let prepared = self
+                let mut prepared = self
                     .resources
                     .prepare(packet)
                     .map_err(|error| HostedAdapterError::InvalidPacket(error.code().to_owned()))?;
+                prepared.reset_resources = self.rehydrate_resources;
                 self.resources.commit(prepared.clone());
+                self.rehydrate_resources = false;
                 Ok(Some(prepared))
             }
             _ => Err(HostedAdapterError::FrameBoundary),
@@ -695,6 +703,35 @@ mod tests {
             [LegacySceneResourceOperationV1::UpdateTexture(texture)] if texture.x == 1
         ));
         assert!(translator.snapshot().textures.contains_key(&9));
+    }
+
+    #[test]
+    fn restored_translator_starts_a_new_resource_epoch() {
+        let mut translator = HostedScenePacketTranslator::default();
+        translator.restore(LegacySceneResourceStateV1::default());
+        let prepared = translator
+            .translate(&delta(vec![
+                HostedSceneOperation::CreateTexture(HostedTextureData {
+                    id: TextureId(9),
+                    desc: TextureDesc {
+                        width: 1,
+                        height: 1,
+                        format: PixelFormat::Rgba8,
+                        mip_count: 1,
+                    },
+                    pixels: Some(vec![0, 0, 0, 255]),
+                }),
+                HostedSceneOperation::BeginFrame {
+                    width: 640,
+                    height: 480,
+                    clear: None,
+                },
+                HostedSceneOperation::EndFrame,
+                HostedSceneOperation::Present,
+            ]))
+            .expect("rehydration packet translates")
+            .expect("complete frame");
+        assert!(prepared.reset_resources);
     }
 
     #[test]

@@ -428,12 +428,20 @@ impl StageGpu {
         target: &wgpu::Texture,
         commit: LegacyPreparedSceneCommitV1,
     ) -> Result<(), String> {
-        let verified = self
-            .scene_resources
+        let resource_state = if commit.reset_resources {
+            LegacySceneResourceStateV1::default()
+        } else {
+            self.scene_resources.clone()
+        };
+        let verified = resource_state
             .prepare(commit.packet.clone())
             .map_err(|error| format!("ASTRA_EMU_STAGE_SCENE_PREPARE:{}", error.code()))?;
         if verified.next_resources != commit.next_resources {
             return Err("ASTRA_EMU_STAGE_SCENE_COMMIT_MISMATCH".into());
+        }
+        if commit.reset_resources {
+            self.textures.clear();
+            self.scene_resources = LegacySceneResourceStateV1::default();
         }
         for operation in &verified.packet.resources {
             match operation {
@@ -455,6 +463,25 @@ impl StageGpu {
                     self.textures.remove(texture_id);
                 }
             }
+        }
+        if verified
+            .packet
+            .draws
+            .iter()
+            .any(|draw| draw.texture_id == u32::MAX)
+            && !self.textures.contains_key(&u32::MAX)
+        {
+            self.upload(
+                context,
+                LegacyTextureUpdateV1 {
+                    texture_id: u32::MAX,
+                    width: 1,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    content_hash: astra_core::Hash256::from_sha256(&[255, 255, 255, 255]),
+                    pixels: vec![255, 255, 255, 255],
+                },
+            )?;
         }
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = context

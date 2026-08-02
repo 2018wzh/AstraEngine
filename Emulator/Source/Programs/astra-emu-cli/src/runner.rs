@@ -954,7 +954,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV2,
         .map_err(|_| "ASTRA_EMU_HEADLESS_ARTIFACT_MANIFEST_READ".to_owned())?;
     let mut manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|_| "ASTRA_EMU_HEADLESS_ARTIFACT_MANIFEST_PARSE".to_owned())?;
-    if artifact_policy.retention == HeadlessArtifactRetention::Checkpoints {
+    if artifact_policy.retention != HeadlessArtifactRetention::ManifestOnly {
         persist_checkpoint_frames(
             &launch.artifact_root,
             &execution.checkpoint_frames,

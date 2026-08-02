@@ -768,6 +768,10 @@ pub struct LegacySceneTextureDescriptorV1 {
 pub struct LegacyPreparedSceneCommitV1 {
     pub packet: LegacyScenePacketV1,
     pub next_resources: LegacySceneResourceStateV1,
+    /// A restored provider may rehydrate every live texture before its next
+    /// draw. Consumers must atomically discard their retained scene resources
+    /// before validating and applying this commit.
+    pub reset_resources: bool,
 }
 
 /// Resource-backed presentation packet. Unlike [`LegacyRenderFrameV1`], this
@@ -1241,6 +1245,7 @@ impl LegacySceneResourceStateV1 {
         Ok(LegacyPreparedSceneCommitV1 {
             packet,
             next_resources: next,
+            reset_resources: false,
         })
     }
 

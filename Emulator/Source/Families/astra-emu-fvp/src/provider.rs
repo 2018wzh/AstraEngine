@@ -481,7 +481,11 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 text: text.text.clone(),
                 speaker: None,
             };
-            if session.ephemeral_text.insert(lease_id.clone(), ephemeral).is_some() {
+            if session
+                .ephemeral_text
+                .insert(lease_id.clone(), ephemeral)
+                .is_some()
+            {
                 session.poisoned = true;
                 return Err(invalid(
                     "ASTRA_FVP_TEXT_LEASE_DUPLICATE",
@@ -1104,10 +1108,6 @@ mod tests {
         worker.shutdown().expect("worker must stop");
     }
 
-
-
-
-
     #[test]
     fn hosted_v5_session_emits_one_semantic_commit_and_restores() {
         let script = terminal_hcb();
@@ -1170,9 +1170,6 @@ mod tests {
             .shutdown(&ctx, &session_id)
             .expect("hosted session must shut down");
     }
-
-
-
 
     fn open_fixture(
         provider: &mut FvpRuntimeProvider,
@@ -1243,5 +1240,4 @@ mod tests {
             profile: "test".into(),
         }
     }
-
 }
