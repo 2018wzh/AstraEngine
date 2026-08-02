@@ -3128,6 +3128,14 @@ impl<'a> RuntimeDriver<'a> {
                 return Err("ASTRA_EMU_HEADLESS_VIDEO_CODEC_UNSUPPORTED".into());
             }
         };
+        tracing::debug!(
+            event = "astra_emu_headless_video_opened",
+            codec = extension,
+            decoded_frame_count = stream.frames.len(),
+            duration_us = stream.duration_us,
+            audio_stream_active = audio_stream_id.is_some(),
+            "opened bounded Headless video stream"
+        );
         self.video = Some(ActiveVideo {
             playback_id,
             resource_uri,
@@ -3221,6 +3229,11 @@ impl<'a> RuntimeDriver<'a> {
             / 1_000;
         if elapsed_us >= video.stream.duration_us {
             let completed = self.video.take().unwrap();
+            tracing::debug!(
+                event = "astra_emu_headless_video_completed",
+                elapsed_us,
+                "completed bounded Headless video stream"
+            );
             if let Some(stream_id) = completed.audio_stream_id {
                 self.audio
                     .close_movie_stream(stream_id, self.platform)

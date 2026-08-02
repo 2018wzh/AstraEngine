@@ -43,6 +43,8 @@ FVP Headless 只接受 `astra.user_input_sequence.v1` 的物理输入。键盘 `
 
 FVP 原生 WMV/ASF/MPEG 在 Headless 中使用与 Manager 相同的 bounded compatibility decoder，不要求 `ffmpeg-vcpkg`。解码结果仍由 Astra-owned Headless media executor按 fixed tick 合成，电影音频进入同一 WAV/meter evidence。MP4/M4V 不走隐式 fallback，必须由 profile 显式绑定已编译的平台 video provider。
 
+Headless 会以 `astra_emu_headless_video_opened` 和 `astra_emu_headless_video_completed` 记录媒体生命周期；字段只包含 codec、decoded frame count、duration、audio stream 是否激活和 elapsed time，不记录资源 URI、路径或媒体内容。这样黑场检查能区分已打开/已完成视频与普通场景或输入等待，但视觉与 PTS parity 仍必须由 checkpoint 和对应 artifact evidence 判断。
+
 ## rfvp tools
 
 | Tool | Input | Output | AstraEMU use |
