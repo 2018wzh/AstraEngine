@@ -442,7 +442,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             }
         };
         session.last_step = input.tick_index;
-        tracing::trace!(
+        tracing::debug!(
             event = "astra.emu.fvp.hosted_delta",
             fixed_step = input.tick_index,
             scene_operation_count = delta.scene.len(),
