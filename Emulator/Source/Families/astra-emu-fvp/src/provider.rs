@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     panic::{catch_unwind, AssertUnwindSafe},
     sync::Arc,
 };
@@ -349,10 +349,12 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 ));
             }
             let nls = parse_nls_option(&request.family_options)?;
+            let pack_paths = parse_pack_paths_option(&request.family_options)?;
             HostedFvpSession::open_vfs(
                 host,
                 ctx.mount_set_id.clone(),
                 script_uri,
+                pack_paths,
                 nls,
                 stage_width,
                 stage_height,
@@ -997,6 +999,41 @@ fn parse_nls_option(options: &BTreeMap<String, String>) -> Result<FvpNls, Legacy
     }
 }
 
+fn parse_pack_paths_option(
+    options: &BTreeMap<String, String>,
+) -> Result<Vec<String>, LegacyProviderError> {
+    let encoded = options.get("fvp.pack_paths").ok_or_else(|| {
+        invalid(
+            "ASTRA_FVP_PACK_PATHS",
+            "host VFS cases must explicitly declare fvp.pack_paths",
+        )
+    })?;
+    let paths: Vec<String> = serde_json::from_str(encoded).map_err(|_| {
+        invalid(
+            "ASTRA_FVP_PACK_PATHS",
+            "fvp.pack_paths must be a JSON string array",
+        )
+    })?;
+    if paths.len() > MAX_CASE_FILES {
+        return Err(invalid(
+            "ASTRA_FVP_PACK_PATHS",
+            "fvp.pack_paths exceeds the hosted file bound",
+        ));
+    }
+    let mut normalized = BTreeSet::new();
+    for path in paths {
+        let path = normalize_vfs_path(&path)
+            .map_err(|message| invalid("ASTRA_FVP_PACK_PATHS", message))?;
+        if !path.ends_with(".bin") || !normalized.insert(path) {
+            return Err(invalid(
+                "ASTRA_FVP_PACK_PATHS",
+                "fvp.pack_paths must contain unique normalized .bin files",
+            ));
+        }
+    }
+    Ok(normalized.into_iter().collect())
+}
+
 fn parse_stage_dimensions(
     options: &BTreeMap<String, String>,
 ) -> Result<(u32, u32), LegacyProviderError> {
@@ -1195,7 +1232,12 @@ mod tests {
                     fixed_delta_ns: 16_666_667,
                     session_seed: 7,
                     compatibility_profile: "rfvp.reference".into(),
-                    family_options: [("fvp.nls".into(), "utf8".into())].into_iter().collect(),
+                    family_options: [
+                        ("fvp.nls".into(), "utf8".into()),
+                        ("fvp.pack_paths".into(), "[]".into()),
+                    ]
+                    .into_iter()
+                    .collect(),
                 },
             )
             .unwrap();

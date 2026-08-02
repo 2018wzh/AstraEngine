@@ -103,7 +103,7 @@ impl HostedFvpSession {
             .map_err(HostedRuntimeError::Core)?;
             core.set_trace_profile(HostedTraceProfile::Shipping)
                 .map_err(HostedRuntimeError::Core)?;
-            core.boot(
+            if let Err(error) = core.boot(
                 &mut host,
                 HostedBootConfig {
                     asset_root: ".",
@@ -112,8 +112,12 @@ impl HostedFvpSession {
                     max_manifest_entries: MAX_HOSTED_CASE_FILES,
                     nls: map_nls(nls),
                 },
-            )
-            .map_err(HostedRuntimeError::Core)?;
+            ) {
+                let detail = core.core().last_error_detail().unwrap_or("unspecified");
+                return Err(HostedRuntimeError::Initialization(format!(
+                    "ASTRA_FVP_HOSTED_BOOT:{error:?}:{detail}"
+                )));
+            }
             Ok::<_, HostedRuntimeError>(HostedState {
                 core,
                 host,
@@ -132,13 +136,14 @@ impl HostedFvpSession {
         reader: std::sync::Arc<dyn LegacyVfsReader>,
         mount_set_id: String,
         expected_script_uri: String,
+        pack_paths: Vec<String>,
         nls: FvpNls,
         stage_width: u32,
         stage_height: u32,
     ) -> Result<Self, HostedRuntimeError> {
         let expected_script_uri = normalize_script_uri(&expected_script_uri)?;
         let worker = HostedSessionWorker::try_spawn(move || {
-            let mut host = HostedMemoryHost::from_vfs(reader, mount_set_id)
+            let mut host = HostedMemoryHost::from_vfs(reader, mount_set_id, pack_paths)
                 .map_err(HostedRuntimeError::Core)?;
             let mut core = HostedSession::new(
                 HostedConfig {
@@ -151,7 +156,7 @@ impl HostedFvpSession {
             .map_err(HostedRuntimeError::Core)?;
             core.set_trace_profile(HostedTraceProfile::Shipping)
                 .map_err(HostedRuntimeError::Core)?;
-            core.boot(
+            if let Err(error) = core.boot(
                 &mut host,
                 HostedBootConfig {
                     asset_root: ".",
@@ -160,8 +165,12 @@ impl HostedFvpSession {
                     max_manifest_entries: MAX_HOSTED_CASE_FILES,
                     nls: map_nls(nls),
                 },
-            )
-            .map_err(HostedRuntimeError::Core)?;
+            ) {
+                let detail = core.core().last_error_detail().unwrap_or("unspecified");
+                return Err(HostedRuntimeError::Initialization(format!(
+                    "ASTRA_FVP_HOSTED_BOOT:{error:?}:{detail}"
+                )));
+            }
             if core
                 .core()
                 .loaded_game()

@@ -26,6 +26,12 @@ const MAX_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct HostedScenePacketTranslator {
     resources: LegacySceneResourceStateV1,
+    // RFVP can allocate or update a texture before beginning the frame that
+    // first samples it. Keep the bounded semantic operation until that frame
+    // closes so the renderer receives one atomic commit rather than losing a
+    // resource-only delta between steps.
+    pending_resources: Vec<LegacySceneResourceOperationV1>,
+    pending_upload_bytes: usize,
     rehydrate_resources: bool,
 }
 
@@ -40,6 +46,8 @@ impl HostedScenePacketTranslator {
         // the provider snapshot, so the next complete packet must establish
         // a new resource epoch rather than collide with pre-restore metadata.
         self.resources = LegacySceneResourceStateV1::default();
+        self.pending_resources.clear();
+        self.pending_upload_bytes = 0;
         self.rehydrate_resources = true;
     }
 
@@ -53,9 +61,9 @@ impl HostedScenePacketTranslator {
         let mut frame: Option<(u32, u32)> = None;
         let mut ended = false;
         let mut presented = false;
-        let mut resources = Vec::new();
+        let mut resources = std::mem::take(&mut self.pending_resources);
         let mut draws = Vec::new();
-        let mut bytes = 0usize;
+        let mut bytes = self.pending_upload_bytes;
 
         for operation in &delta.scene {
             match operation {
@@ -141,20 +149,66 @@ impl HostedScenePacketTranslator {
             }
         }
         match (frame, ended, presented) {
-            (None, false, false) => Ok(None),
+            (None, false, false) => {
+                self.pending_resources = resources;
+                self.pending_upload_bytes = bytes;
+                Ok(None)
+            }
             (Some((width, height)), true, true) => {
+                let staged_resource_count = resources.len();
+                let draw_count = draws.len();
+                let mut available_texture_ids = self
+                    .resources
+                    .textures
+                    .keys()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>();
+                for operation in &resources {
+                    match operation {
+                        LegacySceneResourceOperationV1::CreateTexture(texture) => {
+                            available_texture_ids.insert(texture.texture_id);
+                        }
+                        LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
+                            available_texture_ids.remove(texture_id);
+                        }
+                        LegacySceneResourceOperationV1::UpdateTexture(_) => {}
+                    }
+                }
+                let missing_texture_id = draws.iter().find_map(|draw| {
+                    (draw.texture_id != u32::MAX
+                        && !available_texture_ids.contains(&draw.texture_id))
+                    .then_some(draw.texture_id)
+                });
                 let packet = LegacyScenePacketV1 {
                     width,
                     height,
                     resources,
                     draws,
                 };
-                let mut prepared = self
-                    .resources
-                    .prepare(packet)
-                    .map_err(|error| HostedAdapterError::InvalidPacket(error.code().to_owned()))?;
+                let mut prepared = self.resources.prepare(packet).map_err(|error| {
+                    tracing::error!(
+                        event = "astra.emu.fvp.hosted_packet_invalid",
+                        diagnostic_code = error.code(),
+                        retained_texture_count = self.resources.textures.len(),
+                        staged_resource_count,
+                        draw_count,
+                        "RFVP hosted scene transaction failed validation"
+                    );
+                    let diagnostic = match missing_texture_id {
+                        Some(texture_id) => format!(
+                            "{}:retained_textures={}:staged_resources={}:draws={}:missing_texture={texture_id}",
+                            error.code(),
+                            self.resources.textures.len(),
+                            staged_resource_count,
+                            draw_count,
+                        ),
+                        None => error.code().to_owned(),
+                    };
+                    HostedAdapterError::InvalidPacket(diagnostic)
+                })?;
                 prepared.reset_resources = self.rehydrate_resources;
                 self.resources.commit(prepared.clone());
+                self.pending_upload_bytes = 0;
                 self.rehydrate_resources = false;
                 Ok(Some(prepared))
             }
@@ -701,6 +755,44 @@ mod tests {
         assert!(matches!(
             prepared.packet.resources.as_slice(),
             [LegacySceneResourceOperationV1::UpdateTexture(texture)] if texture.x == 1
+        ));
+        assert!(translator.snapshot().textures.contains_key(&9));
+    }
+
+    #[test]
+    fn retains_a_resource_only_delta_until_a_later_frame_commits_it() {
+        let mut translator = HostedScenePacketTranslator::default();
+        assert!(translator
+            .translate(&delta(vec![HostedSceneOperation::CreateTexture(
+                HostedTextureData {
+                    id: TextureId(9),
+                    desc: TextureDesc {
+                        width: 1,
+                        height: 1,
+                        format: PixelFormat::Rgba8,
+                        mip_count: 1,
+                    },
+                    pixels: Some(vec![0, 0, 0, 255]),
+                },
+            )]))
+            .expect("resource-only delta is retained")
+            .is_none());
+
+        let prepared = translator
+            .translate(&delta(vec![
+                HostedSceneOperation::BeginFrame {
+                    width: 640,
+                    height: 480,
+                    clear: None,
+                },
+                HostedSceneOperation::EndFrame,
+                HostedSceneOperation::Present,
+            ]))
+            .expect("later frame commits retained resource")
+            .expect("complete frame");
+        assert!(matches!(
+            prepared.packet.resources.as_slice(),
+            [LegacySceneResourceOperationV1::CreateTexture(texture)] if texture.texture_id == 9
         ));
         assert!(translator.snapshot().textures.contains_key(&9));
     }

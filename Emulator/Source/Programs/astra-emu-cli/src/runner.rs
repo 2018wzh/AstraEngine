@@ -72,6 +72,13 @@ const MAX_MOVIE_AUDIO_SAMPLES: usize = 64 * 1024 * 1024;
 const MOVIE_AUDIO_STREAM_BASE: u32 = 0xF000_0000;
 const HEADLESS_RESUME_SNAPSHOT_SCHEMA: &str = "astra.emu.headless_resume_snapshot.v1";
 const MAX_RESUME_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
+// Hosted RFVP requires `default.ttf` during core boot.  Some original FVP
+// installations rely on the platform renderer's system-font fallback and do
+// not ship that file.  The CLI supplies this public OFL font through the
+// already-bounded, mount-scoped VFS overlay port only when the installation
+// lacks its own default font; it never mutates or shadows game content.
+const FVP_HOSTED_FALLBACK_FONT: &[u8] =
+    include_bytes!("../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf");
 
 #[derive(Debug, Clone)]
 pub struct HeadlessLaunch {
@@ -197,6 +204,7 @@ struct PreparedFamilyCase {
     case_identity: String,
     package_hash: Hash256,
     entry_uri: String,
+    fvp_pack_paths: Option<Vec<String>>,
     reader: Arc<dyn LegacyVfsReader>,
     evidence: VfsEvidenceBackend,
 }
@@ -313,6 +321,19 @@ fn prepare_fvp_case(
     if loaded.profile.family_id != "fvp" {
         return Err("ASTRA_EMU_VFS_FAMILY_MISMATCH".into());
     }
+    let options: astra_emu_fvp::FvpVfsFamilyOptions =
+        serde_json::from_slice(&loaded.family_config.payload)
+            .map_err(|_| "ASTRA_EMU_FVP_MOUNT_OPTIONS".to_owned())?;
+    if options.archives.is_empty() || options.archives.len() > 4096 {
+        return Err("ASTRA_EMU_FVP_MOUNT_OPTIONS".into());
+    }
+    let mut pack_paths = BTreeSet::new();
+    for archive in options.archives {
+        let archive = normalize_fvp_pack_path(&archive)?;
+        if !pack_paths.insert(archive) {
+            return Err("ASTRA_EMU_FVP_ARCHIVE_DUPLICATE".into());
+        }
+    }
     let case = scan_case(game_root, entry)?;
     let package_hash: Hash256 = case
         .content_hash
@@ -320,17 +341,53 @@ fn prepare_fvp_case(
         .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
     let registry = Arc::new(DesktopVfsRegistry::default());
     registry.bind(mount_set_id, &game_root.to_string_lossy())?;
+    install_fvp_hosted_font_overlay(registry.as_ref(), mount_set_id)?;
     Ok(PreparedFamilyCase {
         family_id: "fvp".into(),
         case_identity: case.case_identity,
         package_hash,
         entry_uri: case.relative_path,
+        fvp_pack_paths: Some(pack_paths.into_iter().collect()),
         reader: registry.clone(),
         evidence: VfsEvidenceBackend::Desktop {
             registry,
             mount_set_id: mount_set_id.into(),
         },
     })
+}
+
+fn normalize_fvp_pack_path(path: &str) -> Result<String, String> {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    if normalized.is_empty()
+        || !normalized.ends_with(".bin")
+        || normalized.starts_with('/')
+        || normalized.contains(':')
+        || normalized
+            .split('/')
+            .any(|part| part.is_empty() || matches!(part, "." | ".."))
+    {
+        return Err("ASTRA_EMU_FVP_ARCHIVE_PATH".into());
+    }
+    Ok(normalized)
+}
+
+fn install_fvp_hosted_font_overlay(
+    registry: &DesktopVfsRegistry,
+    mount_set_id: &str,
+) -> Result<(), String> {
+    if registry
+        .list_resources(mount_set_id)?
+        .iter()
+        .any(|resource| resource.path.eq_ignore_ascii_case("default.ttf"))
+    {
+        return Ok(());
+    }
+    registry.install_overlays(
+        mount_set_id,
+        [("default.ttf".into(), FVP_HOSTED_FALLBACK_FONT.to_vec())]
+            .into_iter()
+            .collect(),
+    )
 }
 
 fn prepare_minori_case(
@@ -386,6 +443,7 @@ fn prepare_minori_case(
         case_identity: format!("minori-{}", &package_hash.to_string()[7..23]),
         package_hash,
         entry_uri,
+        fvp_pack_paths: None,
         reader: adapter.clone(),
         evidence: VfsEvidenceBackend::Mounted(adapter),
     })
@@ -1512,6 +1570,7 @@ fn profile_from_probe_report(
             compatibility_profile: "rfvp-v1".into(),
             family_options: [
                 ("fvp.nls".into(), nls),
+                ("fvp.pack_paths".into(), "[]".into()),
                 ("fvp.stage_width".into(), width.clone()),
                 ("fvp.stage_height".into(), height.clone()),
                 ("astra.stage_width".into(), width),
@@ -1608,6 +1667,12 @@ fn probe_profile(
     height
         .parse::<u32>()
         .map_err(|_| "ASTRA_EMU_FVP_PROBE_STAGE_INVALID")?;
+    let pack_paths = case
+        .fvp_pack_paths
+        .as_ref()
+        .ok_or_else(|| "ASTRA_EMU_FVP_PACK_PATHS_MISSING".to_owned())?;
+    let pack_paths = serde_json::to_string(pack_paths)
+        .map_err(|_| "ASTRA_EMU_FVP_PACK_PATHS_ENCODE".to_owned())?;
     Ok(ProbeProfile {
         runtime: astra_emu_manager_core::CaseRuntimeProfileRecord {
             case_identity: case.case_identity.clone(),
@@ -1616,6 +1681,7 @@ fn probe_profile(
             compatibility_profile: "rfvp-v1".into(),
             family_options: [
                 ("fvp.nls".into(), nls),
+                ("fvp.pack_paths".into(), pack_paths),
                 ("fvp.stage_width".into(), width.clone()),
                 ("fvp.stage_height".into(), height.clone()),
                 ("astra.stage_width".into(), width),
@@ -4237,6 +4303,44 @@ mod native_tests {
         FamilyId, LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneResourceStateV1,
         LegacySceneTextureCreateV1,
     };
+
+    #[test]
+    fn fvp_hosted_font_overlay_fills_only_a_missing_game_font() {
+        let directory = tempfile::tempdir().expect("temporary source directory");
+        let registry = DesktopVfsRegistry::default();
+        registry
+            .bind(
+                "font.missing",
+                directory.path().to_str().expect("utf-8 path"),
+            )
+            .expect("mount without a font");
+        install_fvp_hosted_font_overlay(&registry, "font.missing").expect("install fallback");
+        let fallback = registry
+            .list_resources("font.missing")
+            .expect("list fallback mount")
+            .into_iter()
+            .find(|resource| resource.path == "default.ttf")
+            .expect("fallback font must be mounted");
+        assert_eq!(fallback.source_layer, "overlay");
+        assert_eq!(fallback.byte_size, FVP_HOSTED_FALLBACK_FONT.len() as u64);
+
+        std::fs::write(directory.path().join("default.ttf"), b"game-font")
+            .expect("write game font");
+        let game_registry = DesktopVfsRegistry::default();
+        game_registry
+            .bind("font.game", directory.path().to_str().expect("utf-8 path"))
+            .expect("mount with a font");
+        install_fvp_hosted_font_overlay(&game_registry, "font.game")
+            .expect("leave game font intact");
+        let game_font = game_registry
+            .list_resources("font.game")
+            .expect("list game font mount")
+            .into_iter()
+            .find(|resource| resource.path == "default.ttf")
+            .expect("game font must be mounted");
+        assert_eq!(game_font.source_layer, "base");
+        assert_eq!(game_font.byte_size, b"game-font".len() as u64);
+    }
 
     fn case_record() -> CaseRecord {
         CaseRecord {

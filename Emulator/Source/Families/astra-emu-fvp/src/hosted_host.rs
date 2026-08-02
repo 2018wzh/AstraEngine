@@ -3,7 +3,10 @@
 //! The dynamic VFS bridge is added separately; this port deliberately owns no
 //! platform renderer/audio object and is usable for registered case images.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use astra_byte_source::{ByteRange, SourceRevision};
 use astra_emu_family_api::LegacyVfsReader;
@@ -14,7 +17,11 @@ use rfvp_hosted::host_api::{
 };
 
 pub const MAX_HOSTED_FILES: usize = 65_536;
-pub const MAX_HOSTED_FILE_BYTES: usize = 512 * 1024 * 1024;
+// FVP installations may contain multi-gigabyte graph archives.  Hosted VFS
+// keeps those as bounded, paged host-port files; this is a metadata/identity
+// limit, not an allocation allowance.  Whole-file reads remain capped by the
+// caller and every individual VFS range remains at most 16 MiB.
+pub const MAX_HOSTED_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const MAX_HOSTED_RANGE_BYTES: usize = 16 * 1024 * 1024;
 
 pub enum HostedFileSource {
@@ -22,6 +29,7 @@ pub enum HostedFileSource {
     Vfs {
         reader: Arc<dyn LegacyVfsReader>,
         mount_set_id: String,
+        pack_paths: BTreeSet<String>,
     },
 }
 
@@ -39,7 +47,7 @@ impl HostedMemoryHost {
         if files.len() > MAX_HOSTED_FILES
             || files
                 .values()
-                .any(|bytes| bytes.len() > MAX_HOSTED_FILE_BYTES)
+                .any(|bytes| bytes.len() as u64 > MAX_HOSTED_FILE_BYTES)
         {
             return Err(RfvpError::CapacityExceeded);
         }
@@ -60,15 +68,30 @@ impl HostedMemoryHost {
         })
     }
 
-    pub fn from_vfs(reader: Arc<dyn LegacyVfsReader>, mount_set_id: String) -> RfvpResult<Self> {
+    pub fn from_vfs(
+        reader: Arc<dyn LegacyVfsReader>,
+        mount_set_id: String,
+        pack_paths: Vec<String>,
+    ) -> RfvpResult<Self> {
         if mount_set_id.is_empty() {
             return Err(RfvpError::InvalidArgument);
+        }
+        if pack_paths.len() > MAX_HOSTED_FILES {
+            return Err(RfvpError::CapacityExceeded);
+        }
+        let mut normalized_pack_paths = BTreeSet::new();
+        for path in pack_paths {
+            let path = normalize(&path)?;
+            if !path.ends_with(".bin") || !normalized_pack_paths.insert(path) {
+                return Err(RfvpError::InvalidArgument);
+            }
         }
         Ok(Self {
             fs: HostedMemoryFileSystem {
                 source: HostedFileSource::Vfs {
                     reader,
                     mount_set_id,
+                    pack_paths: normalized_pack_paths,
                 },
             },
             renderer: RejectingRenderer,
@@ -145,11 +168,12 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
             HostedFileSource::Vfs {
                 reader,
                 mount_set_id,
+                ..
             } => {
                 let stat = reader
                     .stat_file(mount_set_id, &path)
                     .map_err(map_vfs_error)?;
-                if stat.len > MAX_HOSTED_FILE_BYTES as u64 {
+                if stat.len > MAX_HOSTED_FILE_BYTES {
                     return Err(RfvpError::CapacityExceeded);
                 }
                 Ok(HostedMemoryFile::Vfs {
@@ -172,6 +196,7 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
             HostedFileSource::Vfs {
                 reader,
                 mount_set_id,
+                ..
             } => reader
                 .stat_file(mount_set_id, &path)
                 .map(|stat| RfvpFileInfo::file(stat.len))
@@ -203,7 +228,19 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
             HostedFileSource::Vfs {
                 reader,
                 mount_set_id,
+                pack_paths,
             } => {
+                if ext.eq_ignore_ascii_case("bin") {
+                    for path in pack_paths {
+                        if in_root_with_extension(path, &root, ext) {
+                            let stat = reader
+                                .stat_file(mount_set_id, path)
+                                .map_err(map_vfs_error)?;
+                            visitor(path, RfvpFileInfo::file(stat.len))?;
+                        }
+                    }
+                    return Ok(());
+                }
                 let entries = reader
                     .enumerate_by_extension(mount_set_id, &root, ext, MAX_HOSTED_FILES as u32)
                     .map_err(map_vfs_error)?;
