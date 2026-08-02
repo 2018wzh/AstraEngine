@@ -12,6 +12,7 @@
 | [script-execution.md](script-execution.md) | VM context、thread state、syscall dispatch 和 yield 流程 |
 | [presentation-and-media.md](presentation-and-media.md) | graph/text/prim/audio/movie 的表现层映射 |
 | [runtime-family-plugin.md](runtime-family-plugin.md) | AstraEMU FVP family plugin 的 session 边界和 step 输出 |
+| [thin-fork.md](thin-fork.md) | RFVP thin fork、hosted-core 与 Astra adapter 的维护边界 |
 | [game-observations.md](game-observations.md) | 「樱花萌放」样本观察，保留 metadata 和 hash |
 | [tooling.md](tooling.md) | disassembler、assembler、hcb2lua、lua2hcb、nvsg_pack 的使用边界 |
 | [implementation-checklist.md](implementation-checklist.md) | FVP family adapter 实施清单和验收口径 |
