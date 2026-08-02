@@ -8,6 +8,8 @@ FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 f
 
 本地公开 Win95 Painter sample 的 signed dynamic FVP v5 已通过 120 fixed step 的 Headless run：6 条物理输入均被 host 消费、4 个实际 CPU frame、一个 PNG checkpoint、VFS 2 资源/20 次 range-read、snapshot round-trip 和正常 host shutdown 均通过；人工查看 checkpoint，窗口、工具栏、调色板、画布与底部状态栏可见且无残缺。该输入序列未产生可见笔划，因此它只证明 input transport，不证明脚本交互语义。CPU reference 该次 step p95 为 11.22 ms，4 次 raster 的中位数为 248.12 ms；它用于确认 scene dedup 没有退化为逐 tick 全帧光栅化，不是 GPU 或 RFVP 对比结论。该 sample 无音频、未到脚本 terminal，也没有媒体、路线、性能 soak 或 Windows E3，所以只构成 hosted-v5 的局部 Headless E2/视觉证据，不能作为完成声明。
 
+另一个由公开无资源脚本生成的 signed dynamic FVP v5 Headless lifecycle case 已在 2 step 达到 `terminal`，并同时通过 snapshot round-trip、PNG checkpoint、正常 session shutdown 与 host shutdown。该 checkpoint 是预期的空黑 frame，只证明 `ExitMode(3)` 到 hosted terminal 的生命周期传播，不是产品视觉、路线或媒体证据。
+
 ## 不可跨越的边界
 
 ```text
