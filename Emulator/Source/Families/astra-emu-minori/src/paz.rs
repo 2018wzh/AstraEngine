@@ -1692,6 +1692,7 @@ fn xor_byte(bytes: &mut [u8], key: u8) {
 mod tests {
     use super::*;
     use blowfish::cipher::BlockCipherEncrypt;
+    use rc4::{KeyInit, Rc4, StreamCipher};
     use std::{fs, io::Write};
 
     const FIXTURE_KEY: &[u8] = b"fixture-key";
@@ -1719,7 +1720,9 @@ mod tests {
             .copy_from_slice(&payload_offset.to_le_bytes());
 
         let index = blowfish_encrypt(FIXTURE_KEY, &index);
-        let payload = if role == "mov" {
+        let payload = if role == "mov" && version > 0 {
+            movie_rc4_encrypt(format!("{role}.bin").as_bytes(), payload)
+        } else if role == "mov" {
             payload.to_vec()
         } else {
             blowfish_encrypt(FIXTURE_KEY, payload)
@@ -1799,6 +1802,23 @@ mod tests {
             chunk[4..].reverse();
         }
         bytes
+    }
+
+    fn movie_rc4_encrypt(name: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        let mut entry_key = name.iter().map(u8::to_ascii_lowercase).collect::<Vec<_>>();
+        entry_key.extend_from_slice(format!(" {:08X} ", plaintext.len()).as_bytes());
+        let key = (0u8..=255)
+            .enumerate()
+            .map(|(index, video_key)| video_key ^ entry_key[index % entry_key.len()])
+            .collect::<Vec<_>>();
+        let mut cipher = Rc4::new_from_slice(&key).unwrap();
+        let mut block = vec![0; plaintext.len().min(0x10000)];
+        cipher.apply_keystream(&mut block);
+        plaintext
+            .iter()
+            .enumerate()
+            .map(|(index, byte)| byte ^ block[index % block.len()])
+            .collect()
     }
 
     fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> PazEntryDescriptor {
@@ -2016,6 +2036,26 @@ mod tests {
 
         assert_eq!(read.bytes, b"ixture");
         assert!(!read.cache_hit);
+    }
+
+    #[test]
+    fn v1_and_v2_raw_movie_ranges_use_the_rc4_entry_offset() {
+        for version in [1, 2] {
+            let temp = tempfile::tempdir().unwrap();
+            for role in REQUIRED_ARCHIVE_ROLES {
+                fs::write(
+                    temp.path().join(format!("{role}.paz")),
+                    fixture_archive(role, version),
+                )
+                .unwrap();
+            }
+            let vfs = mount_fixture(temp.path(), version);
+
+            let read = vfs.read_range("minori:/mov/mov.bin", 1, 6).unwrap();
+
+            assert_eq!(read.bytes, b"ixture");
+            assert!(!read.cache_hit);
+        }
     }
 
     #[test]
