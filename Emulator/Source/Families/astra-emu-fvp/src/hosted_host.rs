@@ -5,6 +5,8 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use astra_byte_source::{ByteRange, SourceRevision};
+use astra_emu_family_api::LegacyVfsReader;
 use rfvp_hosted::host_api::{
     AudioParams, AudioStreamDesc, AudioStreamId, ColorRgba, DrawSolidCommand, DrawSpriteCommand,
     EncodedAudioKind, RfvpAudio, RfvpClock, RfvpError, RfvpFile, RfvpFileInfo, RfvpFileSystem,
@@ -13,6 +15,15 @@ use rfvp_hosted::host_api::{
 
 pub const MAX_HOSTED_FILES: usize = 65_536;
 pub const MAX_HOSTED_FILE_BYTES: usize = 512 * 1024 * 1024;
+pub const MAX_HOSTED_RANGE_BYTES: usize = 16 * 1024 * 1024;
+
+pub enum HostedFileSource {
+    Memory(Arc<BTreeMap<String, Vec<u8>>>),
+    Vfs {
+        reader: Arc<dyn LegacyVfsReader>,
+        mount_set_id: String,
+    },
+}
 
 pub struct HostedMemoryHost {
     fs: HostedMemoryFileSystem,
@@ -20,6 +31,8 @@ pub struct HostedMemoryHost {
     audio: RejectingAudio,
     clock: StepClock,
 }
+
+pub type HostedVfsHost = HostedMemoryHost;
 
 impl HostedMemoryHost {
     pub fn new(files: BTreeMap<String, Vec<u8>>) -> RfvpResult<Self> {
@@ -39,7 +52,24 @@ impl HostedMemoryHost {
         }
         Ok(Self {
             fs: HostedMemoryFileSystem {
-                files: Arc::new(normalized),
+                source: HostedFileSource::Memory(Arc::new(normalized)),
+            },
+            renderer: RejectingRenderer,
+            audio: RejectingAudio,
+            clock: StepClock::default(),
+        })
+    }
+
+    pub fn from_vfs(reader: Arc<dyn LegacyVfsReader>, mount_set_id: String) -> RfvpResult<Self> {
+        if mount_set_id.is_empty() {
+            return Err(RfvpError::InvalidArgument);
+        }
+        Ok(Self {
+            fs: HostedMemoryFileSystem {
+                source: HostedFileSource::Vfs {
+                    reader,
+                    mount_set_id,
+                },
             },
             renderer: RejectingRenderer,
             audio: RejectingAudio,
@@ -81,26 +111,66 @@ impl RfvpHost for HostedMemoryHost {
 }
 
 pub struct HostedMemoryFileSystem {
-    files: Arc<BTreeMap<String, Vec<u8>>>,
+    source: HostedFileSource,
 }
-pub struct HostedMemoryFile {
-    bytes: Vec<u8>,
+pub enum HostedMemoryFile {
+    Memory {
+        bytes: Vec<u8>,
+    },
+    Vfs {
+        reader: Arc<dyn LegacyVfsReader>,
+        mount_set_id: String,
+        uri: String,
+        len: u64,
+        revision: SourceRevision,
+    },
 }
 
 impl RfvpFileSystem for HostedMemoryFileSystem {
     type File = HostedMemoryFile;
     fn open(&mut self, path: &str) -> RfvpResult<Self::File> {
-        self.files
-            .get(&normalize(path)?)
-            .cloned()
-            .map(|bytes| HostedMemoryFile { bytes })
-            .ok_or(RfvpError::NotFound)
+        let path = normalize(path)?;
+        match &self.source {
+            HostedFileSource::Memory(files) => files
+                .get(&path)
+                .cloned()
+                .map(|bytes| HostedMemoryFile::Memory { bytes })
+                .ok_or(RfvpError::NotFound),
+            HostedFileSource::Vfs {
+                reader,
+                mount_set_id,
+            } => {
+                let stat = reader
+                    .stat_file(mount_set_id, &path)
+                    .map_err(map_vfs_error)?;
+                if stat.len > MAX_HOSTED_FILE_BYTES as u64 {
+                    return Err(RfvpError::CapacityExceeded);
+                }
+                Ok(HostedMemoryFile::Vfs {
+                    reader: Arc::clone(reader),
+                    mount_set_id: mount_set_id.clone(),
+                    uri: path,
+                    len: stat.len,
+                    revision: stat.revision,
+                })
+            }
+        }
     }
     fn metadata(&mut self, path: &str) -> RfvpResult<RfvpFileInfo> {
-        self.files
-            .get(&normalize(path)?)
-            .map(|bytes| RfvpFileInfo::file(bytes.len() as u64))
-            .ok_or(RfvpError::NotFound)
+        let path = normalize(path)?;
+        match &self.source {
+            HostedFileSource::Memory(files) => files
+                .get(&path)
+                .map(|bytes| RfvpFileInfo::file(bytes.len() as u64))
+                .ok_or(RfvpError::NotFound),
+            HostedFileSource::Vfs {
+                reader,
+                mount_set_id,
+            } => reader
+                .stat_file(mount_set_id, &path)
+                .map(|stat| RfvpFileInfo::file(stat.len))
+                .map_err(map_vfs_error),
+        }
     }
     fn enumerate_by_extension(
         &mut self,
@@ -117,16 +187,31 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
         if ext.is_empty() {
             return Err(RfvpError::InvalidArgument);
         }
-        for (path, bytes) in self.files.iter() {
-            if (root.is_empty()
-                || path
-                    .strip_prefix(&root)
-                    .is_some_and(|tail| tail.starts_with('/')))
-                && path
-                    .rsplit_once('.')
-                    .is_some_and(|(_, value)| value.eq_ignore_ascii_case(ext))
-            {
-                visitor(path, RfvpFileInfo::file(bytes.len() as u64))?;
+        match &self.source {
+            HostedFileSource::Memory(files) => {
+                for (path, bytes) in files.iter() {
+                    if in_root_with_extension(path, &root, ext) {
+                        visitor(path, RfvpFileInfo::file(bytes.len() as u64))?;
+                    }
+                }
+            }
+            HostedFileSource::Vfs {
+                reader,
+                mount_set_id,
+            } => {
+                let entries = reader
+                    .enumerate_by_extension(mount_set_id, &root, ext, MAX_HOSTED_FILES as u32)
+                    .map_err(map_vfs_error)?;
+                if entries.len() > MAX_HOSTED_FILES {
+                    return Err(RfvpError::CapacityExceeded);
+                }
+                for entry in entries {
+                    let path = normalize(&entry.uri)?;
+                    if !in_root_with_extension(&path, &root, ext) {
+                        return Err(RfvpError::InvalidData);
+                    }
+                    visitor(&path, RfvpFileInfo::file(entry.stat.len))?;
+                }
             }
         }
         Ok(())
@@ -135,16 +220,52 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
 
 impl RfvpFile for HostedMemoryFile {
     fn len(&mut self) -> RfvpResult<u64> {
-        Ok(self.bytes.len() as u64)
+        match self {
+            Self::Memory { bytes } => Ok(bytes.len() as u64),
+            Self::Vfs { len, .. } => Ok(*len),
+        }
     }
     fn read_at(&mut self, offset: u64, out: &mut [u8]) -> RfvpResult<usize> {
-        let offset = usize::try_from(offset).map_err(|_| RfvpError::EndOfFile)?;
-        if offset >= self.bytes.len() {
-            return Ok(0);
+        if out.len() > MAX_HOSTED_RANGE_BYTES {
+            return Err(RfvpError::CapacityExceeded);
         }
-        let len = out.len().min(self.bytes.len() - offset);
-        out[..len].copy_from_slice(&self.bytes[offset..offset + len]);
-        Ok(len)
+        match self {
+            Self::Memory { bytes } => {
+                let offset = usize::try_from(offset).map_err(|_| RfvpError::EndOfFile)?;
+                if offset >= bytes.len() {
+                    return Ok(0);
+                }
+                let len = out.len().min(bytes.len() - offset);
+                out[..len].copy_from_slice(&bytes[offset..offset + len]);
+                Ok(len)
+            }
+            Self::Vfs {
+                reader,
+                mount_set_id,
+                uri,
+                len,
+                revision,
+            } => {
+                if offset >= *len || out.is_empty() {
+                    return Ok(0);
+                }
+                let bytes = (out.len() as u64).min(*len - offset);
+                let result = reader
+                    .read_file_range(
+                        mount_set_id,
+                        uri,
+                        revision.clone(),
+                        ByteRange { offset, len: bytes },
+                        MAX_HOSTED_RANGE_BYTES as u64,
+                    )
+                    .map_err(map_vfs_error)?;
+                if result.bytes.len() != bytes as usize {
+                    return Err(RfvpError::Io);
+                }
+                out[..result.bytes.len()].copy_from_slice(&result.bytes);
+                Ok(result.bytes.len())
+            }
+        }
     }
 }
 
@@ -230,6 +351,22 @@ fn normalize(path: &str) -> RfvpResult<String> {
         return Err(RfvpError::InvalidArgument);
     }
     Ok(path.to_ascii_lowercase())
+}
+fn in_root_with_extension(path: &str, root: &str, extension: &str) -> bool {
+    (root.is_empty()
+        || path
+            .strip_prefix(root)
+            .is_some_and(|tail| tail.starts_with('/')))
+        && path
+            .rsplit_once('.')
+            .is_some_and(|(_, suffix)| suffix.eq_ignore_ascii_case(extension))
+}
+fn map_vfs_error(error: astra_emu_family_api::LegacyProviderError) -> RfvpError {
+    match error.code() {
+        "ASTRA_EMU_VFS_NOT_FOUND" => RfvpError::NotFound,
+        "ASTRA_EMU_VFS_BOUNDS" => RfvpError::CapacityExceeded,
+        _ => RfvpError::Io,
+    }
 }
 
 #[cfg(test)]
