@@ -4,7 +4,7 @@
 
 FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。它只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
-截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals、内存 snapshot/restore 以及最多 64 MiB 的 opaque snapshot bytes、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 已为注册 case image 和动态 host VFS 提供无平台 handle 的 hosted VFS/clock port；动态 provider 尚未使用该 port。FVP adapter 已具备 session-owned `ScenePacket` translator：它将 create/partial-update/destroy 转为有界资源操作，先通过 `PreparedCommit` 验证完整事务再替换元数据；Manager runtime output 与 WGPU stage 已能接收该 packet，并在 GPU 资源写入前独立复验 commit。旧 render-frame 转换仍只用于过渡测试。动态 FVP provider、CLI renderer 消费和 Headless E2 尚未切换，本页不是 E2 或性能完成声明。
+截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals、snapshot/restore、canonical state identity、最多 64 MiB 的 opaque snapshot bytes、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开；动态 provider 每 tick 只接收一个 hosted delta，转换为 `ScenePacket`、媒体命令和 `PreparedCommit`。`ScenePacket` translator 将 create/partial-update/destroy 转为有界资源操作，先验证完整事务再替换元数据；Manager runtime output 与 WGPU stage 在 GPU 资源写入前独立复验 commit。`astra-emu-fvp` 已不再编译依赖本地 RFVP vendor core。旧 render-frame、逐 syscall journal 和逐 opcode 字符串 trace 不再参与 v5 provider。CLI renderer 消费和 Headless E2 尚未完成，本页不是 E2 或性能完成声明。
 
 ## 不可跨越的边界
 
@@ -43,6 +43,6 @@ RuntimeWorld + platform renderer/audio/media
 
 ## 迁移约束
 
-- FVP v5 是 hard cut。旧 v4 save/replay 仅返回明确迁移诊断，不能保留双读运行时。
+- FVP v5 是 hard cut。v4 snapshot section、逐 syscall journal 和旧 render-frame 都不得进入运行时或保存容器；遇到旧 section 必须返回明确迁移诊断，不能保留双读运行时。
 - `na_wmv_player` 与 `na_mpeg2_decoder` 只在没有其他消费者后移除；RFVP hosted-core 不再拥有这些 decoder。
 - Headless E2 需要同一 session 的真实 PNG/WAV、artifact manifest、输入消费、state/scene/route/wait/media PTS/audio 签名与视觉审查。单元测试、fixture 或启动日志不能替代它。

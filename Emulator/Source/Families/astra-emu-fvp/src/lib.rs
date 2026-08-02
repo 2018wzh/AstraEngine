@@ -25,7 +25,7 @@ pub const FVP_FAMILY_ID: &str = "fvp";
 pub const FVP_PROVIDER_ID: &str = "astra.emu.family.fvp";
 
 pub fn release_syscall_ids() -> Vec<String> {
-    let mut ids = rfvp::subsystem::components::syscalls::generated::SYSCALL_SPECS
+    let mut ids = rfvp_hosted::subsystem::components::syscalls::generated::SYSCALL_SPECS
         .iter()
         .filter(|spec| spec.name != "BREAKPOINT")
         .map(|spec| spec.name.to_owned())

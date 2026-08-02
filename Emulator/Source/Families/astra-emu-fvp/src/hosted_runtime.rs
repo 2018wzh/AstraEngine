@@ -11,8 +11,8 @@ use astra_emu_family_api::{
 };
 use rfvp_hosted::{
     hosted::{
-        HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStepDelta,
-        HostedStepInput, HostedTraceProfile,
+        HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStateComponentHashesV1,
+        HostedStepDelta, HostedStepInput, HostedTraceProfile,
     },
     script::parser::Nls,
 };
@@ -217,6 +217,28 @@ impl HostedFvpSession {
                 return Err(HostedRuntimeError::Snapshot);
             }
             Ok(bytes)
+        })?
+    }
+
+    /// Returns the hosted-core canonical state identity. This deliberately
+    /// excludes opaque checkpoint representation and translator caches.
+    pub fn canonical_state_bytes(&self) -> Result<Vec<u8>, HostedRuntimeError> {
+        self.worker.execute_result(|state| {
+            state
+                .core
+                .canonical_state_bytes()
+                .map_err(HostedRuntimeError::Core)
+        })?
+    }
+
+    pub fn canonical_state_component_hashes(
+        &self,
+    ) -> Result<HostedStateComponentHashesV1, HostedRuntimeError> {
+        self.worker.execute_result(|state| {
+            state
+                .core
+                .canonical_state_component_hashes()
+                .map_err(HostedRuntimeError::Core)
         })?
     }
 
