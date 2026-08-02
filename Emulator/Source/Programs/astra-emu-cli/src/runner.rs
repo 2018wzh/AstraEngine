@@ -2885,6 +2885,14 @@ impl<'a> RuntimeDriver<'a> {
         if self.queued_visual_hash == Some(visual_hash) {
             return Ok(());
         }
+        tracing::debug!(
+            event = "astra_emu_headless_scene_commit",
+            draw_count = commit.packet.draws.len(),
+            resource_operation_count = commit.packet.resources.len(),
+            retained_texture_count = commit.next_resources.textures.len(),
+            reset_resources = commit.reset_resources,
+            "queued validated semantic scene commit"
+        );
         self.pending_render_frame = Some(self.rasterizer.prepare_scene_commit(commit)?);
         self.queued_visual_hash = Some(visual_hash);
         self.visual_dirty = true;
