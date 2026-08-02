@@ -6,8 +6,8 @@
 
 use astra_core::Hash256;
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioSampleFormat, LegacyBlendMode, LegacyDrawV1,
-    LegacyPreparedSceneCommitV1, LegacyRenderFrameV1, LegacyScenePacketV1,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyBlendMode,
+    LegacyDrawV1, LegacyPreparedSceneCommitV1, LegacyRenderFrameV1, LegacyScenePacketV1,
     LegacySceneResourceOperationV1, LegacySceneResourceStateV1, LegacySceneTextureCreateV1,
     LegacySceneTextureUpdateV1, LegacyScissorV1, LegacyTextureFormat, LegacyTextureUpdateV1,
     LegacyVertexV1, LegacyVideoCommandV1, LegacyVideoMode,
@@ -321,6 +321,23 @@ pub fn audio_commands_from_delta(
         .iter()
         .map(|operation| {
             let command = match operation {
+                HostedAudioOperation::LoadResource {
+                    id,
+                    kind,
+                    resource_uri,
+                } => LegacyAudioCommandV1::LoadResource {
+                    stream_id: id.0,
+                    encoding: match kind {
+                        rfvp_hosted::host_api::EncodedAudioKind::Unknown => {
+                            LegacyAudioEncoding::Unknown
+                        }
+                        rfvp_hosted::host_api::EncodedAudioKind::Wav => LegacyAudioEncoding::Wav,
+                        rfvp_hosted::host_api::EncodedAudioKind::Ogg => LegacyAudioEncoding::Ogg,
+                        rfvp_hosted::host_api::EncodedAudioKind::Mp3 => LegacyAudioEncoding::Mp3,
+                        rfvp_hosted::host_api::EncodedAudioKind::Flac => LegacyAudioEncoding::Flac,
+                    },
+                    resource_uri: resource_uri.clone(),
+                },
                 HostedAudioOperation::LoadEncoded { .. } => {
                     return Err(HostedAdapterError::EncodedAudioRequiresResource);
                 }
@@ -722,5 +739,16 @@ mod tests {
             audio_commands_from_delta(&input),
             Err(HostedAdapterError::EncodedAudioRequiresResource)
         );
+        input.audio.pop();
+        input.audio.push(HostedAudioOperation::LoadResource {
+            id: rfvp_hosted::host_api::AudioStreamId(4),
+            kind: rfvp_hosted::host_api::EncodedAudioKind::Ogg,
+            resource_uri: "audio/theme.ogg".into(),
+        });
+        assert!(matches!(
+            audio_commands_from_delta(&input).expect("resource audio converts").as_slice(),
+            [LegacyAudioCommandV1::CreateStream { .. }, LegacyAudioCommandV1::LoadResource { resource_uri, .. }]
+                if resource_uri == "audio/theme.ogg"
+        ));
     }
 }

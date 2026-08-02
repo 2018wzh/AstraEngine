@@ -38,7 +38,7 @@ RuntimeWorld + platform renderer/audio/media
 - Evidence 使用固定容量 crash trace ring 和显式 profile。它是受限诊断，不得改变 Shipping 执行、状态 hash 或资源访问。
 - 纹理按 id/generation 管理：创建、局部更新、销毁均为显式操作；adapter 在资源/profile/binding 检查完成前不得提交部分帧。
 - `.bin` 只读取受限 metadata；entry 通过受限 range-read 提供。禁止启动时预载整包，也禁止把商业 bytes 写入 save、replay、日志或报告。
-- hosted audio 的 encoded bytes 不能伪装成 URI 或跨 ABI 传递；在二阶段资源响应完成前必须以 blocking diagnostic 停止提交。PCM stream command 仍可在既有限额内转换。
+- named hosted audio 保留 source URI 并转换为受 policy 约束的资源命令；没有 source identity 的 encoded bytes 不能伪装成 URI 或跨 ABI 传递，必须以 blocking diagnostic 停止提交。PCM stream command 仍可在既有限额内转换。
 - `PreparedCommit` 在 host 完成 ABI、资源、预算、hash、profile 与 binding 验证后才可提交。任何缺失或不匹配都必须阻断。
 
 ## 迁移约束
