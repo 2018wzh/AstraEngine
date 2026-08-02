@@ -144,6 +144,8 @@ pub struct NativeLaunch {
     pub family_library: Option<PathBuf>,
     pub enable_audio: bool,
     pub perfetto_trace: Option<PathBuf>,
+    pub input_path: Option<PathBuf>,
+    pub max_fixed_steps: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -556,6 +558,14 @@ pub async fn run_native(launch: NativeLaunch) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
+    if launch.max_fixed_steps == Some(0) {
+        return Err("ASTRA_EMU_NATIVE_MAX_FIXED_STEPS_INVALID".into());
+    }
+    let native_input = launch
+        .input_path
+        .as_deref()
+        .map(read_input_sequence)
+        .transpose()?;
     let game_root = fs::canonicalize(&launch.game_dir)
         .map_err(|_| "ASTRA_EMU_CLI_GAME_DIR_INVALID".to_owned())?;
     if !game_root.is_dir() {
@@ -708,17 +718,36 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         stage_height,
     };
     let mut suspended = false;
+    let mut native_input_cursor = 0usize;
+    let mut native_shutdown_requested = false;
+    if let Some(input) = native_input.as_ref() {
+        native_shutdown_requested =
+            consume_native_inputs_due(&mut driver, &input.messages, &mut native_input_cursor)?;
+    }
     let mut ticker = tokio::time::interval(std::time::Duration::from_nanos(
         probe.runtime.fixed_delta_ns,
     ));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let run_result = loop {
+        if native_shutdown_requested {
+            break Ok(());
+        }
         tokio::select! {
             _ = ticker.tick(), if !suspended => {
                 if let Err(error) = driver.step().await {
                     break Err(error);
                 }
                 if driver.terminal {
+                    break Ok(());
+                }
+                if let Some(input) = native_input.as_ref() {
+                    native_shutdown_requested = consume_native_inputs_due(
+                        &mut driver,
+                        &input.messages,
+                        &mut native_input_cursor,
+                    )?;
+                }
+                if launch.max_fixed_steps.is_some_and(|limit| driver.fixed_step >= limit) {
                     break Ok(());
                 }
             }
@@ -2779,6 +2808,22 @@ impl NativePerfettoCapture {
         Ok(())
     }
 
+    fn counter(&mut self, name: &'static str, value: u64) -> Result<(), String> {
+        self.writer
+            .counter(
+                perfetto_domain(name),
+                name,
+                elapsed_ns(self.started)?,
+                value,
+            )
+            .map_err(|error| error.to_string())?;
+        self.recorded = self
+            .recorded
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_PERFETTO_EVENT_OVERFLOW".to_owned())?;
+        Ok(())
+    }
+
     fn finish(self) -> Result<PerfettoTraceSummary, String> {
         if self.recorded == 0 {
             return Err("ASTRA_EMU_NATIVE_PERFETTO_NO_SAMPLES".into());
@@ -2979,6 +3024,47 @@ fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&
         "control" | "ctrl" | "controlleft" | "controlright" => Some("control"),
         _ => None,
     }
+}
+
+/// Applies the portion of a validated physical input sequence that becomes due
+/// at the driver's current fixed-step boundary. Native replay deliberately
+/// shares the exact `consume_physical_input` mapper used by Headless: the host
+/// does not synthesize legacy control names or bypass RuntimeDriver queues.
+///
+/// A native window cannot make deterministic Headless captures, so checkpoint
+/// records remain observable trace markers rather than silently becoming a
+/// second capture protocol. `AdvanceTicks` and `Await` are rejected because a
+/// real-time native host must not skip simulation or poll internal state.
+fn consume_native_inputs_due(
+    driver: &mut RuntimeDriver<'_>,
+    messages: &[InputMessage],
+    cursor: &mut usize,
+) -> Result<bool, String> {
+    let mut shutdown_requested = false;
+    while let Some(message) = messages.get(*cursor) {
+        if message.tick > driver.fixed_step {
+            break;
+        }
+        match &message.event {
+            PhysicalInput::Shutdown => shutdown_requested = true,
+            PhysicalInput::Checkpoint { id } => {
+                tracing::debug!(
+                    event = "astra_emu_native_input_checkpoint",
+                    fixed_step = driver.fixed_step,
+                    checkpoint_id = id.as_str(),
+                    "native replay reached a declared checkpoint"
+                );
+            }
+            PhysicalInput::AdvanceTicks { .. } | PhysicalInput::Await { .. } => {
+                return Err("ASTRA_EMU_NATIVE_INPUT_CONTROL_UNSUPPORTED".into());
+            }
+            input => driver.consume_physical_input(input)?,
+        }
+        *cursor = cursor
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_INPUT_CURSOR_OVERFLOW".to_owned())?;
+    }
+    Ok(shutdown_requested)
 }
 
 impl NativeViewport {
@@ -3211,6 +3297,47 @@ impl<'a> RuntimeDriver<'a> {
             perfetto.record(name, track, self.fixed_step, started)?;
         }
         Ok(())
+    }
+
+    fn record_perfetto_counter(&mut self, name: &'static str, value: u64) -> Result<(), String> {
+        if let Some(perfetto) = self.perfetto.as_mut() {
+            perfetto.counter(name, value)?;
+        }
+        Ok(())
+    }
+
+    fn record_audio_perfetto(&mut self, telemetry: AudioPumpTelemetry) -> Result<(), String> {
+        // These are device observations at the adapter boundary. They do not
+        // infer callback starvation or decoder stalls from a missing packet:
+        // only the platform-reported queue and underflow counters are emitted.
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_active_streams",
+            telemetry.active_streams,
+        )?;
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_packets_submitted",
+            telemetry.packets_submitted,
+        )?;
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_submitted_frames",
+            telemetry.submitted_frames,
+        )?;
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_consumed_frames",
+            telemetry.consumed_frames,
+        )?;
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_queued_frames",
+            telemetry.queued_frames,
+        )?;
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_underflow_count",
+            telemetry.underflow_count,
+        )?;
+        self.record_perfetto_counter(
+            "astra.emu.adapter.audio_decoder_refills",
+            telemetry.decoder_refills,
+        )
     }
 
     fn finish_perfetto(&mut self) -> Result<Option<PerfettoTraceSummary>, String> {
@@ -3800,12 +3927,21 @@ impl<'a> RuntimeDriver<'a> {
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.record_perfetto_phase("astra.emu.adapter.effect_dispatch", 2, effect_started)?;
         let media_started = Instant::now();
-        if self.audio_enabled {
-            self.audio.pump(self.platform, self.audio_pump).await?;
-        }
+        let audio_telemetry = if self.audio_enabled {
+            Some(self.audio.pump(self.platform, self.audio_pump).await?)
+        } else {
+            None
+        };
         let video_changed = self.advance_video().await?;
         self.media_timings_ns.push(elapsed_ns(media_started)?);
         self.record_perfetto_phase("astra.emu.adapter.media_queue", 3, media_started)?;
+        // Complete the encompassing media slice before emitting its instantaneous
+        // counters. Perfetto's streaming writer rejects timestamp regression,
+        // so counters cannot be recorded while a later-completed parent slice
+        // still has an earlier start timestamp.
+        if let Some(telemetry) = audio_telemetry {
+            self.record_audio_perfetto(telemetry)?;
+        }
         let presentation_changed = rendered || video_changed;
         let sample_due = self.fixed_step.is_multiple_of(self.frame_sample_interval);
         if sample_due
@@ -4458,6 +4594,17 @@ struct HeadlessAudioExecutor {
     observed_underflows: BTreeMap<u32, u64>,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct AudioPumpTelemetry {
+    active_streams: u64,
+    packets_submitted: u64,
+    submitted_frames: u64,
+    consumed_frames: u64,
+    queued_frames: u64,
+    underflow_count: u64,
+    decoder_refills: u64,
+}
+
 impl Default for HeadlessAudioExecutor {
     fn default() -> Self {
         Self {
@@ -4772,12 +4919,17 @@ impl HeadlessAudioExecutor {
         &mut self,
         platform: &PlatformHostClient,
         policy: AudioPumpPolicy,
-    ) -> Result<(), String> {
+    ) -> Result<AudioPumpTelemetry, String> {
+        let mut telemetry = AudioPumpTelemetry::default();
         for (stream_id, stream) in self
             .streams
             .iter_mut()
             .filter(|(_, stream)| stream.playing && !stream.paused)
         {
+            telemetry.active_streams = telemetry
+                .active_streams
+                .checked_add(1)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
             let output = stream
                 .output
                 .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_OUTPUT_MISSING".to_owned())?;
@@ -4845,6 +4997,10 @@ impl HeadlessAudioExecutor {
                                                 / 32768.0
                                         },
                                     ));
+                                    telemetry.decoder_refills =
+                                        telemetry.decoder_refills.checked_add(1).ok_or_else(
+                                            || "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned(),
+                                        )?;
                                     continue;
                                 }
                                 None => stream.end_of_stream = true,
@@ -4901,6 +5057,10 @@ impl HeadlessAudioExecutor {
                 )
                 .await
                 .map_err(|e| e.to_string())?;
+            telemetry.packets_submitted = telemetry
+                .packets_submitted
+                .checked_add(1)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
             if stream.awaiting_priming {
                 platform
                     .resume_audio(output)
@@ -4931,6 +5091,23 @@ impl HeadlessAudioExecutor {
                     "platform audio callback underflowed"
                 );
             }
+            let channels = u64::from(stream.channels);
+            telemetry.submitted_frames = telemetry
+                .submitted_frames
+                .checked_add(state.submitted_samples / channels)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            telemetry.consumed_frames = telemetry
+                .consumed_frames
+                .checked_add(state.consumed_samples / channels)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            telemetry.queued_frames = telemetry
+                .queued_frames
+                .checked_add(state.queued_frames as u64)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            telemetry.underflow_count = telemetry
+                .underflow_count
+                .checked_add(state.underflow_count)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
             self.meter_trace.extend_from_slice(
                 format!(
                     "{}:{}:{}:{}\n",
@@ -4942,7 +5119,7 @@ impl HeadlessAudioExecutor {
                 .as_bytes(),
             );
         }
-        Ok(())
+        Ok(telemetry)
     }
 
     async fn close_stream(

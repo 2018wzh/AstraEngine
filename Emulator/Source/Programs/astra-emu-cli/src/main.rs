@@ -53,6 +53,14 @@ enum CliCommand {
         /// Write a local-private Perfetto Trace Event file for this native Windows run.
         #[arg(long)]
         perfetto_trace: Option<PathBuf>,
+        /// Replay a validated physical-input JSONL sequence through the native host.
+        /// Checkpoints are retained as trace markers only; they are not Headless captures.
+        #[arg(long)]
+        input: Option<PathBuf>,
+        /// Stop after this many 60 Hz Runtime fixed steps. This is intended for
+        /// bounded native soak runs and is never a throughput sampling shortcut.
+        #[arg(long, requires = "input")]
+        max_fixed_steps: Option<u64>,
     },
     /// Run the same AstraEMU RuntimeWorld/provider path on astra-platform-headless.
     Headless {
@@ -136,6 +144,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             family_library,
             enable_audio,
             perfetto_trace,
+            input,
+            max_fixed_steps,
         } => {
             tracing::info!(
                 event = "astra_emu_cli_native_launch_started",
@@ -150,6 +160,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 family_library,
                 enable_audio,
                 perfetto_trace,
+                input_path: input,
+                max_fixed_steps,
             })
             .await?;
             tracing::info!(
