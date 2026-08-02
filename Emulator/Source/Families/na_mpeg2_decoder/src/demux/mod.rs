@@ -108,8 +108,26 @@ impl Demuxer {
                 }
             }
             ContainerKind::MpegTs => self.push_ts_into(out),
-            ContainerKind::MpegPs => self.push_ps_into(out),
+            ContainerKind::MpegPs => self.push_ps_into(out, false),
             ContainerKind::Auto => {}
+        }
+    }
+
+    /// Deliver a bounded trailing PES at end of input. Incomplete TS packets are
+    /// intentionally discarded: they cannot establish a complete PES payload.
+    pub fn flush_into(&mut self, out: &mut Vec<Packet>) {
+        match self.kind {
+            ContainerKind::Es => {
+                if !self.buf.is_empty() {
+                    out.push(Packet {
+                        stream_type: self.stream_type,
+                        pts_90k: None,
+                        data: std::mem::take(&mut self.buf),
+                    });
+                }
+            }
+            ContainerKind::MpegPs => self.push_ps_into(out, true),
+            ContainerKind::MpegTs | ContainerKind::Auto => self.buf.clear(),
         }
     }
 
@@ -235,7 +253,7 @@ impl Demuxer {
         }
     }
 
-    fn push_ps_into(&mut self, out: &mut Vec<Packet>) {
+    fn push_ps_into(&mut self, out: &mut Vec<Packet>, end_of_stream: bool) {
         // Scan for PES start codes; keep the last partial chunk.
         let mut pos = 0usize;
         while let Some((sc_pos, sid)) = find_start_code(&self.buf, pos) {
@@ -271,10 +289,11 @@ impl Demuxer {
                     }
                     search = next_sc + 4;
                 }
-                let Some(end_pos) = end_opt else {
-                    break;
-                };
-                end_pos
+                match end_opt {
+                    Some(end_pos) => end_pos,
+                    None if end_of_stream => self.buf.len(),
+                    None => break,
+                }
             };
             if pes_end > self.buf.len() {
                 break;
@@ -333,12 +352,30 @@ fn detect_kind(buf: &[u8]) -> ContainerKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_kind, ContainerKind};
+    use super::{detect_kind, ContainerKind, Demuxer, StreamType};
 
     #[test]
     fn standalone_video_pes_uses_packetized_demux() {
         assert_eq!(detect_kind(&[0, 0, 1, 0xE0]), ContainerKind::MpegPs);
         assert_eq!(detect_kind(&[0, 0, 1, 0xB3]), ContainerKind::Es);
+    }
+
+    #[test]
+    fn eos_flush_delivers_an_unbounded_standalone_video_pes() {
+        let mut demuxer = Demuxer::new_auto();
+        let mut packets = Vec::new();
+        demuxer.push_into(
+            &[0, 0, 1, 0xE0, 0, 0, 0x80, 0, 0, 0x0F],
+            None,
+            &mut packets,
+        );
+        assert!(packets.is_empty());
+
+        demuxer.flush_into(&mut packets);
+
+        assert_eq!(packets.len(), 1);
+        assert_eq!(packets[0].stream_type, StreamType::MpegVideo);
+        assert_eq!(packets[0].data, vec![0x0F]);
     }
 }
 

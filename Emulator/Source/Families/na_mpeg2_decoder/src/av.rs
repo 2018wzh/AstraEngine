@@ -113,6 +113,22 @@ impl MpegAvPipeline {
     where
         F: FnMut(MpegAvEvent),
     {
+        self.pkts.clear();
+        self.demux.flush_into(&mut self.pkts);
+        let mut local_pkts = Vec::new();
+        std::mem::swap(&mut self.pkts, &mut local_pkts);
+        for pkt in local_pkts.drain(..) {
+            match pkt.stream_type {
+                StreamType::MpegVideo => self.handle_video_pkt(&pkt, &mut on_event)?,
+                StreamType::MpegAudio => {
+                    #[cfg(feature = "audio")]
+                    self.handle_audio_pkt(&pkt, &mut on_event)?;
+                }
+                StreamType::Unknown => {}
+            }
+        }
+        std::mem::swap(&mut self.pkts, &mut local_pkts);
+        self.pkts.clear();
         // Video: flush delayed frames.
         for f in self.vdec.flush_shared()? {
             self.emit_video_frame(f, &mut on_event)?;
