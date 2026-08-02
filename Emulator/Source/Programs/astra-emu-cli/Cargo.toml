@@ -52,7 +52,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "ti
 tracing.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows" }
+astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows", features = ["platform-test-driver"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 fuser.workspace = true

@@ -11,8 +11,8 @@ use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyAwaitResult,
-    LegacyEffect, LegacyInputEdge, LegacyProbeRequest, LegacyRenderFrameV1,
-    LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
+    LegacyEffect, LegacyInputEdge, LegacyPreparedSceneCommitV1, LegacyProbeRequest,
+    LegacyRenderFrameV1, LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
     LegacyTextPresentationLeaseV1, LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVfsReader,
     LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
 };
@@ -2562,6 +2562,20 @@ impl<'a> RuntimeDriver<'a> {
                 rendered = true;
                 continue;
             }
+            if envelope.domain == RuntimeOutputDomain::Presentation
+                && envelope.schema == "astra.emu.scene_packet.v1"
+            {
+                let commit = envelope
+                    .decode_postcard::<LegacyPreparedSceneCommitV1>(
+                        RuntimeOutputDomain::Presentation,
+                        "astra.emu.scene_packet.v1",
+                        SchemaVersion::new(1, 0, 0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                self.queue_scene_commit(commit)?;
+                rendered = true;
+                continue;
+            }
             if envelope.domain != RuntimeOutputDomain::Effect
                 || envelope.schema != "astra.emu.legacy_step_output.v1"
             {
@@ -2600,6 +2614,14 @@ impl<'a> RuntimeDriver<'a> {
                         let frame: LegacyRenderFrameV1 = postcard::from_bytes(&payload)
                             .map_err(|_| "ASTRA_EMU_HEADLESS_RENDER_FRAME_DECODE".to_owned())?;
                         self.queue_render_frame(frame)?;
+                        rendered = true;
+                    }
+                    LegacyEffect::Presentation {
+                        command, payload, ..
+                    } if command == "astra.emu.scene_packet.v1" => {
+                        let commit: LegacyPreparedSceneCommitV1 = postcard::from_bytes(&payload)
+                            .map_err(|_| "ASTRA_EMU_HEADLESS_SCENE_PACKET_DECODE".to_owned())?;
+                        self.queue_scene_commit(commit)?;
                         rendered = true;
                     }
                     LegacyEffect::Presentation {
@@ -2780,6 +2802,23 @@ impl<'a> RuntimeDriver<'a> {
             return Ok(());
         }
         self.pending_render_frame = Some(self.rasterizer.prepare(frame)?);
+        self.queued_visual_hash = Some(visual_hash);
+        self.visual_dirty = true;
+        Ok(())
+    }
+
+    fn queue_scene_commit(&mut self, commit: LegacyPreparedSceneCommitV1) -> Result<(), String> {
+        // Commit identity is calculated before mutation, while the rasterizer
+        // independently validates `next_resources` before it mutates retained
+        // CPU texture storage. This mirrors the GPU stage's fail-stop path.
+        let visual_hash = Hash256::from_sha256(
+            &postcard::to_allocvec(&commit)
+                .map_err(|_| "ASTRA_EMU_HEADLESS_SCENE_PACKET_ENCODE".to_owned())?,
+        );
+        if self.queued_visual_hash == Some(visual_hash) {
+            return Ok(());
+        }
+        self.pending_render_frame = Some(self.rasterizer.prepare_scene_commit(commit)?);
         self.queued_visual_hash = Some(visual_hash);
         self.visual_dirty = true;
         Ok(())
