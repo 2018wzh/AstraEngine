@@ -1558,7 +1558,9 @@ fn validate_fvp_performance_budget(
         || budget.profile_hash != profile_hash.to_string()
         || budget.min_run_duration_us != 600_000_000
     {
-        return Err("ASTRA_EMU_PERFORMANCE_BUDGET_IDENTITY".into());
+        return Err(format!(
+            "ASTRA_EMU_PERFORMANCE_BUDGET_IDENTITY:expected_policy_hash={profile_hash}"
+        ));
     }
     let expected = [
         (
