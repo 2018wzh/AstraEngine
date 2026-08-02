@@ -6,9 +6,10 @@
 
 use astra_core::Hash256;
 use astra_emu_family_api::{
-    LegacyBlendMode, LegacyDrawV1, LegacyRenderFrameV1, LegacyScissorV1,
-    LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVertexV1, LegacyVideoCommandV1,
-    LegacyVideoMode,
+    LegacyBlendMode, LegacyDrawV1, LegacyPreparedSceneCommitV1, LegacyRenderFrameV1,
+    LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneResourceStateV1,
+    LegacySceneTextureCreateV1, LegacySceneTextureUpdateV1, LegacyScissorV1, LegacyTextureFormat,
+    LegacyTextureUpdateV1, LegacyVertexV1, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use rfvp_hosted::{
     host_api::{BlendMode, DrawSolidCommand, PixelFormat, TextureId},
@@ -16,6 +17,142 @@ use rfvp_hosted::{
 };
 
 const MAX_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
+
+/// Session-owned translator for RFVP's semantic scene operations.  Its
+/// metadata is intentionally serializable, so a save/restore boundary can
+/// reconstruct the same incremental resource validation without retaining
+/// decoded pixels outside the renderer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HostedScenePacketTranslator {
+    resources: LegacySceneResourceStateV1,
+}
+
+impl HostedScenePacketTranslator {
+    pub fn snapshot(&self) -> LegacySceneResourceStateV1 {
+        self.resources.clone()
+    }
+
+    pub fn restore(&mut self, resources: LegacySceneResourceStateV1) {
+        self.resources = resources;
+    }
+
+    /// Converts and prepares one complete RFVP scene transaction.  Resource
+    /// metadata changes only after every operation and draw reference has
+    /// passed validation, preventing partial commit on malformed plugin output.
+    pub fn translate(
+        &mut self,
+        delta: &HostedStepDelta,
+    ) -> Result<Option<LegacyPreparedSceneCommitV1>, HostedAdapterError> {
+        let mut frame: Option<(u32, u32)> = None;
+        let mut ended = false;
+        let mut presented = false;
+        let mut resources = Vec::new();
+        let mut draws = Vec::new();
+        let mut bytes = 0usize;
+
+        for operation in &delta.scene {
+            match operation {
+                HostedSceneOperation::CreateTexture(texture) => {
+                    let pixels = texture
+                        .pixels
+                        .as_deref()
+                        .ok_or(HostedAdapterError::TextureWithoutPixels(texture.id))?;
+                    let (format, pixels) = texture_payload(
+                        &mut bytes,
+                        texture.id,
+                        texture.desc.width,
+                        texture.desc.height,
+                        texture.desc.format,
+                        pixels,
+                    )?;
+                    resources.push(LegacySceneResourceOperationV1::CreateTexture(
+                        LegacySceneTextureCreateV1 {
+                            texture_id: texture.id.0,
+                            width: texture.desc.width,
+                            height: texture.desc.height,
+                            format,
+                            content_hash: Hash256::from_sha256(&pixels),
+                            pixels,
+                        },
+                    ));
+                }
+                HostedSceneOperation::UpdateTexture(update) => {
+                    let (format, pixels) = texture_payload(
+                        &mut bytes,
+                        update.id,
+                        update.rect.width,
+                        update.rect.height,
+                        update.format,
+                        &update.pixels,
+                    )?;
+                    resources.push(LegacySceneResourceOperationV1::UpdateTexture(
+                        LegacySceneTextureUpdateV1 {
+                            texture_id: update.id.0,
+                            x: update.rect.x,
+                            y: update.rect.y,
+                            width: update.rect.width,
+                            height: update.rect.height,
+                            format,
+                            content_hash: Hash256::from_sha256(&pixels),
+                            pixels,
+                        },
+                    ));
+                }
+                HostedSceneOperation::DestroyTexture(id) => {
+                    resources
+                        .push(LegacySceneResourceOperationV1::DestroyTexture { texture_id: id.0 });
+                }
+                HostedSceneOperation::BeginFrame { width, height, .. } => {
+                    if frame.replace((*width, *height)).is_some() || ended || presented {
+                        return Err(HostedAdapterError::FrameBoundary);
+                    }
+                }
+                HostedSceneOperation::DrawSprite(draw) => {
+                    if frame.is_none() || ended || presented {
+                        return Err(HostedAdapterError::FrameBoundary);
+                    }
+                    draws.push(sprite_draw(draw));
+                }
+                HostedSceneOperation::DrawSolid(command) => {
+                    if frame.is_none() || ended || presented {
+                        return Err(HostedAdapterError::FrameBoundary);
+                    }
+                    draws.push(solid_draw(command));
+                }
+                HostedSceneOperation::EndFrame => {
+                    if frame.is_none() || ended || presented {
+                        return Err(HostedAdapterError::FrameBoundary);
+                    }
+                    ended = true;
+                }
+                HostedSceneOperation::Present => {
+                    if !ended || presented {
+                        return Err(HostedAdapterError::FrameBoundary);
+                    }
+                    presented = true;
+                }
+            }
+        }
+        match (frame, ended, presented) {
+            (None, false, false) => Ok(None),
+            (Some((width, height)), true, true) => {
+                let packet = LegacyScenePacketV1 {
+                    width,
+                    height,
+                    resources,
+                    draws,
+                };
+                let prepared = self
+                    .resources
+                    .prepare(packet)
+                    .map_err(|error| HostedAdapterError::InvalidPacket(error.code().to_owned()))?;
+                self.resources.commit(prepared.clone());
+                Ok(Some(prepared))
+            }
+            _ => Err(HostedAdapterError::FrameBoundary),
+        }
+    }
+}
 
 /// Converts exactly one RFVP hosted transaction into one renderer packet.
 /// Frame-boundary violations and unsupported semantic operations are blocking;
@@ -77,7 +214,12 @@ pub fn scene_packet_from_delta(
                     vertices: draw.vertices.map(|vertex| LegacyVertexV1 {
                         position: vertex.position,
                         tex_coord: vertex.tex_coord,
-                        color: [vertex.color.r, vertex.color.g, vertex.color.b, vertex.color.a],
+                        color: [
+                            vertex.color.r,
+                            vertex.color.g,
+                            vertex.color.b,
+                            vertex.color.a,
+                        ],
                     }),
                     blend: map_blend(draw.blend),
                     scissor: draw.scissor.map(|scissor| LegacyScissorV1 {
@@ -176,6 +318,26 @@ fn push_texture(
     format: PixelFormat,
     pixels: &[u8],
 ) -> Result<(), HostedAdapterError> {
+    let (format, pixels) = texture_payload(bytes, id, width, height, format, pixels)?;
+    updates.push(LegacyTextureUpdateV1 {
+        texture_id: id.0,
+        width,
+        height,
+        format,
+        content_hash: Hash256::from_sha256(&pixels),
+        pixels,
+    });
+    Ok(())
+}
+
+fn texture_payload(
+    bytes: &mut usize,
+    id: TextureId,
+    width: u32,
+    height: u32,
+    format: PixelFormat,
+    pixels: &[u8],
+) -> Result<(LegacyTextureFormat, Vec<u8>), HostedAdapterError> {
     let format = match format {
         PixelFormat::Rgba8 => LegacyTextureFormat::Rgba8,
         PixelFormat::LumaA8 => LegacyTextureFormat::LumaAlpha8,
@@ -192,19 +354,13 @@ fn push_texture(
     if pixels.len() != expected {
         return Err(HostedAdapterError::TextureBounds(id));
     }
-    *bytes = bytes.checked_add(expected).ok_or(HostedAdapterError::UploadBudget)?;
+    *bytes = bytes
+        .checked_add(expected)
+        .ok_or(HostedAdapterError::UploadBudget)?;
     if *bytes > MAX_UPLOAD_BYTES {
         return Err(HostedAdapterError::UploadBudget);
     }
-    updates.push(LegacyTextureUpdateV1 {
-        texture_id: id.0,
-        width,
-        height,
-        format,
-        content_hash: Hash256::from_sha256(pixels),
-        pixels: pixels.to_vec(),
-    });
-    Ok(())
+    Ok((format, pixels.to_vec()))
 }
 
 fn map_blend(blend: BlendMode) -> LegacyBlendMode {
@@ -221,17 +377,61 @@ fn solid_draw(command: &DrawSolidCommand) -> LegacyDrawV1 {
     let y0 = command.rect.y as f32;
     let x1 = command.rect.x.saturating_add(command.rect.width) as f32;
     let y1 = command.rect.y.saturating_add(command.rect.height) as f32;
-    let color = [command.color.r, command.color.g, command.color.b, command.color.a];
+    let color = [
+        command.color.r,
+        command.color.g,
+        command.color.b,
+        command.color.a,
+    ];
     LegacyDrawV1 {
         texture_id: u32::MAX,
         vertices: [
-            LegacyVertexV1 { position: [x0, y1], tex_coord: [0.0, 1.0], color },
-            LegacyVertexV1 { position: [x0, y0], tex_coord: [0.0, 0.0], color },
-            LegacyVertexV1 { position: [x1, y1], tex_coord: [1.0, 1.0], color },
-            LegacyVertexV1 { position: [x1, y0], tex_coord: [1.0, 0.0], color },
+            LegacyVertexV1 {
+                position: [x0, y1],
+                tex_coord: [0.0, 1.0],
+                color,
+            },
+            LegacyVertexV1 {
+                position: [x0, y0],
+                tex_coord: [0.0, 0.0],
+                color,
+            },
+            LegacyVertexV1 {
+                position: [x1, y1],
+                tex_coord: [1.0, 1.0],
+                color,
+            },
+            LegacyVertexV1 {
+                position: [x1, y0],
+                tex_coord: [1.0, 0.0],
+                color,
+            },
         ],
         blend: map_blend(command.blend),
         scissor: command.scissor.map(|scissor| LegacyScissorV1 {
+            x: scissor.x,
+            y: scissor.y,
+            width: scissor.width,
+            height: scissor.height,
+        }),
+    }
+}
+
+fn sprite_draw(draw: &rfvp_hosted::host_api::DrawSpriteCommand) -> LegacyDrawV1 {
+    LegacyDrawV1 {
+        texture_id: draw.texture.0,
+        vertices: draw.vertices.map(|vertex| LegacyVertexV1 {
+            position: vertex.position,
+            tex_coord: vertex.tex_coord,
+            color: [
+                vertex.color.r,
+                vertex.color.g,
+                vertex.color.b,
+                vertex.color.a,
+            ],
+        }),
+        blend: map_blend(draw.blend),
+        scissor: draw.scissor.map(|scissor| LegacyScissorV1 {
             x: scissor.x,
             y: scissor.y,
             width: scissor.width,
@@ -266,8 +466,8 @@ pub enum HostedAdapterError {
 mod tests {
     use super::*;
     use rfvp_hosted::{
-        host_api::{ColorRgba, RectI32, TextureRect},
-        hosted::{HostedAudioOperation, HostedTickResult},
+        host_api::{ColorRgba, RectI32, TextureDesc, TextureRect},
+        hosted::{HostedAudioOperation, HostedTextureData, HostedTickResult},
     };
 
     fn delta(scene: Vec<HostedSceneOperation>) -> HostedStepDelta {
@@ -286,9 +486,18 @@ mod tests {
     #[test]
     fn converts_one_complete_semantic_frame() {
         let frame = scene_packet_from_delta(&delta(vec![
-            HostedSceneOperation::BeginFrame { width: 640, height: 480, clear: None },
+            HostedSceneOperation::BeginFrame {
+                width: 640,
+                height: 480,
+                clear: None,
+            },
             HostedSceneOperation::DrawSolid(DrawSolidCommand {
-                rect: RectI32 { x: 4, y: 8, width: 16, height: 32 },
+                rect: RectI32 {
+                    x: 4,
+                    y: 8,
+                    width: 16,
+                    height: 32,
+                },
                 color: ColorRgba::BLACK,
                 blend: BlendMode::Alpha,
                 scissor: None,
@@ -309,14 +518,79 @@ mod tests {
         let error = scene_packet_from_delta(&delta(vec![HostedSceneOperation::UpdateTexture(
             rfvp_hosted::hosted::HostedTextureUpdate {
                 id: TextureId(9),
-                rect: TextureRect { x: 1, y: 0, width: 1, height: 1 },
+                rect: TextureRect {
+                    x: 1,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
                 format: PixelFormat::Rgba8,
                 pixels: vec![0, 0, 0, 255],
             },
         )]))
         .expect_err("v1 packet cannot represent a partial texture update");
 
-        assert_eq!(error, HostedAdapterError::PartialTextureUpdate(TextureId(9)));
+        assert_eq!(
+            error,
+            HostedAdapterError::PartialTextureUpdate(TextureId(9))
+        );
+    }
+
+    #[test]
+    fn prepared_scene_packet_retains_texture_metadata_for_partial_uploads() {
+        let mut translator = HostedScenePacketTranslator::default();
+        let create = delta(vec![
+            HostedSceneOperation::CreateTexture(HostedTextureData {
+                id: TextureId(9),
+                desc: TextureDesc {
+                    width: 2,
+                    height: 1,
+                    format: PixelFormat::Rgba8,
+                    mip_count: 1,
+                },
+                pixels: Some(vec![0, 0, 0, 255, 255, 255, 255, 255]),
+            }),
+            HostedSceneOperation::BeginFrame {
+                width: 640,
+                height: 480,
+                clear: None,
+            },
+            HostedSceneOperation::EndFrame,
+            HostedSceneOperation::Present,
+        ]);
+        translator
+            .translate(&create)
+            .expect("create packet translates");
+
+        let update = delta(vec![
+            HostedSceneOperation::UpdateTexture(rfvp_hosted::hosted::HostedTextureUpdate {
+                id: TextureId(9),
+                rect: TextureRect {
+                    x: 1,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                format: PixelFormat::Rgba8,
+                pixels: vec![1, 2, 3, 4],
+            }),
+            HostedSceneOperation::BeginFrame {
+                width: 640,
+                height: 480,
+                clear: None,
+            },
+            HostedSceneOperation::EndFrame,
+            HostedSceneOperation::Present,
+        ]);
+        let prepared = translator
+            .translate(&update)
+            .expect("partial packet translates")
+            .expect("complete frame");
+        assert!(matches!(
+            prepared.packet.resources.as_slice(),
+            [LegacySceneResourceOperationV1::UpdateTexture(texture)] if texture.x == 1
+        ));
+        assert!(translator.snapshot().textures.contains_key(&9));
     }
 
     #[test]

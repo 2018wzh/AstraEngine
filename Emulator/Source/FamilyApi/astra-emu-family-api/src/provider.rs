@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
@@ -704,6 +704,72 @@ pub struct LegacyRenderFrameV1 {
     pub draws: Vec<LegacyDrawV1>,
 }
 
+/// Incremental, host-neutral scene packet.  This is the v5 rendering contract
+/// for providers which retain resources across steps: it sends only texture
+/// lifecycle operations and the current ordered draw list, never a rebuilt
+/// full texture set.  Consumers must validate and prepare the whole packet
+/// before committing any resource mutation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyScenePacketV1 {
+    pub width: u32,
+    pub height: u32,
+    pub resources: Vec<LegacySceneResourceOperationV1>,
+    pub draws: Vec<LegacyDrawV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacySceneResourceOperationV1 {
+    CreateTexture(LegacySceneTextureCreateV1),
+    UpdateTexture(LegacySceneTextureUpdateV1),
+    DestroyTexture { texture_id: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySceneTextureCreateV1 {
+    pub texture_id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub format: LegacyTextureFormat,
+    pub content_hash: Hash256,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySceneTextureUpdateV1 {
+    pub texture_id: u32,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub format: LegacyTextureFormat,
+    pub content_hash: Hash256,
+    pub pixels: Vec<u8>,
+}
+
+/// Serializable texture metadata used to prepare a scene packet.  It never
+/// stores decoded pixels, so it is safe to retain in an adapter snapshot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySceneResourceStateV1 {
+    pub textures: BTreeMap<u32, LegacySceneTextureDescriptorV1>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySceneTextureDescriptorV1 {
+    pub width: u32,
+    pub height: u32,
+    pub format: LegacyTextureFormat,
+}
+
+/// A packet that has passed all lifecycle and draw-reference checks.  Hosts
+/// must apply its resource operations atomically, then replace their retained
+/// metadata with `next_resources`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyPreparedSceneCommitV1 {
+    pub packet: LegacyScenePacketV1,
+    pub next_resources: LegacySceneResourceStateV1,
+}
+
 /// Resource-backed presentation packet. Unlike [`LegacyRenderFrameV1`], this
 /// contract never serializes decoded commercial pixels. The host resolves each
 /// URI through the active family session, verifies the encoded identity, and
@@ -1060,6 +1126,177 @@ impl LegacyRenderFrameV1 {
         }
         validate_render_draws(&self.draws)
     }
+}
+
+impl LegacyScenePacketV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_render_dimensions_and_counts(
+            self.width,
+            self.height,
+            self.resources.len(),
+            self.draws.len(),
+        )?;
+        let mut bytes = 0usize;
+        for operation in &self.resources {
+            match operation {
+                LegacySceneResourceOperationV1::CreateTexture(texture) => {
+                    validate_scene_pixels(
+                        texture.width,
+                        texture.height,
+                        texture.format,
+                        &texture.pixels,
+                        texture.content_hash,
+                    )?;
+                    bytes = add_scene_upload_bytes(bytes, texture.pixels.len())?;
+                }
+                LegacySceneResourceOperationV1::UpdateTexture(texture) => {
+                    if texture.width == 0 || texture.height == 0 {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_SCENE_TEXTURE_REGION",
+                            "texture update region must be nonempty",
+                        ));
+                    }
+                    validate_scene_pixels(
+                        texture.width,
+                        texture.height,
+                        texture.format,
+                        &texture.pixels,
+                        texture.content_hash,
+                    )?;
+                    bytes = add_scene_upload_bytes(bytes, texture.pixels.len())?;
+                }
+                LegacySceneResourceOperationV1::DestroyTexture { .. } => {}
+            }
+        }
+        validate_render_draws(&self.draws)
+    }
+}
+
+impl LegacySceneResourceStateV1 {
+    /// Validates a complete transaction against retained resource metadata
+    /// without changing this state.  The caller chooses when to commit the
+    /// returned replacement state, so an invalid packet cannot partially
+    /// mutate a renderer or adapter.
+    pub fn prepare(
+        &self,
+        packet: LegacyScenePacketV1,
+    ) -> Result<LegacyPreparedSceneCommitV1, LegacyProviderError> {
+        packet.validate()?;
+        let mut next = self.clone();
+        for operation in &packet.resources {
+            match operation {
+                LegacySceneResourceOperationV1::CreateTexture(texture) => {
+                    if next.textures.contains_key(&texture.texture_id) {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_SCENE_TEXTURE_EXISTS",
+                            "scene packet creates an existing texture",
+                        ));
+                    }
+                    next.textures.insert(
+                        texture.texture_id,
+                        LegacySceneTextureDescriptorV1 {
+                            width: texture.width,
+                            height: texture.height,
+                            format: texture.format,
+                        },
+                    );
+                }
+                LegacySceneResourceOperationV1::UpdateTexture(texture) => {
+                    let descriptor = next.textures.get(&texture.texture_id).ok_or_else(|| {
+                        LegacyProviderError::invalid(
+                            "ASTRA_EMU_SCENE_TEXTURE_MISSING",
+                            "scene packet updates an unknown texture",
+                        )
+                    })?;
+                    let right = texture.x.checked_add(texture.width);
+                    let bottom = texture.y.checked_add(texture.height);
+                    if descriptor.format != texture.format
+                        || right.is_none_or(|right| right > descriptor.width)
+                        || bottom.is_none_or(|bottom| bottom > descriptor.height)
+                    {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_SCENE_TEXTURE_REGION",
+                            "scene update format or region does not match retained texture",
+                        ));
+                    }
+                }
+                LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
+                    if next.textures.remove(texture_id).is_none() {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_SCENE_TEXTURE_MISSING",
+                            "scene packet destroys an unknown texture",
+                        ));
+                    }
+                }
+            }
+        }
+        for draw in &packet.draws {
+            if draw.texture_id != u32::MAX && !next.textures.contains_key(&draw.texture_id) {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SCENE_DRAW_TEXTURE_MISSING",
+                    "scene draw references a texture unavailable after commit",
+                ));
+            }
+        }
+        Ok(LegacyPreparedSceneCommitV1 {
+            packet,
+            next_resources: next,
+        })
+    }
+
+    pub fn commit(&mut self, prepared: LegacyPreparedSceneCommitV1) {
+        *self = prepared.next_resources;
+    }
+}
+
+fn add_scene_upload_bytes(current: usize, bytes: usize) -> Result<usize, LegacyProviderError> {
+    let total = current.checked_add(bytes).ok_or_else(|| {
+        LegacyProviderError::invalid(
+            "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
+            "scene texture upload length overflow",
+        )
+    })?;
+    if total > MAX_EFFECT_PAYLOAD_BYTES_PER_STEP {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
+            "scene texture uploads exceed the per-step bound",
+        ));
+    }
+    Ok(total)
+}
+
+fn validate_scene_pixels(
+    width: u32,
+    height: u32,
+    format: LegacyTextureFormat,
+    pixels: &[u8],
+    content_hash: Hash256,
+) -> Result<(), LegacyProviderError> {
+    let channels = match format {
+        LegacyTextureFormat::Rgba8 => 4usize,
+        LegacyTextureFormat::LumaAlpha8 => 2usize,
+    };
+    let expected = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(channels))
+        .ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
+                "scene texture length overflow",
+            )
+        })?;
+    if expected != pixels.len() || Hash256::from_sha256(pixels) != content_hash {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_RENDER_TEXTURE_IDENTITY",
+            "scene texture dimensions, bytes, or hash do not match",
+        ));
+    }
+    Ok(())
 }
 
 impl LegacyRenderResourceFrameV1 {
@@ -1488,6 +1725,60 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn prepared_scene_commit_is_atomic_and_accepts_partial_uploads() {
+        let pixels = vec![0, 0, 0, 255, 255, 255, 255, 255];
+        let create = LegacyScenePacketV1 {
+            width: 640,
+            height: 480,
+            resources: vec![LegacySceneResourceOperationV1::CreateTexture(
+                LegacySceneTextureCreateV1 {
+                    texture_id: 7,
+                    width: 2,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    content_hash: Hash256::from_sha256(&pixels),
+                    pixels,
+                },
+            )],
+            draws: vec![],
+        };
+        let mut state = LegacySceneResourceStateV1::default();
+        let prepared = state.prepare(create).expect("create packet prepares");
+        state.commit(prepared);
+
+        let update_pixels = vec![1, 2, 3, 4];
+        let update = LegacyScenePacketV1 {
+            width: 640,
+            height: 480,
+            resources: vec![LegacySceneResourceOperationV1::UpdateTexture(
+                LegacySceneTextureUpdateV1 {
+                    texture_id: 7,
+                    x: 1,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    content_hash: Hash256::from_sha256(&update_pixels),
+                    pixels: update_pixels,
+                },
+            )],
+            draws: vec![],
+        };
+        let prepared = state.prepare(update).expect("partial packet prepares");
+        state.commit(prepared);
+        assert!(state.textures.contains_key(&7));
+
+        let missing = LegacyScenePacketV1 {
+            width: 640,
+            height: 480,
+            resources: vec![LegacySceneResourceOperationV1::DestroyTexture { texture_id: 99 }],
+            draws: vec![],
+        };
+        assert!(state.prepare(missing).is_err());
+        assert!(state.textures.contains_key(&7));
     }
 
     #[test]

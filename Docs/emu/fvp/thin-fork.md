@@ -4,7 +4,7 @@
 
 FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。它只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
-截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals、内存 snapshot/restore、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 已完成首个 fail-stop scene/video 转换单测，但动态 FVP adapter 尚未切换；本页不是 E2 或性能完成声明。
+截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals、内存 snapshot/restore、Shipping/Evidence 固定 trace ring、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 的 FVP adapter 已具备 session-owned `ScenePacket` translator：它将 create/partial-update/destroy 转为有界资源操作，先通过 `PreparedCommit` 验证完整事务再替换元数据；旧 render-frame 转换仍只用于过渡测试。动态 FVP provider、Manager/CLI renderer 消费和 Headless E2 尚未切换，本页不是 E2 或性能完成声明。
 
 ## 不可跨越的边界
 
