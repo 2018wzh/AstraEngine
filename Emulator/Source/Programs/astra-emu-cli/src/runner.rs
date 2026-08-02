@@ -11,10 +11,11 @@ use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyAwaitResult,
-    LegacyEffect, LegacyInputEdge, LegacyPreparedSceneCommitV1, LegacyProbeRequest,
-    LegacyRenderFrameV1, LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyStepBudget,
-    LegacyTextPresentationLeaseV1, LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVfsReader,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
+    LegacyDrawV1, LegacyEffect, LegacyInputEdge, LegacyPreparedSceneCommitV1, LegacyProbeRequest,
+    LegacyRenderFrameV1, LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx,
+    LegacySceneResourceOperationV1, LegacyStepBudget, LegacyTextPresentationLeaseV1,
+    LegacyTextureFormat, LegacyTextureUpdateV1, LegacyVfsReader, LegacyVideoCommandV1,
+    LegacyVideoMode, LegacyWaitRequest,
 };
 use astra_emu_family_support::{
     verify_vfs, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
@@ -2808,13 +2809,13 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn queue_scene_commit(&mut self, commit: LegacyPreparedSceneCommitV1) -> Result<(), String> {
-        // Commit identity is calculated before mutation, while the rasterizer
-        // independently validates `next_resources` before it mutates retained
-        // CPU texture storage. This mirrors the GPU stage's fail-stop path.
-        let visual_hash = Hash256::from_sha256(
-            &postcard::to_allocvec(&commit)
-                .map_err(|_| "ASTRA_EMU_HEADLESS_SCENE_PACKET_ENCODE".to_owned())?,
-        );
+        // A v5 semantic commit is already a single, bounded transaction.
+        // Its identity contains resource content hashes rather than resource
+        // bytes, so frame deduplication does not duplicate texture payloads on
+        // the hot path. The rasterizer independently validates
+        // `next_resources` before retained CPU state changes, which keeps this
+        // direct hand-off fail-stop.
+        let visual_hash = scene_commit_visual_hash(&commit)?;
         if self.queued_visual_hash == Some(visual_hash) {
             return Ok(());
         }
@@ -3861,6 +3862,88 @@ fn stream_mut(
         .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_STREAM_MISSING".to_owned())
 }
 
+/// The visual identity deliberately substitutes every validated upload with
+/// its SHA-256 content identity.  It is used only to suppress a byte-for-byte
+/// equivalent presentation; validation still checks the actual bytes before
+/// they reach retained renderer state.
+#[derive(Serialize)]
+struct SceneCommitVisualIdentity<'a> {
+    reset_resources: bool,
+    width: u32,
+    height: u32,
+    resources: Vec<SceneResourceVisualIdentity>,
+    draws: &'a [LegacyDrawV1],
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum SceneResourceVisualIdentity {
+    Create {
+        texture_id: u32,
+        width: u32,
+        height: u32,
+        format: LegacyTextureFormat,
+        content_hash: Hash256,
+    },
+    Update {
+        texture_id: u32,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        format: LegacyTextureFormat,
+        content_hash: Hash256,
+    },
+    Destroy {
+        texture_id: u32,
+    },
+}
+
+fn scene_commit_visual_hash(commit: &LegacyPreparedSceneCommitV1) -> Result<Hash256, String> {
+    let resources = commit
+        .packet
+        .resources
+        .iter()
+        .map(|operation| match operation {
+            LegacySceneResourceOperationV1::CreateTexture(texture) => {
+                SceneResourceVisualIdentity::Create {
+                    texture_id: texture.texture_id,
+                    width: texture.width,
+                    height: texture.height,
+                    format: texture.format,
+                    content_hash: texture.content_hash,
+                }
+            }
+            LegacySceneResourceOperationV1::UpdateTexture(texture) => {
+                SceneResourceVisualIdentity::Update {
+                    texture_id: texture.texture_id,
+                    x: texture.x,
+                    y: texture.y,
+                    width: texture.width,
+                    height: texture.height,
+                    format: texture.format,
+                    content_hash: texture.content_hash,
+                }
+            }
+            LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
+                SceneResourceVisualIdentity::Destroy {
+                    texture_id: *texture_id,
+                }
+            }
+        })
+        .collect();
+    let identity = SceneCommitVisualIdentity {
+        reset_resources: commit.reset_resources,
+        width: commit.packet.width,
+        height: commit.packet.height,
+        resources,
+        draws: &commit.packet.draws,
+    };
+    let bytes = postcard::to_allocvec(&identity)
+        .map_err(|_| "ASTRA_EMU_HEADLESS_SCENE_IDENTITY_ENCODE".to_owned())?;
+    Ok(Hash256::from_sha256(&bytes))
+}
+
 fn prepare_audio_stream_for_output(
     stream: &mut AudioStream,
     output_sample_rate: u32,
@@ -4150,7 +4233,10 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod native_tests {
     use super::*;
-    use astra_emu_family_api::FamilyId;
+    use astra_emu_family_api::{
+        FamilyId, LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneResourceStateV1,
+        LegacySceneTextureCreateV1,
+    };
 
     fn case_record() -> CaseRecord {
         CaseRecord {
@@ -4213,6 +4299,58 @@ mod native_tests {
             stage_height: 720,
             session_seed: 7,
         }
+    }
+
+    #[test]
+    fn semantic_scene_identity_uses_validated_resource_content_identity() {
+        let pixels = vec![7, 8, 9, 255];
+        let packet = LegacyScenePacketV1 {
+            width: 1,
+            height: 1,
+            resources: vec![LegacySceneResourceOperationV1::CreateTexture(
+                LegacySceneTextureCreateV1 {
+                    texture_id: 11,
+                    width: 1,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    content_hash: Hash256::from_sha256(&pixels),
+                    pixels,
+                },
+            )],
+            draws: Vec::new(),
+        };
+        let commit = LegacySceneResourceStateV1::default()
+            .prepare(packet)
+            .unwrap();
+        let same = commit.clone();
+        assert_eq!(
+            scene_commit_visual_hash(&commit).unwrap(),
+            scene_commit_visual_hash(&same).unwrap()
+        );
+
+        let replacement = vec![9, 8, 7, 255];
+        let changed_packet = LegacyScenePacketV1 {
+            width: 1,
+            height: 1,
+            resources: vec![LegacySceneResourceOperationV1::CreateTexture(
+                LegacySceneTextureCreateV1 {
+                    texture_id: 11,
+                    width: 1,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    content_hash: Hash256::from_sha256(&replacement),
+                    pixels: replacement,
+                },
+            )],
+            draws: Vec::new(),
+        };
+        let changed = LegacySceneResourceStateV1::default()
+            .prepare(changed_packet)
+            .unwrap();
+        assert_ne!(
+            scene_commit_visual_hash(&commit).unwrap(),
+            scene_commit_visual_hash(&changed).unwrap()
+        );
     }
 
     #[test]
