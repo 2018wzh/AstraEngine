@@ -6,7 +6,7 @@
 //! Supported:
 //! - Raw ES (start-code byte stream)
 //! - MPEG-TS (188-byte packets; video PID auto-sniffed from PES stream_id 0xE0..0xEF)
-//! - MPEG-PS (pack/system headers + PES; extracts video PES payload)
+//! - MPEG-PS or standalone PES (pack/system headers are optional; extracts video PES payload)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamType {
@@ -315,15 +315,31 @@ fn detect_kind(buf: &[u8]) -> ContainerKind {
             return ContainerKind::MpegTs;
         }
     }
-    // PS: pack start code 00 00 01 BA.
+    // PS: pack start code 00 00 01 BA, or standalone video PES.  Some legacy
+    // wrappers omit the PS pack/system headers but retain complete PES packets;
+    // treating those as raw ES forwards the PES header to the video decoder.
     if buf
         .windows(4)
         .take(4096)
-        .any(|w| w == [0x00, 0x00, 0x01, 0xBA])
+        .any(|w| {
+            w == [0x00, 0x00, 0x01, 0xBA]
+                || (w[0..3] == [0x00, 0x00, 0x01] && (0xE0..=0xEF).contains(&w[3]))
+        })
     {
         return ContainerKind::MpegPs;
     }
     ContainerKind::Es
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{detect_kind, ContainerKind};
+
+    #[test]
+    fn standalone_video_pes_uses_packetized_demux() {
+        assert_eq!(detect_kind(&[0, 0, 1, 0xE0]), ContainerKind::MpegPs);
+        assert_eq!(detect_kind(&[0, 0, 1, 0xB3]), ContainerKind::Es);
+    }
 }
 
 fn find_start_code(buf: &[u8], from: usize) -> Option<(usize, u8)> {
