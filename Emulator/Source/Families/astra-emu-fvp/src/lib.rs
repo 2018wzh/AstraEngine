@@ -7,6 +7,7 @@ mod ffi;
 mod hcb;
 mod hosted;
 pub mod hosted_host;
+pub mod hosted_runtime;
 pub mod hosted_worker;
 mod media_decode;
 mod provider;
