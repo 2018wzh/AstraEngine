@@ -8,7 +8,14 @@
 - `MINORI_READER_ID` 升级为 `astra.emu.minori.paz.v2`，并进入 plaintext cache 的 codec identity。旧 reader 写出的明文 cache 因而不会跨实现版本复用；新版本仍需由独立的真实 cache hit 轮次验证。
 - v1/v2 的 RC4 entry key 改由 index 中保留的原始 CP932 名称字节派生，仅对 ASCII 字节做格式要求的大小写归一化。这样避免 Unicode decode/re-encode 改变密钥；原始字节只驻留 mount session 的 opaque descriptor，不进入 save、report 或 cache identity。
 - 真实首路线已到达影片指令。公共 VFS 已提供 range-backed reader，Minori 对未压缩 movie entry 以 entry-relative transform 直接读取请求范围；它不再因首个 header probe 物化整个影片。压缩 entry 仍走完整、受上限的解压路径，不能冒充流式实现。
-- 原程序的影片启动路径按扩展名选择文件流媒体图。AstraEMU 不复用该系统路径：Minori host 只用有界 reader 读取固定 header，再依据容器识别结果要求显式的纯 Rust decoder binding。当前授权样本的首个影片没有匹配已确认容器，返回 `ASTRA_EMU_MINORI_VIDEO_CONTAINER_UNRECOGNIZED`；即使将来识别出容器，缺少绑定也必须返回 `ASTRA_EMU_MINORI_VIDEO_PURE_RUST_DECODER_UNBOUND`。这不是 E2 路线通过证据。
+- 原程序的影片启动路径按扩展名选择文件流媒体图。AstraEMU 不复用该系统路径：Minori host 只用有界 reader 读取固定 header，再依据容器识别结果要求显式的纯 Rust decoder binding。当前五项授权样本中仅一项在有界前缀后识别出 MPEG start code；其余四项继续返回 `ASTRA_EMU_MINORI_VIDEO_CONTAINER_UNRECOGNIZED`。这不是 E2 路线通过证据。
+
+### MPEG 流式绑定
+
+- 已将已识别 MPEG entry 交给 `MpegRangeDecoder`：reader 只保留 64 KiB 输入块和最多 256 个待消费事件，帧与音频不物化为整片媒体或历史帧队列。MPEG start code 的前缀偏移在创建 decoder 时固定，VFS range transform 仍由 Minori mount session 执行。
+- 视频 frame 的 PTS、尺寸、RGBA 长度与 sequence 都在进入 Renderer2D 前校验。音频 chunk 只接受有限的 mono/stereo、有限 sample、交错 frame 对齐与单调 PTS；pending event 和 mixer queue 都有独立上限。错误格式、时间倒退、队列超限或 identity 冲突均为 `ASTRA_EMU_MINORI_MPEG_*` blocking diagnostic。
+- MPEG 音频改为流式提交现有 Headless audio executor。它不走整片 decode 或私有 mixer；首次 chunk 必须精确匹配 host 显式 audio output format，之后格式漂移直接阻断。视频 EOF 只标记 audio EOS，media fence 会等待已提交音频 drain 后再完成。
+- 该轮仅有 range decoder、格式边界和 Headless binding 的定向 Rust 回归。尚未以授权样本完成 MPEG 影片的实际 Headless E2，也没有把四项未识别容器解释为 MPEG、WMV 或其他 codec。
 
 ## 2026-08-01
 
