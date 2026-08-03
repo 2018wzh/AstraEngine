@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -558,6 +558,7 @@ pub async fn run_native(launch: NativeLaunch) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
+    let launch_started = Instant::now();
     if launch.max_fixed_steps == Some(0) {
         return Err("ASTRA_EMU_NATIVE_MAX_FIXED_STEPS_INVALID".into());
     }
@@ -576,6 +577,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         format!("{}\0{}", launch.family_id, game_root.to_string_lossy()).as_bytes(),
     );
     let mount_set_id = format!("native-{}", &mount_seed.to_string()[7..39]);
+    let phase_started = Instant::now();
     let prepared = prepare_family_case(
         &launch.family_id,
         &game_root,
@@ -583,6 +585,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         launch.entry.as_deref(),
         &mount_set_id,
     )?;
+    record_native_launch_phase("case_prepare", phase_started, launch_started);
     let game_identity_hash = prepared.package_hash;
     let family_config = match (&launch.family_manifest, &launch.family_library) {
         (Some(manifest), Some(library)) => {
@@ -593,9 +596,12 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         }
         _ => return Err("ASTRA_EMU_CLI_FAMILY_PATH_PAIR_REQUIRED".into()),
     };
+    let phase_started = Instant::now();
     let family = family_config.create_provider(prepared.reader.clone())?;
+    record_native_launch_phase("family_load", phase_started, launch_started);
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.native.instance".into()))?;
+    let phase_started = Instant::now();
     let probe = probe_profile(
         &runtime,
         &prepared,
@@ -608,6 +614,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             stage_size: (1280, 720),
         },
     )?;
+    record_native_launch_phase("family_probe", phase_started, launch_started);
     let stage_width = probe
         .runtime
         .family_options
@@ -627,6 +634,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         probe.content_identity,
     )?;
     let seed = u64::from_le_bytes(game_identity_hash.as_bytes()[..8].try_into().unwrap());
+    let phase_started = Instant::now();
     let open = runtime.open(RuntimeOpenRequest {
         target_id: "astra-emu-native-case".into(),
         profile: format!("{}-v1", launch.family_id),
@@ -637,6 +645,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         package_hash: game_identity_hash.to_string(),
         sections: vec![section],
     })?;
+    record_native_launch_phase("runtime_open", phase_started, launch_started);
     let mut host_profile = astra_platform::PlatformHostProfile::windows_release(
         "astra-emu-cli",
         "dev.astraengine.astraemu-cli",
@@ -653,6 +662,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .ok_or_else(|| "ASTRA_EMU_NATIVE_FRAME_BOUNDS".to_owned())?;
     host_profile.limits.max_frame_bytes =
         native_rgba_frame_bytes.max(MAX_NATIVE_SCENE_UPLOAD_BYTES);
+    let phase_started = Instant::now();
     let mut host = astra_platform_windows::factory()
         .start(HostLaunchProfile::platform(host_profile))
         .await
@@ -676,6 +686,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         })
         .await
         .map_err(|error| error.to_string())?;
+    record_native_launch_phase("platform_open", phase_started, launch_started);
     tracing::info!(
         event = "astra_emu_cli_native_session_opened",
         family = launch.family_id.as_str(),
@@ -684,6 +695,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         audio_enabled = launch.enable_audio
     );
 
+    let phase_started = Instant::now();
     let mut driver = RuntimeDriver::new(
         &mut runtime,
         open.session_id.clone(),
@@ -714,6 +726,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             },
         },
     )?;
+    record_native_launch_phase("driver_ready", phase_started, launch_started);
     let mut viewport = NativeViewport {
         window_width: stage_width,
         window_height: stage_height,
@@ -828,6 +841,18 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         family = launch.family_id.as_str()
     );
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn record_native_launch_phase(phase: &'static str, started: Instant, launch_started: Instant) {
+    let phase_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    let total_ms = launch_started.elapsed().as_secs_f64() * 1_000.0;
+    tracing::info!(
+        event = "astra_emu_cli_native_launch_phase",
+        phase,
+        phase_ms,
+        total_ms
+    );
 }
 
 pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3, String> {
@@ -2753,7 +2778,7 @@ struct RuntimeDriver<'a> {
     pending_scene_metrics: Option<GpuScenePrepareMetrics>,
     pending_render_frame: Option<LegacyRenderFrameV1>,
     pending_scene_frame: Option<SceneFrame>,
-    pending_scene_present: Option<ScenePresentReceipt>,
+    pending_scene_presents: VecDeque<ScenePresentReceipt>,
     queued_visual_hash: Option<Hash256>,
     visual_dirty: bool,
     image_decoders: DecodeProviderRegistry,
@@ -3516,7 +3541,7 @@ impl<'a> RuntimeDriver<'a> {
             pending_scene_metrics: None,
             pending_render_frame: None,
             pending_scene_frame: None,
-            pending_scene_present: None,
+            pending_scene_presents: VecDeque::new(),
             queued_visual_hash: None,
             visual_dirty: false,
             image_decoders,
@@ -4129,7 +4154,7 @@ impl<'a> RuntimeDriver<'a> {
                     .is_some_and(|scene| scene.width != 0 && scene.height != 0))
         {
             if self.synchronous_gpu_presents {
-                if self.pending_scene_present.is_some() {
+                if !self.pending_scene_presents.is_empty() {
                     return Err("ASTRA_EMU_SYNCHRONOUS_PRESENT_RECEIPT_PENDING".into());
                 }
                 let mut submitted = 0u8;
@@ -4147,10 +4172,11 @@ impl<'a> RuntimeDriver<'a> {
                     self.present_scene_sync(scene).await?;
                     submitted += 1;
                 }
-            } else if self.visual_dirty
-                && self.pending_scene_frame.is_some()
-                && self.pending_scene_present.is_none()
-            {
+            } else if self.visual_dirty && self.pending_scene_frame.is_some() {
+                const MAX_IN_FLIGHT_SCENE_PRESENTS: usize = 32;
+                if self.pending_scene_presents.len() >= MAX_IN_FLIGHT_SCENE_PRESENTS {
+                    return Err("ASTRA_EMU_NATIVE_PRESENT_BACKLOG".into());
+                }
                 let present_started = Instant::now();
                 self.present_sequence = self
                     .present_sequence
@@ -4161,7 +4187,7 @@ impl<'a> RuntimeDriver<'a> {
                     .take()
                     .expect("checked pending native scene frame");
                 scene.sequence = self.present_sequence;
-                self.pending_scene_present = Some(
+                self.pending_scene_presents.push_back(
                     self.platform
                         .submit_scene(self.surface, scene)
                         .map_err(|error| error.to_string())?,
@@ -4205,14 +4231,11 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn poll_native_scene_present(&mut self) -> Result<(), String> {
-        let completed = self
-            .pending_scene_present
-            .as_mut()
-            .map(|receipt| receipt.try_complete().map_err(|error| error.to_string()))
-            .transpose()?
-            .unwrap_or(false);
-        if completed {
-            self.pending_scene_present = None;
+        while let Some(receipt) = self.pending_scene_presents.front_mut() {
+            if !receipt.try_complete().map_err(|error| error.to_string())? {
+                break;
+            }
+            self.pending_scene_presents.pop_front();
         }
         Ok(())
     }
@@ -4278,12 +4301,10 @@ impl<'a> RuntimeDriver<'a> {
         );
         if let Some(gpu_scene) = self.gpu_scene.as_mut() {
             let (delta, metrics) = gpu_scene.prepare(commit)?;
-            // An in-flight receipt forms a strict submission boundary.  A
-            // later frame is therefore applied only after that receipt, but
-            // it must retain every resource mutation on which its latest
-            // draw list depends.  Coalescing keeps the old resource prefix
-            // and replaces presentation commands; it never rebuilds and
-            // reuploads the retained texture table.
+            // Multiple commits produced within one Runtime tick may be folded
+            // into that tick's transaction. Across ticks every semantic frame
+            // is submitted in order; in-flight platform receipts are tracked
+            // independently and never throttle animation cadence.
             self.pending_scene_frame = Some(match self.pending_scene_frame.take() {
                 Some(queued) => merge_scene_frames(queued, delta)?,
                 None => delta,

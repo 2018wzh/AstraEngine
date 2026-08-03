@@ -4,7 +4,7 @@
 
 FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。补丁基底固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）；为复用已验证的文本 surface 所有权实现，补丁栈还保留一个经审查、未改写的上游移植补丁 `a94fa18`。除此以外只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
-截至本文更新，Astra 精确 pin hosted fork `8819de6b4e65c5a099d5ea51476e47d1af6d8f58`。fork 保持 `GraphBuff` 和 generation 为权威状态，只保留一次 `GraphBuff -> hosted capture` 复制；`HostedStepDelta`、scene operation 和 PCM command 随后按值移动。owned audio port 直接接收 RFVP 已拥有的 PCM `Vec`，并记录 capture、operation、PCM moved/copied bytes；这些计数只进入脱敏 telemetry，不参与状态或 replay hash。
+截至本文更新，Astra 精确 pin hosted fork `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`。fork 保持 `GraphBuff` 和 generation 为权威状态，只保留一次 `GraphBuff -> hosted capture` 复制；`HostedStepDelta`、scene operation 和 PCM command 随后按值移动。owned audio port 直接接收 RFVP 已拥有的 PCM `Vec`，并记录 capture、operation、PCM moved/copied bytes；这些计数只进入脱敏 telemetry，不参与状态或 replay hash。同一 texture id 的尺寸或格式变化会按顺序输出 destroy/create，建立新 generation；同尺寸同格式仍只输出 update。
 
 Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开。Family ABI v6 使用显式 `StableAbi` wire DTO 和 ABI-owned bulk buffer，不再把整份 step postcard 编码后跨 dylib。scene translator 按值消费 delta，restore 后显式切换资源 epoch并完整重发。旧 render-frame、逐 syscall journal、逐 opcode 字符串 trace、v5 binary/fingerprint/runtime snapshot 都不再进入当前 provider。
 
@@ -63,7 +63,7 @@ RuntimeWorld + platform renderer/audio/media
 
 ## 原版与 hosted 链路对照
 
-对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `8819de6b4e65c5a099d5ea51476e47d1af6d8f58`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture。
+对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture。
 
 hosted 路径保留 generation 判断和一次必要 capture；capture 后的 delta、translator、Family ABI v6 与 Runtime bulk 采用消费式所有权。业务 serde/schema 仍是契约真源，但 FFI wire 不再使用整包 postcard。RGBA upload 只借用 bulk slice；LumaAlpha8 允许一次显式、可计量的格式转换。copy telemetry 分别记录 fork capture、operation 和 PCM moved/copied bytes，用来阻断重新引入的完整 payload clone。
 

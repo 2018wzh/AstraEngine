@@ -323,6 +323,11 @@ struct AudioStream {
     pan: f32,
     output: Option<AudioOutputHandle>,
     packet_sequence: u64,
+    /// Absolute device sample cursor at which the final non-silent sample ends.
+    /// The final packet is padded to the latency target, allowing the worker to
+    /// close the output without either truncating content or racing a callback
+    /// into an empty queue.
+    end_content_sample: Option<u64>,
     fade_in_total_frames: usize,
     fade_in_remaining_frames: usize,
     fade_out_total_frames: usize,
@@ -351,6 +356,7 @@ impl AudioStream {
             pan: 0.0,
             output: None,
             packet_sequence: 0,
+            end_content_sample: None,
             fade_in_total_frames: 0,
             fade_in_remaining_frames: 0,
             fade_out_total_frames: 0,
@@ -681,6 +687,7 @@ impl WorkerState {
         stream.playing = true;
         stream.paused = false;
         stream.packet_sequence = 0;
+        stream.end_content_sample = None;
         stream.fade_in_total_frames = frames_for_ms(format.sample_rate, fade_in_ms)?;
         stream.fade_in_remaining_frames = stream.fade_in_total_frames;
         stream.fade_out_total_frames = 0;
@@ -794,7 +801,7 @@ impl WorkerState {
     }
 
     async fn refill_stream(&mut self, stream_id: u32) -> Result<(), String> {
-        let (output, rate, channels, queued) = {
+        let (output, rate, channels, state) = {
             let stream = self
                 .streams
                 .get(&stream_id)
@@ -807,13 +814,38 @@ impl WorkerState {
                 .query_audio(output)
                 .await
                 .map_err(|error| error.to_string())?;
-            (
-                output,
-                stream.output_rate,
-                stream.output_channels,
-                state.queued_frames,
-            )
+            (output, stream.output_rate, stream.output_channels, state)
         };
+        if let Some(end_content_sample) = self
+            .streams
+            .get(&stream_id)
+            .and_then(|stream| stream.end_content_sample)
+        {
+            if state.consumed_samples >= end_content_sample {
+                self.client
+                    .pause_audio(output)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.client
+                    .close_audio(output)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let stream = self
+                    .streams
+                    .get_mut(&stream_id)
+                    .ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_MISSING".to_owned())?;
+                stream.output = None;
+                stream.playing = false;
+                stream.end_content_sample = None;
+                tracing::debug!(
+                    event = "astra_emu_audio_stream_eof_closed",
+                    stream_id,
+                    consumed_samples = state.consumed_samples
+                );
+            }
+            return Ok(());
+        }
+        let queued = state.queued_frames;
         let low = frames_for_ms(rate, LOW_WATER_MS)?;
         let target = frames_for_ms(rate, TARGET_LATENCY_MS)?;
         if queued > low {
@@ -844,17 +876,33 @@ impl WorkerState {
             source_needed,
             &mut stream.source_buffer,
         );
-        if stream.source_buffer.is_empty() {
+        let source_exhausted = stream.decoder_eof
+            && stream.decoder.is_none()
+            && queued_samples(&stream.segments, stream.segment_cursor) == 0;
+        if stream.source_buffer.is_empty() && !source_exhausted {
             return Ok(());
         }
-        resample_chunk_into(
-            &stream.source_buffer,
-            stream.source_rate,
-            stream.source_channels,
-            rate,
-            channels,
-            &mut stream.mix_buffer,
-        )?;
+        if stream.source_buffer.is_empty() {
+            stream.mix_buffer.clear();
+        } else {
+            resample_chunk_into(
+                &stream.source_buffer,
+                stream.source_rate,
+                stream.source_channels,
+                rate,
+                channels,
+                &mut stream.mix_buffer,
+            )?;
+        }
+        let content_sample_count = stream.mix_buffer.len();
+        if source_exhausted {
+            let target_samples = frames
+                .checked_mul(usize::from(channels))
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_REFILL_BOUNDS".to_owned())?;
+            if stream.mix_buffer.len() < target_samples {
+                stream.mix_buffer.resize(target_samples, 0.0);
+            }
+        }
         apply_gain_pan(
             &mut stream.mix_buffer,
             channels,
@@ -878,6 +926,11 @@ impl WorkerState {
             .ok_or_else(|| "ASTRA_EMU_AUDIO_SEQUENCE_OVERFLOW".to_owned())?;
         let sequence = stream.packet_sequence;
         let first_packet = sequence == 1;
+        let end_content_sample = source_exhausted.then(|| {
+            state
+                .submitted_samples
+                .saturating_add(content_sample_count as u64)
+        });
         stream.mix_buffer = self
             .client
             .submit_audio_owned(
@@ -896,6 +949,7 @@ impl WorkerState {
                 .await
                 .map_err(|error| error.to_string())?;
         }
+        stream.end_content_sample = end_content_sample;
         self.telemetry.packet_count.fetch_add(1, Ordering::Relaxed);
         if stop_after_packet {
             self.stop(stream_id).await?;
