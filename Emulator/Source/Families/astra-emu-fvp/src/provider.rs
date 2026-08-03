@@ -493,7 +493,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             }
         };
         session.last_step = input.tick_index;
-        emit_hosted_logs(input.tick_index, &delta.logs);
+        let diagnostics = hosted_diagnostics(&delta.logs);
         tracing::debug!(
             event = "astra.emu.fvp.hosted_delta",
             fixed_step = input.tick_index,
@@ -655,7 +655,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             effects,
             waits,
             trace: Vec::new(),
-            diagnostics: Vec::new(),
+            diagnostics,
             coverage,
             state_hash,
         };
@@ -1124,46 +1124,27 @@ fn parse_stage_dimensions(
     }
     Ok((width, height))
 }
-/// Maps the fork's structured, payload-free diagnostics into Astra's logging
-/// policy.  RFVP message text intentionally never crosses this boundary.
-fn emit_hosted_logs(fixed_step: u64, records: &[HostedLogRecord]) {
-    for record in records {
-        let event = record.event.code();
-        match record.level {
-            RfvpLogLevel::Error => tracing::error!(
-                target: "astra_emu_fvp::hosted",
-                event,
-                fixed_step,
-                diagnostic_code = "ASTRA_FVP_HOSTED_CORE",
-                "hosted RFVP diagnostic"
-            ),
-            RfvpLogLevel::Warn => tracing::warn!(
-                target: "astra_emu_fvp::hosted",
-                event,
-                fixed_step,
-                diagnostic_code = "ASTRA_FVP_HOSTED_CORE",
-                "hosted RFVP diagnostic"
-            ),
-            RfvpLogLevel::Info => tracing::info!(
-                target: "astra_emu_fvp::hosted",
-                event,
-                fixed_step,
-                "hosted RFVP diagnostic"
-            ),
-            RfvpLogLevel::Debug => tracing::debug!(
-                target: "astra_emu_fvp::hosted",
-                event,
-                fixed_step,
-                "hosted RFVP diagnostic"
-            ),
-            RfvpLogLevel::Trace => tracing::trace!(
-                target: "astra_emu_fvp::hosted",
-                event,
-                fixed_step,
-                "hosted RFVP diagnostic"
-            ),
-        }
-    }
+/// Carries payload-free RFVP diagnostics across the family dylib boundary.
+/// The executable host removes these DTOs before Runtime output serialization
+/// and emits them through `astra-observability`; logging inside the dylib would
+/// use a different process-global `tracing` dispatcher on Windows.
+fn hosted_diagnostics(records: &[HostedLogRecord]) -> Vec<LegacyDiagnostic> {
+    records
+        .iter()
+        .map(|record| LegacyDiagnostic {
+            code: record.event.code().to_owned(),
+            severity: match record.level {
+                RfvpLogLevel::Error => "error",
+                RfvpLogLevel::Warn => "warn",
+                RfvpLogLevel::Info => "info",
+                RfvpLogLevel::Debug => "debug",
+                RfvpLogLevel::Trace => "trace",
+            }
+            .to_owned(),
+            subject: "rfvp.hosted".to_owned(),
+            message: "hosted RFVP diagnostic".to_owned(),
+        })
+        .collect()
 }
 
 fn transition_hash_value<T: Serialize>(value: &T) -> Result<Hash256, String> {

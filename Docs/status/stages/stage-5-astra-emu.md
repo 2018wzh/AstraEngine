@@ -6,6 +6,8 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 2026 年 8 月 3 日的真实安装原生 10 分钟 mixed-run 未通过性能与音频门禁。35,578 个 fixed tick 中，RFVP core p99 为 2.923 ms，完整 tick p99 为 16.690 ms、最大值为 5.892 s，device underflow 累计 656 次。第 651 step 的 effect dispatch 阻塞 3.940 s，而同 step 的 RFVP core 只用 2.696 ms。与 RFVP `0.5.0` 的 native renderer 对照后，根因边界已经收窄：原版按 `GraphBuff generation` 对同尺寸动态纹理执行原位 GPU 更新；hosted 路径仍把像素复制、序列化到 family ABI，随后分配新 scene resource generation，并至少完整重传变化纹理。通用 WGPU atlas 能增量复用空闲槽，只有容量不足或碎片化时才 repack；当前 trace 还不能把所有长帧归因于全 atlas rebuild。音频 producer 仍依赖 fixed tick 补充 120–180 ms device queue，所以图形长帧会直接造成撕裂。稳定 subresource update、独立 audio producer 和复跑通过前，本 Stage 的 FVP 性能、native audio 与 Windows E3 状态保持 `IN_PROGRESS`。
 
+后续 clean Release 诊断已确认动态 VFS 小读放大是开屏等待的独立根因：加入 1 MiB 有界分页后，同一授权样本的 `runtime_open` 从 50,789 ms 降到 220 ms。首次复跑发现并修复页尾跨页读取 panic，当前只形成单元与动态 lifecycle 证据，尚未完成修复后完整真实复跑。RFVP hosted 的脱敏 log record 也已改为通过 Family ABI v6 diagnostic DTO 到达可执行宿主，再由 `astra-observability` 输出；宿主消费后会清空 diagnostic，避免进入 Runtime output、save/replay/report 或状态 hash。
+
 Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspace。它只从 ignored 本地 manifest 读取授权 source、entry、`astra.user_input_sequence.v1` JSONL 和私有输出目录，启动实际 Manager 可执行文件，以 Win32 `SendInput` 重放键盘、鼠标和滚轮，并对窗口、焦点、客户区、逐事件捕获与超时严格失败。harness 使用独立 Manager 数据目录，不污染日常资料库；可提交摘要只保留 schema、hash、计数、生命周期和 diagnostic。Manager 现记录已消费输入、terminal、输出音频 meter、session/package/profile identity 与正常 shutdown 的脱敏事件；游戏页提供真实用户可用的 F5 save、F9 restore，且只调用 RuntimeWorld/provider 的 save/restore lifecycle。harness 在真实关闭路径后读取这些事件，不把进程 kill 当作 shutdown。FVP coverage 与同 run build identity 的完整外部证据仍未形成，任一缺失继续 blocking，不能输出成功 E3。因此仍为 `IN_PROGRESS`；授权样本尚未运行时，不产生 Windows E3 证据。
 
 ## S5-GAME-RUNTIME-01 AstraEmuRuntimeProvider gameplay runtime

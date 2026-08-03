@@ -8,10 +8,10 @@ use std::{
 
 use astra_core::{Diagnostic, Hash256, SchemaVersion, StableId};
 use astra_emu_family_api::{
-    LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge, LegacyOpenRequest,
-    LegacyPayload, LegacyProbeReport, LegacyProbeRequest, LegacyProviderResult, LegacyReplayMode,
-    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacySnapshotEnvelope,
-    LegacyStepBudget, LegacyStepInput, LegacyStepOutput, LegacyWaitRequest,
+    LegacyAwaitResult, LegacyDiagnostic, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
+    LegacyOpenRequest, LegacyPayload, LegacyProbeReport, LegacyProbeRequest, LegacyProviderResult,
+    LegacyReplayMode, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
+    LegacySnapshotEnvelope, LegacyStepBudget, LegacyStepInput, LegacyStepOutput, LegacyWaitRequest,
 };
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 use astra_plugin_abi::{
@@ -52,6 +52,55 @@ impl RuntimeBulkStorage for LegacyPayloadBulkStorage {
     fn bytes(&self) -> Option<&[u8]> {
         Some(self.0.as_bytes())
     }
+}
+
+fn emit_family_diagnostics(
+    fixed_step: u64,
+    diagnostics: &[LegacyDiagnostic],
+) -> Result<(), String> {
+    for diagnostic in diagnostics {
+        let event = diagnostic.code.as_str();
+        let subject = diagnostic.subject.as_str();
+        match diagnostic.severity.as_str() {
+            "error" => tracing::error!(
+                target: "astra_emu_manager_core::family",
+                event,
+                fixed_step,
+                diagnostic_subject = subject,
+                "family runtime diagnostic"
+            ),
+            "warn" => tracing::warn!(
+                target: "astra_emu_manager_core::family",
+                event,
+                fixed_step,
+                diagnostic_subject = subject,
+                "family runtime diagnostic"
+            ),
+            "info" => tracing::info!(
+                target: "astra_emu_manager_core::family",
+                event,
+                fixed_step,
+                diagnostic_subject = subject,
+                "family runtime diagnostic"
+            ),
+            "debug" => tracing::debug!(
+                target: "astra_emu_manager_core::family",
+                event,
+                fixed_step,
+                diagnostic_subject = subject,
+                "family runtime diagnostic"
+            ),
+            "trace" => tracing::trace!(
+                target: "astra_emu_manager_core::family",
+                event,
+                fixed_step,
+                diagnostic_subject = subject,
+                "family runtime diagnostic"
+            ),
+            _ => return Err("ASTRA_EMU_FAMILY_DIAGNOSTIC_SEVERITY".to_owned()),
+        }
+    }
+    Ok(())
 }
 
 const RUNTIME_ID: &str = "astra.emu.runtime";
@@ -958,6 +1007,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 session.poisoned = true;
                 "ASTRA_EMU_OUTPUT_MISSING_AFTER_TICK".to_owned()
             })?;
+        let family_diagnostics = std::mem::take(&mut family_output.diagnostics);
+        emit_family_diagnostics(input.fixed_step, &family_diagnostics)?;
         let render_output = family_output
             .effects
             .iter()

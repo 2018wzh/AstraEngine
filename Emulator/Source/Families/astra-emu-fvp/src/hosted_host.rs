@@ -329,30 +329,47 @@ impl RfvpFile for HostedMemoryFile {
                     return Ok(result.bytes.len());
                 }
                 let page_bytes = HOSTED_VFS_PAGE_BYTES as u64;
-                let page_offset = offset / page_bytes * page_bytes;
-                let page_len = page_bytes.min(*len - page_offset);
-                let result = reader
-                    .read_file_range(
-                        mount_set_id,
-                        uri,
-                        *revision,
-                        ByteRange {
-                            offset: page_offset,
-                            len: page_len,
-                        },
-                        MAX_HOSTED_RANGE_BYTES as u64,
-                    )
-                    .map_err(map_vfs_error)?;
-                if result.bytes.len() != page_len as usize {
-                    return Err(RfvpError::Io);
+                let total = usize::try_from(bytes).map_err(|_| RfvpError::CapacityExceeded)?;
+                let mut copied = 0usize;
+                while copied < total {
+                    let current = offset
+                        .checked_add(copied as u64)
+                        .ok_or(RfvpError::CapacityExceeded)?;
+                    let cache_end = cache_offset
+                        .checked_add(cache.len() as u64)
+                        .ok_or(RfvpError::CapacityExceeded)?;
+                    if current < *cache_offset || current >= cache_end {
+                        let page_offset = current / page_bytes * page_bytes;
+                        let page_len = page_bytes.min(*len - page_offset);
+                        let result = reader
+                            .read_file_range(
+                                mount_set_id,
+                                uri,
+                                *revision,
+                                ByteRange {
+                                    offset: page_offset,
+                                    len: page_len,
+                                },
+                                MAX_HOSTED_RANGE_BYTES as u64,
+                            )
+                            .map_err(map_vfs_error)?;
+                        if result.bytes.len() != page_len as usize {
+                            return Err(RfvpError::Io);
+                        }
+                        *cache_offset = page_offset;
+                        *cache = result.bytes;
+                    }
+                    let start = usize::try_from(current - *cache_offset)
+                        .map_err(|_| RfvpError::CapacityExceeded)?;
+                    let available = cache.len().saturating_sub(start);
+                    let chunk = available.min(total - copied);
+                    if chunk == 0 {
+                        return Err(RfvpError::Io);
+                    }
+                    out[copied..copied + chunk].copy_from_slice(&cache[start..start + chunk]);
+                    copied += chunk;
                 }
-                *cache_offset = page_offset;
-                *cache = result.bytes;
-                let start = usize::try_from(offset - page_offset)
-                    .map_err(|_| RfvpError::CapacityExceeded)?;
-                let bytes = usize::try_from(bytes).map_err(|_| RfvpError::CapacityExceeded)?;
-                out[..bytes].copy_from_slice(&cache[start..start + bytes]);
-                Ok(bytes)
+                Ok(copied)
             }
         }
     }
@@ -460,7 +477,64 @@ fn map_vfs_error(error: astra_emu_family_api::LegacyProviderError) -> RfvpError 
 
 #[cfg(test)]
 mod tests {
+    use astra_byte_source::{ByteSourceStat, RangeReadResult};
+
     use super::*;
+
+    struct TestVfsReader {
+        bytes: Vec<u8>,
+    }
+
+    impl LegacyVfsReader for TestVfsReader {
+        fn stat_file(
+            &self,
+            mount_set_id: &str,
+            uri: &str,
+        ) -> Result<ByteSourceStat, astra_emu_family_api::LegacyProviderError> {
+            if mount_set_id != "mount.test" || uri != "pack.bin" {
+                return Err(astra_emu_family_api::LegacyProviderError::invalid(
+                    "ASTRA_EMU_VFS_NOT_FOUND",
+                    "test VFS entry is missing",
+                ));
+            }
+            Ok(ByteSourceStat {
+                len: self.bytes.len() as u64,
+                revision: SourceRevision(astra_core::Hash256::from_sha256(&self.bytes)),
+            })
+        }
+
+        fn read_file_range(
+            &self,
+            mount_set_id: &str,
+            uri: &str,
+            expected_revision: SourceRevision,
+            range: ByteRange,
+            max_bytes: u64,
+        ) -> Result<RangeReadResult, astra_emu_family_api::LegacyProviderError> {
+            let stat = self.stat_file(mount_set_id, uri)?;
+            range.validate(stat.len, max_bytes).map_err(|_| {
+                astra_emu_family_api::LegacyProviderError::invalid(
+                    "ASTRA_EMU_VFS_BOUNDS",
+                    "test VFS range is invalid",
+                )
+            })?;
+            if expected_revision != stat.revision {
+                return Err(astra_emu_family_api::LegacyProviderError::invalid(
+                    "ASTRA_EMU_VFS_REVISION",
+                    "test VFS revision changed",
+                ));
+            }
+            let start = range.offset as usize;
+            let end = start + range.len as usize;
+            let bytes = self.bytes[start..end].to_vec();
+            Ok(RangeReadResult {
+                range,
+                revision: stat.revision,
+                content_hash: astra_core::Hash256::from_sha256(&bytes),
+                bytes,
+            })
+        }
+    }
 
     #[test]
     fn memory_port_normalizes_and_bounds_files() {
@@ -477,5 +551,27 @@ mod tests {
         host.advance(16_667_000).expect("fixed clock advances");
         assert_eq!(host.clock().ticks_us(), 16_667);
         assert_eq!(host.elapsed_us(), 16_667);
+    }
+
+    #[test]
+    fn paged_vfs_read_spans_cache_boundary_without_truncation() {
+        let bytes = (0..HOSTED_VFS_PAGE_BYTES + 64)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        let expected = bytes[HOSTED_VFS_PAGE_BYTES - 32..HOSTED_VFS_PAGE_BYTES + 32].to_vec();
+        let mut host = HostedMemoryHost::from_vfs(
+            Arc::new(TestVfsReader { bytes }),
+            "mount.test".into(),
+            vec!["pack.bin".into()],
+        )
+        .expect("test VFS host");
+        let mut file = host.fs().open("pack.bin").expect("open test pack");
+        let mut actual = vec![0; expected.len()];
+        assert_eq!(
+            file.read_at((HOSTED_VFS_PAGE_BYTES - 32) as u64, &mut actual)
+                .expect("cross-page read"),
+            expected.len()
+        );
+        assert_eq!(actual, expected);
     }
 }
