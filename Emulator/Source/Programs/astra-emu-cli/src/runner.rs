@@ -2387,6 +2387,27 @@ struct GpuScenePrepareMetrics {
     generation: u64,
 }
 
+impl GpuScenePrepareMetrics {
+    fn accumulate(&mut self, next: Self) -> Result<(), String> {
+        self.resource_operations = self
+            .resource_operations
+            .checked_add(next.resource_operations)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_RESOURCE_OPERATION_OVERFLOW".to_owned())?;
+        self.create_bytes = self
+            .create_bytes
+            .checked_add(next.create_bytes)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
+        self.update_bytes = self
+            .update_bytes
+            .checked_add(next.update_bytes)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
+        self.draw_count = next.draw_count;
+        self.live_textures = next.live_textures;
+        self.generation = next.generation;
+        Ok(())
+    }
+}
+
 impl GpuSceneAdapter {
     fn prepare(
         &mut self,
@@ -2721,6 +2742,7 @@ struct RuntimeDriver<'a> {
     pending_waits: BTreeMap<String, PendingWait>,
     rasterizer: CpuStageRasterizer,
     gpu_scene: Option<GpuSceneAdapter>,
+    pending_scene_metrics: Option<GpuScenePrepareMetrics>,
     pending_render_frame: Option<LegacyRenderFrameV1>,
     pending_scene_frame: Option<SceneFrame>,
     pending_scene_present: Option<ScenePresentReceipt>,
@@ -3481,6 +3503,7 @@ impl<'a> RuntimeDriver<'a> {
             rasterizer: CpuStageRasterizer::default(),
             gpu_scene: (config.presentation == PresentationPath::NativeGpu)
                 .then(GpuSceneAdapter::default),
+            pending_scene_metrics: None,
             pending_render_frame: None,
             pending_scene_frame: None,
             pending_scene_present: None,
@@ -4025,6 +4048,29 @@ impl<'a> RuntimeDriver<'a> {
         }
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.record_perfetto_phase("astra.emu.adapter.effect_dispatch", 2, effect_started)?;
+        if let Some(metrics) = self.pending_scene_metrics.take() {
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_resource_operations",
+                metrics.resource_operations,
+            )?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_create_bytes",
+                metrics.create_bytes,
+            )?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_update_bytes",
+                metrics.update_bytes,
+            )?;
+            self.record_perfetto_counter("astra.emu.adapter.scene_draw_count", metrics.draw_count)?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_live_generations",
+                metrics.live_textures,
+            )?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_generation",
+                metrics.generation,
+            )?;
+        }
         let media_started = Instant::now();
         let audio_telemetry = if self.audio_enabled {
             Some(self.audio.pump(self.platform, self.audio_pump).await?)
@@ -4211,27 +4257,11 @@ impl<'a> RuntimeDriver<'a> {
                 Some(queued) => merge_scene_frames(queued, delta)?,
                 None => delta,
             });
-            self.record_perfetto_counter(
-                "astra.emu.adapter.texture_resource_operations",
-                metrics.resource_operations,
-            )?;
-            self.record_perfetto_counter(
-                "astra.emu.adapter.texture_create_bytes",
-                metrics.create_bytes,
-            )?;
-            self.record_perfetto_counter(
-                "astra.emu.adapter.texture_update_bytes",
-                metrics.update_bytes,
-            )?;
-            self.record_perfetto_counter("astra.emu.adapter.scene_draw_count", metrics.draw_count)?;
-            self.record_perfetto_counter(
-                "astra.emu.adapter.texture_live_generations",
-                metrics.live_textures,
-            )?;
-            self.record_perfetto_counter(
-                "astra.emu.adapter.texture_generation",
-                metrics.generation,
-            )?;
+            if let Some(current) = self.pending_scene_metrics.as_mut() {
+                current.accumulate(metrics)?;
+            } else {
+                self.pending_scene_metrics = Some(metrics);
+            }
             self.pending_render_frame = None;
         } else {
             self.pending_render_frame = Some(self.rasterizer.prepare_scene_commit(commit)?);

@@ -59,9 +59,28 @@ RuntimeWorld + platform renderer/audio/media
 - `PreparedCommit` 在 host 完成 ABI、资源、预算、hash、profile 与 binding 验证后才可提交。任何缺失或不匹配都必须阻断。
 - `astra-emu-cli headless` 的性能证据必须同时指定 `--performance-budget`、`--performance-report`、`--perfetto-trace` 和 `--performance-trace-manifest`。该模式固定 1,200 个 warmup presentation 加 72,000 个测量 presentation，拒绝 Debug 或 dirty build、CPU renderer、非 DX12 timestamp-query GPU、`frame_sample_interval != 1`、resume/export snapshot 和不完整输出集。它把 shared `astra.performance_report.v1` 与 `astra.performance_trace_manifest.v1` 的 hash 回写到 Headless v3 report；report/manifest 只保存身份、计数和 hash，不能携带商业 payload 或本地路径。
 
+## 原版与 hosted 链路对照
+
+对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture，也不需要跨 renderer、ABI 或 `RuntimeWorld` 复制像素。
+
+hosted 路径保留了 generation 判断，但变化纹理随后经过更长的所有权链：`HostPrimRenderCache` 调用 `RecordingRenderer`，fork 将像素复制进 `HostedSceneOperation`；Astra FVP translator 再复制为 `ScenePacket` resource operation 并计算内容 hash；`PreparedCommit` 进入 postcard payload，随后又随动态 family step 经过 ABI 编解码；`RuntimeWorld` 把 presentation envelope 交给 CLI 后，GPU adapter 再解码并构造平台 scene command。`2fab6d4c` 已移除 GPU adapter 验证用的整包 clone，并让 RGBA create payload 直接转移到 `Arc<[u8]>`，但 fork delta、translator 和动态 ABI 之间的像素复制与序列化仍然存在，不能把轻量 visual identity 误写成“像素没有跨层传递”。
+
+更大的差异在平台资源更新。原版对已有动态纹理原位写入；当前 GPU adapter 为每次 update 分配新 resource generation，先 release 旧 resource，再 upload 新 resource。通用 WGPU scene renderer 发现 retained resource 集合变化后会重新 pack atlas，清零 CPU atlas backing，并上传新的 atlas。一次菜单 hover 或状态切换造成的单纹理变化，因而可能同时触发整张纹理复制、ABI payload 编解码、旧 generation 释放、新 generation 创建和全 atlas 重建。这条链路不满足“局部更新只触碰被修改纹理”的目标。正式修复必须让同尺寸/同格式 update 保持稳定 resource identity，在事务验证后对既有 atlas placement 执行有界 subresource write；只有 create、destroy 或尺寸/格式变化才允许重新布局。
+
+音频也不能照搬 fixed tick。原版 native BGM 使用独立的 streaming playback；当前 adapter 在 `Play` 时把 encoded stream 完整解码、重采样，再由 Runtime fixed tick 上的 pump 维持 120–180 ms 平台队列。图形、ABI 或媒体阶段只要阻塞超过水位，device callback 就会先耗尽队列。音频 producer/queue pump 必须脱离 VM、scene prepare、GPU receipt 和 presentation cadence，在独立有界任务上按低水位补充；Runtime tick 只提交命令和读取有界 telemetry。
+
+实现与审查按下列顺序检查放大点：
+
+1. 先看 `rfvp.core.provider_step`。core p99 正常而 `astra.emu.adapter.effect_dispatch` 出现长帧时，不得把问题归因于 VM。
+2. 对每次 scene commit 同时记录 create/update bytes、resource operation、draw count、live generation 和平台 atlas upload bytes。局部 update 后 atlas upload 等于全部 live texture 时，直接判为生命周期放大。
+3. 对 payload 分别记录 fork capture、translator、ABI encode/decode 和 GPU prepare 字节数；同一 decoded pixel 不应在单步内拥有多份长期存活副本。
+4. 音频 trace 必须区分 command、decode、producer、platform queue、callback underflow。增大 buffer 只能用于明确的 bounded latency policy，不能替代独立 producer。
+
 ## 当前性能证据
 
 本地授权样本的一次 clean Release GPU Headless 运行使用同一物理输入，在 DX12 集显 `wgpu_offscreen` 上完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation（其中前 1,200 个是 warmup）。正式 `astra.performance_report.v1` 为 `pass`：Runtime p99 为 2.80 ms、presentation p99 为 0.65 ms、deadline miss 为零，稳态 upload/readback/renderer allocation p95 均为零，memory growth 为零；v3 报告绑定 performance report 与 trace manifest hash。该运行同时产出并可解析 183,000 条 Perfetto Trace Event，trace 丢失和截断均为零，CPU raster phase 的样本数为零。snapshot/restore 正确性由同一输入的独立预跑验证；性能段不在采样窗口执行该昂贵操作。它证明本次 60 FPS baseline 的单轮 E2；不替代三轮 release-reference 对照、10 分钟原生音频 soak、route/media PTS parity 或 Windows Manager E3。
+
+2026 年 8 月 3 日的原生 10 分钟 mixed-run 形成 35,578 个配对 fixed-tick slice，RFVP core p99 为 2.923 ms，fixed tick p99 为 16.690 ms。第 651 step 的 core 为 2.696 ms，effect dispatch 却达到 3.940 s；该 step 正好消费标题菜单转场输入。整段运行的最长 fixed tick 为 5.892 s，后段累计 656 次平台 audio underflow，decoder refill counter 始终为零。证据说明本次撕裂不是 RFVP VM 或增量 decoder 慢，而是 adapter/presentation 长阻塞耗尽了依赖 fixed tick 补充的音频队列。该 run 明确失败，保留为根因 trace，不计入 60 FPS baseline 或音频 soak 通过项。
 
 ## 迁移约束
 
