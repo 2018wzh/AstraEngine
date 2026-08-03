@@ -709,6 +709,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             audio_pump: AudioPumpPolicy::Realtime {
                 target_latency_ms: 180,
                 refill_low_water_ms: 120,
+                poll_interval_ticks: 4,
             },
         },
     )?;
@@ -2766,6 +2767,7 @@ enum AudioPumpPolicy {
     Realtime {
         target_latency_ms: u32,
         refill_low_water_ms: u32,
+        poll_interval_ticks: u8,
     },
 }
 
@@ -4656,6 +4658,7 @@ struct HeadlessAudioExecutor {
     master_volume: f32,
     meter_trace: Vec<u8>,
     observed_underflows: BTreeMap<u32, u64>,
+    realtime_poll_countdown: u8,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -4676,6 +4679,7 @@ impl Default for HeadlessAudioExecutor {
             master_volume: 1.0,
             meter_trace: Vec::new(),
             observed_underflows: BTreeMap::new(),
+            realtime_poll_countdown: 0,
         }
     }
 }
@@ -4984,6 +4988,24 @@ impl HeadlessAudioExecutor {
         platform: &PlatformHostClient,
         policy: AudioPumpPolicy,
     ) -> Result<AudioPumpTelemetry, String> {
+        let realtime_poll_due = match policy {
+            AudioPumpPolicy::FixedTick => true,
+            AudioPumpPolicy::Realtime {
+                poll_interval_ticks,
+                ..
+            } => {
+                if poll_interval_ticks == 0 || poll_interval_ticks > 8 {
+                    return Err("ASTRA_EMU_NATIVE_AUDIO_POLL_INTERVAL_INVALID".into());
+                }
+                if self.realtime_poll_countdown == 0 {
+                    self.realtime_poll_countdown = poll_interval_ticks - 1;
+                    true
+                } else {
+                    self.realtime_poll_countdown -= 1;
+                    false
+                }
+            }
+        };
         let mut telemetry = AudioPumpTelemetry::default();
         for (stream_id, stream) in self
             .streams
@@ -4994,6 +5016,9 @@ impl HeadlessAudioExecutor {
                 .active_streams
                 .checked_add(1)
                 .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            if !realtime_poll_due && !stream.awaiting_priming {
+                continue;
+            }
             let output = stream
                 .output
                 .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_OUTPUT_MISSING".to_owned())?;
@@ -5024,6 +5049,7 @@ impl HeadlessAudioExecutor {
                 AudioPumpPolicy::Realtime {
                     target_latency_ms,
                     refill_low_water_ms,
+                    ..
                 } => {
                     let target = usize::try_from(
                         u64::from(stream.sample_rate).saturating_mul(u64::from(target_latency_ms))
