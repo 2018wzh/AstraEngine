@@ -708,6 +708,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             synchronous_gpu_presents: false,
             audio_pump: AudioPumpPolicy::Realtime {
                 target_latency_ms: 180,
+                refill_low_water_ms: 120,
             },
         },
     )?;
@@ -2762,7 +2763,10 @@ enum PresentationPath {
 #[derive(Clone, Copy)]
 enum AudioPumpPolicy {
     FixedTick,
-    Realtime { target_latency_ms: u32 },
+    Realtime {
+        target_latency_ms: u32,
+        refill_low_water_ms: u32,
+    },
 }
 
 struct NativePerfettoCapture {
@@ -5017,14 +5021,32 @@ impl HeadlessAudioExecutor {
                 )
                 .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_TICK_BOUNDS".to_owned())?
                 .max(1),
-                AudioPumpPolicy::Realtime { target_latency_ms } => {
+                AudioPumpPolicy::Realtime {
+                    target_latency_ms,
+                    refill_low_water_ms,
+                } => {
                     let target = usize::try_from(
                         u64::from(stream.sample_rate).saturating_mul(u64::from(target_latency_ms))
                             / 1_000,
                     )
                     .map_err(|_| "ASTRA_EMU_NATIVE_AUDIO_TARGET_BOUNDS".to_owned())?
                     .max(1);
-                    target.saturating_sub(queued_frames.unwrap_or(0))
+                    let refill_low_water = usize::try_from(
+                        u64::from(stream.sample_rate)
+                            .saturating_mul(u64::from(refill_low_water_ms))
+                            / 1_000,
+                    )
+                    .map_err(|_| "ASTRA_EMU_NATIVE_AUDIO_TARGET_BOUNDS".to_owned())?
+                    .max(1);
+                    if refill_low_water >= target {
+                        return Err("ASTRA_EMU_NATIVE_AUDIO_WATERMARK_INVALID".into());
+                    }
+                    let queued = queued_frames.unwrap_or(0);
+                    if queued > refill_low_water {
+                        0
+                    } else {
+                        target.saturating_sub(queued)
+                    }
                 }
             };
             if frames == 0 {
