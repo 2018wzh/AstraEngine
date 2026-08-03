@@ -2374,52 +2374,79 @@ struct GpuSceneTexture {
     resource_id: String,
 }
 
+/// Per-transaction semantic resource accounting.  Values are recorded only
+/// after validation and local transaction preparation succeeds, which keeps
+/// Perfetto counters aligned with state that may be submitted to the platform.
+#[derive(Clone, Copy, Default)]
+struct GpuScenePrepareMetrics {
+    resource_operations: u64,
+    create_bytes: u64,
+    update_bytes: u64,
+    draw_count: u64,
+    live_textures: u64,
+    generation: u64,
+}
+
 impl GpuSceneAdapter {
-    fn prepare(&mut self, commit: LegacyPreparedSceneCommitV1) -> Result<SceneFrame, String> {
-        let prior_resources = if commit.reset_resources {
+    fn prepare(
+        &mut self,
+        commit: LegacyPreparedSceneCommitV1,
+    ) -> Result<(SceneFrame, GpuScenePrepareMetrics), String> {
+        let LegacyPreparedSceneCommitV1 {
+            packet,
+            next_resources,
+            reset_resources,
+        } = commit;
+        let prior_resources = if reset_resources {
             astra_emu_family_api::LegacySceneResourceStateV1::default()
         } else {
             self.resources.clone()
         };
         let verified = prior_resources
-            .prepare(commit.packet.clone())
+            .validate(&packet)
             .map_err(|error| format!("ASTRA_EMU_NATIVE_GPU_SCENE_PREPARE:{}", error.code()))?;
-        if verified.next_resources != commit.next_resources {
+        if verified != next_resources {
             return Err("ASTRA_EMU_NATIVE_GPU_SCENE_COMMIT_MISMATCH".into());
         }
 
-        let mut textures = if commit.reset_resources {
+        let mut textures = if reset_resources {
             BTreeMap::new()
         } else {
             self.textures.clone()
         };
         let mut generation = self.generation;
+        let mut metrics = GpuScenePrepareMetrics {
+            resource_operations: packet.resources.len() as u64,
+            draw_count: packet.draws.len() as u64,
+            ..GpuScenePrepareMetrics::default()
+        };
         let mut commands = Vec::with_capacity(
-            verified.packet.resources.len().saturating_mul(2)
-                + verified.packet.draws.len().saturating_mul(3)
+            packet.resources.len().saturating_mul(2)
+                + packet.draws.len().saturating_mul(3)
                 + self.textures.len(),
         );
-        if commit.reset_resources {
+        if reset_resources {
             for texture in self.textures.values() {
                 commands.push(SceneCommand::ReleaseResource {
                     resource_id: texture.resource_id.clone(),
                 });
             }
         }
-        for operation in &verified.packet.resources {
+        for operation in packet.resources {
             match operation {
                 LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                    if Hash256::from_sha256(&texture.pixels) != texture.content_hash {
-                        return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_HASH".into());
-                    }
+                    metrics.create_bytes = metrics
+                        .create_bytes
+                        .checked_add(texture.pixels.len() as u64)
+                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
                     generation = generation.checked_add(1).ok_or_else(|| {
                         "ASTRA_EMU_NATIVE_GPU_RESOURCE_GENERATION_OVERFLOW".to_owned()
                     })?;
-                    let rgba8: Arc<[u8]> = Arc::from(gpu_rgba8(
+                    let rgba8: Arc<[u8]> = Arc::from(gpu_rgba8_owned(
                         texture.width,
                         texture.height,
                         texture.format,
-                        &texture.pixels,
+                        texture.pixels,
                     )?);
                     let resource_id = gpu_resource_id(texture.texture_id, generation);
                     commands.push(SceneCommand::UploadTexture {
@@ -2443,9 +2470,10 @@ impl GpuSceneAdapter {
                     );
                 }
                 LegacySceneResourceOperationV1::UpdateTexture(update) => {
-                    if Hash256::from_sha256(&update.pixels) != update.content_hash {
-                        return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_HASH".into());
-                    }
+                    metrics.update_bytes = metrics
+                        .update_bytes
+                        .checked_add(update.pixels.len() as u64)
+                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
                     let old = textures
                         .get(&update.texture_id)
                         .cloned()
@@ -2463,7 +2491,7 @@ impl GpuSceneAdapter {
                         return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_REGION".into());
                     }
                     let patch =
-                        gpu_rgba8(update.width, update.height, update.format, &update.pixels)?;
+                        gpu_rgba8_owned(update.width, update.height, update.format, update.pixels)?;
                     let mut rgba8 = old.rgba8.as_ref().to_vec();
                     for row in 0..update.height as usize {
                         let destination = ((update.y as usize + row) * old.width as usize
@@ -2500,7 +2528,7 @@ impl GpuSceneAdapter {
                 }
                 LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
                     let texture = textures
-                        .remove(texture_id)
+                        .remove(&texture_id)
                         .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_TEXTURE_MISSING".to_owned())?;
                     commands.push(SceneCommand::ReleaseResource {
                         resource_id: texture.resource_id,
@@ -2508,21 +2536,26 @@ impl GpuSceneAdapter {
                 }
             }
         }
-        commands.extend(gpu_draw_commands(&textures, &verified.packet.draws)?);
-        self.resources = verified.next_resources;
+        commands.extend(gpu_draw_commands(&textures, &packet.draws)?);
+        self.resources = verified;
         self.textures = textures;
         self.generation = generation;
-        self.width = verified.packet.width;
-        self.height = verified.packet.height;
-        self.draws = verified.packet.draws;
-        Ok(SceneFrame {
-            sequence: 0,
-            width: self.width,
-            height: self.height,
-            clear_rgba: [0, 0, 0, 255],
-            commands,
-            semantics: None,
-        })
+        self.width = packet.width;
+        self.height = packet.height;
+        self.draws = packet.draws;
+        metrics.live_textures = self.textures.len() as u64;
+        metrics.generation = self.generation;
+        Ok((
+            SceneFrame {
+                sequence: 0,
+                width: self.width,
+                height: self.height,
+                clear_rgba: [0, 0, 0, 255],
+                commands,
+                semantics: None,
+            },
+            metrics,
+        ))
     }
 
     /// Replays the current retained draw state without re-uploading resources.
@@ -2631,11 +2664,11 @@ fn gpu_resource_id(texture_id: u32, generation: u64) -> String {
     format!("rfvp-texture-{texture_id}-{generation}")
 }
 
-fn gpu_rgba8(
+fn gpu_rgba8_owned(
     width: u32,
     height: u32,
     format: LegacyTextureFormat,
-    pixels: &[u8],
+    pixels: Vec<u8>,
 ) -> Result<Vec<u8>, String> {
     let channels = match format {
         LegacyTextureFormat::Rgba8 => 4usize,
@@ -2654,7 +2687,7 @@ fn gpu_rgba8(
         return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_LENGTH".into());
     }
     Ok(match format {
-        LegacyTextureFormat::Rgba8 => pixels.to_vec(),
+        LegacyTextureFormat::Rgba8 => pixels,
         LegacyTextureFormat::LumaAlpha8 => pixels
             .chunks_exact(2)
             .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
@@ -4167,7 +4200,7 @@ impl<'a> RuntimeDriver<'a> {
             "queued validated semantic scene commit"
         );
         if let Some(gpu_scene) = self.gpu_scene.as_mut() {
-            let delta = gpu_scene.prepare(commit)?;
+            let (delta, metrics) = gpu_scene.prepare(commit)?;
             // An in-flight receipt forms a strict submission boundary.  A
             // later frame is therefore applied only after that receipt, but
             // it must retain every resource mutation on which its latest
@@ -4178,6 +4211,27 @@ impl<'a> RuntimeDriver<'a> {
                 Some(queued) => merge_scene_frames(queued, delta)?,
                 None => delta,
             });
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_resource_operations",
+                metrics.resource_operations,
+            )?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_create_bytes",
+                metrics.create_bytes,
+            )?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_update_bytes",
+                metrics.update_bytes,
+            )?;
+            self.record_perfetto_counter("astra.emu.adapter.scene_draw_count", metrics.draw_count)?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_live_generations",
+                metrics.live_textures,
+            )?;
+            self.record_perfetto_counter(
+                "astra.emu.adapter.texture_generation",
+                metrics.generation,
+            )?;
             self.pending_render_frame = None;
         } else {
             self.pending_render_frame = Some(self.rasterizer.prepare_scene_commit(commit)?);

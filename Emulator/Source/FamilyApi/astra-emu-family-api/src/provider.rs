@@ -1178,13 +1178,14 @@ impl LegacyScenePacketV1 {
 
 impl LegacySceneResourceStateV1 {
     /// Validates a complete transaction against retained resource metadata
-    /// without changing this state.  The caller chooses when to commit the
-    /// returned replacement state, so an invalid packet cannot partially
-    /// mutate a renderer or adapter.
-    pub fn prepare(
+    /// without copying its texture payloads.  Renderer adapters use this when
+    /// they consume an already-owned packet: the returned state is still a
+    /// transactional replacement, while the packet can move directly into an
+    /// upload plan rather than being cloned solely for validation.
+    pub fn validate(
         &self,
-        packet: LegacyScenePacketV1,
-    ) -> Result<LegacyPreparedSceneCommitV1, LegacyProviderError> {
+        packet: &LegacyScenePacketV1,
+    ) -> Result<LegacySceneResourceStateV1, LegacyProviderError> {
         packet.validate()?;
         let mut next = self.clone();
         for operation in &packet.resources {
@@ -1242,6 +1243,18 @@ impl LegacySceneResourceStateV1 {
                 ));
             }
         }
+        Ok(next)
+    }
+
+    /// Validates a complete transaction against retained resource metadata
+    /// without changing this state.  The caller chooses when to commit the
+    /// returned replacement state, so an invalid packet cannot partially
+    /// mutate a renderer or adapter.
+    pub fn prepare(
+        &self,
+        packet: LegacyScenePacketV1,
+    ) -> Result<LegacyPreparedSceneCommitV1, LegacyProviderError> {
+        let next = self.validate(&packet)?;
         Ok(LegacyPreparedSceneCommitV1 {
             packet,
             next_resources: next,
