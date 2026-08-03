@@ -4933,16 +4933,24 @@ impl HeadlessAudioExecutor {
             let output = stream
                 .output
                 .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_OUTPUT_MISSING".to_owned())?;
-            let queued_frames = match policy {
+            // A native output's pre-submit state is sufficient both to compute
+            // the bounded target deficit and to observe prior callback
+            // underflows. Do not immediately issue a second synchronous query
+            // after each submit: that serializes the fixed Runtime tick behind
+            // the platform event loop and, in practice, couples audio queue
+            // maintenance to unrelated GPU present work. Headless intentionally
+            // keeps its post-submit query because it advances the deterministic
+            // simulated device callback.
+            let realtime_state = match policy {
                 AudioPumpPolicy::FixedTick => None,
                 AudioPumpPolicy::Realtime { .. } => Some(
                     platform
                         .query_audio(output)
                         .await
-                        .map_err(|e| e.to_string())?
-                        .queued_frames,
+                        .map_err(|e| e.to_string())?,
                 ),
             };
+            let queued_frames = realtime_state.as_ref().map(|state| state.queued_frames);
             let frames = match policy {
                 AudioPumpPolicy::FixedTick => usize::try_from(
                     u64::from(stream.sample_rate).saturating_mul(FIXED_DELTA_NS) / 1_000_000_000,
@@ -5068,15 +5076,21 @@ impl HeadlessAudioExecutor {
                     .map_err(|e| e.to_string())?;
                 stream.awaiting_priming = false;
             }
-            // Headless advances its deterministic device callback only through
-            // `query_audio`. `query_audio_output` is an observational snapshot
-            // and deliberately does not consume queued samples. Using it here
-            // lets one fixed-step packet accumulate every frame until the
-            // bounded platform queue overflows.
-            let state = platform
-                .query_audio(output)
-                .await
-                .map_err(|e| e.to_string())?;
+            let state = match realtime_state {
+                Some(state) => state,
+                None => {
+                    // Headless advances its deterministic device callback only
+                    // through `query_audio`. `query_audio_output` is an
+                    // observational snapshot and deliberately does not consume
+                    // queued samples. Using it here lets one fixed-step packet
+                    // accumulate every frame until the bounded platform queue
+                    // overflows.
+                    platform
+                        .query_audio(output)
+                        .await
+                        .map_err(|e| e.to_string())?
+                }
+            };
             let previous_underflows = self
                 .observed_underflows
                 .insert(*stream_id, state.underflow_count)
