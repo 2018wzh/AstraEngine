@@ -75,6 +75,15 @@ pub struct InputConfigViewModel {
     pub touch_sensitivity: f32,
     pub gamepad_enabled: bool,
     pub gamepad_deadzone: String,
+    pub gamepad_bindings: Vec<GamepadBindingViewModel>,
+}
+
+/// A single gamepad-input -> key-name binding row for the settings UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GamepadBindingViewModel {
+    pub button_id: String,
+    pub button_label: String,
+    pub key_name: String,
 }
 
 impl Default for InputConfigViewModel {
@@ -85,6 +94,7 @@ impl Default for InputConfigViewModel {
             touch_sensitivity: 50.0,
             gamepad_enabled: true,
             gamepad_deadzone: "medium".into(),
+            gamepad_bindings: Vec::new(),
         }
     }
 }
@@ -183,6 +193,7 @@ pub struct SlintManagerAdapter {
     reviews: Rc<VecModel<MatchReview>>,
     vfs_entries: Rc<VecModel<VfsEntry>>,
     play_history: Rc<VecModel<PlaySession>>,
+    gamepad_bindings: Rc<VecModel<GamepadBinding>>,
 }
 
 impl SlintManagerAdapter {
@@ -192,16 +203,19 @@ impl SlintManagerAdapter {
         let reviews = Rc::new(VecModel::default());
         let vfs_entries = Rc::new(VecModel::default());
         let play_history = Rc::new(VecModel::default());
+        let gamepad_bindings = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
         window.set_match_reviews(ModelRc::from(reviews.clone()));
         window.set_vfs_entries(ModelRc::from(vfs_entries.clone()));
         window.set_play_history(ModelRc::from(play_history.clone()));
+        window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
         Ok(Self {
             window,
             games,
             reviews,
             vfs_entries,
             play_history,
+            gamepad_bindings,
         })
     }
 
@@ -246,6 +260,18 @@ impl SlintManagerAdapter {
                 .collect::<Vec<_>>(),
         );
         self.apply_vfs(&model.vfs_entries, model.vfs_preview.as_ref());
+        self.gamepad_bindings.set_vec(
+            model
+                .input_config
+                .gamepad_bindings
+                .iter()
+                .map(|binding| GamepadBinding {
+                    button_id: binding.button_id.as_str().into(),
+                    button_label: binding.button_label.as_str().into(),
+                    key_name: binding.key_name.as_str().into(),
+                })
+                .collect::<Vec<_>>(),
+        );
         self.window
             .set_vfs_selected_path(model.vfs_selected_path.as_str().into());
         self.window

@@ -2333,7 +2333,7 @@ struct CheckpointFrame {
 #[serde(rename_all = "snake_case")]
 enum PendingWait {
     DueStep(u64),
-    Input(u64),
+    Input(Vec<String>),
     Presentation,
     Media(String),
     Unsupported,
@@ -3083,12 +3083,12 @@ fn route_native_event(
         }
         PlatformEventKind::GamepadInput { control, value, .. } => {
             let mapped = match control {
-                PlatformGamepadControl::South => Some("confirm"),
-                PlatformGamepadControl::East => Some("cancel"),
-                PlatformGamepadControl::DpadUp => Some("up"),
-                PlatformGamepadControl::DpadDown => Some("down"),
-                PlatformGamepadControl::DpadLeft => Some("left"),
-                PlatformGamepadControl::DpadRight => Some("right"),
+                PlatformGamepadControl::South => Some("enter"),
+                PlatformGamepadControl::East => Some("escape"),
+                PlatformGamepadControl::DpadUp => Some("arrow_up"),
+                PlatformGamepadControl::DpadDown => Some("arrow_down"),
+                PlatformGamepadControl::DpadLeft => Some("arrow_left"),
+                PlatformGamepadControl::DpadRight => Some("arrow_right"),
                 _ => None,
             };
             if let Some(control) = mapped {
@@ -3114,12 +3114,12 @@ fn route_native_event(
 fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&'static str> {
     let key = logical_key.unwrap_or(physical_key).to_ascii_lowercase();
     match key.as_str() {
-        "enter" | "return" | "numpadenter" => Some("confirm"),
-        "escape" | "esc" => Some("cancel"),
-        "arrowup" | "up" => Some("up"),
-        "arrowdown" | "down" => Some("down"),
-        "arrowleft" | "left" => Some("left"),
-        "arrowright" | "right" => Some("right"),
+        "enter" | "return" | "numpadenter" => Some("enter"),
+        "escape" | "esc" => Some("escape"),
+        "arrowup" | "up" => Some("arrow_up"),
+        "arrowdown" | "down" => Some("arrow_down"),
+        "arrowleft" | "left" => Some("arrow_left"),
+        "arrowright" | "right" => Some("arrow_right"),
         " " | "space" | "spacebar" => Some("space"),
         "shift" | "shiftleft" | "shiftright" => Some("shift"),
         "control" | "ctrl" | "controlleft" | "controlright" => Some("control"),
@@ -3693,12 +3693,12 @@ impl<'a> RuntimeDriver<'a> {
             },
             PhysicalInput::GamepadInput { control, value, .. } => {
                 let mapped = match control {
-                    GamepadControl::South => "confirm",
-                    GamepadControl::East => "cancel",
-                    GamepadControl::DpadUp => "up",
-                    GamepadControl::DpadDown => "down",
-                    GamepadControl::DpadLeft => "left",
-                    GamepadControl::DpadRight => "right",
+                    GamepadControl::South => "enter",
+                    GamepadControl::East => "escape",
+                    GamepadControl::DpadUp => "arrow_up",
+                    GamepadControl::DpadDown => "arrow_down",
+                    GamepadControl::DpadLeft => "arrow_left",
+                    GamepadControl::DpadRight => "arrow_right",
                     _ => return Err("ASTRA_EMU_HEADLESS_GAMEPAD_CONTROL_UNSUPPORTED".into()),
                 };
                 self.queue_input(mapped, *value != 0, f32::from(*value) / f32::from(i16::MAX))
@@ -3740,21 +3740,35 @@ impl<'a> RuntimeDriver<'a> {
         {
             return Err("ASTRA_EMU_HEADLESS_WAIT_UNSUPPORTED".into());
         }
-        let input_mask = pressed_input_mask(&self.pending_inputs);
+        let pressed_keys = pressed_input_keys(&self.pending_inputs);
         let ready = self
             .pending_waits
             .iter()
             .filter_map(|(token, wait)| match wait {
-                PendingWait::DueStep(due) if *due <= next_step => Some((token.clone(), 0)),
-                PendingWait::Input(mask) if input_mask & *mask != 0 => {
-                    Some((token.clone(), input_mask & *mask))
+                PendingWait::DueStep(due) if *due <= next_step => {
+                    Some((token.clone(), BTreeSet::new()))
+                }
+                PendingWait::Input(keys) => {
+                    let consumed = keys
+                        .iter()
+                        .filter(|key| pressed_keys.contains(*key))
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
+                    if consumed.is_empty() {
+                        None
+                    } else {
+                        Some((token.clone(), consumed))
+                    }
                 }
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let consumed_input_mask = ready
+        let consumed_input_keys = ready
             .iter()
-            .fold(0u64, |mask, (_, consumed)| mask | consumed);
+            .fold(BTreeSet::new(), |mut acc, (_, consumed)| {
+                acc.extend(consumed.iter().cloned());
+                acc
+            });
         let mut await_results = Vec::new();
         for (token_id, _) in ready {
             self.pending_waits.remove(&token_id);
@@ -3771,7 +3785,7 @@ impl<'a> RuntimeDriver<'a> {
         }
         let input_edges = retain_unconsumed_input_edges(
             std::mem::take(&mut self.pending_inputs),
-            consumed_input_mask,
+            &consumed_input_keys,
         );
         let runtime_started = Instant::now();
         let output = self.runtime.step(RuntimeStepInput {
@@ -5764,8 +5778,8 @@ fn wait_condition(wait: &LegacyWaitRequest, step: u64, delta_ns: u64) -> (String
             token_id.clone(),
             PendingWait::DueStep(step.saturating_add(u64::from(*frames).max(1))),
         ),
-        LegacyWaitRequest::Input { token_id, mask } => {
-            (token_id.clone(), PendingWait::Input(*mask))
+        LegacyWaitRequest::Input { token_id, keys } => {
+            (token_id.clone(), PendingWait::Input(keys.clone()))
         }
         LegacyWaitRequest::MediaFence { token_id, media_id } => {
             (token_id.clone(), PendingWait::Media(media_id.clone()))
@@ -5780,38 +5794,21 @@ fn wait_condition(wait: &LegacyWaitRequest, step: u64, delta_ns: u64) -> (String
     }
 }
 
-fn input_control_mask(control: &str) -> u64 {
-    match control {
-        "confirm" => 1 << 0,
-        "cancel" => 1 << 1,
-        "up" => 1 << 2,
-        "down" => 1 << 3,
-        "left" => 1 << 4,
-        "right" => 1 << 5,
-        "space" => 1 << 6,
-        "pointer.primary" => 1 << 7,
-        "pointer.secondary" => 1 << 8,
-        "wheel" => 1 << 9,
-        "shift" => 1 << 10,
-        "control" => 1 << 11,
-        _ => 0,
-    }
-}
-
-fn pressed_input_mask(edges: &[LegacyInputEdge]) -> u64 {
+fn pressed_input_keys(edges: &[LegacyInputEdge]) -> BTreeSet<String> {
     edges
         .iter()
         .filter(|edge| edge.pressed)
-        .fold(0, |mask, edge| mask | input_control_mask(&edge.control))
+        .map(|edge| edge.control.clone())
+        .collect()
 }
 
 fn retain_unconsumed_input_edges(
     edges: Vec<LegacyInputEdge>,
-    consumed_mask: u64,
+    consumed_keys: &BTreeSet<String>,
 ) -> Vec<LegacyInputEdge> {
     edges
         .into_iter()
-        .filter(|edge| input_control_mask(&edge.control) & consumed_mask == 0)
+        .filter(|edge| !consumed_keys.contains(&edge.control))
         .collect()
 }
 
@@ -5998,7 +5995,10 @@ mod native_tests {
                 input_sequence: 9,
                 await_sequence: 3,
                 pending_inputs: vec![],
-                pending_waits: BTreeMap::from([("wait.input.1".into(), PendingWait::Input(1))]),
+                pending_waits: BTreeMap::from([(
+                    "wait.input.1".into(),
+                    PendingWait::Input(vec!["enter".into()]),
+                )]),
                 completed_media: vec![],
                 active_video: None,
                 state_hash: Hash256::from_sha256(b"state"),
@@ -6464,11 +6464,11 @@ mod native_tests {
     fn native_key_mapping_is_explicit_and_does_not_capture_unbound_keys() {
         assert_eq!(
             native_key_control(Some("Enter"), "Unidentified"),
-            Some("confirm")
+            Some("enter")
         );
         assert_eq!(
             native_key_control(Some("ArrowLeft"), "Unidentified"),
-            Some("left")
+            Some("arrow_left")
         );
         assert_eq!(native_key_control(None, "Space"), Some("space"));
         assert_eq!(
@@ -6476,8 +6476,6 @@ mod native_tests {
             Some("shift")
         );
         assert_eq!(native_key_control(None, "ControlRight"), Some("control"));
-        assert_eq!(input_control_mask("shift"), 1 << 10);
-        assert_eq!(input_control_mask("control"), 1 << 11);
         assert_eq!(native_key_control(Some("F12"), "F12"), None);
     }
 
@@ -6485,33 +6483,33 @@ mod native_tests {
     fn input_await_consumes_matching_press_and_release_edges() {
         let edges = vec![
             LegacyInputEdge {
-                control: "confirm".into(),
+                control: "enter".into(),
                 pressed: true,
                 value: 1.0,
                 sequence: 1,
             },
             LegacyInputEdge {
-                control: "confirm".into(),
+                control: "enter".into(),
                 pressed: false,
                 value: 0.0,
                 sequence: 2,
             },
             LegacyInputEdge {
-                control: "left".into(),
+                control: "arrow_left".into(),
                 pressed: true,
                 value: 1.0,
                 sequence: 3,
             },
         ];
         assert_eq!(
-            pressed_input_mask(&edges),
-            input_control_mask("confirm") | input_control_mask("left")
+            pressed_input_keys(&edges),
+            BTreeSet::from(["enter".to_string(), "arrow_left".to_string()])
         );
 
-        let retained = retain_unconsumed_input_edges(edges, input_control_mask("confirm"));
+        let retained = retain_unconsumed_input_edges(edges, &BTreeSet::from(["enter".to_string()]));
 
         assert_eq!(retained.len(), 1);
-        assert_eq!(retained[0].control, "left");
+        assert_eq!(retained[0].control, "arrow_left");
     }
 
     #[test]

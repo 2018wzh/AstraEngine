@@ -1,3 +1,4 @@
+use astra_emu_manager_core::{default_vn_preset, InputMapping};
 use astra_emu_manager_ui_slint::{ManagerViewModel, SlintManagerAdapter};
 use slint::ComponentHandle;
 use thiserror::Error;
@@ -147,6 +148,27 @@ pub trait ManagerController: 'static {
     ) -> Result<(), String> {
         Ok(())
     }
+    /// The active device-to-key mapping, used to (re)configure the gamepad pump.
+    fn input_mapping(&self) -> InputMapping {
+        default_vn_preset()
+    }
+    /// Rebind a single gamepad input to a new key name.
+    fn set_gamepad_binding(&mut self, _button_id: &str, _key_name: &str) -> Result<(), String> {
+        Ok(())
+    }
+    /// Reset the gamepad button mapping to the general-purpose VN preset.
+    fn reset_gamepad_mapping(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+    /// Save the current global input mapping as a per-game override for the
+    /// selected work.
+    fn save_per_game_input_mapping(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    /// Clear the per-game input mapping override for the selected work.
+    fn clear_per_game_input_mapping(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
     /// VFS browser: select a file (preview) or enter a directory. An empty
     /// path keeps the current directory and only refreshes the view.
     fn vfs_browse(&mut self, _path: &str) -> Result<ManagerViewModel, String> {
@@ -223,7 +245,10 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let gamepad_timer = slint::Timer::default();
     let gamepad_weak = adapter.window().as_weak();
     let gamepad_controller = controller.clone();
-    let mut gamepad = GameInputPump::new();
+    let gamepad = std::rc::Rc::new(std::cell::RefCell::new(GameInputPump::new(
+        controller.borrow().input_mapping(),
+    )));
+    let gamepad_pump = gamepad.clone();
     gamepad_timer.start(
         slint::TimerMode::Repeated,
         std::time::Duration::from_millis(8),
@@ -236,7 +261,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 || window.get_diagnostics_overlay_active()
                 || window.get_patches_overlay_active()
                 || window.get_filters_overlay_active();
-            let events = match gamepad.poll() {
+            let events = match gamepad_pump.borrow_mut().poll() {
                 Ok(events) => events,
                 Err(error) => {
                     window.set_global_diagnostic(error.into());
@@ -248,7 +273,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     continue;
                 }
                 if let Err(error) = gamepad_controller.borrow_mut().game_input(
-                    event.control,
+                    &event.control,
                     event.pressed,
                     event.value,
                 ) {
@@ -261,12 +286,15 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let launch_weak = adapter.window().as_weak();
     let launch_controller = controller.clone();
     let launch_adapter = adapter.clone();
+    let launch_gamepad = gamepad.clone();
     adapter.window().on_launch(move |case_id| {
         let Some(window) = launch_weak.upgrade() else {
             return;
         };
         match launch_controller.borrow_mut().launch(case_id.as_str()) {
             Ok(model) => {
+                let mapping = launch_controller.borrow().input_mapping();
+                launch_gamepad.borrow_mut().set_mapping(mapping);
                 launch_adapter.apply(&model);
                 window.set_game_active(true);
             }
@@ -276,12 +304,15 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let leave_weak = adapter.window().as_weak();
     let leave_controller = controller.clone();
     let leave_adapter = adapter.clone();
+    let leave_gamepad = gamepad.clone();
     adapter.window().on_leave_game(move || {
         let Some(window) = leave_weak.upgrade() else {
             return;
         };
         match leave_controller.borrow_mut().leave_game() {
             Ok(model) => {
+                let mapping = leave_controller.borrow().input_mapping();
+                leave_gamepad.borrow_mut().set_mapping(mapping);
                 leave_adapter.apply(&model);
                 window.set_game_active(false);
             }
@@ -600,6 +631,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     });
     let input_config_weak = adapter.window().as_weak();
     let input_config_controller = controller.clone();
+    let input_config_gamepad = gamepad.clone();
     adapter.window().on_save_input_config(
         move |confirm_key, cancel_key, touch_sensitivity, gamepad_enabled, gamepad_deadzone| {
             let result = input_config_controller.borrow_mut().save_input_config(
@@ -609,13 +641,89 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 gamepad_enabled,
                 gamepad_deadzone.as_str(),
             );
-            if let Err(error) = result {
-                if let Some(window) = input_config_weak.upgrade() {
-                    window.set_global_diagnostic(error.into());
+            match result {
+                Ok(()) => {
+                    let mapping = input_config_controller.borrow().input_mapping();
+                    input_config_gamepad.borrow_mut().set_mapping(mapping);
+                }
+                Err(error) => {
+                    if let Some(window) = input_config_weak.upgrade() {
+                        window.set_global_diagnostic(error.into());
+                    }
                 }
             }
         },
     );
+    let binding_weak = adapter.window().as_weak();
+    let binding_controller = controller.clone();
+    let binding_gamepad = gamepad.clone();
+    adapter
+        .window()
+        .on_set_gamepad_binding(move |button_id, key_name| {
+            let result = binding_controller
+                .borrow_mut()
+                .set_gamepad_binding(button_id.as_str(), key_name.as_str());
+            match result {
+                Ok(()) => {
+                    let mapping = binding_controller.borrow().input_mapping();
+                    binding_gamepad.borrow_mut().set_mapping(mapping);
+                }
+                Err(error) => {
+                    if let Some(window) = binding_weak.upgrade() {
+                        window.set_global_diagnostic(error.into());
+                    }
+                }
+            }
+        });
+    let reset_mapping_weak = adapter.window().as_weak();
+    let reset_mapping_controller = controller.clone();
+    let reset_mapping_gamepad = gamepad.clone();
+    adapter.window().on_reset_gamepad_mapping(move || {
+        let result = reset_mapping_controller
+            .borrow_mut()
+            .reset_gamepad_mapping();
+        match result {
+            Ok(()) => {
+                let mapping = reset_mapping_controller.borrow().input_mapping();
+                reset_mapping_gamepad.borrow_mut().set_mapping(mapping);
+            }
+            Err(error) => {
+                if let Some(window) = reset_mapping_weak.upgrade() {
+                    window.set_global_diagnostic(error.into());
+                }
+            }
+        }
+    });
+    let save_per_game_weak = adapter.window().as_weak();
+    let save_per_game_controller = controller.clone();
+    let save_per_game_adapter = adapter.clone();
+    adapter.window().on_save_per_game_input_mapping(move || {
+        let Some(window) = save_per_game_weak.upgrade() else {
+            return;
+        };
+        match save_per_game_controller
+            .borrow_mut()
+            .save_per_game_input_mapping()
+        {
+            Ok(model) => save_per_game_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let clear_per_game_weak = adapter.window().as_weak();
+    let clear_per_game_controller = controller.clone();
+    let clear_per_game_adapter = adapter.clone();
+    adapter.window().on_clear_per_game_input_mapping(move || {
+        let Some(window) = clear_per_game_weak.upgrade() else {
+            return;
+        };
+        match clear_per_game_controller
+            .borrow_mut()
+            .clear_per_game_input_mapping()
+        {
+            Ok(model) => clear_per_game_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
     // ===== VFS browser =====
     let open_vfs_weak = adapter.window().as_weak();
     let open_vfs_controller = controller.clone();

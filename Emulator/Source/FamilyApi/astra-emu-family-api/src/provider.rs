@@ -5,6 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::is_valid_input_control;
+
 const MAX_SYMBOL_BYTES: usize = 128;
 const MAX_EFFECTS_PER_STEP: usize = 65_536;
 const MAX_TRACE_ENTRIES_PER_STEP: u32 = 1_000_000;
@@ -283,7 +285,12 @@ impl LegacyStepInput {
             self.provider_results.iter().map(|item| item.sequence),
         )?;
         for edge in &self.input_edges {
-            validate_symbol("input_control", &edge.control)?;
+            if !is_valid_input_control(&edge.control) {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_STEP_INPUT_CONTROL",
+                    "input edge control must be a canonical key name or pointer/wheel control",
+                ));
+            }
             if !edge.value.is_finite() {
                 return Err(LegacyProviderError::invalid(
                     "ASTRA_EMU_STEP_INPUT_VALUE",
@@ -500,12 +507,20 @@ impl LegacyStepOutput {
                     }
                     token_id
                 }
-                LegacyWaitRequest::Input { token_id, mask } => {
-                    if *mask == 0 {
+                LegacyWaitRequest::Input { token_id, keys } => {
+                    if keys.is_empty() {
                         return Err(LegacyProviderError::invalid(
-                            "ASTRA_EMU_WAIT_INPUT_MASK",
-                            "input wait mask must not be empty",
+                            "ASTRA_EMU_WAIT_INPUT_KEYS",
+                            "input wait must list at least one key",
                         ));
+                    }
+                    for key in keys {
+                        if !is_valid_input_control(key) {
+                            return Err(LegacyProviderError::invalid(
+                                "ASTRA_EMU_WAIT_INPUT_KEY",
+                                "input wait key must be a canonical key name or pointer/wheel control",
+                            ));
+                        }
                     }
                     token_id
                 }
@@ -1441,7 +1456,7 @@ pub enum LegacyWaitRequest {
     },
     Input {
         token_id: String,
-        mask: u64,
+        keys: Vec<String>,
     },
     MediaFence {
         token_id: String,
@@ -1850,7 +1865,7 @@ mod tests {
                 },
                 LegacyWaitRequest::Input {
                     token_id: "wait.1".into(),
-                    mask: 1,
+                    keys: vec!["enter".into()],
                 },
             ],
             trace: Vec::new(),
@@ -1865,13 +1880,13 @@ mod tests {
         let invalid = LegacyStepOutput {
             waits: vec![LegacyWaitRequest::Input {
                 token_id: "wait.1".into(),
-                mask: 0,
+                keys: Vec::new(),
             }],
             ..output
         };
         assert_eq!(
             invalid.validate(&budget()).unwrap_err().code(),
-            "ASTRA_EMU_WAIT_INPUT_MASK"
+            "ASTRA_EMU_WAIT_INPUT_KEYS"
         );
     }
 
@@ -1928,7 +1943,7 @@ mod tests {
             },
             LegacyWaitRequest::Input {
                 token_id: "wait.input".into(),
-                mask: 1,
+                keys: vec!["enter".into()],
             },
             LegacyWaitRequest::MediaFence {
                 token_id: "wait.media".into(),

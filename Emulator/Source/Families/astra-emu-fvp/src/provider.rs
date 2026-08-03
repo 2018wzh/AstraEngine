@@ -978,20 +978,26 @@ fn hosted_inputs(
                 });
             }
             control => {
-                let key = match control {
-                    "confirm" => KeyCode::Return,
-                    "cancel" => KeyCode::Escape,
-                    "up" => KeyCode::Up,
-                    "down" => KeyCode::Down,
-                    "left" => KeyCode::Left,
-                    "right" => KeyCode::Right,
-                    "space" => KeyCode::Space,
-                    "shift" => KeyCode::Shift,
-                    "control" => KeyCode::Control,
-                    _ => {
+                let key = match parse_input_key(control) {
+                    Some(InputKey::Enter) => KeyCode::Return,
+                    Some(InputKey::Escape) => KeyCode::Escape,
+                    Some(InputKey::Space) => KeyCode::Space,
+                    Some(InputKey::Shift) => KeyCode::Shift,
+                    Some(InputKey::Control) => KeyCode::Control,
+                    Some(InputKey::ArrowUp) => KeyCode::Up,
+                    Some(InputKey::ArrowDown) => KeyCode::Down,
+                    Some(InputKey::ArrowLeft) => KeyCode::Left,
+                    Some(InputKey::ArrowRight) => KeyCode::Right,
+                    Some(other) => {
                         return Err(invalid(
-                            "ASTRA_FVP_INPUT_CONTROL",
-                            format!("unsupported input control {control}"),
+                            "ASTRA_FVP_INPUT_KEY",
+                            format!("canonical input key is not supported by RFVP: {other:?}"),
+                        ))
+                    }
+                    None => {
+                        return Err(invalid(
+                            "ASTRA_FVP_INPUT_KEY",
+                            format!("unsupported canonical input key {control}"),
                         ))
                     }
                 };

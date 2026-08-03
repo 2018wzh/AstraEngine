@@ -1,8 +1,14 @@
 // Input/gamepad configuration settings sub-page (new).
 
-import { ComboBox, ScrollView, Slider } from "std-widgets.slint";
+import { Button, ComboBox, ScrollView, Slider } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+
+export struct GamepadBinding {
+    button-id: string,
+    button-label: string,
+    key-name: string,
+}
 
 export component InputSettingsPage inherits Rectangle {
     in-out property <string> confirm-key: "return";
@@ -10,7 +16,13 @@ export component InputSettingsPage inherits Rectangle {
     in-out property <float> touch-sensitivity: 50;
     in-out property <bool> gamepad-enabled: true;
     in-out property <string> gamepad-deadzone: "medium";
+    in property <[GamepadBinding]> gamepad-bindings;
+    in property <bool> has-selected-case;
     callback save-input-config(string, string, float, bool, string);
+    callback set-gamepad-binding(string, string);
+    callback reset-gamepad-mapping();
+    callback save-per-game-input-mapping();
+    callback clear-per-game-input-mapping();
 
     background: Theme.background;
 
@@ -85,6 +97,69 @@ export component InputSettingsPage inherits Rectangle {
                 model: ["low", "medium", "high"];
                 current-index: root.gamepad-deadzone == "low" ? 0 : root.gamepad-deadzone == "high" ? 2 : 1;
                 selected(value) => { root.gamepad-deadzone = value; }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Gamepad button mapping"; }
+
+            Text {
+                text: "Each gamepad control is translated to a keyboard key for engines without native gamepad support.";
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            for binding in root.gamepad-bindings : HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: binding.button-label;
+                    color: Theme.text;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    width: 150px;
+                }
+                ComboBox {
+                    model: ["enter", "escape", "space", "arrow_up", "arrow_down", "arrow_left", "arrow_right", "shift", "control"];
+                    current-index: binding.key-name == "enter" ? 0 : binding.key-name == "escape" ? 1 : binding.key-name == "space" ? 2 : binding.key-name == "arrow_up" ? 3 : binding.key-name == "arrow_down" ? 4 : binding.key-name == "arrow_left" ? 5 : binding.key-name == "arrow_right" ? 6 : binding.key-name == "shift" ? 7 : binding.key-name == "control" ? 8 : 0;
+                    selected(value) => { root.set-gamepad-binding(binding.button-id, value); }
+                    horizontal-stretch: 1;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: "Reset to VN default";
+                    clicked => { root.reset-gamepad-mapping(); }
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "Per-game settings"; }
+
+            Text {
+                text: root.has-selected-case
+                    ? "Store the current input mapping for the selected game so it overrides the global settings when that game launches."
+                    : "Select a game in the library to store a per-game input mapping.";
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            if root.has-selected-case : HorizontalLayout {
+                spacing: 10px;
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: "Save for selected game";
+                    clicked => { root.save-per-game-input-mapping(); }
+                }
+                Button {
+                    text: "Clear per-game";
+                    clicked => { root.clear-per-game-input-mapping(); }
+                }
             }
 
             SettingsDivider {}

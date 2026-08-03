@@ -210,17 +210,25 @@ AstraEMU Manager 的作品级数据分两类：社区维护的只读兼容性库
 
 JSON Schema 由 `astra-emu-metadata` 的 `compatibility_json_schema()` 从 Rust 类型导出，供数据仓在 CI 中校验文档；默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖；数据仓由用户单独创建维护。匹配按 work 的 `external_identity(provider, remote_id)` join 本地缓存，无匹配返回未知，不显示徽章。
 
-### Manager 本地 SQLite 记录（Library v7）
+### Manager 本地 SQLite 记录（Library v9）
 
-Library v7 迁移在 Manager 本地库新增三张表，只记录计时与兼容性缓存：
+Library v7 迁移在 Manager 本地库新增三张表，只记录计时与兼容性缓存；v8/v9 迁移在此之上补充输入映射与逐游戏设置：
 
 | 表 | 用途 |
 | --- | --- |
 | `play_session` | 游玩会话，记录 work_id、case_identity、start/end_unix_ms、duration_ms 与 ended_by（`active`/`leave`/`shutdown`/`crash`）；崩溃残留会话在恢复时按上次已知时间结算 |
 | `compatibility_entry_cache` | 兼容性库本地只读缓存，按 `(provider, remote_id)` 主键 |
 | `compatibility_sync_state` | 单例同步状态，记录 source_url、response_hash、last_fetched_unix_ms 与 diagnostic_code |
+| `input_settings` | 单例全局设备→键名输入映射（`InputMapping` 的 JSON 序列化） |
+| `work_settings` | 逐游戏设置覆盖，按 work_id 主键（`WorkSettings` 的 JSON 序列化），`None` 字段沿用全局值，随 work 级联删除 |
 
 游玩统计经 SQL 聚合派生（`SUM(duration_ms)`/`MAX(start_unix_ms)`/`COUNT`），不另存冗余汇总字段。
+
+### 设备输入键名契约（family ABI v5）
+
+自 `astra.emu.family_abi.v5` 起，`LegacyInputEdge.control` 携带规范键名而非语义动作，语义动作词表（`confirm`/`cancel`/`up` 等）已废弃。规范键名由 `astra-emu-family-api` 的 `input_key` 模块定义（`enter`/`escape`/`space`/`arrow_*`/`shift`/`control`/`character:<a-z0-9>`/`function:<1-12>` 等），指针/滚轮 control（`pointer.*`/`wheel`）保持原拼写。输入等待 `LegacyWaitRequest::Input` 由 u64 位掩码改为键名列表 `keys`。
+
+手柄/键盘重映射是 Manager 层通用能力：设备输入经 `InputMapping`（`astra-emu-manager-core`，schemars 导出）翻译为规范键名后入队，family 只负责把键名注入各自引擎。`default_vn_preset()` 提供面向无手柄支持引擎的通用 VN 预设（确认/取消/导航映射到引擎已理解的键盘键）；`WorkSettings.input_mapping` 允许逐游戏覆盖，启动时生效、离开时恢复全局。
 
 ## Migration
 

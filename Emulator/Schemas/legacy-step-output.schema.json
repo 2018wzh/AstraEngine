@@ -500,14 +500,15 @@
             "input": {
               "type": "object",
               "required": [
-                "mask",
+                "keys",
                 "token_id"
               ],
               "properties": {
-                "mask": {
-                  "type": "integer",
-                  "format": "uint64",
-                  "minimum": 0.0
+                "keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "token_id": {
                   "type": "string"

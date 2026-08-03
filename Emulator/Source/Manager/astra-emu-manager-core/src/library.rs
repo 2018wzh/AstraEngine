@@ -13,7 +13,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 7;
+use crate::input_mapping::InputMapping;
+use crate::work_settings::WorkSettings;
+
+const SCHEMA_VERSION: i64 = 9;
 
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
@@ -160,6 +163,8 @@ pub enum LibraryError {
     Cancelled,
     #[error("ASTRA_EMU_LIBRARY_SCHEMA_VERSION: found {found}, supported {supported}")]
     SchemaVersion { found: i64, supported: i64 },
+    #[error("ASTRA_EMU_LIBRARY_INPUT_MAPPING: {0}")]
+    InputMapping(String),
 }
 
 pub struct Library {
@@ -393,8 +398,110 @@ impl Library {
                  );",
             )?;
             tx.pragma_update(None, "user_version", 7)?;
+            version = 7;
+        }
+        if version == 7 {
+            tx.execute_batch(
+                "CREATE TABLE input_settings (
+                    singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+                    mapping_json TEXT NOT NULL
+                 );",
+            )?;
+            tx.pragma_update(None, "user_version", 8)?;
+            version = 8;
+        }
+        if version == 8 {
+            tx.execute_batch(
+                "CREATE TABLE work_settings (
+                    work_id TEXT PRIMARY KEY NOT NULL REFERENCES library_work(work_id) ON DELETE CASCADE,
+                    settings_json TEXT NOT NULL
+                 );",
+            )?;
+            tx.pragma_update(None, "user_version", 9)?;
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Persist the global device-to-key input mapping.
+    pub fn save_input_mapping(&mut self, mapping: &InputMapping) -> Result<(), LibraryError> {
+        let mapping_json = serde_json::to_string(mapping)
+            .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
+        self.connection.execute(
+            "INSERT INTO input_settings(singleton, mapping_json)
+             VALUES(1, ?1)
+             ON CONFLICT(singleton) DO UPDATE SET mapping_json=excluded.mapping_json",
+            params![mapping_json],
+        )?;
+        Ok(())
+    }
+
+    /// Read the persisted input mapping, if one has been saved.
+    pub fn load_input_mapping(&self) -> Result<Option<InputMapping>, LibraryError> {
+        let mapping_json: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT mapping_json FROM input_settings WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match mapping_json {
+            Some(mapping_json) => {
+                let mapping = serde_json::from_str(&mapping_json)
+                    .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
+                Ok(Some(mapping))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Read the per-game settings overrides for a work, if any.
+    pub fn work_settings(&self, work_id: &str) -> Result<Option<WorkSettings>, LibraryError> {
+        validate_symbol(work_id)?;
+        let settings_json: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT settings_json FROM work_settings WHERE work_id=?1",
+                params![work_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match settings_json {
+            Some(settings_json) => {
+                let settings = serde_json::from_str(&settings_json)
+                    .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
+                Ok(Some(settings))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Persist the per-game settings overrides for a work.
+    pub fn set_work_settings(
+        &mut self,
+        work_id: &str,
+        settings: &WorkSettings,
+    ) -> Result<(), LibraryError> {
+        validate_symbol(work_id)?;
+        let settings_json = serde_json::to_string(settings)
+            .map_err(|error| LibraryError::InputMapping(error.to_string()))?;
+        self.connection.execute(
+            "INSERT INTO work_settings(work_id, settings_json)
+             VALUES(?1, ?2)
+             ON CONFLICT(work_id) DO UPDATE SET settings_json=excluded.settings_json",
+            params![work_id, settings_json],
+        )?;
+        Ok(())
+    }
+
+    /// Remove all per-game settings overrides for a work.
+    pub fn clear_work_settings(&mut self, work_id: &str) -> Result<(), LibraryError> {
+        validate_symbol(work_id)?;
+        self.connection.execute(
+            "DELETE FROM work_settings WHERE work_id=?1",
+            params![work_id],
+        )?;
         Ok(())
     }
 
@@ -1306,19 +1413,53 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 9);
         let table_count: i64 = library
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
                  AND name IN ('cover_cache', 'source_diagnostic', 'case_runtime_profile',
                     'translation_profile', 'play_session', 'compatibility_entry_cache',
-                    'compatibility_sync_state')",
+                    'compatibility_sync_state', 'input_settings', 'work_settings')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(table_count, 7);
+        assert_eq!(table_count, 9);
+    }
+
+    #[test]
+    fn input_mapping_round_trips_through_the_library() {
+        let mut library = Library::in_memory().unwrap();
+        assert!(library.load_input_mapping().unwrap().is_none());
+        let mapping = crate::input_mapping::default_vn_preset();
+        library.save_input_mapping(&mapping).unwrap();
+        let loaded = library.load_input_mapping().unwrap().unwrap();
+        assert_eq!(loaded, mapping);
+        // Saving again overwrites the singleton row.
+        let mut changed = mapping.clone();
+        changed.gamepad_enabled = false;
+        library.save_input_mapping(&changed).unwrap();
+        let loaded = library.load_input_mapping().unwrap().unwrap();
+        assert_eq!(loaded, changed);
+    }
+
+    #[test]
+    fn work_settings_round_trip_and_clear() {
+        let mut library = Library::in_memory().unwrap();
+        scan_case(&mut library, "case-a");
+        let work_id = work_id_for(&library, "case-a");
+        assert!(library.work_settings(&work_id).unwrap().is_none());
+        let settings = crate::work_settings::WorkSettings {
+            input_mapping: Some(crate::input_mapping::default_vn_preset()),
+            filter_preset: Some("crt-soft".into()),
+            patch_mode: None,
+        };
+        library.set_work_settings(&work_id, &settings).unwrap();
+        let loaded = library.work_settings(&work_id).unwrap().unwrap();
+        assert_eq!(loaded, settings);
+        library.clear_work_settings(&work_id).unwrap();
+        assert!(library.work_settings(&work_id).unwrap().is_none());
     }
 
     #[test]

@@ -1077,8 +1077,11 @@ fn wait_condition(wait: &LegacyWaitRequest, step: u64, delta_ns: u64) -> (String
             token_id.clone(),
             PendingWait::DueStep(step.saturating_add(u64::from(*frames).max(1))),
         ),
-        LegacyWaitRequest::Input { token_id, mask } => {
-            (token_id.clone(), PendingWait::Input(*mask))
+        LegacyWaitRequest::Input { token_id, keys } => {
+            let mask = keys
+                .iter()
+                .fold(0_u64, |mask, key| mask | input_control_mask(key));
+            (token_id.clone(), PendingWait::Input(mask))
         }
         LegacyWaitRequest::MediaFence { token_id, media_id } => {
             (token_id.clone(), PendingWait::MediaFence(media_id.clone()))
@@ -1097,12 +1100,12 @@ fn wait_condition(wait: &LegacyWaitRequest, step: u64, delta_ns: u64) -> (String
 
 fn input_control_mask(control: &str) -> u64 {
     match control {
-        "confirm" => 1 << 0,
-        "cancel" => 1 << 1,
-        "up" => 1 << 2,
-        "down" => 1 << 3,
-        "left" => 1 << 4,
-        "right" => 1 << 5,
+        "enter" => 1 << 0,
+        "escape" => 1 << 1,
+        "arrow_up" => 1 << 2,
+        "arrow_down" => 1 << 3,
+        "arrow_left" => 1 << 4,
+        "arrow_right" => 1 << 5,
         "space" => 1 << 6,
         "pointer.primary" => 1 << 7,
         "pointer.secondary" => 1 << 8,

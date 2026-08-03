@@ -131,6 +131,8 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Done Evidence:** Windows/Android Manager workflow、同设备 WGPU identity、响应布局、overlay input isolation、report redaction、accessibility 和 provider identity 通过真实程序证据；不能用静态面板、compile-only 或 emulator 结果外推未验证硬件。
 
+**Current Evidence:** family ABI 已升至 v5，输入改为规范键名（废弃语义动作），手柄/键盘重映射作为 Manager 层通用能力落地：`InputMapping`（schemars 导出）+ 通用 VN 预设 + 开关/死区 + 逐按键绑定 UI，Library v9 `input_settings`/`work_settings` 支持全局与逐游戏输入映射覆盖（启动生效、离开恢复）。该部分为 crate check 与 unit/集成测试级证据；Windows/Android 真实手柄 E3 仍未闭合。
+
 **Linked Test IDs:** `T-S5-MANAGER-UI-01`
 
 ## S5-FAMILY-01 LegacyRuntimeProvider facade

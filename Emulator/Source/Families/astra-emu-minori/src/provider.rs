@@ -24,7 +24,12 @@ pub const MINORI_RUNTIME_PROVIDER_ID: &str = "astra.emu.family.minori";
 const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_EPHEMERAL_TEXT_BYTES: usize = 64 * 1024;
-const MESSAGE_INPUT_MASK: u64 = (1 << 0) | (1 << 6) | (1 << 7);
+fn message_input_keys() -> Vec<String> {
+    ["enter", "space", "pointer.primary"]
+        .iter()
+        .map(|key| key.to_string())
+        .collect()
+}
 
 fn minori_message_presentation(
     stage_size: Option<(u32, u32)>,
@@ -1331,7 +1336,7 @@ fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
         },
         MinoriWaitState::Input { token_id } => LegacyWaitRequest::Input {
             token_id: token_id.clone(),
-            mask: MESSAGE_INPUT_MASK,
+            keys: message_input_keys(),
         },
         MinoriWaitState::Media { token_id, media_id } => LegacyWaitRequest::MediaFence {
             token_id: token_id.clone(),
@@ -1648,7 +1653,7 @@ mod tests {
             .is_none());
         assert!(matches!(
             output.waits.as_slice(),
-            [LegacyWaitRequest::Input { mask, .. }] if *mask == MESSAGE_INPUT_MASK
+            [LegacyWaitRequest::Input { keys, .. }] if *keys == message_input_keys()
         ));
     }
 

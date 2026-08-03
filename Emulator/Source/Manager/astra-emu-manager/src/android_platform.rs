@@ -610,12 +610,22 @@ pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnGamepadInp
         .map(|value| value.into())
         .map_err(|_| "ASTRA_EMU_ANDROID_GAMEPAD_CONTROL".to_owned())
         .and_then(|control: String| match control.as_str() {
-            "confirm" => Ok("confirm"),
-            "cancel" => Ok("cancel"),
-            "up" => Ok("up"),
-            "down" => Ok("down"),
-            "left" => Ok("left"),
-            "right" => Ok("right"),
+            // Canonical ABI key names.
+            "enter" => Ok("enter"),
+            "escape" => Ok("escape"),
+            "arrow_up" => Ok("arrow_up"),
+            "arrow_down" => Ok("arrow_down"),
+            "arrow_left" => Ok("arrow_left"),
+            "arrow_right" => Ok("arrow_right"),
+            "space" => Ok("space"),
+            // Deprecated semantic actions, translated at the JNI boundary while
+            // the Android UI layer still emits the legacy vocabulary.
+            "confirm" => Ok("enter"),
+            "cancel" => Ok("escape"),
+            "up" => Ok("arrow_up"),
+            "down" => Ok("arrow_down"),
+            "left" => Ok("arrow_left"),
+            "right" => Ok("arrow_right"),
             _ => Err("ASTRA_EMU_ANDROID_GAMEPAD_CONTROL".to_owned()),
         });
     let result = control.and_then(|control| {

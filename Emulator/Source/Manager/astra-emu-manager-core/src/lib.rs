@@ -4,12 +4,14 @@ mod evidence;
 mod family_loader;
 mod filter;
 mod identity;
+mod input_mapping;
 mod library;
 mod patch;
 mod play_record;
 mod probe;
 mod runtime_provider;
 mod scanner;
+mod work_settings;
 
 pub use compatibility_cache::{
     CompatibilityCacheEntry, CompatibilityMatch, CompatibilitySyncState,
@@ -25,6 +27,7 @@ pub use identity::{
     MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord, ProviderConsentRecord,
     ScanRunRecord, WorkRecord, MATCHER_VERSION,
 };
+pub use input_mapping::{default_vn_preset, GamepadDeadzone, GamepadInput, InputMapping};
 pub use library::{
     CancellationToken, CaseRecord, CaseRuntimeProfileRecord, CoverCacheRecord, Library,
     LibraryError, ScanCandidate, ScanReport, SourceDiagnosticRecord, SourceGrant,
@@ -43,3 +46,4 @@ pub use scanner::{
     DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,
     LibraryScanner, ScanLimits, SourceScanError, DEFAULT_DISCOVERY_DESCRIPTORS,
 };
+pub use work_settings::WorkSettings;

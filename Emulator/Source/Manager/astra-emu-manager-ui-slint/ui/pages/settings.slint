@@ -10,7 +10,7 @@ import { TranslationSettingsPage } from "../settings/translation.slint";
 import { FilterSettingsPage } from "../settings/filters.slint";
 import { PatchSettingsPage } from "../settings/patches.slint";
 import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
-import { InputSettingsPage } from "../settings/input.slint";
+import { GamepadBinding, InputSettingsPage } from "../settings/input.slint";
 import { AppearanceSettingsPage } from "../settings/appearance.slint";
 
 component MobileCategoryChip inherits Rectangle {
@@ -96,7 +96,12 @@ export component SettingsPage inherits Rectangle {
     in-out property <float> touch-sensitivity;
     in-out property <bool> gamepad-enabled;
     in-out property <string> gamepad-deadzone;
+    in property <[GamepadBinding]> gamepad-bindings;
     callback save-input-config(string, string, float, bool, string);
+    callback set-gamepad-binding(string, string);
+    callback reset-gamepad-mapping();
+    callback save-per-game-input-mapping();
+    callback clear-per-game-input-mapping();
 
     // Appearance
     in property <bool> dark-mode;
@@ -131,6 +136,13 @@ export component SettingsPage inherits Rectangle {
                 Rectangle { height: 8px; }
 
                 SettingsCategoryItem {
+                    label: "Input";
+                    icon: Icons.keyboard;
+                    description: "Gamepad remap, per-game, touch";
+                    active: root.category == "input";
+                    clicked => { root.category = "input"; }
+                }
+                SettingsCategoryItem {
                     label: "Translation";
                     icon: Icons.language;
                     description: "Provider, model, glossary";
@@ -164,13 +176,6 @@ export component SettingsPage inherits Rectangle {
                     description: "Trusted Luau patches";
                     active: root.category == "patches";
                     clicked => { root.category = "patches"; }
-                }
-                SettingsCategoryItem {
-                    label: "Input";
-                    icon: Icons.keyboard;
-                    description: "Keyboard, gamepad, touch";
-                    active: root.category == "input";
-                    clicked => { root.category = "input"; }
                 }
                 SettingsCategoryItem {
                     label: "Appearance";
@@ -253,9 +258,15 @@ export component SettingsPage inherits Rectangle {
                 touch-sensitivity <=> root.touch-sensitivity;
                 gamepad-enabled <=> root.gamepad-enabled;
                 gamepad-deadzone <=> root.gamepad-deadzone;
+                gamepad-bindings: root.gamepad-bindings;
                 save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
                     root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
                 }
+                set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
+                reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
+                has-selected-case: root.has-selected-case;
+                save-per-game-input-mapping => { root.save-per-game-input-mapping(); }
+                clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
             }
 
             if root.category == "appearance" : AppearanceSettingsPage {
@@ -285,12 +296,12 @@ export component SettingsPage inherits Rectangle {
                     spacing: 8px;
                     alignment: start;
 
+                    MobileCategoryChip { label: "Input"; active: root.category == "input"; clicked => { root.category = "input"; } }
                     MobileCategoryChip { label: "Translation"; active: root.category == "translation"; clicked => { root.category = "translation"; } }
                     MobileCategoryChip { label: "Metadata"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
                     MobileCategoryChip { label: "Compatibility"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
                     MobileCategoryChip { label: "Filters"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
                     MobileCategoryChip { label: "Patches"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
-                    MobileCategoryChip { label: "Input"; active: root.category == "input"; clicked => { root.category = "input"; } }
                     MobileCategoryChip { label: "Appearance"; active: root.category == "appearance"; clicked => { root.category = "appearance"; } }
                 }
             }
@@ -367,9 +378,15 @@ export component SettingsPage inherits Rectangle {
                 touch-sensitivity <=> root.touch-sensitivity;
                 gamepad-enabled <=> root.gamepad-enabled;
                 gamepad-deadzone <=> root.gamepad-deadzone;
+                gamepad-bindings: root.gamepad-bindings;
                 save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
                     root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
                 }
+                set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
+                reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
+                has-selected-case: root.has-selected-case;
+                save-per-game-input-mapping => { root.save-per-game-input-mapping(); }
+                clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
             }
 
             if root.category == "appearance" : AppearanceSettingsPage {

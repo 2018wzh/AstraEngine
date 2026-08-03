@@ -303,12 +303,12 @@ export component ManagerWindow inherits Window {
         game-focus := FocusScope {
             key-pressed(event) => {
                 if root.overlay-active { return reject; }
-                if event.text == Key.Return { root.game-input("confirm", true, 1); return accept; }
-                if event.text == Key.Escape { root.game-input("cancel", true, 1); return accept; }
-                if event.text == Key.UpArrow { root.game-input("up", true, 1); return accept; }
-                if event.text == Key.DownArrow { root.game-input("down", true, 1); return accept; }
-                if event.text == Key.LeftArrow { root.game-input("left", true, 1); return accept; }
-                if event.text == Key.RightArrow { root.game-input("right", true, 1); return accept; }
+                if event.text == Key.Return { root.game-input("enter", true, 1); return accept; }
+                if event.text == Key.Escape { root.game-input("escape", true, 1); return accept; }
+                if event.text == Key.UpArrow { root.game-input("arrow_up", true, 1); return accept; }
+                if event.text == Key.DownArrow { root.game-input("arrow_down", true, 1); return accept; }
+                if event.text == Key.LeftArrow { root.game-input("arrow_left", true, 1); return accept; }
+                if event.text == Key.RightArrow { root.game-input("arrow_right", true, 1); return accept; }
                 if event.text == " " { root.game-input("space", true, 1); return accept; }
                 if event.text == Key.F5 { root.save-game(); return accept; }
                 if event.text == Key.F9 { root.restore-game(); return accept; }
@@ -316,12 +316,12 @@ export component ManagerWindow inherits Window {
             }
             key-released(event) => {
                 if root.overlay-active { return reject; }
-                if event.text == Key.Return { root.game-input("confirm", false, 0); return accept; }
-                if event.text == Key.Escape { root.game-input("cancel", false, 0); return accept; }
-                if event.text == Key.UpArrow { root.game-input("up", false, 0); return accept; }
-                if event.text == Key.DownArrow { root.game-input("down", false, 0); return accept; }
-                if event.text == Key.LeftArrow { root.game-input("left", false, 0); return accept; }
-                if event.text == Key.RightArrow { root.game-input("right", false, 0); return accept; }
+                if event.text == Key.Return { root.game-input("enter", false, 0); return accept; }
+                if event.text == Key.Escape { root.game-input("escape", false, 0); return accept; }
+                if event.text == Key.UpArrow { root.game-input("arrow_up", false, 0); return accept; }
+                if event.text == Key.DownArrow { root.game-input("arrow_down", false, 0); return accept; }
+                if event.text == Key.LeftArrow { root.game-input("arrow_left", false, 0); return accept; }
+                if event.text == Key.RightArrow { root.game-input("arrow_right", false, 0); return accept; }
                 if event.text == " " { root.game-input("space", false, 0); return accept; }
                 return reject;
             }

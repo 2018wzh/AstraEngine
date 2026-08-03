@@ -8,6 +8,7 @@ import { Sidebar, BottomNav } from "./components/sidebar.slint";
 import { GameCard } from "./components/cover-card.slint";
 import { VfsEntry, VfsPreview } from "./components/file-tree.slint";
 import { MatchReview } from "./settings/metadata.slint";
+import { GamepadBinding } from "./settings/input.slint";
 import { LibraryPage, PlaySession } from "./pages/library.slint";
 import { AboutPage } from "./pages/about.slint";
 import { SettingsPage } from "./pages/settings.slint";
@@ -129,6 +130,7 @@ export component ManagerWindow inherits Window {
     in-out property <float> touch-sensitivity: 50;
     in-out property <bool> gamepad-enabled: true;
     in-out property <string> gamepad-deadzone: "medium";
+    in property <[GamepadBinding]> gamepad-bindings;
 
     // ===== About =====
     in property <string> version;
@@ -179,6 +181,10 @@ export component ManagerWindow inherits Window {
     callback toggle-theme();
     callback open-vfs();
     callback save-input-config(string, string, float, bool, string);
+    callback set-gamepad-binding(string, string);
+    callback reset-gamepad-mapping();
+    callback save-per-game-input-mapping();
+    callback clear-per-game-input-mapping();
     callback set-grid-columns(int);
     callback vfs-select-entry(string);
     callback vfs-toggle-expand(string);
@@ -365,9 +371,14 @@ export component ManagerWindow inherits Window {
                     touch-sensitivity <=> root.touch-sensitivity;
                     gamepad-enabled <=> root.gamepad-enabled;
                     gamepad-deadzone <=> root.gamepad-deadzone;
+                    gamepad-bindings: root.gamepad-bindings;
                     save-input-config(confirm, cancel, sensitivity, gamepad, deadzone) => {
                         root.save-input-config(confirm, cancel, sensitivity, gamepad, deadzone);
                     }
+                    set-gamepad-binding(button, key) => { root.set-gamepad-binding(button, key); }
+                    reset-gamepad-mapping => { root.reset-gamepad-mapping(); }
+                    save-per-game-input-mapping => { root.save-per-game-input-mapping(); }
+                    clear-per-game-input-mapping => { root.clear-per-game-input-mapping(); }
 
                     // Appearance
                     dark-mode: root.theme-dark;
