@@ -65,14 +65,14 @@ RuntimeWorld + platform renderer/audio/media
 
 hosted 路径保留了 generation 判断，但变化纹理随后经过更长的所有权链：`HostPrimRenderCache` 调用 `RecordingRenderer`，fork 将像素复制进 `HostedSceneOperation`；Astra FVP translator 再复制为 `ScenePacket` resource operation 并计算内容 hash；`PreparedCommit` 进入 postcard payload，随后又随动态 family step 经过 ABI 编解码；`RuntimeWorld` 把 presentation envelope 交给 CLI 后，GPU adapter 再解码并构造平台 scene command。`2fab6d4c` 已移除 GPU adapter 验证用的整包 clone，并让 RGBA create payload 直接转移到 `Arc<[u8]>`，但 fork delta、translator 和动态 ABI 之间的像素复制与序列化仍然存在，不能把轻量 visual identity 误写成“像素没有跨层传递”。
 
-更大的差异在平台资源更新。原版对已有动态纹理原位写入；当前 GPU adapter 为每次 update 分配新 resource generation，先 release 旧 resource，再 upload 新 resource。通用 WGPU scene renderer 发现 retained resource 集合变化后会重新 pack atlas，清零 CPU atlas backing，并上传新的 atlas。一次菜单 hover 或状态切换造成的单纹理变化，因而可能同时触发整张纹理复制、ABI payload 编解码、旧 generation 释放、新 generation 创建和全 atlas 重建。这条链路不满足“局部更新只触碰被修改纹理”的目标。正式修复必须让同尺寸/同格式 update 保持稳定 resource identity，在事务验证后对既有 atlas placement 执行有界 subresource write；只有 create、destroy 或尺寸/格式变化才允许重新布局。
+更大的差异在平台资源更新。原版对已有动态纹理原位写入；当前 GPU adapter 为每次 update 分配新 resource generation，先 release 旧 resource，再 upload 新 resource。通用 WGPU scene renderer 已有增量 atlas allocator：空闲槽能容纳新 generation 时，只上传变化资源；容量不足或碎片化时才 repack，不能把每次资源变化都记成全 atlas 重建。问题仍然存在于 resource identity churn：同尺寸/同格式 update 无法复用 live resource，至少要完整重传该纹理，还会持续制造释放与分配，增加后续 repack 的概率。一次菜单 hover 或状态切换造成的局部变化，因而被放大为整张纹理复制、ABI payload 编解码、旧 generation 释放和新 generation 创建。这条链路不满足“局部更新只触碰被修改区域”的目标。正式修复必须让同尺寸/同格式 update 保持稳定 resource identity，在事务验证后对既有 atlas placement 执行有界 subresource write；只有 create、destroy 或尺寸/格式变化才允许重新布局。
 
 音频也不能照搬 fixed tick。原版 native BGM 使用独立的 streaming playback；当前 adapter 在 `Play` 时把 encoded stream 完整解码、重采样，再由 Runtime fixed tick 上的 pump 维持 120–180 ms 平台队列。图形、ABI 或媒体阶段只要阻塞超过水位，device callback 就会先耗尽队列。音频 producer/queue pump 必须脱离 VM、scene prepare、GPU receipt 和 presentation cadence，在独立有界任务上按低水位补充；Runtime tick 只提交命令和读取有界 telemetry。
 
 实现与审查按下列顺序检查放大点：
 
 1. 先看 `rfvp.core.provider_step`。core p99 正常而 `astra.emu.adapter.effect_dispatch` 出现长帧时，不得把问题归因于 VM。
-2. 对每次 scene commit 同时记录 create/update bytes、resource operation、draw count、live generation 和平台 atlas upload bytes。局部 update 后 atlas upload 等于全部 live texture 时，直接判为生命周期放大。
+2. 对每次 scene commit 同时记录 create/update bytes、resource operation、draw count、live generation 和平台 atlas upload bytes。局部 update 后若上传整张资源，说明 subresource 语义已经丢失；若 upload bytes 进一步接近全部 live texture，则检查 allocator 是否因 generation churn 进入 repack。
 3. 对 payload 分别记录 fork capture、translator、ABI encode/decode 和 GPU prepare 字节数；同一 decoded pixel 不应在单步内拥有多份长期存活副本。
 4. 音频 trace 必须区分 command、decode、producer、platform queue、callback underflow。增大 buffer 只能用于明确的 bounded latency policy，不能替代独立 producer。
 
