@@ -2824,6 +2824,46 @@ impl NativePerfettoCapture {
         Ok(())
     }
 
+    fn begin(
+        &mut self,
+        name: &'static str,
+        track: u32,
+        fixed_step: u64,
+        started: Instant,
+    ) -> Result<(), String> {
+        self.writer
+            .begin(
+                perfetto_domain(name),
+                name,
+                track,
+                Some(fixed_step),
+                elapsed_ns_since(self.started, started)?,
+            )
+            .map_err(|error| error.to_string())?;
+        self.recorded = self
+            .recorded
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_PERFETTO_EVENT_OVERFLOW".to_owned())?;
+        Ok(())
+    }
+
+    fn end(&mut self, name: &'static str, track: u32, fixed_step: u64) -> Result<(), String> {
+        self.writer
+            .end(
+                perfetto_domain(name),
+                name,
+                track,
+                Some(fixed_step),
+                elapsed_ns(self.started)?,
+            )
+            .map_err(|error| error.to_string())?;
+        self.recorded = self
+            .recorded
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_PERFETTO_EVENT_OVERFLOW".to_owned())?;
+        Ok(())
+    }
+
     fn finish(self) -> Result<PerfettoTraceSummary, String> {
         if self.recorded == 0 {
             return Err("ASTRA_EMU_NATIVE_PERFETTO_NO_SAMPLES".into());
@@ -3306,6 +3346,25 @@ impl<'a> RuntimeDriver<'a> {
         Ok(())
     }
 
+    fn begin_perfetto_phase(
+        &mut self,
+        name: &'static str,
+        track: u32,
+        started: Instant,
+    ) -> Result<(), String> {
+        if let Some(perfetto) = self.perfetto.as_mut() {
+            perfetto.begin(name, track, self.fixed_step.saturating_add(1), started)?;
+        }
+        Ok(())
+    }
+
+    fn end_perfetto_phase(&mut self, name: &'static str, track: u32) -> Result<(), String> {
+        if let Some(perfetto) = self.perfetto.as_mut() {
+            perfetto.end(name, track, self.fixed_step)?;
+        }
+        Ok(())
+    }
+
     fn record_audio_perfetto(&mut self, telemetry: AudioPumpTelemetry) -> Result<(), String> {
         // These are device observations at the adapter boundary. They do not
         // infer callback starvation or decoder stalls from a missing packet:
@@ -3595,6 +3654,7 @@ impl<'a> RuntimeDriver<'a> {
     async fn step(&mut self) -> Result<(), String> {
         self.poll_native_scene_present()?;
         let step_started = Instant::now();
+        self.begin_perfetto_phase("astra.emu.adapter.fixed_tick", 0, step_started)?;
         let next_step = self
             .fixed_step
             .checked_add(1)
@@ -4025,7 +4085,7 @@ impl<'a> RuntimeDriver<'a> {
         }
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
-        Ok(())
+        self.end_perfetto_phase("astra.emu.adapter.fixed_tick", 0)
     }
 
     fn poll_native_scene_present(&mut self) -> Result<(), String> {
