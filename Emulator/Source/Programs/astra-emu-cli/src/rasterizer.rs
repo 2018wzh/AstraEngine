@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use astra_core::Hash256;
 use astra_emu_family_api::{
     LegacyBlendMode, LegacyDrawV1, LegacyPreparedSceneCommitV1, LegacyRenderFrameV1,
-    LegacySceneResourceOperationV1, LegacySceneResourceStateV1, LegacyTextureFormat,
-    LegacyVertexV1,
+    LegacySceneResourceOperationV1, LegacySceneResourceStateV1, LegacySceneTextureUpdateV1,
+    LegacyTextureFormat, LegacyVertexV1,
 };
 use rayon::prelude::*;
 
@@ -63,17 +63,7 @@ impl CpuStageRasterizer {
                     )?;
                 }
                 LegacySceneResourceOperationV1::UpdateTexture(texture) => {
-                    Self::update_texture_into(
-                        &mut textures,
-                        texture.texture_id,
-                        texture.x,
-                        texture.y,
-                        texture.width,
-                        texture.height,
-                        texture.format,
-                        &texture.pixels,
-                        texture.content_hash,
-                    )?;
+                    Self::update_texture_into(&mut textures, texture)?;
                 }
                 LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
                     textures.remove(texture_id);
@@ -192,45 +182,49 @@ impl CpuStageRasterizer {
 
     fn update_texture_into(
         textures: &mut BTreeMap<u32, Arc<Texture>>,
-        texture_id: u32,
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-        format: LegacyTextureFormat,
-        pixels: &[u8],
-        content_hash: Hash256,
+        texture: &LegacySceneTextureUpdateV1,
     ) -> Result<(), String> {
-        if Hash256::from_sha256(pixels) != content_hash {
+        if Hash256::from_sha256(&texture.pixels) != texture.content_hash {
             return Err("ASTRA_EMU_HEADLESS_TEXTURE_HASH".into());
         }
         let previous = textures
-            .get(&texture_id)
+            .get(&texture.texture_id)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_MISSING".to_owned())?;
-        let right = x
-            .checked_add(width)
+        let right = texture
+            .x
+            .checked_add(texture.width)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-        let bottom = y
-            .checked_add(height)
+        let bottom = texture
+            .y
+            .checked_add(texture.height)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
         if right > previous.width || bottom > previous.height {
             return Err("ASTRA_EMU_HEADLESS_TEXTURE_REGION".into());
         }
-        let update = rgba8_pixels(width, height, format, pixels)?;
+        let update = rgba8_pixels(
+            texture.width,
+            texture.height,
+            texture.format,
+            &texture.pixels,
+        )?;
         let mut next = (**previous).clone();
-        let row_bytes = usize::try_from(width)
+        let row_bytes = usize::try_from(texture.width)
             .ok()
             .and_then(|value| value.checked_mul(4))
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-        for row in 0..height {
-            let destination = usize::try_from(y + row)
+        for row in 0..texture.height {
+            let destination = usize::try_from(texture.y + row)
                 .ok()
                 .and_then(|row| {
                     usize::try_from(previous.width)
                         .ok()
                         .and_then(|stride| row.checked_mul(stride))
                 })
-                .and_then(|offset| usize::try_from(x).ok().and_then(|x| offset.checked_add(x)))
+                .and_then(|offset| {
+                    usize::try_from(texture.x)
+                        .ok()
+                        .and_then(|x| offset.checked_add(x))
+                })
                 .and_then(|offset| offset.checked_mul(4))
                 .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
             let source = usize::try_from(row)
@@ -240,7 +234,7 @@ impl CpuStageRasterizer {
             next.rgba8[destination..destination + row_bytes]
                 .copy_from_slice(&update[source..source + row_bytes]);
         }
-        textures.insert(texture_id, Arc::new(next));
+        textures.insert(texture.texture_id, Arc::new(next));
         Ok(())
     }
 

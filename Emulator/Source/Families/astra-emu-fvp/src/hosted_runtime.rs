@@ -1,6 +1,6 @@
 //! Thread-confined RFVP hosted-session lifecycle.
 //!
-//! This is the concrete v5 execution boundary used by the dynamic provider:
+//! This is the concrete v6 execution boundary used by the dynamic provider:
 //! the RFVP core and its non-`Send` VFS cursors remain on one worker while the
 //! caller exchanges only bounded semantic deltas and opaque snapshots.
 
@@ -29,6 +29,17 @@ use crate::{
 pub const MAX_HOSTED_CASE_FILES: usize = 65_536;
 pub const MAX_HOSTED_HCB_BYTES: usize = 512 * 1024 * 1024;
 const MAX_HOSTED_RUNTIME_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+
+pub struct HostedVfsSessionConfig {
+    pub reader: std::sync::Arc<dyn LegacyVfsReader>,
+    pub mount_set_id: String,
+    pub expected_script_uri: String,
+    pub pack_paths: Vec<String>,
+    pub nls: FvpNls,
+    pub stage_width: u32,
+    pub stage_height: u32,
+    pub trace_profile: HostedTraceProfile,
+}
 
 #[derive(Debug, Error)]
 pub enum HostedRuntimeError {
@@ -133,30 +144,22 @@ impl HostedFvpSession {
     /// requested HCB is checked after boot because RFVP discovers scripts by
     /// extension; accepting a different discovered script would break the
     /// package binding even if both files are otherwise valid.
-    pub fn open_vfs(
-        reader: std::sync::Arc<dyn LegacyVfsReader>,
-        mount_set_id: String,
-        expected_script_uri: String,
-        pack_paths: Vec<String>,
-        nls: FvpNls,
-        stage_width: u32,
-        stage_height: u32,
-        trace_profile: HostedTraceProfile,
-    ) -> Result<Self, HostedRuntimeError> {
-        let expected_script_uri = normalize_script_uri(&expected_script_uri)?;
+    pub fn open_vfs(config: HostedVfsSessionConfig) -> Result<Self, HostedRuntimeError> {
+        let expected_script_uri = normalize_script_uri(&config.expected_script_uri)?;
         let worker = HostedSessionWorker::try_spawn(move || {
-            let mut host = HostedMemoryHost::from_vfs(reader, mount_set_id, pack_paths)
-                .map_err(HostedRuntimeError::Core)?;
+            let mut host =
+                HostedMemoryHost::from_vfs(config.reader, config.mount_set_id, config.pack_paths)
+                    .map_err(HostedRuntimeError::Core)?;
             let mut core = HostedSession::new(
                 HostedConfig {
-                    virtual_width: stage_width,
-                    virtual_height: stage_height,
+                    virtual_width: config.stage_width,
+                    virtual_height: config.stage_height,
                     ..HostedConfig::default()
                 },
                 HostedLimits::default(),
             )
             .map_err(HostedRuntimeError::Core)?;
-            core.set_trace_profile(trace_profile)
+            core.set_trace_profile(config.trace_profile)
                 .map_err(HostedRuntimeError::Core)?;
             if let Err(error) = core.boot(
                 &mut host,
@@ -165,7 +168,7 @@ impl HostedFvpSession {
                     hcb_extension: "hcb",
                     max_hcb_bytes: MAX_HOSTED_HCB_BYTES,
                     max_manifest_entries: MAX_HOSTED_CASE_FILES,
-                    nls: map_nls(nls),
+                    nls: map_nls(config.nls),
                 },
             ) {
                 let detail = core.core().last_error_detail().unwrap_or("unspecified");
@@ -200,13 +203,13 @@ impl HostedFvpSession {
                 .host
                 .advance(delta_ns)
                 .map_err(HostedRuntimeError::Core)?;
-            let delta = state
+            let mut delta = state
                 .core
                 .step(&mut state.host, input)
                 .map_err(HostedRuntimeError::Core)?;
             let prepared = state
                 .translator
-                .translate(&delta)
+                .translate(&mut delta)
                 .map_err(|error| HostedRuntimeError::Scene(error.to_string()))?;
             Ok((delta, prepared))
         })?

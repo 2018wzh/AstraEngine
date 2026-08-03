@@ -89,16 +89,14 @@ impl AudioOutputCallback for MonoCallback {
         output: &mut [f32],
     ) -> DataCallbackResult {
         self.0.meter.begin_callback();
-        let mut underflow = false;
-        for sample in output {
-            let value = self.0.consumer.pop_sample().unwrap_or_else(|| {
-                underflow = true;
-                0.0
-            }) * f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
-            *sample = value;
-            self.0.meter.record(value);
+        let filled = self.0.consumer.pop_samples(output);
+        let gain = f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
+        for sample in &mut output[..filled] {
+            *sample *= gain;
+            self.0.meter.record(*sample);
         }
-        if underflow {
+        output[filled..].fill(0.0);
+        if filled != output.len() {
             self.0.consumer.record_underflow();
         }
         DataCallbackResult::Continue
@@ -122,22 +120,33 @@ impl AudioOutputCallback for StereoCallback {
         output: &mut [(f32, f32)],
     ) -> DataCallbackResult {
         self.0.meter.begin_callback();
-        let mut underflow = false;
-        for (left, right) in output {
-            let first = self.0.consumer.pop_sample().unwrap_or_else(|| {
-                underflow = true;
-                0.0
-            }) * f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
-            let second = self.0.consumer.pop_sample().unwrap_or_else(|| {
-                underflow = true;
-                0.0
-            }) * f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
-            *left = first;
-            *right = second;
-            self.0.meter.record(first);
-            self.0.meter.record(second);
+        let gain = f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
+        let mut scratch = [0.0_f32; 2048];
+        let mut written_frames = 0;
+        while written_frames < output.len() {
+            let requested_frames = (scratch.len() / 2).min(output.len() - written_frames);
+            let requested_samples = requested_frames * 2;
+            let filled = self
+                .0
+                .consumer
+                .pop_samples(&mut scratch[..requested_samples]);
+            let complete_frames = filled / 2;
+            for (target, frame) in output[written_frames..written_frames + complete_frames]
+                .iter_mut()
+                .zip(scratch[..complete_frames * 2].chunks_exact(2))
+            {
+                target.0 = frame[0] * gain;
+                target.1 = frame[1] * gain;
+                self.0.meter.record(target.0);
+                self.0.meter.record(target.1);
+            }
+            written_frames += complete_frames;
+            if filled != requested_samples {
+                break;
+            }
         }
-        if underflow {
+        output[written_frames..].fill((0.0, 0.0));
+        if written_frames != output.len() {
             self.0.consumer.record_underflow();
         }
         DataCallbackResult::Continue
@@ -238,7 +247,7 @@ impl AndroidAudioResource {
         Ok(resource)
     }
 
-    pub(crate) fn submit(&mut self, packet: AudioPacket) -> Result<(), PlatformError> {
+    pub(crate) fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
         self.ensure_connected("audio.submit")?;
         if self.paused || packet.sequence != self.next_sequence || packet.channels != self.channels
         {
@@ -267,7 +276,7 @@ impl AndroidAudioResource {
             .next_sequence
             .checked_add(1)
             .ok_or_else(|| audio_error("audio.submit", "audio sequence counter overflows"))?;
-        Ok(())
+        Ok(packet.samples)
     }
 
     pub(crate) fn state(&self) -> Result<AudioOutputState, PlatformError> {

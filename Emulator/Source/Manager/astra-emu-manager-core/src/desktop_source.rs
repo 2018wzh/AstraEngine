@@ -585,7 +585,7 @@ impl LegacyVfsReader for DesktopVfsRegistry {
                     uri.clone(),
                     ByteSourceStat {
                         len: file.byte_size,
-                        revision: file.revision.clone(),
+                        revision: file.revision,
                     },
                 );
             }

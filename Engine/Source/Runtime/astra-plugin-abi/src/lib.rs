@@ -8,7 +8,7 @@ use abi_stable::{
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub const GAME_RUNTIME_PROVIDER_SLOT: &str = "game_runtime_provider";
 pub const NATIVE_VN_RUNTIME_ID: &str = "native_vn";
@@ -792,6 +792,177 @@ pub enum RuntimeOutputDomain {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeOutputCodec {
     Postcard,
+    Bulk,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeBulkKind {
+    Bytes,
+    I16,
+    F32,
+}
+
+pub trait RuntimeBulkStorage: Send + Sync {
+    fn kind(&self) -> RuntimeBulkKind;
+    fn len(&self) -> u64;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn hash(&self) -> Hash256;
+    fn bytes(&self) -> Option<&[u8]> {
+        None
+    }
+    fn i16_samples(&self) -> Option<&[i16]> {
+        None
+    }
+    fn f32_samples(&self) -> Option<&[f32]> {
+        None
+    }
+}
+
+#[derive(Clone)]
+pub struct RuntimeBulkPayload {
+    kind: RuntimeBulkKind,
+    hash: Hash256,
+    len: u64,
+    owner: Arc<Mutex<Option<Arc<dyn RuntimeBulkStorage>>>>,
+}
+
+impl std::fmt::Debug for RuntimeBulkPayload {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeBulkPayload")
+            .field("kind", &self.kind)
+            .field("hash", &self.hash)
+            .field("len", &self.len)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for RuntimeBulkPayload {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.hash == other.hash && self.len == other.len
+    }
+}
+
+impl Eq for RuntimeBulkPayload {}
+
+impl RuntimeBulkPayload {
+    pub fn new(owner: Arc<dyn RuntimeBulkStorage>) -> Result<Self, RuntimeEnvelopeError> {
+        let kind = owner.kind();
+        let hash = owner.hash();
+        let len = owner.len();
+        if len == 0 {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_BULK_EMPTY",
+                "runtime bulk payload must be non-empty",
+            ));
+        }
+        let observed = match kind {
+            RuntimeBulkKind::Bytes => owner.bytes().map(|value| value.len() as u64),
+            RuntimeBulkKind::I16 => owner.i16_samples().map(|value| value.len() as u64),
+            RuntimeBulkKind::F32 => owner.f32_samples().map(|value| value.len() as u64),
+        };
+        if observed != Some(len) {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_BULK_LENGTH",
+                "runtime bulk owner length does not match its typed slice",
+            ));
+        }
+        Ok(Self {
+            kind,
+            hash,
+            len,
+            owner: Arc::new(Mutex::new(Some(owner))),
+        })
+    }
+
+    pub fn kind(&self) -> RuntimeBulkKind {
+        self.kind
+    }
+
+    pub fn hash(&self) -> Hash256 {
+        self.hash
+    }
+
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn claim(&self) -> Result<RuntimeBulkLease, RuntimeEnvelopeError> {
+        let owner = self
+            .owner
+            .lock()
+            .map_err(|_| {
+                RuntimeEnvelopeError::new(
+                    "ASTRA_RUNTIME_BULK_LOCK_POISONED",
+                    "runtime bulk ownership lock is poisoned",
+                )
+            })?
+            .take()
+            .ok_or_else(|| {
+                RuntimeEnvelopeError::new(
+                    "ASTRA_RUNTIME_BULK_ALREADY_CLAIMED",
+                    "runtime bulk payload ownership is one-shot",
+                )
+            })?;
+        Ok(RuntimeBulkLease { owner })
+    }
+}
+
+pub struct RuntimeBulkLease {
+    owner: Arc<dyn RuntimeBulkStorage>,
+}
+
+struct RuntimeBytesStorage {
+    bytes: Arc<[u8]>,
+    hash: Hash256,
+}
+
+impl RuntimeBulkStorage for RuntimeBytesStorage {
+    fn kind(&self) -> RuntimeBulkKind {
+        RuntimeBulkKind::Bytes
+    }
+
+    fn len(&self) -> u64 {
+        self.bytes.len() as u64
+    }
+
+    fn hash(&self) -> Hash256 {
+        self.hash
+    }
+
+    fn bytes(&self) -> Option<&[u8]> {
+        Some(&self.bytes)
+    }
+}
+
+pub fn runtime_bulk_bytes(bytes: Arc<[u8]>) -> Result<RuntimeBulkPayload, RuntimeEnvelopeError> {
+    let hash = Hash256::from_sha256(&bytes);
+    RuntimeBulkPayload::new(Arc::new(RuntimeBytesStorage { bytes, hash }))
+}
+
+impl RuntimeBulkLease {
+    pub fn kind(&self) -> RuntimeBulkKind {
+        self.owner.kind()
+    }
+
+    pub fn bytes(&self) -> Option<&[u8]> {
+        self.owner.bytes()
+    }
+
+    pub fn i16_samples(&self) -> Option<&[i16]> {
+        self.owner.i16_samples()
+    }
+
+    pub fn f32_samples(&self) -> Option<&[f32]> {
+        self.owner.f32_samples()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -809,7 +980,12 @@ pub struct RuntimeOutputEnvelope {
     pub version: SchemaVersion,
     pub codec: RuntimeOutputCodec,
     pub hash: Hash256,
+    pub length: u64,
+    pub bulk_kind: Option<RuntimeBulkKind>,
     bytes: Arc<[u8]>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    bulk: Option<RuntimeBulkPayload>,
 }
 
 #[derive(Deserialize)]
@@ -819,6 +995,8 @@ struct RuntimeOutputEnvelopeWire {
     version: SchemaVersion,
     codec: RuntimeOutputCodec,
     hash: Hash256,
+    length: u64,
+    bulk_kind: Option<RuntimeBulkKind>,
     bytes: Arc<[u8]>,
 }
 
@@ -828,10 +1006,24 @@ impl<'de> Deserialize<'de> for RuntimeOutputEnvelope {
         D: Deserializer<'de>,
     {
         let wire = RuntimeOutputEnvelopeWire::deserialize(deserializer)?;
-        if Hash256::from_sha256(&wire.bytes) != wire.hash {
-            return Err(D::Error::custom(
-                "ASTRA_RUNTIME_ENVELOPE_HASH: runtime output envelope hash does not match payload",
-            ));
+        match wire.codec {
+            RuntimeOutputCodec::Postcard
+                if Hash256::from_sha256(&wire.bytes) != wire.hash
+                    || wire.length != wire.bytes.len() as u64
+                    || wire.bulk_kind.is_some() =>
+            {
+                return Err(D::Error::custom(
+                    "ASTRA_RUNTIME_ENVELOPE_HASH: runtime output envelope identity is invalid",
+                ));
+            }
+            RuntimeOutputCodec::Bulk
+                if !wire.bytes.is_empty() || wire.length == 0 || wire.bulk_kind.is_none() =>
+            {
+                return Err(D::Error::custom(
+                    "ASTRA_RUNTIME_ENVELOPE_BULK: serialized bulk envelope identity is invalid",
+                ));
+            }
+            _ => {}
         }
         Ok(Self {
             domain: wire.domain,
@@ -839,7 +1031,10 @@ impl<'de> Deserialize<'de> for RuntimeOutputEnvelope {
             version: wire.version,
             codec: wire.codec,
             hash: wire.hash,
+            length: wire.length,
+            bulk_kind: wire.bulk_kind,
             bytes: wire.bytes,
+            bulk: None,
         })
     }
 }
@@ -863,7 +1058,10 @@ impl RuntimeOutputEnvelope {
             version,
             codec: RuntimeOutputCodec::Postcard,
             hash: Hash256::from_sha256(&payload),
+            length: payload.len() as u64,
+            bulk_kind: None,
             bytes: payload.into(),
+            bulk: None,
         })
     }
 
@@ -879,8 +1077,42 @@ impl RuntimeOutputEnvelope {
             version,
             codec: RuntimeOutputCodec::Postcard,
             hash: Hash256::from_sha256(&bytes),
+            length: bytes.len() as u64,
+            bulk_kind: None,
             bytes,
+            bulk: None,
         }
+    }
+
+    pub fn bulk(
+        domain: RuntimeOutputDomain,
+        schema: impl Into<String>,
+        version: SchemaVersion,
+        payload: RuntimeBulkPayload,
+    ) -> Self {
+        Self {
+            domain,
+            schema: schema.into(),
+            version,
+            codec: RuntimeOutputCodec::Bulk,
+            hash: payload.hash(),
+            length: payload.len(),
+            bulk_kind: Some(payload.kind()),
+            bytes: Arc::from([]),
+            bulk: Some(payload),
+        }
+    }
+
+    pub fn claim_bulk(&self) -> Result<RuntimeBulkLease, RuntimeEnvelopeError> {
+        self.bulk
+            .as_ref()
+            .ok_or_else(|| {
+                RuntimeEnvelopeError::new(
+                    "ASTRA_RUNTIME_BULK_UNAVAILABLE",
+                    "runtime bulk payload bytes are unavailable in this live output",
+                )
+            })?
+            .claim()
     }
 
     pub fn bytes(&self) -> &Arc<[u8]> {
@@ -921,6 +1153,44 @@ impl RuntimeOutputEnvelope {
             RuntimeEnvelopeError::new(
                 "ASTRA_RUNTIME_ENVELOPE_DECODE",
                 format!("decode runtime output envelope: {err}"),
+            )
+        })
+    }
+
+    pub fn decode_bulk_postcard<T: for<'de> Deserialize<'de>>(
+        &self,
+        expected_domain: RuntimeOutputDomain,
+        expected_schema: &str,
+        expected_version: SchemaVersion,
+    ) -> Result<T, RuntimeEnvelopeError> {
+        if self.domain != expected_domain
+            || self.schema != expected_schema
+            || self.version != expected_version
+            || self.codec != RuntimeOutputCodec::Bulk
+            || self.bulk_kind != Some(RuntimeBulkKind::Bytes)
+        {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_BULK_BINDING",
+                "runtime bulk envelope does not match the requested postcard contract",
+            ));
+        }
+        let lease = self.claim_bulk()?;
+        let bytes = lease.bytes().ok_or_else(|| {
+            RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_BULK_TYPE",
+                "runtime bulk owner does not expose bytes",
+            )
+        })?;
+        if bytes.len() as u64 != self.length || Hash256::from_sha256(bytes) != self.hash {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_BULK_IDENTITY",
+                "runtime bulk bytes do not match the declared identity",
+            ));
+        }
+        postcard::from_bytes(bytes).map_err(|error| {
+            RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_BULK_DECODE",
+                format!("decode runtime bulk postcard: {error}"),
             )
         })
     }

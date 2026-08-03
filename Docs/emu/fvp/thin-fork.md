@@ -4,7 +4,9 @@
 
 FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。补丁基底固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）；为复用已验证的文本 surface 所有权实现，补丁栈还保留一个经审查、未改写的上游移植补丁 `a94fa18`。除此以外只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
-截至本文更新，fork 已固定 upstream base，并已加入有界 `HostedSession`、`HostedStepInput`、`HostedStepDelta`、session-owned globals/text、snapshot/restore、canonical state identity、最多 64 MiB 的 opaque snapshot bytes、Shipping/Evidence 固定 trace ring、结构化 `HostedLogRecord`/phase observer、`.bin` metadata 后的按需 range-read，以及仅含 URI/长度的视频资源 delta。Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开；动态 provider 每 tick 只接收一个 hosted delta，转换为 `ScenePacket`、媒体命令、local-only text lease 和 `PreparedCommit`。named audio 在 fork 中只排入 source URI，资源字节由 adapter 后续经 session-bound host VFS 读取；RFVP core 不再通过内部或进程 VFS 读取这类资源。`HostedLogRecord` 只含稳定 code、level、phase 和计数；adapter 映射为 `astra-observability` event，绝不跨边界转发 RFVP message。`ScenePacket` translator 将 create/partial-update/destroy 转为有界资源操作，先验证完整事务再替换元数据；restore 后的纹理重建显式开始新的资源 epoch，Manager/WGPU 与 CLI CPU reference 都先清除旧资源、独立复验 commit，再写入各自资源存储；solid draw 使用保留的白色 sentinel texture，不借助平台 handle。`astra-emu-fvp` 已不再编译依赖本地 RFVP vendor core。旧 render-frame、逐 syscall journal 和逐 opcode 字符串 trace 不再参与 v5 provider。
+截至本文更新，Astra 精确 pin hosted fork `8819de6b4e65c5a099d5ea51476e47d1af6d8f58`。fork 保持 `GraphBuff` 和 generation 为权威状态，只保留一次 `GraphBuff -> hosted capture` 复制；`HostedStepDelta`、scene operation 和 PCM command 随后按值移动。owned audio port 直接接收 RFVP 已拥有的 PCM `Vec`，并记录 capture、operation、PCM moved/copied bytes；这些计数只进入脱敏 telemetry，不参与状态或 replay hash。
+
+Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开。Family ABI v6 使用显式 `StableAbi` wire DTO 和 ABI-owned bulk buffer，不再把整份 step postcard 编码后跨 dylib。scene translator 按值消费 delta，restore 后显式切换资源 epoch并完整重发。旧 render-frame、逐 syscall journal、逐 opcode 字符串 trace、v5 binary/fingerprint/runtime snapshot 都不再进入当前 provider。
 
 本地公开 Win95 Painter sample 的 signed dynamic FVP v5 已通过 120 fixed step 的 Headless run：6 条物理输入均被 host 消费、4 个实际 CPU frame、一个 PNG checkpoint、VFS 2 资源/20 次 range-read、snapshot round-trip 和正常 host shutdown 均通过；人工查看 checkpoint，窗口、工具栏、调色板、画布与底部状态栏可见且无残缺。该输入序列未产生可见笔划，因此它只证明 input transport，不证明脚本交互语义。CPU reference 该次 step p95 为 11.22 ms，4 次 raster 的中位数为 248.12 ms；它用于确认 scene dedup 没有退化为逐 tick 全帧光栅化，不是 GPU 或 RFVP 对比结论。该 sample 无音频、未到脚本 terminal，也没有媒体、路线、性能 soak 或 Windows E3，所以只构成 hosted-v5 的局部 Headless E2/视觉证据，不能作为完成声明。
 
@@ -53,21 +55,21 @@ RuntimeWorld + platform renderer/audio/media
 
 - Shipping 只传 scene/resource/media 的语义 delta；不得逐 opcode 分配 trace、格式化 opcode 字符串、序列化完整状态或复制完整 RGBA framebuffer。接收端以尺寸、draw list 和已验证资源内容 hash 计算轻量 visual identity，再校验并提交 `PreparedCommit`；不得为了帧去重再次序列化包含纹理像素的 commit。
 - Evidence 使用固定容量 crash trace ring 和显式 profile。它是受限诊断，不得改变 Shipping 执行、状态 hash 或资源访问。
-- 纹理按 id/generation 管理：创建、局部更新、销毁均为显式操作；adapter 在资源/profile/binding 检查完成前不得提交部分帧。
+- 纹理按稳定 id/generation 管理：同 id、尺寸和格式的变化使用 `UpdateTextureRegion`，保留 atlas placement 并执行有界 `queue.write_texture`；只有 create、destroy、尺寸/格式变化或真实容量不足才允许重新布局。adapter 在资源/profile/binding 检查完成前不得提交部分帧。
 - `.bin` 只读取受限 metadata；entry 通过受限 range-read 提供。禁止启动时预载整包，也禁止把商业 bytes 写入 save、replay、日志或报告。
-- named hosted audio 保留 source URI 并转换为受 policy 约束的资源命令；没有 source identity 的 encoded bytes 不能伪装成 URI 或跨 ABI 传递，必须以 blocking diagnostic 停止提交。PCM stream command 仍可在既有限额内转换。
+- named hosted audio 保留 source URI并转换为受 policy 约束的资源命令；没有 source identity 的 encoded bytes 不能伪装成 URI。PCM stream command 使用 owned submit。Manager 与 native CLI 统一把命令送入 PlatformHost-backed worker；worker 按 90/150 ms 低水位策略独立 decode、resample、mix 和 refill，使用分段队列、可复用 source/mix buffer 与批量 `rtrb` push/pop，不依赖 fixed tick。
 - `PreparedCommit` 在 host 完成 ABI、资源、预算、hash、profile 与 binding 验证后才可提交。任何缺失或不匹配都必须阻断。
 - `astra-emu-cli headless` 的性能证据必须同时指定 `--performance-budget`、`--performance-report`、`--perfetto-trace` 和 `--performance-trace-manifest`。该模式固定 1,200 个 warmup presentation 加 72,000 个测量 presentation，拒绝 Debug 或 dirty build、CPU renderer、非 DX12 timestamp-query GPU、`frame_sample_interval != 1`、resume/export snapshot 和不完整输出集。它把 shared `astra.performance_report.v1` 与 `astra.performance_trace_manifest.v1` 的 hash 回写到 Headless v3 report；report/manifest 只保存身份、计数和 hash，不能携带商业 payload 或本地路径。
 
 ## 原版与 hosted 链路对照
 
-对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture，也不需要跨 renderer、ABI 或 `RuntimeWorld` 复制像素。
+对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `8819de6b4e65c5a099d5ea51476e47d1af6d8f58`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture。
 
-hosted 路径保留了 generation 判断，但变化纹理随后经过更长的所有权链：`HostPrimRenderCache` 调用 `RecordingRenderer`，fork 将像素复制进 `HostedSceneOperation`；Astra FVP translator 再复制为 `ScenePacket` resource operation 并计算内容 hash；`PreparedCommit` 进入 postcard payload，随后又随动态 family step 经过 ABI 编解码；`RuntimeWorld` 把 presentation envelope 交给 CLI 后，GPU adapter 再解码并构造平台 scene command。`2fab6d4c` 已移除 GPU adapter 验证用的整包 clone，并让 RGBA create payload 直接转移到 `Arc<[u8]>`，但 fork delta、translator 和动态 ABI 之间的像素复制与序列化仍然存在，不能把轻量 visual identity 误写成“像素没有跨层传递”。
+hosted 路径保留 generation 判断和一次必要 capture；capture 后的 delta、translator、Family ABI v6 与 Runtime bulk 采用消费式所有权。业务 serde/schema 仍是契约真源，但 FFI wire 不再使用整包 postcard。RGBA upload 只借用 bulk slice；LumaAlpha8 允许一次显式、可计量的格式转换。copy telemetry 分别记录 fork capture、operation 和 PCM moved/copied bytes，用来阻断重新引入的完整 payload clone。
 
-更大的差异在平台资源更新。原版对已有动态纹理原位写入；当前 GPU adapter 为每次 update 分配新 resource generation，先 release 旧 resource，再 upload 新 resource。通用 WGPU scene renderer 已有增量 atlas allocator：空闲槽能容纳新 generation 时，只上传变化资源；容量不足或碎片化时才 repack，不能把每次资源变化都记成全 atlas 重建。问题仍然存在于 resource identity churn：同尺寸/同格式 update 无法复用 live resource，至少要完整重传该纹理，还会持续制造释放与分配，增加后续 repack 的概率。一次菜单 hover 或状态切换造成的局部变化，因而被放大为整张纹理复制、ABI payload 编解码、旧 generation 释放和新 generation 创建。这条链路不满足“局部更新只触碰被修改区域”的目标。正式修复必须让同尺寸/同格式 update 保持稳定 resource identity，在事务验证后对既有 atlas placement 执行有界 subresource write；只有 create、destroy 或尺寸/格式变化才允许重新布局。
+平台资源更新已与原版语义对齐：同 id、同尺寸、同格式 update 保持 resource generation 和 atlas placement，事务通过后只上传变更 region。retained texture 保存权威 base 与有界 sparse patches，不为每次局部更新重建完整 CPU 镜像；patch 总量超过 base 大小时会 fail-fast 要求 full refresh。create、destroy、尺寸/格式变化或 allocator 真实容量不足才会 release、repack 或创建新 generation。
 
-音频也不能照搬 fixed tick。原版 native BGM 使用独立的 streaming playback；当前 adapter 在 `Play` 时把 encoded stream 完整解码、重采样，再由 Runtime fixed tick 上的 pump 维持 120–180 ms 平台队列。图形、ABI 或媒体阶段只要阻塞超过水位，device callback 就会先耗尽队列。音频 producer/queue pump 必须脱离 VM、scene prepare、GPU receipt 和 presentation cadence，在独立有界任务上按低水位补充；Runtime tick 只提交命令和读取有界 telemetry。
+音频 producer 已脱离 fixed tick、scene prepare、GPU receipt 和 Slint event loop。共享 worker 对 named BGM/SE 按需流式 decode，对 PCM 使用分段队列和 cursor，不再随历史长度合并；resample/mix buffer 在平台 owned submit 返回后复用，native callback 批量 push/pop。pause/resume、repeat、fade、format drift、queue overflow、device loss、worker panic 和 shutdown 都有稳定失败边界。Runtime tick 只提交命令和读取 telemetry。
 
 实现与审查按下列顺序检查放大点：
 
@@ -84,6 +86,6 @@ hosted 路径保留了 generation 判断，但变化纹理随后经过更长的�
 
 ## 迁移约束
 
-- FVP v5 是 hard cut。v4 snapshot section、逐 syscall journal 和旧 render-frame 都不得进入运行时或保存容器；遇到旧 section 必须返回明确迁移诊断，不能保留双读运行时。
+- Family ABI v6 是 hard cut。v5 binary、fingerprint、FVP runtime snapshot、逐 syscall journal 和旧 render-frame 都不得进入运行时或保存容器；遇到旧 identity 必须返回明确迁移诊断，不能保留双读运行时。
 - `na_wmv_player` 与 `na_mpeg2_decoder` 只在没有其他消费者后移除；RFVP hosted-core 不再拥有这些 decoder。
 - Headless E2 需要同一 session 的真实 PNG/WAV、artifact manifest、输入消费、state/scene/route/wait/media PTS/audio 签名与视觉审查。单元测试、fixture 或启动日志不能替代它。

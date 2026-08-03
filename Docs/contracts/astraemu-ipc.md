@@ -85,7 +85,9 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-ABI v4 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
+Family ABI v6 对 descriptor、instance、probe、open、step、save、restore、resource read、VFS callback 和 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。v5 binary、fingerprint 和 FVP runtime snapshot 都会 fail-fast，host 不保留兼容 shim。
+
+v6 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径。scene bytes、encoded bytes 和 PCM bulk 以引用计数的 ABI-owned buffer 过边界；host 只借用 slice 做校验、hash、decode 或上传，不用 `into_vec()` 跨 allocator 复制。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
 
 `open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、legacy presentation/audio state、await state、snapshot cursor 和 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
 

@@ -5,6 +5,7 @@ mod decoder;
 mod extract;
 #[cfg(target_os = "linux")]
 mod fuse;
+mod legacy_audio;
 mod private_profile;
 mod profile;
 mod registry;
@@ -19,6 +20,7 @@ pub use decoder::*;
 pub use extract::*;
 #[cfg(target_os = "linux")]
 pub use fuse::*;
+pub use legacy_audio::*;
 pub use private_profile::*;
 pub use profile::*;
 pub use registry::*;

@@ -28,8 +28,6 @@ astra-observability = { path = "../../../../Engine/Source/Developer/astra-observ
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
-cpal.workspace = true
-rtrb.workspace = true
 tokio.workspace = true
 directories.workspace = true
 image.workspace = true

@@ -1,188 +1,192 @@
 use abi_stable::{
     library::RootModule,
     sabi_types::VersionStrings,
-    std_types::{RString, RVec},
+    std_types::{RResult, RString},
     StableAbi,
 };
-use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    LegacyEphemeralText, LegacyOpenRequest, LegacyProbeRequest, LegacyProviderError,
-    LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacySnapshotEnvelope, LegacyStepInput,
+    FfiBulkBytes, FfiByteRange, FfiByteSourceStat, FfiEphemeralText, FfiFamilyPluginDescriptor,
+    FfiHash256, FfiOpenRequest, FfiProbeReport, FfiProbeRequest, FfiRangeReadResult,
+    FfiRestoreReport, FfiRuntimeHostCtx, FfiShutdownReport, FfiSnapshotEnvelope, FfiStepInput,
+    FfiStepOutput, FfiVfsListedFile, LegacyProviderError,
 };
 
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v5";
+pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v6";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyProviderInstanceRequest {
-    pub instance_id: String,
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiLegacyError {
+    pub code: RString,
+    pub message: RString,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyProbeCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub request: LegacyProbeRequest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyOpenCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub request: LegacyOpenRequest,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyStepCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub session_id: LegacyRuntimeSessionId,
-    pub input: LegacyStepInput,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacySessionCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub session_id: LegacyRuntimeSessionId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyRestoreCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub session_id: LegacyRuntimeSessionId,
-    pub snapshot: LegacySnapshotEnvelope,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyTextLeaseCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub session_id: LegacyRuntimeSessionId,
-    pub lease_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyResourceReadCall {
-    pub instance_id: String,
-    pub ctx: LegacyRuntimeHostCtx,
-    pub session_id: LegacyRuntimeSessionId,
-    pub resource_uri: String,
-    pub max_bytes: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyVfsStatCall {
-    pub mount_set_id: String,
-    pub uri: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyVfsRangeCall {
-    pub mount_set_id: String,
-    pub uri: String,
-    pub expected_revision: astra_byte_source::SourceRevision,
-    pub range: astra_byte_source::ByteRange,
-    pub max_bytes: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FfiLegacyEphemeralText {
-    pub lease_id: String,
-    pub text: String,
-    pub speaker: Option<String>,
-}
-
-impl From<LegacyEphemeralText> for FfiLegacyEphemeralText {
-    fn from(value: LegacyEphemeralText) -> Self {
+impl From<LegacyProviderError> for FfiLegacyError {
+    fn from(value: LegacyProviderError) -> Self {
         Self {
-            lease_id: value.lease_id,
-            text: value.text,
-            speaker: value.speaker,
+            code: value.code().into(),
+            message: value.message().into(),
         }
     }
 }
 
-impl From<FfiLegacyEphemeralText> for LegacyEphemeralText {
-    fn from(value: FfiLegacyEphemeralText) -> Self {
-        Self {
-            lease_id: value.lease_id,
-            text: value.text,
-            speaker: value.speaker,
-        }
+impl From<FfiLegacyError> for LegacyProviderError {
+    fn from(value: FfiLegacyError) -> Self {
+        Self::remote(value.code.to_string(), value.message.to_string())
+    }
+}
+
+pub type FfiLegacyResult<T> = RResult<T, FfiLegacyError>;
+
+pub fn ffi_result<T, U>(result: Result<T, LegacyProviderError>) -> FfiLegacyResult<U>
+where
+    T: Into<U>,
+{
+    match result {
+        Ok(value) => RResult::ROk(value.into()),
+        Err(error) => RResult::RErr(error.into()),
+    }
+}
+
+pub fn native_result<T, U>(result: FfiLegacyResult<T>) -> Result<U, LegacyProviderError>
+where
+    T: Into<U>,
+{
+    match result {
+        RResult::ROk(value) => Ok(value.into()),
+        RResult::RErr(error) => Err(error.into()),
     }
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, StableAbi)]
-pub struct FfiLegacyResult {
-    pub ok: bool,
-    pub payload: RVec<u8>,
-    pub diagnostic_code: RString,
-    pub diagnostic_message: RString,
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiProviderInstanceRequest {
+    pub instance_id: RString,
 }
 
-impl FfiLegacyResult {
-    pub fn success<T: Serialize>(value: &T) -> Self {
-        match postcard::to_allocvec(value) {
-            Ok(payload) => Self {
-                ok: true,
-                payload: payload.into(),
-                diagnostic_code: RString::new(),
-                diagnostic_message: RString::new(),
-            },
-            Err(error) => Self::failure(LegacyProviderError::invalid(
-                "ASTRA_EMU_FFI_ENCODE",
-                error.to_string(),
-            )),
-        }
-    }
-
-    pub fn failure(error: LegacyProviderError) -> Self {
-        Self {
-            ok: false,
-            payload: RVec::new(),
-            diagnostic_code: error.code().into(),
-            diagnostic_message: error.message().into(),
-        }
-    }
-
-    pub fn decode<T: DeserializeOwned>(&self) -> Result<T, LegacyProviderError> {
-        if !self.ok {
-            return Err(LegacyProviderError::remote(
-                self.diagnostic_code.to_string(),
-                self.diagnostic_message.to_string(),
-            ));
-        }
-        postcard::from_bytes(&self.payload).map_err(|error| {
-            LegacyProviderError::invalid("ASTRA_EMU_FFI_DECODE", error.to_string())
-        })
-    }
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiProbeCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub request: FfiProbeRequest,
 }
 
-pub type FfiLegacyInvoke = extern "C" fn(RVec<u8>) -> FfiLegacyResult;
-pub type FfiLegacyVfsCall = extern "C" fn(RString, RVec<u8>) -> FfiLegacyResult;
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiOpenCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub request: FfiOpenRequest,
+}
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LegacyVfsEnumerateCall {
-    pub mount_set_id: String,
-    pub root: String,
-    pub extension_without_dot: String,
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiStepCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub session_id: RString,
+    pub input: FfiStepInput,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiSessionCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub session_id: RString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiRestoreCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub session_id: RString,
+    pub snapshot: FfiSnapshotEnvelope,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiTextLeaseCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub session_id: RString,
+    pub lease_id: RString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiResourceReadCall {
+    pub instance_id: RString,
+    pub ctx: FfiRuntimeHostCtx,
+    pub session_id: RString,
+    pub resource_uri: RString,
+    pub max_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiVfsStatCall {
+    pub mount_set_id: RString,
+    pub uri: RString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiVfsRangeCall {
+    pub mount_set_id: RString,
+    pub uri: RString,
+    pub expected_revision: FfiHash256,
+    pub range: FfiByteRange,
+    pub max_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiVfsEnumerateCall {
+    pub mount_set_id: RString,
+    pub root: RString,
+    pub extension_without_dot: RString,
     pub max_entries: u32,
 }
+
+pub type FfiDescriptor = extern "C" fn() -> FfiLegacyResult<FfiFamilyPluginDescriptor>;
+pub type FfiCreateInstance =
+    extern "C" fn(FfiLegacyHostServices, FfiProviderInstanceRequest) -> FfiLegacyResult<()>;
+pub type FfiDestroyInstance = extern "C" fn(FfiProviderInstanceRequest) -> FfiLegacyResult<()>;
+pub type FfiProbe = extern "C" fn(FfiProbeCall) -> FfiLegacyResult<FfiProbeReport>;
+pub type FfiOpen = extern "C" fn(FfiOpenCall) -> FfiLegacyResult<RString>;
+pub type FfiStep = extern "C" fn(FfiStepCall) -> FfiLegacyResult<FfiStepOutput>;
+pub type FfiSave = extern "C" fn(FfiSessionCall) -> FfiLegacyResult<FfiSnapshotEnvelope>;
+pub type FfiRestore = extern "C" fn(FfiRestoreCall) -> FfiLegacyResult<FfiRestoreReport>;
+pub type FfiTakeEphemeralText =
+    extern "C" fn(
+        FfiTextLeaseCall,
+    ) -> FfiLegacyResult<abi_stable::std_types::ROption<FfiEphemeralText>>;
+pub type FfiReadSessionResource =
+    extern "C" fn(FfiResourceReadCall) -> FfiLegacyResult<FfiBulkBytes>;
+pub type FfiShutdown = extern "C" fn(FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport>;
+
+pub type FfiVfsStat = extern "C" fn(RString, FfiVfsStatCall) -> FfiLegacyResult<FfiByteSourceStat>;
+pub type FfiVfsReadRange =
+    extern "C" fn(RString, FfiVfsRangeCall) -> FfiLegacyResult<FfiRangeReadResult>;
+pub type FfiVfsEnumerate =
+    extern "C" fn(
+        RString,
+        FfiVfsEnumerateCall,
+    ) -> FfiLegacyResult<abi_stable::std_types::RVec<FfiVfsListedFile>>;
 
 #[repr(C)]
 #[derive(Clone, StableAbi)]
 pub struct FfiLegacyHostServices {
     pub host_token: RString,
     #[sabi(unsafe_opaque_field)]
-    pub stat_vfs: FfiLegacyVfsCall,
+    pub stat_vfs: FfiVfsStat,
     #[sabi(unsafe_opaque_field)]
-    pub read_vfs_range: FfiLegacyVfsCall,
+    pub read_vfs_range: FfiVfsReadRange,
     #[sabi(unsafe_opaque_field)]
-    pub enumerate_vfs: FfiLegacyVfsCall,
+    pub enumerate_vfs: FfiVfsEnumerate,
 }
 
 impl core::fmt::Debug for FfiLegacyHostServices {
@@ -194,9 +198,6 @@ impl core::fmt::Debug for FfiLegacyHostServices {
     }
 }
 
-pub type FfiLegacyCreateInstance =
-    extern "C" fn(FfiLegacyHostServices, RVec<u8>) -> FfiLegacyResult;
-
 #[repr(C)]
 #[derive(StableAbi)]
 #[sabi(kind(Prefix(
@@ -206,28 +207,28 @@ pub type FfiLegacyCreateInstance =
 #[sabi(missing_field(panic))]
 pub struct AstraLegacyFamilyModule {
     #[sabi(unsafe_opaque_field)]
-    pub descriptor: FfiLegacyInvoke,
+    pub descriptor: FfiDescriptor,
     #[sabi(unsafe_opaque_field)]
-    pub create_instance: FfiLegacyCreateInstance,
+    pub create_instance: FfiCreateInstance,
     #[sabi(unsafe_opaque_field)]
-    pub destroy_instance: FfiLegacyInvoke,
+    pub destroy_instance: FfiDestroyInstance,
     #[sabi(unsafe_opaque_field)]
-    pub probe: FfiLegacyInvoke,
+    pub probe: FfiProbe,
     #[sabi(unsafe_opaque_field)]
-    pub open: FfiLegacyInvoke,
+    pub open: FfiOpen,
     #[sabi(unsafe_opaque_field)]
-    pub step: FfiLegacyInvoke,
+    pub step: FfiStep,
     #[sabi(unsafe_opaque_field)]
-    pub save: FfiLegacyInvoke,
+    pub save: FfiSave,
     #[sabi(unsafe_opaque_field)]
-    pub restore: FfiLegacyInvoke,
+    pub restore: FfiRestore,
     #[sabi(unsafe_opaque_field)]
-    pub take_ephemeral_text: FfiLegacyInvoke,
+    pub take_ephemeral_text: FfiTakeEphemeralText,
     #[sabi(unsafe_opaque_field)]
-    pub read_session_resource: FfiLegacyInvoke,
+    pub read_session_resource: FfiReadSessionResource,
     #[sabi(last_prefix_field)]
     #[sabi(unsafe_opaque_field)]
-    pub shutdown: FfiLegacyInvoke,
+    pub shutdown: FfiShutdown,
 }
 
 impl RootModule for AstraLegacyFamilyModuleRef {
@@ -238,18 +239,13 @@ impl RootModule for AstraLegacyFamilyModuleRef {
     const VERSION_STRINGS: VersionStrings = abi_stable::package_version_strings!();
 }
 
-pub fn decode_ffi_request<T: DeserializeOwned>(bytes: RVec<u8>) -> Result<T, LegacyProviderError> {
-    postcard::from_bytes(&bytes)
-        .map_err(|error| LegacyProviderError::invalid("ASTRA_EMU_FFI_REQUEST", error.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{FamilyId, LegacyFamilyPluginDescriptor};
 
     #[test]
-    fn ffi_result_round_trips_descriptor_without_native_ownership() {
+    fn v6_descriptor_round_trips_through_typed_wire() {
         let descriptor = LegacyFamilyPluginDescriptor {
             family_id: FamilyId("fvp".into()),
             plugin_id: "astra.emu.fvp".into(),
@@ -263,17 +259,28 @@ mod tests {
             report_redaction: "astra.emu.redaction.v1".into(),
             license: "MPL-2.0".into(),
         };
-        let result = FfiLegacyResult::success(&descriptor);
-        let decoded: LegacyFamilyPluginDescriptor = result.decode().unwrap();
+        let decoded: LegacyFamilyPluginDescriptor =
+            FfiFamilyPluginDescriptor::from(descriptor.clone()).into();
         assert_eq!(decoded, descriptor);
     }
 
     #[test]
-    fn ffi_failure_preserves_code_without_duplicating_it() {
-        let result = FfiLegacyResult::failure(LegacyProviderError::invalid("TEST_CODE", "message"));
-        let error = result.decode::<()>().unwrap_err();
+    fn v6_error_preserves_code_without_serialization() {
+        let ffi = FfiLegacyError::from(LegacyProviderError::invalid("TEST_CODE", "message"));
+        let error = LegacyProviderError::from(ffi);
         assert_eq!(error.code(), "TEST_CODE");
         assert_eq!(error.message(), "message");
-        assert_eq!(error.to_string(), "TEST_CODE: message");
+    }
+
+    #[test]
+    fn v6_bulk_buffer_preserves_the_owned_allocation_across_clones() {
+        let bytes = vec![1_u8, 2, 3, 4, 5];
+        let allocation = bytes.as_ptr();
+        let bulk = crate::bulk_bytes_from_vec(bytes);
+        assert_eq!(bulk.as_slice().as_ptr(), allocation);
+        let clone = bulk.clone();
+        drop(bulk);
+        assert_eq!(clone.as_slice().as_ptr(), allocation);
+        assert_eq!(clone.as_slice(), &[1, 2, 3, 4, 5]);
     }
 }

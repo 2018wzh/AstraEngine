@@ -560,23 +560,128 @@ impl LegacyStepOutput {
     }
 }
 
+pub trait LegacyPayloadStorage: Send + Sync + 'static {
+    fn bytes(&self) -> &[u8];
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+#[derive(Clone)]
+pub enum LegacyPayload {
+    Native(Vec<u8>),
+    Foreign(std::sync::Arc<dyn LegacyPayloadStorage>),
+}
+
+impl LegacyPayload {
+    pub fn from_foreign(storage: std::sync::Arc<dyn LegacyPayloadStorage>) -> Self {
+        Self::Foreign(storage)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Native(bytes) => bytes,
+            Self::Foreign(storage) => storage.bytes(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.as_bytes().is_empty()
+    }
+
+    pub fn into_native(self) -> Vec<u8> {
+        match self {
+            Self::Native(bytes) => bytes,
+            Self::Foreign(storage) => storage.bytes().to_vec(),
+        }
+    }
+
+    pub fn into_foreign_storage(self) -> Option<std::sync::Arc<dyn LegacyPayloadStorage>> {
+        match self {
+            Self::Foreign(storage) => Some(storage),
+            Self::Native(_) => None,
+        }
+    }
+}
+
+impl From<Vec<u8>> for LegacyPayload {
+    fn from(value: Vec<u8>) -> Self {
+        Self::Native(value)
+    }
+}
+
+impl std::fmt::Debug for LegacyPayload {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LegacyPayload")
+            .field("byte_len", &self.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for LegacyPayload {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl Eq for LegacyPayload {}
+
+impl std::ops::Deref for LegacyPayload {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_bytes()
+    }
+}
+
+impl Serialize for LegacyPayload {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.as_bytes().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for LegacyPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Vec::<u8>::deserialize(deserializer).map(Self::Native)
+    }
+}
+
+impl JsonSchema for LegacyPayload {
+    fn schema_name() -> String {
+        "LegacyPayload".into()
+    }
+
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        Vec::<u8>::json_schema(generator)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LegacyEffect {
     RuntimeEvent {
         sequence: u64,
         event: String,
-        payload: Vec<u8>,
+        payload: LegacyPayload,
     },
     Presentation {
         sequence: u64,
         command: String,
-        payload: Vec<u8>,
+        payload: LegacyPayload,
     },
     Audio {
         sequence: u64,
         command: String,
-        payload: Vec<u8>,
+        payload: LegacyPayload,
     },
     TextCapture {
         sequence: u64,
@@ -589,13 +694,13 @@ pub enum LegacyEffect {
     SetBlackboard {
         sequence: u64,
         key: String,
-        value: Vec<u8>,
+        value: LegacyPayload,
     },
     ScheduleEvent {
         sequence: u64,
         due_tick: u64,
         event: String,
-        payload: Vec<u8>,
+        payload: LegacyPayload,
     },
     SnapshotDirty {
         sequence: u64,
@@ -1896,17 +2001,17 @@ mod tests {
             LegacyEffect::RuntimeEvent {
                 sequence: 0,
                 event: "event.test".into(),
-                payload: vec![1],
+                payload: vec![1].into(),
             },
             LegacyEffect::Presentation {
                 sequence: 1,
                 command: "present.test".into(),
-                payload: vec![2],
+                payload: vec![2].into(),
             },
             LegacyEffect::Audio {
                 sequence: 2,
                 command: "audio.test".into(),
-                payload: vec![3],
+                payload: vec![3].into(),
             },
             LegacyEffect::TextCapture {
                 sequence: 3,
@@ -1919,13 +2024,13 @@ mod tests {
             LegacyEffect::SetBlackboard {
                 sequence: 4,
                 key: "key.test".into(),
-                value: vec![4],
+                value: vec![4].into(),
             },
             LegacyEffect::ScheduleEvent {
                 sequence: 5,
                 due_tick: 9,
                 event: "event.later".into(),
-                payload: vec![5],
+                payload: vec![5].into(),
             },
             LegacyEffect::SnapshotDirty {
                 sequence: 6,

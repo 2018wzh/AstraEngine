@@ -13,6 +13,7 @@ astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-sourc
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
+astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
 blowfish.workspace = true
 crc32fast = "1.5"
 encoding_rs.workspace = true
@@ -28,18 +29,24 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+astra-platform-linux = { path = "../../../../Engine/Source/Platform/astra-platform-linux" }
 fuser.workspace = true
 libc.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
+astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows" }
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+astra-platform-macos = { path = "../../../../Engine/Source/Platform/astra-platform-macos" }
 
 [dev-dependencies]
 tempfile.workspace = true

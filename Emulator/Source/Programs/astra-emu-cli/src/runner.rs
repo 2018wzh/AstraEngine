@@ -22,7 +22,7 @@ use astra_emu_family_api::{
     LegacyVideoMode, LegacyWaitRequest,
 };
 use astra_emu_family_support::{
-    verify_vfs, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
+    verify_vfs, LegacyAudioPlaybackService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
 };
 use astra_emu_fvp::{decode_fvp_movie, fvp_movie_compatibility, FvpMovieCompatibility};
 use astra_emu_manager_core::{
@@ -706,6 +706,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
             synchronous_gpu_presents: false,
+            background_audio: true,
             audio_pump: AudioPumpPolicy::Realtime {
                 target_latency_ms: 180,
                 refill_low_water_ms: 120,
@@ -760,7 +761,10 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                 };
                 match route_native_event(&mut driver, window, &mut viewport, event.kind) {
                     Ok(NativeEventAction::Continue) => {}
-                    Ok(NativeEventAction::Suspend(value)) => suspended = value,
+                    Ok(NativeEventAction::Suspend(value)) => {
+                        driver.audio.set_suspended(value)?;
+                        suspended = value;
+                    }
                     Ok(NativeEventAction::Close) => break Ok(()),
                     Err(error) => break Err(error),
                 }
@@ -1009,7 +1013,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         .transpose()?;
     let gpu_observer = launch.performance.as_ref().map(|_| {
         Arc::new(EmuHeadlessGpuObserver::new(
-            (PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS) as usize,
+            PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS,
         ))
     });
     let mut host_factory = HeadlessPlatformFactory::new(&launch.artifact_root, &game_root)
@@ -1171,19 +1175,21 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     )?;
     let performance = match (&launch.performance, performance_memory_baseline) {
         (Some(artifacts), Some(_)) => Some(finalize_headless_performance(
-            artifacts,
-            &launch,
-            &host_profile,
-            performance_profile_hash,
-            build_identity_hash,
-            game_identity_hash,
-            family_binary_hash,
-            &open.session_id,
-            &execution,
-            execution
-                .performance_memory_after_warmup
-                .ok_or("ASTRA_EMU_PERFORMANCE_WARMUP_MEMORY_MISSING")?,
-            sample_process_memory().map_err(|error| error.to_string())?,
+            HeadlessPerformanceFinalize {
+                artifacts,
+                launch: &launch,
+                host_profile: &host_profile,
+                profile_hash: performance_profile_hash,
+                build_identity_hash,
+                game_identity_hash,
+                family_binary_hash,
+                session_id: &open.session_id,
+                execution: &execution,
+                memory_baseline: execution
+                    .performance_memory_after_warmup
+                    .ok_or("ASTRA_EMU_PERFORMANCE_WARMUP_MEMORY_MISSING")?,
+                memory_final: sample_process_memory().map_err(|error| error.to_string())?,
+            },
         )?),
         (None, None) => None,
         _ => return Err("ASTRA_EMU_PERFORMANCE_MEMORY_BASELINE_MISMATCH".into()),
@@ -1380,19 +1386,36 @@ struct HeadlessPerformanceEvidence {
     trace_manifest_hash: Hash256,
 }
 
-fn finalize_headless_performance(
-    artifacts: &HeadlessPerformanceArtifacts,
-    launch: &HeadlessLaunch,
-    host_profile: &HeadlessHostProfile,
+struct HeadlessPerformanceFinalize<'a> {
+    artifacts: &'a HeadlessPerformanceArtifacts,
+    launch: &'a HeadlessLaunch,
+    host_profile: &'a HeadlessHostProfile,
     profile_hash: Hash256,
     build_identity_hash: Hash256,
     game_identity_hash: Hash256,
     family_binary_hash: Hash256,
-    session_id: &GameRuntimeSessionId,
-    execution: &ExecutionEvidence,
+    session_id: &'a GameRuntimeSessionId,
+    execution: &'a ExecutionEvidence,
     memory_baseline: astra_observability::ProcessMemorySample,
     memory_final: astra_observability::ProcessMemorySample,
+}
+
+fn finalize_headless_performance(
+    finalize: HeadlessPerformanceFinalize<'_>,
 ) -> Result<HeadlessPerformanceEvidence, String> {
+    let HeadlessPerformanceFinalize {
+        artifacts,
+        launch,
+        host_profile,
+        profile_hash,
+        build_identity_hash,
+        game_identity_hash,
+        family_binary_hash,
+        session_id,
+        execution,
+        memory_baseline,
+        memory_final,
+    } = finalize;
     if execution.present_sequence
         != (PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS) as u64
         || execution.runtime_samples_ns.len() != execution.fixed_step as usize
@@ -1515,8 +1538,7 @@ fn finalize_headless_performance(
         "memory.growth_bytes",
         &[memory_final
             .private_bytes
-            .checked_sub(memory_baseline.private_bytes)
-            .unwrap_or(0)],
+            .saturating_sub(memory_baseline.private_bytes)],
     )?;
     let report = recorder
         .finalize(identity.clone(), 600_000_000)
@@ -2368,9 +2390,6 @@ struct GpuSceneTexture {
     width: u32,
     height: u32,
     format: LegacyTextureFormat,
-    // Retained bytes are shared with the platform upload frame.  Cloning a
-    // prepared transaction must never duplicate every live texture payload.
-    rgba8: Arc<[u8]>,
     resource_id: String,
 }
 
@@ -2485,7 +2504,6 @@ impl GpuSceneAdapter {
                             width: texture.width,
                             height: texture.height,
                             format: texture.format,
-                            rgba8,
                             resource_id,
                         },
                     );
@@ -2511,30 +2529,20 @@ impl GpuSceneAdapter {
                     {
                         return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_REGION".into());
                     }
-                    let patch =
-                        gpu_rgba8_owned(update.width, update.height, update.format, update.pixels)?;
-                    let mut rgba8 = old.rgba8.as_ref().to_vec();
-                    for row in 0..update.height as usize {
-                        let destination = ((update.y as usize + row) * old.width as usize
-                            + update.x as usize)
-                            * 4;
-                        let source = row * update.width as usize * 4;
-                        let len = update.width as usize * 4;
-                        rgba8[destination..destination + len]
-                            .copy_from_slice(&patch[source..source + len]);
-                    }
-                    let rgba8: Arc<[u8]> = Arc::from(rgba8);
-                    generation = generation.checked_add(1).ok_or_else(|| {
-                        "ASTRA_EMU_NATIVE_GPU_RESOURCE_GENERATION_OVERFLOW".to_owned()
-                    })?;
-                    let resource_id = gpu_resource_id(update.texture_id, generation);
-                    commands.push(SceneCommand::ReleaseResource {
-                        resource_id: old.resource_id,
-                    });
-                    commands.push(SceneCommand::UploadTexture {
-                        resource_id: resource_id.clone(),
-                        frame: TextureFrame::from_rgba8(old.width, old.height, Arc::clone(&rgba8))
-                            .map_err(|error| error.to_string())?,
+                    let rgba8: Arc<[u8]> = Arc::from(gpu_rgba8_owned(
+                        update.width,
+                        update.height,
+                        update.format,
+                        update.pixels,
+                    )?);
+                    commands.push(SceneCommand::UpdateTextureRegion {
+                        resource_id: old.resource_id.clone(),
+                        x: update.x,
+                        y: update.y,
+                        width: update.width,
+                        height: update.height,
+                        hash: Hash256::from_sha256(&rgba8),
+                        rgba8,
                     });
                     textures.insert(
                         update.texture_id,
@@ -2542,8 +2550,7 @@ impl GpuSceneAdapter {
                             width: old.width,
                             height: old.height,
                             format: old.format,
-                            rgba8,
-                            resource_id,
+                            resource_id: old.resource_id,
                         },
                     );
                 }
@@ -2621,6 +2628,7 @@ fn is_scene_resource_command(command: &SceneCommand) -> bool {
     matches!(
         command,
         SceneCommand::UploadTexture { .. }
+            | SceneCommand::UpdateTextureRegion { .. }
             | SceneCommand::UploadGlyph { .. }
             | SceneCommand::ReleaseResource { .. }
     )
@@ -2756,7 +2764,7 @@ struct RuntimeDriver<'a> {
     present_sequence: u64,
     state_hash: Hash256,
     terminal: bool,
-    audio: HeadlessAudioExecutor,
+    audio: AudioExecutor,
     video: Option<ActiveVideo>,
     pending_video_restore: Option<HeadlessVideoResumeV1>,
     movie_audio_sequence: u32,
@@ -2804,6 +2812,7 @@ struct RuntimeDriverConfig<'a> {
     presentation: PresentationPath,
     presentation_substeps: u8,
     synchronous_gpu_presents: bool,
+    background_audio: bool,
     audio_pump: AudioPumpPolicy,
 }
 
@@ -3218,6 +3227,7 @@ async fn execute_sequence(
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
             synchronous_gpu_presents: config.synchronous_gpu_presents,
+            background_audio: false,
             audio_pump: AudioPumpPolicy::FixedTick,
         },
     )?;
@@ -3521,7 +3531,14 @@ impl<'a> RuntimeDriver<'a> {
             present_sequence: 0,
             state_hash: Hash256::from_sha256(&[]),
             terminal: false,
-            audio: HeadlessAudioExecutor::default(),
+            audio: if config.background_audio {
+                AudioExecutor::Worker(LegacyAudioPlaybackService::start_with_client(
+                    platform.clone(),
+                    false,
+                )?)
+            } else {
+                AudioExecutor::Deterministic(HeadlessAudioExecutor::default())
+            },
             video: None,
             pending_video_restore: None,
             movie_audio_sequence: 0,
@@ -3830,7 +3847,7 @@ impl<'a> RuntimeDriver<'a> {
                 && envelope.schema == "astra.emu.render_frame.v1"
             {
                 let frame = envelope
-                    .decode_postcard::<LegacyRenderFrameV1>(
+                    .decode_bulk_postcard::<LegacyRenderFrameV1>(
                         RuntimeOutputDomain::Presentation,
                         "astra.emu.render_frame.v1",
                         SchemaVersion::new(1, 0, 0),
@@ -3844,7 +3861,7 @@ impl<'a> RuntimeDriver<'a> {
                 && envelope.schema == "astra.emu.scene_packet.v1"
             {
                 let commit = envelope
-                    .decode_postcard::<LegacyPreparedSceneCommitV1>(
+                    .decode_bulk_postcard::<LegacyPreparedSceneCommitV1>(
                         RuntimeOutputDomain::Presentation,
                         "astra.emu.scene_packet.v1",
                         SchemaVersion::new(1, 0, 0),
@@ -3967,7 +3984,7 @@ impl<'a> RuntimeDriver<'a> {
                         // astra.emu.render_frame.v1 packet.
                         self.state_trace.extend_from_slice(
                             Hash256::from_sha256(
-                                &[command.as_bytes(), payload.as_slice()].concat(),
+                                &[command.as_bytes(), payload.as_bytes()].concat(),
                             )
                             .to_string()
                             .as_bytes(),
@@ -4759,6 +4776,17 @@ struct HeadlessAudioExecutor {
     realtime_poll_countdown: u8,
 }
 
+enum AudioExecutor {
+    Deterministic(HeadlessAudioExecutor),
+    Worker(LegacyAudioPlaybackService),
+}
+
+impl Default for AudioExecutor {
+    fn default() -> Self {
+        Self::Deterministic(HeadlessAudioExecutor::default())
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct AudioPumpTelemetry {
     active_streams: u64,
@@ -4768,6 +4796,121 @@ struct AudioPumpTelemetry {
     queued_frames: u64,
     underflow_count: u64,
     decoder_refills: u64,
+}
+
+impl AudioExecutor {
+    fn underflow_count(&self) -> Result<u64, String> {
+        match self {
+            Self::Deterministic(executor) => executor.underflow_count(),
+            Self::Worker(service) => Ok(service.telemetry().underflow_count),
+        }
+    }
+
+    async fn reset_for_restore(&mut self, platform: &PlatformHostClient) -> Result<(), String> {
+        match self {
+            Self::Deterministic(executor) => executor.reset_for_restore(platform).await,
+            Self::Worker(service) => service.reset(),
+        }
+    }
+
+    async fn execute(
+        &mut self,
+        command: LegacyAudioCommandV1,
+        resource: Option<Vec<u8>>,
+        platform: &PlatformHostClient,
+    ) -> Result<(), String> {
+        match self {
+            Self::Deterministic(executor) => executor.execute(command, resource, platform).await,
+            Self::Worker(service) => service.execute(command, resource),
+        }
+    }
+
+    async fn play_buffered_movie(
+        &mut self,
+        stream_id: u32,
+        sample_rate: u32,
+        channels: u16,
+        mut samples: Vec<f32>,
+        elapsed_ns: u64,
+        platform: &PlatformHostClient,
+    ) -> Result<(), String> {
+        match self {
+            Self::Deterministic(executor) => {
+                executor
+                    .play_buffered_movie(
+                        stream_id,
+                        sample_rate,
+                        channels,
+                        samples,
+                        elapsed_ns,
+                        platform,
+                    )
+                    .await
+            }
+            Self::Worker(service) => {
+                let elapsed_frames =
+                    elapsed_ns.saturating_mul(u64::from(sample_rate)) / 1_000_000_000;
+                let elapsed_samples = usize::try_from(elapsed_frames)
+                    .ok()
+                    .and_then(|frames| frames.checked_mul(usize::from(channels)))
+                    .ok_or_else(|| "ASTRA_EMU_AUDIO_MOVIE_TIMELINE".to_owned())?;
+                if elapsed_samples >= samples.len() {
+                    samples.clear();
+                } else if elapsed_samples != 0 {
+                    samples.drain(..elapsed_samples);
+                }
+                service.begin_movie_stream(stream_id, sample_rate, channels, samples)
+            }
+        }
+    }
+
+    async fn close_movie_stream(
+        &mut self,
+        stream_id: u32,
+        platform: &PlatformHostClient,
+    ) -> Result<(), String> {
+        match self {
+            Self::Deterministic(executor) => executor.close_movie_stream(stream_id, platform).await,
+            Self::Worker(service) => service.stop_movie_pcm(stream_id),
+        }
+    }
+
+    async fn pump(
+        &mut self,
+        platform: &PlatformHostClient,
+        policy: AudioPumpPolicy,
+    ) -> Result<AudioPumpTelemetry, String> {
+        match self {
+            Self::Deterministic(executor) => executor.pump(platform, policy).await,
+            Self::Worker(service) => {
+                service.pump()?;
+                let telemetry = service.telemetry();
+                Ok(AudioPumpTelemetry {
+                    active_streams: telemetry.active_streams,
+                    packets_submitted: telemetry.packet_count,
+                    submitted_frames: telemetry.submitted_frames,
+                    consumed_frames: telemetry.consumed_frames,
+                    queued_frames: telemetry.queued_frames,
+                    underflow_count: telemetry.underflow_count,
+                    decoder_refills: telemetry.decoder_refills,
+                })
+            }
+        }
+    }
+
+    fn set_suspended(&self, suspended: bool) -> Result<(), String> {
+        match self {
+            Self::Deterministic(_) => Ok(()),
+            Self::Worker(service) => service.set_suspended(suspended),
+        }
+    }
+
+    async fn shutdown(self, platform: &PlatformHostClient) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Deterministic(executor) => executor.shutdown(platform).await,
+            Self::Worker(service) => service.shutdown(),
+        }
+    }
 }
 
 impl Default for HeadlessAudioExecutor {
@@ -5862,7 +6005,7 @@ mod native_tests {
     use super::*;
     use astra_emu_family_api::{
         FamilyId, LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneResourceStateV1,
-        LegacySceneTextureCreateV1,
+        LegacySceneTextureCreateV1, LegacySceneTextureDescriptorV1, LegacySceneTextureUpdateV1,
     };
 
     #[test]
@@ -5914,6 +6057,79 @@ mod native_tests {
             SceneCommand::Clear {
                 rgba: [7, 8, 9, 255]
             }
+        ));
+    }
+
+    #[test]
+    fn gpu_scene_region_update_preserves_resource_id_and_generation() {
+        let mut adapter = GpuSceneAdapter::default();
+        let descriptor = LegacySceneTextureDescriptorV1 {
+            width: 2,
+            height: 1,
+            format: LegacyTextureFormat::Rgba8,
+        };
+        let resources = LegacySceneResourceStateV1 {
+            textures: [(7, descriptor)].into_iter().collect(),
+        };
+        let initial = vec![255, 0, 0, 255, 0, 255, 0, 255];
+        let (created, created_metrics) = adapter
+            .prepare(LegacyPreparedSceneCommitV1 {
+                packet: LegacyScenePacketV1 {
+                    width: 2,
+                    height: 1,
+                    resources: vec![LegacySceneResourceOperationV1::CreateTexture(
+                        LegacySceneTextureCreateV1 {
+                            texture_id: 7,
+                            width: 2,
+                            height: 1,
+                            format: LegacyTextureFormat::Rgba8,
+                            content_hash: Hash256::from_sha256(&initial),
+                            pixels: initial,
+                        },
+                    )],
+                    draws: vec![],
+                },
+                next_resources: resources.clone(),
+                reset_resources: false,
+            })
+            .unwrap();
+        let resource_id = match &created.commands[0] {
+            SceneCommand::UploadTexture { resource_id, .. } => resource_id.clone(),
+            other => panic!("unexpected create command: {other:?}"),
+        };
+
+        let patch = vec![0, 0, 255, 255];
+        let (updated, updated_metrics) = adapter
+            .prepare(LegacyPreparedSceneCommitV1 {
+                packet: LegacyScenePacketV1 {
+                    width: 2,
+                    height: 1,
+                    resources: vec![LegacySceneResourceOperationV1::UpdateTexture(
+                        LegacySceneTextureUpdateV1 {
+                            texture_id: 7,
+                            x: 0,
+                            y: 0,
+                            width: 1,
+                            height: 1,
+                            format: LegacyTextureFormat::Rgba8,
+                            content_hash: Hash256::from_sha256(&patch),
+                            pixels: patch,
+                        },
+                    )],
+                    draws: vec![],
+                },
+                next_resources: resources,
+                reset_resources: false,
+            })
+            .unwrap();
+
+        assert_eq!(created_metrics.generation, 1);
+        assert_eq!(updated_metrics.generation, 1);
+        assert_eq!(updated.commands.len(), 1);
+        assert!(matches!(
+            &updated.commands[0],
+            SceneCommand::UpdateTextureRegion { resource_id: updated_id, width: 1, height: 1, .. }
+                if updated_id == &resource_id
         ));
     }
 

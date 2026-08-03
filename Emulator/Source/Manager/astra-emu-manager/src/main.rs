@@ -33,8 +33,9 @@ use std::{
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
-    LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx,
-    LegacyStepBudget, LegacyVfsReader, LegacyVideoCommandV1, LegacyWaitRequest,
+    LegacyPayload, LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1,
+    LegacyRuntimeHostCtx, LegacyStepBudget, LegacyVfsReader, LegacyVideoCommandV1,
+    LegacyWaitRequest,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_fvp::FvpVfsFamilyFactory;
@@ -487,7 +488,7 @@ impl RuntimeBridge {
                 && envelope.schema == "astra.emu.render_frame.v1"
             {
                 let frame = envelope
-                    .decode_postcard::<LegacyRenderFrameV1>(
+                    .decode_bulk_postcard::<LegacyRenderFrameV1>(
                         RuntimeOutputDomain::Presentation,
                         "astra.emu.render_frame.v1",
                         SchemaVersion::new(1, 0, 0),
@@ -504,7 +505,7 @@ impl RuntimeBridge {
                 && envelope.schema == "astra.emu.scene_packet.v1"
             {
                 let commit = envelope
-                    .decode_postcard::<LegacyPreparedSceneCommitV1>(
+                    .decode_bulk_postcard::<LegacyPreparedSceneCommitV1>(
                         RuntimeOutputDomain::Presentation,
                         "astra.emu.scene_packet.v1",
                         SchemaVersion::new(1, 0, 0),
@@ -702,7 +703,7 @@ impl RuntimeBridge {
             let audio_meter_hash = audio.meter_hash();
             let audio_non_silent = audio.has_audible_output();
             self.video.reset(&mut audio)?;
-            audio.reset()?;
+            let _meter_trace = audio.shutdown()?;
             tracing::info!(
                 event = "astra.emu.manager.audio_meter_observed",
                 session_hash = %session_hash,
@@ -1014,13 +1015,13 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
                     LegacyEffect::RuntimeEvent {
                         sequence: 0,
                         event: target,
-                        payload,
+                        payload: LegacyPayload::Native(payload),
                     }
                 } else if target.starts_with("blackboard.") {
                     LegacyEffect::SetBlackboard {
                         sequence: 0,
                         key: target,
-                        value: payload,
+                        value: LegacyPayload::Native(payload),
                     }
                 } else {
                     return Err("ASTRA_EMU_PATCH_EFFECT_TARGET".into());
@@ -3820,7 +3821,7 @@ mod manager_tests {
         assert!(matches!(
             &effects[0],
             astra_emu_family_api::LegacyEffect::RuntimeEvent { event, payload, .. }
-                if event == "event.patch_ready" && payload == &[1, 2, 3]
+                if event == "event.patch_ready" && payload.as_bytes() == [1, 2, 3]
         ));
 
         let mut command = astra_emu_family_api::LegacyAudioCommandV1::LoadResource {

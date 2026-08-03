@@ -1316,7 +1316,7 @@ mod windows {
             })
         }
 
-        fn submit(&mut self, packet: AudioPacket) -> Result<(), PlatformError> {
+        fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
             if self.stream_error.load(Ordering::Acquire) {
                 return Err(PlatformError::new(
                     PlatformErrorCode::DeviceLost,
@@ -1353,7 +1353,7 @@ mod windows {
             self.producer.push_samples(&packet.samples)?;
             self.next_sequence = next_sequence;
             self.submitted_samples = submitted_samples;
-            Ok(())
+            Ok(packet.samples)
         }
 
         fn pause(&mut self) -> Result<(), PlatformError> {
@@ -1577,33 +1577,18 @@ mod windows {
         }
     }
 
-    fn pop_sample(
-        consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
-    ) -> Option<f32> {
-        match consumer.pop_sample() {
-            Some(sample) => {
-                meter.record(sample);
-                Some(sample)
-            }
-            None => None,
-        }
-    }
-
     fn fill_f32(
         output: &mut [f32],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
-        let mut underflowed = false;
-        for target in output {
-            *target = pop_sample(consumer, meter).unwrap_or_else(|| {
-                underflowed = true;
-                0.0
-            });
+        let filled = consumer.pop_samples(output);
+        for sample in &output[..filled] {
+            meter.record(*sample);
         }
-        if underflowed {
+        output[filled..].fill(0.0);
+        if filled != output.len() {
             consumer.record_underflow();
         }
     }
@@ -1614,15 +1599,25 @@ mod windows {
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
-        let mut underflowed = false;
-        for target in output {
-            let sample = pop_sample(consumer, meter).unwrap_or_else(|| {
-                underflowed = true;
-                0.0
-            });
-            *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+        let mut scratch = [0.0_f32; 1024];
+        let mut written = 0;
+        while written < output.len() {
+            let requested = scratch.len().min(output.len() - written);
+            let filled = consumer.pop_samples(&mut scratch[..requested]);
+            for (target, sample) in output[written..written + filled]
+                .iter_mut()
+                .zip(&scratch[..filled])
+            {
+                meter.record(*sample);
+                *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+            }
+            written += filled;
+            if filled != requested {
+                break;
+            }
         }
-        if underflowed {
+        output[written..].fill(0);
+        if written != output.len() {
             consumer.record_underflow();
         }
     }
@@ -1633,17 +1628,25 @@ mod windows {
         meter: &CallbackMeter,
     ) {
         meter.begin_callback();
-        let mut underflowed = false;
-        for target in output {
-            let sample = pop_sample(consumer, meter)
-                .unwrap_or_else(|| {
-                    underflowed = true;
-                    0.0
-                })
-                .clamp(-1.0, 1.0);
-            *target = ((sample * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
+        let mut scratch = [0.0_f32; 1024];
+        let mut written = 0;
+        while written < output.len() {
+            let requested = scratch.len().min(output.len() - written);
+            let filled = consumer.pop_samples(&mut scratch[..requested]);
+            for (target, sample) in output[written..written + filled]
+                .iter_mut()
+                .zip(&scratch[..filled])
+            {
+                meter.record(*sample);
+                *target = ((sample.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
+            }
+            written += filled;
+            if filled != requested {
+                break;
+            }
         }
-        if underflowed {
+        output[written..].fill(u16::MAX / 2);
+        if written != output.len() {
             consumer.record_underflow();
         }
     }

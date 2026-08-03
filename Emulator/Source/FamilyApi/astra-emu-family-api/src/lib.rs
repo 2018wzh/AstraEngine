@@ -1,11 +1,13 @@
 //! Stable, renderer-neutral contract between AstraEMU and legacy family providers.
 
 mod ffi;
+mod ffi_wire;
 mod input_key;
 mod provider;
 mod scheduler;
 
 pub use ffi::*;
+pub use ffi_wire::*;
 pub use input_key::*;
 pub use provider::*;
 pub use scheduler::*;

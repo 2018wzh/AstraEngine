@@ -885,6 +885,10 @@ dependencies = [
  "astra-emu-family-api",
  "astra-emu-family-core",
  "astra-media",
+ "astra-platform",
+ "astra-platform-linux",
+ "astra-platform-macos",
+ "astra-platform-windows",
  "blowfish",
  "crc32fast",
  "encoding_rs",
@@ -903,6 +907,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
  "windows",
 ]
@@ -952,7 +957,6 @@ dependencies = [
  "astra-observability",
  "astra-plugin",
  "astra-plugin-abi",
- "cpal",
  "directories",
  "gilrs",
  "hex",
@@ -962,7 +966,6 @@ dependencies = [
  "pollster",
  "postcard",
  "rfd",
- "rtrb",
  "serde_json",
  "sha2 0.10.9",
  "slint",
@@ -8690,7 +8693,7 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0#eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=8819de6b4e65c5a099d5ea51476e47d1af6d8f58#8819de6b4e65c5a099d5ea51476e47d1af6d8f58"
 dependencies = [
  "ab_glyph",
  "anyhow",

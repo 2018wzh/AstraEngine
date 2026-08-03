@@ -296,7 +296,7 @@ impl RfvpFile for HostedMemoryFile {
                     .read_file_range(
                         mount_set_id,
                         uri,
-                        revision.clone(),
+                        *revision,
                         ByteRange { offset, len: bytes },
                         MAX_HOSTED_RANGE_BYTES as u64,
                     )

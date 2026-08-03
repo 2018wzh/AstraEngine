@@ -56,7 +56,7 @@ impl HostedScenePacketTranslator {
     /// passed validation, preventing partial commit on malformed plugin output.
     pub fn translate(
         &mut self,
-        delta: &HostedStepDelta,
+        delta: &mut HostedStepDelta,
     ) -> Result<Option<LegacyPreparedSceneCommitV1>, HostedAdapterError> {
         let mut frame: Option<(u32, u32)> = None;
         let mut ended = false;
@@ -65,14 +65,13 @@ impl HostedScenePacketTranslator {
         let mut draws = Vec::new();
         let mut bytes = self.pending_upload_bytes;
 
-        for operation in &delta.scene {
+        for operation in std::mem::take(&mut delta.scene) {
             match operation {
                 HostedSceneOperation::CreateTexture(texture) => {
                     let pixels = texture
                         .pixels
-                        .as_deref()
                         .ok_or(HostedAdapterError::TextureWithoutPixels(texture.id))?;
-                    let (format, pixels) = texture_payload(
+                    let (format, pixels) = texture_payload_owned(
                         &mut bytes,
                         texture.id,
                         texture.desc.width,
@@ -92,13 +91,13 @@ impl HostedScenePacketTranslator {
                     ));
                 }
                 HostedSceneOperation::UpdateTexture(update) => {
-                    let (format, pixels) = texture_payload(
+                    let (format, pixels) = texture_payload_owned(
                         &mut bytes,
                         update.id,
                         update.rect.width,
                         update.rect.height,
                         update.format,
-                        &update.pixels,
+                        update.pixels,
                     )?;
                     resources.push(LegacySceneResourceOperationV1::UpdateTexture(
                         LegacySceneTextureUpdateV1 {
@@ -118,7 +117,7 @@ impl HostedScenePacketTranslator {
                         .push(LegacySceneResourceOperationV1::DestroyTexture { texture_id: id.0 });
                 }
                 HostedSceneOperation::BeginFrame { width, height, .. } => {
-                    if frame.replace((*width, *height)).is_some() || ended || presented {
+                    if frame.replace((width, height)).is_some() || ended || presented {
                         return Err(HostedAdapterError::FrameBoundary);
                     }
                 }
@@ -126,13 +125,13 @@ impl HostedScenePacketTranslator {
                     if frame.is_none() || ended || presented {
                         return Err(HostedAdapterError::FrameBoundary);
                     }
-                    draws.push(sprite_draw(draw));
+                    draws.push(sprite_draw(&draw));
                 }
                 HostedSceneOperation::DrawSolid(command) => {
                     if frame.is_none() || ended || presented {
                         return Err(HostedAdapterError::FrameBoundary);
                     }
-                    draws.push(solid_draw(command));
+                    draws.push(solid_draw(&command));
                 }
                 HostedSceneOperation::EndFrame => {
                     if frame.is_none() || ended || presented {
@@ -207,7 +206,7 @@ impl HostedScenePacketTranslator {
                     HostedAdapterError::InvalidPacket(diagnostic)
                 })?;
                 prepared.reset_resources = self.rehydrate_resources;
-                self.resources.commit(prepared.clone());
+                self.resources = prepared.next_resources.clone();
                 self.pending_upload_bytes = 0;
                 self.rehydrate_resources = false;
                 Ok(Some(prepared))
@@ -335,11 +334,11 @@ pub fn scene_packet_from_delta(
 /// Converts video deltas into host-resolved resource commands. Encoded bytes
 /// remain behind the active VFS policy and are not copied into an ABI packet.
 pub fn video_commands_from_delta(
-    delta: &HostedStepDelta,
+    frame_index: u64,
+    operations: Vec<HostedVideoOperation>,
 ) -> Result<Vec<LegacyVideoCommandV1>, HostedAdapterError> {
-    delta
-        .video
-        .iter()
+    operations
+        .into_iter()
         .enumerate()
         .map(|(index, operation)| match operation {
             HostedVideoOperation::Play {
@@ -349,19 +348,19 @@ pub fn video_commands_from_delta(
                 stage_width,
                 stage_height,
             } => {
-                if *byte_len == 0 || *byte_len > 512 * 1024 * 1024 {
+                if byte_len == 0 || byte_len > 512 * 1024 * 1024 {
                     return Err(HostedAdapterError::VideoResourceBounds);
                 }
                 let command = LegacyVideoCommandV1::Play {
-                    playback_id: format!("rfvp-{}-{index}", delta.tick.frame_index),
-                    resource_uri: resource_uri.clone(),
-                    mode: if *modal_with_audio {
+                    playback_id: format!("rfvp-{frame_index}-{index}"),
+                    resource_uri,
+                    mode: if modal_with_audio {
                         LegacyVideoMode::ModalWithAudio
                     } else {
                         LegacyVideoMode::LayerNoAudio
                     },
-                    stage_width: *stage_width,
-                    stage_height: *stage_height,
+                    stage_width,
+                    stage_height,
                 };
                 command
                     .validate()
@@ -376,11 +375,10 @@ pub fn video_commands_from_delta(
 /// commands.  This keeps PCM/encoded buffers bounded by RFVP and avoids the
 /// former second audio DTO and cross-layer command mutex.
 pub fn audio_commands_from_delta(
-    delta: &HostedStepDelta,
+    operations: Vec<HostedAudioOperation>,
 ) -> Result<Vec<LegacyAudioCommandV1>, HostedAdapterError> {
-    delta
-        .audio
-        .iter()
+    operations
+        .into_iter()
         .map(|operation| {
             let command = match operation {
                 HostedAudioOperation::LoadResource {
@@ -398,7 +396,7 @@ pub fn audio_commands_from_delta(
                         rfvp_hosted::host_api::EncodedAudioKind::Mp3 => LegacyAudioEncoding::Mp3,
                         rfvp_hosted::host_api::EncodedAudioKind::Flac => LegacyAudioEncoding::Flac,
                     },
-                    resource_uri: resource_uri.clone(),
+                    resource_uri,
                 },
                 HostedAudioOperation::LoadEncoded { .. } => {
                     return Err(HostedAdapterError::EncodedAudioRequiresResource);
@@ -421,13 +419,13 @@ pub fn audio_commands_from_delta(
                 HostedAudioOperation::SubmitI16 { id, samples } => {
                     LegacyAudioCommandV1::SubmitI16 {
                         stream_id: id.0,
-                        samples: samples.clone(),
+                        samples,
                     }
                 }
                 HostedAudioOperation::SubmitF32 { id, samples } => {
                     LegacyAudioCommandV1::SubmitF32 {
                         stream_id: id.0,
-                        samples: samples.clone(),
+                        samples,
                     }
                 }
                 HostedAudioOperation::Play {
@@ -439,11 +437,11 @@ pub fn audio_commands_from_delta(
                     volume: params.volume,
                     pan: params.pan,
                     repeat: params.repeat,
-                    fade_in_ms: *fade_in_ms,
+                    fade_in_ms,
                 },
                 HostedAudioOperation::Stop { id, fade_ms } => LegacyAudioCommandV1::Stop {
                     stream_id: id.0,
-                    fade_ms: *fade_ms,
+                    fade_ms,
                 },
                 HostedAudioOperation::Pause(id) => LegacyAudioCommandV1::Pause { stream_id: id.0 },
                 HostedAudioOperation::Resume(id) => {
@@ -456,7 +454,7 @@ pub fn audio_commands_from_delta(
                     repeat: params.repeat,
                 },
                 HostedAudioOperation::SetMasterVolume(volume) => {
-                    LegacyAudioCommandV1::MasterVolume { volume: *volume }
+                    LegacyAudioCommandV1::MasterVolume { volume }
                 }
                 HostedAudioOperation::DestroyStream(id) => {
                     LegacyAudioCommandV1::DestroyStream { stream_id: id.0 }
@@ -501,6 +499,17 @@ fn texture_payload(
     format: PixelFormat,
     pixels: &[u8],
 ) -> Result<(LegacyTextureFormat, Vec<u8>), HostedAdapterError> {
+    texture_payload_owned(bytes, id, width, height, format, pixels.to_vec())
+}
+
+fn texture_payload_owned(
+    bytes: &mut usize,
+    id: TextureId,
+    width: u32,
+    height: u32,
+    format: PixelFormat,
+    pixels: Vec<u8>,
+) -> Result<(LegacyTextureFormat, Vec<u8>), HostedAdapterError> {
     let format = match format {
         PixelFormat::Rgba8 => LegacyTextureFormat::Rgba8,
         PixelFormat::LumaA8 => LegacyTextureFormat::LumaAlpha8,
@@ -523,7 +532,7 @@ fn texture_payload(
     if *bytes > MAX_UPLOAD_BYTES {
         return Err(HostedAdapterError::UploadBudget);
     }
-    Ok((format, pixels.to_vec()))
+    Ok((format, pixels))
 }
 
 fn map_blend(blend: BlendMode) -> LegacyBlendMode {
@@ -648,6 +657,7 @@ mod tests {
             text: Vec::new(),
             logs: Vec::new(),
             log_dropped_count: 0,
+            copy_telemetry: Default::default(),
         }
     }
 
@@ -707,7 +717,7 @@ mod tests {
     #[test]
     fn prepared_scene_packet_retains_texture_metadata_for_partial_uploads() {
         let mut translator = HostedScenePacketTranslator::default();
-        let create = delta(vec![
+        let mut create = delta(vec![
             HostedSceneOperation::CreateTexture(HostedTextureData {
                 id: TextureId(9),
                 desc: TextureDesc {
@@ -727,10 +737,10 @@ mod tests {
             HostedSceneOperation::Present,
         ]);
         translator
-            .translate(&create)
+            .translate(&mut create)
             .expect("create packet translates");
 
-        let update = delta(vec![
+        let mut update = delta(vec![
             HostedSceneOperation::UpdateTexture(rfvp_hosted::hosted::HostedTextureUpdate {
                 id: TextureId(9),
                 rect: TextureRect {
@@ -751,7 +761,7 @@ mod tests {
             HostedSceneOperation::Present,
         ]);
         let prepared = translator
-            .translate(&update)
+            .translate(&mut update)
             .expect("partial packet translates")
             .expect("complete frame");
         assert!(matches!(
@@ -764,32 +774,34 @@ mod tests {
     #[test]
     fn retains_a_resource_only_delta_until_a_later_frame_commits_it() {
         let mut translator = HostedScenePacketTranslator::default();
-        assert!(translator
-            .translate(&delta(vec![HostedSceneOperation::CreateTexture(
-                HostedTextureData {
-                    id: TextureId(9),
-                    desc: TextureDesc {
-                        width: 1,
-                        height: 1,
-                        format: PixelFormat::Rgba8,
-                        mip_count: 1,
-                    },
-                    pixels: Some(vec![0, 0, 0, 255]),
+        let mut resource_only = delta(vec![HostedSceneOperation::CreateTexture(
+            HostedTextureData {
+                id: TextureId(9),
+                desc: TextureDesc {
+                    width: 1,
+                    height: 1,
+                    format: PixelFormat::Rgba8,
+                    mip_count: 1,
                 },
-            )]))
+                pixels: Some(vec![0, 0, 0, 255]),
+            },
+        )]);
+        assert!(translator
+            .translate(&mut resource_only)
             .expect("resource-only delta is retained")
             .is_none());
 
+        let mut frame = delta(vec![
+            HostedSceneOperation::BeginFrame {
+                width: 640,
+                height: 480,
+                clear: None,
+            },
+            HostedSceneOperation::EndFrame,
+            HostedSceneOperation::Present,
+        ]);
         let prepared = translator
-            .translate(&delta(vec![
-                HostedSceneOperation::BeginFrame {
-                    width: 640,
-                    height: 480,
-                    clear: None,
-                },
-                HostedSceneOperation::EndFrame,
-                HostedSceneOperation::Present,
-            ]))
+            .translate(&mut frame)
             .expect("later frame commits retained resource")
             .expect("complete frame");
         assert!(matches!(
@@ -803,26 +815,27 @@ mod tests {
     fn restored_translator_starts_a_new_resource_epoch() {
         let mut translator = HostedScenePacketTranslator::default();
         translator.restore(LegacySceneResourceStateV1::default());
-        let prepared = translator
-            .translate(&delta(vec![
-                HostedSceneOperation::CreateTexture(HostedTextureData {
-                    id: TextureId(9),
-                    desc: TextureDesc {
-                        width: 1,
-                        height: 1,
-                        format: PixelFormat::Rgba8,
-                        mip_count: 1,
-                    },
-                    pixels: Some(vec![0, 0, 0, 255]),
-                }),
-                HostedSceneOperation::BeginFrame {
-                    width: 640,
-                    height: 480,
-                    clear: None,
+        let mut rehydration = delta(vec![
+            HostedSceneOperation::CreateTexture(HostedTextureData {
+                id: TextureId(9),
+                desc: TextureDesc {
+                    width: 1,
+                    height: 1,
+                    format: PixelFormat::Rgba8,
+                    mip_count: 1,
                 },
-                HostedSceneOperation::EndFrame,
-                HostedSceneOperation::Present,
-            ]))
+                pixels: Some(vec![0, 0, 0, 255]),
+            }),
+            HostedSceneOperation::BeginFrame {
+                width: 640,
+                height: 480,
+                clear: None,
+            },
+            HostedSceneOperation::EndFrame,
+            HostedSceneOperation::Present,
+        ]);
+        let prepared = translator
+            .translate(&mut rehydration)
             .expect("rehydration packet translates")
             .expect("complete frame");
         assert!(prepared.reset_resources);
@@ -838,7 +851,8 @@ mod tests {
             stage_width: 640,
             stage_height: 480,
         });
-        let commands = video_commands_from_delta(&input).expect("valid video resource converts");
+        let commands = video_commands_from_delta(input.tick.frame_index, input.video)
+            .expect("valid video resource converts");
         assert!(matches!(
             commands.as_slice(),
             [LegacyVideoCommandV1::Play { resource_uri, .. }] if resource_uri == "movie/opening.wmv"
@@ -847,38 +861,36 @@ mod tests {
 
     #[test]
     fn converts_pcm_audio_and_blocks_encoded_bytes_without_a_resource_response() {
-        let mut input = delta(Vec::new());
-        input.audio.push(HostedAudioOperation::CreateStream {
+        let create = HostedAudioOperation::CreateStream {
             id: rfvp_hosted::host_api::AudioStreamId(4),
             desc: rfvp_hosted::host_api::AudioStreamDesc {
                 sample_rate: 48_000,
                 channels: 2,
                 sample_format: rfvp_hosted::host_api::AudioSampleFormat::I16,
             },
-        });
+        };
         assert!(matches!(
-            audio_commands_from_delta(&input)
+            audio_commands_from_delta(vec![create.clone()])
                 .expect("PCM stream converts")
                 .as_slice(),
             [LegacyAudioCommandV1::CreateStream { stream_id: 4, .. }]
         ));
-        input.audio.push(HostedAudioOperation::LoadEncoded {
+        let encoded = HostedAudioOperation::LoadEncoded {
             id: rfvp_hosted::host_api::AudioStreamId(4),
             kind: rfvp_hosted::host_api::EncodedAudioKind::Ogg,
             bytes: vec![0],
-        });
+        };
         assert_eq!(
-            audio_commands_from_delta(&input),
+            audio_commands_from_delta(vec![create.clone(), encoded]),
             Err(HostedAdapterError::EncodedAudioRequiresResource)
         );
-        input.audio.pop();
-        input.audio.push(HostedAudioOperation::LoadResource {
+        let resource = HostedAudioOperation::LoadResource {
             id: rfvp_hosted::host_api::AudioStreamId(4),
             kind: rfvp_hosted::host_api::EncodedAudioKind::Ogg,
             resource_uri: "audio/theme.ogg".into(),
-        });
+        };
         assert!(matches!(
-            audio_commands_from_delta(&input).expect("resource audio converts").as_slice(),
+            audio_commands_from_delta(vec![create, resource]).expect("resource audio converts").as_slice(),
             [LegacyAudioCommandV1::CreateStream { .. }, LegacyAudioCommandV1::LoadResource { resource_uri, .. }]
                 if resource_uri == "audio/theme.ogg"
         ));

@@ -263,6 +263,15 @@ pub enum SceneCommand {
         resource_id: String,
         frame: TextureFrame,
     },
+    UpdateTextureRegion {
+        resource_id: String,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        rgba8: Arc<[u8]>,
+        hash: Hash256,
+    },
     UploadGlyph {
         resource_id: String,
         glyph: GlyphBitmap,
@@ -502,6 +511,35 @@ impl HeadlessRenderer {
                     resource_overlay.insert(resource_id.as_str(), PendingResource::Texture(frame));
                     mutations.push(RetainedResourceMutation::UploadTexture { resource_id, frame });
                 }
+                DrawCommand::UpdateTextureRegion {
+                    resource_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba8,
+                    hash,
+                } => {
+                    let dimensions = retained_texture_dimensions(
+                        &self.textures,
+                        &resource_overlay,
+                        resource_id,
+                    )
+                    .ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: texture update references an unknown texture",
+                        )
+                    })?;
+                    validate_texture_region(dimensions, *x, *y, *width, *height, rgba8, *hash)?;
+                    mutations.push(RetainedResourceMutation::UpdateTextureRegion {
+                        resource_id,
+                        x: *x,
+                        y: *y,
+                        width: *width,
+                        height: *height,
+                        rgba8,
+                    });
+                }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph_metadata(glyph)?;
                     if retained_resource_exists_indexed(
@@ -687,6 +725,21 @@ impl HeadlessRenderer {
                     self.glyph_ids.insert(resource_id.clone());
                     self.glyphs.insert(resource_id, glyph);
                 }
+                OwnedRetainedResourceMutation::UpdateTextureRegion {
+                    resource_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba8,
+                } => {
+                    let frame = self
+                        .textures
+                        .get_mut(&resource_id)
+                        .expect("validated texture region target must remain live");
+                    apply_texture_region(frame, x, y, width, height, &rgba8)
+                        .expect("validated texture region must commit");
+                }
                 OwnedRetainedResourceMutation::Release { resource_id } => {
                     self.textures.remove(&resource_id);
                     self.glyphs.remove(&resource_id);
@@ -713,6 +766,14 @@ enum OwnedRetainedResourceMutation {
         resource_id: String,
         glyph: GlyphBitmap,
     },
+    UpdateTextureRegion {
+        resource_id: String,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        rgba8: Arc<[u8]>,
+    },
     Release {
         resource_id: String,
     },
@@ -727,6 +788,14 @@ enum RetainedResourceMutation<'a> {
     UploadGlyph {
         resource_id: &'a str,
         glyph: &'a GlyphBitmap,
+    },
+    UpdateTextureRegion {
+        resource_id: &'a str,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        rgba8: &'a Arc<[u8]>,
     },
     Release {
         resource_id: &'a str,
@@ -743,6 +812,21 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
             RetainedResourceMutation::UploadGlyph { resource_id, glyph } => Self::UploadGlyph {
                 resource_id: resource_id.to_owned(),
                 glyph: glyph.clone(),
+            },
+            RetainedResourceMutation::UpdateTextureRegion {
+                resource_id,
+                x,
+                y,
+                width,
+                height,
+                rgba8,
+            } => Self::UpdateTextureRegion {
+                resource_id: resource_id.to_owned(),
+                x,
+                y,
+                width,
+                height,
+                rgba8: Arc::clone(rgba8),
             },
             RetainedResourceMutation::Release { resource_id } => Self::Release {
                 resource_id: resource_id.to_owned(),
@@ -819,6 +903,54 @@ fn validate_source_rect_dimensions(
     Ok(())
 }
 
+fn validate_texture_region(
+    texture_dimensions: (u32, u32),
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    rgba8: &Arc<[u8]>,
+    hash: Hash256,
+) -> Result<(), MediaError> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| MediaError::message("ASTRA_MEDIA_TEXTURE_REGION: byte count overflow"))?;
+    if width == 0
+        || height == 0
+        || x.checked_add(width)
+            .is_none_or(|right| right > texture_dimensions.0)
+        || y.checked_add(height)
+            .is_none_or(|bottom| bottom > texture_dimensions.1)
+        || rgba8.len() != expected
+    {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_TEXTURE_REGION: update is outside the retained texture",
+        ));
+    }
+    remember_validated_payload(rgba8, hash)
+}
+
+fn apply_texture_region(
+    frame: &mut TextureFrame,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    rgba8: &[u8],
+) -> Result<(), MediaError> {
+    let mut pixels = frame.rgba8.as_ref().to_vec();
+    for row in 0..height as usize {
+        let destination = ((y as usize + row) * frame.width as usize + x as usize) * 4;
+        let source = row * width as usize * 4;
+        let byte_len = width as usize * 4;
+        pixels[destination..destination + byte_len]
+            .copy_from_slice(&rgba8[source..source + byte_len]);
+    }
+    *frame = TextureFrame::from_rgba8(frame.width, frame.height, Arc::from(pixels))?;
+    Ok(())
+}
+
 impl Renderer2D for HeadlessRenderer {
     fn capture_frame(&mut self, commands: &[DrawCommand]) -> Result<CpuFrame, MediaError> {
         let width = self.request.width as usize;
@@ -846,6 +978,31 @@ impl Renderer2D for HeadlessRenderer {
                         ));
                     }
                     textures.insert(resource_id.clone(), frame.clone());
+                }
+                DrawCommand::UpdateTextureRegion {
+                    resource_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba8,
+                    hash,
+                } => {
+                    let frame = textures.get_mut(resource_id).ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: texture update references an unknown texture",
+                        )
+                    })?;
+                    validate_texture_region(
+                        (frame.width, frame.height),
+                        *x,
+                        *y,
+                        *width,
+                        *height,
+                        rgba8,
+                        *hash,
+                    )?;
+                    apply_texture_region(frame, *x, *y, *width, *height, rgba8)?;
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph(glyph)?;

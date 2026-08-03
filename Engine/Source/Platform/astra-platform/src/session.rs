@@ -301,7 +301,7 @@ pub enum HostCommand {
     SubmitAudio {
         output: AudioOutputHandle,
         packet: AudioPacket,
-        reply: oneshot::Sender<Result<(), PlatformError>>,
+        reply: oneshot::Sender<Result<Vec<f32>, PlatformError>>,
     },
     QueryAudio {
         output: AudioOutputHandle,
@@ -444,7 +444,6 @@ impl HostCommand {
             | Self::PresentScene { reply, .. }
             | Self::DestroySurface { reply, .. }
             | Self::DestroyWindow { reply, .. }
-            | Self::SubmitAudio { reply, .. }
             | Self::PauseAudio { reply, .. }
             | Self::ResumeAudio { reply, .. }
             | Self::AbortAudio { reply, .. }
@@ -911,6 +910,18 @@ impl PlatformHostClient {
         output: AudioOutputHandle,
         packet: AudioPacket,
     ) -> Result<(), PlatformError> {
+        self.submit_audio_owned(output, packet).await.map(|_| ())
+    }
+
+    /// Submits an owned packet and returns its allocation after the host has
+    /// copied the samples into the native lock-free device queue. Callers on a
+    /// streaming producer can refill the returned `Vec` without steady-state
+    /// allocation or an additional payload clone.
+    pub async fn submit_audio_owned(
+        &self,
+        output: AudioOutputHandle,
+        packet: AudioPacket,
+    ) -> Result<Vec<f32>, PlatformError> {
         if packet.sequence == 0
             || packet.channels == 0
             || packet.samples.is_empty()

@@ -30,6 +30,9 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+// Parsed once at process startup; boxing individual clap fields would add
+// indirection without reducing any runtime hot-path allocation.
+#[allow(clippy::large_enum_variant)]
 enum CliCommand {
     /// Inspect, verify, extract, or mount a family-owned legacy VFS.
     Vfs(vfs::VfsArgs),

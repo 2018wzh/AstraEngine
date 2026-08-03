@@ -1008,7 +1008,7 @@ impl HostState {
             }
             HostCommand::SubmitAudio {
                 output,
-                packet,
+                mut packet,
                 reply,
             } => {
                 let result = (|| {
@@ -1055,9 +1055,9 @@ impl HostState {
                         a.peak = a.peak.max(sample.abs());
                     }
                     a.submitted_samples = submitted_samples;
-                    a.queued.extend(packet.samples);
+                    a.queued.append(&mut packet.samples);
                     a.last_sequence = packet.sequence;
-                    Ok(())
+                    Ok(packet.samples)
                 })();
                 let _ = reply.send(result);
             }

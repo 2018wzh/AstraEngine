@@ -993,6 +993,7 @@ fn scene_command_kind(command: &astra_media::SceneCommand) -> &'static str {
     use astra_media::SceneCommand;
     match command {
         SceneCommand::UploadTexture { .. } => "upload_texture",
+        SceneCommand::UpdateTextureRegion { .. } => "update_texture_region",
         SceneCommand::UploadGlyph { .. } => "upload_glyph",
         SceneCommand::ReleaseResource { .. } => "release_resource",
         SceneCommand::Sprite { .. } => "sprite",

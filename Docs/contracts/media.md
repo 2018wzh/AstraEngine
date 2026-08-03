@@ -26,6 +26,8 @@ Player 的一次性音频必须执行完整资源事务：`OpenDecode -> Decode 
 
 平台 `audio.query` 返回 queued/consumed/submitted frame、meter 和 callback underflow，Player 只补到目标 queue 水位；启动期建立 underflow baseline，稳定泵送后 underflow 增长必须以 `ASTRA_PLAYER_AUDIO_UNDERFLOW` 终止受影响 session。Windows/WASAPI 和 Web/AudioWorklet 使用同一 queue-state contract，open 后若设备格式相对协商结果发生变化必须 blocking；drain deadline 按实际提交时长加 callback margin 计算，不能使用固定两秒或十秒超时。退出时必须 drain 并 close。Web 必须由真实 keyboard/pointer user activation 触发 `AudioContext.resume()`，不得在 page load 时伪造 gesture；随后由共享 `NativeVnProductMediaHost` 统一执行 timeline、decode、mixer、wait completion 和 cleanup，其内部音频 owner 为 `NativeVnProductAudioHost`。设备热切换恢复、正式浏览器 E3 evidence 仍是独立未完成门禁，不能由 native `web-code-check` 或 mixer unit test 替代。
 
+PlatformHost 的 streaming producer 应使用 `submit_audio_owned`：host 把样本批量写入 native `rtrb` 后归还原 `Vec<f32>` allocation，producer 在下一次 mix/refill 复用它。native callback 使用 chunk API 批量消费，不能逐 sample push/pop 或在 callback 内分配。AstraEMU Manager 与 native CLI 由同一 bounded legacy audio worker 持有 decode、resample、voice、fade、segmented PCM cursor 和低水位 refill；Runtime tick、GPU present 与 Slint event loop 只提交命令和读取 telemetry。
+
 ## FilterGraph
 
 视觉 FilterGraph 是 typed node graph：

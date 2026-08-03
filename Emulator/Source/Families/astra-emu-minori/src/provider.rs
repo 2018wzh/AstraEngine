@@ -464,7 +464,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             effects.push(LegacyEffect::Presentation {
                 sequence: *presentation_sequence,
                 command: "astra.emu.text_presentation.v1".into(),
-                payload: presentation_payload,
+                payload: presentation_payload.into(),
             });
             effects.push(LegacyEffect::TextCapture {
                 sequence: *capture_sequence,
@@ -506,7 +506,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             effects.push(LegacyEffect::Presentation {
                 sequence,
                 command: "astra.emu.render_resource_frame.v1".into(),
-                payload,
+                payload: payload.into(),
             });
         }
         if let Some(MinoriVmEvent::Effect(frame)) = &event {
@@ -575,7 +575,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 effects.push(LegacyEffect::Audio {
                     sequence,
                     command: "astra.emu.audio_command.v1".into(),
-                    payload,
+                    payload: payload.into(),
                 });
                 audio_command_count += 1;
             }
@@ -1067,7 +1067,7 @@ fn panel_presentation(
     Ok(LegacyEffect::Presentation {
         sequence,
         command: "astra.emu.render_resource_frame.v1".into(),
-        payload,
+        payload: payload.into(),
     })
 }
 
@@ -1144,7 +1144,7 @@ fn effect_presentation(
     Ok(LegacyEffect::Presentation {
         sequence: effect.sequence,
         command: "astra.emu.render_resource_frame.v1".into(),
-        payload,
+        payload: payload.into(),
     })
 }
 

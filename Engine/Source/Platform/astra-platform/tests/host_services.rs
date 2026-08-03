@@ -1,8 +1,8 @@
 use astra_platform::{
     host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputRequest,
     AudioOutputState, AudioPacket, CapturedFrame, HostCommand, PackageSourceHandle,
-    PackageSourceRequest, PlatformErrorCode, PlatformHostProfile, SaveTransactionHandle,
-    SurfaceHandle, SurfaceRequest, WindowHandle,
+    PackageSourceRequest, PlatformError, PlatformErrorCode, PlatformHostProfile,
+    SaveTransactionHandle, SurfaceHandle, SurfaceRequest, WindowHandle,
 };
 
 #[tokio::test]
@@ -97,26 +97,30 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
     let submit = tokio::spawn({
         let client = client.clone();
         async move {
-            client
-                .submit_audio(
+            let samples = vec![0.25, -0.25, 0.5, -0.5];
+            let pointer = samples.as_ptr() as usize;
+            let returned = client
+                .submit_audio_owned(
                     audio,
                     AudioPacket {
                         sequence: 1,
                         channels: 2,
-                        samples: vec![0.25, -0.25, 0.5, -0.5],
+                        samples,
                     },
                 )
-                .await
+                .await?;
+            Ok::<_, PlatformError>((pointer, returned))
         }
     });
     match backend.next_command().await.unwrap() {
         HostCommand::SubmitAudio { packet, reply, .. } => {
             assert_eq!(packet.frame_count(), 2);
-            reply.send(Ok(())).unwrap();
+            reply.send(Ok(packet.samples)).unwrap();
         }
         other => panic!("unexpected command: {}", other.operation()),
     }
-    submit.await.unwrap().unwrap();
+    let (pointer, returned) = submit.await.unwrap().unwrap();
+    assert_eq!(pointer, returned.as_ptr() as usize);
 
     let query = tokio::spawn({
         let client = client.clone();

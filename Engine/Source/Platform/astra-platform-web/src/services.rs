@@ -216,7 +216,7 @@ impl WebAudioOutput {
         })
     }
 
-    pub fn submit(&mut self, packet: AudioPacket) -> Result<(), PlatformError> {
+    pub fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
         if packet.sequence != self.next_sequence || packet.channels != self.request.channels {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
@@ -261,7 +261,7 @@ impl WebAudioOutput {
             .submitted_samples
             .saturating_add(packet.samples.len() as u64);
         self.next_sequence += 1;
-        Ok(())
+        Ok(packet.samples)
     }
 
     pub fn status(&self) -> AudioOutputStatus {

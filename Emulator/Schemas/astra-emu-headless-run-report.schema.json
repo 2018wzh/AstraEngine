@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "HeadlessRunReportV2",
+  "title": "HeadlessRunReportV3",
   "type": "object",
   "required": [
     "artifact_manifest_hash",
@@ -96,6 +96,26 @@
       "items": {
         "type": "string"
       }
+    },
+    "performance_report_hash": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Hash256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "performance_trace_manifest_hash": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Hash256"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "phase_timings": {
       "$ref": "#/definitions/HeadlessPhaseTimingEvidenceV1"
@@ -201,6 +221,7 @@
         "max_ns",
         "median_ns",
         "p95_ns",
+        "p99_ns",
         "sample_count",
         "total_ns"
       ],
@@ -216,6 +237,11 @@
           "minimum": 0.0
         },
         "p95_ns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "p99_ns": {
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0

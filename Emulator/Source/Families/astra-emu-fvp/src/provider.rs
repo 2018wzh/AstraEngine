@@ -22,7 +22,7 @@ const MAX_CASE_FILES: usize = 65_536;
 const MAX_FILE_BYTES: usize = 512 * 1024 * 1024;
 
 fn legacy_transition_hash_default() -> Hash256 {
-    Hash256::from_sha256(b"astra.emu.fvp.transition.legacy-v5")
+    Hash256::from_sha256(b"astra.emu.fvp.transition.legacy-v6")
 }
 
 #[derive(Debug, Clone)]
@@ -394,16 +394,16 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             }
             let nls = parse_nls_option(&request.family_options)?;
             let pack_paths = parse_pack_paths_option(&request.family_options)?;
-            HostedFvpSession::open_vfs(
-                host,
-                ctx.mount_set_id.clone(),
-                script_uri,
+            HostedFvpSession::open_vfs(crate::hosted_runtime::HostedVfsSessionConfig {
+                reader: host,
+                mount_set_id: ctx.mount_set_id.clone(),
+                expected_script_uri: script_uri,
                 pack_paths,
                 nls,
                 stage_width,
                 stage_height,
                 trace_profile,
-            )
+            })
             .map_err(|error| invalid("ASTRA_FVP_OPEN", error.to_string()))?
         };
         let session = FvpSession {
@@ -502,8 +502,17 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             video_operation_count = delta.video.len(),
             text_operation_count = delta.text.len(),
             hosted_log_count = delta.logs.len(),
-            hosted_log_dropped_count = delta.log_dropped_count
+            hosted_log_dropped_count = delta.log_dropped_count,
+            capture_bytes = delta.copy_telemetry.capture_bytes,
+            operation_bytes = delta.copy_telemetry.operation_bytes,
+            pcm_moved_bytes = delta.copy_telemetry.pcm_moved_bytes,
+            pcm_copied_bytes = delta.copy_telemetry.pcm_copied_bytes
         );
+
+        let frame_index = delta.tick.frame_index;
+        let audio_operations = delta.audio;
+        let video_operations = delta.video;
+        let text_operations = delta.text;
 
         let mut effects = Vec::new();
         let mut waits = Vec::new();
@@ -514,11 +523,11 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             effects.push(LegacyEffect::Presentation {
                 sequence: effects.len() as u64,
                 command: "astra.emu.scene_packet.v1".into(),
-                payload,
+                payload: payload.into(),
             });
             coverage.presentation_commands = coverage.presentation_commands.saturating_add(1);
         }
-        for command in audio_commands_from_delta(&delta)
+        for command in audio_commands_from_delta(audio_operations)
             .map_err(|error| invalid("ASTRA_FVP_AUDIO_DELTA", error.to_string()))?
         {
             command.validate()?;
@@ -527,11 +536,12 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             effects.push(LegacyEffect::Audio {
                 sequence: effects.len() as u64,
                 command: "astra.emu.audio_command.v1".into(),
-                payload,
+                payload: payload.into(),
             });
             coverage.audio_commands = coverage.audio_commands.saturating_add(1);
         }
-        for (text_index, text) in delta.text.iter().enumerate() {
+        for (text_index, text) in text_operations.into_iter().enumerate() {
+            let text_hash = Hash256::from_sha256(text.text.as_bytes());
             let byte_len = u32::try_from(text.text.len()).map_err(|_| {
                 session.poisoned = true;
                 invalid(
@@ -542,7 +552,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             let lease_id = format!("fvp.text.{}.{}", input.tick_index, text_index);
             let ephemeral = LegacyEphemeralText {
                 lease_id: lease_id.clone(),
-                text: text.text.clone(),
+                text: text.text,
                 speaker: None,
             };
             if session
@@ -559,13 +569,13 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             effects.push(LegacyEffect::TextCapture {
                 sequence: effects.len() as u64,
                 lease_id,
-                text_hash: Hash256::from_sha256(text.text.as_bytes()),
+                text_hash,
                 byte_len,
                 speaker_hash: None,
                 source_ref: format!("rfvp.text.slot.{}", text.slot),
             });
         }
-        for command in video_commands_from_delta(&delta)
+        for command in video_commands_from_delta(frame_index, video_operations)
             .map_err(|error| invalid("ASTRA_FVP_VIDEO_DELTA", error.to_string()))?
         {
             let LegacyVideoCommandV1::Play {
@@ -604,7 +614,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             effects.push(LegacyEffect::Presentation {
                 sequence: effects.len() as u64,
                 command: "astra.emu.video_command.v1".into(),
-                payload,
+                payload: payload.into(),
             });
             waits.push(LegacyWaitRequest::MediaFence {
                 token_id,
@@ -695,15 +705,15 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let envelope = LegacySnapshotEnvelope {
             family_id: FamilyId(FVP_FAMILY_ID.into()),
             session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(5, 0, 0),
+            schema_version: SchemaVersion::new(6, 0, 0),
             case_fingerprint: session.case_fingerprint,
             fixed_step: session.last_step,
             session_seed: session.seed,
             runtime_cursor: session.instruction_count,
             family_sections: vec![LegacySnapshotSection {
                 section_id: "fvp.runtime".into(),
-                schema: "astra.emu.fvp.runtime.v5".into(),
-                version: SchemaVersion::new(5, 0, 0),
+                schema: "astra.emu.fvp.runtime.v6".into(),
+                version: SchemaVersion::new(6, 0, 0),
                 hash: Hash256::from_sha256(&bytes),
                 bytes,
             }],
@@ -728,6 +738,12 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 "snapshot family or session identity does not match",
             ));
         }
+        if snapshot.schema_version != SchemaVersion::new(6, 0, 0) {
+            return Err(invalid(
+                "ASTRA_FVP_SNAPSHOT_VERSION",
+                "FVP snapshots require the Family ABI v6 runtime schema",
+            ));
+        }
         if snapshot.family_sections.len() != 1 {
             return Err(invalid(
                 "ASTRA_FVP_SNAPSHOT_SECTION",
@@ -736,8 +752,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         }
         let section = &snapshot.family_sections[0];
         if section.section_id != "fvp.runtime"
-            || section.schema != "astra.emu.fvp.runtime.v5"
-            || section.version != SchemaVersion::new(5, 0, 0)
+            || section.schema != "astra.emu.fvp.runtime.v6"
+            || section.version != SchemaVersion::new(6, 0, 0)
             || section.hash != Hash256::from_sha256(&section.bytes)
         {
             return Err(invalid(
@@ -1366,7 +1382,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_v5_session_emits_one_semantic_commit_and_restores() {
+    fn hosted_v6_session_emits_one_semantic_commit_and_restores() {
         let script = terminal_hcb();
         let fingerprint = Hash256::from_sha256(&script);
         let mut provider = FvpRuntimeProvider::default();
@@ -1396,10 +1412,10 @@ mod tests {
             "shipping profile must not format opcode trace"
         );
         let snapshot = provider.save(&ctx, &session_id).expect("save must succeed");
-        assert_eq!(snapshot.schema_version, SchemaVersion::new(5, 0, 0));
+        assert_eq!(snapshot.schema_version, SchemaVersion::new(6, 0, 0));
         assert_eq!(
             snapshot.family_sections[0].schema,
-            "astra.emu.fvp.runtime.v5"
+            "astra.emu.fvp.runtime.v6"
         );
         let before = output.state_hash;
         let before_components = provider
@@ -1409,9 +1425,20 @@ mod tests {
             .runtime
             .canonical_state_component_hashes()
             .expect("canonical state must be available");
+        let mut rejected_v5 = snapshot.clone();
+        rejected_v5.schema_version = SchemaVersion::new(5, 0, 0);
+        rejected_v5.family_sections[0].schema = "astra.emu.fvp.runtime.v5".into();
+        rejected_v5.family_sections[0].version = SchemaVersion::new(5, 0, 0);
+        assert_eq!(
+            provider
+                .restore(&ctx, &session_id, &rejected_v5)
+                .expect_err("v5 snapshot must fail fast")
+                .code(),
+            "ASTRA_FVP_SNAPSHOT_VERSION"
+        );
         let restored = provider
             .restore(&ctx, &session_id, &snapshot)
-            .expect("v5 snapshot must restore");
+            .expect("v6 snapshot must restore");
         let restored_components = provider
             .sessions
             .get(&session_id.0)

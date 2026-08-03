@@ -146,12 +146,7 @@
                   "type": "string"
                 },
                 "payload": {
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0.0
-                  }
+                  "$ref": "#/definitions/LegacyPayload"
                 },
                 "sequence": {
                   "type": "integer",
@@ -181,12 +176,7 @@
                   "type": "string"
                 },
                 "payload": {
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0.0
-                  }
+                  "$ref": "#/definitions/LegacyPayload"
                 },
                 "sequence": {
                   "type": "integer",
@@ -216,12 +206,7 @@
                   "type": "string"
                 },
                 "payload": {
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0.0
-                  }
+                  "$ref": "#/definitions/LegacyPayload"
                 },
                 "sequence": {
                   "type": "integer",
@@ -306,12 +291,7 @@
                   "minimum": 0.0
                 },
                 "value": {
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0.0
-                  }
+                  "$ref": "#/definitions/LegacyPayload"
                 }
               }
             }
@@ -342,12 +322,7 @@
                   "type": "string"
                 },
                 "payload": {
-                  "type": "array",
-                  "items": {
-                    "type": "integer",
-                    "format": "uint8",
-                    "minimum": 0.0
-                  }
+                  "$ref": "#/definitions/LegacyPayload"
                 },
                 "sequence": {
                   "type": "integer",
@@ -386,6 +361,14 @@
           "additionalProperties": false
         }
       ]
+    },
+    "LegacyPayload": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0.0
+      }
     },
     "LegacyRuntimeStatus": {
       "type": "string",

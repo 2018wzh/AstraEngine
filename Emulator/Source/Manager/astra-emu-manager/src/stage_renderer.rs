@@ -869,7 +869,7 @@ fn to_rgba(format: LegacyTextureFormat, pixels: &[u8]) -> Result<Vec<u8>, String
     match format {
         LegacyTextureFormat::Rgba8 => Ok(pixels.to_vec()),
         LegacyTextureFormat::LumaAlpha8 => {
-            if pixels.len() % 2 != 0 {
+            if !pixels.len().is_multiple_of(2) {
                 return Err("ASTRA_EMU_STAGE_TEXTURE_LENGTH".into());
             }
             let mut rgba = Vec::with_capacity(pixels.len().saturating_mul(2));

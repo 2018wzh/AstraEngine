@@ -150,6 +150,71 @@ fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
 }
 
 #[astra_headless_test::test]
+fn retained_texture_region_updates_are_in_place_and_transactional() {
+    let mut renderer = CpuRendererProvider
+        .create(RendererCreateRequest {
+            width: 2,
+            height: 1,
+            format: RenderTargetFormat::Rgba8Srgb,
+            profile: "texture-region".into(),
+        })
+        .unwrap();
+    let initial: std::sync::Arc<[u8]> = vec![255, 0, 0, 255, 0, 255, 0, 255].into();
+    renderer
+        .capture_frame(&[DrawCommand::UploadTexture {
+            resource_id: "atlas".into(),
+            frame: TextureFrame {
+                width: 2,
+                height: 1,
+                hash: Hash256::from_sha256(&initial),
+                rgba8: initial,
+            },
+        }])
+        .unwrap();
+
+    let invalid: std::sync::Arc<[u8]> = vec![1, 2, 3, 4].into();
+    let error = renderer
+        .capture_frame(&[
+            DrawCommand::UpdateTextureRegion {
+                resource_id: "atlas".into(),
+                x: 1,
+                y: 0,
+                width: 1,
+                height: 1,
+                hash: Hash256::from_sha256(&invalid),
+                rgba8: invalid,
+            },
+            DrawCommand::PopClip,
+        ])
+        .unwrap_err();
+    assert!(error.to_string().contains("ASTRA_MEDIA_CLIP_STACK"));
+
+    let blue: std::sync::Arc<[u8]> = vec![0, 0, 255, 255].into();
+    let rendered = renderer
+        .capture_frame(&[
+            DrawCommand::UpdateTextureRegion {
+                resource_id: "atlas".into(),
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+                hash: Hash256::from_sha256(&blue),
+                rgba8: blue,
+            },
+            DrawCommand::Sprite {
+                id: "retained".into(),
+                texture_id: "atlas".into(),
+                source: None,
+                destination: RectI::new(0, 0, 2, 1),
+                opacity: 1.0,
+                blend: BlendMode::Alpha,
+            },
+        ])
+        .unwrap();
+    assert_eq!(rendered.bytes, vec![0, 0, 255, 255, 0, 255, 0, 255]);
+}
+
+#[astra_headless_test::test]
 fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {

@@ -9,19 +9,19 @@ use std::{
 use astra_core::{Diagnostic, Hash256, SchemaVersion, StableId};
 use astra_emu_family_api::{
     LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge, LegacyOpenRequest,
-    LegacyProbeReport, LegacyProbeRequest, LegacyProviderResult, LegacyReplayMode,
+    LegacyPayload, LegacyProbeReport, LegacyProbeRequest, LegacyProviderResult, LegacyReplayMode,
     LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacySnapshotEnvelope,
     LegacyStepBudget, LegacyStepInput, LegacyStepOutput, LegacyWaitRequest,
 };
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimeOutputCodec, RuntimeOutputDomain, RuntimeOutputEnvelope,
-    RuntimeOutputSchemaDescriptor, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
-    RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
-    RuntimeStepOutput, RuntimeTickIntegrityMode,
+    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeBulkKind,
+    RuntimeBulkPayload, RuntimeBulkStorage, RuntimeOpenReport, RuntimeOpenRequest,
+    RuntimeOutputCodec, RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor,
+    RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
+    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
+    RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, RuntimeTickIntegrityMode,
 };
 use astra_runtime::{
     ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
@@ -33,6 +33,26 @@ use astra_runtime::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+struct LegacyPayloadBulkStorage(LegacyPayload);
+
+impl RuntimeBulkStorage for LegacyPayloadBulkStorage {
+    fn kind(&self) -> RuntimeBulkKind {
+        RuntimeBulkKind::Bytes
+    }
+
+    fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+
+    fn hash(&self) -> Hash256 {
+        Hash256::from_sha256(self.0.as_bytes())
+    }
+
+    fn bytes(&self) -> Option<&[u8]> {
+        Some(self.0.as_bytes())
+    }
+}
 
 const RUNTIME_ID: &str = "astra.emu.runtime";
 const PROVIDER_ID: &str = "astra.emu.runtime_provider";
@@ -139,9 +159,12 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
                     astra_runtime::EventSource::StateMachine,
                     EventPayload {
                         kind: event.clone(),
-                        data: [("payload".into(), BlackboardValue::Bytes(payload.clone()))]
-                            .into_iter()
-                            .collect(),
+                        data: [(
+                            "payload".into(),
+                            BlackboardValue::Bytes(payload.as_bytes().to_vec()),
+                        )]
+                        .into_iter()
+                        .collect(),
                     },
                 ),
                 LegacyEffect::Presentation {
@@ -167,9 +190,10 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
                 LegacyEffect::TextCapture { .. } => {
                     ctx.emit_serialized_effect("text", "astra.emu.text_capture.v1", effect)?
                 }
-                LegacyEffect::SetBlackboard { key, value, .. } => {
-                    ctx.set_blackboard(key.clone(), BlackboardValue::Bytes(value.clone()))
-                }
+                LegacyEffect::SetBlackboard { key, value, .. } => ctx.set_blackboard(
+                    key.clone(),
+                    BlackboardValue::Bytes(value.as_bytes().to_vec()),
+                ),
                 LegacyEffect::ScheduleEvent {
                     due_tick,
                     event,
@@ -181,9 +205,12 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
                         astra_runtime::EventSource::StateMachine,
                         EventPayload {
                             kind: event.clone(),
-                            data: [("payload".into(), BlackboardValue::Bytes(payload.clone()))]
-                                .into_iter()
-                                .collect(),
+                            data: [(
+                                "payload".into(),
+                                BlackboardValue::Bytes(payload.as_bytes().to_vec()),
+                            )]
+                            .into_iter()
+                            .collect(),
                         },
                     );
                 }
@@ -945,17 +972,21 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 )
             })
             .map(|index| family_output.effects.remove(index))
-            .map(|effect| match effect {
-                LegacyEffect::Presentation {
-                    command, payload, ..
-                } => RuntimeOutputEnvelope::postcard_bytes(
-                    RuntimeOutputDomain::Presentation,
-                    command,
-                    SchemaVersion::new(1, 0, 0),
-                    payload.into(),
-                ),
-                _ => unreachable!("matched render presentation effect"),
-            });
+            .map(|effect| -> Result<RuntimeOutputEnvelope, String> {
+                match effect {
+                    LegacyEffect::Presentation {
+                        command, payload, ..
+                    } => Ok(RuntimeOutputEnvelope::bulk(
+                        RuntimeOutputDomain::Presentation,
+                        command,
+                        SchemaVersion::new(1, 0, 0),
+                        RuntimeBulkPayload::new(Arc::new(LegacyPayloadBulkStorage(payload)))
+                            .map_err(|error| error.to_string())?,
+                    )),
+                    _ => unreachable!("matched render presentation effect"),
+                }
+            })
+            .transpose()?;
         let mut outputs = vec![RuntimeOutputEnvelope::postcard(
             RuntimeOutputDomain::Effect,
             "astra.emu.legacy_step_output.v1",
@@ -1352,7 +1383,7 @@ mod tests {
             extension_without_dot: &str,
             max_entries: u32,
         ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
-            if root != "" || max_entries == 0 {
+            if !root.is_empty() || max_entries == 0 {
                 return Err(LegacyProviderError::invalid(
                     "TEST_VFS_ENUMERATE",
                     "synthetic fixture enumeration is invalid",
@@ -1408,7 +1439,12 @@ mod tests {
             compatibility_profile: "rfvp-v1".into(),
             mount_set_id: "mount.test".into(),
             permission_policy_id: "permission.test".into(),
-            family_options: [("fvp.nls".into(), "utf8".into())].into_iter().collect(),
+            family_options: [
+                ("fvp.nls".into(), "utf8".into()),
+                ("fvp.pack_paths".into(), "[]".into()),
+            ]
+            .into_iter()
+            .collect(),
         };
         let bytes = postcard::to_allocvec(&profile).unwrap();
         let package_hash = Hash256::from_sha256(b"package.test").to_string();
@@ -1437,7 +1473,7 @@ mod tests {
                 LegacyEffect::RuntimeEvent {
                     sequence: 0,
                     event: "patch.synthetic".into(),
-                    payload: vec![1, 2, 3],
+                    payload: vec![1, 2, 3].into(),
                 },
             )
             .unwrap();
@@ -1473,7 +1509,7 @@ mod tests {
         assert!(family_output.effects.iter().any(|effect| matches!(
             effect,
             LegacyEffect::RuntimeEvent { event, payload, .. }
-                if event == "patch.synthetic" && payload == &[1, 2, 3]
+                if event == "patch.synthetic" && payload.as_bytes() == [1, 2, 3]
         )));
         let mut output_hashes = output
             .outputs

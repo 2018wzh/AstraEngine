@@ -40,16 +40,13 @@ impl NativeAudioProducer {
                 "audio output queue is full",
             ));
         }
-        for &sample in samples {
-            self.inner.push(sample).map_err(|_| {
-                PlatformError::new(
-                    PlatformErrorCode::QueueOverflow,
-                    "audio.submit",
-                    "audio output queue changed while producer was submitting",
-                )
-            })?;
-        }
-        Ok(())
+        self.inner.push_entire_slice(samples).map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::QueueOverflow,
+                "audio.submit",
+                "audio output queue changed while producer was submitting",
+            )
+        })
     }
 }
 
@@ -60,6 +57,23 @@ pub struct NativeAudioConsumer {
 }
 
 impl NativeAudioConsumer {
+    pub fn pop_samples(&mut self, target: &mut [f32]) -> usize {
+        let available = self.inner.slots().min(target.len());
+        if available == 0 {
+            return 0;
+        }
+        if self
+            .inner
+            .pop_entire_slice(&mut target[..available])
+            .is_err()
+        {
+            return 0;
+        }
+        self.sample_count
+            .fetch_add(available as u64, Ordering::Relaxed);
+        available
+    }
+
     pub fn pop_sample(&mut self) -> Option<f32> {
         match self.inner.pop() {
             Ok(sample) => {

@@ -326,7 +326,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
                     assert_eq!(packet.sequence, sequence);
                     assert_eq!(packet.channels, 2);
                     assert_eq!(packet.frame_count(), 800);
-                    reply.send(Ok(())).unwrap();
+                    reply.send(Ok(packet.samples)).unwrap();
                 }
                 command => panic!("unexpected command: {}", command.operation()),
             }
