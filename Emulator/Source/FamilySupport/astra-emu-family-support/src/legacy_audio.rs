@@ -475,6 +475,12 @@ impl WorkerState {
         command: LegacyAudioCommandV1,
         resource: Option<Vec<u8>>,
     ) -> Result<(), String> {
+        let (operation, stream_id) = legacy_audio_command_identity(&command);
+        tracing::debug!(
+            event = "astra_emu_legacy_audio_command",
+            operation,
+            stream_id
+        );
         match command {
             LegacyAudioCommandV1::LoadResource {
                 stream_id,
@@ -548,27 +554,64 @@ impl WorkerState {
                 fade_in_ms,
             } => self.play(stream_id, volume, pan, repeat, fade_in_ms).await,
             LegacyAudioCommandV1::Stop { stream_id, fade_ms } => {
-                self.request_stop(stream_id, fade_ms).await
+                if self
+                    .streams
+                    .get(&stream_id)
+                    .is_some_and(|stream| stream.output.is_some())
+                {
+                    self.request_stop(stream_id, fade_ms).await
+                } else {
+                    if let Some(stream) = self.streams.get_mut(&stream_id) {
+                        stream.playing = false;
+                    }
+                    Ok(())
+                }
             }
-            LegacyAudioCommandV1::Pause { stream_id } => self.pause(stream_id).await,
-            LegacyAudioCommandV1::Resume { stream_id } => self.resume(stream_id).await,
+            LegacyAudioCommandV1::Pause { stream_id } => {
+                if self
+                    .streams
+                    .get(&stream_id)
+                    .is_some_and(|stream| stream.output.is_some())
+                {
+                    self.pause(stream_id).await
+                } else {
+                    Ok(())
+                }
+            }
+            LegacyAudioCommandV1::Resume { stream_id } => {
+                if self
+                    .streams
+                    .get(&stream_id)
+                    .is_some_and(|stream| stream.output.is_some())
+                {
+                    self.resume(stream_id).await
+                } else {
+                    Ok(())
+                }
+            }
             LegacyAudioCommandV1::SetParams {
                 stream_id,
                 volume,
                 pan,
                 repeat,
             } => {
-                let stream = self
+                if let Some(stream) = self
                     .streams
                     .get_mut(&stream_id)
-                    .ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_MISSING".to_owned())?;
-                stream.volume = volume;
-                stream.pan = pan;
-                stream.repeat = repeat;
+                    .filter(|stream| stream.output.is_some())
+                {
+                    stream.volume = volume;
+                    stream.pan = pan;
+                    stream.repeat = repeat;
+                }
                 Ok(())
             }
             LegacyAudioCommandV1::DestroyStream { stream_id } => {
-                self.remove_stream(stream_id).await
+                if self.streams.contains_key(&stream_id) {
+                    self.remove_stream(stream_id).await
+                } else {
+                    Ok(())
+                }
             }
             LegacyAudioCommandV1::MasterVolume { volume } => {
                 self.master_volume = volume;
@@ -991,6 +1034,22 @@ impl WorkerState {
     }
 }
 
+fn legacy_audio_command_identity(command: &LegacyAudioCommandV1) -> (&'static str, u32) {
+    match command {
+        LegacyAudioCommandV1::LoadResource { stream_id, .. } => ("load_resource", *stream_id),
+        LegacyAudioCommandV1::CreateStream { stream_id, .. } => ("create_stream", *stream_id),
+        LegacyAudioCommandV1::SubmitI16 { stream_id, .. } => ("submit_i16", *stream_id),
+        LegacyAudioCommandV1::SubmitF32 { stream_id, .. } => ("submit_f32", *stream_id),
+        LegacyAudioCommandV1::Play { stream_id, .. } => ("play", *stream_id),
+        LegacyAudioCommandV1::Stop { stream_id, .. } => ("stop", *stream_id),
+        LegacyAudioCommandV1::Pause { stream_id } => ("pause", *stream_id),
+        LegacyAudioCommandV1::Resume { stream_id } => ("resume", *stream_id),
+        LegacyAudioCommandV1::SetParams { stream_id, .. } => ("set_params", *stream_id),
+        LegacyAudioCommandV1::DestroyStream { stream_id } => ("destroy_stream", *stream_id),
+        LegacyAudioCommandV1::MasterVolume { .. } => ("master_volume", 0),
+    }
+}
+
 fn validate_segment(sample_rate: u32, channels: u16, samples: &[f32]) -> Result<(), String> {
     if sample_rate == 0
         || !(1..=2).contains(&channels)
@@ -1313,6 +1372,83 @@ mod tests {
         assert_eq!(&samples[4..], &[0.0, 0.0, 0.0, 0.0]);
         assert_eq!(fade_in_remaining, 0);
         assert_eq!(fade_out_remaining, 0);
+    }
+
+    #[test]
+    fn control_commands_preserve_legacy_idempotence_before_stream_creation() {
+        let (client, _backend, _events) = host_channel(
+            PlatformHostProfile::windows_release(
+                "legacy-audio-controls",
+                "dev.astraengine.audio-controls-test",
+            ),
+            16,
+            4,
+        )
+        .expect("host channel");
+        let mut state = WorkerState {
+            client,
+            streams: BTreeMap::new(),
+            master_volume: 1.0,
+            suspended: false,
+            telemetry: Arc::new(TelemetryAtomics::default()),
+            audible: Arc::new(AtomicBool::new(false)),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            for command in [
+                LegacyAudioCommandV1::Stop {
+                    stream_id: 9,
+                    fade_ms: 250,
+                },
+                LegacyAudioCommandV1::Pause { stream_id: 9 },
+                LegacyAudioCommandV1::Resume { stream_id: 9 },
+                LegacyAudioCommandV1::SetParams {
+                    stream_id: 9,
+                    volume: 0.5,
+                    pan: 0.0,
+                    repeat: false,
+                },
+                LegacyAudioCommandV1::DestroyStream { stream_id: 9 },
+            ] {
+                state
+                    .execute_legacy(command, None)
+                    .await
+                    .expect("missing control target is an idempotent no-op");
+            }
+            state
+                .execute_legacy(
+                    LegacyAudioCommandV1::CreateStream {
+                        stream_id: 9,
+                        sample_rate: 48_000,
+                        channels: 2,
+                        sample_format: LegacyAudioSampleFormat::F32,
+                    },
+                    None,
+                )
+                .await
+                .expect("create stream");
+            state
+                .execute_legacy(
+                    LegacyAudioCommandV1::Stop {
+                        stream_id: 9,
+                        fade_ms: 250,
+                    },
+                    None,
+                )
+                .await
+                .expect("unplayed stream stop is idempotent");
+            state
+                .execute_legacy(LegacyAudioCommandV1::DestroyStream { stream_id: 9 }, None)
+                .await
+                .expect("destroy stream");
+            state
+                .execute_legacy(LegacyAudioCommandV1::DestroyStream { stream_id: 9 }, None)
+                .await
+                .expect("repeated destroy is idempotent");
+        });
     }
 
     #[test]
