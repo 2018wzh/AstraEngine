@@ -3,7 +3,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -707,6 +707,7 @@ pub enum PlatformEventKind {
 #[derive(Clone)]
 pub struct PlatformHostClient {
     command_tx: mpsc::Sender<HostCommand>,
+    command_wake: Option<PlatformCommandWakeRegistration>,
     shutdown: Arc<AtomicBool>,
     profile: Arc<HostLaunchProfile>,
 }
@@ -1368,7 +1369,11 @@ impl PlatformHostClient {
                     "platform command queue is full",
                 ),
                 mpsc::error::TrySendError::Closed(_) => queue_closed(operation),
-            })
+            })?;
+        if let Some(wake) = &self.command_wake {
+            wake.wake(operation);
+        }
+        Ok(())
     }
 
     async fn send_unit(
@@ -1380,6 +1385,54 @@ impl PlatformHostClient {
         self.ensure_running(operation)?;
         self.try_send(command)?;
         response.await.map_err(|_| queue_closed(operation))?
+    }
+}
+
+type PlatformCommandWakeCallback = dyn Fn() + Send + Sync + 'static;
+
+/// Opaque in-process bridge used by native event-loop hosts to wake command
+/// processing immediately after a successful queue submission. It contains no
+/// platform handle and is never serialized or exposed through plugin ABIs.
+#[derive(Clone, Default)]
+pub struct PlatformCommandWakeRegistration {
+    callback: Arc<Mutex<Option<Arc<PlatformCommandWakeCallback>>>>,
+}
+
+impl PlatformCommandWakeRegistration {
+    pub fn bind(&self, callback: impl Fn() + Send + Sync + 'static) -> Result<(), PlatformError> {
+        let mut slot = self.callback.lock().map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "host.command_wake.bind",
+                "platform command wake registration is poisoned",
+            )
+        })?;
+        if slot.is_some() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "host.command_wake.bind",
+                "platform command wake callback is already bound",
+            ));
+        }
+        *slot = Some(Arc::new(callback));
+        Ok(())
+    }
+
+    fn wake(&self, operation: &'static str) {
+        let callback = match self.callback.lock() {
+            Ok(slot) => slot.clone(),
+            Err(_) => {
+                tracing::error!(
+                    event = "platform.host.command_wake.poisoned",
+                    operation,
+                    "platform command wake registration is poisoned"
+                );
+                return;
+            }
+        };
+        if let Some(callback) = callback {
+            callback();
+        }
     }
 }
 
@@ -1508,6 +1561,43 @@ pub fn host_channel(
     ),
     PlatformError,
 > {
+    host_channel_internal(profile, command_capacity, event_capacity, None)
+}
+
+pub fn host_channel_with_command_wake(
+    profile: impl Into<HostLaunchProfile>,
+    command_capacity: usize,
+    event_capacity: usize,
+    command_wake: PlatformCommandWakeRegistration,
+) -> Result<
+    (
+        PlatformHostClient,
+        PlatformBackendChannels,
+        PlatformEventStream,
+    ),
+    PlatformError,
+> {
+    host_channel_internal(
+        profile,
+        command_capacity,
+        event_capacity,
+        Some(command_wake),
+    )
+}
+
+fn host_channel_internal(
+    profile: impl Into<HostLaunchProfile>,
+    command_capacity: usize,
+    event_capacity: usize,
+    command_wake: Option<PlatformCommandWakeRegistration>,
+) -> Result<
+    (
+        PlatformHostClient,
+        PlatformBackendChannels,
+        PlatformEventStream,
+    ),
+    PlatformError,
+> {
     let profile = profile.into();
     profile.validate()?;
     if command_capacity == 0 || event_capacity == 0 {
@@ -1522,6 +1612,7 @@ pub fn host_channel(
     Ok((
         PlatformHostClient {
             command_tx,
+            command_wake,
             shutdown: Arc::new(AtomicBool::new(false)),
             profile: Arc::new(profile),
         },

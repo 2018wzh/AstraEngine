@@ -22,6 +22,8 @@ pub struct PlatformHostSession {
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
+Windows host 的命令队列是事件驱动的：命令成功进入有界队列后必须通过 `EventLoopProxy` 唤醒 Winit，并在 `user_event` 中立即排空；队列满、关闭或未成功提交时不得产生伪唤醒。HTTPS package completion 同样显式唤醒 event loop。`about_to_wait` 不能作为 render/audio/decode command 的生产或补水时钟；无已连接 gamepad 时只保留 250 ms 的设备发现轮询，已连接 gamepad 才使用 4 ms 输入轮询。唤醒注册重复绑定、event loop 关闭和 queue overflow 都必须输出稳定 diagnostic，不能静默退回 fixed polling。
+
 用户授权原版目录只暴露安全相对路径的 stat/range read。source fingerprint 固定按 4 MiB range 流式读取，同时计算公开文件 SHA-256 与不落盘的私有 key material；单个原版大文件不得通过 whole-file `fs::read` 进入 Player、Headless 或 CLI。每次 range 都校验 offset、length、最大读取量和文件边界，fingerprint 前后再次 stat，长度或内容变化立即阻断。
 
 所有资源使用不可序列化的 `{slot, generation}` typed handle：`WindowHandle`、`SurfaceHandle`、`AudioOutputHandle`、`DecodeSessionHandle`、`MediaFrameHandle`、`SaveTransactionHandle` 与 `PackageSourceHandle`。stale handle、重复 close、越界 range、乱序 completion、队列溢出和 shutdown leak 必须显式报错。

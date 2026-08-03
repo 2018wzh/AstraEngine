@@ -8,6 +8,8 @@ RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁�
 
 AstraEMU FVP 当前实现边界以 Family ABI v6 为准：显式 `StableAbi` lifecycle/VFS wire、ABI-owned bulk、FVP snapshot v6、hosted owned delta/copy telemetry、稳定纹理 region update 和共享 PlatformHost audio worker 已进入 workspace。局部 contract、动态 lifecycle、scene/audio queue 回归已通过；最终 clean Release CLI/Manager 性能重跑尚未完成，旧 v5 与失败 soak identity 不能作为当前放行证据。下表 AstraEMU 行中的 hosted-v5 运行只保留为历史 E2 记录。
 
+2026-08-03 的 Windows native 诊断另确认 PlatformHost command queue 未唤醒 Winit 是 present backlog 的直接根因。当前 command submit 和 HTTPS completion 已通过 `EventLoopProxy` 事件驱动，800-step signed Release 复跑无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms；该短跑不替代 hover 动画语义、Family ABI scene bulk 零拷贝、10 分钟 audio soak 或 Manager E3。
+
 | 模块 | Design | Contract | Public API | Data Format | Test Scenario | Release Gate | Manual |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | EngineCore | [module](../modules/engine-core.md) | [runtime](../contracts/runtime.md) | `Engine/Source/Runtime/astra-runtime` implemented, `Engine/Source/Runtime/astra-engine` Rust dylib facade implemented；Runtime v3 包含 inverse journal/overlay、增量 root、compiled dispatch 和 conflict-DAG executor | shared `astra-package` save container；RuntimeSnapshot 包含 StableId generator、typed component、完整 Event/Await/Delayed queue、mutation/effect trace；`RuntimeReplayTranscript` 包含 input/await/provider output/checkpoint | `cargo test -p astra-runtime` 覆盖 tick/action/access/1-8 worker/save/replay/event ordinal，`cargo test --workspace` 与 clean Release 72,000 帧产品性能运行通过 | runtime determinism, run-to-quiescence flat StateMachine transaction, Await replay policy, save/load continuation, provider-free replay, bounded candidate work, structured logs, Rust dylib facade | [operator](../manual/operator-guide.md) |

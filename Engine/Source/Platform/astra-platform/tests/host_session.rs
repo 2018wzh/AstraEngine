@@ -1,6 +1,11 @@
 use astra_platform::{
-    host_channel, HostCommand, PlatformErrorCode, PlatformEvent, PlatformEventKind,
-    PlatformHostProfile, WindowHandle, WindowRequest,
+    host_channel, host_channel_with_command_wake, HostCommand, PlatformCommandWakeRegistration,
+    PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile, WindowHandle,
+    WindowRequest,
+};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 #[tokio::test]
@@ -80,4 +85,99 @@ async fn cloned_event_emitter_assigns_one_global_monotonic_sequence() {
     second.emit(PlatformEventKind::Suspended).unwrap();
     assert_eq!(events.recv().await.unwrap().sequence, 1);
     assert_eq!(events.recv().await.unwrap().sequence, 2);
+}
+
+#[tokio::test]
+async fn successful_command_submission_wakes_native_event_loop() {
+    let wake = PlatformCommandWakeRegistration::default();
+    let wake_count = Arc::new(AtomicUsize::new(0));
+    wake.bind({
+        let wake_count = Arc::clone(&wake_count);
+        move || {
+            wake_count.fetch_add(1, Ordering::SeqCst);
+        }
+    })
+    .unwrap();
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    let (client, mut backend, _events) =
+        host_channel_with_command_wake(profile, 2, 2, wake).unwrap();
+
+    let create = tokio::spawn(async move {
+        client
+            .create_window(WindowRequest {
+                title: "AstraPlayer".to_string(),
+                width: 800,
+                height: 600,
+                visible: true,
+            })
+            .await
+    });
+
+    while wake_count.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(wake_count.load(Ordering::SeqCst), 1);
+    match backend.next_command().await.unwrap() {
+        HostCommand::CreateWindow { reply, .. } => {
+            reply
+                .send(Ok(WindowHandle::from_parts(1, 1).unwrap()))
+                .unwrap();
+        }
+        other => panic!("unexpected command: {}", other.operation()),
+    }
+    create.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn rejected_command_submission_does_not_wake_native_event_loop() {
+    let wake = PlatformCommandWakeRegistration::default();
+    let wake_count = Arc::new(AtomicUsize::new(0));
+    wake.bind({
+        let wake_count = Arc::clone(&wake_count);
+        move || {
+            wake_count.fetch_add(1, Ordering::SeqCst);
+        }
+    })
+    .unwrap();
+    let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
+    let (client, _backend, _events) = host_channel_with_command_wake(profile, 1, 2, wake).unwrap();
+
+    let first = tokio::spawn({
+        let client = client.clone();
+        async move {
+            client
+                .create_window(WindowRequest {
+                    title: "AstraPlayer".to_string(),
+                    width: 800,
+                    height: 600,
+                    visible: true,
+                })
+                .await
+        }
+    });
+    while wake_count.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+
+    let error = client
+        .create_window(WindowRequest {
+            title: "AstraPlayer".to_string(),
+            width: 800,
+            height: 600,
+            visible: true,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, PlatformErrorCode::QueueOverflow);
+    assert_eq!(wake_count.load(Ordering::SeqCst), 1);
+    first.abort();
+}
+
+#[test]
+fn command_wake_registration_rejects_rebinding() {
+    let wake = PlatformCommandWakeRegistration::default();
+    wake.bind(|| {}).unwrap();
+    let error = wake.bind(|| {}).unwrap_err();
+    assert_eq!(error.code, PlatformErrorCode::InvalidState);
+    assert_eq!(error.operation, "host.command_wake.bind");
 }

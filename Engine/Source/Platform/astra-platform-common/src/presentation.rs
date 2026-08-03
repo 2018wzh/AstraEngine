@@ -243,6 +243,7 @@ impl WgpuPresentationCore {
     }
 
     pub fn present_scene(&mut self, frame: SceneFrame) -> Result<(), PlatformError> {
+        let present_started = std::time::Instant::now();
         self.ensure_device_available("surface.present_scene")?;
         if frame.sequence == 0
             || self
@@ -269,11 +270,17 @@ impl WgpuPresentationCore {
             self.config.height = frame.height;
             self.surface.configure(&self.device, &self.config);
         }
+        let render_started = std::time::Instant::now();
         let prepared = self
             .glyph_renderer
             .render(&self.device, &self.queue, &frame)?;
+        let render_ns = render_started.elapsed().as_nanos();
+        let surface_started = std::time::Instant::now();
         self.present_texture(&prepared.texture, "surface.present_scene")?;
+        let surface_ns = surface_started.elapsed().as_nanos();
+        let commit_started = std::time::Instant::now();
         let texture = self.glyph_renderer.commit(prepared);
+        let commit_ns = commit_started.elapsed().as_nanos();
         self.last_upload = Some(UploadFrame {
             texture,
             width: frame.width,
@@ -282,6 +289,19 @@ impl WgpuPresentationCore {
         self.last_sequence = Some(frame.sequence);
         self.last_frame = None;
         self.last_scene_frame = Some(frame);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                event = "platform.wgpu.surface.scene_frame_presented",
+                scene_render_ns = u64::try_from(render_ns).unwrap_or(u64::MAX),
+                surface_present_ns = u64::try_from(surface_ns).unwrap_or(u64::MAX),
+                retained_commit_ns = u64::try_from(commit_ns).unwrap_or(u64::MAX),
+                total_present_ns =
+                    u64::try_from(present_started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                draw_calls = self.glyph_renderer.last_draw_calls(),
+                upload_bytes = self.glyph_renderer.last_upload_bytes(),
+                "wgpu surface presented a retained scene frame"
+            );
+        }
         Ok(())
     }
 

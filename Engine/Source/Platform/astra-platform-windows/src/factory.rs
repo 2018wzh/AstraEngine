@@ -69,13 +69,13 @@ mod windows {
     use crate::accessibility::WindowsAccessibilityBridge;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputRequest,
-        AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind, DecodeOutput,
-        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, PackageSourceHandle,
-        PackageSourceRequest, PlatformBackendChannels, PlatformDecodeRequest, PlatformError,
-        PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
-        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
-        WindowHandle,
+        host_channel_with_command_wake, AudioDeviceFormat, AudioMeter, AudioOutputHandle,
+        AudioOutputRequest, AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind,
+        DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
+        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
+        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
+        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -89,7 +89,7 @@ mod windows {
             ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase as WinitTouchPhase,
             WindowEvent,
         },
-        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
         platform::windows::EventLoopBuilderExtWindows,
         window::{Window, WindowAttributes, WindowId},
     };
@@ -109,16 +109,27 @@ mod windows {
         let command_capacity = profile.limits.command_queue_capacity;
         let event_capacity = profile.limits.event_queue_capacity;
         let instance_guard = SingleInstanceGuard::acquire(&profile)?;
-        let (client, backend, events) = host_channel(
+        let command_wake = PlatformCommandWakeRegistration::default();
+        let (client, backend, events) = host_channel_with_command_wake(
             HostLaunchProfile::platform(profile.clone()),
             command_capacity,
             event_capacity,
+            command_wake.clone(),
         )?;
         let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
         let backend_profile = profile.clone();
         thread::Builder::new()
             .name("astra-platform-windows".to_string())
-            .spawn(move || run_backend(backend, ready_tx, backend_profile, roots, instance_guard))
+            .spawn(move || {
+                run_backend(
+                    backend,
+                    command_wake,
+                    ready_tx,
+                    backend_profile,
+                    roots,
+                    instance_guard,
+                )
+            })
             .map_err(|_| {
                 PlatformError::new(
                     PlatformErrorCode::InvalidState,
@@ -142,6 +153,7 @@ mod windows {
 
     fn run_backend(
         backend: PlatformBackendChannels,
+        command_wake: PlatformCommandWakeRegistration,
         ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
         profile: PlatformHostProfile,
         roots: Option<super::HostRoots>,
@@ -184,6 +196,20 @@ mod windows {
                 return;
             }
         };
+        let event_loop_proxy = event_loop.create_proxy();
+        let command_proxy = event_loop_proxy.clone();
+        if let Err(error) = command_wake.bind(move || {
+            if command_proxy.send_event(()).is_err() {
+                tracing::error!(
+                    event = "platform.windows.command_wake.failed",
+                    diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                    "Windows platform command could not wake the event loop"
+                );
+            }
+        }) {
+            let _ = ready.send(Err(error));
+            return;
+        }
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = match WindowsHostApp::new(
             backend,
@@ -196,6 +222,7 @@ mod windows {
                 cache_policy: profile.package_cache.clone(),
                 bundle_root: roots.bundle_root,
             },
+            event_loop_proxy,
         ) {
             Ok(app) => app,
             Err(_) => return,
@@ -285,6 +312,7 @@ mod windows {
         event_sequence: u64,
         gamepads: gilrs::Gilrs,
         gamepad_mapper: astra_platform_common::GamepadMapper,
+        event_loop_proxy: EventLoopProxy<()>,
     }
 
     struct PackageHostConfig {
@@ -301,6 +329,7 @@ mod windows {
             save_store: AtomicSaveStore,
             package_cache: VerifiedPackageCache,
             package: PackageHostConfig,
+            event_loop_proxy: EventLoopProxy<()>,
         ) -> Result<Self, PlatformError> {
             let gamepads = gilrs::Gilrs::new().map_err(|_| {
                 let error = host_error(
@@ -336,6 +365,7 @@ mod windows {
                 event_sequence: 0,
                 gamepads,
                 gamepad_mapper,
+                event_loop_proxy,
             })
         }
 
@@ -366,6 +396,8 @@ mod windows {
                         break;
                     }
                 };
+                let operation = command.operation();
+                let command_started = Instant::now();
                 match command {
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
@@ -782,6 +814,15 @@ mod windows {
                         }
                     }
                 }
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        event = "platform.windows.command.completed",
+                        operation,
+                        duration_ns =
+                            u64::try_from(command_started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                        "Windows platform host completed one command"
+                    );
+                }
             }
         }
 
@@ -816,6 +857,7 @@ mod windows {
             let policies = self.package_source_policies.clone();
             let package_id = self.package_id.clone();
             let policy = self.package_cache_policy.clone();
+            let event_loop_proxy = self.event_loop_proxy.clone();
             self.pending_package_opens += 1;
             thread::spawn(move || {
                 let result = (|| {
@@ -831,7 +873,17 @@ mod windows {
                     runtime.block_on(client.fetch_into_cache(&url, &expected_hash, &mut cache))?;
                     cache.open_source(&expected_hash)
                 })();
-                let _ = completion_tx.send(PackageCompletion { reply, result });
+                if completion_tx
+                    .send(PackageCompletion { reply, result })
+                    .is_ok()
+                    && event_loop_proxy.send_event(()).is_err()
+                {
+                    tracing::error!(
+                        event = "platform.windows.package_completion_wake.failed",
+                        diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                        "Windows package completion could not wake the event loop"
+                    );
+                }
             });
         }
 
@@ -856,6 +908,10 @@ mod windows {
             if let Some(ready) = self.ready.take() {
                 let _ = ready.send(result);
             }
+        }
+
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, (): ()) {
+            self.process_commands(event_loop);
         }
 
         fn window_event(
@@ -962,9 +1018,19 @@ mod windows {
                 });
             }
             self.poll_gamepad();
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(4),
-            ));
+            if self.gamepads.gamepads().next().is_some() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(4),
+                ));
+            } else {
+                // Gilrs does not expose a Windows event-loop wake handle for a
+                // newly connected controller. Keep discovery bounded and low
+                // frequency while all host commands and async completions use
+                // explicit EventLoopProxy wakes.
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(250),
+                ));
+            }
         }
     }
 
