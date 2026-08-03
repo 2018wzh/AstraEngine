@@ -748,11 +748,7 @@ impl WorkerState {
             .ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_MISSING".to_owned())?;
         if let Some(output) = stream.output.take() {
             self.client
-                .drain_audio(output)
-                .await
-                .map_err(|error| error.to_string())?;
-            self.client
-                .close_audio(output)
+                .abort_audio(output)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -827,7 +823,7 @@ impl WorkerState {
                     .await
                     .map_err(|error| error.to_string())?;
                 self.client
-                    .close_audio(output)
+                    .abort_audio(output)
                     .await
                     .map_err(|error| error.to_string())?;
                 let stream = self
@@ -1571,6 +1567,7 @@ mod tests {
                         }
                         HostCommand::ResumeAudio { reply, .. }
                         | HostCommand::PauseAudio { reply, .. }
+                        | HostCommand::AbortAudio { reply, .. }
                         | HostCommand::CloseAudio { reply, .. } => {
                             let _ = reply.send(Ok(()));
                         }

@@ -23,6 +23,7 @@ pub const MAX_HOSTED_FILES: usize = 65_536;
 // caller and every individual VFS range remains at most 16 MiB.
 pub const MAX_HOSTED_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const MAX_HOSTED_RANGE_BYTES: usize = 16 * 1024 * 1024;
+const HOSTED_VFS_PAGE_BYTES: usize = 1024 * 1024;
 
 pub enum HostedFileSource {
     Memory(Arc<BTreeMap<String, Vec<u8>>>),
@@ -152,6 +153,8 @@ pub enum HostedMemoryFile {
         uri: String,
         len: u64,
         revision: SourceRevision,
+        cache_offset: u64,
+        cache: Vec<u8>,
     },
 }
 
@@ -182,6 +185,8 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
                     uri: path,
                     len: stat.len,
                     revision: stat.revision,
+                    cache_offset: 0,
+                    cache: Vec::new(),
                 })
             }
         }
@@ -287,25 +292,67 @@ impl RfvpFile for HostedMemoryFile {
                 uri,
                 len,
                 revision,
+                cache_offset,
+                cache,
             } => {
                 if offset >= *len || out.is_empty() {
                     return Ok(0);
                 }
                 let bytes = (out.len() as u64).min(*len - offset);
+                let end = offset
+                    .checked_add(bytes)
+                    .ok_or(RfvpError::CapacityExceeded)?;
+                let cache_end = cache_offset
+                    .checked_add(cache.len() as u64)
+                    .ok_or(RfvpError::CapacityExceeded)?;
+                if offset >= *cache_offset && end <= cache_end {
+                    let start = usize::try_from(offset - *cache_offset)
+                        .map_err(|_| RfvpError::CapacityExceeded)?;
+                    let bytes = usize::try_from(bytes).map_err(|_| RfvpError::CapacityExceeded)?;
+                    out[..bytes].copy_from_slice(&cache[start..start + bytes]);
+                    return Ok(bytes);
+                }
+                if out.len() >= HOSTED_VFS_PAGE_BYTES {
+                    let result = reader
+                        .read_file_range(
+                            mount_set_id,
+                            uri,
+                            *revision,
+                            ByteRange { offset, len: bytes },
+                            MAX_HOSTED_RANGE_BYTES as u64,
+                        )
+                        .map_err(map_vfs_error)?;
+                    if result.bytes.len() != bytes as usize {
+                        return Err(RfvpError::Io);
+                    }
+                    out[..result.bytes.len()].copy_from_slice(&result.bytes);
+                    return Ok(result.bytes.len());
+                }
+                let page_bytes = HOSTED_VFS_PAGE_BYTES as u64;
+                let page_offset = offset / page_bytes * page_bytes;
+                let page_len = page_bytes.min(*len - page_offset);
                 let result = reader
                     .read_file_range(
                         mount_set_id,
                         uri,
                         *revision,
-                        ByteRange { offset, len: bytes },
+                        ByteRange {
+                            offset: page_offset,
+                            len: page_len,
+                        },
                         MAX_HOSTED_RANGE_BYTES as u64,
                     )
                     .map_err(map_vfs_error)?;
-                if result.bytes.len() != bytes as usize {
+                if result.bytes.len() != page_len as usize {
                     return Err(RfvpError::Io);
                 }
-                out[..result.bytes.len()].copy_from_slice(&result.bytes);
-                Ok(result.bytes.len())
+                *cache_offset = page_offset;
+                *cache = result.bytes;
+                let start = usize::try_from(offset - page_offset)
+                    .map_err(|_| RfvpError::CapacityExceeded)?;
+                let bytes = usize::try_from(bytes).map_err(|_| RfvpError::CapacityExceeded)?;
+                out[..bytes].copy_from_slice(&cache[start..start + bytes]);
+                Ok(bytes)
             }
         }
     }
