@@ -259,14 +259,14 @@ mod browser {
                     let _ = reply.send(result);
                 }
                 HostCommand::QueryAudio { output, reply } => {
-                    let result = match audio.get(output) {
+                    let result = match audio.get_mut(output) {
                         Ok(audio) => audio.state().await,
                         Err(error) => Err(error),
                     };
                     let _ = reply.send(result);
                 }
                 HostCommand::DrainAudio { output, reply } => {
-                    let result = match audio.get(output) {
+                    let result = match audio.get_mut(output) {
                         Ok(audio) => audio.drain().await,
                         Err(error) => Err(error),
                     };
@@ -456,8 +456,8 @@ mod browser {
     struct BrowserLifecycle {
         target: EventTarget,
         visibility: Closure<dyn FnMut(Event)>,
-        gamepad_timer: i32,
-        _gamepad_callback: Closure<dyn FnMut()>,
+        gamepad_frame: i32,
+        _gamepad_callback: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
     }
 
     impl BrowserLifecycle {
@@ -491,7 +491,13 @@ mod browser {
             let mapper = astra_platform_common::GamepadMapper::new(0.2)?;
             let state = Rc::new(RefCell::new((gamepads, mapper)));
             let gamepad_emitter = emitter.clone();
-            let gamepad_callback = Closure::wrap(Box::new(move || {
+            let callback_slot: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
+                Rc::new(RefCell::new(None));
+            let callback_slot_for_callback = callback_slot.clone();
+            let gamepad_window =
+                web_sys::window().ok_or_else(|| web_error("input.gamepad.bind"))?;
+            let gamepad_window_for_callback = gamepad_window.clone();
+            let gamepad_callback = Closure::wrap(Box::new(move |_timestamp: f64| {
                 let mut state = state.borrow_mut();
                 while let Some(event) = state.0.next_event() {
                     let Some(event) = raw_gamepad_event(event) else {
@@ -511,19 +517,34 @@ mod browser {
                         ),
                     }
                 }
-            }) as Box<dyn FnMut()>);
-            let gamepad_timer = web_sys::window()
-                .ok_or_else(|| web_error("input.gamepad.bind"))?
-                .set_interval_with_callback_and_timeout_and_arguments_0(
-                    gamepad_callback.as_ref().unchecked_ref(),
-                    16,
-                )
-                .map_err(|_| web_error("input.gamepad.bind"))?;
+                if let Some(callback) = callback_slot_for_callback.borrow().as_ref() {
+                    if gamepad_window_for_callback
+                        .request_animation_frame(callback.as_ref().unchecked_ref())
+                        .is_err()
+                    {
+                        tracing::warn!(
+                            event = "platform.web.gamepad.raf_failed",
+                            diagnostic_code = "ASTRA_PLATFORM_GAMEPAD_RAF_FAILED",
+                            "browser requestAnimationFrame could not schedule the gamepad source"
+                        );
+                    }
+                }
+            }) as Box<dyn FnMut(f64)>);
+            *callback_slot.borrow_mut() = Some(gamepad_callback);
+            let gamepad_frame = {
+                let callback_slot_ref = callback_slot.borrow();
+                let callback = callback_slot_ref
+                    .as_ref()
+                    .ok_or_else(|| web_error("input.gamepad.bind"))?;
+                gamepad_window
+                    .request_animation_frame(callback.as_ref().unchecked_ref())
+                    .map_err(|_| web_error("input.gamepad.bind"))?
+            };
             Ok(Self {
                 target,
                 visibility,
-                gamepad_timer,
-                _gamepad_callback: gamepad_callback,
+                gamepad_frame,
+                _gamepad_callback: callback_slot,
             })
         }
     }
@@ -535,7 +556,7 @@ mod browser {
                 self.visibility.as_ref().unchecked_ref(),
             );
             if let Some(window) = web_sys::window() {
-                window.clear_interval_with_handle(self.gamepad_timer);
+                let _ = window.cancel_animation_frame(self.gamepad_frame);
             }
         }
     }
@@ -1259,314 +1280,6 @@ mod browser {
         readback.finish()
     }
 
-    #[cfg(any())]
-    struct LegacySurfaceResource {
-        _instance: wgpu::Instance,
-        surface: wgpu::Surface<'static>,
-        _adapter: wgpu::Adapter,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        config: wgpu::SurfaceConfiguration,
-        bind_group_layout: wgpu::BindGroupLayout,
-        sampler: wgpu::Sampler,
-        pipeline: wgpu::RenderPipeline,
-        last_upload: Option<UploadFrame>,
-    }
-
-    #[cfg(any())]
-    impl LegacySurfaceResource {
-        async fn new(
-            canvas: HtmlCanvasElement,
-            width: u32,
-            height: u32,
-        ) -> Result<Self, PlatformError> {
-            let instance = wgpu::Instance::default();
-            let surface = instance
-                .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-                .map_err(|_| web_error("surface.create"))?;
-            let adapter = instance
-                .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: Some(&surface),
-                    force_fallback_adapter: false,
-                    apply_limit_buckets: false,
-                })
-                .await
-                .map_err(|_| web_error("surface.create"))?;
-            let (device, queue) = adapter
-                .request_device(&wgpu::DeviceDescriptor::default())
-                .await
-                .map_err(|_| web_error("surface.create"))?;
-            let mut config = surface
-                .get_default_config(&adapter, width, height)
-                .ok_or_else(|| web_error("surface.create"))?;
-            config.present_mode = wgpu::PresentMode::Fifo;
-            surface.configure(&device, &config);
-            let (bind_group_layout, sampler, pipeline) = create_pipeline(&device, config.format);
-            Ok(Self {
-                _instance: instance,
-                surface,
-                _adapter: adapter,
-                device,
-                queue,
-                config,
-                bind_group_layout,
-                sampler,
-                pipeline,
-                last_upload: None,
-            })
-        }
-
-        fn present(&mut self, frame: RgbaFrame) -> Result<(), PlatformError> {
-            if frame.width != self.config.width || frame.height != self.config.height {
-                self.config.width = frame.width;
-                self.config.height = frame.height;
-                self.surface.configure(&self.device, &self.config);
-            }
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("astra-web-frame-upload"),
-                size: wgpu::Extent3d {
-                    width: frame.width,
-                    height: frame.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST
-                    | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &frame.rgba8,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(frame.width * 4),
-                    rows_per_image: Some(frame.height),
-                },
-                wgpu::Extent3d {
-                    width: frame.width,
-                    height: frame.height,
-                    depth_or_array_layers: 1,
-                },
-            );
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("astra-web-frame-bind-group"),
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
-            let output = match self.surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(output)
-                | wgpu::CurrentSurfaceTexture::Suboptimal(output) => output,
-                wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                    return Err(PlatformError::new(
-                        PlatformErrorCode::ContextLost,
-                        "surface.present_rgba",
-                        "WebGPU canvas surface was lost",
-                    ));
-                }
-                _ => return Err(web_error("surface.present_rgba")),
-            };
-            let output_view = output
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("astra-web-frame-encoder"),
-                });
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("astra-web-frame-pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &output_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &bind_group, &[]);
-                pass.draw(0..3, 0..1);
-            }
-            self.queue.submit([encoder.finish()]);
-            self.queue.present(output);
-            self.last_upload = Some(UploadFrame {
-                texture,
-                width: frame.width,
-                height: frame.height,
-            });
-            Ok(())
-        }
-
-        async fn capture(&mut self) -> Result<CapturedFrame, PlatformError> {
-            let upload = self
-                .last_upload
-                .as_ref()
-                .ok_or_else(|| web_error("surface.capture"))?;
-            let row = upload.width * 4;
-            let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-                * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("astra-web-frame-readback"),
-                size: u64::from(padded) * u64::from(upload.height),
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("astra-web-frame-readback-encoder"),
-                });
-            encoder.copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &upload.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &buffer,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(padded),
-                        rows_per_image: Some(upload.height),
-                    },
-                },
-                wgpu::Extent3d {
-                    width: upload.width,
-                    height: upload.height,
-                    depth_or_array_layers: 1,
-                },
-            );
-            self.queue.submit([encoder.finish()]);
-            let (mapped_tx, mapped_rx) = tokio::sync::oneshot::channel();
-            buffer
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |result| {
-                    let _ = mapped_tx.send(result);
-                });
-            mapped_rx
-                .await
-                .map_err(|_| web_error("surface.capture"))?
-                .map_err(|_| web_error("surface.capture"))?;
-            let mapped = buffer
-                .slice(..)
-                .get_mapped_range()
-                .map_err(|_| web_error("surface.capture"))?;
-            let mut rgba8 = Vec::with_capacity((row * upload.height) as usize);
-            for bytes in mapped
-                .chunks_exact(padded as usize)
-                .take(upload.height as usize)
-            {
-                rgba8.extend_from_slice(&bytes[..row as usize]);
-            }
-            drop(mapped);
-            buffer.unmap();
-            Ok(CapturedFrame {
-                width: upload.width,
-                height: upload.height,
-                rgba8,
-            })
-        }
-    }
-
-    #[cfg(any())]
-    struct UploadFrame {
-        texture: wgpu::Texture,
-        width: u32,
-        height: u32,
-    }
-
-    #[cfg(any())]
-    fn create_pipeline(
-        device: &wgpu::Device,
-        format: wgpu::TextureFormat,
-    ) -> (wgpu::BindGroupLayout, wgpu::Sampler, wgpu::RenderPipeline) {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("astra-web-frame-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("astra-web-frame-shader"),
-            source: wgpu::ShaderSource::Wgsl(FRAME_SHADER.into()),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("astra-web-frame-pipeline-layout"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("astra-web-frame-pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        (layout, sampler, pipeline)
-    }
-
     fn web_error(operation: &'static str) -> PlatformError {
         PlatformError::new(
             PlatformErrorCode::ProviderUnavailable,
@@ -1574,24 +1287,4 @@ mod browser {
             "browser platform operation failed",
         )
     }
-
-    #[cfg(any())]
-    const FRAME_SHADER: &str = r#"
-@vertex
-fn vs_main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
-    var positions = array<vec2<f32>, 3>(
-        vec2<f32>(-1.0, -3.0),
-        vec2<f32>(3.0, 1.0),
-        vec2<f32>(-1.0, 1.0)
-    );
-    return vec4<f32>(positions[index], 0.0, 1.0);
-}
-@group(0) @binding(0) var frame_texture: texture_2d<f32>;
-@group(0) @binding(1) var frame_sampler: sampler;
-@fragment
-fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    let dimensions = vec2<f32>(textureDimensions(frame_texture));
-    return textureSample(frame_texture, frame_sampler, position.xy / dimensions);
-}
-"#;
 }

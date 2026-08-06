@@ -8,23 +8,20 @@ use std::{
 };
 
 #[cfg(feature = "dynamic-abi")]
-use abi_stable::std_types::RVec;
+use crate::concurrent_runtime_host::{
+    FfiRuntimeProviderFactory, ProductRuntimeProviderFactory, ProductRuntimeSession,
+};
 use astra_core::SchemaVersion;
 #[cfg(feature = "dynamic-abi")]
-use astra_plugin_abi::{
-    FfiRuntimeProviderInvoke, FfiRuntimeProviderRegistration, RuntimeProviderCall,
-    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest,
-};
+use astra_plugin_abi::FfiRuntimeProviderRegistration;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimePrepareReport,
+    RuntimeOpenRequest, RuntimeOutputDomain, RuntimePersistedOutput, RuntimePrepareReport,
     RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
     RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
     RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
     RuntimeStepOutput, ValidatedRuntimeProviderSelection,
 };
-#[cfg(feature = "dynamic-abi")]
-use serde::{de::DeserializeOwned, Serialize};
 
 pub trait ProductRuntimeProvider: Send {
     fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
@@ -132,18 +129,21 @@ impl RuntimeHostSchemaRegistry {
     pub(crate) fn validate(
         &self,
         domain: RuntimeOutputDomain,
-        envelope: &RuntimeOutputEnvelope,
+        persisted: &RuntimePersistedOutput,
     ) -> Result<(), RuntimeHostError> {
         let allowed = self.schemas.get(&domain);
         let Some((schema, version)) =
-            allowed.and_then(|schemas| schemas.get(&(envelope.schema.clone(), envelope.version)))
+            allowed.and_then(|schemas| schemas.get(&(persisted.schema.clone(), persisted.version)))
         else {
             return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_HOST_ENVELOPE_SCHEMA",
-                format!("unknown {:?} output schema {}", domain, envelope.schema),
+                "ASTRA_RUNTIME_HOST_PERSISTED_SCHEMA",
+                format!(
+                    "unknown {:?} persisted output schema {}",
+                    domain, persisted.schema
+                ),
             ));
         };
-        envelope
+        persisted
             .validate_binding(domain, schema, *version)
             .map_err(|err| RuntimeHostError::new(err.code(), err.to_string()))?;
         Ok(())
@@ -153,20 +153,23 @@ impl RuntimeHostSchemaRegistry {
         &self,
         output: &RuntimeStepOutput,
     ) -> Result<(), RuntimeHostError> {
-        if output.outputs.len() > self.max_outputs {
+        if output.persisted.len() > self.max_outputs {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_OUTPUT_COUNT",
                 "runtime provider output count exceeds the configured bound",
             ));
         }
-        let bytes = output.outputs.iter().try_fold(0usize, |total, envelope| {
-            total.checked_add(envelope.bytes().len()).ok_or_else(|| {
-                RuntimeHostError::new(
-                    "ASTRA_RUNTIME_HOST_OUTPUT_BYTES",
-                    "runtime provider output byte count overflowed",
-                )
-            })
-        })?;
+        let bytes = output
+            .persisted
+            .iter()
+            .try_fold(0usize, |total, persisted| {
+                total.checked_add(persisted.bytes().len()).ok_or_else(|| {
+                    RuntimeHostError::new(
+                        "ASTRA_RUNTIME_HOST_OUTPUT_BYTES",
+                        "runtime provider output byte count overflowed",
+                    )
+                })
+            })?;
         if bytes > self.max_output_bytes {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_OUTPUT_BYTES",
@@ -201,12 +204,6 @@ impl RuntimeHostSchemaRegistry {
                 return Err(RuntimeHostError::new(
                     "ASTRA_RUNTIME_HOST_SECTION_DUPLICATE",
                     "runtime save section ids must be unique",
-                ));
-            }
-            if !section.validate_hash() {
-                return Err(RuntimeHostError::new(
-                    "ASTRA_RUNTIME_HOST_SECTION_HASH",
-                    "runtime save section hash does not match its bytes",
                 ));
             }
             bytes = bytes.checked_add(section.bytes.len()).ok_or_else(|| {
@@ -519,13 +516,6 @@ impl ProductRuntimeHost {
                 "runtime step seed does not match the opened session seed",
             ));
         }
-        if input.mode == RuntimeStepMode::Replay {
-            session.poisoned = true;
-            return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_HOST_REPLAY_PROVIDER_BYPASS",
-                "provider-free replay cannot invoke a live runtime provider",
-            ));
-        }
         if input.mode != session.next_step_mode {
             session.poisoned = true;
             return Err(RuntimeHostError::new(
@@ -733,8 +723,8 @@ impl ProductRuntimeHost {
 
     fn validate_output(&self, output: &RuntimeStepOutput) -> Result<(), RuntimeHostError> {
         self.schemas.validate_output_bounds(output)?;
-        for envelope in &output.outputs {
-            self.schemas.validate(envelope.domain, envelope)?;
+        for persisted in &output.persisted {
+            self.schemas.validate(persisted.domain, persisted)?;
         }
         Ok(())
     }
@@ -1012,183 +1002,95 @@ impl AsyncProductRuntimeHost {
 
 #[cfg(feature = "dynamic-abi")]
 struct FfiProductRuntimeProvider {
-    registration: FfiRuntimeProviderRegistration,
-    instance_id: Option<ProviderInstanceId>,
-    session_handles: BTreeMap<String, astra_plugin_abi::RuntimeProviderSessionHandle>,
+    factory: FfiRuntimeProviderFactory,
+    sessions: BTreeMap<String, Box<dyn ProductRuntimeSession>>,
 }
 
 #[cfg(feature = "dynamic-abi")]
 impl FfiProductRuntimeProvider {
     fn new(registration: FfiRuntimeProviderRegistration) -> Result<Self, RuntimeHostError> {
-        if registration.abi_version != astra_plugin_abi::PRODUCT_RUNTIME_PROVIDER_ABI_VERSION {
-            return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_PROVIDER_ABI_VERSION",
-                format!(
-                    "runtime provider ABI {} is unsupported; expected {}",
-                    registration.abi_version,
-                    astra_plugin_abi::PRODUCT_RUNTIME_PROVIDER_ABI_VERSION
-                ),
-            ));
-        }
+        let factory = FfiRuntimeProviderFactory::new(registration)?;
         Ok(Self {
-            registration,
-            instance_id: None,
-            session_handles: BTreeMap::new(),
+            factory,
+            sessions: BTreeMap::new(),
         })
-    }
-
-    fn direct<I: Serialize, O: DeserializeOwned>(
-        invoke: FfiRuntimeProviderInvoke,
-        input: &I,
-    ) -> Result<O, String> {
-        let payload = serde_json::to_vec(input).map_err(|err| err.to_string())?;
-        decode_ffi_result(invoke(RVec::from(payload)))
-    }
-
-    fn instance<I: Serialize, O: DeserializeOwned>(
-        &self,
-        invoke: FfiRuntimeProviderInvoke,
-        input: &I,
-    ) -> Result<O, String> {
-        let instance_id = self
-            .instance_id
-            .clone()
-            .ok_or_else(|| "FFI provider instance is not created".to_string())?;
-        let payload = serde_json::to_vec(input).map_err(|err| err.to_string())?;
-        Self::direct(
-            invoke,
-            &RuntimeProviderCall {
-                instance_id,
-                payload,
-            },
-        )
-    }
-
-    fn session<I: Serialize, O: DeserializeOwned>(
-        &self,
-        invoke: FfiRuntimeProviderInvoke,
-        session_id: &GameRuntimeSessionId,
-        input: &I,
-    ) -> Result<O, String> {
-        let instance_id = self
-            .instance_id
-            .clone()
-            .ok_or_else(|| "FFI provider instance is not created".to_string())?;
-        let session_handle = self
-            .session_handles
-            .get(&session_id.0)
-            .copied()
-            .ok_or_else(|| "FFI provider session handle is not open".to_string())?;
-        let payload = serde_json::to_vec(input).map_err(|err| err.to_string())?;
-        Self::direct(
-            invoke,
-            &astra_plugin_abi::RuntimeProviderSessionCall {
-                instance_id,
-                session_handle,
-                payload,
-            },
-        )
     }
 }
 
 #[cfg(feature = "dynamic-abi")]
 impl ProductRuntimeProvider for FfiProductRuntimeProvider {
     fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
-        if self.registration.descriptor_schema.as_str()
-            != astra_plugin_abi::PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA
-        {
-            return Err(
-                "ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_SCHEMA: FFI descriptor schema is unsupported"
-                    .to_string(),
-            );
-        }
-        serde_json::from_slice(self.registration.descriptor_json.as_slice())
-            .map_err(|error| format!("ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_DECODE: {error}"))
+        self.factory.descriptor()
     }
 
     fn create_instance(
         &mut self,
         instance_id: ProviderInstanceId,
     ) -> Result<RuntimeProviderInstanceReport, String> {
-        let report = Self::direct(
-            self.registration.create_instance,
-            &RuntimeProviderCreateRequest {
-                instance_id: instance_id.clone(),
-            },
-        )?;
-        self.instance_id = Some(instance_id);
-        Ok(report)
+        self.factory.create_instance(instance_id)
     }
 
     fn destroy_instance(
         &mut self,
         instance_id: ProviderInstanceId,
     ) -> Result<RuntimeProviderInstanceReport, String> {
-        let report = Self::direct(
-            self.registration.destroy_instance,
-            &RuntimeProviderDestroyRequest { instance_id },
-        )?;
-        self.session_handles.clear();
-        self.instance_id = None;
-        Ok(report)
+        if !self.sessions.is_empty() {
+            return Err("ASTRA_RUNTIME_PROVIDER_FFI_SESSIONS_OPEN".to_string());
+        }
+        self.factory.destroy_instance(instance_id)
     }
 
     fn prepare(&mut self, request: RuntimePrepareRequest) -> Result<RuntimePrepareReport, String> {
-        Self::direct(self.registration.prepare, &request)
+        self.factory.prepare(request)
     }
 
     fn probe(&mut self, request: RuntimeProbeRequest) -> Result<RuntimeProbeReport, String> {
-        Self::direct(self.registration.probe, &request)
+        self.factory.probe(request)
     }
 
     fn open(&mut self, request: RuntimeOpenRequest) -> Result<RuntimeOpenReport, String> {
-        let opened: astra_plugin_abi::RuntimeProviderSessionOpenReport =
-            self.instance(self.registration.open_session, &request)?;
+        let (report, session) = self.factory.open(request)?;
         if self
-            .session_handles
-            .insert(opened.report.session_id.0.clone(), opened.session_handle)
+            .sessions
+            .insert(report.session_id.0.clone(), session)
             .is_some()
         {
             return Err("FFI provider returned a duplicate session id".to_string());
         }
-        Ok(opened.report)
+        Ok(report)
     }
 
     fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
-        self.session(self.registration.step, &input.session_id, &input)
+        self.sessions
+            .get_mut(&input.session_id.0)
+            .ok_or_else(|| "FFI provider session is not open".to_string())?
+            .step(input)
     }
 
     fn save(&mut self, request: RuntimeSaveRequest) -> Result<RuntimeSaveSections, String> {
-        self.session(self.registration.save, &request.session_id, &request)
+        self.sessions
+            .get_mut(&request.session_id.0)
+            .ok_or_else(|| "FFI provider session is not open".to_string())?
+            .save(request)
     }
 
     fn restore(&mut self, request: RuntimeRestoreRequest) -> Result<RuntimeRestoreReport, String> {
-        self.session(self.registration.restore, &request.session_id, &request)
+        self.sessions
+            .get_mut(&request.session_id.0)
+            .ok_or_else(|| "FFI provider session is not open".to_string())?
+            .restore(request)
     }
 
     fn shutdown(
         &mut self,
         session_id: GameRuntimeSessionId,
     ) -> Result<RuntimeShutdownReport, String> {
-        let report = self.session(self.registration.shutdown, &session_id, &session_id)?;
-        self.session_handles.remove(&session_id.0);
-        Ok(report)
+        let session = self
+            .sessions
+            .remove(&session_id.0)
+            .ok_or_else(|| "FFI provider session is not open".to_string())?;
+        session.shutdown(session_id)
     }
-}
-
-#[cfg(feature = "dynamic-abi")]
-fn decode_ffi_result<T: DeserializeOwned>(
-    result: astra_plugin_abi::FfiRuntimeProviderResult,
-) -> Result<T, String> {
-    if !result.ok {
-        return Err(result
-            .diagnostics
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("; "));
-    }
-    serde_json::from_slice(result.payload.as_slice()).map_err(|err| err.to_string())
 }
 
 fn call_provider<T>(

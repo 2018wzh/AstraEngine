@@ -530,7 +530,6 @@ mod tests {
             Ok(RangeReadResult {
                 range,
                 revision: stat.revision,
-                content_hash: astra_core::Hash256::from_sha256(&bytes),
                 bytes,
             })
         }

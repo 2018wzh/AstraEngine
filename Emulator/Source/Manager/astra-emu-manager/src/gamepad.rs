@@ -1,5 +1,16 @@
 use astra_emu_manager_core::{GamepadInput, InputMapping};
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender},
+        Arc, Mutex,
+    },
+    thread,
+    time::Duration,
+};
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GameInput {
     pub(crate) control: String,
@@ -8,106 +19,223 @@ pub(crate) struct GameInput {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+pub(crate) type GameInputWake = std::sync::Arc<dyn Fn() + Send + Sync + 'static>;
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub(crate) struct GameInputPump {
-    backend: Option<gilrs::Gilrs>,
-    mapping: InputMapping,
-    left_x: DirectionalAxis,
-    left_y: DirectionalAxis,
+    batches: Option<Receiver<Result<Vec<GameInput>, String>>>,
+    mapping: Arc<Mutex<InputMapping>>,
+    wake: Arc<Mutex<Option<GameInputWake>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 impl GameInputPump {
     pub(crate) fn new(mapping: InputMapping) -> Self {
-        let backend = match gilrs::Gilrs::new() {
-            Ok(backend) => Some(backend),
+        let mapping = Arc::new(Mutex::new(mapping));
+        let worker_mapping = Arc::clone(&mapping);
+        let wake = Arc::new(Mutex::new(None));
+        let worker_wake = Arc::clone(&wake);
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let (batch_tx, batches) = mpsc::sync_channel(32);
+        let worker = match thread::Builder::new()
+            .name("astra-manager-gamepad".to_string())
+            .spawn(move || {
+                gamepad_worker(worker_mapping, worker_wake, worker_stop, batch_tx.clone())
+            }) {
+            Ok(worker) => Some(worker),
             Err(error) => {
-                tracing::warn!(
-                    event = "astra.emu.input.gamepad_backend_unavailable",
-                    diagnostic_code = "ASTRA_EMU_GAMEPAD_BACKEND_UNAVAILABLE",
+                tracing::error!(
+                    event = "astra.emu.input.gamepad_worker_create_failed",
+                    diagnostic_code = "ASTRA_EMU_GAMEPAD_WORKER_CREATE",
                     error_kind = %error
                 );
                 None
             }
         };
-        let (press, release) = mapping.deadzone.thresholds();
         Self {
-            backend,
-            left_x: DirectionalAxis::new(press, release),
-            left_y: DirectionalAxis::new(press, release),
+            batches: Some(batches),
             mapping,
+            wake,
+            stop,
+            worker,
         }
     }
 
     /// Replace the active mapping, re-tuning stick hysteresis.
     pub(crate) fn set_mapping(&mut self, mapping: InputMapping) {
-        let (press, release) = mapping.deadzone.thresholds();
-        self.left_x.set_thresholds(press, release);
-        self.left_y.set_thresholds(press, release);
-        self.mapping = mapping;
+        if let Ok(mut current) = self.mapping.lock() {
+            *current = mapping;
+        }
+    }
+
+    /// Installs the host event-loop wake used by the worker.  The worker never
+    /// touches UI state; it only signals that a bounded batch is ready so the
+    /// host can drain it on its own thread.
+    pub(crate) fn set_wake(&mut self, wake: GameInputWake) {
+        if let Ok(mut current) = self.wake.lock() {
+            *current = Some(wake.clone());
+        }
+        // The worker can receive a device event during startup before the
+        // host installs its callback. One explicit wake closes that race; the
+        // UI still drains only the bounded channel and never starts polling.
+        wake();
     }
 
     pub(crate) fn poll(&mut self) -> Result<Vec<GameInput>, String> {
         let mut output = Vec::new();
-        let Some(backend) = self.backend.as_mut() else {
+        let Some(batches) = self.batches.as_ref() else {
             return Ok(output);
         };
-        if !self.mapping.gamepad_enabled {
-            // Drain the event queue so stale events do not burst when the
-            // gamepad is re-enabled, but emit nothing.
-            while backend.next_event().is_some() {}
-            return Ok(output);
-        }
-        while let Some(event) = backend.next_event() {
-            use gilrs::{Axis, EventType};
-            match event.event {
-                EventType::ButtonPressed(button, _) => {
-                    if let Some(control) = map_button(&self.mapping, button) {
-                        output.push(GameInput {
-                            control,
-                            pressed: true,
-                            value: 1.0,
-                        });
-                    }
-                }
-                EventType::ButtonReleased(button, _) => {
-                    if let Some(control) = map_button(&self.mapping, button) {
-                        output.push(GameInput {
-                            control,
-                            pressed: false,
-                            value: 0.0,
-                        });
-                    }
-                }
-                EventType::AxisChanged(Axis::LeftStickX, value, _) => {
-                    let negative = self
-                        .mapping
-                        .gamepad
-                        .get(&GamepadInput::LeftStickLeft)
-                        .cloned();
-                    let positive = self
-                        .mapping
-                        .gamepad
-                        .get(&GamepadInput::LeftStickRight)
-                        .cloned();
-                    self.left_x.update(value, negative, positive, &mut output);
-                }
-                EventType::AxisChanged(Axis::LeftStickY, value, _) => {
-                    let negative = self
-                        .mapping
-                        .gamepad
-                        .get(&GamepadInput::LeftStickDown)
-                        .cloned();
-                    let positive = self
-                        .mapping
-                        .gamepad
-                        .get(&GamepadInput::LeftStickUp)
-                        .cloned();
-                    self.left_y.update(value, negative, positive, &mut output);
-                }
-                _ => {}
-            }
+        while let Ok(batch) = batches.try_recv() {
+            output.extend(batch?);
         }
         Ok(output)
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+impl Drop for GameInputPump {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        // Dropping the receiver releases a worker blocked by a full bounded
+        // queue, so shutdown never relies on a spin/yield polling loop.
+        self.batches = None;
+        if let Some(worker) = self.worker.take() {
+            if worker.join().is_err() {
+                tracing::error!(
+                    event = "astra.emu.input.gamepad_worker_panic",
+                    diagnostic_code = "ASTRA_EMU_GAMEPAD_WORKER_PANIC"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+fn gamepad_worker(
+    mapping: Arc<Mutex<InputMapping>>,
+    wake: Arc<Mutex<Option<GameInputWake>>>,
+    stop: Arc<AtomicBool>,
+    batches: SyncSender<Result<Vec<GameInput>, String>>,
+) {
+    let mut backend = match gilrs::Gilrs::new() {
+        Ok(backend) => backend,
+        Err(error) => {
+            send_gamepad_batch(
+                &batches,
+                &wake,
+                &stop,
+                Err(format!("ASTRA_EMU_GAMEPAD_BACKEND_UNAVAILABLE:{error}")),
+            );
+            return;
+        }
+    };
+    let initial = match mapping.lock() {
+        Ok(value) => value.clone(),
+        Err(_) => {
+            send_gamepad_batch(
+                &batches,
+                &wake,
+                &stop,
+                Err("ASTRA_EMU_GAMEPAD_MAPPING_POISONED".to_owned()),
+            );
+            return;
+        }
+    };
+    let (press, release) = initial.deadzone.thresholds();
+    let mut left_x = DirectionalAxis::new(press, release);
+    let mut left_y = DirectionalAxis::new(press, release);
+    while !stop.load(Ordering::Acquire) {
+        let Some(event) = backend.next_event_blocking(Some(Duration::from_millis(250))) else {
+            continue;
+        };
+        let current_mapping = match mapping.lock() {
+            Ok(value) => value.clone(),
+            Err(_) => {
+                send_gamepad_batch(
+                    &batches,
+                    &wake,
+                    &stop,
+                    Err("ASTRA_EMU_GAMEPAD_MAPPING_POISONED".to_owned()),
+                );
+                return;
+            }
+        };
+        if !current_mapping.gamepad_enabled {
+            continue;
+        }
+        let mut output = Vec::new();
+        process_gamepad_event(
+            &current_mapping,
+            &mut left_x,
+            &mut left_y,
+            event,
+            &mut output,
+        );
+        if !output.is_empty() {
+            send_gamepad_batch(&batches, &wake, &stop, Ok(output));
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+fn send_gamepad_batch(
+    batches: &SyncSender<Result<Vec<GameInput>, String>>,
+    wake: &Arc<Mutex<Option<GameInputWake>>>,
+    stop: &AtomicBool,
+    batch: Result<Vec<GameInput>, String>,
+) {
+    if stop.load(Ordering::Acquire) || batches.send(batch).is_err() {
+        return;
+    }
+    let callback = wake.lock().ok().and_then(|guard| guard.clone());
+    if let Some(callback) = callback {
+        callback();
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+fn process_gamepad_event(
+    mapping: &InputMapping,
+    left_x: &mut DirectionalAxis,
+    left_y: &mut DirectionalAxis,
+    event: gilrs::Event,
+    output: &mut Vec<GameInput>,
+) {
+    use gilrs::{Axis, EventType};
+    match event.event {
+        EventType::ButtonPressed(button, _) => {
+            if let Some(control) = map_button(mapping, button) {
+                output.push(GameInput {
+                    control,
+                    pressed: true,
+                    value: 1.0,
+                });
+            }
+        }
+        EventType::ButtonReleased(button, _) => {
+            if let Some(control) = map_button(mapping, button) {
+                output.push(GameInput {
+                    control,
+                    pressed: false,
+                    value: 0.0,
+                });
+            }
+        }
+        EventType::AxisChanged(Axis::LeftStickX, value, _) => {
+            let negative = mapping.gamepad.get(&GamepadInput::LeftStickLeft).cloned();
+            let positive = mapping.gamepad.get(&GamepadInput::LeftStickRight).cloned();
+            left_x.update(value, negative, positive, output);
+        }
+        EventType::AxisChanged(Axis::LeftStickY, value, _) => {
+            let negative = mapping.gamepad.get(&GamepadInput::LeftStickDown).cloned();
+            let positive = mapping.gamepad.get(&GamepadInput::LeftStickUp).cloned();
+            left_y.update(value, negative, positive, output);
+        }
+        _ => {}
     }
 }
 
@@ -151,11 +279,6 @@ impl DirectionalAxis {
             negative_pressed: false,
             positive_pressed: false,
         }
-    }
-
-    fn set_thresholds(&mut self, press_threshold: f32, release_threshold: f32) {
-        self.press_threshold = press_threshold;
-        self.release_threshold = release_threshold;
     }
 
     fn update(
@@ -227,6 +350,8 @@ impl GameInputPump {
 
     pub(crate) fn set_mapping(&mut self, _mapping: InputMapping) {}
 
+    pub(crate) fn set_wake(&mut self, _wake: std::sync::Arc<dyn Fn() + Send + Sync + 'static>) {}
+
     pub(crate) fn poll(&mut self) -> Result<Vec<GameInput>, String> {
         crate::android_platform::take_pending_gamepad_inputs().map(|events| {
             events
@@ -261,6 +386,8 @@ impl GameInputPump {
     }
 
     pub(crate) fn set_mapping(&mut self, _mapping: InputMapping) {}
+
+    pub(crate) fn set_wake(&mut self, _wake: std::sync::Arc<dyn Fn() + Send + Sync + 'static>) {}
 
     pub(crate) fn poll(&mut self) -> Result<Vec<GameInput>, String> {
         Ok(Vec::new())

@@ -875,7 +875,11 @@ impl WindowsMediaFoundationDecodeProvider {
                 "wma".to_string(),
                 "aac".to_string(),
                 "mp4".to_string(),
+                "m4v".to_string(),
                 "wmv".to_string(),
+                "asf".to_string(),
+                "mpg".to_string(),
+                "mpeg".to_string(),
                 "h264".to_string(),
             ],
             feature_gated: false,
@@ -1013,11 +1017,11 @@ mod wmf_decode {
                 MFCreateMFByteStreamOnStreamEx, MFCreateMediaType,
                 MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video,
                 MFShutdown, MFStartup, MFVideoFormat_RGB32, MFSTARTUP_FULL,
-                MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_SIZE,
-                MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
-                MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING,
-                MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-                MF_VERSION,
+                MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE,
+                MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+                MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READERF_ENDOFSTREAM,
+                MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
             },
             System::{
                 Com::{
@@ -1123,6 +1127,7 @@ mod wmf_decode {
         width: u32,
         height: u32,
         expected_frame_bytes: usize,
+        frame_duration_us: u64,
         max_frames: u64,
         max_bytes: u64,
         emitted_frames: u64,
@@ -1262,6 +1267,7 @@ mod wmf_decode {
                 let Some((width, height)) = attribute_frame_size(&current_type) else {
                     return Err(wmf_error("video decode did not report a frame size"));
                 };
+                let frame_duration_us = attribute_frame_duration_us(&current_type);
                 let expected_frame_bytes = usize::try_from(width)
                     .ok()
                     .and_then(|width| {
@@ -1283,6 +1289,7 @@ mod wmf_decode {
                     width,
                     height,
                     expected_frame_bytes,
+                    frame_duration_us,
                     max_frames,
                     max_bytes,
                     emitted_frames: 0,
@@ -1344,11 +1351,17 @@ mod wmf_decode {
                     self.emitted_frames += 1;
                     self.emitted_bytes = next_bytes;
                     self.previous_pts_us = Some(pts_us);
-                    let bgra8 = frame_bytes[..self.expected_frame_bytes].to_vec();
+                    // `sample_bytes` already owns the one CPU readback from the
+                    // Media Foundation buffer.  Truncate that allocation in
+                    // place instead of slicing into a second Vec; the stream
+                    // path must not copy a complete frame again before it
+                    // reaches PlatformHost.
+                    let mut bgra8 = frame_bytes;
+                    bgra8.truncate(self.expected_frame_bytes);
                     return Ok(Some(crate::DecodedVideoFrame {
                         sequence: self.emitted_frames,
                         pts_us,
-                        duration_us: 0,
+                        duration_us: self.frame_duration_us,
                         width: self.width,
                         height: self.height,
                         content_hash: Hash256::from_sha256(&bgra8),
@@ -1491,8 +1504,10 @@ mod wmf_decode {
                     if bytes.len() < expected_frame_bytes {
                         return Err(wmf_error("video decode produced a partial BGRA frame"));
                     }
+                    let mut bgra = bytes;
+                    bgra.truncate(expected_frame_bytes);
                     return Ok(VideoOutput {
-                        bgra: bytes[..expected_frame_bytes].to_vec(),
+                        bgra,
                         width,
                         height,
                     });
@@ -1566,10 +1581,9 @@ mod wmf_decode {
                     .checked_add(expected_frame_bytes as u64)
                     .filter(|value| *value <= max_bytes)
                     .ok_or_else(|| wmf_error("decoded video exceeds the byte budget"))?;
-                raw.push((
-                    timestamp_100ns as u64 / 10,
-                    frame_bytes[..expected_frame_bytes].to_vec(),
-                ));
+                let mut frame_bytes = frame_bytes;
+                frame_bytes.truncate(expected_frame_bytes);
+                raw.push((timestamp_100ns as u64 / 10, frame_bytes));
             }
             if raw.is_empty() {
                 return Err(wmf_error("video decode produced no frames"));
@@ -1631,6 +1645,12 @@ mod wmf_decode {
             attributes.ok_or_else(|| wmf_error("source reader attributes unavailable"))?;
         attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1)?;
         attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)?;
+        tracing::debug!(
+            event = "media.decode.wmf.hardware_transform.requested",
+            hardware_transforms = true,
+            output_boundary = "cpu_bgra8_or_pcm_s16le",
+            "Media Foundation source reader requested hardware transforms"
+        );
         MFCreateSourceReaderFromByteStream(&byte_stream, Some(&attributes))
     }
 
@@ -1656,6 +1676,27 @@ mod wmf_decode {
         let width = (packed >> 32) as u32;
         let height = (packed & 0xffff_ffff) as u32;
         (width > 0 && height > 0).then_some((width, height))
+    }
+
+    unsafe fn attribute_frame_duration_us(media_type: &IMFMediaType) -> u64 {
+        let attrs: IMFAttributes = match media_type.cast() {
+            Ok(attrs) => attrs,
+            Err(_) => return 33_333,
+        };
+        let packed = match attrs.GetUINT64(&MF_MT_FRAME_RATE) {
+            Ok(packed) => packed,
+            Err(_) => return 33_333,
+        };
+        let numerator = packed >> 32;
+        let denominator = packed & 0xffff_ffff;
+        if numerator == 0 || denominator == 0 {
+            return 33_333;
+        }
+        (1_000_000_u64
+            .saturating_mul(denominator)
+            .saturating_add(numerator / 2)
+            / numerator)
+            .max(1)
     }
 
     fn wmf_error(message: &'static str) -> WindowsError {

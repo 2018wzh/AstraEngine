@@ -60,6 +60,10 @@ pub enum RuntimePayloadCodec {
     /// high-frequency authoritative components whose deterministic state hash
     /// is the first 128 bits of the same digest.
     PostcardBlake3,
+    /// Owned postcard bytes for Shipping hot components.  The component
+    /// payload keeps the disabled hash marker and is authenticated only when
+    /// an Evidence snapshot is requested.
+    PostcardOwned,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -116,6 +120,15 @@ impl ValidatedRuntimeComponentEncoding {
         }
     }
 
+    pub fn postcard_owned(bytes: Arc<[u8]>) -> Self {
+        Self {
+            bytes,
+            storage_hash: Hash256::from_bytes([0; 32]),
+            state_hash: Hash128::from_bytes([0; 16]),
+            codec: RuntimePayloadCodec::PostcardOwned,
+        }
+    }
+
     pub fn storage_hash(&self) -> Hash256 {
         self.storage_hash
     }
@@ -145,6 +158,7 @@ impl<'de> Deserialize<'de> for RuntimeComponentPayload {
             RuntimePayloadCodec::PostcardBlake3 => {
                 Hash256::from_bytes(*blake3::hash(&wire.bytes).as_bytes())
             }
+            RuntimePayloadCodec::PostcardOwned => Hash256::from_bytes([0; 32]),
         };
         if actual_hash != wire.hash {
             return Err(D::Error::custom(
@@ -178,7 +192,7 @@ impl RuntimeComponentPayload {
         })
     }
 
-    pub(crate) fn validated_encoded_postcard(
+    pub fn validated_encoded_postcard(
         schema: impl Into<SchemaId>,
         version: SchemaVersion,
         encoding: ValidatedRuntimeComponentEncoding,
@@ -200,9 +214,9 @@ impl RuntimeComponentPayload {
 
     pub fn validated_postcard_bytes(&self) -> Result<Arc<[u8]>, RuntimeError> {
         match self.codec {
-            RuntimePayloadCodec::Postcard | RuntimePayloadCodec::PostcardBlake3 => {
-                Ok(Arc::clone(&self.bytes))
-            }
+            RuntimePayloadCodec::Postcard
+            | RuntimePayloadCodec::PostcardBlake3
+            | RuntimePayloadCodec::PostcardOwned => Ok(Arc::clone(&self.bytes)),
         }
     }
 

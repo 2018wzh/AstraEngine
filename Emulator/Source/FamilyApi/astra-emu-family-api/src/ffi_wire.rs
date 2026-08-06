@@ -7,43 +7,22 @@ use abi_stable::{
 use astra_core::{Hash256, SchemaVersion};
 
 use crate::{
-    FamilyId, LegacyAwaitResult, LegacyCoverageDelta, LegacyDiagnostic, LegacyEffect,
-    LegacyEphemeralText, LegacyFamilyPluginDescriptor, LegacyInputEdge, LegacyOpenRequest,
-    LegacyPayload, LegacyPayloadStorage, LegacyProbeReport, LegacyProbeRequest,
-    LegacyProviderError, LegacyProviderResult, LegacyReplayMode, LegacyRestoreReport,
-    LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyShutdownReport,
+    FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
+    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode,
+    LegacyControlTransaction, LegacyCoverageDelta, LegacyDiagnostic, LegacyDirtySection,
+    LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyPluginDescriptor, LegacyInputEdge,
+    LegacyLiveOutput, LegacyOpenRequest, LegacyPayload, LegacyPcmBufferV7, LegacyProbeReport,
+    LegacyProbeRequest, LegacyProviderError, LegacyProviderResult, LegacyRenderResourceFrameV1,
+    LegacyReplayMode, LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeSessionId,
+    LegacyRuntimeStatus, LegacySceneResourceOperationV7, LegacySceneTransactionV7,
+    LegacyScheduledEvent, LegacyScissorV1, LegacySequenced, LegacyShutdownReport,
     LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepBudget, LegacyStepInput,
-    LegacyStepOutput, LegacyTraceEntry, LegacyVfsListedFile, LegacyWaitRequest,
+    LegacyStepOutput, LegacyTextLease, LegacyTextPresentationLeaseV1, LegacyTextureFormat,
+    LegacyTraceEntry, LegacyVertexV1, LegacyVfsListedFile, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyWaitRequest,
 };
 
 pub type FfiBulkBytes = RArc<RVec<u8>>;
-
-struct FfiBulkStorage(FfiBulkBytes);
-
-impl LegacyPayloadStorage for FfiBulkStorage {
-    fn bytes(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-fn payload_to_ffi(value: LegacyPayload) -> FfiBulkBytes {
-    match value {
-        LegacyPayload::Native(bytes) => bulk_bytes_from_vec(bytes),
-        LegacyPayload::Foreign(storage) => storage
-            .as_any()
-            .downcast_ref::<FfiBulkStorage>()
-            .map(|storage| storage.0.clone())
-            .unwrap_or_else(|| bulk_bytes_from_vec(storage.bytes().to_vec())),
-    }
-}
-
-fn payload_from_ffi(value: FfiBulkBytes) -> LegacyPayload {
-    LegacyPayload::from_foreign(std::sync::Arc::new(FfiBulkStorage(value)))
-}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
@@ -58,6 +37,28 @@ impl From<Hash256> for FfiHash256 {
 impl From<FfiHash256> for Hash256 {
     fn from(value: FfiHash256) -> Self {
         Self::from_bytes(value.0)
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiOwnedBytes {
+    pub bytes: FfiBulkBytes,
+}
+
+impl FfiOwnedBytes {
+    pub fn empty() -> Self {
+        Self {
+            bytes: RArc::new(RVec::new()),
+        }
+    }
+
+    pub fn new(bytes: FfiBulkBytes) -> Self {
+        Self { bytes }
+    }
+
+    pub fn into_bytes(self) -> FfiBulkBytes {
+        self.bytes
     }
 }
 
@@ -483,7 +484,7 @@ macro_rules! ffi_result_item {
     ($ffi:ident, $native:ident, $($field:ident),+) => {
         #[repr(C)]
         #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-        pub struct $ffi { $(pub $field: RString,)+ pub payload_hash: FfiHash256, pub sequence: u64 }
+        pub struct $ffi { $(pub $field: RString,)+ pub payload_len: u64, pub sequence: u64 }
     };
 }
 
@@ -501,7 +502,7 @@ impl From<LegacyAwaitResult> for FfiAwaitResult {
         Self {
             token_id: value.token_id.into(),
             status: value.status.into(),
-            payload_hash: value.payload_hash.into(),
+            payload_len: value.payload_len,
             sequence: value.sequence,
         }
     }
@@ -511,7 +512,7 @@ impl From<FfiAwaitResult> for LegacyAwaitResult {
         Self {
             token_id: value.token_id.to_string(),
             status: value.status.to_string(),
-            payload_hash: value.payload_hash.into(),
+            payload_len: value.payload_len,
             sequence: value.sequence,
         }
     }
@@ -522,7 +523,7 @@ impl From<LegacyProviderResult> for FfiProviderResult {
             request_id: value.request_id.into(),
             provider_id: value.provider_id.into(),
             status: value.status.into(),
-            payload_hash: value.payload_hash.into(),
+            payload_len: value.payload_len,
             sequence: value.sequence,
         }
     }
@@ -533,7 +534,7 @@ impl From<FfiProviderResult> for LegacyProviderResult {
             request_id: value.request_id.to_string(),
             provider_id: value.provider_id.to_string(),
             status: value.status.to_string(),
-            payload_hash: value.payload_hash.into(),
+            payload_len: value.payload_len,
             sequence: value.sequence,
         }
     }
@@ -639,201 +640,6 @@ impl From<FfiRuntimeStatus> for LegacyRuntimeStatus {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
-pub enum FfiEffectKind {
-    RuntimeEvent,
-    Presentation,
-    Audio,
-    TextCapture,
-    SetBlackboard,
-    ScheduleEvent,
-    SnapshotDirty,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiEffect {
-    pub kind: FfiEffectKind,
-    pub sequence: u64,
-    pub name: RString,
-    pub auxiliary: RString,
-    pub payload: FfiBulkBytes,
-    pub hash: ROption<FfiHash256>,
-    pub auxiliary_hash: ROption<FfiHash256>,
-    pub number: u64,
-}
-
-impl From<LegacyEffect> for FfiEffect {
-    fn from(value: LegacyEffect) -> Self {
-        let empty = || RArc::new(RVec::new());
-        match value {
-            LegacyEffect::RuntimeEvent {
-                sequence,
-                event,
-                payload,
-            } => Self {
-                kind: FfiEffectKind::RuntimeEvent,
-                sequence,
-                name: event.into(),
-                auxiliary: RString::new(),
-                payload: payload_to_ffi(payload),
-                hash: ROption::RNone,
-                auxiliary_hash: ROption::RNone,
-                number: 0,
-            },
-            LegacyEffect::Presentation {
-                sequence,
-                command,
-                payload,
-            } => Self {
-                kind: FfiEffectKind::Presentation,
-                sequence,
-                name: command.into(),
-                auxiliary: RString::new(),
-                payload: payload_to_ffi(payload),
-                hash: ROption::RNone,
-                auxiliary_hash: ROption::RNone,
-                number: 0,
-            },
-            LegacyEffect::Audio {
-                sequence,
-                command,
-                payload,
-            } => Self {
-                kind: FfiEffectKind::Audio,
-                sequence,
-                name: command.into(),
-                auxiliary: RString::new(),
-                payload: payload_to_ffi(payload),
-                hash: ROption::RNone,
-                auxiliary_hash: ROption::RNone,
-                number: 0,
-            },
-            LegacyEffect::TextCapture {
-                sequence,
-                lease_id,
-                text_hash,
-                byte_len,
-                speaker_hash,
-                source_ref,
-            } => Self {
-                kind: FfiEffectKind::TextCapture,
-                sequence,
-                name: lease_id.into(),
-                auxiliary: source_ref.into(),
-                payload: empty(),
-                hash: ROption::RSome(text_hash.into()),
-                auxiliary_hash: speaker_hash.map(Into::into).into(),
-                number: u64::from(byte_len),
-            },
-            LegacyEffect::SetBlackboard {
-                sequence,
-                key,
-                value,
-            } => Self {
-                kind: FfiEffectKind::SetBlackboard,
-                sequence,
-                name: key.into(),
-                auxiliary: RString::new(),
-                payload: payload_to_ffi(value),
-                hash: ROption::RNone,
-                auxiliary_hash: ROption::RNone,
-                number: 0,
-            },
-            LegacyEffect::ScheduleEvent {
-                sequence,
-                due_tick,
-                event,
-                payload,
-            } => Self {
-                kind: FfiEffectKind::ScheduleEvent,
-                sequence,
-                name: event.into(),
-                auxiliary: RString::new(),
-                payload: payload_to_ffi(payload),
-                hash: ROption::RNone,
-                auxiliary_hash: ROption::RNone,
-                number: due_tick,
-            },
-            LegacyEffect::SnapshotDirty {
-                sequence,
-                section_id,
-            } => Self {
-                kind: FfiEffectKind::SnapshotDirty,
-                sequence,
-                name: section_id.into(),
-                auxiliary: RString::new(),
-                payload: empty(),
-                hash: ROption::RNone,
-                auxiliary_hash: ROption::RNone,
-                number: 0,
-            },
-        }
-    }
-}
-
-impl TryFrom<FfiEffect> for LegacyEffect {
-    type Error = LegacyProviderError;
-    fn try_from(value: FfiEffect) -> Result<Self, Self::Error> {
-        let payload = || payload_from_ffi(value.payload.clone());
-        Ok(match value.kind {
-            FfiEffectKind::RuntimeEvent => Self::RuntimeEvent {
-                sequence: value.sequence,
-                event: value.name.to_string(),
-                payload: payload(),
-            },
-            FfiEffectKind::Presentation => Self::Presentation {
-                sequence: value.sequence,
-                command: value.name.to_string(),
-                payload: payload(),
-            },
-            FfiEffectKind::Audio => Self::Audio {
-                sequence: value.sequence,
-                command: value.name.to_string(),
-                payload: payload(),
-            },
-            FfiEffectKind::TextCapture => Self::TextCapture {
-                sequence: value.sequence,
-                lease_id: value.name.to_string(),
-                text_hash: value
-                    .hash
-                    .into_option()
-                    .ok_or_else(|| {
-                        LegacyProviderError::invalid(
-                            "ASTRA_EMU_FFI_EFFECT",
-                            "text capture hash is missing",
-                        )
-                    })?
-                    .into(),
-                byte_len: u32::try_from(value.number).map_err(|_| {
-                    LegacyProviderError::invalid(
-                        "ASTRA_EMU_FFI_EFFECT",
-                        "text capture byte length overflowed",
-                    )
-                })?,
-                speaker_hash: value.auxiliary_hash.into_option().map(Into::into),
-                source_ref: value.auxiliary.to_string(),
-            },
-            FfiEffectKind::SetBlackboard => Self::SetBlackboard {
-                sequence: value.sequence,
-                key: value.name.to_string(),
-                value: payload(),
-            },
-            FfiEffectKind::ScheduleEvent => Self::ScheduleEvent {
-                sequence: value.sequence,
-                due_tick: value.number,
-                event: value.name.to_string(),
-                payload: payload(),
-            },
-            FfiEffectKind::SnapshotDirty => Self::SnapshotDirty {
-                sequence: value.sequence,
-                section_id: value.name.to_string(),
-            },
-        })
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub enum FfiWaitKind {
     Frame,
     Time,
@@ -852,7 +658,7 @@ pub struct FfiWaitRequest {
     pub name: RString,
     pub keys: RVec<RString>,
     pub number: u32,
-    pub payload_hash: ROption<FfiHash256>,
+    pub payload_len: u64,
 }
 
 impl From<LegacyWaitRequest> for FfiWaitRequest {
@@ -863,7 +669,7 @@ impl From<LegacyWaitRequest> for FfiWaitRequest {
             name: RString::new(),
             keys: RVec::new(),
             number: 0,
-            payload_hash: ROption::RNone,
+            payload_len: 0,
         };
         match value {
             LegacyWaitRequest::Frame { token_id, frames } => Self {
@@ -899,10 +705,10 @@ impl From<LegacyWaitRequest> for FfiWaitRequest {
             LegacyWaitRequest::FamilyOpaque {
                 token_id,
                 wait_kind,
-                payload_hash,
+                payload_len,
             } => Self {
                 name: wait_kind.into(),
-                payload_hash: ROption::RSome(payload_hash.into()),
+                payload_len,
                 ..base(FfiWaitKind::FamilyOpaque, token_id)
             },
         }
@@ -941,16 +747,7 @@ impl TryFrom<FfiWaitRequest> for LegacyWaitRequest {
             FfiWaitKind::FamilyOpaque => Self::FamilyOpaque {
                 token_id,
                 wait_kind: value.name.to_string(),
-                payload_hash: value
-                    .payload_hash
-                    .into_option()
-                    .ok_or_else(|| {
-                        LegacyProviderError::invalid(
-                            "ASTRA_EMU_FFI_WAIT",
-                            "opaque wait hash is missing",
-                        )
-                    })?
-                    .into(),
+                payload_len: value.payload_len,
             },
         })
     }
@@ -1001,6 +798,10 @@ pub struct FfiCoverageDelta {
     pub presentation_commands: u64,
     pub audio_commands: u64,
     pub text_events: u64,
+    pub capture_bytes: u64,
+    pub operation_bytes: u64,
+    pub pcm_moved_bytes: u64,
+    pub pcm_copied_bytes: u64,
 }
 
 impl From<LegacyCoverageDelta> for FfiCoverageDelta {
@@ -1012,6 +813,10 @@ impl From<LegacyCoverageDelta> for FfiCoverageDelta {
             presentation_commands: value.presentation_commands,
             audio_commands: value.audio_commands,
             text_events: value.text_events,
+            capture_bytes: value.capture_bytes,
+            operation_bytes: value.operation_bytes,
+            pcm_moved_bytes: value.pcm_moved_bytes,
+            pcm_copied_bytes: value.pcm_copied_bytes,
         }
     }
 }
@@ -1024,38 +829,1164 @@ impl From<FfiCoverageDelta> for LegacyCoverageDelta {
             presentation_commands: value.presentation_commands,
             audio_commands: value.audio_commands,
             text_events: value.text_events,
+            capture_bytes: value.capture_bytes,
+            operation_bytes: value.operation_bytes,
+            pcm_moved_bytes: value.pcm_moved_bytes,
+            pcm_copied_bytes: value.pcm_copied_bytes,
         }
     }
 }
 
+// Family ABI v7 live values own the allocation that moves through the
+// provider boundary without a bytes envelope or an application-level copy.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveTextureFormat {
+    Rgba8,
+    LumaAlpha8,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, StableAbi)]
+pub struct FfiLiveVertex {
+    pub position: [f32; 2],
+    pub tex_coord: [f32; 2],
+    pub color: [f32; 4],
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveBlendMode {
+    Alpha,
+    Additive,
+    Opaque,
+    Multiply,
+    Screen,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub struct FfiLiveScissor {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiLiveDraw {
+    pub texture_id: u32,
+    pub vertices: [FfiLiveVertex; 4],
+    pub blend: FfiLiveBlendMode,
+    pub scissor: ROption<FfiLiveScissor>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveTextureCreate {
+    pub texture_id: u32,
+    pub generation: u64,
+    pub width: u32,
+    pub height: u32,
+    pub format: FfiLiveTextureFormat,
+    pub pixels: RVec<u8>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveTextureUpdate {
+    pub texture_id: u32,
+    pub generation: u64,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub format: FfiLiveTextureFormat,
+    pub pixels: RVec<u8>,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, StableAbi)]
+pub enum FfiLiveSceneResourceOperation {
+    Create(FfiLiveTextureCreate),
+    Update(FfiLiveTextureUpdate),
+    Destroy { texture_id: u32, generation: u64 },
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveSceneTransaction {
+    pub sequence: u64,
+    pub width: u32,
+    pub height: u32,
+    pub resources: RVec<FfiLiveSceneResourceOperation>,
+    pub draws: RVec<FfiLiveDraw>,
+    pub reset_resources: bool,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiLiveResourceTexture {
+    pub texture_id: u32,
+    pub resource_uri: RString,
+    pub codec: RString,
+    pub revision: u64,
+    pub decoded_width: u32,
+    pub decoded_height: u32,
+    pub decoded_format: FfiLiveTextureFormat,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveResourceScene {
+    pub sequence: u64,
+    pub width: u32,
+    pub height: u32,
+    pub textures: RVec<FfiLiveResourceTexture>,
+    pub draws: RVec<FfiLiveDraw>,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, StableAbi)]
+pub enum FfiLivePcmBuffer {
+    I16(RVec<i16>),
+    F32(RVec<f32>),
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveAudioPacket {
+    pub sequence: u64,
+    pub stream_id: u32,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub pcm: FfiLivePcmBuffer,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveAudioCommandKind {
+    LoadResource,
+    CreateStream,
+    SubmitI16,
+    SubmitF32,
+    Play,
+    Stop,
+    Pause,
+    Resume,
+    SetParams,
+    DestroyStream,
+    MasterVolume,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveAudioEncoding {
+    Unknown,
+    Wav,
+    Ogg,
+    Mp3,
+    Flac,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveAudioSampleFormat {
+    I16,
+    F32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveAudioCommand {
+    pub sequence: u64,
+    pub kind: FfiLiveAudioCommandKind,
+    pub stream_id: u32,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub encoding: FfiLiveAudioEncoding,
+    pub sample_format: FfiLiveAudioSampleFormat,
+    pub resource_uri: RString,
+    pub samples: FfiLivePcmBuffer,
+    pub volume: f32,
+    pub pan: f32,
+    pub repeat: bool,
+    pub fade_ms: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, StableAbi)]
+pub struct FfiLiveTextRegion {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub max_lines: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveTextPresentation {
+    pub sequence: u64,
+    pub lease_id: RString,
+    pub layout_id: RString,
+    pub language: RString,
+    pub font_families: RVec<RString>,
+    pub body: FfiLiveTextRegion,
+    pub speaker: ROption<FfiLiveTextRegion>,
+    pub rgba: [u8; 4],
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveVideoMode {
+    ModalWithAudio,
+    LayerNoAudio,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveVideoCommandKind {
+    Play,
+    Stop,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveVideoCommand {
+    pub sequence: u64,
+    pub playback_id: RString,
+    pub resource_uri: RString,
+    pub mode: FfiLiveVideoMode,
+    pub stage_width: u32,
+    pub stage_height: u32,
+    pub kind: FfiLiveVideoCommandKind,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveEvent {
+    pub sequence: u64,
+    pub event: RString,
+    pub payload: RVec<u8>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveTextLease {
+    pub sequence: u64,
+    pub lease_id: RString,
+    pub byte_len: u32,
+    pub source_ref: RString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiLiveOutput {
+    pub scenes: RVec<FfiLiveSceneTransaction>,
+    pub resource_scenes: RVec<FfiLiveResourceScene>,
+    pub audio: RVec<FfiLiveAudioPacket>,
+    pub audio_commands: RVec<FfiLiveAudioCommand>,
+    pub text: RVec<FfiLiveTextLease>,
+    pub text_presentations: RVec<FfiLiveTextPresentation>,
+    pub video: RVec<FfiLiveVideoCommand>,
+}
+
+fn ffi_live_format(value: LegacyTextureFormat) -> FfiLiveTextureFormat {
+    match value {
+        LegacyTextureFormat::Rgba8 => FfiLiveTextureFormat::Rgba8,
+        LegacyTextureFormat::LumaAlpha8 => FfiLiveTextureFormat::LumaAlpha8,
+    }
+}
+
+fn legacy_live_format(value: FfiLiveTextureFormat) -> LegacyTextureFormat {
+    match value {
+        FfiLiveTextureFormat::Rgba8 => LegacyTextureFormat::Rgba8,
+        FfiLiveTextureFormat::LumaAlpha8 => LegacyTextureFormat::LumaAlpha8,
+    }
+}
+
+fn ffi_live_draw(value: LegacyDrawV1) -> FfiLiveDraw {
+    FfiLiveDraw {
+        texture_id: value.texture_id,
+        vertices: value.vertices.map(|vertex| FfiLiveVertex {
+            position: vertex.position,
+            tex_coord: vertex.tex_coord,
+            color: vertex.color,
+        }),
+        blend: match value.blend {
+            LegacyBlendMode::Alpha => FfiLiveBlendMode::Alpha,
+            LegacyBlendMode::Add => FfiLiveBlendMode::Additive,
+            LegacyBlendMode::Opaque => FfiLiveBlendMode::Opaque,
+            LegacyBlendMode::Multiply => FfiLiveBlendMode::Multiply,
+            LegacyBlendMode::Screen => FfiLiveBlendMode::Screen,
+        },
+        scissor: value
+            .scissor
+            .map(|value| FfiLiveScissor {
+                x: value.x,
+                y: value.y,
+                width: value.width,
+                height: value.height,
+            })
+            .into(),
+    }
+}
+
+fn legacy_live_draw(value: FfiLiveDraw) -> LegacyDrawV1 {
+    LegacyDrawV1 {
+        texture_id: value.texture_id,
+        vertices: value.vertices.map(|vertex| LegacyVertexV1 {
+            position: vertex.position,
+            tex_coord: vertex.tex_coord,
+            color: vertex.color,
+        }),
+        blend: match value.blend {
+            FfiLiveBlendMode::Alpha => LegacyBlendMode::Alpha,
+            FfiLiveBlendMode::Additive => LegacyBlendMode::Add,
+            FfiLiveBlendMode::Opaque => LegacyBlendMode::Opaque,
+            FfiLiveBlendMode::Multiply => LegacyBlendMode::Multiply,
+            FfiLiveBlendMode::Screen => LegacyBlendMode::Screen,
+        },
+        scissor: value.scissor.into_option().map(|value| LegacyScissorV1 {
+            x: value.x,
+            y: value.y,
+            width: value.width,
+            height: value.height,
+        }),
+    }
+}
+
+fn live_payload_to_ffi(value: LegacyPayload) -> RVec<u8> {
+    match value {
+        LegacyPayload::Native(bytes) => bytes.into(),
+        LegacyPayload::Foreign(_) => {
+            panic!("ASTRA_EMU_FFI_LIVE_FOREIGN_PAYLOAD_REJECTED")
+        }
+    }
+}
+
+fn live_payload_from_ffi(value: RVec<u8>) -> LegacyPayload {
+    LegacyPayload::Native(value.into_vec())
+}
+
+fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
+    FfiLiveSceneTransaction {
+        sequence: value.sequence,
+        width: value.width,
+        height: value.height,
+        resources: value
+            .resources
+            .into_iter()
+            .map(|operation| match operation {
+                LegacySceneResourceOperationV7::CreateTexture {
+                    texture_id,
+                    generation,
+                    width,
+                    height,
+                    format,
+                    pixels,
+                } => FfiLiveSceneResourceOperation::Create(FfiLiveTextureCreate {
+                    texture_id,
+                    generation,
+                    width,
+                    height,
+                    format: ffi_live_format(format),
+                    pixels: live_payload_to_ffi(pixels),
+                }),
+                LegacySceneResourceOperationV7::UpdateTexture {
+                    texture_id,
+                    generation,
+                    x,
+                    y,
+                    width,
+                    height,
+                    format,
+                    pixels,
+                } => FfiLiveSceneResourceOperation::Update(FfiLiveTextureUpdate {
+                    texture_id,
+                    generation,
+                    x,
+                    y,
+                    width,
+                    height,
+                    format: ffi_live_format(format),
+                    pixels: live_payload_to_ffi(pixels),
+                }),
+                LegacySceneResourceOperationV7::DestroyTexture {
+                    texture_id,
+                    generation,
+                } => FfiLiveSceneResourceOperation::Destroy {
+                    texture_id,
+                    generation,
+                },
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        draws: value
+            .draws
+            .into_iter()
+            .map(ffi_live_draw)
+            .collect::<Vec<_>>()
+            .into(),
+        reset_resources: value.reset_resources,
+    }
+}
+
+fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7 {
+    LegacySceneTransactionV7 {
+        sequence: value.sequence,
+        width: value.width,
+        height: value.height,
+        resources: value
+            .resources
+            .into_iter()
+            .map(|operation| match operation {
+                FfiLiveSceneResourceOperation::Create(value) => {
+                    LegacySceneResourceOperationV7::CreateTexture {
+                        texture_id: value.texture_id,
+                        generation: value.generation,
+                        width: value.width,
+                        height: value.height,
+                        format: legacy_live_format(value.format),
+                        pixels: live_payload_from_ffi(value.pixels),
+                    }
+                }
+                FfiLiveSceneResourceOperation::Update(value) => {
+                    LegacySceneResourceOperationV7::UpdateTexture {
+                        texture_id: value.texture_id,
+                        generation: value.generation,
+                        x: value.x,
+                        y: value.y,
+                        width: value.width,
+                        height: value.height,
+                        format: legacy_live_format(value.format),
+                        pixels: live_payload_from_ffi(value.pixels),
+                    }
+                }
+                FfiLiveSceneResourceOperation::Destroy {
+                    texture_id,
+                    generation,
+                } => LegacySceneResourceOperationV7::DestroyTexture {
+                    texture_id,
+                    generation,
+                },
+            })
+            .collect(),
+        draws: value.draws.into_iter().map(legacy_live_draw).collect(),
+        reset_resources: value.reset_resources,
+    }
+}
+
+fn ffi_live_audio(value: LegacyAudioPacketV7) -> FfiLiveAudioPacket {
+    FfiLiveAudioPacket {
+        sequence: value.sequence,
+        stream_id: value.stream_id,
+        sample_rate: value.sample_rate,
+        channels: value.channels,
+        pcm: match value.pcm {
+            LegacyPcmBufferV7::I16(samples) => FfiLivePcmBuffer::I16(samples.into()),
+            LegacyPcmBufferV7::F32(samples) => FfiLivePcmBuffer::F32(samples.into()),
+        },
+    }
+}
+
+fn legacy_live_audio(value: FfiLiveAudioPacket) -> LegacyAudioPacketV7 {
+    LegacyAudioPacketV7 {
+        sequence: value.sequence,
+        stream_id: value.stream_id,
+        sample_rate: value.sample_rate,
+        channels: value.channels,
+        pcm: match value.pcm {
+            FfiLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples.into_vec()),
+            FfiLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples.into_vec()),
+        },
+    }
+}
+
+fn ffi_live_audio_command(sequence: u64, value: LegacyAudioCommandV1) -> FfiLiveAudioCommand {
+    let (
+        kind,
+        stream_id,
+        sample_rate,
+        channels,
+        encoding,
+        sample_format,
+        resource_uri,
+        samples,
+        volume,
+        pan,
+        repeat,
+        fade_ms,
+    ) = match value {
+        LegacyAudioCommandV1::LoadResource {
+            stream_id,
+            encoding,
+            resource_uri,
+        } => (
+            FfiLiveAudioCommandKind::LoadResource,
+            stream_id,
+            0,
+            0,
+            match encoding {
+                LegacyAudioEncoding::Unknown => FfiLiveAudioEncoding::Unknown,
+                LegacyAudioEncoding::Wav => FfiLiveAudioEncoding::Wav,
+                LegacyAudioEncoding::Ogg => FfiLiveAudioEncoding::Ogg,
+                LegacyAudioEncoding::Mp3 => FfiLiveAudioEncoding::Mp3,
+                LegacyAudioEncoding::Flac => FfiLiveAudioEncoding::Flac,
+            },
+            FfiLiveAudioSampleFormat::I16,
+            resource_uri,
+            FfiLivePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::CreateStream {
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format,
+        } => (
+            FfiLiveAudioCommandKind::CreateStream,
+            stream_id,
+            sample_rate,
+            channels,
+            FfiLiveAudioEncoding::Unknown,
+            match sample_format {
+                LegacyAudioSampleFormat::I16 => FfiLiveAudioSampleFormat::I16,
+                LegacyAudioSampleFormat::F32 => FfiLiveAudioSampleFormat::F32,
+            },
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::SubmitI16 { stream_id, samples } => (
+            FfiLiveAudioCommandKind::SubmitI16,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(samples.into()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::SubmitF32 { stream_id, samples } => (
+            FfiLiveAudioCommandKind::SubmitF32,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::F32,
+            String::new(),
+            FfiLivePcmBuffer::F32(samples.into()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::Play {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        } => (
+            FfiLiveAudioCommandKind::Play,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        ),
+        LegacyAudioCommandV1::Stop { stream_id, fade_ms } => (
+            FfiLiveAudioCommandKind::Stop,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            fade_ms,
+        ),
+        LegacyAudioCommandV1::Pause { stream_id } => (
+            FfiLiveAudioCommandKind::Pause,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::Resume { stream_id } => (
+            FfiLiveAudioCommandKind::Resume,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::SetParams {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        } => (
+            FfiLiveAudioCommandKind::SetParams,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            volume,
+            pan,
+            repeat,
+            0,
+        ),
+        LegacyAudioCommandV1::DestroyStream { stream_id } => (
+            FfiLiveAudioCommandKind::DestroyStream,
+            stream_id,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        LegacyAudioCommandV1::MasterVolume { volume } => (
+            FfiLiveAudioCommandKind::MasterVolume,
+            0,
+            0,
+            0,
+            FfiLiveAudioEncoding::Unknown,
+            FfiLiveAudioSampleFormat::I16,
+            String::new(),
+            FfiLivePcmBuffer::I16(RVec::new()),
+            volume,
+            0.0,
+            false,
+            0,
+        ),
+    };
+    FfiLiveAudioCommand {
+        sequence,
+        kind,
+        stream_id,
+        sample_rate,
+        channels,
+        encoding,
+        sample_format,
+        resource_uri: resource_uri.into(),
+        samples,
+        volume,
+        pan,
+        repeat,
+        fade_ms,
+    }
+}
+
+fn legacy_live_audio_command(value: FfiLiveAudioCommand) -> LegacySequenced<LegacyAudioCommandV1> {
+    let FfiLiveAudioCommand {
+        sequence,
+        kind,
+        stream_id,
+        sample_rate,
+        channels,
+        encoding,
+        sample_format,
+        resource_uri,
+        samples,
+        volume,
+        pan,
+        repeat,
+        fade_ms,
+    } = value;
+    let encoding = match encoding {
+        FfiLiveAudioEncoding::Unknown => LegacyAudioEncoding::Unknown,
+        FfiLiveAudioEncoding::Wav => LegacyAudioEncoding::Wav,
+        FfiLiveAudioEncoding::Ogg => LegacyAudioEncoding::Ogg,
+        FfiLiveAudioEncoding::Mp3 => LegacyAudioEncoding::Mp3,
+        FfiLiveAudioEncoding::Flac => LegacyAudioEncoding::Flac,
+    };
+    let sample_format = match sample_format {
+        FfiLiveAudioSampleFormat::I16 => LegacyAudioSampleFormat::I16,
+        FfiLiveAudioSampleFormat::F32 => LegacyAudioSampleFormat::F32,
+    };
+    let (i16_samples, f32_samples) = match (kind, samples) {
+        (FfiLiveAudioCommandKind::SubmitI16, FfiLivePcmBuffer::I16(samples)) => {
+            (Some(samples.into_vec()), None)
+        }
+        (FfiLiveAudioCommandKind::SubmitF32, FfiLivePcmBuffer::F32(samples)) => {
+            (None, Some(samples.into_vec()))
+        }
+        (FfiLiveAudioCommandKind::SubmitI16, FfiLivePcmBuffer::F32(_))
+        | (FfiLiveAudioCommandKind::SubmitF32, FfiLivePcmBuffer::I16(_)) => {
+            panic!("ASTRA_EMU_FFI_LIVE_AUDIO_FORMAT_MISMATCH")
+        }
+        (_, FfiLivePcmBuffer::I16(values)) if !values.is_empty() => {
+            panic!("ASTRA_EMU_FFI_LIVE_AUDIO_UNEXPECTED_I16")
+        }
+        (_, FfiLivePcmBuffer::F32(values)) if !values.is_empty() => {
+            panic!("ASTRA_EMU_FFI_LIVE_AUDIO_UNEXPECTED_F32")
+        }
+        (_, _) => (None, None),
+    };
+    let value = match kind {
+        FfiLiveAudioCommandKind::LoadResource => LegacyAudioCommandV1::LoadResource {
+            stream_id,
+            encoding,
+            resource_uri: resource_uri.to_string(),
+        },
+        FfiLiveAudioCommandKind::CreateStream => LegacyAudioCommandV1::CreateStream {
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format,
+        },
+        FfiLiveAudioCommandKind::SubmitI16 => LegacyAudioCommandV1::SubmitI16 {
+            stream_id,
+            samples: i16_samples.expect("i16 sample command payload was checked"),
+        },
+        FfiLiveAudioCommandKind::SubmitF32 => LegacyAudioCommandV1::SubmitF32 {
+            stream_id,
+            samples: f32_samples.expect("f32 sample command payload was checked"),
+        },
+        FfiLiveAudioCommandKind::Play => LegacyAudioCommandV1::Play {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms: fade_ms,
+        },
+        FfiLiveAudioCommandKind::Stop => LegacyAudioCommandV1::Stop { stream_id, fade_ms },
+        FfiLiveAudioCommandKind::Pause => LegacyAudioCommandV1::Pause { stream_id },
+        FfiLiveAudioCommandKind::Resume => LegacyAudioCommandV1::Resume { stream_id },
+        FfiLiveAudioCommandKind::SetParams => LegacyAudioCommandV1::SetParams {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        },
+        FfiLiveAudioCommandKind::DestroyStream => LegacyAudioCommandV1::DestroyStream { stream_id },
+        FfiLiveAudioCommandKind::MasterVolume => LegacyAudioCommandV1::MasterVolume { volume },
+    };
+    LegacySequenced { sequence, value }
+}
+
+fn ffi_live_text(value: LegacySequenced<LegacyTextPresentationLeaseV1>) -> FfiLiveTextPresentation {
+    let LegacySequenced {
+        sequence,
+        value: binding,
+    } = value;
+    FfiLiveTextPresentation {
+        sequence,
+        lease_id: binding.lease_id.into(),
+        layout_id: binding.presentation.layout_id.into(),
+        language: binding.presentation.language.into(),
+        font_families: strings_to_ffi(binding.presentation.font_families),
+        body: FfiLiveTextRegion {
+            x: binding.presentation.body.x,
+            y: binding.presentation.body.y,
+            width: binding.presentation.body.width,
+            height: binding.presentation.body.height,
+            font_size: binding.presentation.body.font_size,
+            line_height: binding.presentation.body.line_height,
+            max_lines: binding.presentation.body.max_lines,
+        },
+        speaker: binding
+            .presentation
+            .speaker
+            .map(|speaker| FfiLiveTextRegion {
+                x: speaker.x,
+                y: speaker.y,
+                width: speaker.width,
+                height: speaker.height,
+                font_size: speaker.font_size,
+                line_height: speaker.line_height,
+                max_lines: speaker.max_lines,
+            })
+            .into(),
+        rgba: binding.presentation.rgba,
+    }
+}
+
+fn legacy_live_text(
+    value: FfiLiveTextPresentation,
+) -> LegacySequenced<LegacyTextPresentationLeaseV1> {
+    LegacySequenced {
+        sequence: value.sequence,
+        value: LegacyTextPresentationLeaseV1 {
+            lease_id: value.lease_id.to_string(),
+            presentation: crate::LegacyTextPresentationV1 {
+                layout_id: value.layout_id.to_string(),
+                language: value.language.to_string(),
+                font_families: value
+                    .font_families
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+                body: crate::LegacyTextRegionV1 {
+                    x: value.body.x,
+                    y: value.body.y,
+                    width: value.body.width,
+                    height: value.body.height,
+                    font_size: value.body.font_size,
+                    line_height: value.body.line_height,
+                    max_lines: value.body.max_lines,
+                },
+                speaker: value
+                    .speaker
+                    .into_option()
+                    .map(|speaker| crate::LegacyTextRegionV1 {
+                        x: speaker.x,
+                        y: speaker.y,
+                        width: speaker.width,
+                        height: speaker.height,
+                        font_size: speaker.font_size,
+                        line_height: speaker.line_height,
+                        max_lines: speaker.max_lines,
+                    }),
+                rgba: value.rgba,
+            },
+        },
+    }
+}
+
+fn ffi_live_output(value: LegacyLiveOutput) -> FfiLiveOutput {
+    FfiLiveOutput {
+        scenes: value
+            .scenes
+            .into_iter()
+            .map(ffi_live_scene)
+            .collect::<Vec<_>>()
+            .into(),
+        resource_scenes: value
+            .resource_scenes
+            .into_iter()
+            .map(|scene| FfiLiveResourceScene {
+                sequence: scene.sequence,
+                width: scene.value.width,
+                height: scene.value.height,
+                textures: scene
+                    .value
+                    .texture_resources
+                    .into_iter()
+                    .map(|texture| FfiLiveResourceTexture {
+                        texture_id: texture.texture_id,
+                        resource_uri: texture.resource_uri.into(),
+                        codec: texture.codec.into(),
+                        revision: texture.revision,
+                        decoded_width: texture.decoded_width,
+                        decoded_height: texture.decoded_height,
+                        decoded_format: ffi_live_format(texture.decoded_format),
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+                draws: scene
+                    .value
+                    .draws
+                    .into_iter()
+                    .map(ffi_live_draw)
+                    .collect::<Vec<_>>()
+                    .into(),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        audio: value
+            .audio
+            .into_iter()
+            .map(ffi_live_audio)
+            .collect::<Vec<_>>()
+            .into(),
+        audio_commands: value
+            .audio_commands
+            .into_iter()
+            .map(|command| ffi_live_audio_command(command.sequence, command.value))
+            .collect::<Vec<_>>()
+            .into(),
+        text: value
+            .text
+            .into_iter()
+            .map(|text| FfiLiveTextLease {
+                sequence: text.sequence,
+                lease_id: text.lease_id.into(),
+                byte_len: text.byte_len,
+                source_ref: text.source_ref.into(),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        text_presentations: value
+            .text_presentations
+            .into_iter()
+            .map(ffi_live_text)
+            .collect::<Vec<_>>()
+            .into(),
+        video: value
+            .video
+            .into_iter()
+            .map(|video| {
+                let sequence = video.sequence;
+                let (kind, playback_id, resource_uri, mode, stage_width, stage_height) =
+                    match video.value {
+                        LegacyVideoCommandV1::Play {
+                            playback_id,
+                            resource_uri,
+                            mode,
+                            stage_width,
+                            stage_height,
+                        } => (
+                            FfiLiveVideoCommandKind::Play,
+                            playback_id,
+                            resource_uri,
+                            match mode {
+                                LegacyVideoMode::ModalWithAudio => FfiLiveVideoMode::ModalWithAudio,
+                                LegacyVideoMode::LayerNoAudio => FfiLiveVideoMode::LayerNoAudio,
+                            },
+                            stage_width,
+                            stage_height,
+                        ),
+                        LegacyVideoCommandV1::Stop { playback_id } => (
+                            FfiLiveVideoCommandKind::Stop,
+                            playback_id,
+                            String::new(),
+                            FfiLiveVideoMode::LayerNoAudio,
+                            0,
+                            0,
+                        ),
+                    };
+                FfiLiveVideoCommand {
+                    sequence,
+                    playback_id: playback_id.into(),
+                    resource_uri: resource_uri.into(),
+                    mode,
+                    stage_width,
+                    stage_height,
+                    kind,
+                }
+            })
+            .collect::<Vec<_>>()
+            .into(),
+    }
+}
+
+fn legacy_live_output(value: FfiLiveOutput) -> LegacyLiveOutput {
+    LegacyLiveOutput {
+        scenes: value.scenes.into_iter().map(legacy_live_scene).collect(),
+        resource_scenes: value
+            .resource_scenes
+            .into_iter()
+            .map(|scene| LegacySequenced {
+                sequence: scene.sequence,
+                value: LegacyRenderResourceFrameV1 {
+                    width: scene.width,
+                    height: scene.height,
+                    texture_resources: scene
+                        .textures
+                        .into_iter()
+                        .map(|texture| crate::LegacyTextureResourceV1 {
+                            texture_id: texture.texture_id,
+                            resource_uri: texture.resource_uri.to_string(),
+                            codec: texture.codec.to_string(),
+                            revision: texture.revision,
+                            decoded_width: texture.decoded_width,
+                            decoded_height: texture.decoded_height,
+                            decoded_format: legacy_live_format(texture.decoded_format),
+                        })
+                        .collect(),
+                    draws: scene.draws.into_iter().map(legacy_live_draw).collect(),
+                },
+            })
+            .collect(),
+        audio: value.audio.into_iter().map(legacy_live_audio).collect(),
+        audio_commands: value
+            .audio_commands
+            .into_iter()
+            .map(legacy_live_audio_command)
+            .collect(),
+        text: value
+            .text
+            .into_iter()
+            .map(|text| LegacyTextLease {
+                sequence: text.sequence,
+                lease_id: text.lease_id.to_string(),
+                byte_len: text.byte_len,
+                source_ref: text.source_ref.to_string(),
+            })
+            .collect(),
+        text_presentations: value
+            .text_presentations
+            .into_iter()
+            .map(legacy_live_text)
+            .collect(),
+        video: value
+            .video
+            .into_iter()
+            .map(|video| LegacySequenced {
+                sequence: video.sequence,
+                value: match video.kind {
+                    FfiLiveVideoCommandKind::Play => LegacyVideoCommandV1::Play {
+                        playback_id: video.playback_id.to_string(),
+                        resource_uri: video.resource_uri.to_string(),
+                        mode: match video.mode {
+                            FfiLiveVideoMode::ModalWithAudio => LegacyVideoMode::ModalWithAudio,
+                            FfiLiveVideoMode::LayerNoAudio => LegacyVideoMode::LayerNoAudio,
+                        },
+                        stage_width: video.stage_width,
+                        stage_height: video.stage_height,
+                    },
+                    FfiLiveVideoCommandKind::Stop => LegacyVideoCommandV1::Stop {
+                        playback_id: video.playback_id.to_string(),
+                    },
+                },
+            })
+            .collect(),
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiBlackboardMutation {
+    pub sequence: u64,
+    pub key: RString,
+    pub value: RVec<u8>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiScheduledEvent {
+    pub sequence: u64,
+    pub due_tick: u64,
+    pub event: RString,
+    pub payload: RVec<u8>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiDirtySection {
+    pub sequence: u64,
+    pub section_id: RString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiControlTransaction {
+    pub events: RVec<FfiLiveEvent>,
+    pub blackboard: RVec<FfiBlackboardMutation>,
+    pub scheduled_events: RVec<FfiScheduledEvent>,
+    pub dirty_sections: RVec<FfiDirtySection>,
+    pub waits: RVec<FfiWaitRequest>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, StableAbi)]
 pub struct FfiStepOutput {
     pub status: FfiRuntimeStatus,
-    pub effects: RVec<FfiEffect>,
-    pub waits: RVec<FfiWaitRequest>,
+    pub live: FfiLiveOutput,
+    pub control: FfiControlTransaction,
     pub trace: RVec<FfiTraceEntry>,
     pub diagnostics: RVec<FfiDiagnostic>,
     pub coverage: FfiCoverageDelta,
-    pub state_hash: FfiHash256,
+    pub state_revision: u64,
 }
 
-impl From<LegacyStepOutput> for FfiStepOutput {
-    fn from(value: LegacyStepOutput) -> Self {
-        Self {
+impl TryFrom<LegacyStepOutput> for FfiStepOutput {
+    type Error = LegacyProviderError;
+
+    fn try_from(value: LegacyStepOutput) -> Result<Self, Self::Error> {
+        Ok(Self {
             status: value.status.into(),
-            effects: value
-                .effects
-                .into_iter()
-                .map(Into::into)
-                .collect::<Vec<_>>()
-                .into(),
-            waits: value
-                .waits
-                .into_iter()
-                .map(Into::into)
-                .collect::<Vec<_>>()
-                .into(),
+            live: ffi_live_output(value.live),
+            control: FfiControlTransaction {
+                events: value
+                    .control
+                    .events
+                    .into_iter()
+                    .map(|event| FfiLiveEvent {
+                        sequence: event.sequence,
+                        event: event.event.into(),
+                        payload: live_payload_to_ffi(event.payload),
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+                blackboard: value
+                    .control
+                    .blackboard
+                    .into_iter()
+                    .map(|mutation| FfiBlackboardMutation {
+                        sequence: mutation.sequence,
+                        key: mutation.key.into(),
+                        value: live_payload_to_ffi(mutation.value),
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+                scheduled_events: value
+                    .control
+                    .scheduled_events
+                    .into_iter()
+                    .map(|event| FfiScheduledEvent {
+                        sequence: event.sequence,
+                        due_tick: event.due_tick,
+                        event: event.event.into(),
+                        payload: live_payload_to_ffi(event.payload),
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+                dirty_sections: value
+                    .control
+                    .dirty_sections
+                    .into_iter()
+                    .map(|dirty| FfiDirtySection {
+                        sequence: dirty.sequence,
+                        section_id: dirty.section_id.into(),
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+                waits: value
+                    .control
+                    .waits
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<_>>()
+                    .into(),
+            },
             trace: value
                 .trace
                 .into_iter()
@@ -1069,33 +2000,143 @@ impl From<LegacyStepOutput> for FfiStepOutput {
                 .collect::<Vec<_>>()
                 .into(),
             coverage: value.coverage.into(),
-            state_hash: value.state_hash.into(),
-        }
+            state_revision: value.state_revision,
+        })
     }
 }
 
 impl TryFrom<FfiStepOutput> for LegacyStepOutput {
     type Error = LegacyProviderError;
     fn try_from(value: FfiStepOutput) -> Result<Self, Self::Error> {
+        let FfiStepOutput {
+            status,
+            live,
+            control,
+            trace,
+            diagnostics,
+            coverage,
+            state_revision,
+        } = value;
         Ok(Self {
-            status: value.status.into(),
-            effects: value
-                .effects
-                .iter()
-                .cloned()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-            waits: value
-                .waits
-                .iter()
-                .cloned()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
-            trace: value.trace.iter().cloned().map(Into::into).collect(),
-            diagnostics: value.diagnostics.iter().cloned().map(Into::into).collect(),
-            coverage: value.coverage.into(),
-            state_hash: value.state_hash.into(),
+            status: status.into(),
+            live: legacy_live_output(live),
+            control: LegacyControlTransaction {
+                events: control
+                    .events
+                    .into_iter()
+                    .map(|event| LegacyEvent {
+                        sequence: event.sequence,
+                        event: event.event.to_string(),
+                        payload: live_payload_from_ffi(event.payload),
+                    })
+                    .collect(),
+                blackboard: control
+                    .blackboard
+                    .into_iter()
+                    .map(|mutation| LegacyBlackboardMutation {
+                        sequence: mutation.sequence,
+                        key: mutation.key.to_string(),
+                        value: live_payload_from_ffi(mutation.value),
+                    })
+                    .collect(),
+                scheduled_events: control
+                    .scheduled_events
+                    .into_iter()
+                    .map(|event| LegacyScheduledEvent {
+                        sequence: event.sequence,
+                        due_tick: event.due_tick,
+                        event: event.event.to_string(),
+                        payload: live_payload_from_ffi(event.payload),
+                    })
+                    .collect(),
+                dirty_sections: control
+                    .dirty_sections
+                    .into_iter()
+                    .map(|dirty| LegacyDirtySection {
+                        sequence: dirty.sequence,
+                        section_id: dirty.section_id.to_string(),
+                    })
+                    .collect(),
+                waits: control
+                    .waits
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+            },
+            trace: trace.into_iter().map(Into::into).collect(),
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            coverage: coverage.into(),
+            state_revision,
         })
+    }
+}
+
+#[cfg(test)]
+mod live_zero_copy_tests {
+    use super::*;
+
+    #[test]
+    fn scene_rgba8_allocation_moves_across_family_ffi_wire() {
+        let pixels = vec![255, 0, 128, 255];
+        let source_ptr = pixels.as_ptr();
+        let transaction = LegacySceneTransactionV7 {
+            sequence: 7,
+            width: 1,
+            height: 1,
+            resources: vec![LegacySceneResourceOperationV7::CreateTexture {
+                texture_id: 11,
+                generation: 1,
+                width: 1,
+                height: 1,
+                format: LegacyTextureFormat::Rgba8,
+                pixels: LegacyPayload::Native(pixels),
+            }],
+            draws: Vec::new(),
+            reset_resources: false,
+        };
+
+        let ffi = ffi_live_scene(transaction);
+        let ffi_ptr = match ffi.resources.as_slice().first().expect("scene resource") {
+            FfiLiveSceneResourceOperation::Create(value) => value.pixels.as_slice().as_ptr(),
+            _ => panic!("expected create texture"),
+        };
+        assert_eq!(ffi_ptr, source_ptr);
+
+        let legacy = legacy_live_scene(ffi);
+        let returned_ptr = match legacy.resources.as_slice().first().expect("scene resource") {
+            LegacySceneResourceOperationV7::CreateTexture { pixels, .. } => {
+                pixels.as_bytes().as_ptr()
+            }
+            _ => panic!("expected create texture"),
+        };
+        assert_eq!(returned_ptr, source_ptr);
+    }
+
+    #[test]
+    fn pcm_i16_allocation_moves_across_family_ffi_wire() {
+        let samples = vec![-3_i16, 0, 17, 4096];
+        let source_ptr = samples.as_ptr();
+        let packet = LegacyAudioPacketV7 {
+            sequence: 9,
+            stream_id: 2,
+            sample_rate: 48_000,
+            channels: 2,
+            pcm: LegacyPcmBufferV7::I16(samples),
+        };
+
+        let ffi = ffi_live_audio(packet);
+        let ffi_ptr = match &ffi.pcm {
+            FfiLivePcmBuffer::I16(samples) => samples.as_slice().as_ptr(),
+            FfiLivePcmBuffer::F32(_) => panic!("expected i16 PCM"),
+        };
+        assert_eq!(ffi_ptr, source_ptr);
+
+        let legacy = legacy_live_audio(ffi);
+        let returned_ptr = match legacy.pcm {
+            LegacyPcmBufferV7::I16(samples) => samples.as_ptr(),
+            LegacyPcmBufferV7::F32(_) => panic!("expected i16 PCM"),
+        };
+        assert_eq!(returned_ptr, source_ptr);
     }
 }
 
@@ -1105,7 +2146,6 @@ pub struct FfiSnapshotSection {
     pub section_id: RString,
     pub schema: RString,
     pub version: FfiSchemaVersion,
-    pub hash: FfiHash256,
     pub bytes: FfiBulkBytes,
 }
 
@@ -1115,7 +2155,6 @@ impl From<LegacySnapshotSection> for FfiSnapshotSection {
             section_id: value.section_id.into(),
             schema: value.schema.into(),
             version: value.version.into(),
-            hash: value.hash.into(),
             bytes: bulk_bytes_from_vec(value.bytes),
         }
     }
@@ -1126,7 +2165,6 @@ impl From<FfiSnapshotSection> for LegacySnapshotSection {
             section_id: value.section_id.to_string(),
             schema: value.schema.to_string(),
             version: value.version.into(),
-            hash: value.hash.into(),
             bytes: bulk_bytes_to_vec(&value.bytes),
         }
     }
@@ -1192,7 +2230,7 @@ impl From<FfiSnapshotEnvelope> for LegacySnapshotEnvelope {
 pub struct FfiRestoreReport {
     pub restored_fixed_step: u64,
     pub session_seed: u64,
-    pub state_hash: FfiHash256,
+    pub state_revision: u64,
     pub diagnostics: RVec<FfiDiagnostic>,
 }
 impl From<LegacyRestoreReport> for FfiRestoreReport {
@@ -1200,7 +2238,7 @@ impl From<LegacyRestoreReport> for FfiRestoreReport {
         Self {
             restored_fixed_step: value.restored_fixed_step,
             session_seed: value.session_seed,
-            state_hash: value.state_hash.into(),
+            state_revision: value.state_revision,
             diagnostics: value
                 .diagnostics
                 .into_iter()
@@ -1215,7 +2253,7 @@ impl From<FfiRestoreReport> for LegacyRestoreReport {
         Self {
             restored_fixed_step: value.restored_fixed_step,
             session_seed: value.session_seed,
-            state_hash: value.state_hash.into(),
+            state_revision: value.state_revision,
             diagnostics: value.diagnostics.iter().cloned().map(Into::into).collect(),
         }
     }
@@ -1224,7 +2262,7 @@ impl From<FfiRestoreReport> for LegacyRestoreReport {
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub struct FfiShutdownReport {
-    pub final_state_hash: FfiHash256,
+    pub final_state_revision: u64,
     pub instruction_count: u64,
     pub syscall_count: u64,
     pub diagnostics: RVec<FfiDiagnostic>,
@@ -1232,7 +2270,7 @@ pub struct FfiShutdownReport {
 impl From<LegacyShutdownReport> for FfiShutdownReport {
     fn from(value: LegacyShutdownReport) -> Self {
         Self {
-            final_state_hash: value.final_state_hash.into(),
+            final_state_revision: value.final_state_revision,
             instruction_count: value.instruction_count,
             syscall_count: value.syscall_count,
             diagnostics: value
@@ -1247,7 +2285,7 @@ impl From<LegacyShutdownReport> for FfiShutdownReport {
 impl From<FfiShutdownReport> for LegacyShutdownReport {
     fn from(value: FfiShutdownReport) -> Self {
         Self {
-            final_state_hash: value.final_state_hash.into(),
+            final_state_revision: value.final_state_revision,
             instruction_count: value.instruction_count,
             syscall_count: value.syscall_count,
             diagnostics: value.diagnostics.iter().cloned().map(Into::into).collect(),
@@ -1332,7 +2370,6 @@ impl From<FfiByteSourceStat> for astra_byte_source::ByteSourceStat {
 pub struct FfiRangeReadResult {
     pub range: FfiByteRange,
     pub revision: FfiHash256,
-    pub content_hash: FfiHash256,
     pub bytes: FfiBulkBytes,
 }
 impl From<astra_byte_source::RangeReadResult> for FfiRangeReadResult {
@@ -1340,7 +2377,6 @@ impl From<astra_byte_source::RangeReadResult> for FfiRangeReadResult {
         Self {
             range: value.range.into(),
             revision: value.revision.0.into(),
-            content_hash: value.content_hash.into(),
             bytes: bulk_bytes_from_vec(value.bytes),
         }
     }
@@ -1350,7 +2386,6 @@ impl From<FfiRangeReadResult> for astra_byte_source::RangeReadResult {
         Self {
             range: value.range.into(),
             revision: astra_byte_source::SourceRevision(value.revision.into()),
-            content_hash: value.content_hash.into(),
             bytes: bulk_bytes_to_vec(&value.bytes),
         }
     }

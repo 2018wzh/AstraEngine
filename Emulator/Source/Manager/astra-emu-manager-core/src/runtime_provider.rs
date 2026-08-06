@@ -8,16 +8,27 @@ use std::{
 
 use astra_core::{Diagnostic, Hash256, SchemaVersion, StableId};
 use astra_emu_family_api::{
-    LegacyAwaitResult, LegacyDiagnostic, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
-    LegacyOpenRequest, LegacyPayload, LegacyProbeReport, LegacyProbeRequest, LegacyProviderResult,
-    LegacyReplayMode, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacySnapshotEnvelope, LegacyStepBudget, LegacyStepInput, LegacyStepOutput, LegacyWaitRequest,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
+    LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction,
+    LegacyDiagnostic, LegacyEphemeralText, LegacyEvent, LegacyInputEdge, LegacyLiveOutput,
+    LegacyOpenRequest, LegacyPayload, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
+    LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode, LegacyRuntimeHostCtx,
+    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
+    LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacySnapshotEnvelope,
+    LegacyStepBudget, LegacyStepInput, LegacyTextPresentationLeaseV1, LegacyTextureFormat,
+    LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
 };
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 use astra_plugin_abi::{
-    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeBulkKind,
-    RuntimeBulkPayload, RuntimeBulkStorage, RuntimeOpenReport, RuntimeOpenRequest,
-    RuntimeOutputCodec, RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor,
+    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeLiveAudioCommand,
+    RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket, RuntimeLiveAudioSampleFormat,
+    RuntimeLiveBlendMode, RuntimeLiveControl, RuntimeLiveCoverage, RuntimeLiveDraw,
+    RuntimeLiveEffect, RuntimeLiveEvent, RuntimeLiveOutput, RuntimeLivePcmBuffer,
+    RuntimeLiveResourceScene, RuntimeLiveResourceTexture, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveSceneTransaction, RuntimeLiveScissor, RuntimeLiveTextLease,
+    RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFormat,
+    RuntimeLiveVertex, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode,
+    RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenReport, RuntimeOpenRequest,
     RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
     RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
     RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
@@ -34,24 +45,536 @@ use astra_runtime::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-struct LegacyPayloadBulkStorage(LegacyPayload);
-
-impl RuntimeBulkStorage for LegacyPayloadBulkStorage {
-    fn kind(&self) -> RuntimeBulkKind {
-        RuntimeBulkKind::Bytes
+fn move_live_pixels(payload: LegacyPayload) -> Result<Vec<u8>, String> {
+    match payload {
+        LegacyPayload::Native(bytes) => Ok(bytes),
+        LegacyPayload::Foreign(_) => Err(
+            "ASTRA_EMU_LIVE_FOREIGN_PIXEL_OWNER: live scene would require an application copy"
+                .into(),
+        ),
     }
+}
 
-    fn len(&self) -> u64 {
-        self.0.len() as u64
+fn live_texture_format(format: LegacyTextureFormat) -> RuntimeLiveTextureFormat {
+    match format {
+        LegacyTextureFormat::Rgba8 => RuntimeLiveTextureFormat::Rgba8,
+        LegacyTextureFormat::LumaAlpha8 => RuntimeLiveTextureFormat::LumaAlpha8,
     }
+}
 
-    fn hash(&self) -> Hash256 {
-        Hash256::from_sha256(self.0.as_bytes())
+fn live_color(color: [f32; 4]) -> Result<[u8; 4], String> {
+    let mut output = [0_u8; 4];
+    for (index, value) in color.into_iter().enumerate() {
+        if !value.is_finite() {
+            return Err("ASTRA_EMU_LIVE_SCENE_COLOR: color contains a non-finite value".into());
+        }
+        output[index] = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
     }
+    Ok(output)
+}
 
-    fn bytes(&self) -> Option<&[u8]> {
-        Some(self.0.as_bytes())
+fn move_live_scene(
+    transaction: LegacySceneTransactionV7,
+) -> Result<RuntimeLiveSceneTransaction, String> {
+    let resources = transaction
+        .resources
+        .into_iter()
+        .map(|operation| match operation {
+            LegacySceneResourceOperationV7::CreateTexture {
+                texture_id,
+                generation,
+                width,
+                height,
+                format,
+                pixels,
+            } => Ok(RuntimeLiveSceneResourceOperation::CreateTexture {
+                texture_id,
+                generation,
+                width,
+                height,
+                format: live_texture_format(format),
+                pixels: move_live_pixels(pixels)?,
+            }),
+            LegacySceneResourceOperationV7::UpdateTexture {
+                texture_id,
+                generation,
+                x,
+                y,
+                width,
+                height,
+                format,
+                pixels,
+            } => Ok(RuntimeLiveSceneResourceOperation::UpdateTexture {
+                texture_id,
+                generation,
+                x,
+                y,
+                width,
+                height,
+                format: live_texture_format(format),
+                pixels: move_live_pixels(pixels)?,
+            }),
+            LegacySceneResourceOperationV7::DestroyTexture {
+                texture_id,
+                generation,
+            } => Ok(RuntimeLiveSceneResourceOperation::DestroyTexture {
+                texture_id,
+                generation,
+            }),
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let draws = transaction
+        .draws
+        .into_iter()
+        .map(|draw| {
+            let vertices = draw
+                .vertices
+                .into_iter()
+                .map(|vertex| {
+                    Ok(RuntimeLiveVertex {
+                        x: vertex.position[0],
+                        y: vertex.position[1],
+                        u: vertex.tex_coord[0],
+                        v: vertex.tex_coord[1],
+                        color: live_color(vertex.color)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?
+                .try_into()
+                .map_err(|_| "ASTRA_EMU_LIVE_SCENE_VERTEX_COUNT".to_string())?;
+            let blend = match draw.blend {
+                LegacyBlendMode::Alpha => RuntimeLiveBlendMode::Alpha,
+                LegacyBlendMode::Add => RuntimeLiveBlendMode::Additive,
+                LegacyBlendMode::Opaque => RuntimeLiveBlendMode::Opaque,
+                LegacyBlendMode::Multiply => RuntimeLiveBlendMode::Multiply,
+                LegacyBlendMode::Screen => RuntimeLiveBlendMode::Screen,
+            };
+            let scissor = draw
+                .scissor
+                .map(|scissor| {
+                    if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
+                        return Err("ASTRA_EMU_LIVE_SCENE_SCISSOR".to_string());
+                    }
+                    Ok(RuntimeLiveScissor {
+                        x: scissor.x as u32,
+                        y: scissor.y as u32,
+                        width: scissor.width as u32,
+                        height: scissor.height as u32,
+                    })
+                })
+                .transpose()?;
+            Ok(RuntimeLiveDraw {
+                texture_id: draw.texture_id,
+                vertices,
+                blend,
+                scissor,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let live = RuntimeLiveSceneTransaction {
+        sequence: transaction.sequence,
+        width: transaction.width,
+        height: transaction.height,
+        resources,
+        draws,
+        reset_resources: transaction.reset_resources,
+    };
+    live.validate().map_err(|error| error.to_string())?;
+    Ok(live)
+}
+
+fn move_live_audio(packet: LegacyAudioPacketV7) -> Result<RuntimeLiveAudioPacket, String> {
+    packet.validate().map_err(|error| error.to_string())?;
+    let pcm = match packet.pcm {
+        LegacyPcmBufferV7::I16(samples) => RuntimeLivePcmBuffer::I16(samples),
+        LegacyPcmBufferV7::F32(samples) => RuntimeLivePcmBuffer::F32(samples),
+    };
+    if pcm.is_empty() {
+        return Err("ASTRA_EMU_LIVE_PCM_EMPTY".into());
     }
+    Ok(RuntimeLiveAudioPacket {
+        sequence: packet.sequence,
+        stream_id: packet.stream_id,
+        sample_rate: packet.sample_rate,
+        channels: packet.channels,
+        pcm,
+    })
+}
+
+fn move_live_draw(draw: astra_emu_family_api::LegacyDrawV1) -> Result<RuntimeLiveDraw, String> {
+    let vertices = draw
+        .vertices
+        .into_iter()
+        .map(|vertex| {
+            Ok(RuntimeLiveVertex {
+                x: vertex.position[0],
+                y: vertex.position[1],
+                u: vertex.tex_coord[0],
+                v: vertex.tex_coord[1],
+                color: live_color(vertex.color)?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .try_into()
+        .map_err(|_| "ASTRA_EMU_LIVE_SCENE_VERTEX_COUNT".to_string())?;
+    let blend = match draw.blend {
+        LegacyBlendMode::Alpha => RuntimeLiveBlendMode::Alpha,
+        LegacyBlendMode::Add => RuntimeLiveBlendMode::Additive,
+        LegacyBlendMode::Opaque => RuntimeLiveBlendMode::Opaque,
+        LegacyBlendMode::Multiply => RuntimeLiveBlendMode::Multiply,
+        LegacyBlendMode::Screen => RuntimeLiveBlendMode::Screen,
+    };
+    let scissor = draw
+        .scissor
+        .map(|scissor| {
+            if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
+                return Err("ASTRA_EMU_LIVE_SCENE_SCISSOR".to_string());
+            }
+            Ok(RuntimeLiveScissor {
+                x: scissor.x as u32,
+                y: scissor.y as u32,
+                width: scissor.width as u32,
+                height: scissor.height as u32,
+            })
+        })
+        .transpose()?;
+    Ok(RuntimeLiveDraw {
+        texture_id: draw.texture_id,
+        vertices,
+        blend,
+        scissor,
+    })
+}
+
+fn move_live_resource_scene(
+    frame: LegacyRenderResourceFrameV1,
+) -> Result<RuntimeLiveResourceScene, String> {
+    frame.validate().map_err(|error| error.to_string())?;
+    let textures = frame
+        .texture_resources
+        .into_iter()
+        .map(|texture| RuntimeLiveResourceTexture {
+            texture_id: texture.texture_id,
+            resource_uri: texture.resource_uri,
+            codec: texture.codec,
+            revision: texture.revision,
+            decoded_width: texture.decoded_width,
+            decoded_height: texture.decoded_height,
+            decoded_format: live_texture_format(texture.decoded_format),
+        })
+        .collect();
+    let draws = frame
+        .draws
+        .into_iter()
+        .map(move_live_draw)
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(RuntimeLiveResourceScene {
+        sequence: 0,
+        width: frame.width,
+        height: frame.height,
+        textures,
+        draws,
+    })
+}
+
+fn move_live_audio_command(
+    sequence: u64,
+    command: LegacyAudioCommandV1,
+) -> Result<RuntimeLiveAudioCommand, String> {
+    command.validate().map_err(|error| error.to_string())?;
+    Ok(match command {
+        LegacyAudioCommandV1::LoadResource {
+            stream_id,
+            encoding,
+            resource_uri,
+        } => RuntimeLiveAudioCommand::LoadResource {
+            sequence,
+            stream_id,
+            encoding: match encoding {
+                LegacyAudioEncoding::Unknown => RuntimeLiveAudioEncoding::Unknown,
+                LegacyAudioEncoding::Wav => RuntimeLiveAudioEncoding::Wav,
+                LegacyAudioEncoding::Ogg => RuntimeLiveAudioEncoding::Ogg,
+                LegacyAudioEncoding::Mp3 => RuntimeLiveAudioEncoding::Mp3,
+                LegacyAudioEncoding::Flac => RuntimeLiveAudioEncoding::Flac,
+            },
+            resource_uri,
+        },
+        LegacyAudioCommandV1::CreateStream {
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format,
+        } => RuntimeLiveAudioCommand::CreateStream {
+            sequence,
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format: match sample_format {
+                LegacyAudioSampleFormat::I16 => RuntimeLiveAudioSampleFormat::I16,
+                LegacyAudioSampleFormat::F32 => RuntimeLiveAudioSampleFormat::F32,
+            },
+        },
+        LegacyAudioCommandV1::SubmitI16 { stream_id, samples } => {
+            RuntimeLiveAudioCommand::SubmitI16 {
+                sequence,
+                stream_id,
+                samples,
+            }
+        }
+        LegacyAudioCommandV1::SubmitF32 { stream_id, samples } => {
+            RuntimeLiveAudioCommand::SubmitF32 {
+                sequence,
+                stream_id,
+                samples,
+            }
+        }
+        LegacyAudioCommandV1::Play {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        } => RuntimeLiveAudioCommand::Play {
+            sequence,
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        },
+        LegacyAudioCommandV1::Stop { stream_id, fade_ms } => RuntimeLiveAudioCommand::Stop {
+            sequence,
+            stream_id,
+            fade_ms,
+        },
+        LegacyAudioCommandV1::Pause { stream_id } => RuntimeLiveAudioCommand::Pause {
+            sequence,
+            stream_id,
+        },
+        LegacyAudioCommandV1::Resume { stream_id } => RuntimeLiveAudioCommand::Resume {
+            sequence,
+            stream_id,
+        },
+        LegacyAudioCommandV1::SetParams {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        } => RuntimeLiveAudioCommand::SetParams {
+            sequence,
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        },
+        LegacyAudioCommandV1::DestroyStream { stream_id } => {
+            RuntimeLiveAudioCommand::DestroyStream {
+                sequence,
+                stream_id,
+            }
+        }
+        LegacyAudioCommandV1::MasterVolume { volume } => {
+            RuntimeLiveAudioCommand::MasterVolume { sequence, volume }
+        }
+    })
+}
+
+fn move_live_text_presentation(
+    sequence: u64,
+    binding: LegacyTextPresentationLeaseV1,
+) -> Result<RuntimeLiveTextPresentation, String> {
+    binding.validate().map_err(|error| error.to_string())?;
+    let presentation = binding.presentation;
+    let convert_region = |region: astra_emu_family_api::LegacyTextRegionV1| RuntimeLiveTextRegion {
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        font_size: region.font_size,
+        line_height: region.line_height,
+        max_lines: region.max_lines,
+    };
+    Ok(RuntimeLiveTextPresentation {
+        sequence,
+        lease_id: binding.lease_id,
+        layout_id: presentation.layout_id,
+        language: presentation.language,
+        font_families: presentation.font_families,
+        body: convert_region(presentation.body),
+        speaker: presentation.speaker.map(convert_region),
+        rgba: presentation.rgba,
+    })
+}
+
+fn move_live_video(
+    sequence: u64,
+    command: LegacyVideoCommandV1,
+) -> Result<RuntimeLiveVideoCommand, String> {
+    command.validate().map_err(|error| error.to_string())?;
+    let command = match command {
+        LegacyVideoCommandV1::Play {
+            playback_id,
+            resource_uri,
+            mode,
+            stage_width,
+            stage_height,
+        } => RuntimeLiveVideoCommandKind::Play {
+            playback_id,
+            resource_uri,
+            mode: match mode {
+                LegacyVideoMode::ModalWithAudio => RuntimeLiveVideoMode::ModalWithAudio,
+                LegacyVideoMode::LayerNoAudio => RuntimeLiveVideoMode::LayerNoAudio,
+            },
+            stage_width,
+            stage_height,
+        },
+        LegacyVideoCommandV1::Stop { playback_id } => {
+            RuntimeLiveVideoCommandKind::Stop { playback_id }
+        }
+    };
+    Ok(RuntimeLiveVideoCommand { sequence, command })
+}
+
+fn move_live_payload(payload: LegacyPayload) -> Result<Vec<u8>, String> {
+    match payload {
+        LegacyPayload::Native(bytes) => Ok(bytes),
+        LegacyPayload::Foreign(_) => Err(
+            "ASTRA_EMU_LIVE_FOREIGN_PAYLOAD_OWNER: live event payload requires an application copy"
+                .into(),
+        ),
+    }
+}
+
+fn move_live_wait(sequence: u64, wait: LegacyWaitRequest) -> RuntimeLiveWait {
+    let (token_id, kind) = match wait {
+        LegacyWaitRequest::Frame { token_id, frames } => {
+            (token_id, RuntimeLiveWaitKind::Frame { frames })
+        }
+        LegacyWaitRequest::Time {
+            token_id,
+            milliseconds,
+        } => (token_id, RuntimeLiveWaitKind::Time { milliseconds }),
+        LegacyWaitRequest::Input { token_id, keys } => {
+            (token_id, RuntimeLiveWaitKind::Input { keys })
+        }
+        LegacyWaitRequest::MediaFence { token_id, media_id } => {
+            (token_id, RuntimeLiveWaitKind::MediaFence { media_id })
+        }
+        LegacyWaitRequest::PresentationFence { token_id, fence_id } => (
+            token_id,
+            RuntimeLiveWaitKind::PresentationFence { fence_id },
+        ),
+        LegacyWaitRequest::ProviderCompletion {
+            token_id,
+            request_id,
+        } => (
+            token_id,
+            RuntimeLiveWaitKind::ProviderCompletion { request_id },
+        ),
+        LegacyWaitRequest::FamilyOpaque {
+            token_id,
+            wait_kind,
+            payload_len,
+        } => (
+            token_id,
+            RuntimeLiveWaitKind::FamilyOpaque {
+                wait_kind,
+                payload_len,
+            },
+        ),
+    };
+    RuntimeLiveWait {
+        sequence,
+        token_id,
+        kind,
+    }
+}
+
+fn move_live_output(live: LegacyLiveOutput) -> Result<Vec<RuntimeLiveEffect>, String> {
+    let mut output = Vec::with_capacity(live.len());
+    for scene in live.scenes {
+        output.push(RuntimeLiveEffect::Scene(move_live_scene(scene)?));
+    }
+    for scene in live.resource_scenes {
+        let mut value = move_live_resource_scene(scene.value)?;
+        value.sequence = scene.sequence;
+        output.push(RuntimeLiveEffect::ResourceScene(value));
+    }
+    for packet in live.audio {
+        output.push(RuntimeLiveEffect::Audio(move_live_audio(packet)?));
+    }
+    for command in live.audio_commands {
+        output.push(RuntimeLiveEffect::AudioCommand(move_live_audio_command(
+            command.sequence,
+            command.value,
+        )?));
+    }
+    for text in live.text {
+        output.push(RuntimeLiveEffect::Text(RuntimeLiveTextLease {
+            sequence: text.sequence,
+            lease_id: text.lease_id,
+            byte_len: text.byte_len,
+            source_ref: text.source_ref,
+        }));
+    }
+    for binding in live.text_presentations {
+        output.push(RuntimeLiveEffect::TextPresentation(
+            move_live_text_presentation(binding.sequence, binding.value)?,
+        ));
+    }
+    for video in live.video {
+        output.push(RuntimeLiveEffect::Video(move_live_video(
+            video.sequence,
+            video.value,
+        )?));
+    }
+    Ok(output)
+}
+
+fn move_control_output(
+    control: LegacyControlTransaction,
+    wait_sequence_start: u64,
+) -> Result<Vec<RuntimeLiveEffect>, String> {
+    let mut output = Vec::with_capacity(control.len() + control.waits.len());
+    for event in control.events {
+        output.push(RuntimeLiveEffect::Event(RuntimeLiveEvent {
+            sequence: event.sequence,
+            event: event.event,
+            payload: move_live_payload(event.payload)?,
+            due_tick: None,
+        }));
+    }
+    for mutation in control.blackboard {
+        output.push(RuntimeLiveEffect::Control(
+            RuntimeLiveControl::SetBlackboard {
+                sequence: mutation.sequence,
+                key: mutation.key,
+                value: move_live_payload(mutation.value)?,
+            },
+        ));
+    }
+    for event in control.scheduled_events {
+        output.push(RuntimeLiveEffect::Event(RuntimeLiveEvent {
+            sequence: event.sequence,
+            event: event.event,
+            payload: move_live_payload(event.payload)?,
+            due_tick: Some(event.due_tick),
+        }));
+    }
+    for dirty in control.dirty_sections {
+        output.push(RuntimeLiveEffect::Control(
+            RuntimeLiveControl::SnapshotDirty {
+                sequence: dirty.sequence,
+                section_id: dirty.section_id,
+            },
+        ));
+    }
+    let mut next_sequence = wait_sequence_start;
+    for wait in control.waits {
+        output.push(RuntimeLiveEffect::Wait(move_live_wait(next_sequence, wait)));
+        next_sequence = next_sequence.saturating_add(1);
+    }
+    Ok(output)
 }
 
 fn emit_family_diagnostics(
@@ -120,19 +643,11 @@ pub struct EmuCaseProfile {
     pub family_options: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct EmuStepPayload {
-    pub input_edges: Vec<LegacyInputEdge>,
-    pub await_results: Vec<LegacyAwaitResult>,
-    pub provider_results: Vec<LegacyProviderResult>,
-    pub budget: LegacyStepBudget,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmuRuntimeState {
     family_id: String,
     status: String,
-    family_state_hash: Hash256,
+    family_state_revision: u64,
     fixed_step: u64,
 }
 
@@ -140,31 +655,44 @@ struct EmuRuntimeState {
 struct EmuFamilySaveV1 {
     family: LegacySnapshotEnvelope,
     await_tokens: BTreeMap<String, AwaitTokenId>,
-    pending_patch_effects: Vec<LegacyEffect>,
+    pending_patch_effects: Vec<QueuedPatchEffect>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QueuedPatchEffect {
+    RuntimeEvent { event: String, payload: Vec<u8> },
+    SetBlackboard { key: String, value: Vec<u8> },
 }
 
 struct EmuSession {
     world: RuntimeWorld,
     family_session_id: LegacyRuntimeSessionId,
     host_ctx: LegacyRuntimeHostCtx,
-    output: Arc<Mutex<Option<LegacyStepOutput>>>,
+    pending_control: Arc<Mutex<Option<PendingControlStep>>>,
     await_tokens: Arc<Mutex<BTreeMap<String, AwaitTokenId>>>,
-    pending_patch_effects: Vec<LegacyEffect>,
+    pending_patch_effects: Vec<QueuedPatchEffect>,
     poisoned: bool,
 }
 
-struct ApplyLegacyEffectsAction {
-    output: Arc<Mutex<Option<LegacyStepOutput>>>,
+struct PendingControlStep {
+    status: LegacyRuntimeStatus,
+    state_revision: u64,
+    control: LegacyControlTransaction,
+    live_effect_count: usize,
+}
+
+struct ApplyLegacyControlAction {
+    pending: Arc<Mutex<Option<PendingControlStep>>>,
     state_component: astra_runtime::ComponentId,
     await_tokens: Arc<Mutex<BTreeMap<String, AwaitTokenId>>>,
 }
 
-impl RuntimeAction for ApplyLegacyEffectsAction {
+impl RuntimeAction for ApplyLegacyControlAction {
     fn descriptor(&self) -> ActionDescriptor {
         ActionDescriptor::declared(
-            "astra.emu.apply_legacy_effects",
-            "astra.emu.legacy_effect_input.v1",
-            "astra.emu.legacy_effect_trace.v1",
+            "astra.emu.apply_legacy_control",
+            "astra.emu.legacy_control_input.v1",
+            "astra.emu.legacy_control_trace.v1",
             ActionExecutionClass::Serial,
             ActionAccess::new(
                 [ActionResourceKey::ActorStore],
@@ -187,88 +715,68 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
         ctx: &mut DeterministicActionContext<'_>,
         _input: &BTreeMap<String, BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
-        let output_guard = self
-            .output
+        let pending = self
+            .pending
             .lock()
-            .map_err(|_| RuntimeError::message("ASTRA_EMU_OUTPUT_LOCK_POISONED"))?;
-        let output = output_guard.as_ref().ok_or_else(|| {
+            .map_err(|_| RuntimeError::message("ASTRA_EMU_CONTROL_LOCK_POISONED"))?;
+        let pending = pending.as_ref().ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_EMU_OUTPUT_MISSING",
-                "family provider did not publish a step output",
+                "ASTRA_EMU_CONTROL_MISSING",
+                "family provider did not publish a control transaction",
             ))
         })?;
         let mut state = ctx.read_component::<EmuRuntimeState>(self.state_component)?;
-        state.family_state_hash = output.state_hash;
+        state.family_state_revision = pending.state_revision;
         state.fixed_step = ctx.step();
-        state.status = format!("{:?}", output.status).to_ascii_lowercase();
+        state.status = format!("{:?}", pending.status).to_ascii_lowercase();
         ctx.replace_component(self.state_component, &state)?;
-        for effect in &output.effects {
-            match effect {
-                LegacyEffect::RuntimeEvent { event, payload, .. } => ctx.emit_event(
-                    astra_runtime::EventSource::StateMachine,
-                    EventPayload {
-                        kind: event.clone(),
-                        data: [(
-                            "payload".into(),
-                            BlackboardValue::Bytes(payload.as_bytes().to_vec()),
-                        )]
-                        .into_iter()
-                        .collect(),
-                    },
-                ),
-                LegacyEffect::Presentation {
-                    command, payload, ..
-                } => ctx.emit_presentation(PresentationCommand::Custom {
-                    kind: command.clone(),
-                    data: [
-                        (
-                            "payload_hash".into(),
-                            BlackboardValue::String(Hash256::from_sha256(payload).to_string()),
-                        ),
-                        (
-                            "payload_bytes".into(),
-                            BlackboardValue::I64(payload.len() as i64),
-                        ),
-                    ]
+
+        for event in &pending.control.events {
+            ctx.emit_event(
+                astra_runtime::EventSource::StateMachine,
+                EventPayload {
+                    kind: event.event.clone(),
+                    data: [(
+                        "payload".into(),
+                        BlackboardValue::Bytes(event.payload.as_bytes().to_vec()),
+                    )]
                     .into_iter()
                     .collect(),
-                }),
-                LegacyEffect::Audio {
-                    command, payload, ..
-                } => ctx.emit_serialized_effect("audio", command.clone(), payload)?,
-                LegacyEffect::TextCapture { .. } => {
-                    ctx.emit_serialized_effect("text", "astra.emu.text_capture.v1", effect)?
-                }
-                LegacyEffect::SetBlackboard { key, value, .. } => ctx.set_blackboard(
-                    key.clone(),
-                    BlackboardValue::Bytes(value.as_bytes().to_vec()),
-                ),
-                LegacyEffect::ScheduleEvent {
-                    due_tick,
-                    event,
-                    payload,
-                    ..
-                } => {
-                    ctx.schedule_event(
-                        *due_tick,
-                        astra_runtime::EventSource::StateMachine,
-                        EventPayload {
-                            kind: event.clone(),
-                            data: [(
-                                "payload".into(),
-                                BlackboardValue::Bytes(payload.as_bytes().to_vec()),
-                            )]
-                            .into_iter()
-                            .collect(),
-                        },
-                    );
-                }
-                LegacyEffect::SnapshotDirty { .. } => {
-                    ctx.emit_serialized_effect("save", "astra.emu.snapshot_dirty.v1", effect)?
-                }
-            }
+                },
+            );
         }
-        for wait in &output.waits {
+        for mutation in &pending.control.blackboard {
+            ctx.set_blackboard(
+                mutation.key.clone(),
+                BlackboardValue::Bytes(mutation.value.as_bytes().to_vec()),
+            );
+        }
+        for event in &pending.control.scheduled_events {
+            ctx.schedule_event(
+                event.due_tick,
+                astra_runtime::EventSource::StateMachine,
+                EventPayload {
+                    kind: event.event.clone(),
+                    data: [(
+                        "payload".into(),
+                        BlackboardValue::Bytes(event.payload.as_bytes().to_vec()),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            );
+        }
+        for dirty in &pending.control.dirty_sections {
+            ctx.emit_presentation(PresentationCommand::Custom {
+                kind: "astra.emu.snapshot_dirty.v1".into(),
+                data: BTreeMap::from([(
+                    "section_id".into(),
+                    BlackboardValue::String(dirty.section_id.clone()),
+                )]),
+            });
+        }
+
+        for wait in &pending.control.waits {
             let family_token_id = wait_token_id(wait);
             let token = ctx.create_await(astra_runtime::AwaitKind::Custom(wait_kind(wait)));
             let mut tokens = self
@@ -284,16 +792,21 @@ impl RuntimeAction for ApplyLegacyEffectsAction {
             drop(tokens);
             ctx.push_await(token)?;
         }
+
         Ok(ActionTrace {
             action_id: self.descriptor().id,
             payload: [
                 (
-                    "family_state_hash".into(),
-                    BlackboardValue::String(output.state_hash.to_string()),
+                    "family_state_revision".into(),
+                    BlackboardValue::I64(pending.state_revision as i64),
                 ),
                 (
-                    "effect_count".into(),
-                    BlackboardValue::I64(output.effects.len() as i64),
+                    "control_effect_count".into(),
+                    BlackboardValue::I64(pending.control.len() as i64),
+                ),
+                (
+                    "live_effect_count".into(),
+                    BlackboardValue::I64(pending.live_effect_count as i64),
                 ),
             ]
             .into_iter()
@@ -494,30 +1007,7 @@ impl AstraEmuRuntimeProvider {
                 "emu.family_binding".into(),
                 "emu.payload_redaction".into(),
             ],
-            output_schemas: vec![
-                schema(
-                    RuntimeOutputDomain::Effect,
-                    "astra.emu.legacy_step_output.v1",
-                ),
-                schema(
-                    RuntimeOutputDomain::Presentation,
-                    "astra.emu.render_frame.v1",
-                ),
-                schema(
-                    RuntimeOutputDomain::Presentation,
-                    "astra.emu.scene_packet.v1",
-                ),
-                schema(RuntimeOutputDomain::Audio, "astra.emu.audio_effect.v1"),
-                schema(RuntimeOutputDomain::Trace, "astra.emu.legacy_trace.v1"),
-                schema(
-                    RuntimeOutputDomain::Observation,
-                    "astra.emu.runtime_observation.v1",
-                ),
-                schema(
-                    RuntimeOutputDomain::DirtySaveSection,
-                    "astra.runtime.dirty_save_section.v1",
-                ),
-            ],
+            output_schemas: Vec::new(),
         }
     }
 
@@ -587,7 +1077,7 @@ impl AstraEmuRuntimeProvider {
     pub fn queue_patch_effect(
         &mut self,
         session_id: &GameRuntimeSessionId,
-        effect: LegacyEffect,
+        effect: QueuedPatchEffect,
     ) -> Result<(), String> {
         let session = self
             .sessions
@@ -598,12 +1088,6 @@ impl AstraEmuRuntimeProvider {
         }
         if session.pending_patch_effects.len() >= 4096 {
             return Err("ASTRA_EMU_PATCH_EFFECT_COUNT".into());
-        }
-        if !matches!(
-            effect,
-            LegacyEffect::RuntimeEvent { .. } | LegacyEffect::SetBlackboard { .. }
-        ) {
-            return Err("ASTRA_EMU_PATCH_EFFECT_KIND".into());
         }
         session.pending_patch_effects.push(effect);
         Ok(())
@@ -790,22 +1274,22 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             let state_component = world
                 .attach_component(
                     owner,
-                    "astra.emu.runtime_state.v1",
+                    "astra.emu.runtime_state.v2",
                     &EmuRuntimeState {
                         family_id: profile.family_id,
                         status: "active".into(),
-                        family_state_hash: Hash256::from_bytes([0; 32]),
+                        family_state_revision: 0,
                         fixed_step: 0,
                     },
                 )
                 .map_err(|error| error.to_string())?;
-            let output = Arc::new(Mutex::new(None));
+            let pending_control = Arc::new(Mutex::new(None));
             let await_tokens = Arc::new(Mutex::new(BTreeMap::new()));
             world
                 .register_action(
                     PROVIDER_ID,
-                    ApplyLegacyEffectsAction {
-                        output: output.clone(),
+                    ApplyLegacyControlAction {
+                        pending: pending_control.clone(),
                         state_component,
                         await_tokens: await_tokens.clone(),
                     },
@@ -828,7 +1312,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                             kind: "emu.step".into(),
                         },
                         actions: vec![ActionInvocation {
-                            action_id: "astra.emu.apply_legacy_effects".into(),
+                            action_id: "astra.emu.apply_legacy_control".into(),
                             input: BTreeMap::new(),
                         }],
                         priority: 0,
@@ -837,9 +1321,9 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                     initial_state: running,
                 })
                 .map_err(|error| error.to_string())?;
-            Ok((world, output, await_tokens))
+            Ok((world, pending_control, await_tokens))
         })();
-        let (world, output, await_tokens) = match world_setup {
+        let (world, pending_control, await_tokens) = match world_setup {
             Ok(world) => world,
             Err(setup_error) => {
                 let cleanup = self.family.shutdown(&host_ctx, &family_session_id);
@@ -858,7 +1342,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 world,
                 family_session_id,
                 host_ctx,
-                output,
+                pending_control,
                 await_tokens,
                 pending_patch_effects: Vec::new(),
                 poisoned: false,
@@ -873,14 +1357,46 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
     }
 
     fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String> {
-        if input.mode == RuntimeStepMode::Replay {
-            return Err("ASTRA_EMU_LIVE_PROVIDER_REPLAY".into());
-        }
         if input.action != "emu.step" {
             return Err("ASTRA_EMU_STEP_ACTION".into());
         }
-        let payload: EmuStepPayload = serde_json::from_value(input.payload)
-            .map_err(|error| format!("ASTRA_EMU_STEP_PAYLOAD:{error}"))?;
+        let input_edges = input
+            .input_edges
+            .into_iter()
+            .map(|edge| LegacyInputEdge {
+                control: edge.control,
+                pressed: edge.pressed,
+                value: edge.value,
+                sequence: edge.sequence,
+            })
+            .collect::<Vec<_>>();
+        let await_results = input
+            .await_results
+            .into_iter()
+            .map(|result| LegacyAwaitResult {
+                token_id: result.token_id,
+                status: result.status,
+                payload_len: result.payload_len,
+                sequence: result.sequence,
+            })
+            .collect::<Vec<_>>();
+        let provider_results = input
+            .provider_results
+            .into_iter()
+            .map(|result| LegacyProviderResult {
+                request_id: result.request_id,
+                provider_id: result.provider_id,
+                status: result.status,
+                payload_len: result.payload_len,
+                sequence: result.sequence,
+            })
+            .collect::<Vec<_>>();
+        let step_budget = LegacyStepBudget {
+            max_instructions: u32::try_from(input.budget.max_instructions)
+                .map_err(|_| "ASTRA_EMU_STEP_BUDGET_INSTRUCTIONS")?,
+            max_effects: input.budget.max_effects,
+            max_trace_entries: input.budget.max_trace_entries,
+        };
         let session = self
             .sessions
             .get_mut(&input.session_id.0)
@@ -888,8 +1404,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         if session.poisoned {
             return Err("ASTRA_EMU_SESSION_POISONED".into());
         }
-        let await_results = payload.await_results.clone();
-        let step_budget = payload.budget.clone();
+        let await_results = await_results.clone();
         let mut family_output = self
             .family
             .step(
@@ -904,12 +1419,11 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                         RuntimeStepMode::RestoreContinuation => {
                             LegacyReplayMode::RestoreContinuation
                         }
-                        RuntimeStepMode::Replay => unreachable!(),
                     },
-                    input_edges: payload.input_edges,
-                    await_results: payload.await_results,
-                    provider_results: payload.provider_results,
-                    budget: payload.budget,
+                    input_edges,
+                    await_results: await_results.clone(),
+                    provider_results,
+                    budget: step_budget.clone(),
                 },
             )
             .map_err(|error| {
@@ -918,25 +1432,54 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             })?;
         if !session.pending_patch_effects.is_empty() {
             let mut next_sequence = family_output
-                .effects
-                .iter()
-                .map(LegacyEffect::sequence)
+                .live
+                .max_sequence()
+                .into_iter()
+                .chain(family_output.control.max_sequence())
                 .max()
                 .map_or(0, |sequence| sequence.saturating_add(1));
-            for mut effect in std::mem::take(&mut session.pending_patch_effects) {
-                set_effect_sequence(&mut effect, next_sequence);
+            for effect in std::mem::take(&mut session.pending_patch_effects) {
+                match effect {
+                    QueuedPatchEffect::RuntimeEvent { event, payload } => {
+                        family_output.control.events.push(LegacyEvent {
+                            sequence: next_sequence,
+                            event,
+                            payload: payload.into(),
+                        })
+                    }
+                    QueuedPatchEffect::SetBlackboard { key, value } => family_output
+                        .control
+                        .blackboard
+                        .push(LegacyBlackboardMutation {
+                            sequence: next_sequence,
+                            key,
+                            value: value.into(),
+                        }),
+                }
                 next_sequence = next_sequence.saturating_add(1);
-                family_output.effects.push(effect);
             }
             family_output.validate(&step_budget).map_err(|error| {
                 session.poisoned = true;
                 error.to_string()
             })?;
         }
+        let live = std::mem::take(&mut family_output.live);
+        let control_transaction = std::mem::take(&mut family_output.control);
+        let wait_sequence_start = live
+            .max_sequence()
+            .into_iter()
+            .chain(control_transaction.max_sequence())
+            .max()
+            .map_or(0, |sequence| sequence.saturating_add(1));
         *session
-            .output
+            .pending_control
             .lock()
-            .map_err(|_| "ASTRA_EMU_OUTPUT_LOCK_POISONED")? = Some(family_output);
+            .map_err(|_| "ASTRA_EMU_CONTROL_LOCK_POISONED")? = Some(PendingControlStep {
+            status: family_output.status,
+            state_revision: family_output.state_revision,
+            control: control_transaction,
+            live_effect_count: live.len(),
+        });
         let mut ingress = Vec::with_capacity(await_results.len() + 1);
         for result in await_results {
             let token_id = session
@@ -953,8 +1496,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 .data
                 .insert("status".into(), BlackboardValue::String(result.status));
             event.data.insert(
-                "payload_hash".into(),
-                BlackboardValue::String(result.payload_hash.to_string()),
+                "payload_len".into(),
+                BlackboardValue::I64(result.payload_len as i64),
             );
             ingress.push(OrderedTickIngress {
                 sequence: result.sequence,
@@ -981,104 +1524,71 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             delta_ns: input.delta_ns,
             seed: input.session_seed,
         };
-        let tick = session
-            .world
-            .tick(match input.mode {
-                RuntimeStepMode::Live => TickRequest::live(timing, ingress),
-                RuntimeStepMode::RestoreContinuation => {
-                    TickRequest::restore_continuation(timing, ingress)
-                }
-                RuntimeStepMode::Replay => unreachable!(),
-            })
-            .map_err(|error| {
+        let tick = match session.world.tick(match input.mode {
+            RuntimeStepMode::Live => TickRequest::live(timing, ingress),
+            RuntimeStepMode::RestoreContinuation => {
+                TickRequest::restore_continuation(timing, ingress)
+            }
+        }) {
+            Ok(tick) => tick,
+            Err(error) => {
+                let _ = session
+                    .pending_control
+                    .lock()
+                    .map_err(|_| "ASTRA_EMU_CONTROL_LOCK_POISONED")?
+                    .take();
                 session.poisoned = true;
-                error.to_string()
+                return Err(error.to_string());
+            }
+        };
+        let mut control = session
+            .pending_control
+            .lock()
+            .map_err(|_| "ASTRA_EMU_CONTROL_LOCK_POISONED")?
+            .take()
+            .ok_or_else(|| {
+                session.poisoned = true;
+                "ASTRA_EMU_CONTROL_MISSING_AFTER_TICK".to_owned()
             })?;
         if let Some(diagnostic) = tick.diagnostics.first() {
             session.poisoned = true;
             return Err(format!("{}:{}", diagnostic.code, diagnostic.message));
         }
-        let mut family_output = session
-            .output
-            .lock()
-            .map_err(|_| "ASTRA_EMU_OUTPUT_LOCK_POISONED")?
-            .take()
-            .ok_or_else(|| {
-                session.poisoned = true;
-                "ASTRA_EMU_OUTPUT_MISSING_AFTER_TICK".to_owned()
-            })?;
         let family_diagnostics = std::mem::take(&mut family_output.diagnostics);
         emit_family_diagnostics(input.fixed_step, &family_diagnostics)?;
-        let render_output = family_output
-            .effects
-            .iter()
-            .position(|effect| {
-                matches!(
-                    effect,
-                    LegacyEffect::Presentation { command, .. }
-                        if matches!(
-                            command.as_str(),
-                            "astra.emu.render_frame.v1" | "astra.emu.scene_packet.v1"
-                        )
-                )
-            })
-            .map(|index| family_output.effects.remove(index))
-            .map(|effect| -> Result<RuntimeOutputEnvelope, String> {
-                match effect {
-                    LegacyEffect::Presentation {
-                        command, payload, ..
-                    } => Ok(RuntimeOutputEnvelope::bulk(
-                        RuntimeOutputDomain::Presentation,
-                        command,
-                        SchemaVersion::new(1, 0, 0),
-                        RuntimeBulkPayload::new(Arc::new(LegacyPayloadBulkStorage(payload)))
-                            .map_err(|error| error.to_string())?,
-                    )),
-                    _ => unreachable!("matched render presentation effect"),
-                }
-            })
-            .transpose()?;
-        let mut outputs = vec![RuntimeOutputEnvelope::postcard(
-            RuntimeOutputDomain::Effect,
-            "astra.emu.legacy_step_output.v1",
-            SchemaVersion::new(1, 0, 0),
-            &family_output,
-        )
-        .map_err(|error| error.to_string())?];
-        if let Some(render_output) = render_output {
-            outputs.push(render_output);
-        }
-        outputs.push(
-            RuntimeOutputEnvelope::postcard(
-                RuntimeOutputDomain::Trace,
-                "astra.emu.legacy_trace.v1",
-                SchemaVersion::new(1, 0, 0),
-                &family_output.trace,
-            )
-            .map_err(|error| error.to_string())?,
-        );
-        outputs.push(
-            RuntimeOutputEnvelope::postcard(
-                RuntimeOutputDomain::Observation,
-                "astra.emu.runtime_observation.v1",
-                SchemaVersion::new(1, 0, 0),
-                &(tick.state_hash, family_output.state_hash),
-            )
-            .map_err(|error| error.to_string())?,
-        );
-        outputs.push(
-            RuntimeOutputEnvelope::postcard(
-                RuntimeOutputDomain::DirtySaveSection,
-                "astra.runtime.dirty_save_section.v1",
-                SchemaVersion::new(1, 0, 0),
-                &vec!["runtime.world", "emu.family"],
-            )
-            .map_err(|error| error.to_string())?,
-        );
+        let status = format!("{:?}", family_output.status).to_ascii_lowercase();
+        let state_revision = family_output.state_revision;
+        let coverage = family_output.coverage.clone();
+        let mut live_effects = move_live_output(live)?;
+        live_effects.extend(move_control_output(
+            std::mem::take(&mut control.control),
+            wait_sequence_start,
+        )?);
+        live_effects.sort_by_key(RuntimeLiveEffect::sequence);
+        let diagnostics = family_diagnostics
+            .into_iter()
+            .map(|diagnostic| format!("{}:{}", diagnostic.code, diagnostic.message))
+            .collect();
         Ok(RuntimeStepOutput {
             session_id: input.session_id,
-            status: format!("{:?}", family_output.status).to_ascii_lowercase(),
-            outputs,
+            status,
+            live: RuntimeLiveOutput {
+                effects: live_effects,
+                state_revision,
+                coverage: RuntimeLiveCoverage {
+                    instructions: coverage.instructions,
+                    syscalls: coverage.syscalls,
+                    presentation_commands: coverage.presentation_commands,
+                    audio_commands: coverage.audio_commands,
+                    text_events: coverage.text_events,
+                    capture_bytes: coverage.capture_bytes,
+                    operation_bytes: coverage.operation_bytes,
+                    pcm_moved_bytes: coverage.pcm_moved_bytes,
+                    pcm_copied_bytes: coverage.pcm_copied_bytes,
+                },
+                diagnostics,
+            },
+            persisted: Vec::new(),
             diagnostics: vec![],
         })
     }
@@ -1092,11 +1602,11 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             return Err("ASTRA_EMU_SESSION_POISONED".into());
         }
         if session
-            .output
+            .pending_control
             .lock()
             .map_err(|_| {
                 session.poisoned = true;
-                "ASTRA_EMU_OUTPUT_LOCK_POISONED"
+                "ASTRA_EMU_CONTROL_LOCK_POISONED"
             })?
             .is_some()
         {
@@ -1137,7 +1647,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
             sections: vec![
-                raw_section("runtime.world", "astra.runtime.save_blob.v3", 3, world.0),
+                raw_section("runtime.world", "astra.runtime.save_blob.v4", 4, world.0),
                 raw_section(
                     "emu.family",
                     "astra.emu.family_snapshot.v1",
@@ -1156,7 +1666,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         let world = required_section(
             &request.sections,
             "runtime.world",
-            "astra.runtime.save_blob.v3",
+            "astra.runtime.save_blob.v4",
         )?
         .bytes
         .clone();
@@ -1284,14 +1794,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
     }
 }
 
-fn schema(domain: RuntimeOutputDomain, name: &str) -> RuntimeOutputSchemaDescriptor {
-    RuntimeOutputSchemaDescriptor {
-        domain,
-        schema: name.into(),
-        version: SchemaVersion::new(1, 0, 0),
-        codec: RuntimeOutputCodec::Postcard,
-    }
-}
 fn required_section<'a>(
     sections: &'a [RuntimeSectionPayload],
     id: &str,
@@ -1301,7 +1803,7 @@ fn required_section<'a>(
     let section = matches
         .next()
         .ok_or_else(|| format!("ASTRA_EMU_SECTION_MISSING:{id}"))?;
-    if matches.next().is_some() || section.schema != schema || !section.validate_hash() {
+    if matches.next().is_some() || section.schema != schema {
         return Err(format!("ASTRA_EMU_SECTION_INVALID:{id}"));
     }
     Ok(section)
@@ -1312,7 +1814,6 @@ fn raw_section(id: &str, schema: &str, major: u16, bytes: Vec<u8>) -> RuntimeSec
         schema: schema.into(),
         version: SchemaVersion::new(major, 0, 0),
         codec: RuntimeSectionCodec::Raw,
-        hash: Hash256::from_sha256(&bytes),
         bytes,
     }
 }
@@ -1337,17 +1838,6 @@ fn wait_token_id(wait: &LegacyWaitRequest) -> String {
         | LegacyWaitRequest::PresentationFence { token_id, .. }
         | LegacyWaitRequest::ProviderCompletion { token_id, .. }
         | LegacyWaitRequest::FamilyOpaque { token_id, .. } => token_id.clone(),
-    }
-}
-fn set_effect_sequence(effect: &mut LegacyEffect, value: u64) {
-    match effect {
-        LegacyEffect::RuntimeEvent { sequence, .. }
-        | LegacyEffect::Presentation { sequence, .. }
-        | LegacyEffect::Audio { sequence, .. }
-        | LegacyEffect::TextCapture { sequence, .. }
-        | LegacyEffect::SetBlackboard { sequence, .. }
-        | LegacyEffect::ScheduleEvent { sequence, .. }
-        | LegacyEffect::SnapshotDirty { sequence, .. } => *sequence = value,
     }
 }
 fn parse_package_hash(value: &str) -> Result<Hash256, String> {
@@ -1422,7 +1912,6 @@ mod tests {
             Ok(astra_byte_source::RangeReadResult {
                 range,
                 revision: stat.revision,
-                content_hash: Hash256::from_sha256(&bytes),
                 bytes,
             })
         }
@@ -1455,6 +1944,47 @@ mod tests {
     }
 
     #[test]
+    fn typed_live_output_keeps_scene_pixels_outside_runtime_world_control() {
+        let pixels = vec![1_u8, 2, 3, 4];
+        let allocation = pixels.as_ptr();
+        let live = LegacyLiveOutput {
+            scenes: vec![LegacySceneTransactionV7 {
+                sequence: 0,
+                width: 1,
+                height: 1,
+                resources: vec![LegacySceneResourceOperationV7::CreateTexture {
+                    texture_id: 1,
+                    generation: 1,
+                    width: 1,
+                    height: 1,
+                    format: LegacyTextureFormat::Rgba8,
+                    pixels: LegacyPayload::Native(pixels),
+                }],
+                draws: Vec::new(),
+                reset_resources: false,
+            }],
+            ..LegacyLiveOutput::default()
+        };
+        let control = LegacyControlTransaction {
+            events: vec![LegacyEvent {
+                sequence: 1,
+                event: "test.event".into(),
+                payload: LegacyPayload::default(),
+            }],
+            ..LegacyControlTransaction::default()
+        };
+        assert_eq!(control.len(), 1);
+        assert_eq!(live.len(), 1);
+        let transaction = &live.scenes[0];
+        let LegacySceneResourceOperationV7::CreateTexture { pixels, .. } =
+            &transaction.resources[0]
+        else {
+            panic!("typed texture create is required");
+        };
+        assert_eq!(pixels.as_bytes().as_ptr(), allocation);
+    }
+
+    #[test]
     fn fvp_product_provider_full_lifecycle_and_repeated_run_are_deterministic() {
         let script = terminal_hcb();
         let fingerprint = Hash256::from_sha256(&script);
@@ -1480,7 +2010,10 @@ mod tests {
         provider.destroy_instance(instance).unwrap();
     }
 
-    fn run_once(provider: &mut AstraEmuRuntimeProvider, fingerprint: Hash256) -> Vec<Hash256> {
+    fn run_once(
+        provider: &mut AstraEmuRuntimeProvider,
+        fingerprint: Hash256,
+    ) -> Vec<(u64, Vec<u64>)> {
         let profile = EmuCaseProfile {
             schema: "astra.emu.case_profile.v1".into(),
             family_id: "fvp".into(),
@@ -1513,7 +2046,6 @@ mod tests {
                     schema: "astra.emu.case_profile.v1".into(),
                     version: SchemaVersion::new(1, 0, 0),
                     codec: RuntimeSectionCodec::Postcard,
-                    hash: Hash256::from_sha256(&bytes),
                     bytes,
                 }],
             })
@@ -1521,10 +2053,9 @@ mod tests {
         provider
             .queue_patch_effect(
                 &open.session_id,
-                LegacyEffect::RuntimeEvent {
-                    sequence: 0,
+                QueuedPatchEffect::RuntimeEvent {
                     event: "patch.synthetic".into(),
-                    payload: vec![1, 2, 3].into(),
+                    payload: vec![1, 2, 3],
                 },
             )
             .unwrap();
@@ -1536,37 +2067,31 @@ mod tests {
                 session_seed: 17,
                 mode: RuntimeStepMode::Live,
                 action: "emu.step".into(),
-                payload: serde_json::to_value(EmuStepPayload {
-                    input_edges: vec![],
-                    await_results: vec![],
-                    provider_results: vec![],
-                    budget: LegacyStepBudget {
-                        max_instructions: 32,
-                        max_effects: 32,
-                        max_trace_entries: 32,
-                    },
-                })
-                .unwrap(),
+                budget: astra_plugin_abi::RuntimeStepBudget {
+                    max_instructions: 32,
+                    max_effects: 32,
+                    max_trace_entries: 32,
+                },
+                ..RuntimeStepInput::default()
             })
             .unwrap();
         assert_eq!(output.status, "active");
-        let family_output = output.outputs[0]
-            .decode_postcard::<LegacyStepOutput>(
-                RuntimeOutputDomain::Effect,
-                "astra.emu.legacy_step_output.v1",
-                SchemaVersion::new(1, 0, 0),
+        assert!(output.persisted.is_empty());
+        let live = output.live;
+        assert!(live.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                RuntimeLiveEffect::Event(event)
+                    if event.event == "patch.synthetic" && event.payload.len() == 3
             )
-            .unwrap();
-        assert!(family_output.effects.iter().any(|effect| matches!(
-            effect,
-            LegacyEffect::RuntimeEvent { event, payload, .. }
-                if event == "patch.synthetic" && payload.as_bytes() == [1, 2, 3]
-        )));
-        let mut output_hashes = output
-            .outputs
-            .iter()
-            .map(|envelope| Hash256::from_sha256(envelope.bytes()))
-            .collect::<Vec<_>>();
+        }));
+        let mut output_observations = vec![(
+            live.state_revision,
+            live.effects
+                .iter()
+                .map(RuntimeLiveEffect::sequence)
+                .collect::<Vec<_>>(),
+        )];
         let second = provider
             .step(RuntimeStepInput {
                 session_id: open.session_id.clone(),
@@ -1575,26 +2100,24 @@ mod tests {
                 session_seed: 17,
                 mode: RuntimeStepMode::Live,
                 action: "emu.step".into(),
-                payload: serde_json::to_value(EmuStepPayload {
-                    input_edges: vec![],
-                    await_results: vec![],
-                    provider_results: vec![],
-                    budget: LegacyStepBudget {
-                        max_instructions: 32,
-                        max_effects: 32,
-                        max_trace_entries: 32,
-                    },
-                })
-                .unwrap(),
+                budget: astra_plugin_abi::RuntimeStepBudget {
+                    max_instructions: 32,
+                    max_effects: 32,
+                    max_trace_entries: 32,
+                },
+                ..RuntimeStepInput::default()
             })
             .unwrap();
         assert_eq!(second.status, "active");
-        output_hashes.extend(
-            second
-                .outputs
+        assert!(second.persisted.is_empty());
+        let live = second.live;
+        output_observations.push((
+            live.state_revision,
+            live.effects
                 .iter()
-                .map(|envelope| Hash256::from_sha256(envelope.bytes())),
-        );
+                .map(RuntimeLiveEffect::sequence)
+                .collect::<Vec<_>>(),
+        ));
         let saved = provider
             .save(RuntimeSaveRequest {
                 session_id: open.session_id.clone(),
@@ -1609,7 +2132,7 @@ mod tests {
             .unwrap();
         assert_eq!(restored.restored_fixed_step, 2);
         provider.shutdown(open.session_id).unwrap();
-        output_hashes
+        output_observations
     }
 
     fn terminal_hcb() -> Vec<u8> {

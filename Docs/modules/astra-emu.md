@@ -4,6 +4,10 @@ AstraEMU 是旧 VN 模拟器和现代化套件。它复用 Astra Runtime、Media
 
 ## Engine-native 架构
 
+当前 family contract 已硬切为 `astra.emu.family_abi.v7`；v5/v6 binary、
+manifest、runtime section 和 snapshot 在 loader/provider 边界 fail-fast，
+不保留兼容 shim。
+
 Manager 负责窗口、输入、配置、family 选择、provider selection、插件分发、报告、overlay、文本管线和滤镜 preset。Manager 自身是 Program target；被启动的 legacy case 通过 `AstraEmuRuntimeProvider` 作为 gameplay runtime session 运行。Provider 创建并驱动 AstraEngine `RuntimeWorld`，legacy family 以 engine-native in-process family plugin/provider 接入。
 
 Manager 分为不依赖 UI 的 `astra-emu-manager-core`、只做 ViewModel/响应布局/accessibility/input routing 的 `astra-emu-manager-ui-slint`，以及装配平台服务的 `astra-emu-manager` Program。Slint host 持有单一窗口、event loop、surface 与同一套 wgpu 29.0.4 `Device`/`Queue`；游戏画面作为 GPU texture underlay 导入，Slint 只绘制 Manager 和 overlay，不做 CPU 整帧回读或跨设备复制。桌面采用导航、封面网格与 inspector 三栏；手机采用双列封面、bottom sheet 和底部导航；大屏移动设备切换桌面式自适应布局。
@@ -24,7 +28,7 @@ family 的影片命令只携带 playback id、VFS URI、模式和舞台尺寸。
 
 Family plugin 注册 `LegacyRuntimeProvider` facade。Provider 通过 session 持有 archive resolver、旧 VM、media state、snapshot serializer 和 diagnostics，AstraEngine StateMachine 只调用 `AstraEmuRuntimeProvider` 暴露的 runtime step action。旧引擎语义必须落成 RuntimeEvent、PresentationCommand、AudioCommand、TextCaptureEvent、StateMachineTrace、AwaitToken 和 save section；插件不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
 
-当前 contract 已 hard cut 到 family ABI v6：descriptor、instance、probe/open/step/save/restore/resource read/VFS callback/shutdown 使用显式 `StableAbi` wire DTO，bulk payload 由 ABI-owned buffer 持有，v5 及更早 binary/manifest 直接拒绝。FVP runtime snapshot 同步为 v6。下方 v4 range port 与 snapshot v5 内容只保留为迁移历史，不能作为当前插件身份。
+当前 contract 已 hard cut 到 family ABI v7：descriptor、instance、probe/open/step/save/restore/resource read/VFS callback/shutdown 使用显式 `StableAbi` wire DTO，bulk payload 由 ABI-owned buffer 持有，v5/v6 binary/manifest 直接拒绝。FVP runtime snapshot 同步为 v7。下方 v4 range port 与 snapshot v5/v6 内容只保留为迁移历史，不能作为当前插件身份。
 
 family ABI v4 用 `stat_file`、`read_file_range` 和 session-bound revision 取代 whole-file callback。单次 range 上限为 16 MiB；host 会在读取前后复核 revision，重复 range 的内容证据进入访问账本。Headless report 只记录访问资源数、range 数、读取字节数和最大 range，不记录资源名；`--audit-all-resources` 在 gameplay run 之后另行执行 4 MiB chunk 的完整流式审计，并只输出聚合 manifest hash。音频和影片 effect 仍只携带脱敏 virtual URI，商业路径、文件句柄和本机 metadata 不跨 ABI，也不进入 effect、RuntimeWorld、save/replay、日志、report 或 package。ABI v3 插件会被拒绝，不保留 whole-file fallback。
 

@@ -4,13 +4,11 @@
 //! is the only place where RFVP's typed hosted delta is translated into the
 //! existing renderer-neutral family packet.
 
-use astra_core::Hash256;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyBlendMode,
-    LegacyDrawV1, LegacyPreparedSceneCommitV1, LegacyRenderFrameV1, LegacyScenePacketV1,
-    LegacySceneResourceOperationV1, LegacySceneResourceStateV1, LegacySceneTextureCreateV1,
-    LegacySceneTextureUpdateV1, LegacyScissorV1, LegacyTextureFormat, LegacyTextureUpdateV1,
-    LegacyVertexV1, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyDrawV1, LegacyPayload, LegacySceneResourceOperationV7, LegacySceneResourceStateV1,
+    LegacySceneTransactionV7, LegacyScissorV1, LegacyTextureFormat, LegacyVertexV1,
+    LegacyVideoCommandV1, LegacyVideoMode,
 };
 use rfvp_hosted::{
     host_api::{BlendMode, DrawSolidCommand, PixelFormat, TextureId},
@@ -24,18 +22,19 @@ const MAX_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 /// reconstruct the same incremental resource validation without retaining
 /// decoded pixels outside the renderer.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct HostedScenePacketTranslator {
+pub struct HostedSceneTranslator {
     resources: LegacySceneResourceStateV1,
     // RFVP can allocate or update a texture before beginning the frame that
     // first samples it. Keep the bounded semantic operation until that frame
     // closes so the renderer receives one atomic commit rather than losing a
     // resource-only delta between steps.
-    pending_resources: Vec<LegacySceneResourceOperationV1>,
-    pending_upload_bytes: usize,
+    pending_live_resources: Vec<LegacySceneResourceOperationV7>,
+    pending_live_upload_bytes: usize,
     rehydrate_resources: bool,
+    next_generation: u64,
 }
 
-impl HostedScenePacketTranslator {
+impl HostedSceneTranslator {
     pub fn snapshot(&self) -> LegacySceneResourceStateV1 {
         self.resources.clone()
     }
@@ -46,24 +45,27 @@ impl HostedScenePacketTranslator {
         // the provider snapshot, so the next complete packet must establish
         // a new resource epoch rather than collide with pre-restore metadata.
         self.resources = LegacySceneResourceStateV1::default();
-        self.pending_resources.clear();
-        self.pending_upload_bytes = 0;
+        self.pending_live_resources.clear();
+        self.pending_live_upload_bytes = 0;
         self.rehydrate_resources = true;
+        self.next_generation = 1;
     }
 
-    /// Converts and prepares one complete RFVP scene transaction.  Resource
-    /// metadata changes only after every operation and draw reference has
-    /// passed validation, preventing partial commit on malformed plugin output.
+    /// Converts one RFVP frame by moving pixel allocations directly into the
+    /// typed Family ABI transaction. No serialized scene mirror is created.
     pub fn translate(
         &mut self,
         delta: &mut HostedStepDelta,
-    ) -> Result<Option<LegacyPreparedSceneCommitV1>, HostedAdapterError> {
+    ) -> Result<Option<LegacySceneTransactionV7>, HostedAdapterError> {
         let mut frame: Option<(u32, u32)> = None;
         let mut ended = false;
         let mut presented = false;
-        let mut resources = std::mem::take(&mut self.pending_resources);
+        let mut resources = std::mem::take(&mut self.pending_live_resources);
         let mut draws = Vec::new();
-        let mut bytes = self.pending_upload_bytes;
+        let mut bytes = self.pending_live_upload_bytes;
+        if self.next_generation == 0 {
+            self.next_generation = 1;
+        }
 
         for operation in std::mem::take(&mut delta.scene) {
             match operation {
@@ -79,16 +81,15 @@ impl HostedScenePacketTranslator {
                         texture.desc.format,
                         pixels,
                     )?;
-                    resources.push(LegacySceneResourceOperationV1::CreateTexture(
-                        LegacySceneTextureCreateV1 {
-                            texture_id: texture.id.0,
-                            width: texture.desc.width,
-                            height: texture.desc.height,
-                            format,
-                            content_hash: Hash256::from_sha256(&pixels),
-                            pixels,
-                        },
-                    ));
+                    let generation = take_generation(&mut self.next_generation)?;
+                    resources.push(LegacySceneResourceOperationV7::CreateTexture {
+                        texture_id: texture.id.0,
+                        generation,
+                        width: texture.desc.width,
+                        height: texture.desc.height,
+                        format,
+                        pixels: LegacyPayload::Native(pixels),
+                    });
                 }
                 HostedSceneOperation::UpdateTexture(update) => {
                     let (format, pixels) = texture_payload_owned(
@@ -99,22 +100,23 @@ impl HostedScenePacketTranslator {
                         update.format,
                         update.pixels,
                     )?;
-                    resources.push(LegacySceneResourceOperationV1::UpdateTexture(
-                        LegacySceneTextureUpdateV1 {
-                            texture_id: update.id.0,
-                            x: update.rect.x,
-                            y: update.rect.y,
-                            width: update.rect.width,
-                            height: update.rect.height,
-                            format,
-                            content_hash: Hash256::from_sha256(&pixels),
-                            pixels,
-                        },
-                    ));
+                    let generation = take_generation(&mut self.next_generation)?;
+                    resources.push(LegacySceneResourceOperationV7::UpdateTexture {
+                        texture_id: update.id.0,
+                        generation,
+                        x: update.rect.x,
+                        y: update.rect.y,
+                        width: update.rect.width,
+                        height: update.rect.height,
+                        format,
+                        pixels: LegacyPayload::Native(pixels),
+                    });
                 }
                 HostedSceneOperation::DestroyTexture(id) => {
-                    resources
-                        .push(LegacySceneResourceOperationV1::DestroyTexture { texture_id: id.0 });
+                    resources.push(LegacySceneResourceOperationV7::DestroyTexture {
+                        texture_id: id.0,
+                        generation: take_generation(&mut self.next_generation)?,
+                    });
                 }
                 HostedSceneOperation::BeginFrame { width, height, .. } => {
                     if frame.replace((width, height)).is_some() || ended || presented {
@@ -147,188 +149,53 @@ impl HostedScenePacketTranslator {
                 }
             }
         }
+
         match (frame, ended, presented) {
             (None, false, false) => {
-                self.pending_resources = resources;
-                self.pending_upload_bytes = bytes;
+                self.pending_live_resources = resources;
+                self.pending_live_upload_bytes = bytes;
                 Ok(None)
             }
             (Some((width, height)), true, true) => {
-                let staged_resource_count = resources.len();
-                let draw_count = draws.len();
-                let mut available_texture_ids = self
-                    .resources
-                    .textures
-                    .keys()
-                    .copied()
-                    .collect::<std::collections::BTreeSet<_>>();
-                for operation in &resources {
-                    match operation {
-                        LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                            available_texture_ids.insert(texture.texture_id);
-                        }
-                        LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
-                            available_texture_ids.remove(texture_id);
-                        }
-                        LegacySceneResourceOperationV1::UpdateTexture(_) => {}
-                    }
-                }
-                let missing_texture_id = draws.iter().find_map(|draw| {
-                    (draw.texture_id != u32::MAX
-                        && !available_texture_ids.contains(&draw.texture_id))
-                    .then_some(draw.texture_id)
-                });
-                let packet = LegacyScenePacketV1 {
+                let mut transaction = LegacySceneTransactionV7 {
+                    sequence: 0,
                     width,
                     height,
                     resources,
                     draws,
+                    reset_resources: self.rehydrate_resources,
                 };
-                let mut prepared = self.resources.prepare(packet).map_err(|error| {
-                    tracing::error!(
-                        event = "astra.emu.fvp.hosted_packet_invalid",
-                        diagnostic_code = error.code(),
-                        retained_texture_count = self.resources.textures.len(),
-                        staged_resource_count,
-                        draw_count,
-                        "RFVP hosted scene transaction failed validation"
-                    );
-                    let diagnostic = match missing_texture_id {
-                        Some(texture_id) => format!(
-                            "{}:retained_textures={}:staged_resources={}:draws={}:missing_texture={texture_id}",
-                            error.code(),
-                            self.resources.textures.len(),
-                            staged_resource_count,
-                            draw_count,
-                        ),
-                        None => error.code().to_owned(),
-                    };
-                    HostedAdapterError::InvalidPacket(diagnostic)
-                })?;
-                prepared.reset_resources = self.rehydrate_resources;
-                self.resources = prepared.next_resources.clone();
-                self.pending_upload_bytes = 0;
+                let next = self
+                    .resources
+                    .validate_live(&transaction)
+                    .map_err(|error| {
+                        tracing::error!(
+                            event = "astra.emu.fvp.hosted_live_scene_invalid",
+                            diagnostic_code = error.code(),
+                            retained_texture_count = self.resources.textures.len(),
+                            staged_resource_count = transaction.resources.len(),
+                            draw_count = transaction.draws.len(),
+                            "RFVP hosted live scene transaction failed validation"
+                        );
+                        HostedAdapterError::InvalidPacket(error.to_string())
+                    })?;
+                self.resources = next;
+                self.pending_live_upload_bytes = 0;
                 self.rehydrate_resources = false;
-                Ok(Some(prepared))
+                transaction.sequence = self.next_generation;
+                Ok(Some(transaction))
             }
             _ => Err(HostedAdapterError::FrameBoundary),
         }
     }
 }
 
-/// Converts exactly one RFVP hosted transaction into one renderer packet.
-/// Frame-boundary violations and unsupported semantic operations are blocking;
-/// callers never receive a partially converted presentation packet.
-pub fn scene_packet_from_delta(
-    delta: &HostedStepDelta,
-) -> Result<Option<LegacyRenderFrameV1>, HostedAdapterError> {
-    let mut frame: Option<(u32, u32)> = None;
-    let mut ended = false;
-    let mut presented = false;
-    let mut updates = Vec::new();
-    let mut draws = Vec::new();
-    let mut bytes = 0usize;
-
-    for operation in &delta.scene {
-        match operation {
-            HostedSceneOperation::CreateTexture(texture) => {
-                let Some(pixels) = &texture.pixels else {
-                    return Err(HostedAdapterError::TextureWithoutPixels(texture.id));
-                };
-                push_texture(
-                    &mut updates,
-                    &mut bytes,
-                    texture.id,
-                    texture.desc.width,
-                    texture.desc.height,
-                    texture.desc.format,
-                    pixels,
-                )?;
-            }
-            HostedSceneOperation::UpdateTexture(update) => {
-                if update.rect.x != 0 || update.rect.y != 0 {
-                    return Err(HostedAdapterError::PartialTextureUpdate(update.id));
-                }
-                push_texture(
-                    &mut updates,
-                    &mut bytes,
-                    update.id,
-                    update.rect.width,
-                    update.rect.height,
-                    update.format,
-                    &update.pixels,
-                )?;
-            }
-            HostedSceneOperation::DestroyTexture(id) => {
-                return Err(HostedAdapterError::TextureDestroyRequiresScenePacket(*id));
-            }
-            HostedSceneOperation::BeginFrame { width, height, .. } => {
-                if frame.replace((*width, *height)).is_some() || ended || presented {
-                    return Err(HostedAdapterError::FrameBoundary);
-                }
-            }
-            HostedSceneOperation::DrawSprite(draw) => {
-                if frame.is_none() || ended || presented {
-                    return Err(HostedAdapterError::FrameBoundary);
-                }
-                draws.push(LegacyDrawV1 {
-                    texture_id: draw.texture.0,
-                    vertices: draw.vertices.map(|vertex| LegacyVertexV1 {
-                        position: vertex.position,
-                        tex_coord: vertex.tex_coord,
-                        color: [
-                            vertex.color.r,
-                            vertex.color.g,
-                            vertex.color.b,
-                            vertex.color.a,
-                        ],
-                    }),
-                    blend: map_blend(draw.blend),
-                    scissor: draw.scissor.map(|scissor| LegacyScissorV1 {
-                        x: scissor.x,
-                        y: scissor.y,
-                        width: scissor.width,
-                        height: scissor.height,
-                    }),
-                });
-            }
-            HostedSceneOperation::DrawSolid(command) => {
-                if frame.is_none() || ended || presented {
-                    return Err(HostedAdapterError::FrameBoundary);
-                }
-                draws.push(solid_draw(command));
-            }
-            HostedSceneOperation::EndFrame => {
-                if frame.is_none() || ended || presented {
-                    return Err(HostedAdapterError::FrameBoundary);
-                }
-                ended = true;
-            }
-            HostedSceneOperation::Present => {
-                if !ended || presented {
-                    return Err(HostedAdapterError::FrameBoundary);
-                }
-                presented = true;
-            }
-        }
-    }
-
-    match (frame, ended, presented) {
-        (None, false, false) => Ok(None),
-        (Some((width, height)), true, true) => {
-            let packet = LegacyRenderFrameV1 {
-                width,
-                height,
-                texture_updates: updates,
-                draws,
-            };
-            packet
-                .validate()
-                .map_err(|error| HostedAdapterError::InvalidPacket(error.code().to_owned()))?;
-            Ok(Some(packet))
-        }
-        _ => Err(HostedAdapterError::FrameBoundary),
-    }
+fn take_generation(next: &mut u64) -> Result<u64, HostedAdapterError> {
+    let generation = (*next).max(1);
+    *next = generation
+        .checked_add(1)
+        .ok_or(HostedAdapterError::GenerationExhausted)?;
+    Ok(generation)
 }
 
 /// Converts video deltas into host-resolved resource commands. Encoded bytes
@@ -470,38 +337,6 @@ pub fn audio_commands_from_delta(
         .collect()
 }
 
-fn push_texture(
-    updates: &mut Vec<LegacyTextureUpdateV1>,
-    bytes: &mut usize,
-    id: TextureId,
-    width: u32,
-    height: u32,
-    format: PixelFormat,
-    pixels: &[u8],
-) -> Result<(), HostedAdapterError> {
-    let (format, pixels) = texture_payload(bytes, id, width, height, format, pixels)?;
-    updates.push(LegacyTextureUpdateV1 {
-        texture_id: id.0,
-        width,
-        height,
-        format,
-        content_hash: Hash256::from_sha256(&pixels),
-        pixels,
-    });
-    Ok(())
-}
-
-fn texture_payload(
-    bytes: &mut usize,
-    id: TextureId,
-    width: u32,
-    height: u32,
-    format: PixelFormat,
-    pixels: &[u8],
-) -> Result<(LegacyTextureFormat, Vec<u8>), HostedAdapterError> {
-    texture_payload_owned(bytes, id, width, height, format, pixels.to_vec())
-}
-
 fn texture_payload_owned(
     bytes: &mut usize,
     id: TextureId,
@@ -537,10 +372,11 @@ fn texture_payload_owned(
 
 fn map_blend(blend: BlendMode) -> LegacyBlendMode {
     match blend {
-        BlendMode::Opaque | BlendMode::Alpha => LegacyBlendMode::Alpha,
+        BlendMode::Opaque => LegacyBlendMode::Opaque,
+        BlendMode::Alpha => LegacyBlendMode::Alpha,
         BlendMode::Add => LegacyBlendMode::Add,
         BlendMode::Multiply => LegacyBlendMode::Multiply,
-        BlendMode::Screen => LegacyBlendMode::Alpha,
+        BlendMode::Screen => LegacyBlendMode::Screen,
     }
 }
 
@@ -618,16 +454,14 @@ pub enum HostedAdapterError {
     FrameBoundary,
     #[error("ASTRA_FVP_HOSTED_TEXTURE_NO_PIXELS:{0:?}")]
     TextureWithoutPixels(TextureId),
-    #[error("ASTRA_FVP_HOSTED_PARTIAL_TEXTURE:{0:?}")]
-    PartialTextureUpdate(TextureId),
-    #[error("ASTRA_FVP_HOSTED_TEXTURE_DESTROY:{0:?}")]
-    TextureDestroyRequiresScenePacket(TextureId),
     #[error("ASTRA_FVP_HOSTED_TEXTURE_FORMAT:{0:?}")]
     TextureFormat(TextureId),
     #[error("ASTRA_FVP_HOSTED_TEXTURE_BOUNDS:{0:?}")]
     TextureBounds(TextureId),
     #[error("ASTRA_FVP_HOSTED_UPLOAD_BUDGET")]
     UploadBudget,
+    #[error("ASTRA_FVP_HOSTED_GENERATION_EXHAUSTED")]
+    GenerationExhausted,
     #[error("ASTRA_FVP_HOSTED_PACKET:{0}")]
     InvalidPacket(String),
     #[error("ASTRA_FVP_HOSTED_VIDEO_RESOURCE_BOUNDS")]
@@ -640,7 +474,7 @@ pub enum HostedAdapterError {
 mod tests {
     use super::*;
     use rfvp_hosted::{
-        host_api::{ColorRgba, RectI32, TextureDesc, TextureRect},
+        host_api::{TextureDesc, TextureRect},
         hosted::{HostedAudioOperation, HostedTextureData, HostedTickResult},
     };
 
@@ -662,61 +496,8 @@ mod tests {
     }
 
     #[test]
-    fn converts_one_complete_semantic_frame() {
-        let frame = scene_packet_from_delta(&delta(vec![
-            HostedSceneOperation::BeginFrame {
-                width: 640,
-                height: 480,
-                clear: None,
-            },
-            HostedSceneOperation::DrawSolid(DrawSolidCommand {
-                rect: RectI32 {
-                    x: 4,
-                    y: 8,
-                    width: 16,
-                    height: 32,
-                },
-                color: ColorRgba::BLACK,
-                blend: BlendMode::Alpha,
-                scissor: None,
-            }),
-            HostedSceneOperation::EndFrame,
-            HostedSceneOperation::Present,
-        ]))
-        .expect("complete hosted frame converts")
-        .expect("complete hosted frame is present");
-
-        assert_eq!((frame.width, frame.height), (640, 480));
-        assert_eq!(frame.draws.len(), 1);
-        assert!(frame.texture_updates.is_empty());
-    }
-
-    #[test]
-    fn rejects_partial_texture_updates_without_a_partial_commit() {
-        let error = scene_packet_from_delta(&delta(vec![HostedSceneOperation::UpdateTexture(
-            rfvp_hosted::hosted::HostedTextureUpdate {
-                id: TextureId(9),
-                rect: TextureRect {
-                    x: 1,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                },
-                format: PixelFormat::Rgba8,
-                pixels: vec![0, 0, 0, 255],
-            },
-        )]))
-        .expect_err("v1 packet cannot represent a partial texture update");
-
-        assert_eq!(
-            error,
-            HostedAdapterError::PartialTextureUpdate(TextureId(9))
-        );
-    }
-
-    #[test]
-    fn prepared_scene_packet_retains_texture_metadata_for_partial_uploads() {
-        let mut translator = HostedScenePacketTranslator::default();
+    fn typed_scene_retains_texture_metadata_for_partial_uploads() {
+        let mut translator = HostedSceneTranslator::default();
         let mut create = delta(vec![
             HostedSceneOperation::CreateTexture(HostedTextureData {
                 id: TextureId(9),
@@ -738,7 +519,7 @@ mod tests {
         ]);
         translator
             .translate(&mut create)
-            .expect("create packet translates");
+            .expect("create transaction translates");
 
         let mut update = delta(vec![
             HostedSceneOperation::UpdateTexture(rfvp_hosted::hosted::HostedTextureUpdate {
@@ -760,20 +541,20 @@ mod tests {
             HostedSceneOperation::EndFrame,
             HostedSceneOperation::Present,
         ]);
-        let prepared = translator
+        let transaction = translator
             .translate(&mut update)
-            .expect("partial packet translates")
+            .expect("partial transaction translates")
             .expect("complete frame");
         assert!(matches!(
-            prepared.packet.resources.as_slice(),
-            [LegacySceneResourceOperationV1::UpdateTexture(texture)] if texture.x == 1
+            transaction.resources.as_slice(),
+            [LegacySceneResourceOperationV7::UpdateTexture { x: 1, .. }]
         ));
         assert!(translator.snapshot().textures.contains_key(&9));
     }
 
     #[test]
     fn retains_a_resource_only_delta_until_a_later_frame_commits_it() {
-        let mut translator = HostedScenePacketTranslator::default();
+        let mut translator = HostedSceneTranslator::default();
         let mut resource_only = delta(vec![HostedSceneOperation::CreateTexture(
             HostedTextureData {
                 id: TextureId(9),
@@ -800,20 +581,20 @@ mod tests {
             HostedSceneOperation::EndFrame,
             HostedSceneOperation::Present,
         ]);
-        let prepared = translator
+        let transaction = translator
             .translate(&mut frame)
             .expect("later frame commits retained resource")
             .expect("complete frame");
         assert!(matches!(
-            prepared.packet.resources.as_slice(),
-            [LegacySceneResourceOperationV1::CreateTexture(texture)] if texture.texture_id == 9
+            transaction.resources.as_slice(),
+            [LegacySceneResourceOperationV7::CreateTexture { texture_id: 9, .. }]
         ));
         assert!(translator.snapshot().textures.contains_key(&9));
     }
 
     #[test]
     fn restored_translator_starts_a_new_resource_epoch() {
-        let mut translator = HostedScenePacketTranslator::default();
+        let mut translator = HostedSceneTranslator::default();
         translator.restore(LegacySceneResourceStateV1::default());
         let mut rehydration = delta(vec![
             HostedSceneOperation::CreateTexture(HostedTextureData {
@@ -834,11 +615,11 @@ mod tests {
             HostedSceneOperation::EndFrame,
             HostedSceneOperation::Present,
         ]);
-        let prepared = translator
+        let transaction = translator
             .translate(&mut rehydration)
-            .expect("rehydration packet translates")
+            .expect("rehydration transaction translates")
             .expect("complete frame");
-        assert!(prepared.reset_resources);
+        assert!(transaction.reset_resources);
     }
 
     #[test]

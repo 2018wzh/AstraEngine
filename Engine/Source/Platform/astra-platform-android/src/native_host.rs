@@ -8,11 +8,12 @@ use std::{
 use android_activity::AndroidApp;
 use astra_core::Hash256;
 use astra_platform::{
-    host_channel, AudioOutputHandle, CapturedFrame, DecodeSessionHandle, HostCommand,
-    HostLaunchProfile, InputState, MemoryPressureLevel, PackageCachePolicy, PackageSourceHandle,
-    PackageSourcePolicy, PackageSourceRequest, PlatformBackendChannels, PlatformError,
-    PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostSession, PointerButton,
-    SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
+    host_channel_with_command_wake, AudioOutputHandle, CapturedFrame, DecodeSessionHandle,
+    HostCommand, HostLaunchProfile, InputState, MemoryPressureLevel, PackageCachePolicy,
+    PackageSourceHandle, PackageSourcePolicy, PackageSourceRequest, PlatformBackendChannels,
+    PlatformCommandWakeRegistration, PlatformError, PlatformErrorCode, PlatformEvent,
+    PlatformEventKind, PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle,
+    TouchPhase, WindowHandle,
 };
 use astra_platform_common::{
     AtomicSaveStore, CachedPackageSource, ResourceTable, SaveTransaction, VerifiedPackageCache,
@@ -67,10 +68,12 @@ where
         .checked_mul(256)
         .ok_or_else(|| host_error("host.start", "Android decode output budget overflows"))?;
     let bundled_package = read_bundled_package(&app)?;
-    let (client, backend, events) = host_channel(
+    let command_wake = PlatformCommandWakeRegistration::default();
+    let (client, backend, events) = host_channel_with_command_wake(
         launch_profile.clone(),
         profile.limits.command_queue_capacity,
         profile.limits.event_queue_capacity,
+        command_wake.clone(),
     )?;
     let session = PlatformHostSession {
         client,
@@ -82,6 +85,10 @@ where
     let event_loop = event_loop
         .build()
         .map_err(|_| host_error("host.start", "Android event loop creation failed"))?;
+    let proxy = event_loop.create_proxy();
+    command_wake.bind(move || {
+        let _ = proxy.send_event(());
+    })?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let (player_result_tx, player_result_rx) = std_mpsc::sync_channel(1);
     let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
@@ -460,7 +467,7 @@ impl AndroidHostApp {
                 let _ = reply.send(result);
             }
             HostCommand::OpenAudioOutput { request, reply } => {
-                let result = AndroidAudioResource::new(request)
+                let result = AndroidAudioResource::new(request, self.backend.audio_wake())
                     .and_then(|resource| self.audio_outputs.insert(resource));
                 let _ = reply.send(result);
             }
@@ -929,7 +936,6 @@ impl ApplicationHandler for AndroidHostApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.process_commands(event_loop);
         self.process_package_completions();
         let accessibility_actions = match self.accessibility.as_mut() {
             Some(accessibility) => match accessibility.drain_actions() {
@@ -994,9 +1000,12 @@ impl ApplicationHandler for AndroidHostApp {
         if self.player_result.as_ref().is_some_and(Result::is_err) {
             event_loop.exit();
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(4),
-        ));
+        event_loop.set_control_flow(ControlFlow::Wait);
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: ()) {
+        self.process_commands(event_loop);
+        self.process_package_completions();
     }
 }
 

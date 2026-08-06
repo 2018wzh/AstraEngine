@@ -35,8 +35,8 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
             profile: "test".to_string(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v2".to_string(),
-            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         },
         true,
         true,
@@ -198,4 +198,38 @@ fn blake3_component_encoding_reuses_one_digest_for_storage_and_state() {
         Hash256::from_bytes(*digest.as_bytes())
     );
     assert_eq!(encoding.state_hash(), Hash128::from_bytes(state_bytes));
+}
+
+#[test]
+fn shipping_owned_component_encoding_round_trips_with_disabled_hash_marker() {
+    let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
+        status: "shipping".to_string(),
+        count: 13,
+    })
+    .unwrap()
+    .into();
+    let encoding = ValidatedRuntimeComponentEncoding::postcard_owned(Arc::clone(&bytes));
+    assert_eq!(encoding.storage_hash(), Hash256::from_bytes([0; 32]));
+    assert_eq!(encoding.state_hash(), Hash128::from_bytes([0; 16]));
+
+    let payload = RuntimeComponentPayload::validated_encoded_postcard(
+        "astra.test.shipping_component",
+        SchemaVersion::default(),
+        encoding,
+    );
+    assert_eq!(
+        payload.codec(),
+        astra_runtime::RuntimePayloadCodec::PostcardOwned
+    );
+    assert_eq!(payload.hash(), Hash256::from_bytes([0; 32]));
+    assert_eq!(payload.decode::<TestComponent>().unwrap().count, 13);
+
+    let decoded =
+        serde_json::from_value::<RuntimeComponentPayload>(serde_json::to_value(&payload).unwrap())
+            .unwrap();
+    assert_eq!(
+        decoded.codec(),
+        astra_runtime::RuntimePayloadCodec::PostcardOwned
+    );
+    assert_eq!(decoded.bytes().as_ref(), bytes.as_ref());
 }

@@ -208,6 +208,7 @@ pub struct DeterministicActionContext<'a> {
     effects: &'a mut Vec<SerializedEffectEnvelope>,
     source: String,
     trigger_event: Option<RuntimeEvent>,
+    evidence_mode: bool,
     observed_reads: RefCell<BTreeSet<ActionResourceKey>>,
     observed_writes: RefCell<BTreeSet<ActionResourceKey>>,
 }
@@ -228,6 +229,7 @@ impl<'a> DeterministicActionContext<'a> {
         effects: &'a mut Vec<SerializedEffectEnvelope>,
         source: String,
         trigger_event: Option<RuntimeEvent>,
+        evidence_mode: bool,
     ) -> Self {
         Self {
             step,
@@ -243,6 +245,7 @@ impl<'a> DeterministicActionContext<'a> {
             effects,
             source,
             trigger_event,
+            evidence_mode,
             observed_reads: RefCell::new(BTreeSet::new()),
             observed_writes: RefCell::new(BTreeSet::new()),
         }
@@ -265,6 +268,10 @@ impl<'a> DeterministicActionContext<'a> {
 
     pub fn step(&self) -> u64 {
         self.step
+    }
+
+    pub fn evidence_mode(&self) -> bool {
+        self.evidence_mode
     }
 
     pub fn trigger_event(&self) -> Option<&RuntimeEvent> {
@@ -446,6 +453,29 @@ impl<'a> DeterministicActionContext<'a> {
     ) -> Result<(Hash256, Hash128), RuntimeError> {
         let encoding = crate::ValidatedRuntimeComponentEncoding::postcard(bytes);
         self.replace_component_validated_postcard(component_id, encoding)
+    }
+
+    /// Replaces a hot component by moving its encoded bytes without computing
+    /// a content hash. Evidence callers must use the authenticated variant.
+    pub fn replace_component_owned_postcard(
+        &mut self,
+        component_id: ComponentId,
+        bytes: Arc<[u8]>,
+    ) -> Result<(Hash256, Hash128), RuntimeError> {
+        let encoding = crate::ValidatedRuntimeComponentEncoding::postcard_owned(bytes);
+        self.replace_component_validated_postcard(component_id, encoding)
+    }
+
+    /// Encodes a hot component once and moves the owned bytes into the actor
+    /// store. The Shipping path deliberately does not hash those bytes.
+    pub fn replace_component_owned<T: Serialize>(
+        &mut self,
+        component_id: ComponentId,
+        data: &T,
+    ) -> Result<(Hash256, Hash128), RuntimeError> {
+        let bytes = postcard::to_allocvec(data)
+            .map_err(|err| RuntimeError::message(format!("encode runtime component: {err}")))?;
+        self.replace_component_owned_postcard(component_id, bytes.into())
     }
 
     /// Replaces an encoded postcard component whose SHA-256 storage hash and

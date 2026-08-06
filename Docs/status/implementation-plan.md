@@ -23,13 +23,13 @@
 
 | Area | Code status | Evidence |
 | --- | --- | --- |
-| Stage 1 EngineCore | `DONE` | Runtime v3、Action ABI v2、Provider ABI v2、inverse journal/overlay transaction、增量 root、compiled dispatch、conflict-DAG、session worker 与全局 worker budget 已通过 workspace test；shipping/evidence integrity profile 已分离，clean Release 单 Session、100k complexity 与多 Session performance evidence 已闭合 |
+| Stage 1 EngineCore | `DONE` | Runtime v3、Action ABI v2、Provider ABI v3、inverse journal/overlay transaction、增量 root、compiled dispatch、conflict-DAG、session worker 与全局 worker budget 已通过 workspace test；shipping/evidence integrity profile 已分离，clean Release 单 Session、100k complexity 与多 Session performance evidence 已闭合 |
 | Stage 2 Media + Package | `IN_PROGRESS` | VFS/container/schema/scenario authority、Cook transaction、bounded text、Windows native media 和 measured performance contract 已完成加固。Headless v3 现已接入精确 GPU policy、60 Hz Runtime/120 Hz presentation cadence、lazy package/source-lock、bounded decoded cache、retained atlas、异步 timestamp/readback ring、全局分配计数和 bounded Perfetto trace；旧 speedup-only report 已删除。代码与定向测试完成不等于性能放行，集显 800×600/1920×1080 三次 120 Hz、完整产品路线、正确性回归和同身份 final trace 仍需形成正式报告。Windows E3 继续独立保持开放 |
 | Stage 3 AstraVN | `IN_PROGRESS` | Migration 6、Migration 9 与 Migration 12 的 shared implementation 已落地。Engine workspace 使用仅供测试且禁止 release 的 NativeVN `minimal` profile；TsuiNoSora 工具与私有素材验收保持独立，不作为 Engine 主线门禁。2026-07-20 的 source-locked Classic private RC 在 Windows DX12 离散 GPU 上通过 43 个 Headless checkpoint、完整 Y 路线物理输入、13 项同节点视觉比较、安全扫描和人工签署，并形成七天私密交付；package 保留 37 条路线但只保证 Y 可玩。Windows E3、其余路线和正式公开许可均未关闭，Stage 3 继续由 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 与 `S3-FLAGSHIP-DEMO-01` 阻断 |
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
 | Stage 6 Platform Completion | `IN_PROGRESS` | Linux、macOS host 和 packaged Player 已进入静态实现；Android 的真实 Runtime/provider Player、Vulkan/AAudio/MediaCodec/save/package/accessibility/input host services 已接通，bundle、Gradle 和 build driver 同步落地；Linux/macOS Headless portability、真实 host smoke/decode/save/resume/release evidence，以及 Android API 28/36 emulator、arm64 真机和正式同 run E3 仍 blocking；iOS 保持 `SPEC_READY` |
-| Stage 5 AstraEMU | `IN_PROGRESS` | FVP 已从 vendor RFVP 迁至 pinned thin fork hosted-core；动态 family ABI hard cut 到 v5，FVP adapter 完成单 delta wire，CLI CPU reference 与 Manager/WGPU 都能消费经复验的增量 `ScenePacket`。fork 的 named audio 仅传 source URI，adapter 通过 session-bound host VFS 读取并按 policy 执行，避免 RFVP 内部/进程 VFS 绕过。公开 Painter sample 的 signed dynamic FVP v5 已通过 120 step、6 条 host-consumed physical input、4 frame、实际 PNG checkpoint 与 snapshot round-trip；input 未形成可见笔划，只证明 transport，不得视为交互 route。另一个公开生成 input case 的 3 step E2 将 primary edge 送入 VM，令 64×64 tile 从黑变红；snapshot、PNG、terminal 与 shutdown 均通过，人工检查画面符合该唯一可见变化，证明 input → VM → ScenePacket 的语义链。公开 audio case 的 62 step E2 经 named-audio URI、session resource read 和 Headless decoder 输出 49,600 audio frame、两个 WAV artifact 与非空 meter hash；它只证明该媒体子链，不等同于真实游戏音频、视频/PTS 或 route。2026-08-02 的授权本机安装 signed dynamic Headless E2 已通过 300 step、170 scene/raster frame、两个 PNG checkpoint、snapshot round-trip 与 shutdown；人工查看后一个 checkpoint 的标题画面完整，14 个 VFS 资源/55,011 次受限读取/41,648,158 bytes 且无 blocking diagnostic。该 run 没有路线输入、terminal、音频或视频，CPU reference step p95 58.08 ms 只作 Evidence profile 本机趋势。轻量 scene identity 以已验证资源 hash 去重，避免把纹理像素再次序列化；本地 CPU reference 的 step p95 11.22 ms、4 次 raster 中位数 248.12 ms 仅说明该去重生效，不构成 GPU、原版 RFVP 或性能放行结论。2026-08-03 的 clean Release 授权样本 GPU Headless formal E2 使用同一物理输入，在 DX12 集显完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation：Runtime p99 2.80 ms、presentation p99 0.65 ms、deadline miss 为零，稳态 upload/readback/renderer allocation p95 与 memory growth 均为零，CPU raster sample 为零，并绑定 v3 report、shared performance report 与 trace manifest hash；183,000 条 Perfetto event 可解析且无丢失/截断。snapshot/restore correctness 已由同一输入的独立预跑验证，不在性能采样窗口执行。该单轮 baseline 通过。新增的原生受控输入与 Perfetto 复跑完成 4,201 step：核心 provider p99 2.88 ms、音频 underflow 为零，但 adapter media queue p99 为 21.95 ms，尚未满足 60 Hz 原生门槛；trace 已保留用于继续定位，不能计作原生 soak 或修复结论。三轮 release-reference、原生 10 分钟音频 soak、route/media PTS parity 与 Windows Manager E3 仍是阻断项。另一个公开无资源脚本的 2 step lifecycle case 已到达 hosted terminal 并通过 snapshot/PNG/shutdown，但其空黑 frame 只证明 `ExitMode(3)` 生命周期传播。Painter 的人工检查画面可见且完整；这些局部案例不能替代真实 media/route/soak 或 Windows/Android E3。既有 RuntimeWorld、Slint/WGPU host 和历史 E2 证据不能证明本轮迁移。本轮其他 Library v7 work/installation 分层、七 family discovery descriptor、VNDB/Bangumi provider、可解释 matcher、Scan Review、受限封面缓存、Bangumi 游玩状态同步、本地游玩时间/历史统计与社区中央兼容性库（`astra.emu.compatibility.v1` 五级分级、HTTPS-only 拉取、SHA-256 增量同步、本地缓存与 UI 徽章/筛选/设置）保持原状态。离线 HTTP contract fixture、中央兼容性数据仓、正式商业 VNDB license gate、完整 UI 自动化、Windows/Android E3、完整 media parity 和正式签名仍开放，Stage 5 不得标记 `DONE` |
-> 当前身份修正：上表 Stage 5 长段中的 family ABI v5、signed dynamic v5 与 snapshot v5 只描述迁移前历史 evidence，不能代表当前可加载 contract。当前实现仅接受 family ABI v6 与 snapshot v6；正式结论以下方 hot-path 重构记录和最终 clean Release 复跑为准。
+| Stage 5 AstraEMU | `IN_PROGRESS` | FVP 已从 vendor RFVP 迁至 pinned thin fork hosted-core；当前 active Family ABI hard cut 为 v7（v5/v6 仅作拒绝迁移输入），FVP adapter 完成单 delta wire，CLI CPU reference 与 Manager/WGPU 都能消费经复验的增量 `ScenePacket`。fork 的 named audio 仅传 source URI，adapter 通过 session-bound host VFS 读取并按 policy 执行，避免 RFVP 内部/进程 VFS 绕过。公开 Painter sample 的 signed dynamic FVP v7 已通过 120 step、6 条 host-consumed physical input、4 frame、实际 PNG checkpoint 与 snapshot round-trip；input 未形成可见笔划，只证明 transport，不得视为交互 route。另一个公开生成 input case 的 3 step E2 将 primary edge 送入 VM，令 64×64 tile 从黑变红；snapshot、PNG、terminal 与 shutdown 均通过，人工检查画面符合该唯一可见变化，证明 input → VM → ScenePacket 的语义链。公开 audio case 的 62 step E2 经 named-audio URI、session resource read 和 Headless decoder 输出 49,600 audio frame、两个 WAV artifact 与非空 meter hash；它只证明该媒体子链，不等同于真实游戏音频、视频/PTS 或 route。2026-08-02 的授权本机安装 signed dynamic Headless E2 已通过 300 step、170 scene/raster frame、两个 PNG checkpoint、snapshot round-trip 与 shutdown；人工查看后一个 checkpoint 的标题画面完整，14 个 VFS 资源/55,011 次受限读取/41,648,158 bytes 且无 blocking diagnostic。该 run 没有路线输入、terminal、音频或视频，CPU reference step p95 58.08 ms 只作 Evidence profile 本机趋势。轻量 scene identity 以已验证资源 hash 去重，避免把纹理像素再次序列化；本地 CPU reference 的 step p95 11.22 ms、4 次 raster 中位数 248.12 ms 仅说明该去重生效，不构成 GPU、原版 RFVP 或性能放行结论。2026-08-03 的 clean Release 授权样本 GPU Headless formal E2 使用同一物理输入，在 DX12 集显完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation：Runtime p99 2.80 ms、presentation p99 0.65 ms、deadline miss 为零，稳态 upload/readback/renderer allocation p95 与 memory growth 均为零，CPU raster sample 为零，并绑定 v3 report、shared performance report 与 trace manifest hash；183,000 条 Perfetto event 可解析且无丢失/截断。snapshot/restore correctness 已由同一输入的独立预跑验证，不在性能采样窗口执行。该单轮 baseline 通过。新增的原生受控输入与 Perfetto 复跑完成 4,201 step：核心 provider p99 2.88 ms、音频 underflow 为零，但 adapter media queue p99 为 21.95 ms，尚未满足 60 Hz 原生门槛；trace 已保留用于继续定位，不能计作原生 soak 或修复结论。三轮 release-reference、原生 10 分钟音频 soak、route/media PTS parity 与 Windows Manager E3 仍是阻断项。另一个公开无资源脚本的 2 step lifecycle case 已到达 hosted terminal 并通过 snapshot/PNG/shutdown，但其空黑 frame 只证明 `ExitMode(3)` 生命周期传播。Painter 的人工检查画面可见且完整；这些局部案例不能替代真实 media/route/soak 或 Windows/Android E3。既有 RuntimeWorld、Slint/WGPU host 和历史 E2 证据不能证明本轮迁移。本轮其他 Library v7 work/installation 分层、七 family discovery descriptor、VNDB/Bangumi provider、可解释 matcher、Scan Review、受限封面缓存、Bangumi 游玩状态同步、本地游玩时间/历史统计与社区中央兼容性库（`astra.emu.compatibility.v1` 五级分级、HTTPS-only 拉取、SHA-256 增量同步、本地缓存与 UI 徽章/筛选/设置）保持原状态。离线 HTTP contract fixture、中央兼容性数据仓、正式商业 VNDB license gate、完整 UI 自动化、Windows/Android E3、完整 media parity 和正式签名仍开放，Stage 5 不得标记 `DONE` |
+> 当前身份修正：上表 Stage 5 长段中的 family ABI v5/v6、signed dynamic v5/v6 与 snapshot v5/v6 只描述迁移前历史 evidence，不能代表当前可加载 contract。当前实现仅接受 family ABI v7 与 snapshot v7；正式结论以下方 hot-path 重构记录和最终 clean Release 复跑为准。
 
 > 2026-08-03 native update：同一授权输入的 4,201-step 复跑，在移除 submit 后冗余 query 后将 `media_queue` p99 从 21.95 ms 降至 16.36 ms，音频 underflow 为零。完整 `fixed_tick` Perfetto span p99 仍为 18.52 ms；原生 60 Hz gate 未通过，不能代替 10 分钟 soak 或作为修复结论。
 
@@ -37,11 +37,17 @@
 
 > 2026-08-03 native soak：10 分钟 mixed-run 完成 35,578 个配对 fixed tick，RFVP core p99 为 2.923 ms，但 fixed tick p99 为 16.690 ms、最大值为 5.892 s，累计 656 次 device underflow。第 651 step 的 core 只用 2.696 ms，adapter effect dispatch 却阻塞 3.940 s；后段另有多次 0.2–2.98 s 的 media/effect 长帧。与 RFVP `0.5.0` 对照后确认，原版按 `GraphBuff generation` 对已有动态纹理执行原位 `queue.write_texture`，当前 hosted 链则复制和序列化像素、分配新 resource generation，并至少完整重传变化纹理。通用 WGPU atlas 能复用合适的空闲槽，只有容量或碎片化触发时才 repack；新计数将区分整纹理上传与实际 repack。音频 producer 又依赖 fixed tick 补水，任何超过 120–180 ms 的长帧都会耗尽 device queue。该 soak 失败，短跑结论不再作为原生音频通过项；稳定 texture update、增量 atlas upload 和独立 audio producer 完成前，不得关闭 60 FPS 原生门禁。
 
-> 2026-08-03 hot-path 重构：Family ABI 已 hard cut 到 v6，descriptor/lifecycle/VFS 改用显式 `StableAbi` wire DTO，ABI-owned bulk clone/drop-once 与 v5 rejection 有单元/动态 lifecycle 覆盖；FVP runtime snapshot 同步升为 v6。hosted fork pin 更新为 `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`，scene/PCM delta 按值消费并输出脱敏 copy telemetry；同 id texture 的尺寸变化现按 generation 重建，不再把合法动画帧误判为 `InvalidData`。WGPU retained scene 已支持稳定 resource id 的 `UpdateTextureRegion`，保留 atlas placement 和 sparse patch；native async present 改为有界有序回执流水线，不再用单回执阻塞下一动画帧。Manager 私有 CPAL 链已删除，Manager/native CLI 共用 PlatformHost-backed bounded audio worker，按需 decode、分段 PCM、fade/repeat/pause、独立低水位 refill、可复用 mix buffer、owned platform submit 和批量 callback queue 已落地；EOF 尾包会用有界静音余量关闭，避免自然结束后的持续 underflow。启动阶段新增 case/family/probe/runtime/platform/driver 脱敏耗时事件。局部 contract/unit/dynamic lifecycle 已通过；最终 clean Release 三轮短跑和 10 分钟 CLI/Manager mixed-run 尚未重跑，因此本项仍为 `IN_PROGRESS`，不得沿用旧 soak identity 或宣称 60 FPS/零 underflow 已放行。
+> 2026-08-03 hot-path 重构：Family ABI 已从 v5 直接 hard cut 到 v7，descriptor/lifecycle/VFS 改用显式 `StableAbi` wire DTO，ABI-owned typed bulk clone/drop-once 与 v5/v6 rejection 有单元/动态 lifecycle 覆盖；FVP runtime snapshot 同步升为 v7。hosted fork pin 更新为 `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`，scene/PCM delta 按值消费并输出脱敏 copy telemetry；同 id texture 的尺寸变化现按 generation 重建，不再把合法动画帧误判为 `InvalidData`。WGPU retained scene 已支持稳定 resource id 的 `UpdateTextureRegion`，保留 atlas placement 和 sparse patch；native async present 改为有界有序回执流水线，不再用单回执阻塞下一动画帧。Manager 私有 CPAL 链已删除，Manager/native CLI 共用 PlatformHost-backed bounded audio worker，按需 decode、分段 PCM、fade/repeat/pause、独立低水位 refill、可复用 mix buffer、owned platform submit 和批量 callback queue 已落地；EOF 尾包会用有界静音余量关闭，避免自然结束后的持续 underflow。启动阶段新增 case/family/probe/runtime/platform/driver 脱敏耗时事件。局部 contract/unit/dynamic lifecycle 已通过；最终 clean Release 三轮短跑和 10 分钟 CLI/Manager mixed-run 尚未重跑，因此本项仍为 `IN_PROGRESS`，不得沿用旧 soak identity 或宣称 60 FPS/零 underflow 已放行。
 
-> 2026-08-03 startup/logging follow-up：授权样本同一输入的 clean Release 诊断把 `runtime_open` 从 50,789 ms 降到 220 ms，确认原先每次 RFVP 小读都穿透动态 VFS 的 open/stat/hash 是开屏延迟主因；hosted VFS 现使用有界 1 MiB read-through page。首次复跑同时发现跨页读取在页尾错误切片并 panic，现已改为最多逐页复制到调用方 buffer，并以真实越界形状的回归测试覆盖。RFVP hosted 的 payload-free log record 不再在 family dylib 内直接调用 `tracing`；它经 ABI v6 `LegacyDiagnostic` 返回可执行宿主，由宿主统一发送到 `astra-observability` 后从 Runtime output 移除，因此不进入 save、replay、report 或状态 hash。该复跑在进入主循环前被已修复的分页错误阻断，最终动画与音频门禁仍需在新 clean identity 上重跑。
+> 2026-08-03 startup/logging follow-up：授权样本同一输入的 clean Release 诊断把 `runtime_open` 从 50,789 ms 降到 220 ms，确认原先每次 RFVP 小读都穿透动态 VFS 的 open/stat/hash 是开屏延迟主因；hosted VFS 现使用有界 1 MiB read-through page。首次复跑同时发现跨页读取在页尾错误切片并 panic，现已改为最多逐页复制到调用方 buffer，并以真实越界形状的回归测试覆盖。RFVP hosted 的 payload-free log record 不再在 family dylib 内直接调用 `tracing`；它经 ABI v7 `LegacyDiagnostic` 返回可执行宿主，由宿主统一发送到 `astra-observability` 后从 Runtime output 移除，因此不进入 save、replay、report 或状态 hash。该复跑在进入主循环前被已修复的分页错误阻断，最终动画与音频门禁仍需在新 clean identity 上重跑。
 
 > 2026-08-03 native event-loop follow-up：修复分页后，800-step signed Release 复跑定位到 Windows PlatformHost command queue 没有唤醒 Winit，`surface.present_scene` 只能等待 `about_to_wait` 的 fixed polling；修复前单次 WGPU present 中位数仅 1.873 ms，但相邻提交中位数为 15.562 ms，并出现 2.218 s 空档后触发 `ASTRA_EMU_NATIVE_PRESENT_BACKLOG`。当前实现改为成功入队后由 `EventLoopProxy` 唤醒、`user_event` 立即处理，队列满不伪唤醒，HTTPS completion 也走同一路径；无 gamepad 时 4 ms 空转轮询降为 250 ms 设备发现。修复后的同授权输入完成 800 fixed step，无 backlog/underflow diagnostic，scene present 间隔中位数 16.677 ms、p95 18.387 ms，WGPU present p99 6.129 ms。一次约 2.2 s 无 scene commit 的区间内没有长 provider/effect/GPU span：RFVP core p99 3.085 ms、最大 58.496 ms，effect dispatch p99 0.104 ms、GPU submit p99 0.836 ms；它不是 event-loop 阻塞，仍需用标题 hover 的受控 pointer 输入确认 fork 的动画产出语义。该短跑关闭 present backlog 根因，但不替代三轮短跑、10 分钟 CLI/Manager mixed-run 或 Family ABI scene bulk 的最终零拷贝门禁。
+
+> 2026-08-04 event-driven follow-up：Windows/Linux PlatformHost 的 gilrs 不再由 `about_to_wait` 以 4 ms 周期轮询；独立 worker 以有界事件批次持有 backend，通过 `EventLoopProxy` 唤醒宿主，满队列使用阻塞背压并在 shutdown 释放接收端。Windows `DecodeResource` 同样改为每会话独立有界 worker，WMF `ReadSample` 不再阻塞 Winit command loop；Manager 的平台视频/音频预取满环改为阻塞式有界发送，删除 `try_send` + `yield_now` 的忙等。UI/render 线程只在唤醒后的事件循环边界消费批次；底层无 hotplug handle 的 250 ms 等待保留为显式 discovery fallback。Windows target compile、Manager gamepad tests 已通过；Linux/macOS native host 与真实游戏 clean Release/10 分钟 mixed-run 尚未形成新报告，不能提升 Stage 5 或性能 gate。
+
+> 同日 Windowed E2 复跑发现 native CLI 的无偏 `tokio::select!` 会在窗口事件突发时延迟已经到期的固定 tick；固定 deadline 分支现改为 `biased` 优先，避免事件队列人为制造 debt。修复前的脱敏 trace 同时确认首个 2048² retained atlas 的一次性 GPU 上传约 16.8 MiB、scene render 约 33 ms，属于需要单独优化/预热的真实首帧成本，不能通过放宽 scheduler 或跳过 tick 掩盖。当前 clean Release Windowed E2 仍需在该修复身份上重跑，硬门禁与硬件 transform selection proof 保持开放。
+
+> 2026-08-04 startup/deadline follow-up：native CLI/Windowed E2 现在把首个 retained-resource transaction 作为显式 startup fixed step，随后从 `after_completed_step` 的绝对 deadline 继续，不重置时间基准；超出 60 Hz 预算只输出 `ASTRA_NATIVE_STARTUP_TICK_OVER_BUDGET`，稳态仍最多追赶四个逾期 tick，继续超限则 fail-fast。授权游戏的私有 Windowed E2 手工包已完成 750 fixed step、自动输入与 shutdown，no-audio 运行无 debt；startup 约 59 ms，报告保留该诊断。开启真实音频时第 4 step 仍因 RFVP 首次 12 纹理/约 5.3 MiB 场景事务达到约 75 ms并触发 `ASTRA_FIXED_DEADLINE_DEBT`，因此该身份不计作 Release/10 分钟性能或音频门禁，后续需继续优化资源解码/场景提交并以 clean Release 重跑。
 
 > 同日真实 Release 首轮定位到 `runtime_open` 占用约 50.8 秒，根因是 hosted 小页读取经 ABI VFS 时每页重复 open/stat/hash。hosted VFS file 现持有有界 1 MiB read-through page，revision 校验仍由每次底层 range read 保证；大块读取继续直通。音频 stop/EOF 在内容消费完成后改用显式 abort，避免 `CloseAudio` 的 drain 在 platform event loop 上阻塞 GPU command。该轮在旧实现上触发的 present backlog 只作为诊断，不计入放行证据；修复后的 clean Release 仍需重跑。
 
@@ -251,7 +257,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | 22 | `S5-MANAGER-01` + `S5-MANAGER-UI-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `REOPENED_SPEC` | AstraEMU Manager 仍作为 Program target，启动 gameplay runtime session、family plugin，并复用 Stage 4 provider、MCP 和 memory；Manager/overlay UI 按 ADR 0015 使用 egui，Windows v1 gate 留 Stage 5 |
 | 23 | `S6-LINUX-HOST-01` + `S6-LINUX-HEADLESS-01` + `S6-MACOS-HOST-01` + `S6-MACOS-HEADLESS-01` + `S6-IOS-HOST-01` + `S6-ANDROID-HOST-01` platform completion | `IN_PROGRESS` | Linux/macOS host 与 Player 静态主路径已接入，真实 runtime evidence 待环境完善；Linux/macOS Headless、iOS 和 Android 仍按 Stage 6 计划推进 |
 | 21 | `S5-GAME-RUNTIME-01` + `S5-EMUCORE-SM-01` + `S5-LEGACY-VFS-01` | `IN_PROGRESS` | `AstraEmuRuntimeProvider`、session-owned `RuntimeWorld`、`LegacyRuntimeProvider` ABI v4、FVP host/virtual VFS、bounded session-resource media channel、ordered effect、snapshot v5、restore continuation 和重复运行 hash 测试已经接入；snapshot 不再丢弃进行中的 alpha、move、scale、rotation、z、V3D、sprite、snow 或 lip motion。FVP 已实现 `astra-emu-family-core` 的显式 `.bin` factory、manifest v2、stat/range/stream、source revision、重复读取账本与私有 continuation snapshot，CLI/Manager 与 Minori 共用同一 registry。Windows 本机授权样本的 ignored Headless run 已完成固定 RFVP 0.5.0 observer 的 188 帧逐像素基线，以及最长 4001 tick 的标题鼠标选择、剧情画面、输入、音频、snapshot/restore continuation 子链；native WMV/ASF/MPEG 执行器已接入。完整逐帧 media parity、选择/terminal、全资源审计和平台 evidence 仍开放 |
-| 21 | `S5-MINORI-VFS-01` | `IN_PROGRESS` | VFS/decrypt/factory contract 已硬迁移到 `astra-emu-family-core`，公共 Luau/profile/cache/viewer/verify/extract/FUSE 进入 `astra-emu-family-support`；通用 CLI 为 `vfs --family`，Minori import/census 使用独立 CLI。Minori 只保留纯 Rust decrypt provider，Luau 仅注册 data-only private profile。重新递归扫描后确认 8 个逻辑 archive、18 个物理 PAZ 文件；no-cache full verify 覆盖 14502 entry、43818 range read 与 6624958365 decoded bytes。mount 已用单次有界顺序流同时计算 source/entry hash，真实耗时从约 466 秒降至约 367–403 秒。89 脚本 census 为 33728 行、33695 command、29 token、0 unknown opcode；IDA 已确认 tokenizer 会保留连续分隔符形成的空 positional operand，以及 `chain`、`message`、音频 `*`、BGM/SE、stage 前部、`CrossFade2`、`CMessagePanel` mode 1 与 panel 坐标公式。snapshot v6 保存 transition/layer/effect accumulator、最后可见 effect frame、message panel 与 audio state；Await request 只在创建等待时提交，Host 会消费用于完成 input await 的按键 edge。stage/effect/panel 均使用无商业像素的 resource-frame contract，Host 经 session resource channel 和唯一显式绑定的纯 Rust `ImageDecodeProvider` 生成临时 RGBA；message 经一次性 lease、显式 Noto Sans JP、CosmicText 和 Renderer2D 合成，不走 fallback。迁移后的签名动态 plugin 真实八包 Headless E2 已通过 373 tick、9 个实际呈现帧、6 checkpoint、16 条物理输入、音频 artifact 和 snapshot round-trip，diagnostic 为 0；前两条日文正文无缺字、横向裁剪、拉伸或旧文本残留。公共 `prepare-review`、bundle 模型检查和 `validate-review` 已通过当前 slice；cache identity、完整 effect 周期、stand/transition 动画、select/voice、Linux FUSE、macOS 和 Manager media preview 仍开放 |
+| 21 | `S5-MINORI-VFS-01` | `IN_PROGRESS` | VFS/decrypt/factory contract 已硬迁移到 `astra-emu-family-core`，公共 Luau/profile/cache/viewer/verify/extract/FUSE 进入 `astra-emu-family-support`；通用 CLI 为 `vfs --family`，Minori import/census 使用独立 CLI。Minori 只保留纯 Rust decrypt provider，Luau 仅注册 data-only private profile。重新递归扫描后确认 8 个逻辑 archive、18 个物理 PAZ 文件；no-cache full verify 覆盖 14502 entry、43818 range read 与 6624958365 decoded bytes。mount 已用单次有界顺序流同时计算 source/entry hash，真实耗时从约 466 秒降至约 367–403 秒。89 脚本 census 为 33728 行、33695 command、29 token、0 unknown opcode；IDA 已确认 tokenizer 会保留连续分隔符形成的空 positional operand，以及 `chain`、`message`、音频 `*`、BGM/SE、stage 前部、`CrossFade2`、`CMessagePanel` mode 1 与 panel 坐标公式。snapshot v7 保存 transition/layer/effect accumulator、最后可见 effect frame、message panel 与 audio state；旧 v5/v6 仅作拒绝覆盖。Await request 只在创建等待时提交，Host 会消费用于完成 input await 的按键 edge。stage/effect/panel 均使用无商业像素的 resource-frame contract，Host 经 session resource channel 和唯一显式绑定的纯 Rust `ImageDecodeProvider` 生成临时 RGBA；message 经一次性 lease、显式 Noto Sans JP、CosmicText 和 Renderer2D 合成，不走 fallback。迁移后的签名动态 plugin 真实八包 Headless E2 已通过 373 tick、9 个实际呈现帧、6 checkpoint、16 条物理输入、音频 artifact 和 snapshot round-trip，diagnostic 为 0；前两条日文正文无缺字、横向裁剪、拉伸或旧文本残留。公共 `prepare-review`、bundle 模型检查和 `validate-review` 已通过当前 slice；cache identity、完整 effect 周期、stand/transition 动画、select/voice、Linux FUSE、macOS 和 Manager media preview 仍开放 |
 | 22 | `S5-MANAGER-01` + `S5-MANAGER-UI-01` + `S5-PROGRAM-TARGET-01` + `S5-FAMILY-01` + `S5-AUTOPROBE-01` + `S5-SCRIPT-01` + `S5-TEXT-01` + `S5-FILTER-01` | `IN_PROGRESS` | Manager Program、`astra-emu-cli` overlay-free Windows native/headless launch、SQLite Library v5、stable case identity、增量扫描、Trusted Luau、ECNU adapter、Slint 1.17.1 与共享 wgpu host 已接入。family ABI 已硬切 v4，desktop/Android VFS 使用 stat/range/revision，FVP `.bin` 启动不再整包读取。FVP fixed-step 和 snapshot 漏项已修复，本地 RFVP 参考固定为 0.5.0；外部 reference 不在 CI 联网运行。既有 ignored 样本只证明旧 E2/Windows 子链，尚未完成本轮逐帧对照、完整资源审计、非静音 media 和正式 run identity。正式 platform signer、filter visual golden、Windows/Android E3、iOS/macOS/Linux 实际报告和 Android arm64 真机证据仍未关闭 |
 | 23 | `S6-LINUX-HOST-01` + `S6-LINUX-HEADLESS-01` + `S6-MACOS-HOST-01` + `S6-MACOS-HEADLESS-01` + `S6-IOS-HOST-01` + `S6-ANDROID-HOST-01` platform completion | `SPEC_READY` | Windows/Web 之外的平台完成从 Stage 2 移出；Linux/macOS Headless native portability 同步延后，等 VN/Core/Editor 发布路径稳定后集中接入真实 SDK 与 runtime evidence |
 | 24 | `S7-POLICY-01` + `S7-RPG-PROVIDER-01` + `S7-RPG-CORE-01` + `S7-RPG-POLICY-01` + `S7-RPG-AI-TOWN-01` + `S7-RPG-TRPG-01` + `S7-RPG-CP2020-01` + `S7-RPG-GATE-01` | `SPEC_READY` | AstraRPG 需要先抽通用 Luau policy，再接 RPG provider/core/policy，最后用 AI Town、`rpg.trpg` 和 CP2020 local-private adapter gate 验证；当前只完成设计和迁移计划 |
@@ -269,3 +275,143 @@ git diff --check
 ```
 
 Expected output: docs check reports checked markdown files；fmt/clippy/workspace tests pass；diff check has no whitespace errors。
+
+## 2026-08-04 RFVP PlatformHost stream update
+
+The active Family ABI is v7 (`astra.emu.family_abi.v7`); v5/v6 manifests,
+binaries, runtime sections, and snapshots are rejection-only migration inputs.
+FVP and Minori runtime sections now use v7 identities. Windows WMF exposes
+bounded PlatformHost video/audio cursors (`Start -> Next* -> CloseDecode`) for
+the FVP WMV/ASF/MPEG/MP4 family, with hardware-transform requests and stable
+EOS diagnostics. Manager and native CLI consume bounded worker output without
+waiting on an empty ring; a slow decoder returns `Pending` and is resumed by
+the next deadline/event. Native CLI uses lazy video frames on the WGPU path,
+while Headless keeps its complete-stream validation path. CPU BGRA/i16 is the
+explicit provider boundary, so the final upload/device transfer remains
+observable. Full clean Release performance and ten-minute mixed-run evidence
+remain `IN_PROGRESS` until rerun on the final identity.
+
+## 2026-08-04 event-driven Manager and source hand-off update
+
+Manager gamepad, metadata and translation completions now use an edge-triggered
+host wake and drain on the Slint UI thread; the old 8 ms gamepad and 250 ms
+platform UI timers were removed. Runtime fixed ticks still use their absolute
+deadline scheduler. Platform-provider movies move the encoded source into the
+video decode session and make at most one bounded source clone when a separate
+audio session is required. This removes the previous two full source copies in
+the Manager movie open path. Targeted Manager/platform checks, docs and clippy
+are current. macOS now runs Player async orchestration off the main thread and
+blocks the Winit pump until an explicit command/completion event; Web gamepad
+and media cadence use `requestAnimationFrame` instead of fixed interval/timeout
+polling. Native window focus and final Release soak evidence remain open.
+
+Windowed E2/CLI now executes one explicit startup fixed step before arming the
+steady-state absolute-deadline scheduler. Retained atlas/resource creation is
+measured as `astra.emu.native_startup_tick`; exceeding the 60 Hz budget emits
+`ASTRA_NATIVE_STARTUP_TICK_OVER_BUDGET` without dropping a tick or rebasing the
+steady-state clock. Every later step remains under the four-step catch-up/debt
+blocking rule. This isolates only the one-time GPU initialization cost and is
+not evidence for steady-state p99, audio underflow, or the real-game soak gate.
+
+2026-08-04 typed PCM hand-off：FVP 的 `SubmitI16`/`SubmitF32` 直接进入
+Family ABI v7 typed live output。ABI-owned PCM allocation 经 Runtime output、
+Manager 和 native CLI 移交到混音 worker，不再通过 `FfiEffect`、audio command
+postcard 或 optional live envelope。Family FFI 已删除 generic effect 通道；旧
+effect 到达导出边界会立即失败。未使用的 `LegacyEffect::Presentation`、
+`LegacyEffect::Audio`、`LegacyEffect::TextCapture`、generic control mirror、
+`LegacyTypedBulk` 和 audio bulk control 已删除；resource read 只返回 owned bytes，
+不再附加 kind/schema/length 镜像。EMU provider descriptor 也不再声明从未产出的
+persisted scene/audio/trace schema。控制类 audio command 继续使用 typed variant，
+实时 PCM 不计算 content hash。
+该 slice 已通过 family API 20 项、family-support 20 项和 Manager core 48 项测试，
+受影响 crate 的定向 check 与 clippy 也已通过；最终
+clean Release、真实游戏音频 underflow 和跨平台硬件解码证据仍未闭合。
+
+同一批次的 scene 热路径已切到 Family ABI v7 typed scene transaction：FVP
+不再把 scene postcard 放进 Presentation payload，Manager/Runtime/Scene2D 只移动
+ABI-owned RGBA8 allocation；native GPU adapter 对同尺寸 partial update 只上传变化
+区域，LumaAlpha8 只做一次明确格式转换，live scene 不计算 content hash。scene
+transaction、generation、原子提交和 allocation pointer 定向测试已通过；最终 clean
+Release 的 copy telemetry、同身份 Perfetto trace 与真实游戏窗口证据仍需重跑。
+
+Manager 的 RuntimeWorld bridge 不再用 `Arc<Mutex<Option<LegacyStepOutput>>>`
+暂存完整 Family 输出。step 只扫描一次 effect list，将 event、blackboard、scheduled
+event、snapshot 和 wait 移入轻量 control transaction；scene、PCM、video 和 text
+allocation 留在调用栈上，RuntimeWorld 提交成功后直接移交 host。RuntimeWorld 错误时
+control transaction 会立即释放，不生成替代输出。Manager core 48 项测试通过，其中
+allocation 测试确认 scene 像素不会进入 control transaction。
+
+Product Runtime live output 已改为必填值；Rust 与 Provider ABI 不再用
+`Option<RuntimeLiveOutput>`/`ROption<FfiRuntimeLiveOutput>` 表示正常空 step。通用
+`RuntimeLiveControlKind` 及其六字段 FFI 镜像也已删除，只保留 typed blackboard
+mutation 和 dirty section。NativeVN 同时停止每 tick 生成无人消费的 await、observation
+和 dirty-section postcard；presentation、timeline、step evidence 与 view-state 的实时
+postcard 仍待迁移，因此零序列化门禁尚未关闭。
+
+CLI Perfetto 不再输出从未连接真实入口的 `serialize_calls`、`content_hash_bytes` 和
+`intermediate_scene_copy_bytes` 默认零值。PCM copy counter 由 FVP capture telemetry
+提供，仍保留 fail-fast；其余 counter 要等 codec/hash/scene owner 接入真实累计后再恢复，
+不能用常量零值充当性能证据。
+
+## 2026-08-04 native media/audio wake update
+
+Windows FVP movie compatibility now routes WMV/ASF/MPEG/MP4/M4V through the
+PlatformHost WMF stream provider. Decode sessions perform WMF work on a
+bounded per-resource worker, request hardware transforms, and expose only the
+validated CPU BGRA/i16 boundary. Manager platform movie workers use bounded
+producer rings with `Pending` rather than blocking or `try_send`/`yield_now`
+spins, so a slow decoder cannot stall a fixed runtime tick. Windows, Linux,
+macOS and Android native audio outputs now wake drain/refill waiters through
+`AudioWakeRegistration`; Web AudioWorklet meter/drain state uses MessagePort
+completion and oneshot waiters rather than a fixed 5 ms timer. These changes
+close the timer/polling and decoder-thread boundaries at contract level and
+targeted checks pass, but clean Release three-run/ten-minute evidence,
+hardware-transform selection proof, and real-game A/V parity remain open.
+
+The streamed video hand-off now uses the metadata-only
+`astra.decoded_video_frame_cpu.v1` format. WMF moves its validated BGRA8
+allocation as the `DecodeOutput` payload; Manager, CLI and the VN media host
+consume it without a second full-frame postcard encode/decode. The hash and
+dimension/byte-budget checks remain mandatory, and the final BGRA-to-RGBA
+conversion is still the explicit CPU-to-renderer boundary. This removes the
+per-frame serialization churn but does not by itself prove adapter-selected
+hardware transforms.
+The WMF sample readback also truncates its owned buffer in place for one-shot,
+incremental, and bounded-stream video paths, so the decoder does not allocate a
+second full-frame Vec before the PlatformHost move.
+
+The native CLI cursor no longer clones the first or last decoded video frame
+just to compute stream duration: the worker carries only the scalar end PTS,
+and the owned BGRA allocation is moved into the presentation queue. The
+Headless native conversion likewise mutates each owned frame in place. A
+separate audio decode session still requires one encoded-source clone because
+WMF sessions own their input independently.
+
+## 2026-08-06 Runtime/VFS hot-path update
+
+Shipping `RuntimeWorld` no longer computes StateMachine candidate cycle
+fingerprints: the evidence-only cycle guard is disabled at the tick boundary,
+and the bounded microstep limit remains the fail-fast safety boundary. The
+Shipping integrity report now uses a constant disabled marker instead of
+recomputing a hash every tick. `RangeReadResult` and Family ABI v7 VFS wire
+also carry only revision, range and owned bytes; per-read SHA-256 and the
+hash-backed repeat ledger were removed. Evidence/package/source revisions
+remain explicit identities, while asynchronous Evidence can hash committed
+artifacts after the live step. Runtime/VFS and FVP focused tests pass.
+
+The VN provider now moves product audio cues through `RuntimeLiveOutput` and
+rejects persisted audio at the Player boundary. Shipping hot component updates
+move one owned postcard allocation with disabled hash markers; Evidence keeps
+the authenticated encoding. VN presentation/view-state and timeline data still
+use the separate persisted contract, so whole-engine zero-serialization is not
+claimed until that remaining live DTO path is closed.
+
+## 2026-08-04 Windowed E2 identity update
+
+`astra-emu-cli windowed-e2` now emits `astra.emu.windowed_e2_report.v1` with
+family/provider and binary identity, executable build identity, native profile,
+package/entry/session and input hashes. The command uses the real Windows
+PlatformHost window/device/audio path but accepts only the validated Headless
+JSONL sequence; external gameplay input is rejected and counted, while surface
+readback is restricted to declared checkpoints. This is developer E2 evidence,
+not manual E3 or clean Release performance evidence.

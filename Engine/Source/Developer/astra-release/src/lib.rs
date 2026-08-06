@@ -1776,7 +1776,6 @@ fn native_vn_behavioral_evidence(
         schema: "astra.vn.story".to_string(),
         version: astra_core::SchemaVersion::default(),
         codec: astra_plugin_abi::RuntimeSectionCodec::Postcard,
-        hash: Hash256::from_sha256(&compiled_bytes),
         bytes: compiled_bytes,
     };
     let section_ids = package
@@ -1849,17 +1848,17 @@ fn native_vn_behavioral_evidence(
                 session_seed: 0xA57A,
                 mode: RuntimeStepMode::Live,
                 action: "launch_default".to_string(),
-                payload: serde_json::json!({}),
+                ..RuntimeStepInput::default()
             })
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", err.to_string()))?;
         let state = output
-            .outputs
+            .persisted
             .iter()
-            .find(|envelope| envelope.schema == VN_RUNTIME_VIEW_STATE_SCHEMA)
+            .find(|persisted| persisted.schema == VN_RUNTIME_VIEW_STATE_SCHEMA)
             .ok_or_else(|| {
                 (
                     "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE",
-                    "runtime provider emitted no bounded runtime view state envelope".to_string(),
+                    "runtime provider emitted no bounded persisted runtime view state".to_string(),
                 )
             })?
             .decode_postcard::<VnRuntimeViewState>(
@@ -1871,11 +1870,11 @@ fn native_vn_behavioral_evidence(
         let state_hash = state.authoritative_state_hash;
         let event_bytes = postcard::to_allocvec(
             &output
-                .outputs
+                .persisted
                 .iter()
-                .filter(|envelope| {
+                .filter(|persisted| {
                     matches!(
-                        envelope.domain,
+                        persisted.domain,
                         RuntimeOutputDomain::Effect | RuntimeOutputDomain::Trace
                     )
                 })
@@ -1889,9 +1888,9 @@ fn native_vn_behavioral_evidence(
         })?;
         let presentation_bytes = postcard::to_allocvec(
             &output
-                .outputs
+                .persisted
                 .iter()
-                .filter(|envelope| envelope.domain == RuntimeOutputDomain::Presentation)
+                .filter(|persisted| persisted.domain == RuntimeOutputDomain::Presentation)
                 .collect::<Vec<_>>(),
         )
         .map_err(|err| {

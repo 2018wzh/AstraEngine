@@ -2,11 +2,15 @@
 
 ## 目的与当前状态
 
+当前 hosted fork 绑定 Family ABI v7。v5/v6 binary、fingerprint 和 runtime
+snapshot 只作为拒绝测试输入，不再进入运行时；scene/PCM 继续按值消费，
+PlatformHost 负责有界 WMF video/audio cursor。
+
 FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。补丁基底固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）；为复用已验证的文本 surface 所有权实现，补丁栈还保留一个经审查、未改写的上游移植补丁 `a94fa18`。除此以外只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
 
 截至本文更新，Astra 精确 pin hosted fork `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`。fork 保持 `GraphBuff` 和 generation 为权威状态，只保留一次 `GraphBuff -> hosted capture` 复制；`HostedStepDelta`、scene operation 和 PCM command 随后按值移动。owned audio port 直接接收 RFVP 已拥有的 PCM `Vec`，并记录 capture、operation、PCM moved/copied bytes；这些计数只进入脱敏 telemetry，不参与状态或 replay hash。同一 texture id 的尺寸或格式变化会按顺序输出 destroy/create，建立新 generation；同尺寸同格式仍只输出 update。
 
-Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开。Family ABI v6 使用显式 `StableAbi` wire DTO 和 ABI-owned bulk buffer，不再把整份 step postcard 编码后跨 dylib。scene translator 按值消费 delta，restore 后显式切换资源 epoch并完整重发。旧 render-frame、逐 syscall journal、逐 opcode 字符串 trace、v5 binary/fingerprint/runtime snapshot 都不再进入当前 provider。
+Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开。Family ABI v7 使用显式 `StableAbi` wire DTO 和 ABI-owned bulk buffer，不再把整份 step postcard 编码后跨 dylib。scene translator 按值消费 delta，restore 后显式切换资源 epoch并完整重发。旧 render-frame、逐 syscall journal、逐 opcode 字符串 trace、v5/v6 binary/fingerprint/runtime snapshot 都不再进入当前 provider。
 
 本地公开 Win95 Painter sample 的 signed dynamic FVP v5 已通过 120 fixed step 的 Headless run：6 条物理输入均被 host 消费、4 个实际 CPU frame、一个 PNG checkpoint、VFS 2 资源/20 次 range-read、snapshot round-trip 和正常 host shutdown 均通过；人工查看 checkpoint，窗口、工具栏、调色板、画布与底部状态栏可见且无残缺。该输入序列未产生可见笔划，因此它只证明 input transport，不证明脚本交互语义。CPU reference 该次 step p95 为 11.22 ms，4 次 raster 的中位数为 248.12 ms；它用于确认 scene dedup 没有退化为逐 tick 全帧光栅化，不是 GPU 或 RFVP 对比结论。该 sample 无音频、未到脚本 terminal，也没有媒体、路线、性能 soak 或 Windows E3，所以只构成 hosted-v5 的局部 Headless E2/视觉证据，不能作为完成声明。
 
@@ -65,7 +69,7 @@ RuntimeWorld + platform renderer/audio/media
 
 对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture。
 
-hosted 路径保留 generation 判断和一次必要 capture；capture 后的 delta、translator、Family ABI v6 与 Runtime bulk 采用消费式所有权。业务 serde/schema 仍是契约真源，但 FFI wire 不再使用整包 postcard。RGBA upload 只借用 bulk slice；LumaAlpha8 允许一次显式、可计量的格式转换。copy telemetry 分别记录 fork capture、operation 和 PCM moved/copied bytes，用来阻断重新引入的完整 payload clone。
+hosted 路径保留 generation 判断和一次必要 capture；capture 后的 delta、translator、Family ABI v7 与 Runtime bulk 采用消费式所有权。业务 serde/schema 仍是契约真源，但 FFI wire 不再使用整包 postcard。RGBA upload 只借用 bulk slice；LumaAlpha8 允许一次显式、可计量的格式转换。copy telemetry 分别记录 fork capture、operation 和 PCM moved/copied bytes，用来阻断重新引入的完整 payload clone。
 
 平台资源更新已与原版语义对齐：同 id、同尺寸、同格式 update 保持 resource generation 和 atlas placement，事务通过后只上传变更 region。retained texture 保存权威 base 与有界 sparse patches，不为每次局部更新重建完整 CPU 镜像；patch 总量超过 base 大小时会 fail-fast 要求 full refresh。create、destroy、尺寸/格式变化或 allocator 真实容量不足才会 release、repack 或创建新 generation。
 
@@ -86,6 +90,6 @@ hosted 路径保留 generation 判断和一次必要 capture；capture 后的 de
 
 ## 迁移约束
 
-- Family ABI v6 是 hard cut。v5 binary、fingerprint、FVP runtime snapshot、逐 syscall journal 和旧 render-frame 都不得进入运行时或保存容器；遇到旧 identity 必须返回明确迁移诊断，不能保留双读运行时。
+- Family ABI v7 是 hard cut。v5/v6 binary、fingerprint、FVP runtime snapshot、逐 syscall journal 和旧 render-frame 都不得进入运行时或保存容器；遇到旧 identity 必须返回明确迁移诊断，不能保留双读运行时。
 - `na_wmv_player` 与 `na_mpeg2_decoder` 只在没有其他消费者后移除；RFVP hosted-core 不再拥有这些 decoder。
 - Headless E2 需要同一 session 的真实 PNG/WAV、artifact manifest、输入消费、state/scene/route/wait/media PTS/audio 签名与视觉审查。单元测试、fixture 或启动日志不能替代它。

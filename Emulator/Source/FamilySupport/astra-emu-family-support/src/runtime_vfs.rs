@@ -205,7 +205,6 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
         Ok(RangeReadResult {
             range,
             revision: before.revision,
-            content_hash: Hash256::from_sha256(&read.bytes),
             bytes: read.bytes,
         })
     }

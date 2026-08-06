@@ -7,7 +7,7 @@ use astra_plugin_abi::{
 use astra_vn_runtime_provider::{
     compile_astra_project, AstraSource, BacklogEntry, BacklogLayoutMetadata,
     NativeVnRuntimeProvider, PresentationCommand, StageCommand, SystemPageKind, TimelineCommand,
-    VnAudioCommand, VnAudioControlAction, VnPlayerCommand, VnRunConfig, VnTimelineTask,
+    VnAudioControlAction, VnPlayerCommand, VnRunConfig, VnTimelineTask,
 };
 
 const STORY: &str = r#"
@@ -92,6 +92,21 @@ state load #@id state.system.load
     let step = |provider: &mut NativeVnRuntimeProvider,
                 fixed_step: u64,
                 command: Option<VnPlayerCommand>| {
+        let (action, argument) = match command {
+            None => ("launch_default", None),
+            Some(VnPlayerCommand::Advance) => ("advance", None),
+            Some(VnPlayerCommand::OpenSystem {
+                page: SystemPageKind::Save,
+            }) => ("open_system", Some("save".to_string())),
+            Some(VnPlayerCommand::SwitchSystemPage {
+                page: SystemPageKind::Load,
+            }) => ("switch_system_page", Some("load".to_string())),
+            Some(VnPlayerCommand::ReturnSystem) => ("system_return", None),
+            Some(VnPlayerCommand::SetReadingMode {
+                mode: astra_vn_runtime_provider::ReadingMode::Hidden,
+            }) => ("set_reading_mode", Some("hidden".to_string())),
+            Some(command) => panic!("unmapped typed test command: {command:?}"),
+        };
         provider
             .step(RuntimeStepInput {
                 session_id: open.session_id.clone(),
@@ -99,14 +114,9 @@ state load #@id state.system.load
                 delta_ns: 16_666_667,
                 session_seed: 3,
                 mode: RuntimeStepMode::Live,
-                action: if command.is_some() {
-                    "command".into()
-                } else {
-                    "launch_default".into()
-                },
-                payload: command
-                    .map(|command| serde_json::to_value(command).unwrap())
-                    .unwrap_or_else(|| serde_json::json!({})),
+                action: action.into(),
+                argument,
+                ..RuntimeStepInput::default()
             })
             .unwrap();
     };
@@ -226,25 +236,22 @@ state start #@id state.start
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "launch_default".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
-    let audio_index = output
-        .outputs
+    let audio_sequence = output
+        .live
+        .effects
         .iter()
-        .position(|envelope| {
-            matches!(
-                envelope.decode_postcard::<VnAudioCommand>(
-                    RuntimeOutputDomain::Audio,
-                    "astra.vn.audio_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                ),
-                Ok(command) if command.command_id == "bgm.main"
-            )
+        .find_map(|effect| match effect {
+            astra_plugin_abi::RuntimeLiveEffect::AudioCue(cue) if cue.command_id == "bgm.main" => {
+                Some(cue.sequence)
+            }
+            _ => None,
         })
-        .unwrap();
+        .expect("BGM must use the typed live audio cue contract");
     let stop_index = output
-        .outputs
+        .persisted
         .iter()
         .position(|envelope| {
             matches!(
@@ -258,7 +265,63 @@ state start #@id state.start
             )
         })
         .unwrap();
-    assert!(audio_index < stop_index);
+    assert!(audio_sequence < stop_index as u64);
+}
+
+#[astra_headless_test::test]
+fn native_vn_shipping_step_uses_disabled_integrity_and_live_audio() {
+    let compiled = compile_astra_project(
+        [AstraSource::story("shipping-live.astra", STORY)],
+        Default::default(),
+    )
+    .unwrap();
+    let mut provider = NativeVnRuntimeProvider::default();
+    let open = provider
+        .open_compiled_story(
+            compiled,
+            VnRunConfig::classic("ja"),
+            RuntimeOpenRequest {
+                target_id: "shipping-live".into(),
+                profile: "classic".into(),
+                locale: "ja".into(),
+                seed: 7,
+                integrity_mode: RuntimeTickIntegrityMode::Shipping,
+                executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
+                package_hash: "package-id".into(),
+                sections: vec![],
+            },
+        )
+        .unwrap();
+
+    let output = provider
+        .step(RuntimeStepInput {
+            session_id: open.session_id.clone(),
+            fixed_step: 1,
+            delta_ns: 16_666_667,
+            session_seed: 7,
+            mode: RuntimeStepMode::Live,
+            action: "launch_default".into(),
+            ..RuntimeStepInput::default()
+        })
+        .unwrap();
+
+    assert!(output
+        .live
+        .effects
+        .iter()
+        .any(|effect| { matches!(effect, astra_plugin_abi::RuntimeLiveEffect::AudioCue(_)) }));
+    assert!(!output
+        .persisted
+        .iter()
+        .any(|value| value.domain == RuntimeOutputDomain::Audio));
+    assert_eq!(
+        provider.runtime_hashes(&open.session_id).unwrap(),
+        (
+            Hash128::from_bytes([0; 16]),
+            Hash128::from_bytes([0; 16]),
+            Hash128::from_bytes([0; 16])
+        )
+    );
 }
 
 #[astra_headless_test::test]
@@ -286,22 +349,6 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         )
         .unwrap();
 
-    let replay_error = provider
-        .step(RuntimeStepInput {
-            session_id: open.session_id.clone(),
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            session_seed: 7,
-            mode: RuntimeStepMode::Replay,
-            action: "launch_default".to_string(),
-            payload: serde_json::json!({}),
-        })
-        .unwrap_err();
-    assert!(replay_error
-        .to_string()
-        .contains("ASTRA_NATIVE_VN_LIVE_PROVIDER_REPLAY"));
-    assert_eq!(provider.runtime_snapshot(&open.session_id).unwrap().step, 0);
-
     let first = provider
         .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
@@ -310,19 +357,19 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             session_seed: 7,
             mode: RuntimeStepMode::Live,
             action: "launch_default".to_string(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
     assert_eq!(first.status, "blocked");
-    assert!(!first.outputs.iter().any(|value| {
+    assert!(!first.persisted.iter().any(|value| {
         value.domain == RuntimeOutputDomain::Trace && value.schema == "astra.vn.runtime_state.v2"
     }));
-    assert!(first.outputs.iter().any(|value| {
+    assert!(first.persisted.iter().any(|value| {
         value.domain == RuntimeOutputDomain::Trace
             && value.schema == "astra.vn.runtime_view_state.v1"
             && value.version == SchemaVersion::new(1, 0, 0)
     }));
-    assert!(first.outputs.iter().any(|value| {
+    assert!(first.persisted.iter().any(|value| {
         matches!(
             value.decode_postcard::<PresentationCommand>(
                 RuntimeOutputDomain::Presentation,
@@ -371,10 +418,10 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             session_seed: 7,
             mode: RuntimeStepMode::Live,
             action: "advance".to_string(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
-    assert!(choice.outputs.iter().any(|value| matches!(
+    assert!(choice.persisted.iter().any(|value| matches!(
         value.decode_postcard::<PresentationCommand>(
             RuntimeOutputDomain::Presentation,
             "astra.vn.presentation_command.v2",
@@ -391,17 +438,19 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             session_seed: 7,
             mode: RuntimeStepMode::Live,
             action: "choose".to_string(),
-            payload: serde_json::json!({ "option_id": "choice.library" }),
+            argument: Some("choice.library".into()),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
     assert_eq!(selected.status, "blocked");
-    assert!(selected.outputs.iter().any(|section| section
-        .decode_postcard::<String>(
-            RuntimeOutputDomain::DirtySaveSection,
-            "astra.runtime.dirty_save_section.v1",
-            SchemaVersion::new(1, 0, 0)
+    assert!(selected.persisted.iter().all(|section| {
+        !matches!(
+            section.domain,
+            RuntimeOutputDomain::Await
+                | RuntimeOutputDomain::Observation
+                | RuntimeOutputDomain::DirtySaveSection
         )
-        .is_ok_and(|section| section == "runtime.world")));
+    }));
 
     let save = provider
         .save(astra_plugin_abi::RuntimeSaveRequest {
@@ -411,8 +460,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
         .unwrap();
     assert_eq!(save.sections.len(), 1);
     assert_eq!(save.sections[0].section_id, "runtime.world");
-    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v3");
-    assert!(save.sections[0].validate_hash());
+    assert_eq!(save.sections[0].schema, "astra.runtime.save_blob.v4");
     assert!(!save.sections[0].bytes.is_empty());
     let saved_hash = provider.runtime_snapshot(&open.session_id).unwrap();
     provider
@@ -423,14 +471,12 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             session_seed: 7,
             mode: RuntimeStepMode::Live,
             action: "advance".to_string(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
     let after_step_four = provider.runtime_snapshot(&open.session_id).unwrap();
     let mut corrupted = save.sections.clone();
-    let last = corrupted[0].bytes.len() - 1;
-    corrupted[0].bytes[last] ^= 0x80;
-    corrupted[0].hash = astra_core::Hash256::from_sha256(&corrupted[0].bytes);
+    corrupted[0].bytes.pop();
     provider
         .restore(astra_plugin_abi::RuntimeRestoreRequest {
             session_id: open.session_id.clone(),
@@ -461,7 +507,7 @@ fn native_vn_provider_steps_compiled_story_through_runtime_session() {
             session_seed: 7,
             mode: RuntimeStepMode::RestoreContinuation,
             action: "advance".to_string(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
 
@@ -508,11 +554,11 @@ state prologue #@id state.prologue
             session_seed: 9,
             mode: RuntimeStepMode::Live,
             action: "launch_default".to_string(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
 
-    assert!(first.outputs.iter().any(|value| {
+    assert!(first.persisted.iter().any(|value| {
         value
             .decode_postcard::<VnTimelineTask>(
                 RuntimeOutputDomain::Effect,
@@ -582,7 +628,7 @@ fn vn_runtime_hot_state_stays_bounded_through_one_hundred_thousand_dialogues() {
                 session_seed: 91,
                 mode: RuntimeStepMode::Live,
                 action: "launch_default".to_string(),
-                payload: serde_json::json!({}),
+                ..RuntimeStepInput::default()
             })
             .unwrap();
         let complexity = provider.step_complexity_metrics(&open.session_id).unwrap();
@@ -648,7 +694,7 @@ fn vn_provider_worker_counts_preserve_hashes_and_save_restore() {
                 session_seed: 109,
                 mode: RuntimeStepMode::Live,
                 action: "launch_default".into(),
-                payload: serde_json::json!({}),
+                ..RuntimeStepInput::default()
             })
             .unwrap();
         let hashes = provider.runtime_hashes(&open.session_id).unwrap();
@@ -666,7 +712,7 @@ fn vn_provider_worker_counts_preserve_hashes_and_save_restore() {
                 session_seed: 109,
                 mode: RuntimeStepMode::Live,
                 action: "advance".into(),
-                payload: serde_json::json!({}),
+                ..RuntimeStepInput::default()
             })
             .unwrap();
         provider

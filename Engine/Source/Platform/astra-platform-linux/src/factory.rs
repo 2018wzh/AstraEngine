@@ -68,13 +68,13 @@ mod linux {
 
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputRequest,
-        AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind, DecodeOutput,
-        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, PackageSourceHandle,
-        PackageSourceRequest, PlatformBackendChannels, PlatformDecodeRequest, PlatformError,
-        PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
-        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
-        WindowHandle,
+        host_channel_with_command_wake, AudioDeviceFormat, AudioMeter, AudioOutputHandle,
+        AudioOutputRequest, AudioOutputStatus, AudioPacket, AudioWakeRegistration, CapturedFrame,
+        DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
+        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
+        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
+        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -88,7 +88,7 @@ mod linux {
             ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase as WinitTouchPhase,
             WindowEvent,
         },
-        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
         platform::wayland::EventLoopBuilderExtWayland,
         window::{Window, WindowAttributes, WindowId},
     };
@@ -108,16 +108,27 @@ mod linux {
         let command_capacity = profile.limits.command_queue_capacity;
         let event_capacity = profile.limits.event_queue_capacity;
         let instance_guard = SingleInstanceGuard::acquire(&profile)?;
-        let (client, backend, events) = host_channel(
+        let command_wake = PlatformCommandWakeRegistration::default();
+        let (client, backend, events) = host_channel_with_command_wake(
             HostLaunchProfile::platform(profile.clone()),
             command_capacity,
             event_capacity,
+            command_wake.clone(),
         )?;
         let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
         let backend_profile = profile.clone();
         thread::Builder::new()
             .name("astra-platform-linux".to_string())
-            .spawn(move || run_backend(backend, ready_tx, backend_profile, roots, instance_guard))
+            .spawn(move || {
+                run_backend(
+                    backend,
+                    ready_tx,
+                    backend_profile,
+                    roots,
+                    instance_guard,
+                    command_wake,
+                )
+            })
             .map_err(|_| {
                 PlatformError::new(
                     PlatformErrorCode::InvalidState,
@@ -145,6 +156,7 @@ mod linux {
         profile: PlatformHostProfile,
         roots: Option<super::HostRoots>,
         _instance_guard: SingleInstanceGuard,
+        command_wake: PlatformCommandWakeRegistration,
     ) {
         let roots = match roots.or_else(|| default_roots(&profile.package_id)) {
             Some(roots) => roots,
@@ -187,6 +199,14 @@ mod linux {
                 return;
             }
         };
+        let proxy = event_loop.create_proxy();
+        let command_proxy = proxy.clone();
+        if let Err(error) = command_wake.bind(move || {
+            let _ = command_proxy.send_event(());
+        }) {
+            let _ = ready.send(Err(error));
+            return;
+        }
         event_loop.set_control_flow(ControlFlow::Wait);
         let mut app = match LinuxHostApp::new(
             backend,
@@ -199,6 +219,7 @@ mod linux {
                 cache_policy: profile.package_cache.clone(),
                 bundle_root: roots.bundle_root,
             },
+            proxy,
         ) {
             Ok(app) => app,
             Err(_) => return,
@@ -296,8 +317,10 @@ mod linux {
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<PackageSourceResource, PackageSourceHandle>,
         event_sequence: u64,
-        gamepads: gilrs::Gilrs,
-        gamepad_mapper: astra_platform_common::GamepadMapper,
+        gamepad_events: std_mpsc::Receiver<Vec<PlatformEventKind>>,
+        gamepad_stop: Arc<AtomicBool>,
+        gamepad_thread: Option<thread::JoinHandle<()>>,
+        event_loop_proxy: EventLoopProxy<()>,
     }
 
     struct PackageHostConfig {
@@ -314,6 +337,7 @@ mod linux {
             save_store: AtomicSaveStore,
             package_cache: VerifiedPackageCache,
             package: PackageHostConfig,
+            event_loop_proxy: EventLoopProxy<()>,
         ) -> Result<Self, PlatformError> {
             let gamepads = gilrs::Gilrs::new().map_err(|_| {
                 let error = host_error(
@@ -324,6 +348,27 @@ mod linux {
                 error
             })?;
             let gamepad_mapper = astra_platform_common::GamepadMapper::new(0.2)?;
+            let (gamepad_tx, gamepad_events) = std_mpsc::sync_channel(32);
+            let gamepad_stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&gamepad_stop);
+            let worker_proxy = event_loop_proxy.clone();
+            let gamepad_thread = thread::Builder::new()
+                .name("astra-linux-gamepad".to_owned())
+                .spawn(move || {
+                    linux_gamepad_worker(
+                        gamepads,
+                        gamepad_mapper,
+                        worker_stop,
+                        worker_proxy,
+                        gamepad_tx,
+                    );
+                })
+                .map_err(|_| {
+                    host_error(
+                        "input.gamepad.worker",
+                        "Linux Gaming Input worker could not start",
+                    )
+                })?;
             let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
             Ok(Self {
                 backend,
@@ -346,8 +391,10 @@ mod linux {
                 bundle_root: package.bundle_root,
                 package_sources: ResourceTable::new("package_source"),
                 event_sequence: 0,
-                gamepads,
-                gamepad_mapper,
+                gamepad_events,
+                gamepad_stop,
+                gamepad_thread: Some(gamepad_thread),
+                event_loop_proxy,
             })
         }
 
@@ -534,7 +581,7 @@ mod linux {
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenAudioOutput { request, reply } => {
-                        let result = AudioResource::new(request)
+                        let result = AudioResource::new(request, self.backend.audio_wake())
                             .and_then(|resource| self.audio_outputs.insert(resource));
                         let _ = reply.send(result);
                     }
@@ -871,7 +918,7 @@ mod linux {
     }
 
     impl ApplicationHandler for LinuxHostApp {
-        fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
             let sequence = self.next_sequence();
             let result = self
                 .backend
@@ -879,6 +926,7 @@ mod linux {
             if let Some(ready) = self.ready.take() {
                 let _ = ready.send(result);
             }
+            self.process_commands(event_loop);
         }
 
         fn window_event(
@@ -964,11 +1012,17 @@ mod linux {
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
             self.process_package_completions();
+            while let Ok(events) = self.gamepad_events.try_recv() {
+                for event in events {
+                    self.emit(event);
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, _event: ()) {
+            self.process_package_completions();
             self.process_commands(event_loop);
-            self.poll_gamepad();
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(4),
-            ));
         }
     }
 
@@ -991,25 +1045,58 @@ mod linux {
         }
     }
 
-    impl LinuxHostApp {
-        fn poll_gamepad(&mut self) {
-            while let Some(event) = self.gamepads.next_event() {
-                let Some(event) = raw_gamepad_event(event) else {
-                    continue;
-                };
-                match self.gamepad_mapper.apply_checked(event) {
-                    Ok(events) => {
-                        for event in events {
-                            self.emit(event);
-                        }
-                    }
-                    Err(error) => tracing::warn!(
+    impl Drop for LinuxHostApp {
+        fn drop(&mut self) {
+            self.gamepad_stop.store(true, Ordering::Release);
+            self.gamepad_events = std_mpsc::sync_channel(0).1;
+            if let Some(worker) = self.gamepad_thread.take() {
+                if worker.join().is_err() {
+                    tracing::error!(
+                        event = "platform.linux.gamepad.worker_panic",
+                        diagnostic_code = "ASTRA_PLATFORM_GAMEPAD_WORKER_PANIC",
+                        "Linux Gaming Input worker panicked during shutdown"
+                    );
+                }
+            }
+        }
+    }
+
+    fn linux_gamepad_worker(
+        mut gamepads: gilrs::Gilrs,
+        mut gamepad_mapper: astra_platform_common::GamepadMapper,
+        stop: Arc<AtomicBool>,
+        event_loop_proxy: EventLoopProxy<()>,
+        tx: std_mpsc::SyncSender<Vec<PlatformEventKind>>,
+    ) {
+        while !stop.load(Ordering::Acquire) {
+            let Some(event) = gamepads.next_event_blocking(Some(Duration::from_millis(250))) else {
+                continue;
+            };
+            let Some(raw_event) = raw_gamepad_event(event) else {
+                continue;
+            };
+            let mapped = match gamepad_mapper.apply_checked(raw_event) {
+                Ok(events) => events,
+                Err(error) => {
+                    tracing::warn!(
                         event = "platform.linux.gamepad.invalid_event",
                         diagnostic_code = ?error.code,
                         operation = %error.operation,
                         "Linux Gaming Input event was rejected"
-                    ),
+                    );
+                    continue;
                 }
+            };
+            if mapped.is_empty() || tx.send(mapped).is_err() {
+                return;
+            }
+            if event_loop_proxy.send_event(()).is_err() {
+                tracing::debug!(
+                    event = "platform.linux.gamepad.wake.closed",
+                    diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                    "Linux event loop was already closed after a gamepad batch"
+                );
+                return;
             }
         }
     }
@@ -1159,6 +1246,7 @@ mod linux {
         next_sequence: u64,
         submitted_samples: u64,
         paused: bool,
+        audio_wake: AudioWakeRegistration,
     }
 
     fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
@@ -1178,7 +1266,10 @@ mod linux {
     }
 
     impl AudioResource {
-        fn new(request: AudioOutputRequest) -> Result<Self, PlatformError> {
+        fn new(
+            request: AudioOutputRequest,
+            audio_wake: AudioWakeRegistration,
+        ) -> Result<Self, PlatformError> {
             if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
             {
                 return Err(PlatformError::new(
@@ -1229,33 +1320,57 @@ mod linux {
                 cpal::SampleFormat::F32 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [f32], _| fill_f32(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [f32], _| {
+                            let _ = fill_f32(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
                 cpal::SampleFormat::I16 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [i16], _| fill_i16(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [i16], _| {
+                            let _ = fill_i16(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
                 cpal::SampleFormat::U16 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [u16], _| fill_u16(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [u16], _| {
+                            let _ = fill_u16(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
@@ -1283,6 +1398,7 @@ mod linux {
                 next_sequence: 1,
                 submitted_samples: 0,
                 paused: request.start_paused,
+                audio_wake,
             })
         }
 
@@ -1372,6 +1488,7 @@ mod linux {
                 start_paused: false,
             };
             let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
+            let mut observed_wake = 0;
             loop {
                 if self.stream_error.load(Ordering::Acquire) {
                     return Err(PlatformError::new(
@@ -1386,7 +1503,11 @@ mod linux {
                 if Instant::now() >= deadline {
                     return Err(host_error("audio.drain", "ALSA output drain timed out"));
                 }
-                thread::sleep(Duration::from_millis(5));
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                observed_wake = self
+                    .audio_wake
+                    .wait_timeout(observed_wake, remaining)
+                    .ok_or_else(|| host_error("audio.drain", "ALSA output drain timed out"))?;
             }
             Ok(self.meter.snapshot())
         }

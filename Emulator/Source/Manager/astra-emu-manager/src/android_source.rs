@@ -252,7 +252,6 @@ impl LegacyVfsReader for AndroidVfsRegistry {
         Ok(RangeReadResult {
             range,
             revision: stat.revision,
-            content_hash: Hash256::from_sha256(&bytes),
             bytes,
         })
     }

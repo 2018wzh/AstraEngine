@@ -47,6 +47,17 @@ rfvp splits BGM-like channels and SE-like channels. BGM channels accept ids `0..
 
 ## Movie
 
+Windows RFVP movie playback binds to the shared PlatformHost Media Foundation
+stream service for `.wmv`, `.asf`, `.mpg`, `.mpeg`, `.mp4` and `.m4v`. `Start`
+returns a bounded cursor, `Next` produces one frame or PCM chunk, and
+`CloseDecode` is issued on completion, stop, restore, or error. The native CLI
+and Manager use separate bounded prefetch workers; a full ring is backpressured
+instead of blocking the Runtime tick, and a not-yet-ready hardware decode is
+retried on the next deadline/event. WMF hardware transforms are requested; the
+observable boundary remains owned CPU BGRA/i16 data followed by the normal
+WGPU/audio-device transfer. Non-Windows reference hosts keep the portable FVP
+decoder and do not claim a hardware provider.
+
 The sample stores movies as loose files:
 
 | File | Bytes | Magic |

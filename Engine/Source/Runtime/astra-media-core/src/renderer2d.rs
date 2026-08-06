@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
+    ops::Deref,
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
@@ -61,6 +62,7 @@ pub struct CpuFrame {
 pub enum BlendMode {
     Alpha,
     Add,
+    Opaque,
     Multiply,
     Screen,
 }
@@ -159,6 +161,70 @@ pub struct TextureFrame {
     pub hash: Hash256,
 }
 
+/// Process-local texture ownership for live scene submission.
+///
+/// The `Vec` allocation is moved into the shared owner without moving its
+/// bytes into an `Arc<[u8]>` allocation.  Cloning this value only clones the
+/// owner reference, so the capture allocation remains the same allocation
+/// until the final GPU upload consumes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveTextureBuffer(Arc<Vec<u8>>);
+
+impl LiveTextureBuffer {
+    pub fn from_vec(rgba8: Vec<u8>) -> Self {
+        Self(Arc::new(rgba8))
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Deref for LiveTextureBuffer {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+/// Process-local texture ownership for live scene submission.  It intentionally
+/// has no content identity: the producer transfers the allocation and the
+/// renderer validates only dimensions before issuing the GPU upload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveTextureFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba8: LiveTextureBuffer,
+}
+
+impl LiveTextureFrame {
+    pub fn from_vec(width: u32, height: u32, rgba8: Vec<u8>) -> Result<Self, MediaError> {
+        Self::from_buffer(width, height, LiveTextureBuffer::from_vec(rgba8))
+    }
+
+    pub fn from_buffer(
+        width: u32,
+        height: u32,
+        rgba8: LiveTextureBuffer,
+    ) -> Result<Self, MediaError> {
+        validate_texture_dimensions(width, height, rgba8.len())?;
+        Ok(Self {
+            width,
+            height,
+            rgba8,
+        })
+    }
+}
+
 impl TextureFrame {
     /// Creates an immutable texture whose identity is derived from these exact
     /// pixels. In-process producers use this constructor so downstream
@@ -185,6 +251,36 @@ impl TextureFrame {
             rgba8,
             hash,
         }
+    }
+
+    /// Builds a retained RGBA8 frame from an already authenticated immutable
+    /// source slice.  The caller must have verified that the source bytes have
+    /// the same length and hash and that this conversion preserves them (the
+    /// native scene adapter uses it only for an RGBA8 identity conversion).
+    /// Remembering that proof lets the platform boundary reuse it without a
+    /// second SHA-256 pass.
+    pub fn from_validated_rgba8(
+        width: u32,
+        height: u32,
+        rgba8: Arc<[u8]>,
+        hash: Hash256,
+    ) -> Result<Self, MediaError> {
+        validate_texture_dimensions(width, height, rgba8.len())?;
+        remember_validated_payload(&rgba8, hash)?;
+        Ok(Self {
+            width,
+            height,
+            rgba8,
+            hash,
+        })
+    }
+
+    /// Validate a transport frame and remember the result for the lifetime of
+    /// its immutable payload allocation.  Platform hosts call this at their
+    /// trust boundary; subsequent renderer layers can reuse the same proof
+    /// without hashing the full texture again.
+    pub fn validate_integrity(&self) -> Result<(), MediaError> {
+        validate_texture(self)
     }
 }
 
@@ -238,6 +334,33 @@ impl GlyphBitmap {
             hash,
         }
     }
+
+    /// Validate a transport glyph and remember the result for the lifetime of
+    /// its immutable payload allocation.
+    pub fn validate_integrity(&self) -> Result<(), MediaError> {
+        validate_glyph(self)
+    }
+}
+
+/// Validate an RGBA8 subresource payload while retaining the proof for later
+/// renderer layers that receive the same `Arc<[u8]>`.  This keeps the
+/// integrity check fail-fast without paying one SHA-256 pass per layer.
+pub fn validate_rgba8_payload(
+    width: u32,
+    height: u32,
+    rgba8: &Arc<[u8]>,
+    hash: Hash256,
+) -> Result<(), MediaError> {
+    validate_texture_dimensions(width, height, rgba8.len())?;
+    if validated_payload_is_cached(rgba8, hash)? {
+        return Ok(());
+    }
+    if Hash256::from_sha256(rgba8) != hash {
+        return Err(MediaError::message(
+            "ASTRA_MEDIA_TEXTURE_HASH: texture payload hash mismatch",
+        ));
+    }
+    remember_validated_payload(rgba8, hash)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -271,6 +394,22 @@ pub enum SceneCommand {
         height: u32,
         rgba8: Arc<[u8]>,
         hash: Hash256,
+    },
+    #[serde(skip)]
+    #[schemars(skip)]
+    UploadLiveTexture {
+        resource_id: String,
+        frame: LiveTextureFrame,
+    },
+    #[serde(skip)]
+    #[schemars(skip)]
+    UpdateLiveTextureRegion {
+        resource_id: String,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        rgba8: LiveTextureBuffer,
     },
     UploadGlyph {
         resource_id: String,
@@ -539,6 +678,12 @@ impl HeadlessRenderer {
                         height: *height,
                         rgba8,
                     });
+                }
+                DrawCommand::UploadLiveTexture { .. }
+                | DrawCommand::UpdateLiveTextureRegion { .. } => {
+                    return Err(MediaError::message(
+                        "ASTRA_MEDIA_LIVE_SCENE_HEADLESS: live scene resources require a platform renderer",
+                    ));
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph_metadata(glyph)?;
@@ -1004,6 +1149,12 @@ impl Renderer2D for HeadlessRenderer {
                     )?;
                     apply_texture_region(frame, *x, *y, *width, *height, rgba8)?;
                 }
+                DrawCommand::UploadLiveTexture { .. }
+                | DrawCommand::UpdateLiveTextureRegion { .. } => {
+                    return Err(MediaError::message(
+                        "ASTRA_MEDIA_LIVE_SCENE_HEADLESS: live scene resources require a platform renderer",
+                    ));
+                }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph(glyph)?;
                     if glyph_resources.contains_key(resource_id) {
@@ -1430,17 +1581,7 @@ fn validate_texture_dimensions(
 }
 
 fn validate_texture(frame: &TextureFrame) -> Result<(), MediaError> {
-    validate_texture_metadata(frame)?;
-    if validated_payload_is_cached(&frame.rgba8, frame.hash)? {
-        return Ok(());
-    }
-    if Hash256::from_sha256(&frame.rgba8) != frame.hash {
-        return Err(MediaError::message(
-            "ASTRA_MEDIA_TEXTURE_HASH: texture payload hash mismatch",
-        ));
-    }
-    remember_validated_payload(&frame.rgba8, frame.hash)?;
-    Ok(())
+    validate_rgba8_payload(frame.width, frame.height, &frame.rgba8, frame.hash)
 }
 
 fn validate_glyph_metadata(glyph: &GlyphBitmap) -> Result<(), MediaError> {
@@ -1479,8 +1620,7 @@ fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), MediaError> {
             "ASTRA_MEDIA_GLYPH_HASH: glyph payload hash mismatch",
         ));
     }
-    remember_validated_payload(&glyph.pixels, glyph.hash)?;
-    Ok(())
+    remember_validated_payload(&glyph.pixels, glyph.hash)
 }
 
 const VALIDATED_PAYLOAD_CACHE_LIMIT: usize = 4096;
@@ -1885,6 +2025,12 @@ fn blend_premultiplied_pixel(target: &mut [u8], source: [u8; 4], opacity: f32, b
                     .saturating_add((source[channel] as f32 * opacity).round() as u8);
             }
         }
+        BlendMode::Opaque => {
+            for channel in 0..3 {
+                target[channel] =
+                    (source[channel] as f32 * opacity).round().clamp(0.0, 255.0) as u8;
+            }
+        }
         BlendMode::Multiply => {
             let straight = if source_alpha > 0.0 {
                 [
@@ -1923,7 +2069,11 @@ fn blend_premultiplied_pixel(target: &mut [u8], source: [u8; 4], opacity: f32, b
             }
         }
     }
-    target[3] = (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    target[3] = if matches!(blend, BlendMode::Opaque) {
+        (source_alpha * 255.0).round().clamp(0.0, 255.0) as u8
+    } else {
+        (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8
+    };
 }
 
 fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, MediaError> {
@@ -1999,6 +2149,12 @@ fn blend_pixel(target: &mut [u8], source: &[u8], opacity: f32, blend: BlendMode)
                     target[channel].saturating_add((source[channel] as f32 * alpha).round() as u8);
             }
         }
+        BlendMode::Opaque => {
+            for channel in 0..3 {
+                target[channel] =
+                    (source[channel] as f32 * opacity).round().clamp(0.0, 255.0) as u8;
+            }
+        }
         BlendMode::Multiply => {
             for channel in 0..3 {
                 let multiplied = target[channel] as f32 * source[channel] as f32 / 255.0;
@@ -2017,7 +2173,11 @@ fn blend_pixel(target: &mut [u8], source: &[u8], opacity: f32, blend: BlendMode)
             }
         }
     }
-    target[3] = (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    target[3] = if matches!(blend, BlendMode::Opaque) {
+        (alpha * 255.0).round().clamp(0.0, 255.0) as u8
+    } else {
+        (output_alpha * 255.0).round().clamp(0.0, 255.0) as u8
+    };
 }
 
 pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[u8]) -> Hash256 {
@@ -2027,4 +2187,29 @@ pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[
     payload.extend_from_slice(&(format as u32).to_le_bytes());
     payload.extend_from_slice(bytes);
     Hash256::from_sha256(&payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LiveTextureBuffer, LiveTextureFrame};
+
+    #[test]
+    fn live_texture_buffer_moves_the_pixel_allocation_without_copying() {
+        let pixels = vec![0x11; 64 * 64 * 4];
+        let pointer = pixels.as_ptr();
+        let buffer = LiveTextureBuffer::from_vec(pixels);
+
+        assert_eq!(buffer.as_slice().as_ptr(), pointer);
+        assert_eq!(buffer.len(), 64 * 64 * 4);
+        assert!(!buffer.is_empty());
+    }
+
+    #[test]
+    fn live_texture_frame_preserves_the_buffer_allocation() {
+        let pixels = vec![0x22; 8 * 4 * 4];
+        let pointer = pixels.as_ptr();
+        let frame = LiveTextureFrame::from_vec(8, 4, pixels).unwrap();
+
+        assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
+    }
 }

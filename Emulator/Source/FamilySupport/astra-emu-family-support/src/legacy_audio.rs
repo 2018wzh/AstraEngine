@@ -11,11 +11,14 @@ use std::{
 };
 
 use astra_core::Hash256;
-use astra_emu_family_api::{LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat};
+use astra_emu_family_api::{
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
+    LegacyPcmBufferV7,
+};
 use astra_media::{open_symphonia_audio_stream, MediaError, SymphoniaAudioStreamDecoder};
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioPacket, HostLaunchProfile, PlatformHostClient,
-    PlatformHostFactory,
+    AudioOutputHandle, AudioOutputRequest, AudioPacket, AudioWakeRegistration, HostLaunchProfile,
+    PlatformHostClient, PlatformHostFactory,
 };
 use serde::Serialize;
 
@@ -23,7 +26,6 @@ pub const LEGACY_AUDIO_MAX_RESOURCE_BYTES: u64 = 512 * 1024 * 1024;
 const COMMAND_CAPACITY: usize = 4096;
 const TARGET_LATENCY_MS: u32 = 150;
 const LOW_WATER_MS: u32 = 90;
-const WORKER_POLL_MS: u64 = 4;
 const MAX_STREAMS: usize = 512;
 const MAX_SEGMENT_SAMPLES: usize = 4_194_304;
 
@@ -67,9 +69,13 @@ impl TelemetryAtomics {
 }
 
 enum WorkerCommand {
+    Wake,
     Execute {
         command: LegacyAudioCommandV1,
         resource: Option<Vec<u8>>,
+    },
+    ExecuteLive {
+        packet: LegacyAudioPacketV7,
     },
     BeginMovie {
         stream_id: u32,
@@ -93,10 +99,14 @@ enum WorkerCommand {
 
 pub struct LegacyAudioPlaybackService {
     commands: SyncSender<WorkerCommand>,
+    client: PlatformHostClient,
     telemetry: Arc<TelemetryAtomics>,
     failure: Arc<Mutex<Option<String>>>,
     audible: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
+    wake_stop: Arc<AtomicBool>,
+    wake: AudioWakeRegistration,
+    wake_forwarder: Option<JoinHandle<()>>,
 }
 
 impl LegacyAudioPlaybackService {
@@ -124,12 +134,15 @@ impl LegacyAudioPlaybackService {
         let worker_telemetry = Arc::clone(&telemetry);
         let worker_failure = Arc::clone(&failure);
         let worker_audible = Arc::clone(&audible);
+        let worker_client = client.clone();
+        let wake_stop = Arc::new(AtomicBool::new(false));
+        let wake = client.audio_wake();
         let worker = thread::Builder::new()
             .name("astra-emu-legacy-audio".into())
             .spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(|| {
                     run_worker(
-                        client,
+                        worker_client,
                         shutdown_host,
                         receiver,
                         worker_telemetry,
@@ -146,13 +159,33 @@ impl LegacyAudioPlaybackService {
                 }
             })
             .map_err(|_| "ASTRA_EMU_AUDIO_WORKER_START".to_owned())?;
+        let forwarder_stop = Arc::clone(&wake_stop);
+        let forwarder_commands = commands.clone();
+        let wake_forwarder = thread::Builder::new()
+            .name("astra-emu-audio-wake".into())
+            .spawn({
+                let forwarder_wake = wake.clone();
+                move || forward_audio_wakes(forwarder_wake, forwarder_stop, forwarder_commands)
+            })
+            .map_err(|_| "ASTRA_EMU_AUDIO_WAKE_START".to_owned())?;
         Ok(Self {
             commands,
+            client,
             telemetry,
             failure,
             audible,
             worker: Some(worker),
+            wake_stop,
+            wake,
+            wake_forwarder: Some(wake_forwarder),
         })
+    }
+
+    /// Returns the same PlatformHost client used by the shared audio worker.
+    /// RFVP movie/video decode must bind to this client so the media request
+    /// and the audio device share one host lifecycle and provider identity.
+    pub fn platform_client(&self) -> PlatformHostClient {
+        self.client.clone()
     }
 
     pub fn execute(
@@ -163,6 +196,15 @@ impl LegacyAudioPlaybackService {
         command.validate().map_err(|error| error.to_string())?;
         self.check_failure()?;
         self.try_send(WorkerCommand::Execute { command, resource })
+    }
+
+    /// Moves a Family ABI v7 PCM allocation into the audio worker.  This path
+    /// intentionally has no hash/serde envelope; stream metadata is checked
+    /// against the already-open device stream when the command is consumed.
+    pub fn execute_live_pcm(&self, packet: LegacyAudioPacketV7) -> Result<(), String> {
+        packet.validate().map_err(|error| error.to_string())?;
+        self.check_failure()?;
+        self.try_send(WorkerCommand::ExecuteLive { packet })
     }
 
     pub fn begin_movie_stream(
@@ -237,6 +279,8 @@ impl LegacyAudioPlaybackService {
     }
 
     pub fn shutdown(mut self) -> Result<Vec<u8>, String> {
+        self.wake_stop.store(true, Ordering::Release);
+        self.wake.notify();
         let result = self
             .request(WorkerCommand::Shutdown)
             .and_then(|result| result);
@@ -244,6 +288,13 @@ impl LegacyAudioPlaybackService {
             if worker.join().is_err() {
                 return Err("ASTRA_EMU_AUDIO_WORKER_JOIN".into());
             }
+        }
+        let wake = self
+            .wake_forwarder
+            .take()
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_WAKE_FORWARDER_MISSING".to_owned())?;
+        if wake.join().is_err() {
+            return Err("ASTRA_EMU_AUDIO_WAKE_JOIN".into());
         }
         result
     }
@@ -300,6 +351,28 @@ impl Drop for LegacyAudioPlaybackService {
         } else {
             tracing::error!(event = "astra_emu_audio_service_forced_detach");
         }
+        self.wake_stop.store(true, Ordering::Release);
+        self.wake.notify();
+        if let Some(wake) = self.wake_forwarder.take() {
+            if wake.join().is_err() {
+                tracing::error!(event = "astra_emu_audio_wake_join_failed");
+            }
+        }
+    }
+}
+
+fn forward_audio_wakes(
+    wake: AudioWakeRegistration,
+    stop: Arc<AtomicBool>,
+    commands: SyncSender<WorkerCommand>,
+) {
+    let mut observed = 0_u64;
+    while !stop.load(Ordering::Acquire) {
+        observed = wake.wait(observed);
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
+        let _ = commands.try_send(WorkerCommand::Wake);
     }
 }
 
@@ -309,7 +382,7 @@ struct AudioStream {
     output_rate: u32,
     output_channels: u16,
     sample_format: LegacyAudioSampleFormat,
-    segments: VecDeque<Vec<f32>>,
+    segments: VecDeque<AudioSegment>,
     segment_cursor: usize,
     source_buffer: Vec<f32>,
     mix_buffer: Vec<f32>,
@@ -332,6 +405,25 @@ struct AudioStream {
     fade_in_remaining_frames: usize,
     fade_out_total_frames: usize,
     fade_out_remaining_frames: usize,
+}
+
+enum AudioSegment {
+    F32(Vec<f32>),
+    LiveI16(Vec<i16>),
+    LiveF32(Vec<f32>),
+}
+
+impl AudioSegment {
+    fn len(&self) -> usize {
+        match self {
+            Self::F32(samples) | Self::LiveF32(samples) => samples.len(),
+            Self::LiveI16(samples) => samples.len(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl AudioStream {
@@ -394,7 +486,7 @@ fn run_worker(
         audible,
     };
     loop {
-        match receiver.recv_timeout(Duration::from_millis(WORKER_POLL_MS)) {
+        match receiver.recv() {
             Ok(WorkerCommand::Shutdown(reply)) => {
                 let result = runtime.block_on(state.shutdown(shutdown_host));
                 let terminal = result.as_ref().map(|_| ()).map_err(Clone::clone);
@@ -405,9 +497,9 @@ fn run_worker(
             Ok(WorkerCommand::Reset(reply)) => {
                 let _ = reply.send(runtime.block_on(state.reset()));
             }
+            Ok(WorkerCommand::Wake) => {}
             Ok(command) => runtime.block_on(state.execute(command))?,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(_) => {
                 return Err("ASTRA_EMU_AUDIO_COMMAND_CHANNEL_CLOSED".into());
             }
         }
@@ -421,9 +513,11 @@ impl WorkerState {
     async fn execute(&mut self, command: WorkerCommand) -> Result<(), String> {
         self.telemetry.command_count.fetch_add(1, Ordering::Relaxed);
         match command {
+            WorkerCommand::Wake => Ok(()),
             WorkerCommand::Execute { command, resource } => {
                 self.execute_legacy(command, resource).await
             }
+            WorkerCommand::ExecuteLive { packet } => self.execute_live_pcm(packet),
             WorkerCommand::BeginMovie {
                 stream_id,
                 sample_rate,
@@ -532,12 +626,12 @@ impl WorkerState {
                 if stream.sample_format != LegacyAudioSampleFormat::I16 {
                     return Err("ASTRA_EMU_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
                 }
-                stream.segments.push_back(
+                stream.segments.push_back(AudioSegment::F32(
                     samples
                         .into_iter()
                         .map(|sample| f32::from(sample) / 32768.0)
                         .collect(),
-                );
+                ));
                 Ok(())
             }
             LegacyAudioCommandV1::SubmitF32 { stream_id, samples } => {
@@ -626,6 +720,35 @@ impl WorkerState {
         }
     }
 
+    fn execute_live_pcm(&mut self, packet: LegacyAudioPacketV7) -> Result<(), String> {
+        let stream = self
+            .streams
+            .get_mut(&packet.stream_id)
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_MISSING".to_owned())?;
+        let expected_format = match packet.pcm {
+            LegacyPcmBufferV7::I16(_) => LegacyAudioSampleFormat::I16,
+            LegacyPcmBufferV7::F32(_) => LegacyAudioSampleFormat::F32,
+        };
+        if stream.sample_format != expected_format
+            || (packet.sample_rate != 0 && packet.sample_rate != stream.source_rate)
+            || (packet.channels != 0 && packet.channels != stream.source_channels)
+        {
+            return Err("ASTRA_EMU_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
+        }
+        match packet.pcm {
+            LegacyPcmBufferV7::I16(samples) => {
+                stream.segments.push_back(AudioSegment::LiveI16(samples));
+            }
+            LegacyPcmBufferV7::F32(samples) => {
+                if samples.iter().any(|sample| !sample.is_finite()) {
+                    return Err("ASTRA_EMU_AUDIO_PCM_NON_FINITE".into());
+                }
+                stream.segments.push_back(AudioSegment::LiveF32(samples));
+            }
+        }
+        Ok(())
+    }
+
     fn append_f32(
         &mut self,
         stream_id: u32,
@@ -644,7 +767,7 @@ impl WorkerState {
         {
             return Err("ASTRA_EMU_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
         }
-        stream.segments.push_back(samples);
+        stream.segments.push_back(AudioSegment::F32(samples));
         Ok(())
     }
 
@@ -1026,13 +1149,13 @@ impl WorkerState {
                     {
                         return Err("ASTRA_EMU_AUDIO_STREAM_FORMAT_CHANGE".into());
                     }
-                    stream.segments.push_back(
+                    stream.segments.push_back(AudioSegment::F32(
                         chunk
                             .pcm_s16le
                             .chunks_exact(2)
                             .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0)
                             .collect(),
-                    );
+                    ));
                     self.telemetry
                         .decoder_refills
                         .fetch_add(1, Ordering::Relaxed);
@@ -1112,7 +1235,7 @@ fn validate_segment(sample_rate: u32, channels: u16, samples: &[f32]) -> Result<
     Ok(())
 }
 
-fn queued_samples(segments: &VecDeque<Vec<f32>>, cursor: usize) -> usize {
+fn queued_samples(segments: &VecDeque<AudioSegment>, cursor: usize) -> usize {
     segments
         .iter()
         .enumerate()
@@ -1127,7 +1250,7 @@ fn queued_samples(segments: &VecDeque<Vec<f32>>, cursor: usize) -> usize {
 }
 
 fn take_segmented_into(
-    segments: &mut VecDeque<Vec<f32>>,
+    segments: &mut VecDeque<AudioSegment>,
     cursor: &mut usize,
     limit: usize,
     output: &mut Vec<f32>,
@@ -1142,7 +1265,21 @@ fn take_segmented_into(
             .len()
             .saturating_sub(*cursor)
             .min(limit - output.len());
-        output.extend_from_slice(&front[*cursor..*cursor + available]);
+        match front {
+            AudioSegment::F32(samples) => {
+                output.extend_from_slice(&samples[*cursor..*cursor + available]);
+            }
+            AudioSegment::LiveF32(samples) => {
+                output.extend_from_slice(&samples[*cursor..*cursor + available]);
+            }
+            AudioSegment::LiveI16(samples) => {
+                output.extend(
+                    samples[*cursor..*cursor + available]
+                        .iter()
+                        .map(|sample| f32::from(*sample) / 32768.0),
+                );
+            }
+        }
         *cursor += available;
         if *cursor == front.len() {
             segments.pop_front();
@@ -1366,20 +1503,26 @@ mod tests {
         let first_pointer = first.as_ptr();
         let second = vec![0.5, 0.6, 0.7, 0.8];
         let second_pointer = second.as_ptr();
-        let mut segments = VecDeque::from([first, second]);
+        let mut segments = VecDeque::from([AudioSegment::F32(first), AudioSegment::F32(second)]);
         let mut cursor = 0;
         let mut output = Vec::new();
 
         take_segmented_into(&mut segments, &mut cursor, 2, &mut output);
         assert_eq!(output, vec![0.1, 0.2]);
         assert_eq!(segments.len(), 2);
-        assert_eq!(segments[0].as_ptr(), first_pointer);
-        assert_eq!(segments[1].as_ptr(), second_pointer);
+        assert!(
+            matches!(&segments[0], AudioSegment::F32(samples) if samples.as_ptr() == first_pointer)
+        );
+        assert!(
+            matches!(&segments[1], AudioSegment::F32(samples) if samples.as_ptr() == second_pointer)
+        );
 
         take_segmented_into(&mut segments, &mut cursor, 4, &mut output);
         assert_eq!(output, vec![0.3, 0.4, 0.5, 0.6]);
         assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].as_ptr(), second_pointer);
+        assert!(
+            matches!(&segments[0], AudioSegment::F32(samples) if samples.as_ptr() == second_pointer)
+        );
         assert_eq!(cursor, 2);
     }
 

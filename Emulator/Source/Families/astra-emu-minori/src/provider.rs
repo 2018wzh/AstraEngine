@@ -3,14 +3,15 @@ use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyBlendMode,
-    LegacyCoverageDelta, LegacyDrawV1, LegacyEffect, LegacyEphemeralText,
-    LegacyFamilyPluginDescriptor, LegacyOpenRequest, LegacyProbeReport, LegacyProbeRequest,
-    LegacyProviderError, LegacyRenderResourceFrameV1, LegacyRestoreReport, LegacyRuntimeHostCtx,
-    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyShutdownReport,
-    LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput, LegacyStepOutput,
-    LegacyTextPresentationLeaseV1, LegacyTextPresentationV1, LegacyTextRegionV1,
-    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
-    LegacyVfsReader, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacyControlTransaction, LegacyCoverageDelta, LegacyDrawV1, LegacyEphemeralText,
+    LegacyFamilyPluginDescriptor, LegacyLiveOutput, LegacyOpenRequest, LegacyProbeReport,
+    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyRestoreReport,
+    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
+    LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection,
+    LegacyStepInput, LegacyStepOutput, LegacyTextLease, LegacyTextPresentationLeaseV1,
+    LegacyTextPresentationV1, LegacyTextRegionV1, LegacyTextureFormat, LegacyTextureResourceV1,
+    LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyWaitRequest,
+    LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 
 use crate::{
@@ -384,7 +385,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             }
         }
         let after = session.vm.state().instruction_count;
-        let mut effects = Vec::new();
+        let mut live = LegacyLiveOutput::default();
         if let Some(frame) = &animated_effect {
             if !matches!(
                 event,
@@ -394,7 +395,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                         | MinoriVmEvent::Panel { .. }
                 )
             ) {
-                effects.push(effect_presentation(
+                live.resource_scenes.push(effect_presentation(
                     &vfs,
                     &session.mount_set_id,
                     session.stage_size,
@@ -436,13 +437,6 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             presentation.validate().inspect_err(|_| {
                 session.poisoned = true;
             })?;
-            let presentation_payload = postcard::to_allocvec(&presentation).map_err(|_| {
-                session.poisoned = true;
-                invalid(
-                    "ASTRA_EMU_MINORI_TEXT_PRESENTATION_ENCODE",
-                    "message presentation could not be encoded",
-                )
-            })?;
             if session
                 .ephemeral_text
                 .insert(
@@ -461,24 +455,19 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "ephemeral text lease id is duplicated",
                 ));
             }
-            effects.push(LegacyEffect::Presentation {
+            live.text_presentations.push(LegacySequenced {
                 sequence: *presentation_sequence,
-                command: "astra.emu.text_presentation.v1".into(),
-                payload: presentation_payload.into(),
+                value: presentation,
             });
-            effects.push(LegacyEffect::TextCapture {
+            live.text.push(LegacyTextLease {
                 sequence: *capture_sequence,
                 lease_id,
-                text_hash: Hash256::from_sha256(text.as_bytes()),
                 byte_len: text.len().try_into().map_err(|_| {
                     invalid(
                         "ASTRA_EMU_MINORI_TEXT_CAPTURE_BOUNDS",
                         "message length cannot be represented by the ABI",
                     )
                 })?,
-                speaker_hash: speaker
-                    .as_ref()
-                    .map(|value| Hash256::from_sha256(value.as_bytes())),
                 source_ref: "minori.sc.message".into(),
             });
         }
@@ -497,16 +486,9 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     return Err(error);
                 }
             };
-            let payload = postcard::to_allocvec(&frame).map_err(|_| {
-                invalid(
-                    "ASTRA_EMU_MINORI_STAGE_ENCODE",
-                    "stage render frame could not be encoded",
-                )
-            })?;
-            effects.push(LegacyEffect::Presentation {
+            live.resource_scenes.push(LegacySequenced {
                 sequence,
-                command: "astra.emu.render_resource_frame.v1".into(),
-                payload: payload.into(),
+                value: frame,
             });
         }
         if let Some(MinoriVmEvent::Effect(frame)) = &event {
@@ -523,7 +505,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     return Err(error);
                 }
             };
-            effects.push(effect);
+            live.resource_scenes.push(effect);
         }
         if let Some(MinoriVmEvent::Panel { sequence }) = &event {
             let panel = match panel_presentation(
@@ -539,7 +521,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     return Err(error);
                 }
             };
-            effects.push(panel);
+            live.resource_scenes.push(panel);
         }
         let mut audio_command_count = 0u64;
         if let Some(MinoriVmEvent::Audio { commands }) = &event {
@@ -566,16 +548,9 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     session.poisoned = true;
                     return Err(error);
                 }
-                let payload = postcard::to_allocvec(&command).map_err(|_| {
-                    invalid(
-                        "ASTRA_EMU_MINORI_AUDIO_ENCODE",
-                        "audio command could not be encoded",
-                    )
-                })?;
-                effects.push(LegacyEffect::Audio {
+                live.audio_commands.push(LegacySequenced {
                     sequence,
-                    command: "astra.emu.audio_command.v1".into(),
-                    payload: payload.into(),
+                    value: command,
                 });
                 audio_command_count += 1;
             }
@@ -618,8 +593,11 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .collect::<Vec<_>>();
         let output = LegacyStepOutput {
             status,
-            effects,
-            waits,
+            live,
+            control: LegacyControlTransaction {
+                waits,
+                ..LegacyControlTransaction::default()
+            },
             trace,
             diagnostics: Vec::new(),
             coverage: LegacyCoverageDelta {
@@ -628,7 +606,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 audio_commands: audio_command_count,
                 ..LegacyCoverageDelta::default()
             },
-            state_hash: session.vm.state_hash().map_err(runtime_error)?,
+            state_revision: session.vm.state().fixed_tick,
         };
         output.validate(&input.budget)?;
         Ok(output)
@@ -655,7 +633,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         let envelope = LegacySnapshotEnvelope {
             family_id: FamilyId(MINORI_FAMILY_ID.into()),
             session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(6, 0, 0),
+            schema_version: SchemaVersion::new(7, 0, 0),
             case_fingerprint: session.case_fingerprint,
             fixed_step: session.vm.state().fixed_tick,
             session_seed: session.session_seed,
@@ -663,8 +641,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             family_sections: vec![LegacySnapshotSection {
                 section_id: "minori.runtime".into(),
                 schema: MINORI_RUNTIME_STATE_SCHEMA.into(),
-                version: SchemaVersion::new(6, 0, 0),
-                hash: Hash256::from_sha256(&bytes),
+                version: SchemaVersion::new(7, 0, 0),
                 bytes,
             }],
             redaction_status: "passed".into(),
@@ -701,7 +678,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         let section = &snapshot.family_sections[0];
         if section.section_id != "minori.runtime"
             || section.schema != MINORI_RUNTIME_STATE_SCHEMA
-            || section.version != SchemaVersion::new(6, 0, 0)
+            || section.version != SchemaVersion::new(7, 0, 0)
         {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_SNAPSHOT_SECTION",
@@ -728,7 +705,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         Ok(LegacyRestoreReport {
             restored_fixed_step: session.vm.state().fixed_tick,
             session_seed: session.session_seed,
-            state_hash: session.vm.state_hash().map_err(runtime_error)?,
+            state_revision: session.vm.state().fixed_tick,
             diagnostics: Vec::new(),
         })
     }
@@ -784,7 +761,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .ok_or_else(session_missing)?;
         validate_session_binding(ctx, &session)?;
         Ok(LegacyShutdownReport {
-            final_state_hash: session.vm.state_hash().map_err(runtime_error)?,
+            final_state_revision: session.vm.state().fixed_tick,
             instruction_count: session.vm.state().instruction_count,
             syscall_count: 0,
             diagnostics: Vec::new(),
@@ -1049,7 +1026,7 @@ fn panel_presentation(
     stage_size: Option<(u32, u32)>,
     state: &MinoriRuntimeState,
     sequence: u64,
-) -> Result<LegacyEffect, LegacyProviderError> {
+) -> Result<LegacySequenced<LegacyRenderResourceFrameV1>, LegacyProviderError> {
     let stage_size = stage_size.ok_or_else(|| {
         invalid(
             "ASTRA_EMU_MINORI_STAGE_SIZE",
@@ -1058,16 +1035,9 @@ fn panel_presentation(
     })?;
     let effect = visible_effect_frame(state, sequence)?;
     let frame = describe_effect_frame(vfs, mount_set_id, state, &effect, stage_size)?;
-    let payload = postcard::to_allocvec(&frame).map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_PANEL_ENCODE",
-            "panel render frame could not be encoded",
-        )
-    })?;
-    Ok(LegacyEffect::Presentation {
+    Ok(LegacySequenced {
         sequence,
-        command: "astra.emu.render_resource_frame.v1".into(),
-        payload: payload.into(),
+        value: frame,
     })
 }
 
@@ -1127,7 +1097,7 @@ fn effect_presentation(
     stage_size: Option<(u32, u32)>,
     state: &MinoriRuntimeState,
     effect: &MinoriEffectFrame,
-) -> Result<LegacyEffect, LegacyProviderError> {
+) -> Result<LegacySequenced<LegacyRenderResourceFrameV1>, LegacyProviderError> {
     let stage_size = stage_size.ok_or_else(|| {
         invalid(
             "ASTRA_EMU_MINORI_STAGE_SIZE",
@@ -1135,16 +1105,9 @@ fn effect_presentation(
         )
     })?;
     let frame = describe_effect_frame(vfs, mount_set_id, state, effect, stage_size)?;
-    let payload = postcard::to_allocvec(&frame).map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_EFFECT_ENCODE",
-            "effect render frame could not be encoded",
-        )
-    })?;
-    Ok(LegacyEffect::Presentation {
+    Ok(LegacySequenced {
         sequence: effect.sequence,
-        command: "astra.emu.render_resource_frame.v1".into(),
-        payload: payload.into(),
+        value: frame,
     })
 }
 
@@ -1213,7 +1176,7 @@ fn append_resource_layer(
         texture_id,
         resource_uri: resource_uri.to_owned(),
         codec: codec.into(),
-        encoded_hash: Hash256::from_sha256(&bytes),
+        revision: 1,
         decoded_width: image_width,
         decoded_height: image_height,
         decoded_format: LegacyTextureFormat::Rgba8,
@@ -1305,20 +1268,23 @@ fn validate_script_uri(script_uri: &str) -> Result<(), LegacyProviderError> {
 fn waiting_output(
     vm: &MinoriVm,
     _wait: MinoriWaitState,
-    effects: Vec<LegacyEffect>,
+    resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
     input: &LegacyStepInput,
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
     let output = LegacyStepOutput {
         status: LegacyRuntimeStatus::Awaiting,
-        effects,
+        live: LegacyLiveOutput {
+            resource_scenes,
+            ..LegacyLiveOutput::default()
+        },
         // A wait request is edge-triggered: it is published only by the
         // command that creates the token. Re-emitting the same pending token
         // on later ticks would violate RuntimeWorld AwaitQueue uniqueness.
-        waits: Vec::new(),
+        control: LegacyControlTransaction::default(),
         trace: Vec::new(),
         diagnostics: Vec::new(),
         coverage: LegacyCoverageDelta::default(),
-        state_hash: vm.state_hash().map_err(runtime_error)?,
+        state_revision: vm.state().fixed_tick,
     };
     output.validate(&input.budget)?;
     Ok(output)
@@ -1469,7 +1435,6 @@ mod tests {
             Ok(RangeReadResult {
                 range,
                 revision: stat.revision,
-                content_hash: Hash256::from_sha256(&bytes),
                 bytes,
             })
         }
@@ -1501,12 +1466,12 @@ mod tests {
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
         assert_eq!(first.status, LegacyRuntimeStatus::Awaiting);
-        let token = match &first.waits[0] {
+        let token = match &first.control.waits[0] {
             LegacyWaitRequest::Time {
                 token_id,
                 milliseconds,
             } => {
-                assert_eq!(*milliseconds, 200);
+                assert_eq!(milliseconds, &200);
                 token_id.clone()
             }
             _ => panic!("expected time wait"),
@@ -1526,7 +1491,7 @@ mod tests {
                     vec![LegacyAwaitResult {
                         token_id: token,
                         status: "completed".into(),
-                        payload_hash: Hash256::from_sha256(b"completed"),
+                        payload_len: 0,
                         sequence: 1,
                     }],
                 ),
@@ -1577,7 +1542,7 @@ mod tests {
         provider.restore(&ctx, &session, &snapshot).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(6, 0, 0)
+            SchemaVersion::new(7, 0, 0)
         );
     }
 
@@ -1609,50 +1574,29 @@ mod tests {
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
         assert_eq!(output.status, LegacyRuntimeStatus::Awaiting);
-        let LegacyEffect::Presentation {
-            sequence,
-            command,
-            payload,
-        } = &output.effects[0]
-        else {
-            panic!("expected text presentation effect")
-        };
-        assert_eq!(*sequence, 1);
-        assert_eq!(command, "astra.emu.text_presentation.v1");
-        let presentation: LegacyTextPresentationLeaseV1 =
-            postcard::from_bytes(payload).expect("presentation payload must decode");
-        let LegacyEffect::TextCapture {
-            sequence,
-            lease_id,
-            text_hash,
-            speaker_hash,
-            ..
-        } = &output.effects[1]
-        else {
-            panic!("expected text capture effect")
-        };
-        assert_eq!(*sequence, 2);
-        assert_eq!(presentation.lease_id, *lease_id);
-        assert_eq!(*text_hash, Hash256::from_sha256(b"hello world"));
-        assert_eq!(*speaker_hash, Some(Hash256::from_sha256(b"speaker")));
-        let presentation = &presentation.presentation;
+        let binding = &output.live.text_presentations[0];
+        assert_eq!(binding.sequence, 1);
+        let presentation = &binding.value.presentation;
+        let lease = &output.live.text[0];
+        assert_eq!(lease.sequence, 2);
+        assert_eq!(&binding.value.lease_id, &lease.lease_id);
         assert_eq!(presentation.layout_id, "minori.message");
         assert_eq!(presentation.language, "ja-JP");
         assert_eq!(presentation.font_families, ["Noto Sans JP"]);
         assert_eq!(presentation.body.font_size, 26.0);
         assert_eq!(presentation.body.max_lines, 3);
         let text = provider
-            .take_ephemeral_text(&ctx, &session, lease_id)
+            .take_ephemeral_text(&ctx, &session, &lease.lease_id)
             .unwrap()
             .unwrap();
         assert_eq!(text.text, "hello world");
         assert_eq!(text.speaker.as_deref(), Some("speaker"));
         assert!(provider
-            .take_ephemeral_text(&ctx, &session, lease_id)
+            .take_ephemeral_text(&ctx, &session, &lease.lease_id)
             .unwrap()
             .is_none());
         assert!(matches!(
-            output.waits.as_slice(),
+            output.control.waits.as_slice(),
             [LegacyWaitRequest::Input { keys, .. }] if *keys == message_input_keys()
         ));
     }
@@ -1718,16 +1662,12 @@ mod tests {
             .unwrap();
         assert_eq!(output.status, LegacyRuntimeStatus::Active);
         assert_eq!(output.coverage.audio_commands, 2);
-        assert_eq!(output.effects.len(), 2);
+        assert_eq!(output.live.audio_commands.len(), 2);
         let commands = output
-            .effects
+            .live
+            .audio_commands
             .iter()
-            .map(|effect| match effect {
-                LegacyEffect::Audio { payload, .. } => {
-                    postcard::from_bytes::<LegacyAudioCommandV1>(payload).unwrap()
-                }
-                _ => panic!("expected audio command"),
-            })
+            .map(|command| command.value.clone())
             .collect::<Vec<_>>();
         assert_eq!(
             commands[0],
@@ -1783,14 +1723,7 @@ mod tests {
         let output = provider
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
-        let LegacyEffect::Presentation {
-            command, payload, ..
-        } = &output.effects[0]
-        else {
-            panic!("expected presentation effect")
-        };
-        assert_eq!(command, "astra.emu.render_resource_frame.v1");
-        let frame: LegacyRenderResourceFrameV1 = postcard::from_bytes(payload).unwrap();
+        let frame = &output.live.resource_scenes[0].value;
         assert_eq!((frame.width, frame.height), (1280, 720));
         assert_eq!(frame.texture_resources.len(), 1);
         assert_eq!(frame.draws.len(), 1);
@@ -1842,10 +1775,7 @@ mod tests {
         let created = provider
             .step(&ctx, &session, step_input_with_delta(1, 20_000_000))
             .unwrap();
-        let LegacyEffect::Presentation { payload, .. } = &created.effects[0] else {
-            panic!("expected initial effect frame")
-        };
-        let initial: LegacyRenderResourceFrameV1 = postcard::from_bytes(payload).unwrap();
+        let initial = &created.live.resource_scenes[0].value;
         assert_eq!(initial.texture_resources.len(), 2);
         assert_eq!(initial.draws[1].vertices[0].color[3], 0.0);
 
@@ -1853,21 +1783,18 @@ mod tests {
             .step(&ctx, &session, step_input_with_delta(2, 20_000_000))
             .unwrap();
         assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
-        assert_eq!(waiting.waits.len(), 1);
+        assert_eq!(waiting.control.waits.len(), 1);
         for tick in 3..6 {
             let unchanged = provider
                 .step(&ctx, &session, step_input_with_delta(tick, 20_000_000))
                 .unwrap();
-            assert!(unchanged.effects.is_empty());
-            assert!(unchanged.waits.is_empty());
+            assert!(unchanged.live.is_empty());
+            assert!(unchanged.control.waits.is_empty());
         }
         let advanced = provider
             .step(&ctx, &session, step_input_with_delta(6, 20_000_000))
             .unwrap();
-        let LegacyEffect::Presentation { payload, .. } = &advanced.effects[0] else {
-            panic!("expected advanced effect frame")
-        };
-        let frame: LegacyRenderResourceFrameV1 = postcard::from_bytes(payload).unwrap();
+        let frame = &advanced.live.resource_scenes[0].value;
         assert_eq!(frame.texture_resources.len(), 1);
         assert_eq!(
             frame.texture_resources[0].resource_uri,
@@ -1922,10 +1849,7 @@ mod tests {
         let panel = provider
             .step(&ctx, &session, step_input_with_delta(2, 20_000_000))
             .unwrap();
-        let LegacyEffect::Presentation { payload, .. } = &panel.effects[0] else {
-            panic!("expected panel presentation")
-        };
-        let frame: LegacyRenderResourceFrameV1 = postcard::from_bytes(payload).unwrap();
+        let frame = &panel.live.resource_scenes[0].value;
         assert_eq!(frame.texture_resources.len(), 3);
         assert_eq!(frame.draws.len(), 3);
         assert_eq!(frame.draws[1].vertices[0].color[3], 0.0);

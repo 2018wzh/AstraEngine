@@ -63,7 +63,7 @@ Runtime 已新增 `ProductRuntimeProviderFactory`、`ProductRuntimeSession` 和 
 
 `astra-headless run-batch` 从 `astra.headless_session_batch.v2` manifest 启动最多八个独立 `astra-headless run` 子进程。`worker_limit` 是允许使用的全局上限，runner 再按 job 数量与 `available_parallelism` 自动选择实际并发度，不能用高于硬件或任务数量的空额度美化利用率。串行 baseline 的单个 Session 可独占完整预算；并发阶段每个子 Session 获得 `floor(global_limit / selected_concurrency)` 个内部 worker，因此所有同时运行子进程的内部配额总和不会超过全局上限，也不会让 Session 内 worker pool 在父级并发之外再次超订阅。每条 job 声明 `route`、`replay` 或 `performance` 类型，以及独立 concurrent/serial artifact root、timeout、package/input/profile/build identity。只有 `performance` job 必须声明 performance budget、warmup 和 measurement start；route/replay job 若夹带 performance 配置会 fail closed。Runner 先生成同身份串行 baseline，再执行公平排队的 concurrent batch；报告 `astra.headless_session_batch_report.v2` 按 session id 稳定排序，记录 output identity 对比、配置上限、硬件并行度、实际并发度、串行/并发每 Session 配额、并发总容量、排队/执行时间、批次 wall time、吞吐、Session slot utilization、按子进程 kernel+user CPU time 与全局容量归一化的 worker utilization、所有 job 的串行/并行 private-memory peak 和串行 baseline；performance job 另记录每 session CPU/E2E p95/p99。Windows runner 直接按子进程 PID 采样 private bytes 与 CPU time，并把 private bytes 与 performance report 内的峰值取较大值；任一采样不受支持、失败或返回空值时 blocking，不写 `null` 冒充完成。任一 session 失败或超时不会取消已开始任务，但 identity mismatch 或任一失败会使批次最终 blocking。
 
-旧同步 `ProductRuntimeHost` 暂时只保留给仍需迁移的 dynamic FFI/shipping host 调用点，不代表 Provider ABI v1 仍受支持；ABI DTO、save 与 action contract 已硬切 v2/v3。删除同步 facade 仍需同身份 Headless batch 与 Windows Player evidence，因此当前状态保持 `IN_PROGRESS`。
+`ProductRuntimeHost` 仍是当前 Player/release 的 in-process host；它不代表旧 Provider ABI 仍受支持。Provider ABI 固定为 v3，save schema 固定为 v3，Action ABI 固定为 v2；删除同步 host facade 必须先完成调用方迁移和同身份 Player evidence，因此当前状态保持 `IN_PROGRESS`。
 
 ## Presentation 与资源流水线
 

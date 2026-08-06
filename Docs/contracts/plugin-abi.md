@@ -61,35 +61,40 @@ pub trait Renderer2DProvider: StableProvider {
 
 ## Game Runtime Provider ABI
 
+Provider ABI 版本固定为 `3`；旧 registration 在创建 instance 前直接拒绝。
+
 `ProductRuntimeProvider` 是 Rust 侧设计 trait；跨插件 ABI 不传 trait object。插件通过 `FfiRuntimeProviderRegistration` 注册 ABI-safe entrypoints，并继续把 provider 记录写入现有 `providers` slot snapshot，让 package/release gate 复用同一 registry：
 
 ```rust
 pub struct FfiRuntimeProviderRegistration {
+    pub abi_version: u32,
     pub provider_id: RString,
     pub runtime_id: RString,
-    pub descriptor_json: RString,
-    pub descriptor_schema: RString,
     pub capability: RString,
-    pub phase: LoadPhase,
+    pub phase: RString,
     pub packaged: bool,
-    pub prepare: FfiRuntimeProviderInvoke,
-    pub probe: FfiRuntimeProviderInvoke,
-    pub open: FfiRuntimeProviderInvoke,
-    pub step: FfiRuntimeProviderInvoke,
-    pub save: FfiRuntimeProviderInvoke,
-    pub restore: FfiRuntimeProviderInvoke,
-    pub shutdown: FfiRuntimeProviderInvoke,
-    pub package_sections: FfiRuntimeProviderInvoke,
-    pub release_checks: FfiRuntimeProviderInvoke,
-    pub editor_metadata: FfiRuntimeProviderInvoke,
+    pub descriptor_schema: RString,
+    pub descriptor_json: RVec<u8>,
+    pub create_instance: FfiRuntimeCreateInstance,
+    pub destroy_instance: FfiRuntimeDestroyInstance,
+    pub prepare: FfiRuntimePrepare,
+    pub probe: FfiRuntimeProbe,
+    pub open_session: FfiRuntimeOpen,
+    pub step: FfiRuntimeStep,
+    pub save: FfiRuntimeSave,
+    pub restore: FfiRuntimeRestore,
+    pub shutdown: FfiRuntimeShutdown,
+    pub package_sections: FfiRuntimePackageSections,
+    pub release_checks: FfiRuntimeReleaseChecks,
+    pub editor_metadata: FfiRuntimeEditorMetadata,
 }
 ```
 
-每个 entrypoint 接收 bounded `RVec<u8>` payload，内容为 serde JSON 或 postcard encoded runtime provider DTO，返回 `FfiRuntimeProviderResult { ok, payload, diagnostics }`。`FfiPluginRegistration.runtime_providers` 可以包含多个 runtime provider registration，但 `game_runtime_provider` slot 在 target 绑定时仍要求单 provider 显式选择。`vfs_provider` 的多 provider 同 slot 规则不适用于 gameplay runtime。
+每个 entrypoint 使用对应的 typed request/result：create/destroy、prepare、probe、open、step、save、restore、shutdown、package sections、release checks 和 editor metadata；不使用 JSON、postcard 或统一 payload envelope。`game_runtime_provider` slot 仍要求显式绑定单一 provider，`vfs_provider` 的多 provider 规则不适用于 gameplay runtime。
 
-当前常量包括 `GAME_RUNTIME_PROVIDER_SLOT = "game_runtime_provider"`、`NATIVE_VN_RUNTIME_ID = "native_vn"` 和 `NATIVE_VN_PROVIDER_ID = "astra.runtime.native_vn"`。NativeVN FFI adapter 提供真实 provider instance create/destroy 与 session open/step/save/restore/shutdown；请求和返回只携带 bounded serialized DTO。外部 dylib 的分发、签名和跨版本加载不作为本阶段完成边界。
+当前常量包括 `GAME_RUNTIME_PROVIDER_SLOT = "game_runtime_provider"`、`NATIVE_VN_RUNTIME_ID = "native_vn"` 和 `NATIVE_VN_PROVIDER_ID = "astra.runtime.native_vn"`。NativeVN FFI adapter 提供 instance create/destroy 与 session open/step/save/restore/shutdown；请求和返回只携带对应的 typed ABI-safe DTO。
 
-FFI 边界只传 stable id、string id、section ref、hash、diagnostic 和 bounded payload。Luau VM handle、RuntimeWorld 指针、Editor widget、本地 root、provider secret、商业文本、音频、图像或 bytecode payload 都不得跨 ABI。
+FFI 边界只传 stable id、section ref、diagnostic 和 bounded typed DTO；Luau VM handle、RuntimeWorld 指针、Editor widget、本地 root、provider secret、商业文本、音频、图像或 bytecode payload 都不得跨 ABI。
 
 ## Extension Registry
 

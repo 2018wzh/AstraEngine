@@ -67,11 +67,12 @@ mod windows {
     };
 
     use crate::accessibility::WindowsAccessibilityBridge;
+    use astra_core::Hash256;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
         host_channel_with_command_wake, AudioDeviceFormat, AudioMeter, AudioOutputHandle,
-        AudioOutputRequest, AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind,
-        DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
+        AudioOutputRequest, AudioOutputStatus, AudioPacket, AudioWakeRegistration, CapturedFrame,
+        DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
         PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
         PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
         PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
@@ -310,8 +311,9 @@ mod windows {
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<PackageSourceResource, PackageSourceHandle>,
         event_sequence: u64,
-        gamepads: gilrs::Gilrs,
-        gamepad_mapper: astra_platform_common::GamepadMapper,
+        gamepad_events: std_mpsc::Receiver<Vec<PlatformEventKind>>,
+        gamepad_stop: Arc<AtomicBool>,
+        gamepad_thread: Option<thread::JoinHandle<()>>,
         event_loop_proxy: EventLoopProxy<()>,
     }
 
@@ -340,6 +342,27 @@ mod windows {
                 error
             })?;
             let gamepad_mapper = astra_platform_common::GamepadMapper::new(0.2)?;
+            let (gamepad_tx, gamepad_events) = std_mpsc::sync_channel(32);
+            let gamepad_stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&gamepad_stop);
+            let worker_proxy = event_loop_proxy.clone();
+            let gamepad_thread = thread::Builder::new()
+                .name("astra-windows-gamepad".to_owned())
+                .spawn(move || {
+                    windows_gamepad_worker(
+                        gamepads,
+                        gamepad_mapper,
+                        worker_stop,
+                        worker_proxy,
+                        gamepad_tx,
+                    );
+                })
+                .map_err(|_| {
+                    host_error(
+                        "input.gamepad.worker",
+                        "Windows Gaming Input worker could not start",
+                    )
+                })?;
             let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
             Ok(Self {
                 backend,
@@ -363,8 +386,9 @@ mod windows {
                 bundle_root: package.bundle_root,
                 package_sources: ResourceTable::new("package_source"),
                 event_sequence: 0,
-                gamepads,
-                gamepad_mapper,
+                gamepad_events,
+                gamepad_stop,
+                gamepad_thread: Some(gamepad_thread),
                 event_loop_proxy,
             })
         }
@@ -579,7 +603,7 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenAudioOutput { request, reply } => {
-                        let result = AudioResource::new(request)
+                        let result = AudioResource::new(request, self.backend.audio_wake())
                             .and_then(|resource| self.audio_outputs.insert(resource));
                         let _ = reply.send(result);
                     }
@@ -694,11 +718,14 @@ mod windows {
                         request,
                         reply,
                     } => {
-                        let result = self
-                            .decode_sessions
-                            .get_mut(session)
-                            .and_then(|resource| resource.decode(request));
-                        let _ = reply.send(result);
+                        if let Ok(resource) = self.decode_sessions.get(session) {
+                            resource.submit(request, reply);
+                        } else {
+                            let _ = reply.send(Err(host_error(
+                                "decode.submit",
+                                "decode session handle is stale or unknown",
+                            )));
+                        }
                     }
                     HostCommand::CloseDecode { session, reply } => {
                         let result = self.decode_sessions.remove(session).map(|_| ());
@@ -1017,20 +1044,17 @@ mod windows {
                     value: request.value,
                 });
             }
-            self.poll_gamepad();
-            if self.gamepads.gamepads().next().is_some() {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    Instant::now() + Duration::from_millis(4),
-                ));
-            } else {
-                // Gilrs does not expose a Windows event-loop wake handle for a
-                // newly connected controller. Keep discovery bounded and low
-                // frequency while all host commands and async completions use
-                // explicit EventLoopProxy wakes.
-                event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    Instant::now() + Duration::from_millis(250),
-                ));
+            while let Ok(events) = self.gamepad_events.try_recv() {
+                for event in events {
+                    self.emit(event);
+                }
             }
+            // The gamepad worker owns the backend and wakes this event loop
+            // when it has a bounded batch. There is intentionally no render-
+            // or input-driven timer here; gilrs' internal 250 ms wait is only
+            // a low-frequency discovery fallback on platforms without a
+            // hotplug handle.
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 
@@ -1053,25 +1077,58 @@ mod windows {
         }
     }
 
-    impl WindowsHostApp {
-        fn poll_gamepad(&mut self) {
-            while let Some(event) = self.gamepads.next_event() {
-                let Some(event) = raw_gamepad_event(event) else {
-                    continue;
-                };
-                match self.gamepad_mapper.apply_checked(event) {
-                    Ok(events) => {
-                        for event in events {
-                            self.emit(event);
-                        }
-                    }
-                    Err(error) => tracing::warn!(
+    impl Drop for WindowsHostApp {
+        fn drop(&mut self) {
+            self.gamepad_stop.store(true, Ordering::Release);
+            self.gamepad_events = std_mpsc::sync_channel(0).1;
+            if let Some(worker) = self.gamepad_thread.take() {
+                if worker.join().is_err() {
+                    tracing::error!(
+                        event = "platform.windows.gamepad.worker_panic",
+                        diagnostic_code = "ASTRA_PLATFORM_GAMEPAD_WORKER_PANIC",
+                        "Windows Gaming Input worker panicked during shutdown"
+                    );
+                }
+            }
+        }
+    }
+
+    fn windows_gamepad_worker(
+        mut gamepads: gilrs::Gilrs,
+        mut gamepad_mapper: astra_platform_common::GamepadMapper,
+        stop: Arc<AtomicBool>,
+        event_loop_proxy: EventLoopProxy<()>,
+        tx: std_mpsc::SyncSender<Vec<PlatformEventKind>>,
+    ) {
+        while !stop.load(Ordering::Acquire) {
+            let Some(event) = gamepads.next_event_blocking(Some(Duration::from_millis(250))) else {
+                continue;
+            };
+            let Some(raw_event) = raw_gamepad_event(event) else {
+                continue;
+            };
+            let mapped = match gamepad_mapper.apply_checked(raw_event) {
+                Ok(events) => events,
+                Err(error) => {
+                    tracing::warn!(
                         event = "platform.windows.gamepad.invalid_event",
                         diagnostic_code = ?error.code,
                         operation = %error.operation,
                         "Windows Gaming Input event was rejected"
-                    ),
+                    );
+                    continue;
                 }
+            };
+            if mapped.is_empty() || tx.send(mapped).is_err() {
+                return;
+            }
+            if event_loop_proxy.send_event(()).is_err() {
+                tracing::debug!(
+                    event = "platform.windows.gamepad.wake.closed",
+                    diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                    "Windows event loop was already closed after a gamepad batch"
+                );
+                return;
             }
         }
     }
@@ -1221,6 +1278,7 @@ mod windows {
         next_sequence: u64,
         submitted_samples: u64,
         paused: bool,
+        audio_wake: AudioWakeRegistration,
     }
 
     fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
@@ -1275,7 +1333,10 @@ mod windows {
     }
 
     impl AudioResource {
-        fn new(request: AudioOutputRequest) -> Result<Self, PlatformError> {
+        fn new(
+            request: AudioOutputRequest,
+            audio_wake: AudioWakeRegistration,
+        ) -> Result<Self, PlatformError> {
             if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
             {
                 return Err(PlatformError::new(
@@ -1325,33 +1386,57 @@ mod windows {
                 cpal::SampleFormat::F32 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [f32], _| fill_f32(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [f32], _| {
+                            let _ = fill_f32(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
                 cpal::SampleFormat::I16 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [i16], _| fill_i16(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [i16], _| {
+                            let _ = fill_i16(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
                 cpal::SampleFormat::U16 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [u16], _| fill_u16(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [u16], _| {
+                            let _ = fill_u16(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
@@ -1379,6 +1464,7 @@ mod windows {
                 next_sequence: 1,
                 submitted_samples: 0,
                 paused: request.start_paused,
+                audio_wake,
             })
         }
 
@@ -1468,6 +1554,7 @@ mod windows {
                 start_paused: false,
             };
             let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
+            let mut observed_wake = 0;
             loop {
                 if self.stream_error.load(Ordering::Acquire) {
                     return Err(PlatformError::new(
@@ -1482,7 +1569,11 @@ mod windows {
                 if Instant::now() >= deadline {
                     return Err(host_error("audio.drain", "WASAPI output drain timed out"));
                 }
-                thread::sleep(Duration::from_millis(5));
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                observed_wake = self
+                    .audio_wake
+                    .wait_timeout(observed_wake, remaining)
+                    .ok_or_else(|| host_error("audio.drain", "WASAPI output drain timed out"))?;
             }
             Ok(self.meter.snapshot())
         }
@@ -1647,7 +1738,7 @@ mod windows {
         output: &mut [f32],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
-    ) {
+    ) -> bool {
         meter.begin_callback();
         let filled = consumer.pop_samples(output);
         for sample in &output[..filled] {
@@ -1657,13 +1748,14 @@ mod windows {
         if filled != output.len() {
             consumer.record_underflow();
         }
+        filled != output.len()
     }
 
     fn fill_i16(
         output: &mut [i16],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
-    ) {
+    ) -> bool {
         meter.begin_callback();
         let mut scratch = [0.0_f32; 1024];
         let mut written = 0;
@@ -1686,13 +1778,14 @@ mod windows {
         if written != output.len() {
             consumer.record_underflow();
         }
+        written != output.len()
     }
 
     fn fill_u16(
         output: &mut [u16],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
         meter: &CallbackMeter,
-    ) {
+    ) -> bool {
         meter.begin_callback();
         let mut scratch = [0.0_f32; 1024];
         let mut written = 0;
@@ -1715,6 +1808,7 @@ mod windows {
         if written != output.len() {
             consumer.record_underflow();
         }
+        written != output.len()
     }
 
     fn set_stream_error(error: &AtomicBool, _value: cpal::StreamError) {
@@ -1722,12 +1816,128 @@ mod windows {
     }
 
     struct DecodeResource {
+        requests: Option<std_mpsc::SyncSender<DecodeWork>>,
+        stop: Arc<AtomicBool>,
+        worker: Option<thread::JoinHandle<()>>,
+    }
+
+    struct DecodeWork {
+        request: PlatformDecodeRequest,
+        reply: oneshot::Sender<Result<DecodeOutput, PlatformError>>,
+    }
+
+    struct DecodeWorkerState {
         kind: DecodeKind,
         provider: astra_media::WindowsMediaFoundationDecodeProvider,
         next_sequence: u64,
+        video_stream: Option<WindowsVideoStreamState>,
+        audio_stream: Option<astra_media::WindowsAudioStreamDecoder>,
+    }
+
+    struct WindowsVideoStreamState {
+        cursor: astra_media::DecodedVideoStreamCursor,
+        decoder: astra_media::WindowsVideoStreamDecoder,
+        pending: Option<astra_media::DecodedVideoFrame>,
+        frame_count: u64,
+        decoded_byte_count: u64,
+        end_emitted: bool,
     }
 
     impl DecodeResource {
+        fn new(kind: DecodeKind) -> Result<Self, PlatformError> {
+            let (request_tx, request_rx) = std_mpsc::sync_channel::<DecodeWork>(2);
+            let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
+            let stop = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&stop);
+            let worker = thread::Builder::new()
+                .name("astra-windows-decode".to_owned())
+                .spawn(move || {
+                    let mut state = match DecodeWorkerState::new(kind) {
+                        Ok(state) => {
+                            let _ = ready_tx.send(Ok(()));
+                            state
+                        }
+                        Err(error) => {
+                            let _ = ready_tx.send(Err(error));
+                            return;
+                        }
+                    };
+                    while !worker_stop.load(Ordering::Acquire) {
+                        let Ok(work) = request_rx.recv() else {
+                            return;
+                        };
+                        let result = state.decode(work.request);
+                        let _ = work.reply.send(result);
+                    }
+                })
+                .map_err(|_| host_error("decode.open", "decode worker could not start"))?;
+            match ready_rx.recv() {
+                Ok(Ok(())) => Ok(Self {
+                    requests: Some(request_tx),
+                    stop,
+                    worker: Some(worker),
+                }),
+                Ok(Err(error)) => {
+                    drop(request_tx);
+                    let _ = worker.join();
+                    Err(error)
+                }
+                Err(_) => {
+                    drop(request_tx);
+                    let _ = worker.join();
+                    Err(host_error(
+                        "decode.open",
+                        "decode worker stopped before initialization",
+                    ))
+                }
+            }
+        }
+
+        fn submit(
+            &self,
+            request: PlatformDecodeRequest,
+            reply: oneshot::Sender<Result<DecodeOutput, PlatformError>>,
+        ) {
+            let Some(requests) = self.requests.as_ref() else {
+                let _ = reply.send(Err(host_error("decode.submit", "decode worker is closed")));
+                return;
+            };
+            match requests.try_send(DecodeWork { request, reply }) {
+                Ok(()) => {}
+                Err(std_mpsc::TrySendError::Full(work)) => {
+                    let _ = work.reply.send(Err(host_error(
+                        "decode.submit",
+                        "decode worker queue is full",
+                    )));
+                }
+                Err(std_mpsc::TrySendError::Disconnected(work)) => {
+                    let _ = work
+                        .reply
+                        .send(Err(host_error("decode.submit", "decode worker is closed")));
+                }
+            }
+        }
+    }
+
+    impl Drop for DecodeResource {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            // Close the sender before joining so a worker waiting for the next
+            // request observes channel closure immediately.
+            self.requests.take();
+            if let Some(worker) = self.worker.take() {
+                if worker.join().is_err() {
+                    tracing::error!(
+                        event = "platform.windows.decode.worker_panic",
+                        diagnostic_code = "ASTRA_PLATFORM_DECODE_WORKER_PANIC",
+                        "Windows decode worker panicked during shutdown"
+                    );
+                }
+            }
+        }
+    }
+
+    impl DecodeWorkerState {
         fn new(kind: DecodeKind) -> Result<Self, PlatformError> {
             let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe()
                 .map_err(|_| host_error("decode.open", "WMF provider initialization failed"))?;
@@ -1735,6 +1945,8 @@ mod windows {
                 kind,
                 provider,
                 next_sequence: 1,
+                video_stream: None,
+                audio_stream: None,
             })
         }
 
@@ -1743,24 +1955,11 @@ mod windows {
             request: PlatformDecodeRequest,
         ) -> Result<DecodeOutput, PlatformError> {
             let capability = self.provider.capability();
-            if request.sequence != self.next_sequence
-                || request.kind != self.kind
-                || request.stream_action != astra_platform::DecodeStreamAction::OneShot
-                || request.bytes.is_empty()
-                || !capability
-                    .codecs
-                    .iter()
-                    .any(|codec| codec == &request.codec)
-                || !request.description.is_empty()
-                || request.sample_rate.is_some()
-                || request.channels.is_some()
-                || request.coded_width.is_some()
-                || request.coded_height.is_some()
-            {
+            if request.sequence != self.next_sequence || request.kind != self.kind {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
                     "decode.submit",
-                    "decode request sequence, kind, codec, payload, or metadata is invalid",
+                    "decode request sequence or kind is invalid",
                 ));
             }
             let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
@@ -1775,32 +1974,272 @@ mod windows {
                 DecodeKind::Audio => astra_media::DecodeKind::Audio,
                 DecodeKind::Video => astra_media::DecodeKind::Video,
             };
-            let result = self
-                .provider
-                .decode(&astra_media::DecodeRequest {
-                    kind,
-                    codec: request.codec,
-                    bytes: request.bytes,
-                    profile: "desktop-release".to_string(),
-                })
-                .map_err(media_decode_error)?;
+            let output = match request.stream_action {
+                astra_platform::DecodeStreamAction::OneShot => {
+                    if request.bytes.is_empty()
+                        || !capability
+                            .codecs
+                            .iter()
+                            .any(|codec| codec == &request.codec)
+                        || !request.description.is_empty()
+                        || request.sample_rate.is_some()
+                        || request.channels.is_some()
+                        || request.coded_width.is_some()
+                        || request.coded_height.is_some()
+                        || self.video_stream.is_some()
+                        || self.audio_stream.is_some()
+                    {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "decode.submit",
+                            "one-shot decode request is invalid while a stream is active",
+                        ));
+                    }
+                    let result = self
+                        .provider
+                        .decode(&astra_media::DecodeRequest {
+                            kind,
+                            codec: request.codec,
+                            bytes: request.bytes,
+                            profile: "desktop-release".to_string(),
+                        })
+                        .map_err(media_decode_error)?;
+                    match result.output {
+                        MediaDecodeOutput::CpuBuffer {
+                            bytes,
+                            format,
+                            hash,
+                        } => DecodeOutput::CpuBuffer {
+                            format,
+                            bytes,
+                            hash: hash.to_string(),
+                        },
+                        MediaDecodeOutput::MediaSurfaceToken(_) => {
+                            return Err(host_error(
+                                "decode.submit",
+                                "WMF returned an unsupported external media surface",
+                            ));
+                        }
+                    }
+                }
+                astra_platform::DecodeStreamAction::Start => {
+                    if request.bytes.is_empty()
+                        || !matches!(request.kind, DecodeKind::Video | DecodeKind::Audio)
+                        || !capability
+                            .codecs
+                            .iter()
+                            .any(|codec| codec == &request.codec)
+                        || !request.description.is_empty()
+                        || request.sample_rate.is_some()
+                        || request.channels.is_some()
+                        || request.coded_width.is_some()
+                        || request.coded_height.is_some()
+                        || self.video_stream.is_some()
+                        || self.audio_stream.is_some()
+                    {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "decode.stream.start",
+                            "stream start request is invalid",
+                        ));
+                    }
+                    match request.kind {
+                        DecodeKind::Video => {
+                            let mut decoder = astra_media::open_windows_video_stream(
+                                &request.bytes,
+                                60 * 60 * 4,
+                                512 * 1024 * 1024,
+                            )
+                            .map_err(media_decode_error)?;
+                            let pending = decoder
+                                .next_frame()
+                                .map_err(media_decode_error)?
+                                .ok_or_else(|| {
+                                    host_error(
+                                        "decode.stream.start",
+                                        "video stream produced no frames",
+                                    )
+                                })?;
+                            let cursor = astra_media::DecodedVideoStreamCursor {
+                                schema: astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA.into(),
+                                source_hash: Hash256::from_sha256(&request.bytes),
+                                width: pending.width,
+                                height: pending.height,
+                                max_frames: 60 * 60 * 4,
+                                max_decoded_byte_count: 512 * 1024 * 1024,
+                            };
+                            let bytes = cursor.encode().map_err(media_decode_error)?;
+                            self.video_stream = Some(WindowsVideoStreamState {
+                                cursor,
+                                decoder,
+                                pending: Some(pending),
+                                frame_count: 0,
+                                decoded_byte_count: 0,
+                                end_emitted: false,
+                            });
+                            DecodeOutput::CpuBuffer {
+                                format: format!(
+                                    "postcard:{}",
+                                    astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA
+                                ),
+                                hash: Hash256::from_sha256(&bytes).to_string(),
+                                bytes,
+                            }
+                        }
+                        DecodeKind::Audio => {
+                            let mut decoder = astra_media::open_windows_audio_stream(
+                                &request.bytes,
+                                64 * 1024 * 1024,
+                            )
+                            .map_err(media_decode_error)?;
+                            let chunk = decoder
+                                .next_chunk()
+                                .map_err(media_decode_error)?
+                                .ok_or_else(|| {
+                                    host_error(
+                                        "decode.stream.start",
+                                        "audio stream produced no samples",
+                                    )
+                                })?;
+                            let format =
+                                format!("pcm_s16le:{}:{}", chunk.sample_rate, chunk.channels);
+                            let hash = Hash256::from_sha256(&chunk.pcm_s16le).to_string();
+                            self.audio_stream = Some(decoder);
+                            DecodeOutput::CpuBuffer {
+                                format,
+                                bytes: chunk.pcm_s16le,
+                                hash,
+                            }
+                        }
+                        DecodeKind::Image => unreachable!(),
+                    }
+                }
+                astra_platform::DecodeStreamAction::Next => {
+                    if !request.bytes.is_empty()
+                        || !request.description.is_empty()
+                        || request.sample_rate.is_some()
+                        || request.channels.is_some()
+                        || request.coded_width.is_some()
+                        || request.coded_height.is_some()
+                    {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "decode.stream.next",
+                            "stream next request must not carry payload or metadata",
+                        ));
+                    }
+                    match request.kind {
+                        DecodeKind::Video => next_windows_video_frame(&mut self.video_stream)?,
+                        DecodeKind::Audio => next_windows_audio_chunk(&mut self.audio_stream)?,
+                        DecodeKind::Image => {
+                            return Err(host_error(
+                                "decode.stream.next",
+                                "image streams are not supported",
+                            ));
+                        }
+                    }
+                }
+            };
             self.next_sequence = next_sequence;
-            match result.output {
-                MediaDecodeOutput::CpuBuffer {
-                    bytes,
-                    format,
-                    hash,
-                } => Ok(DecodeOutput::CpuBuffer {
-                    format,
-                    bytes,
-                    hash: hash.to_string(),
-                }),
-                MediaDecodeOutput::MediaSurfaceToken(_) => Err(host_error(
-                    "decode.submit",
-                    "WMF returned an unsupported external media surface",
-                )),
-            }
+            Ok(output)
         }
+    }
+
+    fn next_windows_video_frame(
+        stream: &mut Option<WindowsVideoStreamState>,
+    ) -> Result<DecodeOutput, PlatformError> {
+        let state = stream
+            .as_mut()
+            .ok_or_else(|| host_error("decode.stream.next", "video stream has not been started"))?;
+        let frame = match state.pending.take() {
+            Some(frame) => Some(frame),
+            None => state.decoder.next_frame().map_err(media_decode_error)?,
+        };
+        if let Some(frame) = frame {
+            state.frame_count = state
+                .frame_count
+                .checked_add(1)
+                .ok_or_else(|| host_error("decode.stream.next", "video frame count overflowed"))?;
+            state.decoded_byte_count = state
+                .decoded_byte_count
+                .checked_add(frame.bgra8.len() as u64)
+                .ok_or_else(|| host_error("decode.stream.next", "decoded byte count overflowed"))?;
+            if state.frame_count > state.cursor.max_frames
+                || state.decoded_byte_count > state.cursor.max_decoded_byte_count
+            {
+                return Err(host_error(
+                    "decode.stream.next",
+                    "decoded video stream exceeds its profile-bound budget",
+                ));
+            }
+            // The decoder already owns a validated BGRA8 allocation.  Keep
+            // the frame metadata in the small format descriptor and move the
+            // pixel Vec directly through the PlatformHost response; encoding
+            // the whole frame as postcard here caused a second full-payload
+            // allocation on every streaming frame.
+            let format = frame.cpu_buffer_format();
+            let bytes = frame.bgra8;
+            tracing::trace!(
+                event = "platform.windows.decode.video_frame.moved",
+                sequence = frame.sequence,
+                width = frame.width,
+                height = frame.height,
+                bytes = bytes.len(),
+                transfer = "owned_cpu_buffer",
+                "WMF streaming frame moved through PlatformHost"
+            );
+            return Ok(DecodeOutput::CpuBuffer {
+                format,
+                hash: frame.content_hash.to_string(),
+                bytes,
+            });
+        }
+        if state.end_emitted {
+            return Err(host_error(
+                "decode.stream.next",
+                "video stream end was already emitted",
+            ));
+        }
+        state.end_emitted = true;
+        let end = astra_media::DecodedVideoStreamCursorEnd {
+            schema: astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA.into(),
+            source_hash: state.cursor.source_hash,
+            frame_count: state.frame_count,
+            decoded_byte_count: state.decoded_byte_count,
+        };
+        end.validate_against(&state.cursor)
+            .map_err(media_decode_error)?;
+        let bytes = end.encode(&state.cursor).map_err(media_decode_error)?;
+        Ok(DecodeOutput::CpuBuffer {
+            format: format!(
+                "postcard:{}",
+                astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA
+            ),
+            hash: Hash256::from_sha256(&bytes).to_string(),
+            bytes,
+        })
+    }
+
+    fn next_windows_audio_chunk(
+        stream: &mut Option<astra_media::WindowsAudioStreamDecoder>,
+    ) -> Result<DecodeOutput, PlatformError> {
+        let decoder = stream
+            .as_mut()
+            .ok_or_else(|| host_error("decode.stream.next", "audio stream has not been started"))?;
+        let chunk = decoder
+            .next_chunk()
+            .map_err(media_decode_error)?
+            .ok_or_else(|| {
+                host_error("decode.stream.next", "audio stream reached end of stream").with_field(
+                    "diagnostic_code",
+                    astra_platform::DECODE_STREAM_EOS_DIAGNOSTIC,
+                )
+            })?;
+        Ok(DecodeOutput::CpuBuffer {
+            format: format!("pcm_s16le:{}:{}", chunk.sample_rate, chunk.channels),
+            hash: Hash256::from_sha256(&chunk.pcm_s16le).to_string(),
+            bytes: chunk.pcm_s16le,
+        })
     }
 
     fn media_decode_error(error: astra_media::MediaError) -> PlatformError {

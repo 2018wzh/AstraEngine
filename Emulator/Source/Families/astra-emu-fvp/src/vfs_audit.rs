@@ -144,7 +144,6 @@ fn byte_source_error(error: ByteSourceError) -> LegacyCoreError {
         ByteSourceError::RangeBounds => "ASTRA_EMU_VFS_READ_BOUNDS",
         ByteSourceError::RevisionMismatch => "ASTRA_EMU_VFS_SOURCE_CHANGED",
         ByteSourceError::ShortRead => "ASTRA_EMU_VFS_SHORT_READ",
-        ByteSourceError::RepeatMismatch => "ASTRA_EMU_VFS_REPEAT_READ_CHANGED",
         ByteSourceError::Poisoned => "ASTRA_EMU_VFS_SOURCE_POISONED",
         ByteSourceError::Io(_) => "ASTRA_EMU_VFS_SOURCE_IO",
     };

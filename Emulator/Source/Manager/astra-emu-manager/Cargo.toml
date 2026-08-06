@@ -25,6 +25,7 @@ astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-emu-metadata = { path = "../../Providers/astra-emu-metadata" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
+astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }

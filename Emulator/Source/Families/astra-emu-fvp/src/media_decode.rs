@@ -99,12 +99,20 @@ pub enum FvpMovieCompatibility {
 }
 
 pub fn fvp_movie_compatibility(extension: &str) -> FvpMovieCompatibility {
-    match extension
-        .trim_start_matches('.')
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    match extension.as_str() {
+        // On Windows these legacy FVP movie containers are handed to the
+        // PlatformHost WMF cursor.  That keeps the encoded source streaming
+        // and lets Media Foundation select a hardware transform when one is
+        // available.  The portable reference decoder remains the explicit
+        // path on non-Windows hosts.
+        #[cfg(windows)]
+        "wmv" | "asf" | "mpg" | "mpeg" | "mp4" | "m4v" => {
+            FvpMovieCompatibility::PlatformProviderRequired
+        }
+        #[cfg(not(windows))]
         "wmv" | "asf" | "mpg" | "mpeg" => FvpMovieCompatibility::Native,
+        #[cfg(not(windows))]
         "mp4" | "m4v" => FvpMovieCompatibility::PlatformProviderRequired,
         _ => FvpMovieCompatibility::Unsupported,
     }
@@ -440,11 +448,19 @@ mod tests {
     fn compatibility_probe_distinguishes_native_platform_and_unsupported() {
         assert_eq!(
             fvp_movie_compatibility("WMV"),
-            FvpMovieCompatibility::Native
+            if cfg!(windows) {
+                FvpMovieCompatibility::PlatformProviderRequired
+            } else {
+                FvpMovieCompatibility::Native
+            }
         );
         assert_eq!(
             fvp_movie_compatibility(".mpeg"),
-            FvpMovieCompatibility::Native
+            if cfg!(windows) {
+                FvpMovieCompatibility::PlatformProviderRequired
+            } else {
+                FvpMovieCompatibility::Native
+            }
         );
         assert_eq!(
             fvp_movie_compatibility("mp4"),

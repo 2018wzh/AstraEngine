@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     fmt,
     fs::File,
     io::{Read, Seek, SeekFrom},
@@ -29,8 +29,6 @@ pub enum ByteSourceError {
     RevisionMismatch,
     #[error("ASTRA_BYTE_SOURCE_SHORT_READ: source returned fewer bytes than requested")]
     ShortRead,
-    #[error("ASTRA_BYTE_SOURCE_REPEAT_MISMATCH: a previously observed range changed")]
-    RepeatMismatch,
     #[error("ASTRA_BYTE_SOURCE_POISONED: source synchronization state is poisoned")]
     Poisoned,
     #[error("ASTRA_BYTE_SOURCE_IO: source I/O failed: {0}")]
@@ -76,7 +74,6 @@ impl ByteRange {
 pub struct RangeReadResult {
     pub range: ByteRange,
     pub revision: SourceRevision,
-    pub content_hash: Hash256,
     pub bytes: Vec<u8>,
 }
 
@@ -167,7 +164,6 @@ impl BoundedByteSource for FileByteSource {
         Ok(RangeReadResult {
             range,
             revision: before.revision,
-            content_hash: Hash256::from_sha256(&bytes),
             bytes,
         })
     }
@@ -212,7 +208,6 @@ impl BoundedByteSource for MemoryByteSource {
         Ok(RangeReadResult {
             range,
             revision: stat.revision,
-            content_hash: Hash256::from_sha256(&bytes),
             bytes,
         })
     }
@@ -227,7 +222,7 @@ struct AccessKey {
 
 #[derive(Debug, Default)]
 pub struct AccessedResourceLedger {
-    observed: BTreeMap<AccessKey, Hash256>,
+    observed: BTreeSet<AccessKey>,
     read_count: u64,
     bytes_read: u64,
     max_range_bytes: u64,
@@ -244,13 +239,7 @@ impl AccessedResourceLedger {
             revision: result.revision,
             range: result.range,
         };
-        if self
-            .observed
-            .insert(key, result.content_hash)
-            .is_some_and(|previous| previous != result.content_hash)
-        {
-            return Err(ByteSourceError::RepeatMismatch);
-        }
+        self.observed.insert(key);
         self.read_count = self.read_count.saturating_add(1);
         self.bytes_read = self.bytes_read.saturating_add(result.range.len);
         self.max_range_bytes = self.max_range_bytes.max(result.range.len);
@@ -271,7 +260,7 @@ impl AccessedResourceLedger {
 
     pub fn unique_resource_count(&self) -> u64 {
         let mut resources = BTreeSet::new();
-        for key in self.observed.keys() {
+        for key in &self.observed {
             resources.insert(key.resource_id.as_str());
         }
         u64::try_from(resources.len()).unwrap_or(u64::MAX)

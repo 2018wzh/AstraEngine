@@ -727,6 +727,34 @@ impl NativeVnProductMediaHost {
             }
             return Ok(Some(frame));
         }
+        if astra_media::is_decoded_video_cpu_buffer_format(&decoded.format) {
+            let frame = astra_media::DecodedVideoFrame::from_cpu_buffer(
+                &decoded.format,
+                decoded.bytes,
+                &decoded.hash,
+                max_decode_output_bytes,
+            )
+            .map_err(|error| media_error("player.video.stream.frame", error))?;
+            let expected_sequence = video.next_frame.checked_add(1).ok_or_else(|| {
+                media_error(
+                    "player.video.stream.frame",
+                    "ASTRA_PLAYER_VIDEO_FRAME_SEQUENCE_OVERFLOW",
+                )
+            })?;
+            if frame.sequence != expected_sequence
+                || frame.pts_us >= video.descriptor.duration_us
+                || frame
+                    .pts_us
+                    .checked_add(frame.duration_us)
+                    .is_none_or(|end| end > video.descriptor.duration_us)
+            {
+                return Err(media_error(
+                    "player.video.stream.frame",
+                    "ASTRA_PLAYER_VIDEO_FRAME_IDENTITY_MISMATCH",
+                ));
+            }
+            return Ok(Some(frame));
+        }
         if decoded.format == format!("postcard:{}", astra_media::DECODED_VIDEO_STREAM_END_SCHEMA) {
             let end: astra_media::DecodedVideoStreamEnd = postcard::from_bytes(&decoded.bytes)
                 .map_err(|error| {

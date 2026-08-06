@@ -37,8 +37,8 @@ fn dylib_facade_reexports_enginecore_public_api() {
             packaged: true,
             engine_version: "0.1.0".to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v2".to_string(),
-            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         })
         .unwrap();
     registrar

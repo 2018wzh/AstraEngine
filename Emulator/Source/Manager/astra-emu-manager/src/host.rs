@@ -1,9 +1,25 @@
 use astra_emu_manager_core::{default_vn_preset, InputMapping};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
+
 use astra_emu_manager_ui_slint::{ManagerViewModel, SlintManagerAdapter};
 use slint::ComponentHandle;
 use thiserror::Error;
 
 use crate::gamepad::GameInputPump;
+
+type HostCallback = Box<dyn FnMut()>;
+type HostCallbackSlot = std::rc::Rc<std::cell::RefCell<Option<HostCallback>>>;
+
+/// Thread-safe edge-triggered wake used by workers to notify the Slint host.
+/// The callback only schedules work back onto the UI thread; it never mutates
+/// controller or renderer state from a worker.
+pub type HostWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
 pub struct WgpuFrameContext<'a> {
     pub device: &'a wgpu::Device,
@@ -111,6 +127,15 @@ pub trait ManagerController: 'static {
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
         Ok(None)
     }
+    fn set_host_wake(&mut self, _wake: HostWake) {}
+    /// Absolute deadline for the next fixed runtime tick.  The host schedules
+    /// a single wake at this deadline; rendering never advances the runtime.
+    fn runtime_deadline(&self) -> Option<Instant> {
+        None
+    }
+    fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String> {
+        Ok(None)
+    }
     // ===== UI redesign callbacks (default implementations keep existing
     // controllers source-compatible until they opt in) =====
     /// Sidebar / bottom navigation. Pure UI state; the host applies the page
@@ -191,6 +216,14 @@ pub trait ManagerController: 'static {
     }
 }
 
+fn fire_host_callback(slot: &HostCallbackSlot) {
+    let Some(mut callback) = slot.borrow_mut().take() else {
+        return;
+    };
+    callback();
+    *slot.borrow_mut() = Some(callback);
+}
+
 #[derive(Debug, Error)]
 pub enum HostError {
     #[error("ASTRA_EMU_HOST_BACKEND: {0}")]
@@ -224,69 +257,65 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let fatal_error = std::rc::Rc::new(std::cell::RefCell::new(None));
     let fatal_error_callback = fatal_error.clone();
     let window_weak = adapter.window().as_weak();
-    let platform_timer = slint::Timer::default();
-    let platform_weak = adapter.window().as_weak();
-    let platform_controller = controller.clone();
-    let platform_adapter = adapter.clone();
-    platform_timer.start(
-        slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(250),
-        move || {
-            let Some(window) = platform_weak.upgrade() else {
-                return;
-            };
-            match platform_controller.borrow_mut().poll_platform() {
-                Ok(Some(model)) => platform_adapter.apply(&model),
-                Ok(None) => {}
-                Err(error) => window.set_global_diagnostic(error.into()),
-            }
-        },
-    );
-    let gamepad_timer = slint::Timer::default();
-    let gamepad_weak = adapter.window().as_weak();
-    let gamepad_controller = controller.clone();
     let gamepad = std::rc::Rc::new(std::cell::RefCell::new(GameInputPump::new(
         controller.borrow().input_mapping(),
     )));
-    let gamepad_pump = gamepad.clone();
-    gamepad_timer.start(
-        slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(8),
-        move || {
-            let Some(window) = gamepad_weak.upgrade() else {
-                return;
-            };
-            let input_blocked = !window.get_game_active()
-                || window.get_translation_overlay_active()
-                || window.get_diagnostics_overlay_active()
-                || window.get_patches_overlay_active()
-                || window.get_filters_overlay_active();
-            let events = match gamepad_pump.borrow_mut().poll() {
-                Ok(events) => events,
-                Err(error) => {
-                    window.set_global_diagnostic(error.into());
-                    return;
-                }
-            };
-            for event in events {
-                if input_blocked {
-                    continue;
-                }
-                if let Err(error) = gamepad_controller.borrow_mut().game_input(
-                    &event.control,
-                    event.pressed,
-                    event.value,
-                ) {
-                    window.set_global_diagnostic(error.into());
-                    break;
+    // Worker completions are edge-triggered.  The render callback only drains
+    // the bounded completion queues when a worker has signalled this flag;
+    // ordinary Slint repaints must not turn into a hidden polling loop.
+    let async_events_pending = Arc::new(AtomicBool::new(true));
+    let async_events_for_wake = async_events_pending.clone();
+    let wake_window = adapter.window().as_weak();
+    let host_wake: HostWake = Arc::new(move || {
+        async_events_for_wake.store(true, Ordering::Release);
+        let weak = wake_window.clone();
+        if let Err(error) = slint::invoke_from_event_loop(move || {
+            if let Some(window) = weak.upgrade() {
+                window.window().request_redraw();
+            }
+        }) {
+            tracing::debug!(
+                event = "astra.emu.host.wake_rejected",
+                diagnostic_code = "ASTRA_EMU_HOST_WAKE_REJECTED",
+                error = %error
+            );
+        }
+    });
+    controller.borrow_mut().set_host_wake(host_wake.clone());
+    gamepad.borrow_mut().set_wake(host_wake);
+    let runtime_timer = std::rc::Rc::new(slint::Timer::default());
+    let runtime_schedule: HostCallbackSlot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let runtime_schedule_slot = runtime_schedule.clone();
+    let runtime_weak = adapter.window().as_weak();
+    let runtime_controller = controller.clone();
+    let runtime_adapter = adapter.clone();
+    *runtime_schedule.borrow_mut() = Some(Box::new(move || {
+        let timer = runtime_timer.clone();
+        let slot = runtime_schedule_slot.clone();
+        let weak = runtime_weak.clone();
+        let controller = runtime_controller.clone();
+        let adapter = runtime_adapter.clone();
+        let Some(deadline) = controller.borrow().runtime_deadline() else {
+            return;
+        };
+        let delay = deadline.saturating_duration_since(Instant::now());
+        timer.start(slint::TimerMode::SingleShot, delay, move || {
+            if let Some(window) = weak.upgrade() {
+                match controller.borrow_mut().advance_runtime() {
+                    Ok(Some(model)) => adapter.apply(&model),
+                    Ok(None) => {}
+                    Err(error) => window.set_global_diagnostic(error.into()),
                 }
             }
-        },
-    );
+            fire_host_callback(&slot);
+        });
+    }));
+    fire_host_callback(&runtime_schedule);
     let launch_weak = adapter.window().as_weak();
     let launch_controller = controller.clone();
     let launch_adapter = adapter.clone();
     let launch_gamepad = gamepad.clone();
+    let launch_runtime_schedule = runtime_schedule.clone();
     adapter.window().on_launch(move |case_id| {
         let Some(window) = launch_weak.upgrade() else {
             return;
@@ -297,6 +326,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 launch_gamepad.borrow_mut().set_mapping(mapping);
                 launch_adapter.apply(&model);
                 window.set_game_active(true);
+                fire_host_callback(&launch_runtime_schedule);
             }
             Err(error) => window.set_global_diagnostic(error.into()),
         }
@@ -305,6 +335,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let leave_controller = controller.clone();
     let leave_adapter = adapter.clone();
     let leave_gamepad = gamepad.clone();
+    let leave_runtime_schedule = runtime_schedule.clone();
     adapter.window().on_leave_game(move || {
         let Some(window) = leave_weak.upgrade() else {
             return;
@@ -315,6 +346,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 leave_gamepad.borrow_mut().set_mapping(mapping);
                 leave_adapter.apply(&model);
                 window.set_game_active(false);
+                fire_host_callback(&leave_runtime_schedule);
             }
             Err(error) => window.set_global_diagnostic(error.into()),
         }
@@ -861,6 +893,14 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 }
             }
         });
+    // Worker completions and gamepad edges only wake the Slint event loop. The
+    // actual drain is performed here on the UI thread immediately before the
+    // underlay render, so no controller/UI object crosses a worker boundary.
+    let event_controller = controller.clone();
+    let event_adapter = adapter.clone();
+    let event_gamepad = gamepad.clone();
+    let event_window = adapter.window().as_weak();
+    let event_pending = async_events_pending.clone();
     let renderer_callback = renderer.clone();
     adapter.window().window().set_rendering_notifier(move |state, api| {
         let slint::GraphicsAPI::WGPU29 { device, queue, .. } = api else {
@@ -879,6 +919,37 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 Ok(())
             }
             slint::RenderingState::BeforeRendering => {
+                if let Some(window) = event_window.upgrade() {
+                    if event_pending.swap(false, Ordering::Acquire) {
+                        match event_controller.borrow_mut().poll_platform() {
+                            Ok(Some(model)) => event_adapter.apply(&model),
+                            Ok(None) => {}
+                            Err(error) => window.set_global_diagnostic(error.into()),
+                        }
+                        let input_blocked = !window.get_game_active()
+                            || window.get_translation_overlay_active()
+                            || window.get_diagnostics_overlay_active()
+                            || window.get_patches_overlay_active()
+                            || window.get_filters_overlay_active();
+                        match event_gamepad.borrow_mut().poll() {
+                            Ok(events) => {
+                                if !input_blocked {
+                                    for event in events {
+                                        if let Err(error) = event_controller.borrow_mut().game_input(
+                                            &event.control,
+                                            event.pressed,
+                                            event.value,
+                                        ) {
+                                            window.set_global_diagnostic(error.into());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(error) => window.set_global_diagnostic(error.into()),
+                        }
+                    }
+                }
                 let mut renderer = renderer_callback.borrow_mut();
                 renderer.render(context)?;
                 if let Some((texture, width, height)) = renderer.take_stage_texture_update() {

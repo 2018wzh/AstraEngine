@@ -1,5 +1,8 @@
 # Minori Script Execution
 
+The active Minori runtime section is `astra.emu.minori.runtime_state.v7`.
+Any v6 snapshot is a migration-rejection input and is never restored.
+
 当前已有受限 VM，执行 `set`、`setglobal`、`label`、`goto`、`if`、`wait`、`message`、BGM/SE、`playvoice *`、`transition`、无 stand 的 `stage`、`effect CrossFade2`、`.panel 1`、`chain` 和 `end`。状态保存 PC、local/global 变量、等待、消息身份、图层、transition、effect timeline、message panel、音频和系统页等字段，并通过 postcard snapshot round-trip 验证。`select`、非控制型 `playvoice`、stand position、其他 panel mode 和其余演出命令遇到执行路径时返回稳定 blocking diagnostic，不会被跳过。
 
 `chain` 的语义已经由原程序反编译纠正。它不是 call，也没有 return frame；处理函数结束当前脚本，把参数写入全局 `NEXT`，随后由外层装载下一个脚本。运行时据此做尾链式 VFS 切换：目标只允许 `minori:/scr/` 根下的直接 `.sc` entry，脚本切换时清空 local 变量，保留 global 变量。路径穿越、缺 entry、解析失败和 hash 漂移都会毒化 session 并阻断执行。
@@ -56,7 +59,7 @@ Manager 只能接收 trace 和 presentation/audio command，不读取私有 VM �
 
 ## Save/Load
 
-Snapshot schema 当前为 `astra.emu.minori.runtime_state.v6`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、已提交 presentation layer、transition 配置、CrossFade2 timeline 与可见 frame、message panel、audio bus 的 URI/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
+Snapshot schema 当前为 `astra.emu.minori.runtime_state.v7`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、已提交 presentation layer、transition 配置、CrossFade2 timeline 与可见 frame、message panel、audio bus 的 URI/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
 
 ## Determinism
 

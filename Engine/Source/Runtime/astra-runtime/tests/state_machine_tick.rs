@@ -3,7 +3,7 @@ use astra_runtime::{
     validate_state_machine, ActionInvocation, ActionRegistry, BlackboardValue, EventPayload,
     EventSource, GuardExpr, PackageHandle, PresentationCommand, RuntimeConfig, RuntimeWorld,
     SetBlackboardAction, StateDefinition, StateMachineDefinition, StateMachineValidationReport,
-    TickInput, TransitionDefinition,
+    TickInput, TickIntegrityMode, TransitionDefinition,
 };
 use std::collections::BTreeMap;
 
@@ -545,8 +545,61 @@ fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
 
 #[astra_headless_test::test]
 fn state_machine_cycle_blocks_without_committing_partial_progress() {
-    let mut world =
-        RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
+    let (mut world, actor) = cycle_world(TickIntegrityMode::Evidence);
+    let report = world
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
+        .unwrap();
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_CYCLE"));
+    assert_eq!(
+        world.debug_session().state_machines(actor)[0].current_state,
+        StableId::deterministic_v7(8, 1, 11)
+    );
+    assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+}
+
+#[astra_headless_test::test]
+fn shipping_state_machine_cycle_uses_microstep_budget_without_hash_guard() {
+    let (mut world, actor) = cycle_world(TickIntegrityMode::Shipping);
+    let report = world
+        .tick(astra_runtime::TickRequest::live(
+            TickInput {
+                fixed_step: 1,
+                delta_ns: 16_666_667,
+                seed: 0,
+            },
+            Vec::new(),
+        ))
+        .unwrap();
+
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_BUDGET"));
+    assert_eq!(
+        world.debug_session().state_machines(actor)[0].current_state,
+        StableId::deterministic_v7(8, 1, 11)
+    );
+    assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+}
+
+fn cycle_world(integrity_mode: TickIntegrityMode) -> (RuntimeWorld, astra_runtime::ActorId) {
+    let mut world = RuntimeWorld::create_with_integrity(
+        RuntimeConfig::default(),
+        PackageHandle::default(),
+        integrity_mode,
+    )
+    .unwrap();
     let actor = world.create_actor("cycle", vec![]);
     let left = StableId::deterministic_v7(8, 1, 11);
     let right = StableId::deterministic_v7(8, 2, 11);
@@ -590,27 +643,7 @@ fn state_machine_cycle_blocks_without_committing_partial_progress() {
             initial_state: left,
         })
         .unwrap();
-
-    let report = world
-        .tick(astra_runtime::TickRequest::live(
-            TickInput {
-                fixed_step: 1,
-                delta_ns: 16_666_667,
-                seed: 0,
-            },
-            Vec::new(),
-        ))
-        .unwrap();
-
-    assert!(report
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_CYCLE"));
-    assert_eq!(
-        world.debug_session().state_machines(actor)[0].current_state,
-        left
-    );
-    assert_eq!(world.snapshot().blackboard.get("cycle"), None);
+    (world, actor)
 }
 
 #[astra_headless_test::test]

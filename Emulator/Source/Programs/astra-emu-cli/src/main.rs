@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use astra_emu_cli::{
     run_headless, run_native, HeadlessLaunch, HeadlessPerformanceArtifacts, NativeLaunch,
+    NativeLaunchMode,
 };
 use clap::{Parser, Subcommand};
 
@@ -64,6 +65,30 @@ enum CliCommand {
         /// bounded native soak runs and is never a throughput sampling shortcut.
         #[arg(long, requires = "input")]
         max_fixed_steps: Option<u64>,
+    },
+    /// Launch a real native window/device path while replaying only the
+    /// validated Headless physical-input JSONL sequence.
+    WindowedE2 {
+        #[arg(long)]
+        family: String,
+        #[arg(long)]
+        game_dir: PathBuf,
+        #[arg(long)]
+        mount_profile: PathBuf,
+        #[arg(long)]
+        entry: Option<String>,
+        #[arg(long, requires = "family_library")]
+        family_manifest: Option<PathBuf>,
+        #[arg(long, requires = "family_manifest")]
+        family_library: Option<PathBuf>,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        artifacts: PathBuf,
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        enable_audio: bool,
+        #[arg(long)]
+        perfetto_trace: Option<PathBuf>,
     },
     /// Run the same AstraEMU RuntimeWorld/provider path on astra-platform-headless.
     Headless {
@@ -165,10 +190,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 perfetto_trace,
                 input_path: input,
                 max_fixed_steps,
+                mode: NativeLaunchMode::Interactive,
             })
             .await?;
             tracing::info!(
                 event = "astra_emu_cli_native_launch_completed",
+                family = family.as_str()
+            );
+        }
+        CliCommand::WindowedE2 {
+            family,
+            game_dir,
+            mount_profile,
+            entry,
+            family_manifest,
+            family_library,
+            input,
+            artifacts,
+            enable_audio,
+            perfetto_trace,
+        } => {
+            tracing::info!(
+                event = "astra_emu_cli_windowed_e2_started",
+                family = family.as_str()
+            );
+            run_native(NativeLaunch {
+                family_id: family.clone(),
+                game_dir,
+                mount_profile,
+                entry,
+                family_manifest,
+                family_library,
+                enable_audio,
+                perfetto_trace,
+                input_path: Some(input),
+                max_fixed_steps: None,
+                mode: NativeLaunchMode::WindowedE2 {
+                    artifact_root: artifacts,
+                },
+            })
+            .await?;
+            tracing::info!(
+                event = "astra_emu_cli_windowed_e2_completed",
                 family = family.as_str()
             );
         }

@@ -3,7 +3,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
     },
     time::Duration,
 };
@@ -163,6 +163,54 @@ pub struct AudioPacket {
     pub samples: Vec<f32>,
 }
 
+#[derive(Clone, Default)]
+pub struct AudioWakeRegistration {
+    state: Arc<(Mutex<u64>, Condvar)>,
+}
+
+impl AudioWakeRegistration {
+    pub fn notify(&self) {
+        let (sequence, wake) = &*self.state;
+        if let Ok(mut sequence) = sequence.lock() {
+            *sequence = sequence.saturating_add(1);
+            wake.notify_one();
+        }
+    }
+
+    pub fn wait(&self, observed: u64) -> u64 {
+        let (sequence, wake) = &*self.state;
+        let mut current = sequence.lock().expect("audio wake state is not poisoned");
+        while *current <= observed {
+            current = wake
+                .wait(current)
+                .expect("audio wake state is not poisoned");
+        }
+        *current
+    }
+
+    /// Waits for the next callback edge without introducing a periodic poll.
+    /// `None` means the supplied deadline elapsed before a new edge arrived.
+    pub fn wait_timeout(&self, observed: u64, timeout: std::time::Duration) -> Option<u64> {
+        let (sequence, wake) = &*self.state;
+        let mut current = sequence.lock().expect("audio wake state is not poisoned");
+        let deadline = std::time::Instant::now() + timeout;
+        while *current <= observed {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return None;
+            }
+            let (next, result) = wake
+                .wait_timeout(current, remaining)
+                .expect("audio wake state is not poisoned");
+            current = next;
+            if result.timed_out() && *current <= observed {
+                return None;
+            }
+        }
+        Some(*current)
+    }
+}
+
 impl AudioPacket {
     pub fn frame_count(&self) -> usize {
         self.samples
@@ -211,6 +259,11 @@ pub enum DecodeStreamAction {
     Start,
     Next,
 }
+
+/// Stable diagnostic attached to a stream `Next` error when the decoder has
+/// reached end-of-stream.  It is intentionally separate from the human
+/// message so workers do not have to pattern-match localized text.
+pub const DECODE_STREAM_EOS_DIAGNOSTIC: &str = "ASTRA_MEDIA_STREAM_EOS";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlatformDecodeRequest {
@@ -708,11 +761,20 @@ pub enum PlatformEventKind {
 pub struct PlatformHostClient {
     command_tx: mpsc::Sender<HostCommand>,
     command_wake: Option<PlatformCommandWakeRegistration>,
+    audio_wake: AudioWakeRegistration,
     shutdown: Arc<AtomicBool>,
     profile: Arc<HostLaunchProfile>,
 }
 
 impl PlatformHostClient {
+    pub fn command_wake_registration(&self) -> Option<PlatformCommandWakeRegistration> {
+        self.command_wake.clone()
+    }
+
+    pub fn audio_wake(&self) -> AudioWakeRegistration {
+        self.audio_wake.clone()
+    }
+
     pub async fn query_audio_device_format(&self) -> Result<AudioDeviceFormat, PlatformError> {
         self.ensure_running("audio.query_device_format")?;
         let (reply, response) = oneshot::channel();
@@ -1098,7 +1160,8 @@ impl PlatformHostClient {
                     || request.bytes.len() > self.profile.limits().max_frame_bytes
             }
             DecodeStreamAction::Next => {
-                request.kind != DecodeKind::Video || !request.bytes.is_empty()
+                !matches!(request.kind, DecodeKind::Video | DecodeKind::Audio)
+                    || !request.bytes.is_empty()
             }
         };
         if request.sequence == 0 || payload_invalid {
@@ -1434,6 +1497,16 @@ impl PlatformCommandWakeRegistration {
             callback();
         }
     }
+
+    /// Notify the owning event loop about work completed by a host worker.
+    ///
+    /// Queue submissions call this internally.  Platform workers (for
+    /// example HTTPS package completion or decoder completion) use this
+    /// explicit edge notification so the event loop does not need a timer to
+    /// discover completed work.
+    pub fn notify(&self) {
+        self.wake("host.command_wake.notify");
+    }
 }
 
 pub struct PlatformEventStream {
@@ -1464,9 +1537,14 @@ pub struct PlatformBackendChannels {
     command_rx: mpsc::Receiver<HostCommand>,
     event_tx: mpsc::Sender<PlatformEvent>,
     last_event_sequence: Arc<std::sync::atomic::AtomicU64>,
+    audio_wake: AudioWakeRegistration,
 }
 
 impl PlatformBackendChannels {
+    pub fn audio_wake(&self) -> AudioWakeRegistration {
+        self.audio_wake.clone()
+    }
+
     pub async fn next_command(&mut self) -> Option<HostCommand> {
         self.command_rx.recv().await
     }
@@ -1609,10 +1687,12 @@ fn host_channel_internal(
     }
     let (command_tx, command_rx) = mpsc::channel(command_capacity);
     let (event_tx, event_rx) = mpsc::channel(event_capacity);
+    let audio_wake = AudioWakeRegistration::default();
     Ok((
         PlatformHostClient {
             command_tx,
             command_wake,
+            audio_wake: audio_wake.clone(),
             shutdown: Arc::new(AtomicBool::new(false)),
             profile: Arc::new(profile),
         },
@@ -1620,6 +1700,7 @@ fn host_channel_internal(
             command_rx,
             event_tx,
             last_event_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            audio_wake,
         },
         PlatformEventStream {
             event_rx,
@@ -1708,12 +1789,54 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                 if texture.width == 0
                     || texture.height == 0
                     || expected != Some(texture.rgba8.len())
-                    || astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash
                 {
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
                         "texture dimensions or content hash are invalid",
+                    ));
+                }
+                astra_media_core::validate_rgba8_payload(
+                    texture.width,
+                    texture.height,
+                    &texture.rgba8,
+                    texture.hash,
+                )
+                .map_err(|_| {
+                    PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "texture dimensions or content hash are invalid",
+                    )
+                })?;
+                resource_bytes =
+                    resource_bytes
+                        .checked_add(texture.rgba8.len())
+                        .ok_or_else(|| {
+                            PlatformError::new(
+                                PlatformErrorCode::InvalidState,
+                                "surface.present_scene",
+                                "scene resource byte count overflowed",
+                            )
+                        })?;
+            }
+            SceneCommand::UploadLiveTexture { frame: texture, .. } => {
+                let expected = usize::try_from(texture.width)
+                    .ok()
+                    .and_then(|width| {
+                        usize::try_from(texture.height)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+                    .and_then(|pixels| pixels.checked_mul(4));
+                if texture.width == 0
+                    || texture.height == 0
+                    || expected != Some(texture.rgba8.len())
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "live texture dimensions or byte length are invalid",
                     ));
                 }
                 resource_bytes =
@@ -1726,6 +1849,35 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                                 "scene resource byte count overflowed",
                             )
                         })?;
+            }
+            SceneCommand::UpdateLiveTextureRegion {
+                width,
+                height,
+                rgba8,
+                ..
+            } => {
+                let expected = usize::try_from(*width)
+                    .ok()
+                    .and_then(|width| {
+                        usize::try_from(*height)
+                            .ok()
+                            .and_then(|height| width.checked_mul(height))
+                    })
+                    .and_then(|pixels| pixels.checked_mul(4));
+                if *width == 0 || *height == 0 || expected != Some(rgba8.len()) {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "live texture region dimensions or byte length are invalid",
+                    ));
+                }
+                resource_bytes = resource_bytes.checked_add(rgba8.len()).ok_or_else(|| {
+                    PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "surface.present_scene",
+                        "scene resource byte count overflowed",
+                    )
+                })?;
             }
             SceneCommand::UploadGlyph { glyph, .. } => {
                 let channels = match glyph.format {
@@ -1740,17 +1892,20 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                             .and_then(|height| width.checked_mul(height))
                     })
                     .and_then(|pixels| pixels.checked_mul(channels));
-                if glyph.width == 0
-                    || glyph.height == 0
-                    || expected != Some(glyph.pixels.len())
-                    || astra_core::Hash256::from_sha256(&glyph.pixels) != glyph.hash
-                {
+                if glyph.width == 0 || glyph.height == 0 || expected != Some(glyph.pixels.len()) {
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
                         "glyph bitmap dimensions or content hash are invalid",
                     ));
                 }
+                glyph.validate_integrity().map_err(|_| {
+                    PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "glyph bitmap dimensions or content hash are invalid",
+                    )
+                })?;
                 resource_bytes =
                     resource_bytes
                         .checked_add(glyph.pixels.len())
@@ -1889,7 +2044,6 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                 if texture.width == 0
                     || texture.height == 0
                     || expected != Some(texture.rgba8.len())
-                    || astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash
                     || destination.width == 0
                     || destination.height == 0
                     || !opacity.is_finite()
@@ -1901,6 +2055,19 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                         "inline media frame geometry, opacity, or content hash is invalid",
                     ));
                 }
+                astra_media_core::validate_rgba8_payload(
+                    texture.width,
+                    texture.height,
+                    &texture.rgba8,
+                    texture.hash,
+                )
+                .map_err(|_| {
+                    PlatformError::new(
+                        PlatformErrorCode::IntegrityMismatch,
+                        "surface.present_scene",
+                        "inline media frame geometry, opacity, or content hash is invalid",
+                    )
+                })?;
                 resource_bytes =
                     resource_bytes
                         .checked_add(texture.rgba8.len())
@@ -2047,4 +2214,47 @@ fn https_origin(value: &str) -> Option<String> {
         return None;
     }
     Some(format!("https://{}", authority.to_ascii_lowercase()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AudioWakeRegistration;
+    use std::{sync::Arc, thread, time::Duration};
+
+    #[test]
+    fn audio_wake_waits_for_an_edge_without_periodic_polling() {
+        let registration = AudioWakeRegistration::default();
+        let worker_registration = registration.clone();
+        let worker = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(5));
+            worker_registration.notify();
+        });
+        let sequence = registration
+            .wait_timeout(0, Duration::from_secs(1))
+            .expect("callback edge should wake the waiter");
+        assert_eq!(sequence, 1);
+        worker.join().expect("audio wake worker must stop");
+    }
+
+    #[test]
+    fn audio_wake_timeout_uses_an_absolute_deadline() {
+        let registration = AudioWakeRegistration::default();
+        let start = std::time::Instant::now();
+        assert!(registration
+            .wait_timeout(0, Duration::from_millis(10))
+            .is_none());
+        assert!(start.elapsed() < Duration::from_millis(250));
+
+        let registration = Arc::new(registration);
+        let notifier = Arc::clone(&registration);
+        let worker = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(5));
+            notifier.notify();
+        });
+        let sequence = registration
+            .wait_timeout(0, Duration::from_secs(1))
+            .expect("a later edge should still wake the waiter");
+        assert_eq!(sequence, 1);
+        worker.join().expect("audio wake worker must stop");
+    }
 }

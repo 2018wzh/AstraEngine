@@ -6,8 +6,8 @@ use std::{
 };
 
 use astra_media_core::{
-    BlendMode, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand,
-    TextureFrame, Transform2D,
+    BlendMode, GlyphBitmap, GlyphBitmapFormat, LiveTextureBuffer, LiveTextureFrame, MeshMaterial2D,
+    MeshVertex2D, RectI, SceneCommand, TextureFrame, Transform2D,
 };
 use astra_platform::{PlatformError, PlatformErrorCode, SceneFrame};
 use sha2::{Digest, Sha256};
@@ -61,6 +61,7 @@ struct CachedOutput {
 /// non-alpha legacy blend from falling back to a CPU framebuffer.
 struct BlendPipelines {
     alpha: wgpu::RenderPipeline,
+    opaque: wgpu::RenderPipeline,
     add: wgpu::RenderPipeline,
     multiply: wgpu::RenderPipeline,
 }
@@ -69,6 +70,7 @@ impl BlendPipelines {
     fn select(&self, blend: BlendMode) -> Result<&wgpu::RenderPipeline, PlatformError> {
         match blend {
             BlendMode::Alpha => Ok(&self.alpha),
+            BlendMode::Opaque => Ok(&self.opaque),
             BlendMode::Add => Ok(&self.add),
             BlendMode::Multiply => Ok(&self.multiply),
             BlendMode::Screen => Err(invalid(
@@ -138,9 +140,57 @@ enum AtlasResource {
 
 #[derive(Clone, PartialEq, Eq)]
 struct RetainedTexture {
-    base: Arc<TextureFrame>,
+    base: RetainedTextureBase,
     patches: Vec<RetainedTexturePatch>,
     patch_bytes: usize,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum RetainedTextureBase {
+    Hashed(Arc<TextureFrame>),
+    Live(Arc<LiveTextureFrame>),
+}
+
+impl RetainedTextureBase {
+    fn width(&self) -> u32 {
+        match self {
+            Self::Hashed(frame) => frame.width,
+            Self::Live(frame) => frame.width,
+        }
+    }
+
+    fn height(&self) -> u32 {
+        match self {
+            Self::Hashed(frame) => frame.height,
+            Self::Live(frame) => frame.height,
+        }
+    }
+
+    fn rgba8(&self) -> &[u8] {
+        match self {
+            Self::Hashed(frame) => &frame.rgba8,
+            Self::Live(frame) => &frame.rgba8,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum RetainedTexturePatchPixels {
+    Hashed(Arc<[u8]>),
+    Live(LiveTextureBuffer),
+}
+
+impl RetainedTexturePatchPixels {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Hashed(rgba8) => rgba8,
+            Self::Live(rgba8) => rgba8.as_slice(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -149,7 +199,7 @@ struct RetainedTexturePatch {
     y: u32,
     width: u32,
     height: u32,
-    rgba8: Arc<[u8]>,
+    rgba8: RetainedTexturePatchPixels,
 }
 
 type ResourceMutationJournal = BTreeMap<String, Option<AtlasResource>>;
@@ -302,7 +352,15 @@ impl<'a> AtlasPlacementView<'a> {
 impl AtlasResource {
     fn texture(frame: TextureFrame) -> Self {
         Self::Texture(Arc::new(RetainedTexture {
-            base: Arc::new(frame),
+            base: RetainedTextureBase::Hashed(Arc::new(frame)),
+            patches: Vec::new(),
+            patch_bytes: 0,
+        }))
+    }
+
+    fn live_texture(frame: LiveTextureFrame) -> Self {
+        Self::Texture(Arc::new(RetainedTexture {
+            base: RetainedTextureBase::Live(Arc::new(frame)),
             patches: Vec::new(),
             patch_bytes: 0,
         }))
@@ -311,21 +369,21 @@ impl AtlasResource {
     fn width(&self) -> u32 {
         match self {
             Self::Glyph(value) => value.width,
-            Self::Texture(value) => value.base.width,
+            Self::Texture(value) => value.base.width(),
         }
     }
 
     fn height(&self) -> u32 {
         match self {
             Self::Glyph(value) => value.height,
-            Self::Texture(value) => value.base.height,
+            Self::Texture(value) => value.base.height(),
         }
     }
 
     fn byte_len(&self) -> usize {
         match self {
             Self::Glyph(value) => value.pixels.len(),
-            Self::Texture(value) => value.base.rgba8.len().saturating_add(value.patch_bytes),
+            Self::Texture(value) => value.base.rgba8().len().saturating_add(value.patch_bytes),
         }
     }
 }
@@ -641,6 +699,8 @@ impl WgpuGlyphAtlasRenderer {
                     command,
                     SceneCommand::UploadTexture { .. }
                         | SceneCommand::UpdateTextureRegion { .. }
+                        | SceneCommand::UploadLiveTexture { .. }
+                        | SceneCommand::UpdateLiveTextureRegion { .. }
                         | SceneCommand::UploadGlyph { .. }
                         | SceneCommand::ReleaseResource { .. }
                         | SceneCommand::Texture { .. }
@@ -747,8 +807,8 @@ impl WgpuGlyphAtlasRenderer {
                         return Err(invalid("texture update references a non-texture resource"));
                     };
                     validate_texture_region(
-                        current.base.width,
-                        current.base.height,
+                        current.base.width(),
+                        current.base.height(),
                         *x,
                         *y,
                         *width,
@@ -758,8 +818,8 @@ impl WgpuGlyphAtlasRenderer {
                     )?;
                     texture_region_uploads.push(TextureRegionUpload {
                         resource_id,
-                        texture_width: current.base.width,
-                        texture_height: current.base.height,
+                        texture_width: current.base.width(),
+                        texture_height: current.base.height(),
                         x: *x,
                         y: *y,
                         width: *width,
@@ -778,7 +838,7 @@ impl WgpuGlyphAtlasRenderer {
                             *y,
                             *width,
                             *height,
-                            Arc::clone(rgba8),
+                            RetainedTexturePatchPixels::Hashed(Arc::clone(rgba8)),
                         )?;
                         let resource = AtlasResource::Texture(Arc::new(texture));
                         render_mutations.insert(resource_id.clone(), Some(resource.clone()));
@@ -787,6 +847,89 @@ impl WgpuGlyphAtlasRenderer {
                     } else {
                         return Err(invalid(
                             "texture region updates are not valid in a recovery frame",
+                        ));
+                    }
+                }
+                SceneCommand::UploadLiveTexture { resource_id, frame } => {
+                    upload_texture_count += 1;
+                    validate_resource_id(resource_id)?;
+                    validate_live_texture_metadata(frame)?;
+                    if apply_mutations {
+                        if committed_mutations.contains_key(resource_id) {
+                            return Err(invalid(
+                                "texture resource id is mutated more than once in a frame",
+                            ));
+                        }
+                        if resource_contains!(resource_id) {
+                            return Err(invalid("texture upload repeats a live resource id"));
+                        }
+                        let resource = AtlasResource::live_texture(frame.clone());
+                        render_mutations.insert(resource_id.clone(), Some(resource.clone()));
+                        committed_mutations.insert(resource_id.clone(), Some(resource));
+                        resources_changed = true;
+                    } else if resource_get!(resource_id)
+                        != Some(&AtlasResource::live_texture(frame.clone()))
+                    {
+                        return Err(invalid(
+                            "retained live texture resource does not match the recovery frame",
+                        ));
+                    }
+                }
+                SceneCommand::UpdateLiveTextureRegion {
+                    resource_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba8,
+                } => {
+                    upload_texture_count += 1;
+                    validate_resource_id(resource_id)?;
+                    let current = resource_get!(resource_id)
+                        .ok_or_else(|| invalid("texture update references an unknown resource"))?;
+                    let AtlasResource::Texture(current) = current else {
+                        return Err(invalid("texture update references a non-texture resource"));
+                    };
+                    validate_live_texture_region(
+                        current.base.width(),
+                        current.base.height(),
+                        *x,
+                        *y,
+                        *width,
+                        *height,
+                        rgba8,
+                    )?;
+                    texture_region_uploads.push(TextureRegionUpload {
+                        resource_id,
+                        texture_width: current.base.width(),
+                        texture_height: current.base.height(),
+                        x: *x,
+                        y: *y,
+                        width: *width,
+                        height: *height,
+                        rgba8,
+                    });
+                    if apply_mutations {
+                        if committed_mutations.contains_key(resource_id) {
+                            return Err(invalid(
+                                "texture resource id is mutated more than once in a frame",
+                            ));
+                        }
+                        let texture = updated_retained_texture(
+                            current,
+                            *x,
+                            *y,
+                            *width,
+                            *height,
+                            RetainedTexturePatchPixels::Live(rgba8.clone()),
+                        )?;
+                        let resource = AtlasResource::Texture(Arc::new(texture));
+                        render_mutations.insert(resource_id.clone(), Some(resource.clone()));
+                        committed_mutations.insert(resource_id.clone(), Some(resource));
+                        resources_changed = true;
+                    } else {
+                        return Err(invalid(
+                            "live texture region updates are not valid in a recovery frame",
                         ));
                     }
                 }
@@ -929,9 +1072,13 @@ impl WgpuGlyphAtlasRenderer {
                     let AtlasResource::Texture(texture) = texture else {
                         return Err(invalid("sprite references a non-texture resource"));
                     };
-                    let source =
-                        source.unwrap_or(RectI::new(0, 0, texture.base.width, texture.base.height));
-                    validate_source_rect(source, texture.base.width, texture.base.height)?;
+                    let source = source.unwrap_or(RectI::new(
+                        0,
+                        0,
+                        texture.base.width(),
+                        texture.base.height(),
+                    ));
+                    validate_source_rect(source, texture.base.width(), texture.base.height())?;
                     validate_destination(*destination)?;
                     insert_unique(&mut drawn_resources, texture_id);
                     push_quad_run(
@@ -1577,6 +1724,7 @@ fn validate_resource_id(resource_id: &str) -> Result<(), PlatformError> {
 
 enum SceneResourcePayload<'a> {
     Texture(&'a TextureFrame),
+    LiveTexture(&'a LiveTextureFrame),
     Glyph(&'a GlyphBitmap),
 }
 
@@ -1584,6 +1732,7 @@ impl SceneResourcePayload<'_> {
     fn byte_len(&self) -> usize {
         match self {
             Self::Texture(frame) => frame.rgba8.len(),
+            Self::LiveTexture(frame) => frame.rgba8.len(),
             Self::Glyph(glyph) => glyph.pixels.len(),
         }
     }
@@ -1591,6 +1740,7 @@ impl SceneResourcePayload<'_> {
     fn validate(&self) -> Result<(), PlatformError> {
         match self {
             Self::Texture(frame) => validate_texture(frame),
+            Self::LiveTexture(frame) => validate_live_texture_metadata(frame),
             Self::Glyph(glyph) => validate_glyph(glyph),
         }
     }
@@ -1605,6 +1755,9 @@ fn validate_scene_resource_payloads(commands: &[SceneCommand]) -> Result<(), Pla
             SceneCommand::UploadTexture { frame, .. }
             | SceneCommand::Texture { frame, .. }
             | SceneCommand::VideoFrame { frame, .. } => SceneResourcePayload::Texture(frame),
+            SceneCommand::UploadLiveTexture { frame, .. } => {
+                SceneResourcePayload::LiveTexture(frame)
+            }
             SceneCommand::UploadGlyph { glyph, .. } | SceneCommand::Glyph { glyph, .. } => {
                 SceneResourcePayload::Glyph(glyph)
             }
@@ -1678,14 +1831,13 @@ fn validate_glyph_metadata(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
 
 fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), PlatformError> {
     validate_glyph_metadata(glyph)?;
-    if astra_core::Hash256::from_sha256(&glyph.pixels) != glyph.hash {
-        return Err(PlatformError::new(
+    glyph.validate_integrity().map_err(|_| {
+        PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "surface.present_scene",
             "glyph dimensions, format, or content hash is invalid",
-        ));
-    }
-    Ok(())
+        )
+    })
 }
 
 fn validate_texture_metadata(texture: &TextureFrame) -> Result<(), PlatformError> {
@@ -1702,16 +1854,25 @@ fn validate_texture_metadata(texture: &TextureFrame) -> Result<(), PlatformError
     Ok(())
 }
 
+fn validate_live_texture_metadata(texture: &LiveTextureFrame) -> Result<(), PlatformError> {
+    let expected = (texture.width as usize)
+        .checked_mul(texture.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if texture.width == 0 || texture.height == 0 || expected != Some(texture.rgba8.len()) {
+        return Err(invalid("live texture dimensions are invalid"));
+    }
+    Ok(())
+}
+
 fn validate_texture(texture: &TextureFrame) -> Result<(), PlatformError> {
     validate_texture_metadata(texture)?;
-    if astra_core::Hash256::from_sha256(&texture.rgba8) != texture.hash {
-        return Err(PlatformError::new(
+    texture.validate_integrity().map_err(|_| {
+        PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "surface.present_scene",
             "texture dimensions or content hash is invalid",
-        ));
-    }
-    Ok(())
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1735,12 +1896,46 @@ fn validate_texture_region(
         || y.checked_add(height)
             .is_none_or(|bottom| bottom > texture_height)
         || expected != Some(rgba8.len())
-        || astra_core::Hash256::from_sha256(rgba8) != hash
     {
         return Err(PlatformError::new(
             PlatformErrorCode::IntegrityMismatch,
             "surface.present_scene",
             "texture region bounds or content hash is invalid",
+        ));
+    }
+    astra_media_core::validate_rgba8_payload(width, height, rgba8, hash).map_err(|_| {
+        PlatformError::new(
+            PlatformErrorCode::IntegrityMismatch,
+            "surface.present_scene",
+            "texture region bounds or content hash is invalid",
+        )
+    })?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_live_texture_region(
+    texture_width: u32,
+    texture_height: u32,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    rgba8: &[u8],
+) -> Result<(), PlatformError> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if width == 0
+        || height == 0
+        || x.checked_add(width)
+            .is_none_or(|right| right > texture_width)
+        || y.checked_add(height)
+            .is_none_or(|bottom| bottom > texture_height)
+        || expected != Some(rgba8.len())
+    {
+        return Err(invalid(
+            "live texture region bounds or byte length are invalid",
         ));
     }
     Ok(())
@@ -1752,22 +1947,50 @@ fn updated_retained_texture(
     y: u32,
     width: u32,
     height: u32,
-    rgba8: Arc<[u8]>,
+    rgba8: RetainedTexturePatchPixels,
 ) -> Result<RetainedTexture, PlatformError> {
-    if x == 0 && y == 0 && width == current.base.width && height == current.base.height {
-        return TextureFrame::from_rgba8(current.base.width, current.base.height, rgba8)
-            .map(|base| RetainedTexture {
-                base: Arc::new(base),
-                patches: Vec::new(),
-                patch_bytes: 0,
-            })
-            .map_err(|error| {
-                PlatformError::new(
-                    PlatformErrorCode::IntegrityMismatch,
-                    "surface.present_scene",
-                    error.to_string(),
-                )
-            });
+    if x == 0 && y == 0 && width == current.base.width() && height == current.base.height() {
+        let base = match &current.base {
+            RetainedTextureBase::Hashed(_) => {
+                let RetainedTexturePatchPixels::Hashed(rgba8) = rgba8 else {
+                    return Err(invalid("live texture update targeted a hashed resource"));
+                };
+                let frame =
+                    TextureFrame::from_rgba8(current.base.width(), current.base.height(), rgba8)
+                        .map_err(|error| {
+                            PlatformError::new(
+                                PlatformErrorCode::IntegrityMismatch,
+                                "surface.present_scene",
+                                error.to_string(),
+                            )
+                        })?;
+                RetainedTextureBase::Hashed(Arc::new(frame))
+            }
+            RetainedTextureBase::Live(_) => {
+                let RetainedTexturePatchPixels::Live(rgba8) = rgba8 else {
+                    return Err(invalid("hashed texture update targeted a live resource"));
+                };
+                RetainedTextureBase::Live(Arc::new(
+                    LiveTextureFrame::from_buffer(
+                        current.base.width(),
+                        current.base.height(),
+                        rgba8,
+                    )
+                    .map_err(|error| {
+                        PlatformError::new(
+                            PlatformErrorCode::IntegrityMismatch,
+                            "surface.present_scene",
+                            error.to_string(),
+                        )
+                    })?,
+                ))
+            }
+        };
+        return Ok(RetainedTexture {
+            base,
+            patches: Vec::new(),
+            patch_bytes: 0,
+        });
     }
     let mut patches = current.patches.clone();
     patches.retain(|patch| {
@@ -1788,7 +2011,7 @@ fn updated_retained_texture(
             .checked_add(patch.rgba8.len())
             .ok_or_else(|| invalid("retained texture patch byte count overflowed"))
     })?;
-    if patch_bytes > current.base.rgba8.len() {
+    if patch_bytes > current.base.rgba8().len() {
         return Err(PlatformError::new(
             PlatformErrorCode::QueueOverflow,
             "surface.present_scene",
@@ -1796,7 +2019,7 @@ fn updated_retained_texture(
         ));
     }
     Ok(RetainedTexture {
-        base: Arc::clone(&current.base),
+        base: current.base.clone(),
         patches,
         patch_bytes,
     })
@@ -2748,7 +2971,7 @@ fn write_padded_resource(
         )?,
         AtlasResource::Texture(texture) => {
             write_padded_rgba_rows(
-                &texture.base.rgba8,
+                texture.base.rgba8(),
                 source_width,
                 source_height,
                 destination,
@@ -2759,8 +2982,8 @@ fn write_padded_resource(
             for patch in &texture.patches {
                 write_retained_texture_patch(
                     patch,
-                    texture.base.width,
-                    texture.base.height,
+                    texture.base.width(),
+                    texture.base.height(),
                     destination,
                     destination_width,
                     destination_x,
@@ -2804,7 +3027,8 @@ fn write_retained_texture_patch(
             if target + 4 > destination.len() {
                 return Err(invalid("retained texture patch is outside destination"));
             }
-            destination[target..target + 4].copy_from_slice(&patch.rgba8[source..source + 4]);
+            destination[target..target + 4]
+                .copy_from_slice(&patch.rgba8.as_slice()[source..source + 4]);
         }
     }
     Ok(())
@@ -3502,6 +3726,10 @@ fn create_pipelines(
             "astra-glyph-atlas-alpha-pipeline",
             wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
         ),
+        opaque: pipeline(
+            "astra-glyph-atlas-opaque-pipeline",
+            wgpu::BlendState::REPLACE,
+        ),
         add: pipeline(
             "astra-glyph-atlas-add-pipeline",
             wgpu::BlendState {
@@ -3569,8 +3797,8 @@ mod tests {
         allocate_pending_atlas_slot, insert_unique, pack_atlas, prepare_upload_pixels,
         release_pending_atlas_slot, updated_retained_texture, vertex_upload_required,
         write_padded_resource, AtlasAllocatorState, AtlasResource, AtlasResourceView,
-        ResourceMutationJournal, RetainedTexture, ATLAS_PADDING, ATLAS_SIDE,
-        MAX_ATLAS_UPLOAD_BYTES,
+        ResourceMutationJournal, RetainedTexture, RetainedTextureBase, RetainedTexturePatchPixels,
+        ATLAS_PADDING, ATLAS_SIDE, MAX_ATLAS_UPLOAD_BYTES,
     };
     use astra_core::Hash256;
     use astra_media_core::TextureFrame;
@@ -3735,18 +3963,26 @@ mod tests {
         let rgba8: Arc<[u8]> = vec![1, 2, 3, 4, 5, 6, 7, 8].into();
         let base_pointer = rgba8.as_ptr();
         let retained = RetainedTexture {
-            base: Arc::new(TextureFrame {
+            base: RetainedTextureBase::Hashed(Arc::new(TextureFrame {
                 width: 2,
                 height: 1,
                 hash: Hash256::from_sha256(&rgba8),
                 rgba8,
-            }),
+            })),
             patches: vec![],
             patch_bytes: 0,
         };
         let patch: Arc<[u8]> = vec![9, 10, 11, 12].into();
-        let updated = updated_retained_texture(&retained, 1, 0, 1, 1, patch).unwrap();
-        assert_eq!(updated.base.rgba8.as_ptr(), base_pointer);
+        let updated = updated_retained_texture(
+            &retained,
+            1,
+            0,
+            1,
+            1,
+            RetainedTexturePatchPixels::Hashed(patch),
+        )
+        .unwrap();
+        assert_eq!(updated.base.rgba8().as_ptr(), base_pointer);
         assert_eq!(updated.patch_bytes, 4);
 
         let resource = AtlasResource::Texture(Arc::new(updated));

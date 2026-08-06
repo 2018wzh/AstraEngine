@@ -1,7 +1,7 @@
 use astra_package::{PackageManifest, PackageReader};
 use astra_platform::{
-    InputState, PackageSourceRequest, PlatformError, PlatformErrorCode, PlatformEventKind,
-    PlatformHostSession, SurfaceRequest, WindowRequest,
+    FixedDeadlineScheduler, InputState, PackageSourceRequest, PlatformError, PlatformErrorCode,
+    PlatformEventKind, PlatformHostSession, SurfaceRequest, WindowRequest,
 };
 use astra_ui_core::{UiInputEventKind, UiInsets, UiPoint, UiTouchPhase, UiViewport};
 use astra_vn_core::VnRunConfig;
@@ -121,25 +121,35 @@ pub async fn run_native_vn_player_session(
                 Vec::new(),
             )
             .await?;
-        let mut timeline_tick = tokio::time::interval(std::time::Duration::from_nanos(16_666_667));
-        timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut timeline_tick = FixedDeadlineScheduler::new(
+            std::time::Duration::from_nanos(16_666_667),
+        )
+        .map_err(|code| player_error("player.runtime.scheduler", code))?;
         loop {
             let event = tokio::select! {
                 event = session.events.recv() => event?,
-                _ = timeline_tick.tick() => {
-                    if let Some(batch) = vn.tick_presentation(16_666_667)
-                        .map_err(|error| player_error_owned("player.runtime.presentation_tick", error))?
-                    {
-                        executor.execute_batch(batch)
-                            .await
-                            .map_err(|error| player_error_owned("player.host.execute", error))?;
-                    }
-                    if media.is_active() {
-                        media.poll_and_process(
-                            &mut vn,
-                            &mut executor,
-                            timeline_clock.elapsed().as_millis() as u64,
-                        ).await?;
+                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())) => {
+                    let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|debt| {
+                        player_error_owned(
+                            "player.runtime.scheduler_debt",
+                            format!("{}:{}", debt.overdue_steps, debt.lateness.as_nanos()),
+                        )
+                    })?.ok_or_else(|| player_error("player.runtime.scheduler", "scheduler woke before its deadline"))?;
+                    for _ in 0..due.steps {
+                        if let Some(batch) = vn.tick_presentation(16_666_667)
+                            .map_err(|error| player_error_owned("player.runtime.presentation_tick", error))?
+                        {
+                            executor.execute_batch(batch)
+                                .await
+                                .map_err(|error| player_error_owned("player.host.execute", error))?;
+                        }
+                        if media.is_active() {
+                            media.poll_and_process(
+                                &mut vn,
+                                &mut executor,
+                                timeline_clock.elapsed().as_millis() as u64,
+                            ).await?;
+                        }
                     }
                     continue;
                 }

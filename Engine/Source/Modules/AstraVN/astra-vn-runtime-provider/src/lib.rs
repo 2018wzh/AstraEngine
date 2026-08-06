@@ -13,20 +13,38 @@ use std::{
 
 #[cfg(feature = "ffi")]
 use abi_stable::std_types::{RString, RVec};
-use astra_core::{Hash128, Hash256, SchemaVersion};
+use astra_core::{Hash128, SchemaVersion};
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 #[cfg(feature = "ffi")]
 use astra_plugin_abi::{
-    FfiRuntimeProviderRegistration, FfiRuntimeProviderResult, RuntimeProviderCall,
-    RuntimeProviderCreateRequest, RuntimeProviderDestroyRequest, RuntimeProviderSessionCall,
-    RuntimeProviderSessionHandle, RuntimeProviderSessionOpenReport,
-    PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
+    FfiRuntimeAudioBus, FfiRuntimeAudioCommand, FfiRuntimeAudioCommandKind, FfiRuntimeAudioCue,
+    FfiRuntimeAudioEncoding, FfiRuntimeAudioPacket, FfiRuntimeAudioSampleFormat,
+    FfiRuntimeAudioSyncKind, FfiRuntimeBlackboardMutation, FfiRuntimeBlendMode,
+    FfiRuntimeDirtySection, FfiRuntimeEditorMetadataResult, FfiRuntimeEvent,
+    FfiRuntimeInstanceRequest, FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput,
+    FfiRuntimeOpenRequest, FfiRuntimeOpenResult, FfiRuntimePackageSectionsResult,
+    FfiRuntimePcmBuffer, FfiRuntimePersistedOutput, FfiRuntimePrepareRequest,
+    FfiRuntimeProbeRequest, FfiRuntimeProviderRegistration, FfiRuntimeReleaseChecksResult,
+    FfiRuntimeReportResult, FfiRuntimeResourceScene, FfiRuntimeResourceTexture,
+    FfiRuntimeRestoreRequest, FfiRuntimeRestoreResult, FfiRuntimeSaveRequest, FfiRuntimeSaveResult,
+    FfiRuntimeSceneResourceOperation, FfiRuntimeSceneTextureCreate, FfiRuntimeSceneTextureUpdate,
+    FfiRuntimeScissor, FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeSectionResult,
+    FfiRuntimeShutdownRequest, FfiRuntimeShutdownResult, FfiRuntimeStepMode, FfiRuntimeStepRequest,
+    FfiRuntimeStepResult, FfiRuntimeTextLease, FfiRuntimeTextPresentation, FfiRuntimeTextRegion,
+    FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand, FfiRuntimeVideoCommandKind,
+    FfiRuntimeVideoMode, FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata,
-    RuntimeExecutorKind, RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputCodec,
-    RuntimeOutputDomain, RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor,
-    RuntimePackageSectionPlan, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
+    RuntimeExecutorConfig, RuntimeExecutorKind, RuntimeLiveAudioBus, RuntimeLiveAudioCommand,
+    RuntimeLiveAudioCue, RuntimeLiveAudioEncoding, RuntimeLiveAudioSampleFormat,
+    RuntimeLiveAudioSync, RuntimeLiveBlendMode, RuntimeLiveControl, RuntimeLiveCoverage,
+    RuntimeLiveEffect, RuntimeLivePcmBuffer, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveTextureFormat, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode,
+    RuntimeLiveWaitKind, RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputDomain,
+    RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan, RuntimePersistedCodec,
+    RuntimePersistedOutput, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
     RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
     RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
     RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport, RuntimeStepInput,
@@ -38,9 +56,9 @@ use astra_runtime::{
     ActionTrace, ActorId, BlackboardValue, ComponentId, ComponentRecord,
     DeterministicActionContext, EventPayload, GuardExpr, OrderedTickIngress, PackageHandle,
     PlayerInput, PresentationCommand as RuntimePresentationCommand, RuntimeAction,
-    RuntimeComponentPayload, RuntimeConfig, RuntimeError, RuntimeSnapshot, RuntimeWorld, SaveBlob,
-    SaveRequest, StateDefinition, StateMachineDefinition, TickIngress, TickInput,
-    TickIntegrityMode, TickRequest, TransitionDefinition,
+    RuntimeComponentPayload, RuntimeConfig, RuntimeError, RuntimeEvent, RuntimeSnapshot,
+    RuntimeWorld, SaveBlob, SaveRequest, StateDefinition, StateMachineDefinition, TickIngress,
+    TickInput, TickIntegrityMode, TickRequest, TransitionDefinition,
 };
 pub use astra_vn_core::*;
 use astra_vn_core::{
@@ -51,6 +69,8 @@ use astra_vn_core::{
 pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
 pub use astra_vn_save::*;
+
+const VN_DISABLED_STATE_HASH: Hash128 = Hash128::from_bytes([0; 16]);
 
 #[derive(Default)]
 pub struct NativeVnRuntimeProvider {
@@ -217,7 +237,7 @@ fn output_schema(
         domain,
         schema: schema.to_string(),
         version: SchemaVersion::new(major, 0, 0),
-        codec: RuntimeOutputCodec::Postcard,
+        codec: RuntimePersistedCodec::Postcard,
     }
 }
 
@@ -344,7 +364,6 @@ struct VnStepAction {
 
 #[derive(Clone)]
 struct VnStepStateCache {
-    payload_hash: Hash256,
     state_hash: Hash128,
     state: VnRuntimeState,
 }
@@ -524,20 +543,19 @@ fn materialize_runtime_state(
 }
 
 fn materialize_session_state(session: &NativeVnSession) -> Result<VnRuntimeState, CoreVnError> {
-    let (payload_hash, bytes) = session
-        .world
-        .read_component_postcard_payload(session.vn_component)
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
     if let Some(state) = session
         .state_cache
         .lock()
         .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?
         .as_ref()
-        .filter(|cached| cached.payload_hash == payload_hash)
         .map(|cached| cached.state.clone())
     {
         return Ok(state);
     }
+    let bytes = session
+        .world
+        .read_component_postcard_bytes(session.vn_component)
+        .map_err(|error| CoreVnError::message(error.to_string()))?;
     let hot: VnRuntimeHotStateV3 = postcard::from_bytes(&bytes)
         .map_err(|error| CoreVnError::message(format!("decode VN hot runtime state: {error}")))?;
     materialize_runtime_state(&hot, &session.runtime_index, |component_id| {
@@ -720,20 +738,12 @@ fn replace_session_state_inner(
             ));
         }
     }
-    let (payload_hash, _) = session
-        .world
-        .read_component_postcard_payload(session.vn_component)
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
     let state_hash = Hash128::from_blake3(&postcard::to_allocvec(&hot)?);
     *session
         .state_cache
         .lock()
         .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? =
-        Some(VnStepStateCache {
-            payload_hash,
-            state_hash,
-            state,
-        });
+        Some(VnStepStateCache { state_hash, state });
     Ok(())
 }
 
@@ -751,9 +761,9 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
     ) -> Result<VnRuntimeStorageMetrics, CoreVnError> {
         let session = self.session(session_id)?;
-        let (_, hot_bytes) = session
+        let hot_bytes = session
             .world
-            .read_component_postcard_payload(session.vn_component)
+            .read_component_postcard_bytes(session.vn_component)
             .map_err(|error| CoreVnError::message(error.to_string()))?;
         let hot: VnRuntimeHotStateV3 = postcard::from_bytes(&hot_bytes)
             .map_err(|error| CoreVnError::message(format!("decode VN hot state: {error}")))?;
@@ -769,9 +779,9 @@ impl NativeVnRuntimeProvider {
                     "VN history chunk chain contains a cycle",
                 ));
             }
-            let (_, bytes) = session
+            let bytes = session
                 .world
-                .read_component_postcard_payload(id)
+                .read_component_postcard_bytes(id)
                 .map_err(|error| CoreVnError::message(error.to_string()))?;
             if chunk_count == 0 {
                 tail_chunk_bytes = bytes.len();
@@ -828,12 +838,6 @@ impl NativeVnRuntimeProvider {
                     2,
                 ),
                 output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v2", 2),
-                output_schema(RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
-                output_schema(
-                    RuntimeOutputDomain::Observation,
-                    "astra.product.observation.v1",
-                    1,
-                ),
                 output_schema(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1", 1),
                 output_schema(
                     RuntimeOutputDomain::Trace,
@@ -844,11 +848,6 @@ impl NativeVnRuntimeProvider {
                     RuntimeOutputDomain::Trace,
                     VN_RUNTIME_VIEW_STATE_SCHEMA,
                     VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
-                ),
-                output_schema(
-                    RuntimeOutputDomain::DirtySaveSection,
-                    "astra.runtime.dirty_save_section.v1",
-                    1,
                 ),
             ],
         }
@@ -974,12 +973,12 @@ impl NativeVnRuntimeProvider {
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
         let output = Arc::new(Mutex::new(None));
-        let (payload_hash, _) = world
-            .read_component_postcard_payload(vn_component)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let initial_state_hash = Hash128::from_blake3(&postcard::to_allocvec(&initial_hot)?);
+        let initial_state_hash = if integrity_mode == TickIntegrityMode::Evidence {
+            Hash128::from_blake3(&postcard::to_allocvec(&initial_hot)?)
+        } else {
+            VN_DISABLED_STATE_HASH
+        };
         let state_cache = Arc::new(Mutex::new(Some(VnStepStateCache {
-            payload_hash,
             state_hash: initial_state_hash,
             state: initial_state,
         })));
@@ -1051,20 +1050,18 @@ impl NativeVnRuntimeProvider {
     }
 
     pub fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, CoreVnError> {
-        if input.mode == RuntimeStepMode::Replay {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_LIVE_PROVIDER_REPLAY",
-                "provider-free replay cannot call NativeVnRuntimeProvider::step",
-            ));
-        }
         tracing::trace!(
             event = "vn.provider.session.step",
             fixed_step = input.fixed_step,
             "AstraVN runtime session step started"
         );
         let command = match input.action.as_str() {
-            "command" => serde_json::from_value(input.payload.clone())
-                .map_err(|err| CoreVnError::message(format!("decode VN player command: {err}")))?,
+            "command" => {
+                return Err(CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_COMMAND_DISPATCH",
+                    "generic command input is not part of the typed runtime ABI",
+                ));
+            }
             "launch_default" => {
                 let session = self.session(&input.session_id)?;
                 let state = materialize_session_state(session)?;
@@ -1108,17 +1105,11 @@ impl NativeVnRuntimeProvider {
             .lock()
             .map_err(|_| CoreVnError::message("VN step output lock is poisoned"))? = None;
         let event_kind = vn_event_kind(&command).to_string();
-        let command_bytes = postcard::to_allocvec(&command)?;
-        let (component_payload_hash, _) = session
-            .world
-            .read_component_postcard_payload(session.vn_component)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
         let cached_command_state = session
             .state_cache
             .lock()
             .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?
             .as_ref()
-            .filter(|cached| cached.payload_hash == component_payload_hash)
             .map(|cached| {
                 (
                     cached.state.pending_wait.clone(),
@@ -1167,9 +1158,7 @@ impl NativeVnRuntimeProvider {
                 kind: event_kind.clone(),
                 payload: EventPayload {
                     kind: event_kind,
-                    data: [("command".to_string(), BlackboardValue::Bytes(command_bytes))]
-                        .into_iter()
-                        .collect(),
+                    data: command_event_data(&command),
                 },
             }),
         });
@@ -1183,7 +1172,6 @@ impl NativeVnRuntimeProvider {
             RuntimeStepMode::RestoreContinuation => {
                 TickRequest::restore_continuation(timing, ingress)
             }
-            RuntimeStepMode::Replay => TickRequest::replay(timing, ingress),
         };
         let tick = session
             .world
@@ -1219,14 +1207,16 @@ impl NativeVnRuntimeProvider {
             })?;
             runtime_view_state(&cached.state, cached.state_hash)
         };
-        // Audio cues are also typed presentation commands. Preserve their position
-        // relative to stage audio controls instead of grouping output by domain:
-        // a BGM start followed by fade-stop must never be observed in reverse.
         let mut media = Vec::with_capacity(output.presentation.len() + output.audio.len());
+        let mut audio_cues = Vec::with_capacity(output.audio.len());
         let mut audio = output.audio.iter();
-        for command in &output.presentation {
+        for (presentation_index, command) in output.presentation.iter().enumerate() {
+            let sequence = presentation_index
+                .checked_add(1)
+                .and_then(|index| u64::try_from(index).ok())
+                .ok_or_else(|| CoreVnError::message("VN presentation sequence overflow"))?;
             media.push(
-                RuntimeOutputEnvelope::postcard(
+                RuntimePersistedOutput::postcard(
                     RuntimeOutputDomain::Presentation,
                     "astra.vn.presentation_command.v2",
                     SchemaVersion::new(2, 0, 0),
@@ -1241,15 +1231,10 @@ impl NativeVnRuntimeProvider {
                         "typed audio presentation has no matching audio output",
                     )
                 })?;
-                media.push(
-                    RuntimeOutputEnvelope::postcard(
-                        RuntimeOutputDomain::Audio,
-                        "astra.vn.audio_command.v2",
-                        SchemaVersion::new(2, 0, 0),
-                        audio_command,
-                    )
-                    .map_err(|err| CoreVnError::message(err.to_string()))?,
-                );
+                audio_cues.push(RuntimeLiveEffect::AudioCue(runtime_live_audio_cue(
+                    sequence,
+                    audio_command,
+                )));
             }
         }
         if audio.next().is_some() {
@@ -1258,24 +1243,11 @@ impl NativeVnRuntimeProvider {
                 "audio output has no matching typed presentation command",
             ));
         }
-        let awaits = output
-            .awaits
-            .iter()
-            .map(|await_id| {
-                RuntimeOutputEnvelope::postcard(
-                    RuntimeOutputDomain::Await,
-                    "astra.runtime.await_id.v1",
-                    SchemaVersion::new(1, 0, 0),
-                    await_id,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
         let timeline = output
             .timeline_tasks
             .iter()
             .map(|task| {
-                RuntimeOutputEnvelope::postcard(
+                RuntimePersistedOutput::postcard(
                     RuntimeOutputDomain::Effect,
                     "astra.vn.timeline_task.v1",
                     SchemaVersion::new(1, 0, 0),
@@ -1284,7 +1256,7 @@ impl NativeVnRuntimeProvider {
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let effects = vec![RuntimeOutputEnvelope::postcard(
+        let effects = vec![RuntimePersistedOutput::postcard(
             RuntimeOutputDomain::Effect,
             "astra.vn.runtime_step_effect.v2",
             SchemaVersion::new(2, 0, 0),
@@ -1296,7 +1268,7 @@ impl NativeVnRuntimeProvider {
         )
         .map_err(|err| CoreVnError::message(err.to_string()))?];
         let trace = vec![
-            RuntimeOutputEnvelope::postcard(
+            RuntimePersistedOutput::postcard(
                 RuntimeOutputDomain::Trace,
                 "astra.vn.runtime_step_trace.v1",
                 SchemaVersion::new(1, 0, 0),
@@ -1307,7 +1279,7 @@ impl NativeVnRuntimeProvider {
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?,
-            RuntimeOutputEnvelope::postcard(
+            RuntimePersistedOutput::postcard(
                 RuntimeOutputDomain::Trace,
                 VN_RUNTIME_VIEW_STATE_SCHEMA,
                 SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
@@ -1315,24 +1287,6 @@ impl NativeVnRuntimeProvider {
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?,
         ];
-        let observations = vec![RuntimeOutputEnvelope::postcard(
-            RuntimeOutputDomain::Observation,
-            "astra.product.observation.v1",
-            SchemaVersion::new(1, 0, 0),
-            &NativeVnStepTrace {
-                runtime_state_hash: tick.state_hash.to_string(),
-                runtime_event_hash: tick.event_hash.to_string(),
-                runtime_presentation_hash: tick.presentation_hash.to_string(),
-            },
-        )
-        .map_err(|err| CoreVnError::message(err.to_string()))?];
-        let dirty_save_sections = vec![RuntimeOutputEnvelope::postcard(
-            RuntimeOutputDomain::DirtySaveSection,
-            "astra.runtime.dirty_save_section.v1",
-            SchemaVersion::new(1, 0, 0),
-            &"runtime.world".to_string(),
-        )
-        .map_err(|err| CoreVnError::message(err.to_string()))?];
         Ok(RuntimeStepOutput {
             session_id,
             status: if output.presentation.is_empty() {
@@ -1340,14 +1294,21 @@ impl NativeVnRuntimeProvider {
             } else {
                 "blocked".to_string()
             },
-            outputs: effects
+            live: astra_plugin_abi::RuntimeLiveOutput {
+                state_revision: fixed_step,
+                coverage: RuntimeLiveCoverage {
+                    presentation_commands: output.presentation.len() as u64,
+                    audio_commands: output.audio.len() as u64,
+                    ..RuntimeLiveCoverage::default()
+                },
+                effects: audio_cues,
+                diagnostics: Vec::new(),
+            },
+            persisted: effects
                 .into_iter()
                 .chain(media)
                 .chain(timeline)
-                .chain(awaits)
-                .chain(observations)
                 .chain(trace)
-                .chain(dirty_save_sections)
                 .collect(),
             diagnostics: Vec::new(),
         })
@@ -1389,6 +1350,13 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
     ) -> Result<(Hash128, Hash128, Hash128), CoreVnError> {
         let world = &self.session(session_id)?.world;
+        if world.tick_integrity_mode() == TickIntegrityMode::Shipping {
+            return Ok((
+                VN_DISABLED_STATE_HASH,
+                VN_DISABLED_STATE_HASH,
+                VN_DISABLED_STATE_HASH,
+            ));
+        }
         Ok((
             world.state_hash(),
             world.event_hash(),
@@ -1440,15 +1408,13 @@ impl NativeVnRuntimeProvider {
             SaveRequest::default(),
         )
         .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let save_hash = Hash256::from_sha256(&save.0);
         Ok(RuntimeSaveSections {
             session_id: request.session_id,
             sections: vec![RuntimeSectionPayload {
                 section_id: "runtime.world".to_string(),
-                schema: "astra.runtime.save_blob.v3".to_string(),
-                version: SchemaVersion::new(3, 0, 0),
+                schema: "astra.runtime.save_blob.v4".to_string(),
+                version: SchemaVersion::new(4, 0, 0),
                 codec: RuntimeSectionCodec::Raw,
-                hash: save_hash,
                 bytes: save.0,
             }],
             diagnostics: Vec::new(),
@@ -1468,7 +1434,7 @@ impl NativeVnRuntimeProvider {
         let runtime_section = required_restore_section_with_codec(
             &request.sections,
             "runtime.world",
-            "astra.runtime.save_blob.v3",
+            "astra.runtime.save_blob.v4",
             RuntimeSectionCodec::Raw,
         )?;
         let session = self.session_mut(&request.session_id)?;
@@ -1476,21 +1442,21 @@ impl NativeVnRuntimeProvider {
             .world
             .load(SaveBlob(runtime_section.bytes.clone()))
             .map_err(|err| CoreVnError::message(err.to_string()))?;
+        *session
+            .state_cache
+            .lock()
+            .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? = None;
         let state = consume_materialized_restore_state(session)?;
-        let (payload_hash, bytes) = session
+        let bytes = session
             .world
-            .read_component_postcard_payload(session.vn_component)
+            .read_component_postcard_bytes(session.vn_component)
             .map_err(|error| CoreVnError::message(error.to_string()))?;
         let state_hash = Hash128::from_blake3(&bytes);
         *session
             .state_cache
             .lock()
             .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? =
-            Some(VnStepStateCache {
-                payload_hash,
-                state_hash,
-                state,
-            });
+            Some(VnStepStateCache { state_hash, state });
         let snapshot = session.world.snapshot();
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
@@ -1623,7 +1589,7 @@ fn runtime_command_from_input(
     match input.action.as_str() {
         "command" => Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_COMMAND_DISPATCH",
-            "generic command input must be decoded before state-dependent command resolution",
+            "generic command input is not part of the typed runtime ABI",
         )),
         "launch_default" => Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_LAUNCH_DISPATCH",
@@ -1631,16 +1597,393 @@ fn runtime_command_from_input(
         )),
         "advance" => Ok(CoreVnPlayerCommand::Advance),
         "choose" => Ok(CoreVnPlayerCommand::Choose {
-            option_id: required_payload_string(&input.payload, "option_id")?,
+            option_id: required_input_argument(input, "choose", "option id")?,
+        }),
+        "open_system" => Ok(CoreVnPlayerCommand::OpenSystem {
+            page: required_page(required_input_argument(input, "open_system", "page")?)?,
+        }),
+        "switch_system_page" => Ok(CoreVnPlayerCommand::SwitchSystemPage {
+            page: required_page(required_input_argument(
+                input,
+                "switch_system_page",
+                "page",
+            )?)?,
+        }),
+        "replay_voice" => Ok(CoreVnPlayerCommand::ReplayVoice {
+            voice: required_input_argument(input, "replay_voice", "voice")?,
+        }),
+        "set_auto" => Ok(CoreVnPlayerCommand::SetAuto {
+            enabled: required_input_flag(input, "set_auto")?,
+        }),
+        "set_skip" => Ok(CoreVnPlayerCommand::SetSkip {
+            mode: required_skip_mode(required_input_argument(input, "set_skip", "mode")?)?,
+        }),
+        "set_reading_mode" => Ok(CoreVnPlayerCommand::SetReadingMode {
+            mode: required_reading_mode(required_input_argument(
+                input,
+                "set_reading_mode",
+                "mode",
+            )?)?,
+        }),
+        "set_audio_enabled" => Ok(CoreVnPlayerCommand::SetAudioEnabled {
+            enabled: required_input_flag(input, "set_audio_enabled")?,
+        }),
+        "invoke_system_action" => Ok(CoreVnPlayerCommand::InvokeSystemAction {
+            action_id: required_input_argument(input, "invoke_system_action", "action id")?,
+        }),
+        "set_config" => Ok(CoreVnPlayerCommand::SetConfig {
+            key: required_input_argument(input, "set_config", "key")?,
+            value: input.auxiliary.clone().ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_ACTION_ARGUMENT",
+                    "set_config action is missing its value argument",
+                )
+            })?,
+        }),
+        "start_replay" => Ok(CoreVnPlayerCommand::StartReplay {
+            replay_id: required_input_argument(input, "start_replay", "replay id")?,
+        }),
+        "preview_gallery" => Ok(CoreVnPlayerCommand::PreviewGallery {
+            item_id: required_input_argument(input, "preview_gallery", "gallery item id")?,
+        }),
+        "jump_route" => Ok(CoreVnPlayerCommand::JumpRoute {
+            node_id: required_input_argument(input, "jump_route", "route node id")?,
+        }),
+        "jump_backlog" => Ok(CoreVnPlayerCommand::JumpBacklog {
+            command_id: required_input_argument(input, "jump_backlog", "backlog command id")?,
+        }),
+        "submit_text" => Ok(CoreVnPlayerCommand::SubmitText {
+            input_id: required_input_argument(input, "submit_text", "input id")?,
+            value: input.auxiliary.clone().ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_ACTION_ARGUMENT",
+                    "submit_text action is missing its value argument",
+                )
+            })?,
+        }),
+        "unlock" => Ok(CoreVnPlayerCommand::Unlock {
+            kind: required_unlock_kind(required_input_argument(input, "unlock", "unlock kind")?)?,
+            id: input.auxiliary.clone().ok_or_else(|| {
+                CoreVnError::diagnostic(
+                    "ASTRA_NATIVE_VN_ACTION_ARGUMENT",
+                    "unlock action is missing its item id argument",
+                )
+            })?,
         }),
         "complete_wait" => Ok(CoreVnPlayerCommand::CompleteWait {
-            fence: required_payload_string(&input.payload, "fence")?,
+            fence: required_input_argument(input, "complete_wait", "fence")?,
         }),
         "system_return" => Ok(CoreVnPlayerCommand::ReturnSystem),
         other => Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_ACTION_UNKNOWN",
             format!("runtime action {other} is not supported"),
         )),
+    }
+}
+
+fn required_input_argument(
+    input: &RuntimeStepInput,
+    action: &str,
+    name: &str,
+) -> Result<String, CoreVnError> {
+    input.argument.clone().ok_or_else(|| {
+        CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_ACTION_ARGUMENT",
+            format!("{action} action is missing its typed {name} argument"),
+        )
+    })
+}
+
+fn required_input_flag(input: &RuntimeStepInput, action: &str) -> Result<bool, CoreVnError> {
+    input.flag.ok_or_else(|| {
+        CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_ACTION_FLAG",
+            format!("{action} action is missing its typed boolean flag"),
+        )
+    })
+}
+
+fn required_page(value: String) -> Result<SystemPageKind, CoreVnError> {
+    let page = SystemPageKind::parse(&value);
+    if page == SystemPageKind::Unknown {
+        return Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_ACTION_PAGE",
+            format!("unknown system page {value}"),
+        ));
+    }
+    Ok(page)
+}
+
+fn required_skip_mode(value: String) -> Result<SkipMode, CoreVnError> {
+    match value.as_str() {
+        "none" => Ok(SkipMode::None),
+        "read" => Ok(SkipMode::Read),
+        "all" => Ok(SkipMode::All),
+        _ => Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_ACTION_SKIP_MODE",
+            format!("unknown skip mode {value}"),
+        )),
+    }
+}
+
+fn required_reading_mode(value: String) -> Result<ReadingMode, CoreVnError> {
+    match value.as_str() {
+        "hidden" => Ok(ReadingMode::Hidden),
+        "manual" => Ok(ReadingMode::Manual),
+        "fast_forward" => Ok(ReadingMode::FastForward),
+        _ => Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_ACTION_READING_MODE",
+            format!("unknown reading mode {value}"),
+        )),
+    }
+}
+
+fn required_unlock_kind(value: String) -> Result<SystemUnlockKind, CoreVnError> {
+    match value.as_str() {
+        "gallery" => Ok(SystemUnlockKind::Gallery),
+        "replay" => Ok(SystemUnlockKind::Replay),
+        _ => Err(CoreVnError::diagnostic(
+            "ASTRA_NATIVE_VN_ACTION_UNLOCK_KIND",
+            format!("unknown unlock kind {value}"),
+        )),
+    }
+}
+
+fn command_event_data(command: &CoreVnPlayerCommand) -> BTreeMap<String, BlackboardValue> {
+    let mut data = BTreeMap::new();
+    let string = |value: &str| BlackboardValue::String(value.to_string());
+    match command {
+        CoreVnPlayerCommand::Launch { story_id, state_id } => {
+            data.insert("story_id".to_string(), string(story_id));
+            data.insert("state_id".to_string(), string(state_id));
+        }
+        CoreVnPlayerCommand::Choose { option_id } => {
+            data.insert("option_id".to_string(), string(option_id));
+        }
+        CoreVnPlayerCommand::OpenSystem { page }
+        | CoreVnPlayerCommand::SwitchSystemPage { page } => {
+            data.insert("page".to_string(), string(page_name(*page)));
+        }
+        CoreVnPlayerCommand::ReplayVoice { voice } => {
+            data.insert("voice".to_string(), string(voice));
+        }
+        CoreVnPlayerCommand::SetAuto { enabled }
+        | CoreVnPlayerCommand::SetAudioEnabled { enabled } => {
+            data.insert("enabled".to_string(), BlackboardValue::Bool(*enabled));
+        }
+        CoreVnPlayerCommand::SetSkip { mode } => {
+            data.insert("mode".to_string(), string(skip_mode_name(*mode)));
+        }
+        CoreVnPlayerCommand::SetReadingMode { mode } => {
+            data.insert("mode".to_string(), string(reading_mode_name(*mode)));
+        }
+        CoreVnPlayerCommand::InvokeSystemAction { action_id } => {
+            data.insert("action_id".to_string(), string(action_id));
+        }
+        CoreVnPlayerCommand::SetConfig { key, value } => {
+            data.insert("key".to_string(), string(key));
+            data.insert("value".to_string(), string(value));
+        }
+        CoreVnPlayerCommand::StartReplay { replay_id } => {
+            data.insert("replay_id".to_string(), string(replay_id));
+        }
+        CoreVnPlayerCommand::PreviewGallery { item_id } => {
+            data.insert("item_id".to_string(), string(item_id));
+        }
+        CoreVnPlayerCommand::JumpRoute { node_id } => {
+            data.insert("node_id".to_string(), string(node_id));
+        }
+        CoreVnPlayerCommand::JumpBacklog { command_id } => {
+            data.insert("command_id".to_string(), string(command_id));
+        }
+        CoreVnPlayerCommand::SubmitText { input_id, value } => {
+            data.insert("input_id".to_string(), string(input_id));
+            data.insert("value".to_string(), string(value));
+        }
+        CoreVnPlayerCommand::Unlock { kind, id } => {
+            data.insert("kind".to_string(), string(unlock_kind_name(*kind)));
+            data.insert("id".to_string(), string(id));
+        }
+        CoreVnPlayerCommand::CompleteWait { fence } => {
+            data.insert("fence".to_string(), string(fence));
+        }
+        CoreVnPlayerCommand::Advance | CoreVnPlayerCommand::ReturnSystem => {}
+    }
+    data
+}
+
+fn command_from_event(event: &RuntimeEvent) -> Result<CoreVnPlayerCommand, RuntimeError> {
+    let data = &event.payload.data;
+    let value = |key: &str| -> Result<String, RuntimeError> {
+        match data.get(key) {
+            Some(BlackboardValue::String(value)) => Ok(value.clone()),
+            _ => Err(command_event_error(
+                "ASTRA_VN_STEP_ARGUMENT_MISSING",
+                format!("event {} is missing typed field {key}", event.payload.kind),
+            )),
+        }
+    };
+    let flag = |key: &str| -> Result<bool, RuntimeError> {
+        match data.get(key) {
+            Some(BlackboardValue::Bool(value)) => Ok(*value),
+            _ => Err(command_event_error(
+                "ASTRA_VN_STEP_FLAG_MISSING",
+                format!("event {} is missing typed flag {key}", event.payload.kind),
+            )),
+        }
+    };
+    match event.payload.kind.as_str() {
+        "vn.launch" => Ok(CoreVnPlayerCommand::Launch {
+            story_id: value("story_id")?,
+            state_id: value("state_id")?,
+        }),
+        "player.advance" => Ok(CoreVnPlayerCommand::Advance),
+        "choice.selected" => Ok(CoreVnPlayerCommand::Choose {
+            option_id: value("option_id")?,
+        }),
+        "system.open" => Ok(CoreVnPlayerCommand::OpenSystem {
+            page: event_page(&value("page")?)?,
+        }),
+        "system.switch" => Ok(CoreVnPlayerCommand::SwitchSystemPage {
+            page: event_page(&value("page")?)?,
+        }),
+        "system.return" => Ok(CoreVnPlayerCommand::ReturnSystem),
+        "voice.replay" => Ok(CoreVnPlayerCommand::ReplayVoice {
+            voice: value("voice")?,
+        }),
+        "system.auto" => Ok(CoreVnPlayerCommand::SetAuto {
+            enabled: flag("enabled")?,
+        }),
+        "system.skip" => Ok(CoreVnPlayerCommand::SetSkip {
+            mode: event_skip_mode(&value("mode")?)?,
+        }),
+        "system.reading_mode" => Ok(CoreVnPlayerCommand::SetReadingMode {
+            mode: event_reading_mode(&value("mode")?)?,
+        }),
+        "system.audio_enabled" => Ok(CoreVnPlayerCommand::SetAudioEnabled {
+            enabled: flag("enabled")?,
+        }),
+        "system.action" => Ok(CoreVnPlayerCommand::InvokeSystemAction {
+            action_id: value("action_id")?,
+        }),
+        "system.config" => Ok(CoreVnPlayerCommand::SetConfig {
+            key: value("key")?,
+            value: value("value")?,
+        }),
+        "system.replay.start" => Ok(CoreVnPlayerCommand::StartReplay {
+            replay_id: value("replay_id")?,
+        }),
+        "system.gallery.preview" => Ok(CoreVnPlayerCommand::PreviewGallery {
+            item_id: value("item_id")?,
+        }),
+        "system.route.jump" => Ok(CoreVnPlayerCommand::JumpRoute {
+            node_id: value("node_id")?,
+        }),
+        "system.backlog.jump" => Ok(CoreVnPlayerCommand::JumpBacklog {
+            command_id: value("command_id")?,
+        }),
+        "system.text.submit" => Ok(CoreVnPlayerCommand::SubmitText {
+            input_id: value("input_id")?,
+            value: value("value")?,
+        }),
+        "system.unlock" => Ok(CoreVnPlayerCommand::Unlock {
+            kind: event_unlock_kind(&value("kind")?)?,
+            id: value("id")?,
+        }),
+        "await.completed" => Ok(CoreVnPlayerCommand::CompleteWait {
+            fence: value("fence")?,
+        }),
+        other => Err(command_event_error(
+            "ASTRA_VN_STEP_EVENT_UNKNOWN",
+            format!("unsupported typed VN event {other}"),
+        )),
+    }
+}
+
+fn command_event_error(code: &str, message: String) -> RuntimeError {
+    RuntimeError::diagnostic(astra_core::Diagnostic::blocking(code, message))
+}
+
+fn event_page(value: &str) -> Result<SystemPageKind, RuntimeError> {
+    let page = SystemPageKind::parse(value);
+    (page != SystemPageKind::Unknown)
+        .then_some(page)
+        .ok_or_else(|| command_event_error("ASTRA_VN_STEP_PAGE_UNKNOWN", value.to_string()))
+}
+
+fn event_skip_mode(value: &str) -> Result<SkipMode, RuntimeError> {
+    match value {
+        "none" => Ok(SkipMode::None),
+        "read" => Ok(SkipMode::Read),
+        "all" => Ok(SkipMode::All),
+        _ => Err(command_event_error(
+            "ASTRA_VN_STEP_SKIP_MODE_UNKNOWN",
+            value.to_string(),
+        )),
+    }
+}
+
+fn event_reading_mode(value: &str) -> Result<ReadingMode, RuntimeError> {
+    match value {
+        "hidden" => Ok(ReadingMode::Hidden),
+        "manual" => Ok(ReadingMode::Manual),
+        "fast_forward" => Ok(ReadingMode::FastForward),
+        _ => Err(command_event_error(
+            "ASTRA_VN_STEP_READING_MODE_UNKNOWN",
+            value.to_string(),
+        )),
+    }
+}
+
+fn event_unlock_kind(value: &str) -> Result<SystemUnlockKind, RuntimeError> {
+    match value {
+        "gallery" => Ok(SystemUnlockKind::Gallery),
+        "replay" => Ok(SystemUnlockKind::Replay),
+        _ => Err(command_event_error(
+            "ASTRA_VN_STEP_UNLOCK_KIND_UNKNOWN",
+            value.to_string(),
+        )),
+    }
+}
+
+fn page_name(page: SystemPageKind) -> &'static str {
+    match page {
+        SystemPageKind::Title => "title",
+        SystemPageKind::QuickPanel => "quick_panel",
+        SystemPageKind::Save => "save",
+        SystemPageKind::Load => "load",
+        SystemPageKind::Config => "config",
+        SystemPageKind::Gallery => "gallery",
+        SystemPageKind::Replay => "replay",
+        SystemPageKind::VoiceReplay => "voice_replay",
+        SystemPageKind::RouteChart => "route_chart",
+        SystemPageKind::Backlog => "backlog",
+        SystemPageKind::LocalizationPreview => "localization_preview",
+        SystemPageKind::Custom => "custom",
+        SystemPageKind::Unknown => "unknown",
+    }
+}
+
+fn skip_mode_name(mode: SkipMode) -> &'static str {
+    match mode {
+        SkipMode::None => "none",
+        SkipMode::Read => "read",
+        SkipMode::All => "all",
+    }
+}
+
+fn reading_mode_name(mode: ReadingMode) -> &'static str {
+    match mode {
+        ReadingMode::Hidden => "hidden",
+        ReadingMode::Manual => "manual",
+        ReadingMode::FastForward => "fast_forward",
+    }
+}
+
+fn unlock_kind_name(kind: SystemUnlockKind) -> &'static str {
+    match kind {
+        SystemUnlockKind::Gallery => "gallery",
+        SystemUnlockKind::Replay => "replay",
     }
 }
 
@@ -1723,6 +2066,7 @@ impl RuntimeAction for VnStepAction {
         ctx: &mut DeterministicActionContext<'_>,
         input: &BTreeMap<String, BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
+        let evidence_mode = ctx.evidence_mode();
         let profile = tracing::enabled!(tracing::Level::TRACE);
         let command_started = profile.then(Instant::now);
         let event = ctx.trigger_event().ok_or_else(|| {
@@ -1732,21 +2076,10 @@ impl RuntimeAction for VnStepAction {
             ))
         })?;
         let event_kind = event.payload.kind.clone();
-        let command_bytes = match event.payload.data.get("command") {
-            Some(BlackboardValue::Bytes(bytes)) => bytes.clone(),
-            _ => {
-                return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
-                    "ASTRA_VN_STEP_COMMAND_MISSING",
-                    "astra.vn.step trigger does not contain a serialized command",
-                )))
-            }
-        };
-        let command: CoreVnPlayerCommand = postcard::from_bytes(&command_bytes)
-            .map_err(|err| RuntimeError::message(format!("decode VN step command: {err}")))?;
-        let command_decode_ns = profile_elapsed_ns(command_started);
+        let command = command_from_event(event)?;
+        let command_mapping_ns = profile_elapsed_ns(command_started);
         let state_started = profile.then(Instant::now);
-        let (payload_hash, previous_state_bytes) =
-            ctx.read_component_postcard_payload(self.component)?;
+        let previous_state_bytes = ctx.read_component_postcard_bytes(self.component)?;
         let previous_hot: VnRuntimeHotStateV3 = postcard::from_bytes(&previous_state_bytes)
             .map_err(|error| {
                 RuntimeError::message(format!("decode VN hot runtime state: {error}"))
@@ -1757,8 +2090,15 @@ impl RuntimeAction for VnStepAction {
             .state_cache
             .lock()
             .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))?
-            .take()
-            .filter(|cached| cached.payload_hash == payload_hash);
+            .take();
+        let previous_state_hash = if evidence_mode {
+            cached_state.as_ref().map_or_else(
+                || Hash128::from_blake3(&previous_state_bytes),
+                |cached| cached.state_hash,
+            )
+        } else {
+            VN_DISABLED_STATE_HASH
+        };
         let state_cache_hit = cached_state.is_some();
         let materialized_history_entries = if state_cache_hit {
             0
@@ -1792,20 +2132,16 @@ impl RuntimeAction for VnStepAction {
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 cached.state,
-                cached.state_hash,
+                previous_state_hash,
                 command,
             )
         } else {
             let state = decoded_state.expect("cache miss must materialize authoritative VN state");
-            let state_hash = Hash128::from_blake3(
-                &postcard::to_allocvec(&previous_hot)
-                    .map_err(|error| RuntimeError::message(error.to_string()))?,
-            );
             astra_vn_core::reduce_vn_step_indexed_prehashed_pending(
                 Arc::clone(&self.compiled),
                 Arc::clone(&self.runtime_index),
                 state,
-                state_hash,
+                previous_state_hash,
                 command,
             )
         }
@@ -1869,7 +2205,11 @@ impl RuntimeAction for VnStepAction {
                 tail.root = backlog_chunk_root(tail.previous_root, &tail.entries)
                     .map_err(|error| RuntimeError::message(error.to_string()))?;
                 backlog_root = tail.root;
-                ctx.replace_component(tail_id, &tail)?;
+                if evidence_mode {
+                    ctx.replace_component(tail_id, &tail)?;
+                } else {
+                    ctx.replace_component_owned(tail_id, &tail)?;
+                }
                 history_component_writes = history_component_writes
                     .checked_add(1)
                     .ok_or_else(|| RuntimeError::message("VN history write count overflowed"))?;
@@ -1894,7 +2234,12 @@ impl RuntimeAction for VnStepAction {
                 )?;
                 let encoded = postcard::to_allocvec(&next)
                     .map_err(|error| RuntimeError::message(error.to_string()))?;
-                ctx.replace_component_encoded_postcard(tail_id, encoded.into())?;
+                let encoded = encoded.into();
+                if evidence_mode {
+                    ctx.replace_component_encoded_postcard(tail_id, encoded)?;
+                } else {
+                    ctx.replace_component_owned_postcard(tail_id, encoded)?;
+                }
                 history_component_writes = history_component_writes
                     .checked_add(1)
                     .ok_or_else(|| RuntimeError::message("VN history write count overflowed"))?;
@@ -1911,15 +2256,17 @@ impl RuntimeAction for VnStepAction {
             .map_err(|error| RuntimeError::message(format!("encode VN hot state: {error}")))?
             .into();
         let encoded_state_bytes = encoded_state.len();
-        // The host-owned await identity is part of the authoritative state.
-        // Reuse this exact byte hash at the Runtime component boundary instead
-        // of hashing the growing VN state twice on every input frame.
-        let encoded_state =
-            astra_runtime::ValidatedRuntimeComponentEncoding::postcard_blake3(encoded_state);
+        // Evidence binds the state bytes to a digest. Shipping only moves the
+        // owned postcard allocation into the component store.
+        let encoded_state = if evidence_mode {
+            astra_runtime::ValidatedRuntimeComponentEncoding::postcard_blake3(encoded_state)
+        } else {
+            astra_runtime::ValidatedRuntimeComponentEncoding::postcard_owned(encoded_state)
+        };
         let authoritative_state_hash = encoded_state.state_hash();
         let output = output.finalize(authoritative_state_hash);
         let mutation_journal_entries = output.mutations.len();
-        let (next_payload_hash, next_state_hash) =
+        let (_, next_state_hash) =
             ctx.replace_component_validated_postcard(self.component, encoded_state)?;
         let replace_component_ns = profile_elapsed_ns(replace_started);
         let output_started = profile.then(Instant::now);
@@ -1934,30 +2281,40 @@ impl RuntimeAction for VnStepAction {
                 },
             );
         }
-        for command in &output.presentation {
-            ctx.emit_presentation(runtime_presentation(command)?);
+        if evidence_mode {
+            for command in &output.presentation {
+                ctx.emit_presentation(runtime_presentation(command)?);
+            }
         }
-        for command in &output.audio {
-            ctx.emit_serialized_effect("audio", "astra.vn.audio_command.v2", command)?;
+        if evidence_mode {
+            for command in &output.audio {
+                ctx.emit_serialized_effect("audio", "astra.vn.audio_command.v2", command)?;
+            }
         }
         for task in &output.timeline_tasks {
             ctx.emit_serialized_effect("timeline", "astra.vn.timeline_task.v2", task)?;
         }
         let output_emit_ns = profile_elapsed_ns(output_started);
         let trace_started = profile.then(Instant::now);
-        let mut trace_payload = input.clone();
+        let mut trace_payload = if evidence_mode {
+            input.clone()
+        } else {
+            BTreeMap::new()
+        };
         trace_payload.insert(
             "event_kind".to_string(),
             BlackboardValue::String(event_kind),
         );
-        trace_payload.insert(
-            "state_hash_before".to_string(),
-            BlackboardValue::String(output.state_hash_before_advance.to_string()),
-        );
-        trace_payload.insert(
-            "state_hash_after".to_string(),
-            BlackboardValue::String(output.state_hash_after_advance.to_string()),
-        );
+        if evidence_mode {
+            trace_payload.insert(
+                "state_hash_before".to_string(),
+                BlackboardValue::String(output.state_hash_before_advance.to_string()),
+            );
+            trace_payload.insert(
+                "state_hash_after".to_string(),
+                BlackboardValue::String(output.state_hash_after_advance.to_string()),
+            );
+        }
         *self
             .output
             .lock()
@@ -1967,7 +2324,6 @@ impl RuntimeAction for VnStepAction {
             .lock()
             .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))? =
             Some(VnStepStateCache {
-                payload_hash: next_payload_hash,
                 state_hash: next_state_hash,
                 state,
             });
@@ -1988,7 +2344,7 @@ impl RuntimeAction for VnStepAction {
         let trace_store_ns = profile_elapsed_ns(trace_started);
         tracing::trace!(
             event = "vn.step.performance",
-            command_decode_ns,
+            command_mapping_ns,
             state_decode_ns,
             reduce_ns,
             await_ns,
@@ -2131,6 +2487,27 @@ fn runtime_presentation(
     Ok(converted)
 }
 
+fn runtime_live_audio_cue(sequence: u64, command: &VnAudioCommand) -> RuntimeLiveAudioCue {
+    RuntimeLiveAudioCue {
+        sequence,
+        command_id: command.command_id.clone(),
+        bus: match command.cue.bus {
+            VnAudioBus::Voice => RuntimeLiveAudioBus::Voice,
+            VnAudioBus::Bgm => RuntimeLiveAudioBus::Bgm,
+            VnAudioBus::Se => RuntimeLiveAudioBus::Se,
+            VnAudioBus::Movie => RuntimeLiveAudioBus::Movie,
+        },
+        asset: command.cue.asset.clone(),
+        looped: command.cue.looped,
+        fade_ms: command.cue.fade_ms,
+        sync: match &command.cue.sync {
+            VnAudioSync::None => RuntimeLiveAudioSync::None,
+            VnAudioSync::Text => RuntimeLiveAudioSync::Text,
+            VnAudioSync::Fence(fence) => RuntimeLiveAudioSync::Fence(fence.clone()),
+        },
+    }
+}
+
 fn vn_event_kind(command: &CoreVnPlayerCommand) -> &'static str {
     match command {
         CoreVnPlayerCommand::Launch { .. } => "vn.launch",
@@ -2243,19 +2620,6 @@ fn command_resolves_wait(
     )
 }
 
-fn required_payload_string(payload: &serde_json::Value, key: &str) -> Result<String, CoreVnError> {
-    payload
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_ACTION_PAYLOAD",
-                format!("runtime action payload is missing {key}"),
-            )
-        })
-}
-
 fn required_restore_section<'a>(
     sections: &'a [RuntimeSectionPayload],
     section_id: &str,
@@ -2289,12 +2653,6 @@ fn required_restore_section_with_codec<'a>(
         return Err(CoreVnError::diagnostic(
             "ASTRA_NATIVE_VN_RESTORE_SECTION_SCHEMA",
             format!("restore section {section_id} has an incompatible schema or codec"),
-        ));
-    }
-    if !section.validate_hash() {
-        return Err(CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_RESTORE_SECTION_HASH",
-            format!("restore section {section_id} failed hash validation"),
         ));
     }
     Ok(section)
@@ -2339,10 +2697,23 @@ fn native_vn_release_check_ids() -> Vec<String> {
 }
 
 #[cfg(feature = "ffi")]
-extern "C" fn ffi_prepare(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |request: RuntimePrepareRequest| {
-        NativeVnRuntimeProvider::default().prepare(request)
-    })
+extern "C" fn ffi_prepare(request: FfiRuntimePrepareRequest) -> FfiRuntimeReportResult {
+    let report = NativeVnRuntimeProvider::default().prepare(RuntimePrepareRequest {
+        target_id: request.target_id.to_string(),
+        profile: request.profile.to_string(),
+        package_hash: request.package_id.to_string(),
+        section_ids: request
+            .section_ids
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect(),
+    });
+    ffi_report_ok(
+        NATIVE_VN_RUNTIME_ID,
+        NATIVE_VN_PROVIDER_ID,
+        report.status,
+        report.diagnostics,
+    )
 }
 
 #[cfg(feature = "ffi")]
@@ -2352,7 +2723,7 @@ type FfiSession = Arc<Mutex<Option<Box<dyn ProductRuntimeSession>>>>;
 struct FfiProviderInstance {
     factory: Arc<NativeVnRuntimeProviderFactory>,
     next_session_handle: u64,
-    sessions: BTreeMap<RuntimeProviderSessionHandle, FfiSession>,
+    sessions: BTreeMap<u64, FfiSession>,
 }
 
 #[cfg(feature = "ffi")]
@@ -2364,18 +2735,20 @@ fn ffi_instances() -> &'static Mutex<BTreeMap<String, FfiProviderInstance>> {
 }
 
 #[cfg(feature = "ffi")]
-extern "C" fn ffi_create_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_result(payload, |request: RuntimeProviderCreateRequest| {
+extern "C" fn ffi_create_instance(request: FfiRuntimeInstanceRequest) -> FfiRuntimeReportResult {
+    let result = (|| -> Result<RuntimeProviderInstanceReport, String> {
         let mut instances = ffi_instances()
             .lock()
             .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
-        if instances.contains_key(&request.instance_id.0) {
+        let instance_id = request.instance_id.to_string();
+        if instances.contains_key(&instance_id) {
             return Err("provider instance id is already active".to_string());
         }
         let factory = Arc::new(NativeVnRuntimeProviderFactory::default());
-        let report = factory.create_instance(request.instance_id.clone())?;
+        let report =
+            factory.create_instance(astra_plugin_abi::ProviderInstanceId(instance_id.clone()))?;
         instances.insert(
-            request.instance_id.0,
+            instance_id,
             FfiProviderInstance {
                 factory,
                 next_session_handle: 1,
@@ -2383,281 +2756,1307 @@ extern "C" fn ffi_create_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult
             },
         );
         Ok(report)
-    })
+    })();
+    match result {
+        Ok(report) => ffi_report_ok(
+            NATIVE_VN_RUNTIME_ID,
+            NATIVE_VN_PROVIDER_ID,
+            report.status,
+            report.diagnostics,
+        ),
+        Err(error) => ffi_report_error(error),
+    }
 }
 
 #[cfg(feature = "ffi")]
-extern "C" fn ffi_destroy_instance(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_result(payload, |request: RuntimeProviderDestroyRequest| {
+extern "C" fn ffi_destroy_instance(request: FfiRuntimeInstanceRequest) -> FfiRuntimeReportResult {
+    let result = (|| -> Result<RuntimeProviderInstanceReport, String> {
         let mut instances = ffi_instances()
             .lock()
             .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+        let instance_id = request.instance_id.to_string();
         let instance = instances
-            .get(&request.instance_id.0)
+            .get(&instance_id)
             .ok_or_else(|| "provider instance is not active".to_string())?;
         if !instance.sessions.is_empty() {
             return Err("provider instance still has active sessions".to_string());
         }
         let report = instance
             .factory
-            .destroy_instance(request.instance_id.clone())?;
-        instances.remove(&request.instance_id.0);
+            .destroy_instance(astra_plugin_abi::ProviderInstanceId(instance_id.clone()))?;
+        instances.remove(&instance_id);
         Ok(report)
-    })
+    })();
+    match result {
+        Ok(report) => ffi_report_ok(
+            NATIVE_VN_RUNTIME_ID,
+            NATIVE_VN_PROVIDER_ID,
+            report.status,
+            report.diagnostics,
+        ),
+        Err(error) => ffi_report_error(error),
+    }
 }
 
 #[cfg(feature = "ffi")]
-extern "C" fn ffi_probe(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json(payload, |request: RuntimeProbeRequest| {
-        NativeVnRuntimeProvider::default().probe(request)
-    })
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_open(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_result(
-        payload,
-        |call: RuntimeProviderCall| -> Result<RuntimeProviderSessionOpenReport, CoreVnError> {
-            let request = serde_json::from_slice::<RuntimeOpenRequest>(&call.payload)
-                .map_err(|err| CoreVnError::message(err.to_string()))?;
-            let factory = {
-                let instances = ffi_instances().lock().map_err(|_| {
-                    CoreVnError::diagnostic(
-                        "ASTRA_NATIVE_VN_FFI_INSTANCE_LOCK",
-                        "provider instance registry lock is poisoned",
-                    )
-                })?;
-                Arc::clone(
-                    &instances
-                        .get(&call.instance_id.0)
-                        .ok_or_else(|| {
-                            CoreVnError::diagnostic(
-                                "ASTRA_NATIVE_VN_FFI_INSTANCE_MISSING",
-                                "provider instance is not active",
-                            )
-                        })?
-                        .factory,
-                )
-            };
-            let (report, session) = factory.open(request).map_err(CoreVnError::message)?;
-            let mut instances = ffi_instances().lock().map_err(|_| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_FFI_INSTANCE_LOCK",
-                    "provider instance registry lock is poisoned",
-                )
-            })?;
-            let instance = instances.get_mut(&call.instance_id.0).ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_FFI_INSTANCE_MISSING",
-                    "provider instance was destroyed while opening a session",
-                )
-            })?;
-            let handle = RuntimeProviderSessionHandle(instance.next_session_handle);
-            instance.next_session_handle =
-                instance.next_session_handle.checked_add(1).ok_or_else(|| {
-                    CoreVnError::diagnostic(
-                        "ASTRA_NATIVE_VN_FFI_SESSION_HANDLE_EXHAUSTED",
-                        "provider session handle space is exhausted",
-                    )
-                })?;
-            instance
-                .sessions
-                .insert(handle, Arc::new(Mutex::new(Some(session))));
-            Ok(RuntimeProviderSessionOpenReport {
-                session_handle: handle,
-                report,
-            })
-        },
+extern "C" fn ffi_probe(request: FfiRuntimeProbeRequest) -> FfiRuntimeReportResult {
+    let report = NativeVnRuntimeProvider::default().probe(RuntimeProbeRequest {
+        target_id: request.target_id.to_string(),
+        profile: request.profile.to_string(),
+        platform: request
+            .platform
+            .into_option()
+            .map(|value| value.to_string()),
+        section_ids: request
+            .section_ids
+            .into_iter()
+            .map(|value| value.to_string())
+            .collect(),
+    });
+    ffi_report_ok(
+        NATIVE_VN_RUNTIME_ID,
+        NATIVE_VN_PROVIDER_ID,
+        report.status,
+        report.diagnostics,
     )
 }
 
 #[cfg(feature = "ffi")]
-extern "C" fn ffi_step(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_session_json(payload, |session, request: RuntimeStepInput| {
-        session.step(request)
-    })
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_save(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_session_json(payload, |session, request: RuntimeSaveRequest| {
-        session.save(request)
-    })
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_restore(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_session_json(payload, |session, request: RuntimeRestoreRequest| {
-        session.restore(request)
-    })
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_shutdown(payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_result(payload, |call: RuntimeProviderSessionCall| {
-        let session_id = serde_json::from_slice::<GameRuntimeSessionId>(&call.payload)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let session = remove_ffi_session(&call)?;
-        let mut guard = session.lock().map_err(|_| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_FFI_SESSION_LOCK",
-                "provider session lock is poisoned",
+extern "C" fn ffi_open(request: FfiRuntimeOpenRequest) -> FfiRuntimeOpenResult {
+    let instance_id = request.instance_id.to_string();
+    let result = (|| -> Result<(RuntimeOpenReport, u64), String> {
+        let factory = {
+            let instances = ffi_instances()
+                .lock()
+                .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+            Arc::clone(
+                &instances
+                    .get(&instance_id)
+                    .ok_or_else(|| "provider instance is not active".to_string())?
+                    .factory,
             )
-        })?;
-        let session = guard.take().ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_FFI_SESSION_CLOSED",
-                "provider session is already closed",
-            )
-        })?;
-        session.shutdown(session_id).map_err(CoreVnError::message)
-    })
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_package_sections(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_value(NativeVnRuntimeProvider::default().package_sections())
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_release_checks(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_value(NativeVnRuntimeProvider::default().release_checks())
-}
-
-#[cfg(feature = "ffi")]
-extern "C" fn ffi_editor_metadata(_payload: RVec<u8>) -> FfiRuntimeProviderResult {
-    ffi_json_value(NativeVnRuntimeProvider::default().editor_metadata())
-}
-
-#[cfg(feature = "ffi")]
-fn ffi_json<T, U>(payload: RVec<u8>, f: impl FnOnce(T) -> U) -> FfiRuntimeProviderResult
-where
-    T: serde::de::DeserializeOwned,
-    U: serde::Serialize,
-{
-    match serde_json::from_slice::<T>(payload.as_slice()) {
-        Ok(request) => ffi_json_value(f(request)),
-        Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_DECODE", err.to_string()),
-    }
-}
-
-#[cfg(feature = "ffi")]
-fn ffi_json_result<T, U, E>(
-    payload: RVec<u8>,
-    f: impl FnOnce(T) -> Result<U, E>,
-) -> FfiRuntimeProviderResult
-where
-    T: serde::de::DeserializeOwned,
-    U: serde::Serialize,
-    E: std::fmt::Display,
-{
-    match serde_json::from_slice::<T>(payload.as_slice()) {
-        Ok(request) => match f(request) {
-            Ok(value) => ffi_json_value(value),
-            Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_CALL", err.to_string()),
-        },
-        Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_DECODE", err.to_string()),
-    }
-}
-
-#[cfg(feature = "ffi")]
-fn ffi_session_json<T, U>(
-    payload: RVec<u8>,
-    f: impl FnOnce(&mut dyn ProductRuntimeSession, T) -> Result<U, String>,
-) -> FfiRuntimeProviderResult
-where
-    T: serde::de::DeserializeOwned,
-    U: serde::Serialize,
-{
-    ffi_json_result(payload, |call: RuntimeProviderSessionCall| {
-        let request = serde_json::from_slice::<T>(&call.payload)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let session = find_ffi_session(&call)?;
-        let mut guard = session.lock().map_err(|_| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_FFI_SESSION_LOCK",
-                "provider session lock is poisoned",
-            )
-        })?;
-        let session = guard.as_deref_mut().ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_FFI_SESSION_CLOSED",
-                "provider session is already closed",
-            )
-        })?;
-        f(session, request).map_err(CoreVnError::message)
-    })
-}
-
-#[cfg(feature = "ffi")]
-fn find_ffi_session(call: &RuntimeProviderSessionCall) -> Result<FfiSession, CoreVnError> {
-    let instances = ffi_instances().lock().map_err(|_| {
-        CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_FFI_INSTANCE_LOCK",
-            "provider instance registry lock is poisoned",
-        )
-    })?;
-    let instance = instances.get(&call.instance_id.0).ok_or_else(|| {
-        CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_FFI_INSTANCE_MISSING",
-            "provider instance is not active",
-        )
-    })?;
-    instance
-        .sessions
-        .get(&call.session_handle)
-        .cloned()
-        .ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_FFI_SESSION_MISSING",
-                "provider session handle is not active",
-            )
-        })
-}
-
-#[cfg(feature = "ffi")]
-fn remove_ffi_session(call: &RuntimeProviderSessionCall) -> Result<FfiSession, CoreVnError> {
-    let mut instances = ffi_instances().lock().map_err(|_| {
-        CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_FFI_INSTANCE_LOCK",
-            "provider instance registry lock is poisoned",
-        )
-    })?;
-    let instance = instances.get_mut(&call.instance_id.0).ok_or_else(|| {
-        CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_FFI_INSTANCE_MISSING",
-            "provider instance is not active",
-        )
-    })?;
-    instance
-        .sessions
-        .remove(&call.session_handle)
-        .ok_or_else(|| {
-            CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_FFI_SESSION_MISSING",
-                "provider session handle is not active",
-            )
-        })
-}
-
-#[cfg(feature = "ffi")]
-fn ffi_json_value(value: impl serde::Serialize) -> FfiRuntimeProviderResult {
-    match serde_json::to_vec(&value) {
-        Ok(payload) => FfiRuntimeProviderResult {
+        };
+        let (report, session) = factory
+            .open(ffi_open_request(request)?)
+            .map_err(|error| error.to_string())?;
+        let mut instances = ffi_instances()
+            .lock()
+            .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+        let instance = instances
+            .get_mut(&instance_id)
+            .ok_or_else(|| "provider instance was destroyed while opening a session".to_string())?;
+        let handle = instance.next_session_handle;
+        instance.next_session_handle = handle
+            .checked_add(1)
+            .ok_or_else(|| "provider session handle space is exhausted".to_string())?;
+        instance
+            .sessions
+            .insert(handle, Arc::new(Mutex::new(Some(session))));
+        Ok((report, handle))
+    })();
+    match result {
+        Ok((report, session_handle)) => FfiRuntimeOpenResult {
             ok: true,
-            payload: RVec::from(payload),
-            diagnostics: RVec::new(),
+            session_handle,
+            session_id: report.session_id.0.into(),
+            runtime_id: report.runtime_id.into(),
+            provider_id: report.provider_id.into(),
+            diagnostics: RVec::from(
+                report
+                    .diagnostics
+                    .into_iter()
+                    .map(RString::from)
+                    .collect::<Vec<_>>(),
+            ),
         },
-        Err(err) => ffi_error("ASTRA_NATIVE_VN_FFI_ENCODE", err.to_string()),
+        Err(error) => ffi_open_error(error),
     }
 }
 
 #[cfg(feature = "ffi")]
-fn ffi_error(code: &'static str, message: String) -> FfiRuntimeProviderResult {
-    FfiRuntimeProviderResult {
+extern "C" fn ffi_step(request: FfiRuntimeStepRequest) -> FfiRuntimeStepResult {
+    let session_id = request.session_id.to_string();
+    let instance_id = request.instance_id.to_string();
+    let session_handle = request.session_handle;
+    let result = (|| -> Result<RuntimeStepOutput, String> {
+        let input = ffi_step_input(request)?;
+        let session = find_ffi_session(&instance_id, session_handle)?;
+        let mut guard = session
+            .lock()
+            .map_err(|_| "provider session lock is poisoned".to_string())?;
+        let session = guard
+            .as_deref_mut()
+            .ok_or_else(|| "provider session is already closed".to_string())?;
+        session.step(input)
+    })();
+    match result {
+        Ok(output) => ffi_step_output(output),
+        Err(error) => ffi_step_error(session_id, error),
+    }
+}
+
+#[cfg(feature = "ffi")]
+extern "C" fn ffi_save(request: FfiRuntimeSaveRequest) -> FfiRuntimeSaveResult {
+    let session_id = request.session_id.to_string();
+    let result = (|| -> Result<RuntimeSaveSections, String> {
+        let session = find_ffi_session(&request.instance_id.to_string(), request.session_handle)?;
+        let mut guard = session
+            .lock()
+            .map_err(|_| "provider session lock is poisoned".to_string())?;
+        let session = guard
+            .as_deref_mut()
+            .ok_or_else(|| "provider session is already closed".to_string())?;
+        session.save(RuntimeSaveRequest {
+            session_id: GameRuntimeSessionId(request.session_id.to_string()),
+            slot: request.slot.to_string(),
+        })
+    })();
+    match result {
+        Ok(value) => ffi_save_result(value),
+        Err(error) => ffi_save_error(session_id, error),
+    }
+}
+
+#[cfg(feature = "ffi")]
+extern "C" fn ffi_restore(request: FfiRuntimeRestoreRequest) -> FfiRuntimeRestoreResult {
+    let session_id = request.session_id.to_string();
+    let result = (|| -> Result<RuntimeRestoreReport, String> {
+        let session = find_ffi_session(&request.instance_id.to_string(), request.session_handle)?;
+        let mut guard = session
+            .lock()
+            .map_err(|_| "provider session lock is poisoned".to_string())?;
+        let session = guard
+            .as_deref_mut()
+            .ok_or_else(|| "provider session is already closed".to_string())?;
+        session.restore(RuntimeRestoreRequest {
+            session_id: GameRuntimeSessionId(request.session_id.to_string()),
+            sections: request
+                .sections
+                .into_iter()
+                .map(ffi_runtime_section)
+                .collect(),
+        })
+    })();
+    match result {
+        Ok(value) => FfiRuntimeRestoreResult {
+            ok: true,
+            session_id: value.session_id.0.into(),
+            restored_fixed_step: value.restored_fixed_step,
+            session_seed: value.session_seed,
+            status: value.status.into(),
+            diagnostics: RVec::from(
+                value
+                    .diagnostics
+                    .into_iter()
+                    .map(RString::from)
+                    .collect::<Vec<_>>(),
+            ),
+        },
+        Err(error) => ffi_restore_error(session_id, error),
+    }
+}
+
+#[cfg(feature = "ffi")]
+extern "C" fn ffi_shutdown(request: FfiRuntimeShutdownRequest) -> FfiRuntimeShutdownResult {
+    let session_id = GameRuntimeSessionId(request.session_id.to_string());
+    let session_id_for_error = session_id.0.clone();
+    let result = (|| -> Result<RuntimeShutdownReport, String> {
+        let session = remove_ffi_session(&request.instance_id.to_string(), request.session_handle)?;
+        let mut guard = session
+            .lock()
+            .map_err(|_| "provider session lock is poisoned".to_string())?;
+        let session = guard
+            .take()
+            .ok_or_else(|| "provider session is already closed".to_string())?;
+        session.shutdown(session_id)
+    })();
+    match result {
+        Ok(value) => FfiRuntimeShutdownResult {
+            ok: true,
+            session_id: value.session_id.0.into(),
+            status: value.status.into(),
+            diagnostics: RVec::from(
+                value
+                    .diagnostics
+                    .into_iter()
+                    .map(RString::from)
+                    .collect::<Vec<_>>(),
+            ),
+        },
+        Err(error) => ffi_shutdown_error(session_id_for_error, error),
+    }
+}
+
+#[cfg(feature = "ffi")]
+extern "C" fn ffi_package_sections() -> FfiRuntimePackageSectionsResult {
+    FfiRuntimePackageSectionsResult {
+        ok: true,
+        sections: RVec::from(
+            NativeVnRuntimeProvider::default()
+                .package_sections()
+                .sections
+                .into_iter()
+                .map(|section| RString::from(section.section_id))
+                .collect::<Vec<_>>(),
+        ),
+        diagnostics: RVec::new(),
+    }
+}
+
+#[cfg(feature = "ffi")]
+extern "C" fn ffi_release_checks() -> FfiRuntimeReleaseChecksResult {
+    FfiRuntimeReleaseChecksResult {
+        ok: true,
+        checks: RVec::from(
+            NativeVnRuntimeProvider::default()
+                .release_checks()
+                .into_iter()
+                .map(|check| RString::from(check.id))
+                .collect::<Vec<_>>(),
+        ),
+        diagnostics: RVec::new(),
+    }
+}
+
+#[cfg(feature = "ffi")]
+extern "C" fn ffi_editor_metadata() -> FfiRuntimeEditorMetadataResult {
+    let metadata = NativeVnRuntimeProvider::default().editor_metadata();
+    FfiRuntimeEditorMetadataResult {
+        ok: true,
+        schema: metadata.schema.into(),
+        runtime_id: metadata.runtime_id.into(),
+        product_kind: metadata.product_kind.into(),
+        project_templates: RVec::from(
+            metadata
+                .project_templates
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+        authoring_surfaces: RVec::from(
+            metadata
+                .authoring_surfaces
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+        debug_views: RVec::from(
+            metadata
+                .debug_views
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+        release_checks: RVec::from(
+            metadata
+                .release_checks
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+        diagnostics: RVec::new(),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn find_ffi_session(instance_id: &str, session_handle: u64) -> Result<FfiSession, String> {
+    let instances = ffi_instances()
+        .lock()
+        .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+    let instance = instances
+        .get(instance_id)
+        .ok_or_else(|| "provider instance is not active".to_string())?;
+    instance
+        .sessions
+        .get(&session_handle)
+        .cloned()
+        .ok_or_else(|| "provider session handle is not active".to_string())
+}
+
+#[cfg(feature = "ffi")]
+fn remove_ffi_session(instance_id: &str, session_handle: u64) -> Result<FfiSession, String> {
+    let mut instances = ffi_instances()
+        .lock()
+        .map_err(|_| "provider instance registry lock is poisoned".to_string())?;
+    let instance = instances
+        .get_mut(instance_id)
+        .ok_or_else(|| "provider instance is not active".to_string())?;
+    instance
+        .sessions
+        .remove(&session_handle)
+        .ok_or_else(|| "provider session handle is not active".to_string())
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_report_ok(
+    runtime_id: &str,
+    provider_id: &str,
+    status: String,
+    diagnostics: Vec<String>,
+) -> FfiRuntimeReportResult {
+    FfiRuntimeReportResult {
+        ok: true,
+        runtime_id: runtime_id.into(),
+        provider_id: provider_id.into(),
+        status: status.into(),
+        diagnostics: RVec::from(
+            diagnostics
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_report_error(message: String) -> FfiRuntimeReportResult {
+    FfiRuntimeReportResult {
         ok: false,
-        payload: RVec::new(),
-        diagnostics: RVec::from(vec![RString::from(format!("{code}: {message}"))]),
+        runtime_id: NATIVE_VN_RUNTIME_ID.into(),
+        provider_id: NATIVE_VN_PROVIDER_ID.into(),
+        status: "error".into(),
+        diagnostics: RVec::from(vec![RString::from(message)]),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_open_request(request: FfiRuntimeOpenRequest) -> Result<RuntimeOpenRequest, String> {
+    if request.worker_count == 0 {
+        return Err("runtime executor worker count must be greater than zero".to_string());
+    }
+    let executor = if request.worker_count == 1 {
+        RuntimeExecutorConfig::serial()
+    } else {
+        RuntimeExecutorConfig::parallel(request.worker_count)
+    };
+    executor.validate().map_err(str::to_string)?;
+    Ok(RuntimeOpenRequest {
+        target_id: request.target_id.to_string(),
+        profile: request.profile.to_string(),
+        locale: request.locale.to_string(),
+        seed: request.seed,
+        integrity_mode: match request.integrity_mode {
+            FfiRuntimeIntegrityMode::Shipping => RuntimeTickIntegrityMode::Shipping,
+            FfiRuntimeIntegrityMode::Evidence => RuntimeTickIntegrityMode::Evidence,
+        },
+        executor,
+        package_hash: request.package_id.to_string(),
+        sections: request
+            .sections
+            .into_iter()
+            .map(ffi_runtime_section)
+            .collect(),
+    })
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_runtime_section(section: FfiRuntimeSection) -> RuntimeSectionPayload {
+    let bytes = section.bytes.into_vec();
+    RuntimeSectionPayload {
+        section_id: section.section_id.to_string(),
+        schema: section.schema.to_string(),
+        version: SchemaVersion::new(
+            section.version_major,
+            section.version_minor,
+            section.version_patch,
+        ),
+        codec: match section.codec {
+            FfiRuntimeSectionCodec::Postcard => RuntimeSectionCodec::Postcard,
+            FfiRuntimeSectionCodec::Raw => RuntimeSectionCodec::Raw,
+            FfiRuntimeSectionCodec::Zstd => RuntimeSectionCodec::Zstd,
+        },
+        bytes,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_step_input(request: FfiRuntimeStepRequest) -> Result<RuntimeStepInput, String> {
+    let action = request.action.to_string();
+    let argument = request
+        .argument
+        .into_option()
+        .map(|argument| argument.to_string());
+    let auxiliary = request
+        .auxiliary
+        .into_option()
+        .map(|auxiliary| auxiliary.to_string());
+    let flag = request.flag.into_option();
+    Ok(RuntimeStepInput {
+        session_id: GameRuntimeSessionId(request.session_id.to_string()),
+        fixed_step: request.fixed_step,
+        delta_ns: request.delta_ns,
+        session_seed: request.session_seed,
+        mode: match request.mode {
+            FfiRuntimeStepMode::Live => RuntimeStepMode::Live,
+            FfiRuntimeStepMode::RestoreContinuation => RuntimeStepMode::RestoreContinuation,
+        },
+        action,
+        argument,
+        auxiliary,
+        flag,
+        input_edges: request
+            .input_edges
+            .into_iter()
+            .map(|edge| astra_plugin_abi::RuntimeInputEdge {
+                control: edge.control.to_string(),
+                pressed: edge.pressed,
+                value: edge.value,
+                sequence: edge.sequence,
+            })
+            .collect(),
+        await_results: request
+            .await_results
+            .into_iter()
+            .map(|result| astra_plugin_abi::RuntimeAwaitResult {
+                token_id: result.token_id.to_string(),
+                status: result.status.to_string(),
+                payload_len: result.payload_len,
+                sequence: result.sequence,
+            })
+            .collect(),
+        provider_results: request
+            .provider_results
+            .into_iter()
+            .map(|result| astra_plugin_abi::RuntimeProviderResult {
+                request_id: result.request_id.to_string(),
+                provider_id: result.provider_id.to_string(),
+                status: result.status.to_string(),
+                payload_len: result.payload_len,
+                sequence: result.sequence,
+            })
+            .collect(),
+        budget: astra_plugin_abi::RuntimeStepBudget {
+            max_instructions: request.max_instructions,
+            max_effects: request.max_effects,
+            max_trace_entries: request.max_trace_entries,
+        },
+    })
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_step_output(output: RuntimeStepOutput) -> FfiRuntimeStepResult {
+    let session_id = output.session_id.0.clone();
+    let mut diagnostics = output.diagnostics;
+    let live = match ffi_live_output(output.live) {
+        Ok((value, live_diagnostics)) => {
+            diagnostics.extend(live_diagnostics);
+            value
+        }
+        Err(error) => return ffi_step_error(session_id, error),
+    };
+    let persisted = match output
+        .persisted
+        .into_iter()
+        .map(ffi_persisted_output)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(value) => value,
+        Err(error) => return ffi_step_error(session_id, error),
+    };
+    FfiRuntimeStepResult {
+        ok: true,
+        session_id: output.session_id.0.into(),
+        status: output.status.into(),
+        live,
+        persisted: RVec::from(persisted),
+        diagnostics: RVec::from(
+            diagnostics
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_persisted_output(
+    output: RuntimePersistedOutput,
+) -> Result<FfiRuntimePersistedOutput, String> {
+    let codec = match output.codec {
+        RuntimePersistedCodec::Postcard => FfiRuntimeSectionCodec::Postcard,
+    };
+    let bytes = output.bytes().as_ref().to_vec();
+    Ok(FfiRuntimePersistedOutput {
+        domain: runtime_output_domain_id(output.domain),
+        schema: output.schema.into(),
+        version_major: output.version.major,
+        version_minor: output.version.minor,
+        version_patch: output.version.patch,
+        codec,
+        bytes: RVec::from(bytes),
+    })
+}
+
+#[cfg(feature = "ffi")]
+fn runtime_output_domain_id(domain: astra_plugin_abi::RuntimeOutputDomain) -> u8 {
+    match domain {
+        astra_plugin_abi::RuntimeOutputDomain::Effect => 0,
+        astra_plugin_abi::RuntimeOutputDomain::Presentation => 1,
+        astra_plugin_abi::RuntimeOutputDomain::Audio => 2,
+        astra_plugin_abi::RuntimeOutputDomain::Await => 3,
+        astra_plugin_abi::RuntimeOutputDomain::Observation => 4,
+        astra_plugin_abi::RuntimeOutputDomain::Trace => 5,
+        astra_plugin_abi::RuntimeOutputDomain::DirtySaveSection => 6,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_output(
+    value: astra_plugin_abi::RuntimeLiveOutput,
+) -> Result<(FfiRuntimeLiveOutput, Vec<String>), String> {
+    let mut scenes = Vec::new();
+    let mut resource_scenes = Vec::new();
+    let mut audio = Vec::new();
+    let mut audio_commands = Vec::new();
+    let mut audio_cues = Vec::new();
+    let mut text = Vec::new();
+    let mut text_presentations = Vec::new();
+    let mut video = Vec::new();
+    let mut waits = Vec::new();
+    let mut events = Vec::new();
+    let mut blackboard = Vec::new();
+    let mut dirty_sections = Vec::new();
+    for effect in value.effects {
+        match effect {
+            RuntimeLiveEffect::Scene(transaction) => scenes.push(ffi_live_scene(transaction)),
+            RuntimeLiveEffect::ResourceScene(scene) => {
+                resource_scenes.push(FfiRuntimeResourceScene {
+                    sequence: scene.sequence,
+                    width: scene.width,
+                    height: scene.height,
+                    textures: RVec::from(
+                        scene
+                            .textures
+                            .into_iter()
+                            .map(|texture| FfiRuntimeResourceTexture {
+                                texture_id: texture.texture_id,
+                                resource_uri: texture.resource_uri.into(),
+                                codec: texture.codec.into(),
+                                revision: texture.revision,
+                                decoded_width: texture.decoded_width,
+                                decoded_height: texture.decoded_height,
+                                decoded_format: ffi_texture_format(texture.decoded_format),
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                    draws: RVec::from(
+                        scene
+                            .draws
+                            .into_iter()
+                            .map(ffi_live_draw)
+                            .collect::<Vec<_>>(),
+                    ),
+                })
+            }
+            RuntimeLiveEffect::Audio(packet) => audio.push(FfiRuntimeAudioPacket {
+                sequence: packet.sequence,
+                stream_id: packet.stream_id,
+                sample_rate: packet.sample_rate,
+                channels: packet.channels,
+                pcm: match packet.pcm {
+                    RuntimeLivePcmBuffer::I16(samples) => {
+                        FfiRuntimePcmBuffer::I16(RVec::from(samples))
+                    }
+                    RuntimeLivePcmBuffer::F32(samples) => {
+                        FfiRuntimePcmBuffer::F32(RVec::from(samples))
+                    }
+                },
+            }),
+            RuntimeLiveEffect::AudioCommand(command) => {
+                audio_commands.push(ffi_live_audio_command(command))
+            }
+            RuntimeLiveEffect::AudioCue(cue) => {
+                let (sync_kind, sync_fence) = match cue.sync {
+                    RuntimeLiveAudioSync::None => (FfiRuntimeAudioSyncKind::None, RString::new()),
+                    RuntimeLiveAudioSync::Text => (FfiRuntimeAudioSyncKind::Text, RString::new()),
+                    RuntimeLiveAudioSync::Fence(fence) => {
+                        (FfiRuntimeAudioSyncKind::Fence, fence.into())
+                    }
+                };
+                audio_cues.push(FfiRuntimeAudioCue {
+                    sequence: cue.sequence,
+                    command_id: cue.command_id.into(),
+                    bus: match cue.bus {
+                        RuntimeLiveAudioBus::Voice => FfiRuntimeAudioBus::Voice,
+                        RuntimeLiveAudioBus::Bgm => FfiRuntimeAudioBus::Bgm,
+                        RuntimeLiveAudioBus::Se => FfiRuntimeAudioBus::Se,
+                        RuntimeLiveAudioBus::Movie => FfiRuntimeAudioBus::Movie,
+                    },
+                    asset: cue.asset.into(),
+                    looped: cue.looped,
+                    fade_ms: cue.fade_ms,
+                    sync_kind,
+                    sync_fence,
+                });
+            }
+            RuntimeLiveEffect::Text(lease) => text.push(FfiRuntimeTextLease {
+                sequence: lease.sequence,
+                lease_id: lease.lease_id.into(),
+                byte_len: lease.byte_len,
+                source_ref: lease.source_ref.into(),
+            }),
+            RuntimeLiveEffect::TextPresentation(presentation) => {
+                text_presentations.push(FfiRuntimeTextPresentation {
+                    sequence: presentation.sequence,
+                    lease_id: presentation.lease_id.into(),
+                    layout_id: presentation.layout_id.into(),
+                    language: presentation.language.into(),
+                    font_families: RVec::from(
+                        presentation
+                            .font_families
+                            .into_iter()
+                            .map(RString::from)
+                            .collect::<Vec<_>>(),
+                    ),
+                    body: ffi_live_text_region(presentation.body),
+                    speaker: presentation.speaker.map(ffi_live_text_region).into(),
+                    rgba: presentation.rgba,
+                })
+            }
+            RuntimeLiveEffect::Video(command) => video.push(FfiRuntimeVideoCommand {
+                sequence: command.sequence,
+                playback_id: match &command.command {
+                    RuntimeLiveVideoCommandKind::Play { playback_id, .. }
+                    | RuntimeLiveVideoCommandKind::Stop { playback_id } => {
+                        playback_id.clone().into()
+                    }
+                },
+                resource_uri: match &command.command {
+                    RuntimeLiveVideoCommandKind::Play { resource_uri, .. } => {
+                        resource_uri.clone().into()
+                    }
+                    RuntimeLiveVideoCommandKind::Stop { .. } => RString::new(),
+                },
+                mode: match &command.command {
+                    RuntimeLiveVideoCommandKind::Play { mode, .. } => match mode {
+                        RuntimeLiveVideoMode::ModalWithAudio => FfiRuntimeVideoMode::ModalWithAudio,
+                        RuntimeLiveVideoMode::LayerNoAudio => FfiRuntimeVideoMode::LayerNoAudio,
+                    },
+                    RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoMode::LayerNoAudio,
+                },
+                stage_width: match &command.command {
+                    RuntimeLiveVideoCommandKind::Play { stage_width, .. } => *stage_width,
+                    RuntimeLiveVideoCommandKind::Stop { .. } => 0,
+                },
+                stage_height: match &command.command {
+                    RuntimeLiveVideoCommandKind::Play { stage_height, .. } => *stage_height,
+                    RuntimeLiveVideoCommandKind::Stop { .. } => 0,
+                },
+                command: match command.command {
+                    RuntimeLiveVideoCommandKind::Play { .. } => FfiRuntimeVideoCommandKind::Play,
+                    RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoCommandKind::Stop,
+                },
+            }),
+            RuntimeLiveEffect::Wait(wait) => {
+                let (kind, number, name, keys, payload_len) = match wait.kind {
+                    RuntimeLiveWaitKind::Frame { frames } => (
+                        FfiRuntimeWaitKind::Frame,
+                        frames,
+                        String::new(),
+                        Vec::new(),
+                        0,
+                    ),
+                    RuntimeLiveWaitKind::Time { milliseconds } => (
+                        FfiRuntimeWaitKind::Time,
+                        milliseconds,
+                        String::new(),
+                        Vec::new(),
+                        0,
+                    ),
+                    RuntimeLiveWaitKind::Input { keys } => {
+                        (FfiRuntimeWaitKind::Input, 0, String::new(), keys, 0)
+                    }
+                    RuntimeLiveWaitKind::MediaFence { media_id } => {
+                        (FfiRuntimeWaitKind::MediaFence, 0, media_id, Vec::new(), 0)
+                    }
+                    RuntimeLiveWaitKind::PresentationFence { fence_id } => (
+                        FfiRuntimeWaitKind::PresentationFence,
+                        0,
+                        fence_id,
+                        Vec::new(),
+                        0,
+                    ),
+                    RuntimeLiveWaitKind::ProviderCompletion { request_id } => (
+                        FfiRuntimeWaitKind::ProviderCompletion,
+                        0,
+                        request_id,
+                        Vec::new(),
+                        0,
+                    ),
+                    RuntimeLiveWaitKind::FamilyOpaque {
+                        wait_kind,
+                        payload_len,
+                    } => (
+                        FfiRuntimeWaitKind::FamilyOpaque,
+                        0,
+                        wait_kind,
+                        Vec::new(),
+                        payload_len,
+                    ),
+                };
+                waits.push(FfiRuntimeWait {
+                    sequence: wait.sequence,
+                    token_id: wait.token_id.into(),
+                    kind,
+                    number,
+                    name: name.into(),
+                    keys: RVec::from(keys.into_iter().map(RString::from).collect::<Vec<_>>()),
+                    payload_len,
+                });
+            }
+            RuntimeLiveEffect::Event(event) => events.push(FfiRuntimeEvent {
+                sequence: event.sequence,
+                event: event.event.into(),
+                payload: RVec::from(event.payload),
+                due_tick: event.due_tick.into(),
+            }),
+            RuntimeLiveEffect::Control(RuntimeLiveControl::SetBlackboard {
+                sequence,
+                key,
+                value,
+            }) => blackboard.push(FfiRuntimeBlackboardMutation {
+                sequence,
+                key: key.into(),
+                value: RVec::from(value),
+            }),
+            RuntimeLiveEffect::Control(RuntimeLiveControl::SnapshotDirty {
+                sequence,
+                section_id,
+            }) => dirty_sections.push(FfiRuntimeDirtySection {
+                sequence,
+                section_id: section_id.into(),
+            }),
+        }
+    }
+    Ok((
+        FfiRuntimeLiveOutput {
+            scenes: RVec::from(scenes),
+            resource_scenes: RVec::from(resource_scenes),
+            audio: RVec::from(audio),
+            audio_commands: RVec::from(audio_commands),
+            audio_cues: RVec::from(audio_cues),
+            text: RVec::from(text),
+            text_presentations: RVec::from(text_presentations),
+            video: RVec::from(video),
+            waits: RVec::from(waits),
+            events: RVec::from(events),
+            blackboard: RVec::from(blackboard),
+            dirty_sections: RVec::from(dirty_sections),
+            state_revision: value.state_revision,
+            instructions: value.coverage.instructions,
+            syscalls: value.coverage.syscalls,
+            presentation_commands: value.coverage.presentation_commands,
+            audio_command_count: value.coverage.audio_commands,
+            text_events: value.coverage.text_events,
+            capture_bytes: value.coverage.capture_bytes,
+            operation_bytes: value.coverage.operation_bytes,
+            pcm_moved_bytes: value.coverage.pcm_moved_bytes,
+            pcm_copied_bytes: value.coverage.pcm_copied_bytes,
+        },
+        value.diagnostics,
+    ))
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_scene(
+    transaction: astra_plugin_abi::RuntimeLiveSceneTransaction,
+) -> astra_plugin_abi::FfiRuntimeSceneTransaction {
+    astra_plugin_abi::FfiRuntimeSceneTransaction {
+        sequence: transaction.sequence,
+        width: transaction.width,
+        height: transaction.height,
+        resources: RVec::from(
+            transaction
+                .resources
+                .into_iter()
+                .map(|operation| match operation {
+                    RuntimeLiveSceneResourceOperation::CreateTexture {
+                        texture_id,
+                        generation,
+                        width,
+                        height,
+                        format,
+                        pixels,
+                    } => FfiRuntimeSceneResourceOperation::Create(FfiRuntimeSceneTextureCreate {
+                        texture_id,
+                        generation,
+                        width,
+                        height,
+                        format: ffi_texture_format(format),
+                        pixels: RVec::from(pixels),
+                    }),
+                    RuntimeLiveSceneResourceOperation::UpdateTexture {
+                        texture_id,
+                        generation,
+                        x,
+                        y,
+                        width,
+                        height,
+                        format,
+                        pixels,
+                    } => FfiRuntimeSceneResourceOperation::Update(FfiRuntimeSceneTextureUpdate {
+                        texture_id,
+                        generation,
+                        x,
+                        y,
+                        width,
+                        height,
+                        format: ffi_texture_format(format),
+                        pixels: RVec::from(pixels),
+                    }),
+                    RuntimeLiveSceneResourceOperation::DestroyTexture {
+                        texture_id,
+                        generation,
+                    } => FfiRuntimeSceneResourceOperation::Destroy {
+                        texture_id,
+                        generation,
+                    },
+                })
+                .collect::<Vec<_>>(),
+        ),
+        draws: RVec::from(
+            transaction
+                .draws
+                .into_iter()
+                .map(|draw| astra_plugin_abi::FfiRuntimeDraw {
+                    texture_id: draw.texture_id,
+                    vertices: draw.vertices.map(|vertex| FfiRuntimeVertex {
+                        x: vertex.x,
+                        y: vertex.y,
+                        u: vertex.u,
+                        v: vertex.v,
+                        r: vertex.color[0],
+                        g: vertex.color[1],
+                        b: vertex.color[2],
+                        a: vertex.color[3],
+                    }),
+                    blend: match draw.blend {
+                        RuntimeLiveBlendMode::Alpha => FfiRuntimeBlendMode::Alpha,
+                        RuntimeLiveBlendMode::Additive => FfiRuntimeBlendMode::Additive,
+                        RuntimeLiveBlendMode::Opaque => FfiRuntimeBlendMode::Opaque,
+                        RuntimeLiveBlendMode::Multiply => FfiRuntimeBlendMode::Multiply,
+                        RuntimeLiveBlendMode::Screen => FfiRuntimeBlendMode::Screen,
+                    },
+                    scissor: draw
+                        .scissor
+                        .map(|scissor| FfiRuntimeScissor {
+                            x: scissor.x,
+                            y: scissor.y,
+                            width: scissor.width,
+                            height: scissor.height,
+                        })
+                        .into(),
+                })
+                .collect::<Vec<_>>(),
+        ),
+        reset_resources: transaction.reset_resources,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_draw(draw: astra_plugin_abi::RuntimeLiveDraw) -> astra_plugin_abi::FfiRuntimeDraw {
+    astra_plugin_abi::FfiRuntimeDraw {
+        texture_id: draw.texture_id,
+        vertices: draw.vertices.map(|vertex| FfiRuntimeVertex {
+            x: vertex.x,
+            y: vertex.y,
+            u: vertex.u,
+            v: vertex.v,
+            r: vertex.color[0],
+            g: vertex.color[1],
+            b: vertex.color[2],
+            a: vertex.color[3],
+        }),
+        blend: match draw.blend {
+            RuntimeLiveBlendMode::Alpha => FfiRuntimeBlendMode::Alpha,
+            RuntimeLiveBlendMode::Additive => FfiRuntimeBlendMode::Additive,
+            RuntimeLiveBlendMode::Opaque => FfiRuntimeBlendMode::Opaque,
+            RuntimeLiveBlendMode::Multiply => FfiRuntimeBlendMode::Multiply,
+            RuntimeLiveBlendMode::Screen => FfiRuntimeBlendMode::Screen,
+        },
+        scissor: draw
+            .scissor
+            .map(|scissor| FfiRuntimeScissor {
+                x: scissor.x,
+                y: scissor.y,
+                width: scissor.width,
+                height: scissor.height,
+            })
+            .into(),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_text_region(region: astra_plugin_abi::RuntimeLiveTextRegion) -> FfiRuntimeTextRegion {
+    FfiRuntimeTextRegion {
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        font_size: region.font_size,
+        line_height: region.line_height,
+        max_lines: region.max_lines,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_audio_command(command: RuntimeLiveAudioCommand) -> FfiRuntimeAudioCommand {
+    let sequence = match &command {
+        RuntimeLiveAudioCommand::LoadResource { sequence, .. }
+        | RuntimeLiveAudioCommand::CreateStream { sequence, .. }
+        | RuntimeLiveAudioCommand::SubmitI16 { sequence, .. }
+        | RuntimeLiveAudioCommand::SubmitF32 { sequence, .. }
+        | RuntimeLiveAudioCommand::Play { sequence, .. }
+        | RuntimeLiveAudioCommand::Stop { sequence, .. }
+        | RuntimeLiveAudioCommand::Pause { sequence, .. }
+        | RuntimeLiveAudioCommand::Resume { sequence, .. }
+        | RuntimeLiveAudioCommand::SetParams { sequence, .. }
+        | RuntimeLiveAudioCommand::DestroyStream { sequence, .. }
+        | RuntimeLiveAudioCommand::MasterVolume { sequence, .. } => *sequence,
+    };
+    let (
+        kind,
+        stream_id,
+        sample_rate,
+        channels,
+        encoding,
+        sample_format,
+        resource_uri,
+        samples,
+        volume,
+        pan,
+        repeat,
+        fade_ms,
+    ) = match command {
+        RuntimeLiveAudioCommand::LoadResource {
+            sequence: _,
+            stream_id,
+            encoding,
+            resource_uri,
+        } => (
+            FfiRuntimeAudioCommandKind::LoadResource,
+            stream_id,
+            0,
+            0,
+            match encoding {
+                RuntimeLiveAudioEncoding::Unknown => FfiRuntimeAudioEncoding::Unknown,
+                RuntimeLiveAudioEncoding::Wav => FfiRuntimeAudioEncoding::Wav,
+                RuntimeLiveAudioEncoding::Ogg => FfiRuntimeAudioEncoding::Ogg,
+                RuntimeLiveAudioEncoding::Mp3 => FfiRuntimeAudioEncoding::Mp3,
+                RuntimeLiveAudioEncoding::Flac => FfiRuntimeAudioEncoding::Flac,
+            },
+            FfiRuntimeAudioSampleFormat::I16,
+            resource_uri,
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::CreateStream {
+            sequence: _,
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format,
+        } => (
+            FfiRuntimeAudioCommandKind::CreateStream,
+            stream_id,
+            sample_rate,
+            channels,
+            FfiRuntimeAudioEncoding::Unknown,
+            match sample_format {
+                RuntimeLiveAudioSampleFormat::I16 => FfiRuntimeAudioSampleFormat::I16,
+                RuntimeLiveAudioSampleFormat::F32 => FfiRuntimeAudioSampleFormat::F32,
+            },
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::SubmitI16 {
+            sequence: _,
+            stream_id,
+            samples,
+        } => (
+            FfiRuntimeAudioCommandKind::SubmitI16,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::from(samples)),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::SubmitF32 {
+            sequence: _,
+            stream_id,
+            samples,
+        } => (
+            FfiRuntimeAudioCommandKind::SubmitF32,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::F32,
+            String::new(),
+            FfiRuntimePcmBuffer::F32(RVec::from(samples)),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::Play {
+            sequence: _,
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        } => (
+            FfiRuntimeAudioCommandKind::Play,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        ),
+        RuntimeLiveAudioCommand::Stop {
+            sequence: _,
+            stream_id,
+            fade_ms,
+        } => (
+            FfiRuntimeAudioCommandKind::Stop,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            fade_ms,
+        ),
+        RuntimeLiveAudioCommand::Pause {
+            sequence: _,
+            stream_id,
+        } => (
+            FfiRuntimeAudioCommandKind::Pause,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::Resume {
+            sequence: _,
+            stream_id,
+        } => (
+            FfiRuntimeAudioCommandKind::Resume,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::SetParams {
+            sequence: _,
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        } => (
+            FfiRuntimeAudioCommandKind::SetParams,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            volume,
+            pan,
+            repeat,
+            0,
+        ),
+        RuntimeLiveAudioCommand::DestroyStream {
+            sequence: _,
+            stream_id,
+        } => (
+            FfiRuntimeAudioCommandKind::DestroyStream,
+            stream_id,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            0.0,
+            0.0,
+            false,
+            0,
+        ),
+        RuntimeLiveAudioCommand::MasterVolume {
+            sequence: _,
+            volume,
+        } => (
+            FfiRuntimeAudioCommandKind::MasterVolume,
+            0,
+            0,
+            0,
+            FfiRuntimeAudioEncoding::Unknown,
+            FfiRuntimeAudioSampleFormat::I16,
+            String::new(),
+            FfiRuntimePcmBuffer::I16(RVec::new()),
+            volume,
+            0.0,
+            false,
+            0,
+        ),
+    };
+    FfiRuntimeAudioCommand {
+        sequence,
+        kind,
+        stream_id,
+        sample_rate,
+        channels,
+        encoding,
+        sample_format,
+        resource_uri: resource_uri.into(),
+        samples,
+        volume,
+        pan,
+        repeat,
+        fade_ms,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_texture_format(format: RuntimeLiveTextureFormat) -> FfiRuntimeTextureFormat {
+    match format {
+        RuntimeLiveTextureFormat::Rgba8 => FfiRuntimeTextureFormat::Rgba8,
+        RuntimeLiveTextureFormat::LumaAlpha8 => FfiRuntimeTextureFormat::LumaAlpha8,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_section_result(section: RuntimeSectionPayload) -> FfiRuntimeSectionResult {
+    FfiRuntimeSectionResult {
+        section_id: section.section_id.into(),
+        schema: section.schema.into(),
+        version_major: section.version.major,
+        version_minor: section.version.minor,
+        version_patch: section.version.patch,
+        codec: match section.codec {
+            RuntimeSectionCodec::Postcard => FfiRuntimeSectionCodec::Postcard,
+            RuntimeSectionCodec::Raw => FfiRuntimeSectionCodec::Raw,
+            RuntimeSectionCodec::Zstd => FfiRuntimeSectionCodec::Zstd,
+        },
+        bytes: RVec::from(section.bytes),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_save_result(value: RuntimeSaveSections) -> FfiRuntimeSaveResult {
+    FfiRuntimeSaveResult {
+        ok: true,
+        session_id: value.session_id.0.into(),
+        sections: RVec::from(
+            value
+                .sections
+                .into_iter()
+                .map(ffi_section_result)
+                .collect::<Vec<_>>(),
+        ),
+        diagnostics: RVec::from(
+            value
+                .diagnostics
+                .into_iter()
+                .map(RString::from)
+                .collect::<Vec<_>>(),
+        ),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_save_error(session_id: String, message: String) -> FfiRuntimeSaveResult {
+    FfiRuntimeSaveResult {
+        ok: false,
+        session_id: session_id.into(),
+        sections: RVec::new(),
+        diagnostics: RVec::from(vec![RString::from(message)]),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_restore_error(session_id: String, message: String) -> FfiRuntimeRestoreResult {
+    FfiRuntimeRestoreResult {
+        ok: false,
+        session_id: session_id.into(),
+        restored_fixed_step: 0,
+        session_seed: 0,
+        status: "error".into(),
+        diagnostics: RVec::from(vec![RString::from(message)]),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_shutdown_error(session_id: String, message: String) -> FfiRuntimeShutdownResult {
+    FfiRuntimeShutdownResult {
+        ok: false,
+        session_id: session_id.into(),
+        status: "error".into(),
+        diagnostics: RVec::from(vec![RString::from(message)]),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_open_error(message: String) -> FfiRuntimeOpenResult {
+    FfiRuntimeOpenResult {
+        ok: false,
+        session_handle: 0,
+        session_id: RString::new(),
+        runtime_id: NATIVE_VN_RUNTIME_ID.into(),
+        provider_id: NATIVE_VN_PROVIDER_ID.into(),
+        diagnostics: RVec::from(vec![RString::from(message)]),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_step_error(session_id: String, message: String) -> FfiRuntimeStepResult {
+    FfiRuntimeStepResult {
+        ok: false,
+        session_id: session_id.into(),
+        status: "error".into(),
+        live: FfiRuntimeLiveOutput::empty(),
+        persisted: RVec::new(),
+        diagnostics: RVec::from(vec![RString::from(message)]),
     }
 }
 

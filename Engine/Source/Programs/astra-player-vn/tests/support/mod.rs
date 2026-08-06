@@ -325,8 +325,8 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v2".to_string(),
-                    abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
             .unwrap()
@@ -353,8 +353,8 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
                 packaged: true,
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
                 rustc_fingerprint: "rustc-stable".to_string(),
-                feature_fingerprint: "runtime-envelope-v2".to_string(),
-                abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                feature_fingerprint: "runtime-envelope-v3".to_string(),
+                abi_fingerprint: "astra-plugin-abi-v3".to_string(),
             })
             .collect(),
         bindings,

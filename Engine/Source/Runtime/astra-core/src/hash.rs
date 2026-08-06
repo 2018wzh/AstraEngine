@@ -18,7 +18,7 @@ impl Hash128 {
         Self(out)
     }
 
-    pub fn from_bytes(bytes: [u8; 16]) -> Self {
+    pub const fn from_bytes(bytes: [u8; 16]) -> Self {
         Self(bytes)
     }
 
@@ -39,7 +39,7 @@ impl Hash256 {
         Self(out)
     }
 
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 

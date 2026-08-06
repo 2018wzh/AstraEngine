@@ -8,7 +8,9 @@ pub struct MacosPlatformFactory {
     #[cfg(target_os = "macos")]
     roots: Option<HostRoots>,
     #[cfg(target_os = "macos")]
-    pending: std::rc::Rc<std::cell::RefCell<Option<macos::BackendSetup>>>,
+    pending: std::sync::Arc<std::sync::Mutex<Option<macos::BackendSetup>>>,
+    #[cfg(target_os = "macos")]
+    start_wake: Option<winit::event_loop::EventLoopProxy<()>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -42,6 +44,7 @@ pub fn factory_with_test_roots(
             bundle_root: bundle_root.as_ref().to_path_buf(),
         }),
         pending: Default::default(),
+        start_wake: None,
     }
 }
 
@@ -53,6 +56,7 @@ impl PlatformHostFactory for MacosPlatformFactory {
                 profile,
                 self.roots.clone(),
                 self.pending.clone(),
+                self.start_wake.clone(),
             ))
         }
         #[cfg(not(target_os = "macos"))]
@@ -73,10 +77,8 @@ impl PlatformHostFactory for MacosPlatformFactory {
 #[cfg(target_os = "macos")]
 mod macos {
     use std::{
-        cell::RefCell,
         collections::BTreeMap,
         future::Future,
-        rc::Rc,
         sync::{
             atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
             mpsc as std_mpsc, Arc,
@@ -88,13 +90,13 @@ mod macos {
     use crate::accessibility::MacosAccessibilityBridge;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputRequest,
-        AudioOutputStatus, AudioPacket, CapturedFrame, DecodeKind, DecodeOutput,
-        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, PackageSourceHandle,
-        PackageSourceRequest, PlatformBackendChannels, PlatformDecodeRequest, PlatformError,
-        PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
-        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
-        WindowHandle,
+        host_channel_with_command_wake, AudioDeviceFormat, AudioMeter, AudioOutputHandle,
+        AudioOutputRequest, AudioOutputStatus, AudioPacket, AudioWakeRegistration, CapturedFrame,
+        DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
+        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
+        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
+        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -108,7 +110,7 @@ mod macos {
             ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase as WinitTouchPhase,
             WindowEvent,
         },
-        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
         platform::pump_events::EventLoopExtPumpEvents,
         window::{Window, WindowAttributes, WindowId},
     };
@@ -117,6 +119,7 @@ mod macos {
         backend: PlatformBackendChannels,
         profile: PlatformHostProfile,
         roots: Option<super::HostRoots>,
+        command_wake: PlatformCommandWakeRegistration,
         _instance_guard: SingleInstanceGuard,
     }
 
@@ -127,14 +130,15 @@ mod macos {
 
     impl MacosHostRunner {
         pub(super) fn new() -> Result<(Self, super::MacosPlatformFactory), PlatformError> {
-            let pending = Rc::new(RefCell::new(None));
+            let pending = Arc::new(std::sync::Mutex::new(None));
             let event_loop = EventLoop::builder().build().map_err(|_| {
                 host_error(
                     "host.runner.create",
                     "macOS event loop could not be created",
                 )
             })?;
-            event_loop.set_control_flow(ControlFlow::Poll);
+            event_loop.set_control_flow(ControlFlow::Wait);
+            let start_wake = event_loop.create_proxy();
             Ok((
                 Self {
                     event_loop,
@@ -146,39 +150,91 @@ mod macos {
                 super::MacosPlatformFactory {
                     roots: None,
                     pending,
+                    start_wake: Some(start_wake),
                 },
             ))
         }
 
-        pub fn run<F: Future>(&mut self, future: F) -> Result<F::Output, PlatformError> {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|_| host_error("host.runner.run", "Tokio runtime could not be created"))?;
-            runtime.block_on(async {
-                tokio::pin!(future);
-                loop {
-                    self.event_loop
-                        .pump_app_events(Some(Duration::ZERO), &mut self.app);
-                    tokio::select! {
-                        result = &mut future => break Ok(result),
-                        _ = tokio::time::sleep(Duration::from_millis(1)) => {}
+        pub fn run<F>(&mut self, future: F) -> Result<F::Output, PlatformError>
+        where
+            F: Future + Send + 'static,
+            F::Output: Send + 'static,
+        {
+            // Tokio and winit cannot both own the macOS main-thread event
+            // loop. Run the async player on a worker and let winit block in
+            // `pump_app_events(None)`. Host commands and completion are
+            // explicit EventLoopProxy user events; there is no fixed-period
+            // bridge timer keeping an idle player hot.
+            let proxy = self.event_loop.create_proxy();
+            let (result_tx, result_rx) = std_mpsc::sync_channel(1);
+            let worker = thread::Builder::new()
+                .name("astra-macos-player-async".to_owned())
+                .spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .map_err(|_| {
+                                host_error("host.runner.run", "Tokio runtime could not be created")
+                            })?;
+                        Ok::<_, PlatformError>(runtime.block_on(future))
+                    }))
+                    .unwrap_or_else(|_| {
+                        Err(host_error(
+                            "host.runner.run",
+                            "macOS async player worker panicked",
+                        ))
+                    });
+                    let _ = result_tx.send(result);
+                    let _ = proxy.send_event(());
+                })
+                .map_err(|_| {
+                    host_error("host.runner.run", "Tokio player worker could not start")
+                })?;
+
+            let result = loop {
+                self.event_loop.pump_app_events(None, &mut self.app);
+                match result_rx.try_recv() {
+                    Ok(result) => break result,
+                    Err(std_mpsc::TryRecvError::Empty) => continue,
+                    Err(std_mpsc::TryRecvError::Disconnected) => {
+                        break Err(host_error(
+                            "host.runner.run",
+                            "Tokio player worker exited without a result",
+                        ));
                     }
                 }
-            })
+            };
+            let _ = worker.join();
+            result
         }
     }
 
     struct MacosRunnerApp {
-        pending: Rc<RefCell<Option<BackendSetup>>>,
+        pending: Arc<std::sync::Mutex<Option<BackendSetup>>>,
         host: Option<MacosHostApp>,
     }
 
     impl MacosRunnerApp {
-        fn initialize(&mut self) -> Result<(), PlatformError> {
-            let Some(setup) = self.pending.borrow_mut().take() else {
+        fn initialize(&mut self, event_loop: &ActiveEventLoop) -> Result<(), PlatformError> {
+            let Some(setup) = self
+                .pending
+                .lock()
+                .map_err(|_| host_error("host.start", "macOS pending host state is poisoned"))?
+                .take()
+            else {
                 return Ok(());
             };
+            let proxy = event_loop.create_proxy();
+            let gamepad_proxy = proxy.clone();
+            setup.command_wake.bind(move || {
+                if proxy.send_event(()).is_err() {
+                    tracing::debug!(
+                        event = "platform.macos.command_wake.closed",
+                        "macOS event loop was already closed when a host wake arrived"
+                    );
+                }
+            })?;
             let roots = setup
                 .roots
                 .or_else(|| default_roots(&setup.profile.package_id))
@@ -194,6 +250,8 @@ mod macos {
             self.host = Some(MacosHostApp::new(
                 setup.backend,
                 ready,
+                setup.command_wake,
+                gamepad_proxy,
                 save_store,
                 package_cache,
                 PackageHostConfig {
@@ -209,7 +267,7 @@ mod macos {
 
     impl ApplicationHandler for MacosRunnerApp {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-            if self.initialize().is_err() {
+            if self.initialize(event_loop).is_err() {
                 event_loop.exit();
             }
             if let Some(host) = self.host.as_mut() {
@@ -229,8 +287,19 @@ mod macos {
             }
         }
 
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, _: ()) {
+            if self.initialize(event_loop).is_err() {
+                event_loop.exit();
+                return;
+            }
+            if let Some(host) = self.host.as_mut() {
+                host.process_package_completions();
+                host.process_commands(event_loop);
+            }
+        }
+
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-            if self.initialize().is_err() {
+            if self.initialize(event_loop).is_err() {
                 event_loop.exit();
             }
             if let Some(host) = self.host.as_mut() {
@@ -242,8 +311,16 @@ mod macos {
     pub async fn start(
         launch_profile: HostLaunchProfile,
         roots: Option<super::HostRoots>,
-        pending: Rc<RefCell<Option<BackendSetup>>>,
+        pending: Arc<std::sync::Mutex<Option<BackendSetup>>>,
+        start_wake: Option<EventLoopProxy<()>>,
     ) -> Result<PlatformHostSession, PlatformError> {
+        let Some(start_wake) = start_wake else {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "host.start",
+                "macOS host requires main_thread_host and MacosHostRunner",
+            ));
+        };
         let profile = launch_profile.require_platform()?.clone();
         if profile.platform != astra_platform::PlatformId::Macos {
             return Err(PlatformError::new(
@@ -255,31 +332,37 @@ mod macos {
         let command_capacity = profile.limits.command_queue_capacity;
         let event_capacity = profile.limits.event_queue_capacity;
         let instance_guard = SingleInstanceGuard::acquire(&profile)?;
-        let (client, backend, events) = host_channel(
+        let command_wake = PlatformCommandWakeRegistration::default();
+        let (client, backend, events) = host_channel_with_command_wake(
             HostLaunchProfile::platform(profile.clone()),
             command_capacity,
             event_capacity,
+            command_wake.clone(),
         )?;
-        if Rc::strong_count(&pending) < 2 {
-            return Err(PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "host.start",
-                "macOS host requires main_thread_host and MacosHostRunner",
-            ));
-        }
-        if pending.borrow().is_some() {
+        let mut pending_slot = pending
+            .lock()
+            .map_err(|_| host_error("host.start", "macOS pending host state is poisoned"))?;
+        if pending_slot.is_some() {
             return Err(PlatformError::new(
                 PlatformErrorCode::AlreadyInUse,
                 "host.start",
                 "macOS factory already has a pending host",
             ));
         }
-        *pending.borrow_mut() = Some(BackendSetup {
+        *pending_slot = Some(BackendSetup {
             backend,
             profile,
             roots,
+            command_wake,
             _instance_guard: instance_guard,
         });
+        drop(pending_slot);
+        start_wake.send_event(()).map_err(|_| {
+            host_error(
+                "host.start",
+                "macOS event loop closed before host initialization",
+            )
+        })?;
         Ok(PlatformHostSession {
             client,
             events,
@@ -352,6 +435,7 @@ mod macos {
 
     struct MacosHostApp {
         backend: PlatformBackendChannels,
+        command_wake: PlatformCommandWakeRegistration,
         ready: Option<std_mpsc::SyncSender<Result<(), PlatformError>>>,
         windows: ResourceTable<Arc<Window>, WindowHandle>,
         window_ids: BTreeMap<WindowId, WindowHandle>,
@@ -372,8 +456,8 @@ mod macos {
         bundle_root: std::path::PathBuf,
         package_sources: ResourceTable<PackageSourceResource, PackageSourceHandle>,
         event_sequence: u64,
-        gamepads: gilrs::Gilrs,
-        gamepad_mapper: astra_platform_common::GamepadMapper,
+        gamepad_stop: Arc<AtomicBool>,
+        gamepad_thread: Option<thread::JoinHandle<()>>,
     }
 
     struct PackageHostConfig {
@@ -387,6 +471,8 @@ mod macos {
         fn new(
             backend: PlatformBackendChannels,
             ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
+            command_wake: PlatformCommandWakeRegistration,
+            gamepad_proxy: EventLoopProxy<()>,
             save_store: AtomicSaveStore,
             package_cache: VerifiedPackageCache,
             package: PackageHostConfig,
@@ -400,9 +486,65 @@ mod macos {
                 error
             })?;
             let gamepad_mapper = astra_platform_common::GamepadMapper::new(0.2)?;
+            let gamepad_emitter = backend.event_emitter();
+            let gamepad_proxy = gamepad_proxy.clone();
+            let gamepad_stop = Arc::new(AtomicBool::new(false));
+            let gamepad_stop_thread = Arc::clone(&gamepad_stop);
+            let gamepad_thread = thread::Builder::new()
+                .name("astra-macos-gamepad".to_string())
+                .spawn(move || {
+                    let mut gamepads = gamepads;
+                    let mut gamepad_mapper = gamepad_mapper;
+                    while !gamepad_stop_thread.load(Ordering::Acquire) {
+                        let Some(event) =
+                            gamepads.next_event_blocking(Some(Duration::from_millis(250)))
+                        else {
+                            continue;
+                        };
+                        let Some(event) = raw_gamepad_event(event) else {
+                            continue;
+                        };
+                        match gamepad_mapper.apply_checked(event) {
+                            Ok(events) => {
+                                let emitted = !events.is_empty();
+                                for event in events {
+                                    if let Err(error) = gamepad_emitter.emit(event) {
+                                        tracing::warn!(
+                                            event = "platform.macos.gamepad.event_dropped",
+                                            diagnostic_code = ?error.code,
+                                            operation = %error.operation,
+                                            "macOS Gaming Input event could not be emitted"
+                                        );
+                                    }
+                                }
+                                if emitted && gamepad_proxy.send_event(()).is_err() {
+                                    tracing::debug!(
+                                        event = "platform.macos.gamepad.wake.closed",
+                                        diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                                        "macOS event loop was already closed after a gamepad batch"
+                                    );
+                                    return;
+                                }
+                            }
+                            Err(error) => tracing::warn!(
+                                event = "platform.macos.gamepad.invalid_event",
+                                diagnostic_code = ?error.code,
+                                operation = %error.operation,
+                                "macOS Gaming Input event was rejected"
+                            ),
+                        }
+                    }
+                })
+                .map_err(|_| {
+                    host_error(
+                        "input.gamepad.worker",
+                        "macOS gamepad worker could not start",
+                    )
+                })?;
             let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
             Ok(Self {
                 backend,
+                command_wake,
                 ready: Some(ready),
                 windows: ResourceTable::new("window"),
                 window_ids: BTreeMap::new(),
@@ -423,8 +565,8 @@ mod macos {
                 bundle_root: package.bundle_root,
                 package_sources: ResourceTable::new("package_source"),
                 event_sequence: 0,
-                gamepads,
-                gamepad_mapper,
+                gamepad_stop,
+                gamepad_thread: Some(gamepad_thread),
             })
         }
 
@@ -636,7 +778,7 @@ mod macos {
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenAudioOutput { request, reply } => {
-                        let result = AudioResource::new(request)
+                        let result = AudioResource::new(request, self.backend.audio_wake())
                             .and_then(|resource| self.audio_outputs.insert(resource));
                         let _ = reply.send(result);
                     }
@@ -906,6 +1048,7 @@ mod macos {
             reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
         ) {
             let completion_tx = self.package_completion_tx.clone();
+            let command_wake = self.command_wake.clone();
             let policies = self.package_source_policies.clone();
             let package_id = self.package_id.clone();
             let policy = self.package_cache_policy.clone();
@@ -925,6 +1068,7 @@ mod macos {
                     cache.open_source(&expected_hash)
                 })();
                 let _ = completion_tx.send(PackageCompletion { reply, result });
+                command_wake.notify();
             });
         }
 
@@ -1043,8 +1187,6 @@ mod macos {
         }
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-            self.process_package_completions();
-            self.process_commands(event_loop);
             let actions = self
                 .accessibility
                 .values_mut()
@@ -1058,10 +1200,7 @@ mod macos {
                     value: request.value,
                 });
             }
-            self.poll_gamepad();
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(4),
-            ));
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 
@@ -1084,24 +1223,15 @@ mod macos {
         }
     }
 
-    impl MacosHostApp {
-        fn poll_gamepad(&mut self) {
-            while let Some(event) = self.gamepads.next_event() {
-                let Some(event) = raw_gamepad_event(event) else {
-                    continue;
-                };
-                match self.gamepad_mapper.apply_checked(event) {
-                    Ok(events) => {
-                        for event in events {
-                            self.emit(event);
-                        }
-                    }
-                    Err(error) => tracing::warn!(
-                        event = "platform.macos.gamepad.invalid_event",
-                        diagnostic_code = ?error.code,
-                        operation = %error.operation,
-                        "macOS Gaming Input event was rejected"
-                    ),
+    impl Drop for MacosHostApp {
+        fn drop(&mut self) {
+            self.gamepad_stop.store(true, Ordering::Release);
+            if let Some(worker) = self.gamepad_thread.take() {
+                if worker.join().is_err() {
+                    tracing::error!(
+                        event = "platform.macos.gamepad.worker_panic",
+                        "macOS gamepad worker panicked during shutdown"
+                    );
                 }
             }
         }
@@ -1252,6 +1382,7 @@ mod macos {
         next_sequence: u64,
         submitted_samples: u64,
         paused: bool,
+        audio_wake: AudioWakeRegistration,
     }
 
     fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
@@ -1276,7 +1407,10 @@ mod macos {
     }
 
     impl AudioResource {
-        fn new(request: AudioOutputRequest) -> Result<Self, PlatformError> {
+        fn new(
+            request: AudioOutputRequest,
+            audio_wake: AudioWakeRegistration,
+        ) -> Result<Self, PlatformError> {
             if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
             {
                 return Err(PlatformError::new(
@@ -1329,33 +1463,57 @@ mod macos {
                 cpal::SampleFormat::F32 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [f32], _| fill_f32(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [f32], _| {
+                            let _ = fill_f32(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
                 cpal::SampleFormat::I16 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [i16], _| fill_i16(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [i16], _| {
+                            let _ = fill_i16(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
                 cpal::SampleFormat::U16 => {
                     let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
+                    let wake = audio_wake.clone();
+                    let error_wake = audio_wake.clone();
                     let mut consumer = consumer;
                     device.build_output_stream(
                         &config,
-                        move |output: &mut [u16], _| fill_u16(output, &mut consumer, &meter),
-                        move |stream_error_value| set_stream_error(&error, stream_error_value),
+                        move |output: &mut [u16], _| {
+                            let _ = fill_u16(output, &mut consumer, &meter);
+                            wake.notify();
+                        },
+                        move |stream_error_value| {
+                            set_stream_error(&error, stream_error_value);
+                            error_wake.notify();
+                        },
                         None,
                     )
                 }
@@ -1383,6 +1541,7 @@ mod macos {
                 next_sequence: 1,
                 submitted_samples: 0,
                 paused: request.start_paused,
+                audio_wake,
             })
         }
 
@@ -1472,6 +1631,7 @@ mod macos {
                 start_paused: false,
             };
             let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
+            let mut observed_wake = 0;
             loop {
                 if self.stream_error.load(Ordering::Acquire) {
                     return Err(PlatformError::new(
@@ -1489,7 +1649,11 @@ mod macos {
                         "CoreAudio output drain timed out",
                     ));
                 }
-                thread::sleep(Duration::from_millis(5));
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                observed_wake = self
+                    .audio_wake
+                    .wait_timeout(observed_wake, remaining)
+                    .ok_or_else(|| host_error("audio.drain", "CoreAudio output drain timed out"))?;
             }
             Ok(self.meter.snapshot())
         }

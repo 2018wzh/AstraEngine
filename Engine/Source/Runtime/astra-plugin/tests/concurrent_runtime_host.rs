@@ -89,7 +89,8 @@ impl ProductRuntimeSession for Session {
         Ok(RuntimeStepOutput {
             session_id: input.session_id,
             status: "idle".into(),
-            outputs: vec![],
+            live: Default::default(),
+            persisted: vec![],
             diagnostics: vec![],
         })
     }
@@ -145,7 +146,7 @@ fn step_input(session_id: GameRuntimeSessionId, seed: u64) -> RuntimeStepInput {
         session_seed: seed,
         mode: RuntimeStepMode::Live,
         action: "advance".into(),
-        payload: serde_json::json!({}),
+        ..RuntimeStepInput::default()
     }
 }
 

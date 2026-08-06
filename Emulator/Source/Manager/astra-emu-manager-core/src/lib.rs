@@ -40,7 +40,7 @@ pub use patch::{
 pub use play_record::{PlaySessionRecord, PlayStats, RecentWorkRecord};
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
 pub use runtime_provider::{
-    AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory, EmuCaseProfile, EmuStepPayload,
+    AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory, EmuCaseProfile, QueuedPatchEffect,
 };
 pub use scanner::{
     DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,

@@ -475,13 +475,13 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
             RResult::ROk(bytes) => bytes,
             RResult::RErr(error) => return Err(error.into()),
         };
-        if bytes.len() as u64 > max_bytes {
+        if bytes.bytes.len() as u64 > max_bytes {
             return Err(LegacyProviderError::invalid(
                 "ASTRA_EMU_FFI_RESOURCE_BOUNDS",
                 "family resource exceeds the requested byte bound",
             ));
         }
-        Ok(bytes.as_slice().to_vec())
+        Ok(bytes.bytes.as_slice().to_vec())
     }
 }
 
@@ -828,6 +828,14 @@ mod tests {
     }
 
     #[test]
+    fn manifest_gate_rejects_v6_without_compatibility_path() {
+        let mut manifest = manifest();
+        manifest.abi_fingerprint = "astra.emu.family_abi.v6".into();
+        let error = validate_manifest(&manifest, &gate()).unwrap_err();
+        assert!(matches!(error, FamilyPluginLoadError::Manifest(_)));
+    }
+
+    #[test]
     fn descriptor_binding_is_exact() {
         let manifest = manifest();
         let descriptor = LegacyFamilyPluginDescriptor {
@@ -1037,7 +1045,7 @@ mod tests {
         let restore = provider.restore(&ctx, &session, &snapshot).unwrap();
         assert!((1..=4).contains(&restore.restored_fixed_step));
         let shutdown = provider.shutdown(&ctx, &session).unwrap();
-        assert_eq!(shutdown.final_state_hash, output.state_hash);
+        assert_eq!(shutdown.final_state_revision, output.state_revision);
     }
 
     struct DynamicMemoryVfs {
@@ -1100,7 +1108,6 @@ mod tests {
             Ok(astra_byte_source::RangeReadResult {
                 range,
                 revision: stat.revision,
-                content_hash: Hash256::from_sha256(&bytes),
                 bytes,
             })
         }

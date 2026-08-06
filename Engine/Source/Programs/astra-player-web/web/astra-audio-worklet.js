@@ -57,7 +57,17 @@ class AstraAudioProcessor extends AudioWorkletProcessor {
         this.queuedFrames -= 1;
         if (packet.offset >= packet.samples.length) {
           this.queue.shift();
-          this.port.postMessage({ type: "consumed", sequence: packet.sequence });
+          const rms = this.sampleCount ? Math.sqrt(this.sumSquares / this.sampleCount) : 0;
+          this.port.postMessage({
+            type: "consumed",
+            sequence: packet.sequence,
+            sampleCount: this.sampleCount,
+            peak: this.peak,
+            rms,
+            queuedFrames: this.queuedFrames,
+            underflowCount: this.underflowCount,
+            callbackCount: this.callbackCount,
+          });
         }
       }
     }

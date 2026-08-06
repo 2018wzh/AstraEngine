@@ -475,7 +475,6 @@ impl LegacyVfsReader for DesktopVfsRegistry {
             let result = RangeReadResult {
                 range,
                 revision: expected_revision,
-                content_hash: Hash256::from_sha256(&bytes),
                 bytes,
             };
             drop(mounts);
@@ -521,7 +520,6 @@ impl LegacyVfsReader for DesktopVfsRegistry {
         let result = RangeReadResult {
             range,
             revision: stat.revision,
-            content_hash: Hash256::from_sha256(&bytes),
             bytes,
         };
         self.record_access(mount_set_id, &uri.to_ascii_lowercase(), &result)?;

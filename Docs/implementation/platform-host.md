@@ -6,6 +6,45 @@ Target 绑定见 [Target And Platform Blueprint](target-platform.md)，native ho
 
 ## Contract
 
+### RFVP media stream path
+
+The Windows PlatformHost owns the Media Foundation `DecodeResource` session.
+Video and audio use `DecodeStreamAction::{Start,Next}` with strict sequence,
+kind, format, and budget validation. Each resource has its own bounded decode
+worker, so `ReadSample` and format conversion never block the Winit command
+loop; the host emits one cursor/frame or PCM chunk per request and a stable end
+diagnostic, while `Next` never carries encoded bytes. Manager and native CLI
+prefetch on bounded workers and close every session during stop, completion,
+error, and host shutdown. WMF hardware transforms are requested, while the
+explicit CPU BGRA/i16 boundary preserves portable hashing and keeps the final
+GPU/device transfer observable. Streaming WMF video uses the metadata-only
+`astra.decoded_video_frame_cpu.v1` format and moves the decoder-owned BGRA8
+allocation through `DecodeOutput`; it no longer wraps every frame in a postcard
+payload. The host still validates the moved buffer hash, dimensions and byte
+budget before the consumer's in-place BGRA-to-RGBA conversion. A hardware
+transform request is not treated as proof that a particular adapter selected a
+hardware transform; that proof remains an explicit release-gate artifact.
+
+### Windowed E2 host path
+
+`astra-emu-cli windowed-e2` is a developer-only conformance path. It creates the
+same native Windows window, WGPU device/queue, PlatformHost audio service and
+decode workers used by the native launch, but the JSONL file remains the sole
+gameplay input source. The input must be the validated
+`astra.user_input_sequence.v1` sequence and must end with `Shutdown`; keyboard,
+pointer, touch, gamepad, IME and external close events are rejected at the host
+boundary and counted instead of entering `RuntimeWorld`. Resize and focus are
+lifecycle events only.
+
+The run writes `astra.emu.windowed_e2_report.v1`. The report binds the family
+provider and binary, executable build, platform profile, package and entry,
+session and input hashes, and records only fixed-step counts, rejected-input
+counts, diagnostics and checkpoint frame/observation hashes. Surface readback is
+allowed at declared checkpoints only; ordinary frames record present/deadline,
+scene/upload, audio queue/refill and resource-lifecycle telemetry. The report is
+not an E3 sign-off and cannot be used to claim clean Release performance without
+the matching native identity and soak evidence.
+
 ```rust
 pub trait PlatformHostFactory {
     fn start(&self, profile: HostLaunchProfile) -> HostStartFuture;
@@ -22,7 +61,19 @@ pub struct PlatformHostSession {
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
-Windows host 的命令队列是事件驱动的：命令成功进入有界队列后必须通过 `EventLoopProxy` 唤醒 Winit，并在 `user_event` 中立即排空；队列满、关闭或未成功提交时不得产生伪唤醒。HTTPS package completion 同样显式唤醒 event loop。`about_to_wait` 不能作为 render/audio/decode command 的生产或补水时钟；无已连接 gamepad 时只保留 250 ms 的设备发现轮询，已连接 gamepad 才使用 4 ms 输入轮询。唤醒注册重复绑定、event loop 关闭和 queue overflow 都必须输出稳定 diagnostic，不能静默退回 fixed polling。
+Windows/Linux/macOS host 的命令队列是事件驱动的：命令成功进入有界队列后必须通过 `EventLoopProxy` 唤醒 Winit，并在 `user_event` 中立即排空；队列满、关闭或未成功提交时不得产生伪唤醒。macOS Player 的异步编排运行在独立 Tokio worker，主线程只阻塞在 `pump_app_events(None)`，由 host command/future completion user event 唤醒。HTTPS package completion 同样显式唤醒 event loop。`about_to_wait` 不能作为 render/audio/decode/input command 的生产或补水时钟。Manager 以及 Windows/Linux/macOS host 的 gamepad、metadata 和 translation worker 使用同一类 edge-triggered host wake；Web gamepad source 和媒体完成使用 `requestAnimationFrame`，不再使用固定 interval/timeout。只有底层 native backend 不提供 hotplug handle 时，worker 内部才允许 250 ms 的设备发现等待。唤醒注册重复绑定、event loop 关闭和 queue overflow 都必须输出稳定 diagnostic，不能静默退回 UI fixed polling。
+
+Native fixed-tick loops use the shared absolute-deadline scheduler. Their event
+select gives an already-due deadline priority over a burst of host events, so
+window/user-event traffic cannot manufacture catch-up debt. A debt diagnostic is
+still blocking; it is never repaired by rebasing the clock or silently dropping
+ticks. Native CLI/Windowed E2 performs one explicit startup fixed step before
+arming the steady-state scheduler: retained atlas/resource creation is measured
+as `astra.emu.native_startup_tick`, and an over-budget result is emitted as
+`ASTRA_NATIVE_STARTUP_TICK_OVER_BUDGET` rather than being hidden or counted as
+a dropped tick. All subsequent steps remain on the absolute deadline and use
+the same four-step debt limit.
+Native audio callback 的消费/错误边沿也通过共享 `AudioWakeRegistration` 唤醒 drain/refill waiter；绝对 deadline 只作为最终超时边界，禁止用 4/5 ms sleep 模拟补水。队列满、设备丢失、格式漂移、worker panic 和 shutdown drain/abort/join 必须终止受影响 session 并输出稳定 diagnostic。
 
 用户授权原版目录只暴露安全相对路径的 stat/range read。source fingerprint 固定按 4 MiB range 流式读取，同时计算公开文件 SHA-256 与不落盘的私有 key material；单个原版大文件不得通过 whole-file `fs::read` 进入 Player、Headless 或 CLI。每次 range 都校验 offset、length、最大读取量和文件边界，fingerprint 前后再次 stat，长度或内容变化立即阻断。
 

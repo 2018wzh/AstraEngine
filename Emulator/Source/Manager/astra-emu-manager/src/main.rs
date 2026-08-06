@@ -32,22 +32,21 @@ use std::{
 
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAwaitResult, LegacyEffect, LegacyEphemeralText, LegacyInputEdge,
-    LegacyPayload, LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1,
-    LegacyRuntimeHostCtx, LegacyStepBudget, LegacyVfsReader, LegacyVideoCommandV1,
-    LegacyWaitRequest,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
+    LegacyAwaitResult, LegacyEphemeralText, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
+    LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_fvp::FvpVfsFamilyFactory;
 use astra_emu_manager::family_host::FamilyHostConfig;
-use astra_emu_manager::{run_manager_with_initial_state, ManagerController};
+use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
     AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord,
-    CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, EmuStepPayload,
-    ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
-    MatchDecisionRecord, MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction,
-    PatchVfsReader, ProviderConsentRecord, ScanLimits, SourceGrant, TranslationCacheRecord,
+    CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord,
+    GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord, MatchDecisionRecord,
+    MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader,
+    ProviderConsentRecord, QueuedPatchEffect, ScanLimits, SourceGrant, TranslationCacheRecord,
     TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
@@ -65,9 +64,15 @@ use astra_emu_translation_openai_compatible::{
 };
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
-    GameRuntimeSessionId, ProviderInstanceId, RuntimeOpenRequest, RuntimeOutputDomain,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode,
+    GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
+    RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
+    RuntimeLiveAudioSampleFormat, RuntimeLiveControl, RuntimeLiveEffect, RuntimeLivePcmBuffer,
+    RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
+    RuntimeLiveTextureFormat, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind,
+    RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest,
+    RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget, RuntimeStepInput,
+    RuntimeStepMode,
 };
 use image::GenericImageView;
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
@@ -132,7 +137,7 @@ fn platform_grant_kind() -> &'static str {
 struct ActiveRuntimeSession {
     session_id: GameRuntimeSessionId,
     package_hash: Hash256,
-    profile_hash: Hash256,
+    profile_id: String,
     fixed_step: u64,
     fixed_delta_ns: u64,
     seed: u64,
@@ -159,8 +164,8 @@ struct RuntimeBridge {
     provider: AstraEmuRuntimeProvider,
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
-    render_frames: VecDeque<LegacyRenderFrameV1>,
-    scene_commits: VecDeque<LegacyPreparedSceneCommitV1>,
+    live_scene_commits: VecDeque<RuntimeLiveSceneTransaction>,
+    resource_revisions: BTreeMap<u32, (u64, u32, u32, RuntimeLiveTextureFormat)>,
     audio: Option<HostAudioExecutor>,
     video: HostVideoExecutor,
     text_captures: VecDeque<LegacyEphemeralText>,
@@ -169,6 +174,7 @@ struct RuntimeBridge {
     media_hooks: BTreeMap<String, String>,
     filter_preset: String,
     suspended: bool,
+    host_wake: Option<HostWake>,
 }
 
 impl RuntimeBridge {
@@ -180,8 +186,8 @@ impl RuntimeBridge {
             provider,
             active: None,
             terminal: false,
-            render_frames: VecDeque::new(),
-            scene_commits: VecDeque::new(),
+            live_scene_commits: VecDeque::new(),
+            resource_revisions: BTreeMap::new(),
             audio: None,
             video: HostVideoExecutor::default(),
             text_captures: VecDeque::new(),
@@ -190,7 +196,15 @@ impl RuntimeBridge {
             media_hooks: BTreeMap::new(),
             filter_preset: "none".into(),
             suspended: false,
+            host_wake: None,
         })
+    }
+
+    fn set_host_wake(&mut self, wake: HostWake) {
+        self.host_wake = Some(wake.clone());
+        if let Some(translation) = self.translation.as_mut() {
+            translation.set_wake(wake);
+        }
     }
 
     fn launch(
@@ -236,16 +250,18 @@ impl RuntimeBridge {
             schema: "astra.emu.case_profile.v1".into(),
             version: SchemaVersion::new(1, 0, 0),
             codec: RuntimeSectionCodec::Postcard,
-            hash: Hash256::from_sha256(&bytes),
             bytes,
         };
-        let profile_hash = section.hash;
         let seed = u64::from_le_bytes(package_hash.as_bytes()[..8].try_into().unwrap());
         let audio = HostAudioExecutor::open()?;
-        let translation = TranslationRuntime::open(
+        self.video.bind_platform(audio.platform_client());
+        let mut translation = TranslationRuntime::open(
             translation_config,
             Arc::new(ManagerSecretStore::open().map_err(|error| error.to_string())?),
         )?;
+        if let Some(wake) = self.host_wake.clone() {
+            translation.set_wake(wake);
+        }
         let open = self.provider.open(RuntimeOpenRequest {
             target_id: "astra-emu-case".into(),
             profile: "fvp-v1".into(),
@@ -270,7 +286,7 @@ impl RuntimeBridge {
         self.active = Some(ActiveRuntimeSession {
             session_id: open.session_id.clone(),
             package_hash,
-            profile_hash,
+            profile_id: "astra.emu.case_profile.v1".into(),
             fixed_step: 0,
             fixed_delta_ns: emu_profile.fixed_delta_ns,
             seed,
@@ -287,15 +303,15 @@ impl RuntimeBridge {
             event = "astra.emu.manager.session_opened",
             session_hash = %Hash256::from_sha256(open.session_id.0.as_bytes()),
             package_hash = %package_hash,
-            profile_hash = %profile_hash
+            profile_id = %"astra.emu.case_profile.v1"
         );
         self.audio = Some(audio);
         self.translation = Some(translation);
         self.text_hooks = text_hooks;
         self.media_hooks = media_hooks;
         self.terminal = false;
-        self.render_frames.clear();
-        self.scene_commits.clear();
+        self.live_scene_commits.clear();
+        self.resource_revisions.clear();
         self.text_captures.clear();
         Ok(())
     }
@@ -397,9 +413,6 @@ impl RuntimeBridge {
             return Ok(false);
         }
         if Instant::now() < active.next_tick {
-            if let Some(audio) = self.audio.as_mut() {
-                audio.pump()?;
-            }
             return Ok(false);
         }
         let next_step = active.fixed_step.saturating_add(1);
@@ -441,22 +454,16 @@ impl RuntimeBridge {
             await_results.push(LegacyAwaitResult {
                 token_id,
                 status: "completed".into(),
-                payload_hash: Hash256::from_sha256(&[]),
+                payload_len: 0,
                 sequence: active.await_sequence,
             });
         }
         let input_edges = std::mem::take(&mut active.pending_inputs);
         if !input_edges.is_empty() {
-            let input_hash = Hash256::from_sha256(
-                &postcard::to_allocvec(&input_edges)
-                    .map_err(|_| "ASTRA_EMU_INPUT_OBSERVATION_SERIALIZE".to_owned())?,
-            );
             tracing::debug!(
                 event = "astra.emu.manager.input_consumed",
-                session_hash = %Hash256::from_sha256(active.session_id.0.as_bytes()),
                 fixed_step = next_step,
-                input_count = input_edges.len(),
-                input_hash = %input_hash
+                input_count = input_edges.len()
             );
         }
         let output = self.provider.step(RuntimeStepInput {
@@ -466,227 +473,201 @@ impl RuntimeBridge {
             session_seed: active.seed,
             mode: RuntimeStepMode::Live,
             action: "emu.step".into(),
-            payload: serde_json::to_value(EmuStepPayload {
-                input_edges,
-                await_results,
-                provider_results: Vec::new(),
-                budget: LegacyStepBudget {
-                    max_instructions: 100_000,
-                    max_effects: 65_536,
-                    max_trace_entries: 100_000,
-                },
-            })
-            .map_err(|error| error.to_string())?,
+            argument: None,
+            auxiliary: None,
+            flag: None,
+            input_edges: input_edges
+                .into_iter()
+                .map(|edge| RuntimeInputEdge {
+                    control: edge.control,
+                    pressed: edge.pressed,
+                    value: edge.value,
+                    sequence: edge.sequence,
+                })
+                .collect(),
+            await_results: await_results
+                .into_iter()
+                .map(|result| RuntimeAwaitResult {
+                    token_id: result.token_id,
+                    status: result.status,
+                    payload_len: result.payload_len,
+                    sequence: result.sequence,
+                })
+                .collect(),
+            provider_results: Vec::<RuntimeProviderResult>::new(),
+            budget: RuntimeStepBudget {
+                max_instructions: 100_000,
+                max_effects: 65_536,
+                max_trace_entries: 100_000,
+            },
         })?;
+        let session_id = active.session_id.clone();
+        let fixed_delta_ns = active.fixed_delta_ns;
         active.fixed_step = next_step;
-        active.next_tick += Duration::from_nanos(active.fixed_delta_ns);
+        active.next_tick += Duration::from_nanos(fixed_delta_ns);
+        if !output.persisted.is_empty() {
+            return Err("ASTRA_EMU_LIVE_PERSISTED_OUTPUT_REJECTED".into());
+        }
+        let live = output.live;
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        active.coverage_syscalls = active
+            .coverage_syscalls
+            .checked_add(live.coverage.syscalls)
+            .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
+        let mut audio_packets = Vec::new();
         let mut audio_commands = Vec::new();
         let mut video_commands = Vec::new();
-        let mut last_family_state_hash = None;
-        for envelope in &output.outputs {
-            if envelope.domain == RuntimeOutputDomain::Presentation
-                && envelope.schema == "astra.emu.render_frame.v1"
-            {
-                let frame = envelope
-                    .decode_bulk_postcard::<LegacyRenderFrameV1>(
-                        RuntimeOutputDomain::Presentation,
-                        "astra.emu.render_frame.v1",
-                        SchemaVersion::new(1, 0, 0),
-                    )
-                    .map_err(|error| error.to_string())?;
-                frame.validate().map_err(|error| error.to_string())?;
-                if self.render_frames.len() >= 3 {
-                    return Err("ASTRA_EMU_RENDER_FRAME_QUEUE_OVERFLOW".into());
+        let mut text_leases = Vec::new();
+        let mut text_presentations = BTreeSet::new();
+        let mut waits = Vec::new();
+        for effect in live.effects {
+            match effect {
+                RuntimeLiveEffect::Scene(transaction) => {
+                    self.queue_live_scene(transaction)?;
                 }
-                self.render_frames.push_back(frame);
-                continue;
-            }
-            if envelope.domain == RuntimeOutputDomain::Presentation
-                && envelope.schema == "astra.emu.scene_packet.v1"
-            {
-                let commit = envelope
-                    .decode_bulk_postcard::<LegacyPreparedSceneCommitV1>(
-                        RuntimeOutputDomain::Presentation,
-                        "astra.emu.scene_packet.v1",
-                        SchemaVersion::new(1, 0, 0),
-                    )
-                    .map_err(|error| error.to_string())?;
-                commit
-                    .packet
-                    .validate()
-                    .map_err(|error| error.to_string())?;
-                if self.scene_commits.len() >= 3 {
-                    return Err("ASTRA_EMU_SCENE_PACKET_QUEUE_OVERFLOW".into());
+                RuntimeLiveEffect::ResourceScene(scene) => {
+                    self.queue_resource_scene_live(&session_id, scene)?;
                 }
-                self.scene_commits.push_back(commit);
-                continue;
-            }
-            if envelope.domain != RuntimeOutputDomain::Effect
-                || envelope.schema != "astra.emu.legacy_step_output.v1"
-            {
-                continue;
-            }
-            let family_output = envelope
-                .decode_postcard::<astra_emu_family_api::LegacyStepOutput>(
-                    RuntimeOutputDomain::Effect,
-                    "astra.emu.legacy_step_output.v1",
-                    SchemaVersion::new(1, 0, 0),
-                )
-                .map_err(|error| error.to_string())?;
-            last_family_state_hash = Some(family_output.state_hash);
-            active.coverage_syscalls = active
-                .coverage_syscalls
-                .checked_add(family_output.coverage.syscalls)
-                .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
-            for trace in &family_output.trace {
-                let count = active
-                    .coverage_opcodes
-                    .entry(trace.opcode.clone())
-                    .or_insert(0);
-                *count = count
-                    .checked_add(1)
-                    .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
-            }
-            for effect in &family_output.effects {
-                match effect {
-                    LegacyEffect::Presentation {
-                        command, payload, ..
-                    } if command == "astra.emu.render_frame.v1" => {
-                        let frame = postcard::from_bytes::<LegacyRenderFrameV1>(payload)
-                            .map_err(|_| "ASTRA_EMU_RENDER_FRAME_DECODE".to_owned())?;
-                        frame.validate().map_err(|error| error.to_string())?;
-                        if self.render_frames.len() >= 3 {
-                            return Err("ASTRA_EMU_RENDER_FRAME_QUEUE_OVERFLOW".into());
-                        }
-                        self.render_frames.push_back(frame);
-                    }
-                    LegacyEffect::Presentation {
-                        command, payload, ..
-                    } if command == "astra.emu.video_command.v1" => {
-                        let command = postcard::from_bytes::<LegacyVideoCommandV1>(payload)
-                            .map_err(|_| "ASTRA_EMU_VIDEO_COMMAND_DECODE".to_owned())?;
-                        command.validate().map_err(|error| error.to_string())?;
-                        video_commands.push(command);
-                    }
-                    LegacyEffect::Audio {
-                        command, payload, ..
-                    } if command == "astra.emu.audio_command.v1" => {
-                        let command = postcard::from_bytes::<LegacyAudioCommandV1>(payload)
-                            .map_err(|_| "ASTRA_EMU_AUDIO_COMMAND_DECODE".to_owned())?;
-                        command.validate().map_err(|error| error.to_string())?;
-                        audio_commands.push(command);
-                    }
-                    LegacyEffect::Audio { .. } => {
-                        return Err("ASTRA_EMU_AUDIO_COMMAND_UNSUPPORTED".into());
-                    }
-                    LegacyEffect::TextCapture {
-                        lease_id,
-                        text_hash,
-                        byte_len,
-                        speaker_hash,
-                        ..
-                    } => {
-                        let mut text = self
-                            .provider
-                            .take_ephemeral_text(&active.session_id, lease_id)?
-                            .ok_or_else(|| "ASTRA_EMU_TEXT_LEASE_MISSING".to_owned())?;
-                        if text.lease_id != *lease_id
-                            || text.text.len() != *byte_len as usize
-                            || Hash256::from_sha256(text.text.as_bytes()) != *text_hash
-                            || text
-                                .speaker
-                                .as_ref()
-                                .map(|speaker| Hash256::from_sha256(speaker.as_bytes()))
-                                != *speaker_hash
-                        {
-                            return Err("ASTRA_EMU_TEXT_LEASE_IDENTITY".into());
-                        }
-                        let hook_key = Hash256::from_sha256(text.text.as_bytes()).to_string();
-                        if let Some(replacement) = self
-                            .text_hooks
-                            .get(&hook_key)
-                            .or_else(|| self.text_hooks.get("all"))
-                        {
-                            text.text.clone_from(replacement);
-                        }
-                        if self.text_captures.len() >= 256 {
-                            self.text_captures.pop_front();
-                        }
-                        self.text_captures.push_back(text);
-                        self.translation
-                            .as_mut()
-                            .ok_or_else(|| "ASTRA_EMU_TRANSLATION_RUNTIME_MISSING".to_owned())?
-                            .capture(
-                                self.text_captures
-                                    .back()
-                                    .ok_or_else(|| "ASTRA_EMU_TEXT_CAPTURE_STATE".to_owned())?
-                                    .text
-                                    .clone(),
-                            )?;
-                    }
-                    _ => {}
+                RuntimeLiveEffect::Audio(packet) => audio_packets.push(packet),
+                RuntimeLiveEffect::AudioCommand(command) => audio_commands.push(command),
+                RuntimeLiveEffect::AudioCue(_) => {
+                    return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
                 }
+                RuntimeLiveEffect::Text(lease) => text_leases.push(lease),
+                RuntimeLiveEffect::TextPresentation(presentation) => {
+                    if !text_presentations.insert(presentation.lease_id) {
+                        return Err("ASTRA_EMU_TEXT_PRESENTATION_DUPLICATE".into());
+                    }
+                }
+                RuntimeLiveEffect::Video(command) => video_commands.push(command),
+                RuntimeLiveEffect::Wait(wait) => waits.push(wait),
+                RuntimeLiveEffect::Event(event) => {
+                    if event.event.is_empty() || event.event.len() > 128 {
+                        return Err("ASTRA_EMU_LIVE_EVENT_INVALID".into());
+                    }
+                }
+                RuntimeLiveEffect::Control(control) => validate_live_control(control)?,
             }
-            for wait in family_output.waits {
-                let (token, condition) = wait_condition(&wait, next_step, active.fixed_delta_ns);
+        }
+        if !live.diagnostics.is_empty() {
+            tracing::debug!(
+                event = "astra.emu.manager.live_diagnostics",
+                diagnostic_count = live.diagnostics.len()
+            );
+        }
+
+        for lease in text_leases {
+            let mut text = self
+                .provider
+                .take_ephemeral_text(&session_id, &lease.lease_id)?
+                .ok_or_else(|| "ASTRA_EMU_TEXT_LEASE_MISSING".to_owned())?;
+            if text.lease_id != lease.lease_id
+                || text.text.len() as u64 != u64::from(lease.byte_len)
+            {
+                return Err("ASTRA_EMU_TEXT_LEASE_IDENTITY".into());
+            }
+            if let Some(replacement) = self
+                .text_hooks
+                .get(&lease.lease_id)
+                .or_else(|| self.text_hooks.get("all"))
+            {
+                text.text.clone_from(replacement);
+            }
+            if self.text_captures.len() >= 256 {
+                self.text_captures.pop_front();
+            }
+            self.text_captures.push_back(text);
+            self.translation
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_TRANSLATION_RUNTIME_MISSING".to_owned())?
+                .capture(
+                    self.text_captures
+                        .back()
+                        .ok_or_else(|| "ASTRA_EMU_TEXT_CAPTURE_STATE".to_owned())?
+                        .text
+                        .clone(),
+                )?;
+            text_presentations.remove(&lease.lease_id);
+        }
+        if !text_presentations.is_empty() {
+            return Err("ASTRA_EMU_TEXT_PRESENTATION_ORPHANED".into());
+        }
+        {
+            let active = self
+                .active
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+            for wait in waits {
+                let (token, condition) = live_wait_condition(wait, next_step, fixed_delta_ns);
                 if active.pending_waits.insert(token, condition).is_some() {
                     return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
                 }
             }
         }
-        let audio = self
-            .audio
-            .as_mut()
-            .ok_or_else(|| "ASTRA_EMU_AUDIO_EXECUTOR_MISSING".to_owned())?;
-        for mut command in audio_commands {
+
+        let mut resolved_audio = Vec::with_capacity(audio_commands.len());
+        for command in audio_commands {
+            let mut command = legacy_live_audio_command(command);
             apply_audio_media_hook(&mut command, &self.media_hooks)?;
             let resource = match &command {
                 LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
                     Some(self.provider.read_session_resource(
-                        &active.session_id,
+                        &session_id,
                         resource_uri,
                         audio_executor::MAX_RESOURCE_BYTES,
                     )?)
                 }
                 _ => None,
             };
-            audio.execute(command, resource)?;
+            resolved_audio.push((command, resource));
         }
-        for mut command in video_commands {
+        let mut resolved_video = Vec::with_capacity(video_commands.len());
+        for command in video_commands {
+            let mut command = legacy_live_video_command(command);
             apply_video_media_hook(&mut command, &self.media_hooks)?;
             let resource = match &command {
                 LegacyVideoCommandV1::Play { resource_uri, .. } => {
                     Some(self.provider.read_session_resource(
-                        &active.session_id,
+                        &session_id,
                         resource_uri,
                         video_executor::MAX_ENCODED_BYTES,
                     )?)
                 }
                 LegacyVideoCommandV1::Stop { .. } => None,
             };
+            resolved_video.push((command, resource));
+        }
+        let audio = self
+            .audio
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_EXECUTOR_MISSING".to_owned())?;
+        for packet in audio_packets {
+            audio.execute_live_pcm(legacy_live_audio_packet(packet))?;
+        }
+        for (command, resource) in resolved_audio {
+            audio.execute(command, resource)?;
+        }
+        for (command, resource) in resolved_video {
             self.video.execute(command, resource, audio)?;
         }
-        self.video.advance(active.fixed_delta_ns, audio)?;
-        audio.pump()?;
-        self.translation
-            .as_mut()
-            .ok_or_else(|| "ASTRA_EMU_TRANSLATION_RUNTIME_MISSING".to_owned())?
-            .poll()?;
+        self.video.advance(fixed_delta_ns, audio)?;
         self.terminal = output.status == "terminal";
         if self.terminal {
-            let terminal_state_hash = last_family_state_hash
-                .ok_or_else(|| "ASTRA_EMU_TERMINAL_STATE_HASH_MISSING".to_owned())?;
-            let terminal_hash =
-                Hash256::from_sha256(format!("{terminal_state_hash}:{next_step}").as_bytes());
             tracing::info!(
                 event = "astra.emu.manager.terminal_observed",
-                session_hash = %Hash256::from_sha256(active.session_id.0.as_bytes()),
+                session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
                 fixed_step = next_step,
-                output_count = output.outputs.len(),
-                terminal_hash = %terminal_hash
+                state_revision = live.state_revision
             );
         }
         Ok(true)
+    }
+
+    fn runtime_deadline(&self) -> Option<Instant> {
+        self.active.as_ref().map(|active| active.next_tick)
     }
 
     fn shutdown(&mut self) -> Result<(), String> {
@@ -712,8 +693,8 @@ impl RuntimeBridge {
             );
         }
         self.terminal = false;
-        self.render_frames.clear();
-        self.scene_commits.clear();
+        self.live_scene_commits.clear();
+        self.resource_revisions.clear();
         self.text_captures.clear();
         self.translation = None;
         self.text_hooks.clear();
@@ -730,7 +711,7 @@ impl RuntimeBridge {
             event = "astra.emu.manager.shutdown_completed",
             session_hash = %session_hash,
             package_hash = %active.package_hash,
-            profile_hash = %active.profile_hash
+            profile_id = %active.profile_id
         );
         Ok(())
     }
@@ -873,12 +854,118 @@ impl RuntimeBridge {
         Ok(())
     }
 
-    fn take_latest_render_frame(&mut self) -> Option<LegacyRenderFrameV1> {
-        self.render_frames.pop_front()
+    fn queue_live_scene(&mut self, transaction: RuntimeLiveSceneTransaction) -> Result<(), String> {
+        transaction.validate().map_err(|error| error.to_string())?;
+        if self.live_scene_commits.len() >= 3 {
+            return Err("ASTRA_EMU_LIVE_SCENE_QUEUE_OVERFLOW".into());
+        }
+        self.live_scene_commits.push_back(transaction);
+        Ok(())
     }
 
-    fn take_latest_scene_commit(&mut self) -> Option<LegacyPreparedSceneCommitV1> {
-        self.scene_commits.pop_front()
+    fn take_latest_live_scene(&mut self) -> Option<RuntimeLiveSceneTransaction> {
+        self.live_scene_commits.pop_front()
+    }
+
+    fn queue_resource_scene_live(
+        &mut self,
+        session_id: &GameRuntimeSessionId,
+        scene: RuntimeLiveResourceScene,
+    ) -> Result<(), String> {
+        if scene.width == 0 || scene.height == 0 || scene.width > 16_384 || scene.height > 16_384 {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSIONS".into());
+        }
+        let mut resources = Vec::with_capacity(scene.textures.len());
+        let mut pending_ids = BTreeSet::new();
+        let mut pending_revisions = Vec::with_capacity(scene.textures.len());
+        for texture in scene.textures {
+            if !pending_ids.insert(texture.texture_id) {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DUPLICATE_TEXTURE".into());
+            }
+            if texture.revision == 0 || texture.decoded_width == 0 || texture.decoded_height == 0 {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_METADATA".into());
+            }
+            if let Some((revision, width, height, format)) =
+                self.resource_revisions.get(&texture.texture_id)
+            {
+                if *revision == texture.revision
+                    && *width == texture.decoded_width
+                    && *height == texture.decoded_height
+                    && *format == texture.decoded_format
+                {
+                    continue;
+                }
+                if *width != texture.decoded_width
+                    || *height != texture.decoded_height
+                    || *format != texture.decoded_format
+                {
+                    return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_CHANGE".into());
+                }
+            }
+            let encoded = self.provider.read_session_resource(
+                session_id,
+                &texture.resource_uri,
+                1024 * 1024 * 1024,
+            )?;
+            let decoded = image::load_from_memory(&encoded)
+                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE".to_owned())?;
+            if decoded.width() != texture.decoded_width
+                || decoded.height() != texture.decoded_height
+            {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
+            }
+            let rgba = decoded.to_rgba8().into_raw();
+            let pixels = match texture.decoded_format {
+                RuntimeLiveTextureFormat::Rgba8 => rgba,
+                RuntimeLiveTextureFormat::LumaAlpha8 => rgba
+                    .chunks_exact(4)
+                    .flat_map(|pixel| [pixel[0], pixel[3]])
+                    .collect(),
+            };
+            let operation = if self.resource_revisions.contains_key(&texture.texture_id) {
+                RuntimeLiveSceneResourceOperation::UpdateTexture {
+                    texture_id: texture.texture_id,
+                    generation: texture.revision,
+                    x: 0,
+                    y: 0,
+                    width: texture.decoded_width,
+                    height: texture.decoded_height,
+                    format: texture.decoded_format,
+                    pixels,
+                }
+            } else {
+                RuntimeLiveSceneResourceOperation::CreateTexture {
+                    texture_id: texture.texture_id,
+                    generation: texture.revision,
+                    width: texture.decoded_width,
+                    height: texture.decoded_height,
+                    format: texture.decoded_format,
+                    pixels,
+                }
+            };
+            resources.push(operation);
+            pending_revisions.push((
+                texture.texture_id,
+                (
+                    texture.revision,
+                    texture.decoded_width,
+                    texture.decoded_height,
+                    texture.decoded_format,
+                ),
+            ));
+        }
+        self.queue_live_scene(RuntimeLiveSceneTransaction {
+            sequence: scene.sequence,
+            width: scene.width,
+            height: scene.height,
+            resources,
+            draws: scene.draws,
+            reset_resources: false,
+        })?;
+        for (texture_id, revision) in pending_revisions {
+            self.resource_revisions.insert(texture_id, revision);
+        }
+        Ok(())
     }
 
     fn current_video_frame(&self) -> Option<HostVideoFrame> {
@@ -906,6 +993,14 @@ impl RuntimeBridge {
             .as_mut()
             .map(TranslationRuntime::take_pending_writes)
             .unwrap_or_default()
+    }
+
+    fn drain_async_completions(&mut self) -> Result<bool, String> {
+        if let Some(translation) = self.translation.as_mut() {
+            translation.poll()
+        } else {
+            Ok(false)
+        }
     }
 
     fn reset_translation(&mut self) -> Result<(), String> {
@@ -938,8 +1033,8 @@ impl RuntimeBridge {
             "idle"
         };
         format!(
-            "runtime={state}; pending_frames={}; video_active={}; translation_active={}; filter={}",
-            self.render_frames.len(),
+            "runtime={state}; pending_scenes={}; video_active={}; translation_active={}; filter={}",
+            self.live_scene_commits.len(),
             self.video.is_active(),
             self.translation.is_some(),
             self.filter_preset
@@ -982,7 +1077,7 @@ impl Drop for RuntimeBridge {
 type PatchBindings = (
     BTreeMap<String, String>,
     BTreeMap<String, String>,
-    Vec<LegacyEffect>,
+    Vec<QueuedPatchEffect>,
 );
 
 fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings, String> {
@@ -1012,16 +1107,14 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
             }
             PatchHostAction::DeterministicEffect { target, payload } => {
                 let effect = if target.starts_with("event.") {
-                    LegacyEffect::RuntimeEvent {
-                        sequence: 0,
+                    QueuedPatchEffect::RuntimeEvent {
                         event: target,
-                        payload: LegacyPayload::Native(payload),
+                        payload,
                     }
                 } else if target.starts_with("blackboard.") {
-                    LegacyEffect::SetBlackboard {
-                        sequence: 0,
+                    QueuedPatchEffect::SetBlackboard {
                         key: target,
-                        value: LegacyPayload::Native(payload),
+                        value: payload,
                     }
                 } else {
                     return Err("ASTRA_EMU_PATCH_EFFECT_TARGET".into());
@@ -1061,42 +1154,167 @@ fn apply_video_media_hook(
     command.validate().map_err(|error| error.to_string())
 }
 
-fn wait_condition(wait: &LegacyWaitRequest, step: u64, delta_ns: u64) -> (String, PendingWait) {
-    match wait {
-        LegacyWaitRequest::Time {
-            token_id,
-            milliseconds,
-        } => {
-            let delay_ns = u64::from(*milliseconds).saturating_mul(1_000_000);
-            let ticks = delay_ns.div_ceil(delta_ns).max(1);
-            (
-                token_id.clone(),
-                PendingWait::DueStep(step.saturating_add(ticks)),
-            )
+fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
+    LegacyAudioPacketV7 {
+        sequence: packet.sequence,
+        stream_id: packet.stream_id,
+        sample_rate: packet.sample_rate,
+        channels: packet.channels,
+        pcm: match packet.pcm {
+            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples),
+            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples),
+        },
+    }
+}
+
+fn legacy_live_audio_command(command: RuntimeLiveAudioCommand) -> LegacyAudioCommandV1 {
+    match command {
+        RuntimeLiveAudioCommand::LoadResource {
+            stream_id,
+            encoding,
+            resource_uri,
+            ..
+        } => LegacyAudioCommandV1::LoadResource {
+            stream_id,
+            encoding: match encoding {
+                RuntimeLiveAudioEncoding::Unknown => LegacyAudioEncoding::Unknown,
+                RuntimeLiveAudioEncoding::Wav => LegacyAudioEncoding::Wav,
+                RuntimeLiveAudioEncoding::Ogg => LegacyAudioEncoding::Ogg,
+                RuntimeLiveAudioEncoding::Mp3 => LegacyAudioEncoding::Mp3,
+                RuntimeLiveAudioEncoding::Flac => LegacyAudioEncoding::Flac,
+            },
+            resource_uri,
+        },
+        RuntimeLiveAudioCommand::CreateStream {
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format,
+            ..
+        } => LegacyAudioCommandV1::CreateStream {
+            stream_id,
+            sample_rate,
+            channels,
+            sample_format: match sample_format {
+                RuntimeLiveAudioSampleFormat::I16 => LegacyAudioSampleFormat::I16,
+                RuntimeLiveAudioSampleFormat::F32 => LegacyAudioSampleFormat::F32,
+            },
+        },
+        RuntimeLiveAudioCommand::SubmitI16 {
+            stream_id, samples, ..
+        } => LegacyAudioCommandV1::SubmitI16 { stream_id, samples },
+        RuntimeLiveAudioCommand::SubmitF32 {
+            stream_id, samples, ..
+        } => LegacyAudioCommandV1::SubmitF32 { stream_id, samples },
+        RuntimeLiveAudioCommand::Play {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+            ..
+        } => LegacyAudioCommandV1::Play {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
+        },
+        RuntimeLiveAudioCommand::Stop {
+            stream_id, fade_ms, ..
+        } => LegacyAudioCommandV1::Stop { stream_id, fade_ms },
+        RuntimeLiveAudioCommand::Pause { stream_id, .. } => {
+            LegacyAudioCommandV1::Pause { stream_id }
         }
-        LegacyWaitRequest::Frame { token_id, frames } => (
-            token_id.clone(),
-            PendingWait::DueStep(step.saturating_add(u64::from(*frames).max(1))),
-        ),
-        LegacyWaitRequest::Input { token_id, keys } => {
+        RuntimeLiveAudioCommand::Resume { stream_id, .. } => {
+            LegacyAudioCommandV1::Resume { stream_id }
+        }
+        RuntimeLiveAudioCommand::SetParams {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            ..
+        } => LegacyAudioCommandV1::SetParams {
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        },
+        RuntimeLiveAudioCommand::DestroyStream { stream_id, .. } => {
+            LegacyAudioCommandV1::DestroyStream { stream_id }
+        }
+        RuntimeLiveAudioCommand::MasterVolume { volume, .. } => {
+            LegacyAudioCommandV1::MasterVolume { volume }
+        }
+    }
+}
+
+fn legacy_live_video_command(command: RuntimeLiveVideoCommand) -> LegacyVideoCommandV1 {
+    match command.command {
+        RuntimeLiveVideoCommandKind::Play {
+            playback_id,
+            resource_uri,
+            mode,
+            stage_width,
+            stage_height,
+        } => LegacyVideoCommandV1::Play {
+            playback_id,
+            resource_uri,
+            mode: match mode {
+                RuntimeLiveVideoMode::ModalWithAudio => LegacyVideoMode::ModalWithAudio,
+                RuntimeLiveVideoMode::LayerNoAudio => LegacyVideoMode::LayerNoAudio,
+            },
+            stage_width,
+            stage_height,
+        },
+        RuntimeLiveVideoCommandKind::Stop { playback_id } => {
+            LegacyVideoCommandV1::Stop { playback_id }
+        }
+    }
+}
+
+fn validate_live_control(control: RuntimeLiveControl) -> Result<(), String> {
+    match control {
+        RuntimeLiveControl::SetBlackboard { key, value, .. } => {
+            if key.is_empty() || key.len() > 128 {
+                return Err("ASTRA_EMU_LIVE_CONTROL_SYMBOL_BOUNDS".into());
+            }
+            if value.len() > 256 * 1024 * 1024 {
+                return Err("ASTRA_EMU_LIVE_CONTROL_PAYLOAD_BOUNDS".into());
+            }
+        }
+        RuntimeLiveControl::SnapshotDirty { section_id, .. } => {
+            if section_id.is_empty() || section_id.len() > 128 {
+                return Err("ASTRA_EMU_LIVE_CONTROL_SYMBOL_BOUNDS".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (String, PendingWait) {
+    let token_id = wait.token_id;
+    let condition = match wait.kind {
+        RuntimeLiveWaitKind::Frame { frames } => {
+            PendingWait::DueStep(step.saturating_add(u64::from(frames).max(1)))
+        }
+        RuntimeLiveWaitKind::Time { milliseconds } => {
+            let delay_ns = u64::from(milliseconds).saturating_mul(1_000_000);
+            PendingWait::DueStep(step.saturating_add(delay_ns.div_ceil(delta_ns).max(1)))
+        }
+        RuntimeLiveWaitKind::Input { keys } => {
             let mask = keys
                 .iter()
                 .fold(0_u64, |mask, key| mask | input_control_mask(key));
-            (token_id.clone(), PendingWait::Input(mask))
+            PendingWait::Input(mask)
         }
-        LegacyWaitRequest::MediaFence { token_id, media_id } => {
-            (token_id.clone(), PendingWait::MediaFence(media_id.clone()))
-        }
-        LegacyWaitRequest::PresentationFence { token_id, .. } => {
-            (token_id.clone(), PendingWait::PresentationFence)
-        }
-        LegacyWaitRequest::ProviderCompletion { token_id, .. } => {
-            (token_id.clone(), PendingWait::ProviderCompletion)
-        }
-        LegacyWaitRequest::FamilyOpaque { token_id, .. } => {
-            (token_id.clone(), PendingWait::FamilyOpaque)
-        }
-    }
+        RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::MediaFence(media_id),
+        RuntimeLiveWaitKind::PresentationFence { .. } => PendingWait::PresentationFence,
+        RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::ProviderCompletion,
+        RuntimeLiveWaitKind::FamilyOpaque { .. } => PendingWait::FamilyOpaque,
+    };
+    (token_id, condition)
 }
 
 fn input_control_mask(control: &str) -> u64 {
@@ -2257,6 +2475,11 @@ fn persist_remote_cover(
 }
 
 impl ManagerController for AstraEmuManagerController {
+    fn set_host_wake(&mut self, wake: HostWake) {
+        self.metadata.set_wake(wake.clone());
+        self.runtime.borrow_mut().set_host_wake(wake);
+    }
+
     fn model(&self) -> Result<ManagerViewModel, String> {
         let now_ms = unix_time_ms().unwrap_or(0);
         let translation_profile = self
@@ -3422,6 +3645,11 @@ impl ManagerController for AstraEmuManagerController {
     #[cfg(target_os = "android")]
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
         let mut changed = self.poll_metadata()?;
+        changed |= self
+            .runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .drain_async_completions()?;
         for state in android_platform::take_pending_lifecycle()? {
             let suspended = !matches!(state, android_platform::AndroidLifecycleState::Resumed);
             self.runtime
@@ -3443,7 +3671,33 @@ impl ManagerController for AstraEmuManagerController {
 
     #[cfg(not(target_os = "android"))]
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
-        if self.poll_metadata()? {
+        let mut changed = self.poll_metadata()?;
+        changed |= self
+            .runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .drain_async_completions()?;
+        if changed {
+            self.model().map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn runtime_deadline(&self) -> Option<Instant> {
+        self.runtime
+            .try_borrow()
+            .ok()
+            .and_then(|runtime| runtime.runtime_deadline())
+    }
+
+    fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String> {
+        let mut runtime = self
+            .runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?;
+        let advanced = runtime.step_if_due()?;
+        if advanced {
             self.model().map(Some)
         } else {
             Ok(None)
@@ -3820,8 +4074,8 @@ mod manager_tests {
         assert_eq!(media[&target_hash], "audio/replacement.ogg");
         assert!(matches!(
             &effects[0],
-            astra_emu_family_api::LegacyEffect::RuntimeEvent { event, payload, .. }
-                if event == "event.patch_ready" && payload.as_bytes() == [1, 2, 3]
+            QueuedPatchEffect::RuntimeEvent { event, payload }
+                if event == "event.patch_ready" && payload == &[1, 2, 3]
         ));
 
         let mut command = astra_emu_family_api::LegacyAudioCommandV1::LoadResource {

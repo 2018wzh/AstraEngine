@@ -1,14 +1,12 @@
 //! Thread-confined RFVP hosted-session lifecycle.
 //!
-//! This is the concrete v6 execution boundary used by the dynamic provider:
+//! This is the concrete v7 execution boundary used by the dynamic provider:
 //! the RFVP core and its non-`Send` VFS cursors remain on one worker while the
 //! caller exchanges only bounded semantic deltas and opaque snapshots.
 
 use std::collections::BTreeMap;
 
-use astra_emu_family_api::{
-    LegacyPreparedSceneCommitV1, LegacySceneResourceStateV1, LegacyVfsReader,
-};
+use astra_emu_family_api::{LegacySceneResourceStateV1, LegacySceneTransactionV7, LegacyVfsReader};
 use rfvp_hosted::{
     hosted::{
         HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStateComponentHashesV1,
@@ -20,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    hosted::HostedScenePacketTranslator,
+    hosted::HostedSceneTranslator,
     hosted_host::HostedMemoryHost,
     hosted_worker::{HostedSessionWorker, HostedWorkerError, HostedWorkerStartError},
     FvpNls,
@@ -64,7 +62,7 @@ pub enum HostedRuntimeError {
 struct HostedState {
     core: HostedSession,
     host: HostedMemoryHost,
-    translator: HostedScenePacketTranslator,
+    translator: HostedSceneTranslator,
 }
 
 /// Astra-owned envelope around the opaque fork snapshot.  The fork owns VM
@@ -133,7 +131,7 @@ impl HostedFvpSession {
             Ok::<_, HostedRuntimeError>(HostedState {
                 core,
                 host,
-                translator: HostedScenePacketTranslator::default(),
+                translator: HostedSceneTranslator::default(),
             })
         })
         .map_err(map_start_error)?;
@@ -186,7 +184,7 @@ impl HostedFvpSession {
             Ok::<_, HostedRuntimeError>(HostedState {
                 core,
                 host,
-                translator: HostedScenePacketTranslator::default(),
+                translator: HostedSceneTranslator::default(),
             })
         })
         .map_err(map_start_error)?;
@@ -197,7 +195,7 @@ impl HostedFvpSession {
         &self,
         delta_ns: u64,
         input: HostedStepInput,
-    ) -> Result<(HostedStepDelta, Option<LegacyPreparedSceneCommitV1>), HostedRuntimeError> {
+    ) -> Result<(HostedStepDelta, Option<LegacySceneTransactionV7>), HostedRuntimeError> {
         self.worker.execute_result(move |state| {
             state
                 .host
@@ -207,11 +205,11 @@ impl HostedFvpSession {
                 .core
                 .step(&mut state.host, input)
                 .map_err(HostedRuntimeError::Core)?;
-            let prepared = state
+            let live_scene = state
                 .translator
                 .translate(&mut delta)
                 .map_err(|error| HostedRuntimeError::Scene(error.to_string()))?;
-            Ok((delta, prepared))
+            Ok((delta, live_scene))
         })?
     }
 
@@ -346,7 +344,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn case_lifecycle_emits_a_prepared_semantic_frame() {
+    fn case_lifecycle_emits_a_typed_scene_transaction() {
         let session = HostedFvpSession::open_case(
             BTreeMap::from([(
                 "default.ttf".into(),

@@ -6,6 +6,10 @@ AstraEMU v1 采用 Manager + `AstraEmuRuntimeProvider` + AstraEngine `RuntimeWor
 
 ## Descriptor
 
+The current hard-cut identity is `astra.emu.family_abi.v7`. Any v5 or v6
+fingerprint, manifest, binary, runtime section, or snapshot is rejected before
+provider execution; this page's older v6 wording is migration history only.
+
 ```rust
 pub struct LegacyFamilyPluginDescriptor {
     pub family_id: FamilyId,
@@ -85,9 +89,16 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-Family ABI v6 对 descriptor、instance、probe、open、step、save、restore、resource read、VFS callback 和 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。v5 binary、fingerprint 和 FVP runtime snapshot 都会 fail-fast，host 不保留兼容 shim。
+Family ABI v7 对 descriptor、instance、probe、open、step、save、restore、resource read、VFS callback 和 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。v5/v6 binary、fingerprint 和 FVP runtime snapshot 都会 fail-fast，host 不保留兼容 shim。
 
-v6 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径。scene bytes、encoded bytes 和 PCM bulk 以引用计数的 ABI-owned buffer 过边界；host 只借用 slice 做校验、hash、decode 或上传，不用 `into_vec()` 跨 allocator 复制。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
+v7 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径；range result 只返回 range、revision、length/bounds 可验证的 owned bytes，不计算或传输 per-read content hash。scene bytes、encoded bytes 和 PCM bulk 以 ABI-owned allocation 过边界；host 只借用 slice 做尺寸校验、decode 或上传，不用 `into_vec()` 跨 allocator 复制。FVP live step 直接发 Family ABI v7 typed scene transaction，RGBA8 `Vec<u8>` 从 hosted capture allocation 移交到 Runtime、Scene2D 和 GPU adapter；同尺寸 partial update 只携带变化区域，LumaAlpha8 只在明确的格式转换边界生成一次 RGBA8。live 路径不发 `astra.emu.scene_packet.v1`，不执行 scene postcard reader，也不计算 texture/frame content hash；旧 scene packet translator 只属于独立的冷/测试 contract，不能由 v7 live provider 选择。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
+
+Typed PCM 由 `LegacyEffect::AudioPcmV7` 直接携带 `LegacyAudioPacketV7` 和 ABI-owned
+`I16`/`F32` buffer，不再拆成 control、bulk reference 和第二条 payload envelope。
+Family FFI、Manager 与音频队列按所有权移动同一 allocation，并校验 stream id、采样格式、
+sample count、channel count 和边界。相同格式不得重建 PCM；只有 decoder 或 resampler 的
+必要格式转换可以生成新 allocation，并单独计入 conversion bytes。格式、长度或边界不匹配
+均返回 blocking diagnostic。
 
 `open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、legacy presentation/audio state、await state、snapshot cursor 和 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
 
@@ -252,3 +263,41 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 ```
 
 Expected report includes `emu.legacy_runtime_provider`, `emu.artemis_full_flow`, `emu.report_redaction`, `runtime.replay.determinism` and `plugin.extension_registry`.
+
+## Windowed E2 report
+
+The developer-only `windowed-e2` command uses the native PlatformHost path while
+replaying the same `astra.user_input_sequence.v1` JSONL accepted by Headless.
+The sequence is validated before the host starts and must terminate with a
+single `Shutdown`. Gameplay input from the native window (keyboard, pointer,
+touch, gamepad and IME) is rejected and counted at the host boundary; focus and
+resize are lifecycle events, and an external close is a fail-fast diagnostic.
+
+The output schema is `astra.emu.windowed_e2_report.v1`:
+
+```rust
+pub struct WindowedE2ReportV1 {
+    pub schema: String,
+    pub family_id: String,
+    pub family_provider_id: String,
+    pub family_binary_hash: Hash256,
+    pub build_identity_hash: Hash256,
+    pub profile_hash: Hash256,
+    pub game_identity_hash: Hash256,
+    pub entry_identity_hash: Hash256,
+    pub session_id_hash: Hash256,
+    pub input_hash: Hash256,
+    pub fixed_steps: u64,
+    pub terminal_reached: bool,
+    pub external_input_rejected: u64,
+    pub checkpoints: Vec<WindowedE2CheckpointV1>,
+    pub diagnostics: Vec<String>,
+}
+```
+
+Only identity hashes, bounded counts, diagnostic codes and checkpoint hashes are
+persisted. Commercial payload, local paths, text, encoded media and ordinary
+frame readbacks are excluded. Headless/Windowed E2 parity compares control state,
+scene identity, audio identity and declared checkpoints under the same package,
+family, profile and input identity; platform-specific pixels and device fields
+remain separate evidence.

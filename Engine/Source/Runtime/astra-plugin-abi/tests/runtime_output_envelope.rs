@@ -1,12 +1,13 @@
 use astra_core::SchemaVersion;
 use astra_plugin_abi::{
-    GameRuntimeSessionId, ProductRuntimeDescriptor, RuntimeOutputCodec, RuntimeOutputDomain,
-    RuntimeOutputEnvelope, RuntimeOutputSchemaDescriptor, RuntimeStepOutput,
+    GameRuntimeSessionId, ProductRuntimeDescriptor, RuntimeOutputDomain,
+    RuntimeOutputSchemaDescriptor, RuntimePersistedCodec, RuntimePersistedOutput,
+    RuntimeStepOutput,
 };
 
 #[astra_headless_test::test]
-fn step_output_uses_one_versioned_envelope_stream() {
-    let envelope = RuntimeOutputEnvelope::postcard(
+fn step_output_keeps_persisted_output_separate_from_live_output() {
+    let persisted = RuntimePersistedOutput::postcard(
         RuntimeOutputDomain::Effect,
         "astra.test.effect.v1",
         SchemaVersion::new(1, 0, 0),
@@ -16,12 +17,13 @@ fn step_output_uses_one_versioned_envelope_stream() {
     let output = RuntimeStepOutput {
         session_id: GameRuntimeSessionId("session".into()),
         status: "blocked".into(),
-        outputs: vec![envelope.clone()],
+        live: Default::default(),
+        persisted: vec![persisted.clone()],
         diagnostics: vec![],
     };
 
-    assert_eq!(output.outputs, [envelope]);
-    assert_eq!(output.outputs[0].version, SchemaVersion::new(1, 0, 0));
+    assert_eq!(output.persisted, [persisted]);
+    assert_eq!(output.persisted[0].version, SchemaVersion::new(1, 0, 0));
 }
 
 #[astra_headless_test::test]
@@ -38,15 +40,15 @@ fn provider_descriptor_declares_every_allowed_output_schema() {
             domain: RuntimeOutputDomain::Effect,
             schema: "astra.test.effect.v1".into(),
             version: SchemaVersion::new(1, 0, 0),
-            codec: RuntimeOutputCodec::Postcard,
+            codec: RuntimePersistedCodec::Postcard,
         }],
     };
     assert_eq!(descriptor.output_schemas.len(), 1);
 }
 
 #[astra_headless_test::test]
-fn envelope_rejects_a_wrong_schema_version() {
-    let envelope = RuntimeOutputEnvelope::postcard(
+fn persisted_output_rejects_a_wrong_schema_version() {
+    let persisted = RuntimePersistedOutput::postcard(
         RuntimeOutputDomain::Trace,
         "astra.test.trace.v1",
         SchemaVersion::new(1, 0, 0),
@@ -54,12 +56,12 @@ fn envelope_rejects_a_wrong_schema_version() {
     )
     .unwrap();
 
-    let error = envelope
+    let error = persisted
         .decode_postcard::<String>(
             RuntimeOutputDomain::Trace,
             "astra.test.trace.v1",
             SchemaVersion::new(2, 0, 0),
         )
         .unwrap_err();
-    assert_eq!(error.code(), "ASTRA_RUNTIME_ENVELOPE_VERSION");
+    assert_eq!(error.code(), "ASTRA_RUNTIME_PERSISTED_VERSION");
 }

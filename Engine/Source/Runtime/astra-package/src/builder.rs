@@ -1,7 +1,7 @@
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProductRuntimeDescriptor, ProviderBinding,
-    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy, RuntimeOutputCodec,
-    RuntimeOutputDomain, RuntimeOutputSchemaDescriptor, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
+    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy, RuntimeOutputDomain,
+    RuntimeOutputSchemaDescriptor, RuntimePersistedCodec, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
 use schemars::JsonSchema;
@@ -141,8 +141,8 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v2".to_string(),
-                    abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
             .expect("fixture provider binding must be valid")
@@ -158,8 +158,8 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
             packaged: true,
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v2".to_string(),
-            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         })
         .collect();
     let policy = ProviderPolicy {
@@ -237,7 +237,7 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
                 domain,
                 schema: schema.to_string(),
                 version: astra_core::SchemaVersion::new(major, 0, 0),
-                codec: RuntimeOutputCodec::Postcard,
+                codec: RuntimePersistedCodec::Postcard,
             })
             .collect(),
         },

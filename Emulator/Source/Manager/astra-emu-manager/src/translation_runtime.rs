@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    sync::{mpsc, Arc},
+    sync::{mpsc, Arc, Mutex},
     thread,
 };
 
@@ -48,7 +48,10 @@ pub(crate) struct TranslationRuntime {
     persistent_cache_enabled: bool,
     pending_writes: Vec<TranslationCacheRecord>,
     overlay: TranslationOverlayState,
+    wake: Arc<Mutex<Option<TranslationWake>>>,
 }
+
+pub(crate) type TranslationWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
 struct CachedTranslation {
     source: String,
@@ -122,6 +125,7 @@ impl TranslationRuntime {
                 },
                 ..Default::default()
             },
+            wake: Arc::new(Mutex::new(None)),
         };
         let Some(record) = config.profile else {
             return Ok(runtime);
@@ -142,9 +146,10 @@ impl TranslationRuntime {
         }
         let (request_tx, request_rx) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
         let (result_tx, result_rx) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
+        let worker_wake = Arc::clone(&runtime.wake);
         let worker = thread::Builder::new()
             .name("astra-emu-translation".into())
-            .spawn(move || worker_main(profile, secrets, request_rx, result_tx))
+            .spawn(move || worker_main(profile, secrets, request_rx, result_tx, worker_wake))
             .map_err(|_| "ASTRA_EMU_TRANSLATION_WORKER_CREATE".to_owned())?;
         runtime.sender = Some(request_tx);
         runtime.receiver = Some(result_rx);
@@ -154,7 +159,6 @@ impl TranslationRuntime {
     }
 
     pub(crate) fn capture(&mut self, source: String) -> Result<(), String> {
-        self.poll()?;
         let source_hash = Hash256::from_sha256(source.as_bytes()).to_string();
         self.overlay.source = source.clone();
         let cache_key = (source_hash.clone(), self.provider_identity.clone());
@@ -200,11 +204,13 @@ impl TranslationRuntime {
         Ok(())
     }
 
-    pub(crate) fn poll(&mut self) -> Result<(), String> {
+    pub(crate) fn poll(&mut self) -> Result<bool, String> {
         let Some(receiver) = &self.receiver else {
-            return Ok(());
+            return Ok(false);
         };
+        let mut changed = false;
         while let Ok(result) = receiver.try_recv() {
+            changed = true;
             if !self.pending.remove(&result.source_hash) {
                 return Err("ASTRA_EMU_TRANSLATION_RESULT_NOT_PENDING".into());
             }
@@ -262,11 +268,24 @@ impl TranslationRuntime {
                 }
             }
         }
-        Ok(())
+        Ok(changed)
     }
 
     pub(crate) fn overlay(&self) -> &TranslationOverlayState {
         &self.overlay
+    }
+
+    pub(crate) fn set_wake(&mut self, wake: TranslationWake) {
+        if let Ok(mut current) = self.wake.lock() {
+            *current = Some(wake);
+        }
+        // A worker can finish between construction and callback registration;
+        // emit one edge so the UI drains the bounded result queue immediately.
+        if let Ok(current) = self.wake.lock() {
+            if let Some(callback) = current.as_ref() {
+                callback();
+            }
+        }
     }
 
     pub(crate) fn take_pending_writes(&mut self) -> Vec<TranslationCacheRecord> {
@@ -314,6 +333,7 @@ fn worker_main(
     secrets: Arc<dyn SecretResolver>,
     receiver: mpsc::Receiver<WorkerCommand>,
     sender: mpsc::SyncSender<WorkerResult>,
+    wake: Arc<Mutex<Option<TranslationWake>>>,
 ) {
     let result = (|| -> Result<(), String> {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -344,6 +364,9 @@ fn worker_main(
                         .is_err()
                     {
                         return Ok(());
+                    }
+                    if let Some(callback) = wake.lock().ok().and_then(|guard| guard.clone()) {
+                        callback();
                     }
                 }
             }

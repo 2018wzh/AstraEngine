@@ -26,7 +26,7 @@ pub trait ProductRuntimeSession: Send {
 }
 ```
 
-`ProductRuntimeProvider` 注册到 extension registry。项目 target 必须显式绑定 runtime provider、profile 和 package sections；host 不能按插件加载顺序自动选择。Provider 返回的 effect list 由 host adapter 通过 `DeterministicActionContext` 应用，跨插件 ABI 不传递 `RuntimeWorld` 指针。跨插件 ABI 使用 `astra-plugin-abi` 的 `FfiRuntimeProviderRegistration` 和 bounded payload DTO；trait object 不跨 ABI 传递。Host 先显式创建 provider instance，再在该 instance 下管理 session；instance 有活动 session 时必须拒绝销毁。
+跨插件 ABI 使用 `astra-plugin-abi` 的 `FfiRuntimeProviderRegistration` 及 typed request/result callback；trait object 不跨 ABI 传递。
 
 ## Common DTO
 
@@ -42,17 +42,19 @@ pub struct ProductRuntimeDescriptor {
 }
 
 pub struct RuntimeStepOutput {
-    pub status: RuntimeSessionStatus,
-    pub effects: Vec<ActionEffect>,
-    pub awaits: Vec<AwaitToken>,
-    pub presentation: Vec<PresentationCommand>,
-    pub audio: Vec<AudioCommand>,
-    pub timeline_tasks: Vec<TimelineTask>,
-    pub diagnostics: Vec<Diagnostic>,
-    pub trace: Vec<StateMachineTrace>,
-    pub dirty_save_sections: Vec<SectionId>,
+    pub session_id: GameRuntimeSessionId,
+    pub status: String,
+    pub live: RuntimeLiveOutput,
+    pub persisted: Vec<RuntimePersistedOutput>,
+    pub diagnostics: Vec<String>,
 }
 ```
+
+`live` 是必填的 owned typed output，空 step 返回空集合，不使用 `Option`、缺失值或
+fallback。blackboard mutation 和 dirty section 使用两个明确 DTO；旧的
+kind/name/auxiliary/payload_len/number 通用 control 包已删除。`persisted` 目前只服务
+NativeVN 尚未迁完的 presentation、timeline 和 view-state 读取，不能作为新增实时输出的
+入口；其删除进度记录在 implementation status。
 
 NativeVN 的 timeline task 通过 `RuntimeOutputDomain::Effect` 和 `astra.vn.timeline_task.v1` 返回。只把 task 写入 `RuntimeWorld` effect trace、却不放入 provider output 属于 `UNWIRED_MAIN_PATH`：Player 无法执行 join/cancel，也不能产生同 run completion evidence。Host 必须先按 descriptor/schema registry 校验该 envelope，再交给 timeline owner；completion 只能在对应 task 真正结束或取消后回到固定 tick 边界。
 
@@ -74,7 +76,11 @@ pub struct RuntimeStepInput {
 
 Host 在调用 provider 前阻断 step gap/重复/回退、零或超过一秒的 `delta_ns`、seed drift 和 lifecycle mode drift。普通调用只能使用 `Live`；restore 后第一 tick 必须使用一次 `RestoreContinuation`。`Replay` 不允许进入 live provider，provider-free replay 只能读取已固化且 hash 已校验的 recorded output。`RuntimeRestoreReport` 必须返回 `restored_fixed_step` 和 `session_seed`，host 据此恢复连续 tick authority；旧 DTO 缺字段时反序列化直接失败，不提供兼容 fallback。
 
-所有 DTO 只能携带 stable id、hash、section ref、`VfsUri`、source span、capability report 和 serde/postcard payload。Luau VM handle、legacy VM object、native renderer/audio handle、Editor widget、local root、provider secret 和商业 payload 不得跨 ABI 或进入 save/replay/report。
+实时 DTO 只携带 stable id、revision、generation、长度、typed value 和 owned buffer，
+不携带 content hash、JSON/postcard payload 或 native handle。Save、replay、package 和
+Evidence 使用独立 persisted contract。Luau VM handle、legacy VM object、原生
+renderer/audio handle、Editor widget、local root、provider secret 和商业 payload
+不得跨 ABI 或进入 save/replay/report。
 
 ## Editor Metadata
 

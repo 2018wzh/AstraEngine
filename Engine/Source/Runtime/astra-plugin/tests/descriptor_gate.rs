@@ -7,8 +7,8 @@ id: com.example.renderer
 version: 0.1.0
 engine_version: 0.1.0
 rustc_fingerprint: rustc-stable
-feature_fingerprint: runtime-envelope-v2
-abi_fingerprint: astra-plugin-abi-v2
+feature_fingerprint: runtime-envelope-v3
+abi_fingerprint: astra-plugin-abi-v3
 abi_style: abi_stable_rust
 capabilities:
   - presentation.headless
@@ -23,8 +23,8 @@ fn descriptor_gate_rejects_mismatch_and_missing_permission() {
     let gate = PluginGate {
         engine_version: Version::parse("0.1.0").unwrap(),
         rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
-        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        feature_fingerprint: "runtime-envelope-v3".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         required_capabilities: vec!["presentation.headless".to_string()],
         required_permissions: vec!["runtime.presentation".to_string()],
     };
@@ -33,8 +33,8 @@ fn descriptor_gate_rejects_mismatch_and_missing_permission() {
     let blocked = PluginGate {
         engine_version: Version::parse("0.2.0").unwrap(),
         rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
-        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        feature_fingerprint: "runtime-envelope-v3".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         required_capabilities: vec!["presentation.headless".to_string()],
         required_permissions: vec!["gpu.surface".to_string()],
     };
@@ -74,8 +74,8 @@ fn descriptor_gate_requires_abi_stable_rust() {
     let gate = PluginGate {
         engine_version: Version::parse("0.1.0").unwrap(),
         rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
-        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+        feature_fingerprint: "runtime-envelope-v3".to_string(),
+        abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         required_capabilities: vec!["presentation.headless".to_string()],
         required_permissions: vec!["runtime.presentation".to_string()],
     };
@@ -94,7 +94,7 @@ fn descriptor_gate_rejects_abi_fingerprint_mismatch() {
     let gate = PluginGate {
         engine_version: Version::parse("0.1.0").unwrap(),
         rustc_fingerprint: "rustc-stable".to_string(),
-        feature_fingerprint: "runtime-envelope-v2".to_string(),
+        feature_fingerprint: "runtime-envelope-v3".to_string(),
         abi_fingerprint: "old-runtime-abi".to_string(),
         required_capabilities: vec![],
         required_permissions: vec![],

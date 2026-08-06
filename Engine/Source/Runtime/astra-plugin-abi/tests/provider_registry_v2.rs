@@ -1,7 +1,7 @@
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProductRuntimeDescriptor, ProviderBinding,
-    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy, RuntimeOutputCodec,
-    RuntimeOutputDomain, RuntimeOutputSchemaDescriptor, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
+    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy, RuntimeOutputDomain,
+    RuntimeOutputSchemaDescriptor, RuntimePersistedCodec, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
     PROVIDER_POLICY_SCHEMA,
 };
 
@@ -13,8 +13,8 @@ fn context(required_capability: &str) -> ProviderBindingContext {
         required_capability: required_capability.into(),
         engine_version: "0.1.0".into(),
         rustc_fingerprint: "rustc-stable".into(),
-        feature_fingerprint: "runtime-envelope-v2".into(),
-        abi_fingerprint: "astra-plugin-abi-v2".into(),
+        feature_fingerprint: "runtime-envelope-v3".into(),
+        abi_fingerprint: "astra-plugin-abi-v3".into(),
     }
 }
 
@@ -42,8 +42,8 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v2".into(),
-                abi_fingerprint: "astra-plugin-abi-v2".into(),
+                feature_fingerprint: "runtime-envelope-v3".into(),
+                abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
             ProviderExtensionRecord {
                 slot: "game_runtime_provider".into(),
@@ -53,8 +53,8 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v2".into(),
-                abi_fingerprint: "astra-plugin-abi-v2".into(),
+                feature_fingerprint: "runtime-envelope-v3".into(),
+                abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
         ],
         bindings: vec![binding.clone(), runtime_binding.clone()],
@@ -77,7 +77,7 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
                 domain: RuntimeOutputDomain::Effect,
                 schema: "astra.vn.runtime_step_effect.v2".into(),
                 version: astra_core::SchemaVersion::new(2, 0, 0),
-                codec: RuntimeOutputCodec::Postcard,
+                codec: RuntimePersistedCodec::Postcard,
             }],
         },
         bindings: vec![binding, runtime_binding],

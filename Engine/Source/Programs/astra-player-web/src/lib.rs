@@ -303,7 +303,7 @@ mod browser {
             let mut save_transaction_id = 1_000_u64;
             loop {
                 let event = events.recv().boxed_local();
-                let tick = sleep(8).boxed_local();
+                let tick = next_animation_frame().boxed_local();
                 let event = match select(event, tick).await {
                     Either::Left((event, _)) => match event {
                         Ok(event) => event,
@@ -312,10 +312,10 @@ mod browser {
                     Either::Right((result, _)) => {
                         if let Err(error) = result {
                             tracing::error!(
-                                event = "player.web.media_timer.failed",
-                                diagnostic_code = "ASTRA_PLAYER_WEB_TIMER",
+                                event = "player.web.media_frame.failed",
+                                diagnostic_code = "ASTRA_PLAYER_WEB_ANIMATION_FRAME",
                                 error = ?error,
-                                "Web Player media timer failed"
+                                "Web Player animation frame wake failed"
                             );
                             break;
                         }
@@ -899,22 +899,28 @@ mod browser {
         Ok(())
     }
 
-    async fn sleep(milliseconds: i32) -> Result<(), JsValue> {
+    async fn next_animation_frame() -> Result<(), JsValue> {
         let promise = Promise::new(&mut |resolve, reject| {
             let Some(window) = web_sys::window() else {
                 let _ = reject.call1(
                     &JsValue::UNDEFINED,
-                    &JsValue::from_str("window unavailable"),
+                    &JsValue::from_str("window unavailable for animation frame"),
                 );
                 return;
             };
+            let resolve = resolve.clone();
+            let callback = Closure::once(move |_timestamp: f64| {
+                let _ = resolve.call1(&JsValue::UNDEFINED, &JsValue::UNDEFINED);
+            });
             if window
-                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, milliseconds)
-                .is_err()
+                .request_animation_frame(callback.as_ref().unchecked_ref())
+                .is_ok()
             {
+                callback.forget();
+            } else {
                 let _ = reject.call1(
                     &JsValue::UNDEFINED,
-                    &JsValue::from_str("timer registration failed"),
+                    &JsValue::from_str("requestAnimationFrame registration failed"),
                 );
             }
         });

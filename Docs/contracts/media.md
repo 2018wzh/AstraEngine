@@ -10,13 +10,39 @@ Migration 11 的 `CpuRendererProvider`、`ProductionAudioMixer`、Image/Symphoni
 
 ## DecodeProvider
 
+### RFVP PlatformHost stream binding
+
+Windows RFVP movie playback uses the shared PlatformHost decode session rather
+than a fixed-tick full-file decode. The lifecycle is
+`OpenDecode -> Start -> Next* -> CloseDecode`. `Start` returns a bounded cursor
+descriptor; each `Next` returns one validated video frame or one PCM chunk, and
+end-of-stream is reported with the stable `ASTRA_MEDIA_STREAM_EOS` diagnostic.
+The Windows provider requests Media Foundation hardware transforms. Its public
+boundary is still CPU BGRA/i16 PCM, so the final CPU-to-WGPU/device transfer is
+the only required output transfer and this contract does not claim external
+texture zero-copy. For a streamed video frame, the CPU buffer format is
+`astra.decoded_video_frame_cpu.v1:<sequence>:<pts_us>:<duration_us>:<width>:<height>`;
+the format carries only bounded metadata and the `DecodeOutput` hash authenticates
+the moved BGRA8 `Vec<u8>`. The WMF host moves that allocation directly to the
+consumer instead of postcard-encoding a frame and decoding it again. The
+postcard frame format remains accepted for non-stream providers and compatibility
+tests. Hardware-transform selection is requested at the WMF source-reader
+boundary, but a device-specific transform-selection proof is still a separate
+release gate.
+
+Manager and native CLI use bounded prefetch workers and consume owned chunks at
+the runtime boundary. The worker, scene present, and UI loops do not decode a
+complete movie or append PCM by rebuilding historical samples. Web and other
+platforms remain explicit provider-gated until their native stream contract is
+implemented; no implicit software fallback is permitted.
+
 Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_fallback, allow_reference_provider }` 选择一个显式 provider。Registry 阻断重复 id、无 binding、profile drift、unsupported codec/kind、feature-gated provider、未声明 fallback 和 reference provider 进入 shipping；注册顺序不参与选择。平台 provider 包括 Windows Media Foundation；CPU fallback 包括 Image/Symphonia。`SyntheticPlatformDecodeProvider` 明确为 non-packaged reference provider。DecodeProvider 输出经过 provider/kind/codec/hash 校验的 CPU buffer 或 `MediaSurfaceToken`，public API 不暴露平台 native handle。
 
 桌面 FFmpeg 由 optional `ffmpeg-vcpkg` feature 声明，默认 build 不要求本机 FFmpeg。`astra-release`、`astra-cli` 和 Windows host 通过同名 feature 透传该能力；启用 FFmpeg 的 Windows profile 必须按顺序声明 `decode.providers: [wmf, ffmpeg]` 并设置 `allow_software: true`，同时证明 native probe 通过。其他 provider 顺序、未声明软件 fallback 或只存在 feature 都会阻断。
 
 `FfmpegPlaybackDecoder` 从受限临时输入执行真实 demux，输出带 generation、sequence、PTS、duration、resource id 和 content hash 的 PCM/BGRA packet。它支持设备目标格式 resample、seek、EOS flush、终段 trimming、取消和单 packet backpressure；`MediaPlaybackPipeline` 负责 payload hash/size、live byte budget、audio-master 调度与视频资源释放。Windows 的 `WindowsNativeMediaSession` 把同一 stream 接到 WASAPI 和 wgpu surface，覆盖 pause/resume、seek、显式 late-frame policy、设备丢失后的同格式重建以及失败清理。Session 现在还强制接收 product-profile-bound performance budget 与 source/package/build/session identity，并输出真实 measured report；host profile hash 绑定平台配置，product profile 绑定 package，二者不能混用。普通 debug test 可能按阈值诚实返回 blocked，不能把 report 存在当成性能通过。完整规则见 [Performance Contract](performance.md)。Release validator 已能校验 budget/report/capability/conformance/Player 的同 run identity，但当前尚无正式 reference environment 的 pass artifact，因此不能单独关闭 Windows Player E3 或完整 release fallback gate。
 
-Headless 完整视频流不再把全部 BGRA frame 聚合进一个 `DecodedVideoStream` 后跨平台命令复制。`DecodeStreamAction::Start` 必须先完整 demux/decode并逐帧校验，再把 raw frame 写入 session-owned、自动删除的 private spool，只把 `astra.decoded_video_stream_descriptor.v2` 返回 Player；后续 `Next` 每次只读取并复核一帧，EOF 返回与 descriptor 完全一致的 end marker。spool index 只保存 offset、size、sequence、PTS、duration、dimensions 与 content hash；总帧数、逻辑 decoded byte count 和 stream hash仍受 profile 上限约束。Player 同时最多保留一帧，snapshot 只保存 package asset/hash、descriptor identity、已呈现 cursor、loop index 和逻辑起始时间；restore 重新创建 decode session并按 cursor 验证 continuation。skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`，不能遗留临时文件或 platform handle。Windows/Web 尚未实现该 session streaming contract时必须返回 blocking diagnostic，不能把首帧 one-shot 冒充 descriptor。
+Headless 完整视频流不再把全部 BGRA frame 聚合进一个 `DecodedVideoStream` 后跨平台命令复制。`DecodeStreamAction::Start` 必须先完整 demux/decode并逐帧校验，再把 raw frame 写入 session-owned、自动删除的 private spool，只把 `astra.decoded_video_stream_descriptor.v2` 返回 Player；后续 `Next` 每次只读取并复核一帧，EOF 返回与 descriptor 完全一致的 end marker。spool index 只保存 offset、size、sequence、PTS、duration、dimensions 与 content hash；总帧数、逻辑 decoded byte count 和 stream hash仍受 profile 上限约束。Player 同时最多保留一帧，snapshot 只保存 package asset/hash、descriptor identity、已呈现 cursor、loop index 和逻辑起始时间；restore 重新创建 decode session并按 cursor 验证 continuation。skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`，不能遗留临时文件或 platform handle。Windows RFVP/WMF 已实现该 cursor session；其他平台未实现对应 native stream contract 时必须返回 blocking diagnostic，不能把首帧 one-shot 冒充 descriptor。
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
 
@@ -27,6 +53,13 @@ Player 的一次性音频必须执行完整资源事务：`OpenDecode -> Decode 
 平台 `audio.query` 返回 queued/consumed/submitted frame、meter 和 callback underflow，Player 只补到目标 queue 水位；启动期建立 underflow baseline，稳定泵送后 underflow 增长必须以 `ASTRA_PLAYER_AUDIO_UNDERFLOW` 终止受影响 session。Windows/WASAPI 和 Web/AudioWorklet 使用同一 queue-state contract，open 后若设备格式相对协商结果发生变化必须 blocking；drain deadline 按实际提交时长加 callback margin 计算，不能使用固定两秒或十秒超时。退出时必须 drain 并 close。Web 必须由真实 keyboard/pointer user activation 触发 `AudioContext.resume()`，不得在 page load 时伪造 gesture；随后由共享 `NativeVnProductMediaHost` 统一执行 timeline、decode、mixer、wait completion 和 cleanup，其内部音频 owner 为 `NativeVnProductAudioHost`。设备热切换恢复、正式浏览器 E3 evidence 仍是独立未完成门禁，不能由 native `web-code-check` 或 mixer unit test 替代。
 
 PlatformHost 的 streaming producer 应使用 `submit_audio_owned`：host 把样本批量写入 native `rtrb` 后归还原 `Vec<f32>` allocation，producer 在下一次 mix/refill 复用它。native callback 使用 chunk API 批量消费，不能逐 sample push/pop 或在 callback 内分配。AstraEMU Manager 与 native CLI 由同一 bounded legacy audio worker 持有 decode、resample、voice、fade、segmented PCM cursor 和低水位 refill；Runtime tick、GPU present 与 Slint event loop 只提交命令和读取 telemetry。
+
+RFVP 的 SubmitI16/SubmitF32 不再把样本放进 audio command postcard。Family ABI v7
+直接移动 typed `I16`/`F32` packet，跨 ABI、Manager 和 worker 保留同一 ABI-owned
+allocation。相同格式的 PCM 不允许重建；worker 只在实际 mix/resample 边界读取 chunk，
+必要的采样格式转换单独记录。
+
+Native callback 的消费、设备错误和低水位边沿通过 `AudioWakeRegistration` 唤醒 drain/refill waiter；waiter 使用绝对 deadline，不能以 4/5 ms `sleep` 或 fixed-tick timeout 反复查询。队列满时 producer 必须背压或返回稳定 overflow，设备丢失、worker panic 和 shutdown drain/abort/join 必须成为可诊断的终态。
 
 ## FilterGraph
 

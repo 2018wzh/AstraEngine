@@ -7,7 +7,7 @@ use std::sync::{
 
 use astra_platform::{
     AudioDeviceFormat, AudioFocusState, AudioMeter, AudioOutputRequest, AudioOutputState,
-    AudioOutputStatus, AudioPacket, PlatformError, PlatformErrorCode,
+    AudioOutputStatus, AudioPacket, AudioWakeRegistration, PlatformError, PlatformErrorCode,
 };
 use astra_platform_common::{
     AudioQueueTelemetryReader, NativeAudioConsumer, NativeAudioProducer, NativeAudioQueue,
@@ -26,10 +26,12 @@ pub(crate) struct AndroidAudioResource {
     disconnected: Arc<AtomicBool>,
     gain_bits: Arc<AtomicU32>,
     channels: u16,
+    sample_rate: u32,
     max_buffered_frames: usize,
     next_sequence: u64,
     submitted_samples: u64,
     paused: bool,
+    audio_wake: AudioWakeRegistration,
 }
 
 enum AndroidAudioStream {
@@ -75,6 +77,7 @@ struct CallbackState {
     meter: Arc<CallbackMeter>,
     disconnected: Arc<AtomicBool>,
     gain_bits: Arc<AtomicU32>,
+    audio_wake: AudioWakeRegistration,
 }
 
 struct MonoCallback(CallbackState);
@@ -99,6 +102,7 @@ impl AudioOutputCallback for MonoCallback {
         if filled != output.len() {
             self.0.consumer.record_underflow();
         }
+        self.0.audio_wake.notify();
         DataCallbackResult::Continue
     }
 
@@ -108,6 +112,7 @@ impl AudioOutputCallback for MonoCallback {
         _error: oboe::Error,
     ) {
         self.0.disconnected.store(true, Ordering::Release);
+        self.0.audio_wake.notify();
     }
 }
 
@@ -149,6 +154,7 @@ impl AudioOutputCallback for StereoCallback {
         if written_frames != output.len() {
             self.0.consumer.record_underflow();
         }
+        self.0.audio_wake.notify();
         DataCallbackResult::Continue
     }
 
@@ -158,11 +164,15 @@ impl AudioOutputCallback for StereoCallback {
         _error: oboe::Error,
     ) {
         self.0.disconnected.store(true, Ordering::Release);
+        self.0.audio_wake.notify();
     }
 }
 
 impl AndroidAudioResource {
-    pub(crate) fn new(request: AudioOutputRequest) -> Result<Self, PlatformError> {
+    pub(crate) fn new(
+        request: AudioOutputRequest,
+        audio_wake: AudioWakeRegistration,
+    ) -> Result<Self, PlatformError> {
         if request.sample_rate == 0
             || !matches!(request.channels, 1 | 2)
             || request.max_buffered_frames == 0
@@ -185,6 +195,7 @@ impl AndroidAudioResource {
             meter: Arc::clone(&meter),
             disconnected: Arc::clone(&disconnected),
             gain_bits: Arc::clone(&gain_bits),
+            audio_wake: audio_wake.clone(),
         };
         let rate = i32::try_from(request.sample_rate)
             .map_err(|_| audio_error("audio.open", "sample rate exceeds AAudio range"))?;
@@ -238,10 +249,12 @@ impl AndroidAudioResource {
             disconnected,
             gain_bits,
             channels: request.channels,
+            sample_rate: request.sample_rate,
             max_buffered_frames: request.max_buffered_frames,
             next_sequence: 1,
             submitted_samples: 0,
             paused: false,
+            audio_wake,
         };
         resource.stream.request_start()?;
         Ok(resource)
@@ -309,15 +322,39 @@ impl AndroidAudioResource {
     }
 
     pub(crate) fn drain(&self) -> Result<AudioMeter, PlatformError> {
-        let state = self.state()?;
-        if state.consumed_samples < state.submitted_samples {
-            return Err(PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "audio.drain",
-                "AAudio queue has not drained yet",
-            ));
+        let timeout = AudioOutputRequest {
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            max_buffered_frames: self.max_buffered_frames,
+            start_paused: false,
         }
-        Ok(state.meter)
+        .drain_timeout(self.submitted_samples);
+        let deadline = std::time::Instant::now() + timeout;
+        let mut observed_wake = 0;
+        loop {
+            let state = self.state()?;
+            if state.consumed_samples >= state.submitted_samples {
+                return Ok(state.meter);
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::DeviceLost,
+                    "audio.drain",
+                    "AAudio output drain timed out",
+                ));
+            }
+            observed_wake = self
+                .audio_wake
+                .wait_timeout(observed_wake, remaining)
+                .ok_or_else(|| {
+                    PlatformError::new(
+                        PlatformErrorCode::DeviceLost,
+                        "audio.drain",
+                        "AAudio output drain timed out",
+                    )
+                })?;
+        }
     }
 
     pub(crate) fn pause(&mut self) -> Result<(), PlatformError> {

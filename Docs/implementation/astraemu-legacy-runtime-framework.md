@@ -4,6 +4,9 @@
 
 ## Crate Shape
 
+The active Family ABI is v7 (`astra.emu.family_abi.v7`). v5/v6 artifacts are
+historical migration inputs and fail fast; there is no compatibility shim.
+
 ```text
 astra-emu-family-api
   LegacyFamilyPluginDescriptor
@@ -37,7 +40,7 @@ astra-emu-family-*
 
 统一管理能力放在 Manager 上，不把 RetroArch/libretro 风格 core ABI 引进 family 层。Manager 先按 `FamilyAutoProbePolicy` 调用各 family `probe`，默认顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori；用户 profile 可以覆盖最终选择。probe 只记录 marker、confidence、blocker、skipped reason 和 override reason，不执行商业脚本。
 
-Family ABI v6 把完整 lifecycle 和 host VFS 固定为显式 `StableAbi` wire DTO；VFS range 每次携带 expected revision、offset、length 和 max bytes，单次读取不能超过 16 MiB。v5 插件、fingerprint 和 FVP runtime snapshot 硬拒绝，不退回旧 whole-file callback 或 postcard FFI envelope。大块 scene/encoded/PCM payload 使用 ABI-owned 引用计数 buffer；控制 effect 仍可序列化，但 bulk body 不进入 RuntimeWorld、save、replay、report 或日志。`read_session_resource` 只负责 family virtual VFS 与通用媒体 host 之间的已解析资源交付：family 负责 archive/path 语义，Manager、CLI 与共享 PlatformHost audio service 负责 decode/playback。
+Family ABI v7 把完整 lifecycle 和 host VFS 固定为显式 `StableAbi` wire DTO；VFS range 每次携带 expected revision、offset、length 和 max bytes，单次读取不能超过 16 MiB。v5/v6 插件、fingerprint 和 FVP runtime snapshot 硬拒绝，不退回旧 whole-file callback 或 postcard FFI envelope。大块 scene/encoded/PCM payload 使用 ABI-owned 引用计数 buffer；控制 effect 仍可序列化，但 bulk body 不进入 RuntimeWorld、save、replay、report 或日志。`read_session_resource` 只负责 family virtual VFS 与通用媒体 host 之间的已解析资源交付：family 负责 archive/path 语义，Manager、CLI 与共享 PlatformHost audio service 负责 decode/playback。
 
 Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent。脚本只能提交 deterministic `LegacyEffect`、Blackboard、input 或 tag intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
 

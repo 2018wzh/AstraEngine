@@ -9,8 +9,8 @@ use abi_stable::{
 };
 use astra_emu_family_api::{
     bulk_bytes_from_vec, ffi_result, native_result, validate_symbol, AstraLegacyFamilyModule,
-    AstraLegacyFamilyModuleRef, FfiBulkBytes, FfiEphemeralText, FfiFamilyPluginDescriptor,
-    FfiLegacyHostServices, FfiLegacyResult, FfiOpenCall, FfiProbeCall, FfiProbeReport,
+    AstraLegacyFamilyModuleRef, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiLegacyHostServices,
+    FfiLegacyResult, FfiOpenCall, FfiOwnedBytes, FfiProbeCall, FfiProbeReport,
     FfiProviderInstanceRequest, FfiResourceReadCall, FfiRestoreCall, FfiRestoreReport,
     FfiSessionCall, FfiShutdownReport, FfiSnapshotEnvelope, FfiStepCall, FfiStepOutput,
     FfiTextLeaseCall, FfiVfsEnumerateCall, FfiVfsRangeCall, FfiVfsStatCall, LegacyProviderError,
@@ -19,7 +19,9 @@ use astra_emu_family_api::{
 
 use crate::MinoriRuntimeProvider;
 
-static PROVIDERS: OnceLock<Mutex<BTreeMap<String, MinoriRuntimeProvider>>> = OnceLock::new();
+type SharedProvider = Arc<Mutex<MinoriRuntimeProvider>>;
+
+static PROVIDERS: OnceLock<Mutex<BTreeMap<String, SharedProvider>>> = OnceLock::new();
 
 #[derive(Clone)]
 struct FfiVfsReader {
@@ -98,8 +100,17 @@ impl LegacyVfsReader for FfiVfsReader {
     }
 }
 
-fn providers() -> &'static Mutex<BTreeMap<String, MinoriRuntimeProvider>> {
+fn providers() -> &'static Mutex<BTreeMap<String, SharedProvider>> {
     PROVIDERS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn provider(instance_id: &str) -> Result<SharedProvider, LegacyProviderError> {
+    providers()
+        .lock()
+        .map_err(|_| lock_error())?
+        .get(instance_id)
+        .cloned()
+        .ok_or_else(instance_missing)
 }
 
 extern "C" fn descriptor() -> FfiLegacyResult<FfiFamilyPluginDescriptor> {
@@ -122,7 +133,9 @@ extern "C" fn create_instance(
         }
         providers.insert(
             instance_id,
-            MinoriRuntimeProvider::with_vfs(Arc::new(FfiVfsReader { services })),
+            Arc::new(Mutex::new(MinoriRuntimeProvider::with_vfs(Arc::new(
+                FfiVfsReader { services },
+            )))),
         );
         Ok(())
     })())
@@ -132,8 +145,15 @@ extern "C" fn destroy_instance(request: FfiProviderInstanceRequest) -> FfiLegacy
     ffi_result((|| {
         let instance_id = request.instance_id.to_string();
         let mut providers = providers().lock().map_err(|_| lock_error())?;
-        let provider = providers.get(&instance_id).ok_or_else(instance_missing)?;
-        if provider.has_active_sessions() {
+        let provider = providers
+            .get(&instance_id)
+            .cloned()
+            .ok_or_else(instance_missing)?;
+        if provider
+            .lock()
+            .map_err(|_| lock_error())?
+            .has_active_sessions()
+        {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_INSTANCE_ACTIVE_SESSIONS",
                 "provider instance still owns active sessions",
@@ -146,20 +166,16 @@ extern "C" fn destroy_instance(request: FfiProviderInstanceRequest) -> FfiLegacy
 
 extern "C" fn probe(call: FfiProbeCall) -> FfiLegacyResult<FfiProbeReport> {
     ffi_result((|| {
-        let providers = providers().lock().map_err(|_| lock_error())?;
-        providers
-            .get(call.instance_id.as_str())
-            .ok_or_else(instance_missing)?
-            .probe(&call.ctx.into(), call.request.into())
+        let provider = provider(call.instance_id.as_str())?;
+        let provider = provider.lock().map_err(|_| lock_error())?;
+        provider.probe(&call.ctx.into(), call.request.into())
     })())
 }
 
 extern "C" fn open(call: FfiOpenCall) -> FfiLegacyResult<RString> {
     ffi_result((|| {
-        let mut providers = providers().lock().map_err(|_| lock_error())?;
-        let provider = providers
-            .get_mut(call.instance_id.as_str())
-            .ok_or_else(instance_missing)?;
+        let provider = provider(call.instance_id.as_str())?;
+        let mut provider = provider.lock().map_err(|_| lock_error())?;
         provider
             .open(&call.ctx.into(), call.request.try_into()?)
             .map(|session| session.0)
@@ -168,15 +184,15 @@ extern "C" fn open(call: FfiOpenCall) -> FfiLegacyResult<RString> {
 
 extern "C" fn step(call: FfiStepCall) -> FfiLegacyResult<FfiStepOutput> {
     ffi_result((|| {
-        let mut providers = providers().lock().map_err(|_| lock_error())?;
-        let provider = providers
-            .get_mut(call.instance_id.as_str())
-            .ok_or_else(instance_missing)?;
-        provider.step(
-            &call.ctx.into(),
-            &LegacyRuntimeSessionId(call.session_id.to_string()),
-            call.input.into(),
-        )
+        let provider = provider(call.instance_id.as_str())?;
+        let mut provider = provider.lock().map_err(|_| lock_error())?;
+        provider
+            .step(
+                &call.ctx.into(),
+                &LegacyRuntimeSessionId(call.session_id.to_string()),
+                call.input.into(),
+            )
+            .and_then(FfiStepOutput::try_from)
     })())
 }
 
@@ -188,10 +204,8 @@ extern "C" fn save(call: FfiSessionCall) -> FfiLegacyResult<FfiSnapshotEnvelope>
 
 extern "C" fn restore(call: FfiRestoreCall) -> FfiLegacyResult<FfiRestoreReport> {
     ffi_result((|| {
-        let mut providers = providers().lock().map_err(|_| lock_error())?;
-        let provider = providers
-            .get_mut(call.instance_id.as_str())
-            .ok_or_else(instance_missing)?;
+        let provider = provider(call.instance_id.as_str())?;
+        let mut provider = provider.lock().map_err(|_| lock_error())?;
         provider.restore(
             &call.ctx.into(),
             &LegacyRuntimeSessionId(call.session_id.to_string()),
@@ -210,10 +224,8 @@ extern "C" fn take_ephemeral_text(
     call: FfiTextLeaseCall,
 ) -> FfiLegacyResult<ROption<FfiEphemeralText>> {
     ffi_result::<ROption<FfiEphemeralText>, ROption<FfiEphemeralText>>((|| {
-        let mut providers = providers().lock().map_err(|_| lock_error())?;
-        let provider = providers
-            .get_mut(call.instance_id.as_str())
-            .ok_or_else(instance_missing)?;
+        let provider = provider(call.instance_id.as_str())?;
+        let mut provider = provider.lock().map_err(|_| lock_error())?;
         provider
             .take_ephemeral_text(
                 &call.ctx.into(),
@@ -224,12 +236,10 @@ extern "C" fn take_ephemeral_text(
     })())
 }
 
-extern "C" fn read_session_resource(call: FfiResourceReadCall) -> FfiLegacyResult<FfiBulkBytes> {
+extern "C" fn read_session_resource(call: FfiResourceReadCall) -> FfiLegacyResult<FfiOwnedBytes> {
     ffi_result((|| {
-        let mut providers = providers().lock().map_err(|_| lock_error())?;
-        let provider = providers
-            .get_mut(call.instance_id.as_str())
-            .ok_or_else(instance_missing)?;
+        let provider = provider(call.instance_id.as_str())?;
+        let mut provider = provider.lock().map_err(|_| lock_error())?;
         provider
             .read_session_resource(
                 &call.ctx.into(),
@@ -237,7 +247,7 @@ extern "C" fn read_session_resource(call: FfiResourceReadCall) -> FfiLegacyResul
                 call.resource_uri.as_str(),
                 call.max_bytes,
             )
-            .map(bulk_bytes_from_vec)
+            .map(|bytes| FfiOwnedBytes::new(bulk_bytes_from_vec(bytes)))
     })())
 }
 
@@ -249,12 +259,10 @@ fn with_session_mut<T>(
         LegacyRuntimeSessionId,
     ) -> Result<T, LegacyProviderError>,
 ) -> Result<T, LegacyProviderError> {
-    let mut providers = providers().lock().map_err(|_| lock_error())?;
-    let provider = providers
-        .get_mut(call.instance_id.as_str())
-        .ok_or_else(instance_missing)?;
+    let provider = provider(call.instance_id.as_str())?;
+    let mut provider = provider.lock().map_err(|_| lock_error())?;
     action(
-        provider,
+        &mut provider,
         call.ctx.into(),
         LegacyRuntimeSessionId(call.session_id.to_string()),
     )

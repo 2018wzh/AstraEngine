@@ -521,7 +521,11 @@ fn drive_codec(
         if remaining.is_zero() {
             return Err(media_codec_error("decode.mediacodec.timeout"));
         }
-        match events.recv_timeout(remaining.min(Duration::from_millis(100))) {
+        // The callback channel is the wake source.  The absolute progress and
+        // total deadlines above are the only timers: capping every receive to
+        // an arbitrary 100 ms interval would turn an event-driven MediaCodec
+        // worker back into a periodic poller under a quiet codec.
+        match events.recv_timeout(remaining) {
             Ok(CodecEvent::Input(index)) if !input_eos => {
                 progress_deadline = Instant::now() + CALLBACK_IDLE_TIMEOUT;
                 let buffer = codec

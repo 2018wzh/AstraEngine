@@ -9,6 +9,8 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Response, Url};
 
+type MeterWaiter = tokio::sync::oneshot::Sender<AudioMeter>;
+
 pub(crate) async fn preferred_audio_output_format() -> Result<AudioOutputFormat, PlatformError> {
     let context = web_sys::AudioContext::new().map_err(|_| audio_error("audio.format"))?;
     let sample_rate = context.sample_rate() as u32;
@@ -30,6 +32,9 @@ pub(crate) struct WebAudioOutput {
     request: AudioOutputRequest,
     next_sequence: u64,
     pending: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u64, usize>>>,
+    pending_meter: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u64, MeterWaiter>>>,
+    pending_drains: std::rc::Rc<std::cell::RefCell<Vec<(u64, u64, MeterWaiter)>>>,
+    next_waiter: u64,
     queued_frames: std::rc::Rc<std::cell::Cell<usize>>,
     meter: std::rc::Rc<std::cell::RefCell<AudioMeter>>,
     underflow_count: std::rc::Rc<std::cell::Cell<u64>>,
@@ -117,6 +122,15 @@ impl WebAudioOutput {
             u64,
             usize,
         >::new()));
+        let pending_meter =
+            std::rc::Rc::new(std::cell::RefCell::new(std::collections::BTreeMap::<
+                u64,
+                MeterWaiter,
+            >::new()));
+        let pending_drains =
+            std::rc::Rc::new(std::cell::RefCell::new(
+                Vec::<(u64, u64, MeterWaiter)>::new(),
+            ));
         let queued_frames = std::rc::Rc::new(std::cell::Cell::new(0usize));
         let meter = std::rc::Rc::new(std::cell::RefCell::new(AudioMeter {
             sample_count: 0,
@@ -127,6 +141,8 @@ impl WebAudioOutput {
         let callback_count = std::rc::Rc::new(std::cell::Cell::new(0));
         let on_message = {
             let pending = pending.clone();
+            let pending_meter = pending_meter.clone();
+            let pending_drains = pending_drains.clone();
             let queued_frames = queued_frames.clone();
             let meter = meter.clone();
             let underflow_count = underflow_count.clone();
@@ -147,39 +163,48 @@ impl WebAudioOutput {
                                 queued_frames.set(queued_frames.get().saturating_sub(frames));
                             }
                         }
+                        if let Some(value) = Reflect::get(&data, &JsValue::from_str("queuedFrames"))
+                            .ok()
+                            .and_then(|value| value.as_f64())
+                        {
+                            queued_frames.set(value.max(0.0) as usize);
+                        }
+                        let mut current = meter.borrow().clone();
+                        update_meter_from_message(
+                            &data,
+                            &mut current,
+                            &underflow_count,
+                            &callback_count,
+                        );
+                        *meter.borrow_mut() = current.clone();
+                        resolve_drain_waiters(&pending_drains, queued_frames.get(), &current);
                     }
                     Some("meter") => {
-                        let sample_count = Reflect::get(&data, &JsValue::from_str("sampleCount"))
+                        let mut current = meter.borrow().clone();
+                        update_meter_from_message(
+                            &data,
+                            &mut current,
+                            &underflow_count,
+                            &callback_count,
+                        );
+                        if let Some(value) = Reflect::get(&data, &JsValue::from_str("queuedFrames"))
                             .ok()
                             .and_then(|value| value.as_f64())
-                            .unwrap_or_default() as u64;
-                        let peak = Reflect::get(&data, &JsValue::from_str("peak"))
-                            .ok()
-                            .and_then(|value| value.as_f64())
-                            .unwrap_or_default() as f32;
-                        let rms = Reflect::get(&data, &JsValue::from_str("rms"))
-                            .ok()
-                            .and_then(|value| value.as_f64())
-                            .unwrap_or_default() as f32;
-                        *meter.borrow_mut() = AudioMeter {
-                            sample_count,
-                            peak_dbfs: linear_to_db(peak),
-                            rms_dbfs: linear_to_db(rms),
-                        };
-                        if let Some(value) =
-                            Reflect::get(&data, &JsValue::from_str("underflowCount"))
+                        {
+                            queued_frames.set(value.max(0.0) as usize);
+                        }
+                        *meter.borrow_mut() = current.clone();
+                        if let Some(request_id) =
+                            Reflect::get(&data, &JsValue::from_str("requestId"))
                                 .ok()
                                 .and_then(|value| value.as_f64())
+                                .map(|value| value as u64)
                         {
-                            underflow_count.set(value as u64);
+                            if let Some(waiter) = pending_meter.borrow_mut().remove(&request_id) {
+                                let _ = waiter.send(current.clone());
+                            }
                         }
-                        if let Some(value) =
-                            Reflect::get(&data, &JsValue::from_str("callbackCount"))
-                                .ok()
-                                .and_then(|value| value.as_f64())
-                        {
-                            callback_count.set(value as u64);
-                        }
+                        resolve_drain_waiters(&pending_drains, queued_frames.get(), &current);
                     }
                     _ => {}
                 }
@@ -208,6 +233,9 @@ impl WebAudioOutput {
             request,
             next_sequence: 0,
             pending,
+            pending_meter,
+            pending_drains,
+            next_waiter: 0,
             queued_frames,
             meter,
             underflow_count,
@@ -271,7 +299,7 @@ impl WebAudioOutput {
             submitted_frames,
             played_frames: submitted_frames.saturating_sub(buffered_frames),
             buffered_frames,
-            underflow_count: 0,
+            underflow_count: self.underflow_count.get(),
             meter: self.meter.borrow().clone(),
         }
     }
@@ -312,54 +340,39 @@ impl WebAudioOutput {
         Ok(())
     }
 
-    pub async fn drain(&self) -> Result<AudioMeter, PlatformError> {
-        let poll_count = self
-            .request
-            .drain_timeout(self.submitted_samples)
-            .as_millis()
-            .div_ceil(5)
-            .max(1);
-        for _ in 0..poll_count {
-            if self.queued_frames.get() == 0 {
-                let message = js_sys::Object::new();
-                Reflect::set(
-                    &message,
-                    &JsValue::from_str("type"),
-                    &JsValue::from_str("meter"),
-                )
-                .map_err(|_| audio_error("audio.drain"))?;
-                self.port
-                    .post_message(&message)
-                    .map_err(|_| audio_error("audio.drain"))?;
-                sleep(5).await?;
-                let meter = self.meter.borrow().clone();
-                if meter.sample_count >= self.submitted_samples {
-                    return Ok(meter);
-                }
-            } else {
-                sleep(5).await?;
+    pub async fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
+        let target = self.submitted_samples;
+        let timeout = self.request.drain_timeout(target);
+        let waiter_id = self.next_waiter;
+        self.next_waiter = self
+            .next_waiter
+            .checked_add(1)
+            .ok_or_else(|| audio_error("audio.drain"))?;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.pending_drains
+            .borrow_mut()
+            .push((waiter_id, target, sender));
+        if self.send_meter_request(None).is_err() {
+            self.remove_drain_waiter(waiter_id);
+            return Err(audio_error("audio.drain"));
+        }
+        match tokio::time::timeout(timeout, receiver).await {
+            Ok(Ok(meter)) => Ok(meter),
+            Ok(Err(_)) | Err(_) => {
+                self.remove_drain_waiter(waiter_id);
+                Err(PlatformError::new(
+                    PlatformErrorCode::DeviceLost,
+                    "audio.drain",
+                    "AudioWorklet did not drain before the deadline",
+                ))
             }
         }
-        Err(PlatformError::new(
-            PlatformErrorCode::DeviceLost,
-            "audio.drain",
-            "AudioWorklet did not drain before the deadline",
-        ))
     }
 
-    pub async fn state(&self) -> Result<AudioOutputState, PlatformError> {
-        let message = js_sys::Object::new();
-        Reflect::set(
-            &message,
-            &JsValue::from_str("type"),
-            &JsValue::from_str("meter"),
-        )
-        .map_err(|_| audio_error("audio.query"))?;
-        self.port
-            .post_message(&message)
-            .map_err(|_| audio_error("audio.query"))?;
-        sleep(5).await?;
-        let meter = self.meter.borrow().clone();
+    pub async fn state(&mut self) -> Result<AudioOutputState, PlatformError> {
+        let meter = self
+            .request_meter(std::time::Duration::from_secs(2))
+            .await?;
         Ok(AudioOutputState {
             queued_frames: self.queued_frames.get(),
             callback_count: self.callback_count.get(),
@@ -368,6 +381,61 @@ impl WebAudioOutput {
             underflow_count: self.underflow_count.get(),
             meter,
         })
+    }
+
+    async fn request_meter(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<AudioMeter, PlatformError> {
+        let request_id = self.next_waiter;
+        self.next_waiter = self
+            .next_waiter
+            .checked_add(1)
+            .ok_or_else(|| audio_error("audio.query"))?;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.pending_meter.borrow_mut().insert(request_id, sender);
+        if self.send_meter_request(Some(request_id)).is_err() {
+            self.pending_meter.borrow_mut().remove(&request_id);
+            return Err(audio_error("audio.query"));
+        }
+        match tokio::time::timeout(timeout, receiver).await {
+            Ok(Ok(meter)) => Ok(meter),
+            Ok(Err(_)) | Err(_) => {
+                self.pending_meter.borrow_mut().remove(&request_id);
+                Err(PlatformError::new(
+                    PlatformErrorCode::DeviceLost,
+                    "audio.query",
+                    "AudioWorklet meter request did not complete",
+                ))
+            }
+        }
+    }
+
+    fn send_meter_request(&self, request_id: Option<u64>) -> Result<(), PlatformError> {
+        let message = js_sys::Object::new();
+        Reflect::set(
+            &message,
+            &JsValue::from_str("type"),
+            &JsValue::from_str("meter"),
+        )
+        .map_err(|_| audio_error("audio.meter"))?;
+        if let Some(request_id) = request_id {
+            Reflect::set(
+                &message,
+                &JsValue::from_str("requestId"),
+                &JsValue::from_f64(request_id as f64),
+            )
+            .map_err(|_| audio_error("audio.meter"))?;
+        }
+        self.port
+            .post_message(&message)
+            .map_err(|_| audio_error("audio.meter"))
+    }
+
+    fn remove_drain_waiter(&self, waiter_id: u64) {
+        self.pending_drains
+            .borrow_mut()
+            .retain(|(id, _, _)| *id != waiter_id);
     }
 
     pub async fn close(self) -> Result<(), PlatformError> {
@@ -384,6 +452,64 @@ impl WebAudioOutput {
         .map(|_| ())
         .map_err(|_| audio_error("audio.close"))
     }
+}
+
+fn update_meter_from_message(
+    data: &JsValue,
+    meter: &mut AudioMeter,
+    underflow_count: &std::rc::Rc<std::cell::Cell<u64>>,
+    callback_count: &std::rc::Rc<std::cell::Cell<u64>>,
+) {
+    if let Some(value) = Reflect::get(data, &JsValue::from_str("sampleCount"))
+        .ok()
+        .and_then(|value| value.as_f64())
+    {
+        meter.sample_count = value.max(0.0) as u64;
+    }
+    if let Some(value) = Reflect::get(data, &JsValue::from_str("peak"))
+        .ok()
+        .and_then(|value| value.as_f64())
+    {
+        meter.peak_dbfs = linear_to_db(value as f32);
+    }
+    if let Some(value) = Reflect::get(data, &JsValue::from_str("rms"))
+        .ok()
+        .and_then(|value| value.as_f64())
+    {
+        meter.rms_dbfs = linear_to_db(value as f32);
+    }
+    if let Some(value) = Reflect::get(data, &JsValue::from_str("underflowCount"))
+        .ok()
+        .and_then(|value| value.as_f64())
+    {
+        underflow_count.set(value.max(0.0) as u64);
+    }
+    if let Some(value) = Reflect::get(data, &JsValue::from_str("callbackCount"))
+        .ok()
+        .and_then(|value| value.as_f64())
+    {
+        callback_count.set(value.max(0.0) as u64);
+    }
+}
+
+fn resolve_drain_waiters(
+    pending: &std::rc::Rc<std::cell::RefCell<Vec<(u64, u64, MeterWaiter)>>>,
+    queued_frames: usize,
+    meter: &AudioMeter,
+) {
+    if queued_frames != 0 {
+        return;
+    }
+    let waiters = std::mem::take(&mut *pending.borrow_mut());
+    let mut remaining = Vec::new();
+    for (waiter_id, target, sender) in waiters {
+        if meter.sample_count >= target {
+            let _ = sender.send(meter.clone());
+        } else {
+            remaining.push((waiter_id, target, sender));
+        }
+    }
+    *pending.borrow_mut() = remaining;
 }
 
 pub(crate) struct WebDecodeSession {
@@ -848,16 +974,6 @@ fn js_error(operation: &'static str) -> PlatformError {
         operation,
         "browser storage operation failed",
     )
-}
-
-async fn sleep(milliseconds: u32) -> Result<(), PlatformError> {
-    let function = Function::new_with_args(
-        "milliseconds",
-        "return new Promise(resolve => setTimeout(resolve, milliseconds));",
-    );
-    await_promise(function.call1(&JsValue::NULL, &JsValue::from_f64(f64::from(milliseconds))))
-        .await
-        .map(|_| ())
 }
 
 fn linear_to_db(value: f32) -> f32 {

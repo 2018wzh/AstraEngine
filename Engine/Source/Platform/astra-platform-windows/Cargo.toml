@@ -25,6 +25,7 @@ cpal.workspace = true
 gilrs = { workspace = true, features = ["wgi"] }
 rfd.workspace = true
 pollster.workspace = true
+postcard.workspace = true
 tokio.workspace = true
 wgpu.workspace = true
 winit = { workspace = true, features = ["rwh_06"] }

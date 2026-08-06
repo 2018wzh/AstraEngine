@@ -1,4 +1,4 @@
-use astra_core::{Hash256, SchemaVersion};
+use astra_core::SchemaVersion;
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -144,7 +144,8 @@ impl ProductRuntimeProvider for Provider {
         Ok(RuntimeStepOutput {
             session_id: input.session_id,
             status: "blocked".into(),
-            outputs: vec![RuntimeOutputEnvelope::postcard(
+            live: Default::default(),
+            persisted: vec![RuntimePersistedOutput::postcard(
                 RuntimeOutputDomain::Effect,
                 "astra.test.effect.v1",
                 SchemaVersion::new(1, 0, 0),
@@ -164,7 +165,6 @@ impl ProductRuntimeProvider for Provider {
                     schema: "test.state.v1".into(),
                     version: SchemaVersion::new(1, 0, 0),
                     codec: RuntimeSectionCodec::Postcard,
-                    hash: Hash256::from_sha256(b"different"),
                     bytes: vec![],
                 }]
             } else {
@@ -210,7 +210,7 @@ fn provider_descriptor() -> ProductRuntimeDescriptor {
             domain: RuntimeOutputDomain::Effect,
             schema: "astra.test.effect.v1".into(),
             version: SchemaVersion::new(1, 0, 0),
-            codec: RuntimeOutputCodec::Postcard,
+            codec: RuntimePersistedCodec::Postcard,
         }],
     }
 }
@@ -223,8 +223,8 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
         required_capability: capability.into(),
         engine_version: "0.1.0".into(),
         rustc_fingerprint: "rustc-stable".into(),
-        feature_fingerprint: "runtime-envelope-v2".into(),
-        abi_fingerprint: "astra-plugin-abi-v2".into(),
+        feature_fingerprint: "runtime-envelope-v3".into(),
+        abi_fingerprint: "astra-plugin-abi-v3".into(),
     };
     let presentation =
         ProviderBinding::new("presentation", "test.renderer", context("renderer2d.test")).unwrap();
@@ -245,8 +245,8 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v2".into(),
-                abi_fingerprint: "astra-plugin-abi-v2".into(),
+                feature_fingerprint: "runtime-envelope-v3".into(),
+                abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
             ProviderExtensionRecord {
                 slot: GAME_RUNTIME_PROVIDER_SLOT.into(),
@@ -256,8 +256,8 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v2".into(),
-                abi_fingerprint: "astra-plugin-abi-v2".into(),
+                feature_fingerprint: "runtime-envelope-v3".into(),
+                abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
         ],
         bindings: vec![presentation.clone(), runtime.clone()],
@@ -359,10 +359,10 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap();
-    assert_eq!(output.outputs.len(), 1);
+    assert_eq!(output.persisted.len(), 1);
     host.save(RuntimeSaveRequest {
         session_id: open.session_id.clone(),
         slot: "slot".into(),
@@ -430,7 +430,7 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap_err();
     assert_eq!(blocked.code(), "ASTRA_RUNTIME_HOST_LIFECYCLE");
@@ -466,10 +466,10 @@ fn host_blocks_unknown_step_schema() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap_err();
-    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_ENVELOPE_SCHEMA");
+    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_PERSISTED_SCHEMA");
 }
 
 #[astra_headless_test::test]
@@ -499,14 +499,14 @@ fn host_blocks_output_count_and_payload_bounds() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_OUTPUT_COUNT");
 }
 
 #[astra_headless_test::test]
-fn host_validates_save_and_restore_sections_before_accepting_state() {
+fn host_validates_save_and_restore_sections_without_content_hashes() {
     let schemas =
         RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
     let mut host =
@@ -524,11 +524,10 @@ fn host_validates_save_and_restore_sections_before_accepting_state() {
         })
         .unwrap();
     let invalid_restore = RuntimeSectionPayload {
-        section_id: "state".into(),
+        section_id: "invalid section id".into(),
         schema: "test.state.v1".into(),
         version: SchemaVersion::new(1, 0, 0),
         codec: RuntimeSectionCodec::Postcard,
-        hash: Hash256::from_sha256(b"different"),
         bytes: vec![],
     };
     assert_eq!(
@@ -538,29 +537,27 @@ fn host_validates_save_and_restore_sections_before_accepting_state() {
         })
         .unwrap_err()
         .code(),
-        "ASTRA_RUNTIME_HOST_SECTION_HASH"
+        "ASTRA_RUNTIME_HOST_SECTION_DESCRIPTOR"
     );
-    let save_error = host
+    let saved = host
         .save(RuntimeSaveRequest {
             session_id: open.session_id.clone(),
             slot: "bad".into(),
         })
-        .unwrap_err();
-    assert_eq!(save_error.code(), "ASTRA_RUNTIME_HOST_SECTION_HASH");
-    assert_eq!(
-        host.step(RuntimeStepInput {
+        .unwrap();
+    assert_eq!(saved.sections.len(), 1);
+    let step = host
+        .step(RuntimeStepInput {
             session_id: open.session_id.clone(),
             fixed_step: 1,
             delta_ns: 16_666_667,
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
-        .unwrap_err()
-        .code(),
-        "ASTRA_RUNTIME_HOST_SESSION_POISONED"
-    );
+        .unwrap();
+    assert_eq!(step.persisted.len(), 1);
     host.shutdown_session(open.session_id).unwrap();
     host.destroy().unwrap();
 }
@@ -590,7 +587,7 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
         session_seed: 1,
         mode: RuntimeStepMode::Live,
         action: "advance".into(),
-        payload: serde_json::json!({}),
+        ..RuntimeStepInput::default()
     };
     host.step(input.clone()).unwrap();
     let error = host.step(input).unwrap_err();
@@ -631,7 +628,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_STEP_ORDER");
@@ -663,7 +660,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "panic".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_PROVIDER_PANIC");
@@ -681,7 +678,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
 }
 
 #[astra_headless_test::test]
-fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch() {
+fn host_enforces_seed_delta_and_step_mode_boundaries_before_dispatch() {
     let invalid_cases = [
         (0, 1, RuntimeStepMode::Live, "ASTRA_RUNTIME_HOST_DELTA"),
         (
@@ -689,12 +686,6 @@ fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch(
             2,
             RuntimeStepMode::Live,
             "ASTRA_RUNTIME_HOST_SEED",
-        ),
-        (
-            16_666_667,
-            1,
-            RuntimeStepMode::Replay,
-            "ASTRA_RUNTIME_HOST_REPLAY_PROVIDER_BYPASS",
         ),
         (
             16_666_667,
@@ -729,7 +720,7 @@ fn host_enforces_seed_delta_and_live_provider_replay_boundaries_before_dispatch(
                 session_seed,
                 mode,
                 action: "advance".into(),
-                payload: serde_json::json!({}),
+                ..RuntimeStepInput::default()
             })
             .unwrap_err();
         assert_eq!(error.code(), expected_code);
@@ -762,7 +753,7 @@ fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
         session_seed: 1,
         mode: RuntimeStepMode::Live,
         action: "advance".into(),
-        payload: serde_json::json!({}),
+        ..RuntimeStepInput::default()
     })
     .unwrap();
     let restored = host
@@ -779,7 +770,7 @@ fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
         session_seed: 1,
         mode: RuntimeStepMode::RestoreContinuation,
         action: "advance".into(),
-        payload: serde_json::json!({}),
+        ..RuntimeStepInput::default()
     })
     .unwrap();
     host.step(RuntimeStepInput {
@@ -789,7 +780,7 @@ fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
         session_seed: 1,
         mode: RuntimeStepMode::Live,
         action: "advance".into(),
-        payload: serde_json::json!({}),
+        ..RuntimeStepInput::default()
     })
     .unwrap();
     host.shutdown_session(open.session_id).unwrap();
@@ -832,7 +823,7 @@ async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() 
             session_seed,
             mode: RuntimeStepMode::Live,
             action: "advance".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .await
         .unwrap();
@@ -873,7 +864,7 @@ async fn async_host_timeout_poisons_the_provider_instance() {
             session_seed: 1,
             mode: RuntimeStepMode::Live,
             action: "slow".into(),
-            payload: serde_json::json!({}),
+            ..RuntimeStepInput::default()
         })
         .await
         .unwrap_err();

@@ -23,7 +23,6 @@ pub(crate) struct BoundTextPresenter {
 #[derive(Debug)]
 pub(crate) struct PresentedTextFrame {
     pub rgba8: Vec<u8>,
-    pub layout_hashes: Vec<Hash256>,
 }
 
 impl BoundTextPresenter {
@@ -140,12 +139,10 @@ impl BoundTextPresenter {
             opacity: 1.0,
             blend: BlendMode::Alpha,
         }];
-        let mut layout_hashes = Vec::with_capacity(2);
         append_layout(
             &self.provider,
             &mut self.resources,
             &mut commands,
-            &mut layout_hashes,
             &format!("{}.body", presentation.layout_id),
             &text.text,
             &presentation.language,
@@ -158,7 +155,6 @@ impl BoundTextPresenter {
                 &self.provider,
                 &mut self.resources,
                 &mut commands,
-                &mut layout_hashes,
                 &format!("{}.speaker", presentation.layout_id),
                 text.speaker.as_deref().unwrap_or(""),
                 &presentation.language,
@@ -170,10 +166,7 @@ impl BoundTextPresenter {
         let frame = renderer
             .capture_frame(&commands)
             .map_err(|_| "ASTRA_EMU_HEADLESS_TEXT_RENDER".to_owned())?;
-        Ok(PresentedTextFrame {
-            rgba8: frame.bytes,
-            layout_hashes,
-        })
+        Ok(PresentedTextFrame { rgba8: frame.bytes })
     }
 }
 
@@ -182,7 +175,6 @@ fn append_layout(
     provider: &CosmicTextLayoutProvider,
     resources: &mut TextRenderResourceOwner,
     commands: &mut Vec<SceneCommand>,
-    layout_hashes: &mut Vec<Hash256>,
     layout_id: &str,
     text: &str,
     language: &str,
@@ -222,7 +214,6 @@ fn append_layout(
     }) {
         return Err("ASTRA_EMU_HEADLESS_TEXT_LAYOUT_DIAGNOSTIC".into());
     }
-    layout_hashes.push(layout.hash);
     let resource_commands = resources
         .update_layout(layout_id, &layout, rgba)
         .map_err(|_| "ASTRA_EMU_HEADLESS_TEXT_RESOURCE".to_owned())?;
@@ -315,7 +306,6 @@ mod tests {
             BoundTextPresenter::new(TEXT_PROVIDER_ID, "headless-test", "minori-v1").unwrap();
         let second = second.render(&underlay, &text, &presentation()).unwrap();
         assert_eq!(first.rgba8, second.rgba8);
-        assert_eq!(first.layout_hashes, second.layout_hashes);
         assert!(first.rgba8.iter().any(|byte| *byte != 0));
     }
 

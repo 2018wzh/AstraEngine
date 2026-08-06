@@ -15,6 +15,16 @@ Media Runtime 执行表现，不保存剧情权威状态。它消费 Presentatio
 
 ## 内置 provider
 
+### RFVP streaming decode
+
+Windows WMF now exposes bounded video and audio cursors through PlatformHost.
+The first request establishes the cursor and subsequent requests transfer one
+validated frame/chunk. A bounded worker performs decode and the runtime only
+consumes ready data. The host reports `ASTRA_MEDIA_STREAM_EOS` instead of
+requiring a polling timeout. Hardware transforms are selected when available;
+the contract deliberately records the CPU BGRA/i16 output boundary and the
+single final upload/device transfer.
+
 - Renderer2D：真实 wgpu owner 位于 platform host 的 `WgpuPresentationCore`；Windows 路径覆盖 hardware surface、ordered frame、resize、context/device loss、retained frame resource rebuild 和 readback。文本 pass 通过 `surface.present_text_scene` 执行真实 GPU atlas、vertex/scissor draw 和事务性资源提交；非文本 `SceneCommand` 仍明确拒绝，不能把该 pass 外推成完整 GPU renderer。Migration 11 Headless 组合 Media-owned CPU provider 并写出 lossless PNG。
 - TextLayout：`astra.text_layout.v2` 的 cosmic-text/Swash provider；只装载 target/profile 允许且 hash/face/coverage 可验证的 package 字体，输出 shaped glyph、cluster/font identity 与 Alpha8/RGBA glyph resource。`TextRenderResourceOwner` 管理跨 frame upload/reference/release；`astra.text_layout_replay.v1` 固化 bounded provider/font/layout/glyph record，restore continuation 与 provider-free replay 都验证 package/build/session identity。Windows hardware glyph consumer 读取相同 command stream，并用字体 revision、layout hash、GPU capture hash 和变化像素形成 visual golden；失败 present 不提交逻辑资源，loss 后从 retained bitmap 重建。Player 不能自行估算字符矩形，也不能在 replay 时重新调用 live font provider。
 - Decode：`DecodeBindingContext` 精确绑定 provider/target/profile；fallback 和 reference provider 都要显式授权。Windows WMF provider 已用 CC0 public MP3/MP4 fixture 验证 bounded PCM、BGRA 首帧、corrupt input diagnostic 和失败后 sequence retry。`ffmpeg-vcpkg` provider 已覆盖 native probe、真实 timestamped MP3/MP4 stream、目标格式 resample、seek generation、EOS drain、取消、packet backpressure、hash 和终段 trimming；Headless 完整视频使用 session-private spool 与 descriptor/单帧/end DTO，避免跨 Player boundary 聚合全部 BGRA frame；`WindowsNativeMediaSession` 把同一 packet stream 接入 audio-master scheduler、WASAPI 和 wgpu。正式 release fallback 仍由 profile policy、native probe、same-run identity 和 reference performance pass共同决定，不能因 feature 或局部测试存在而自动启用。

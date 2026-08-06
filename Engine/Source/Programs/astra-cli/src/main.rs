@@ -994,6 +994,8 @@ fn scene_command_kind(command: &astra_media::SceneCommand) -> &'static str {
     match command {
         SceneCommand::UploadTexture { .. } => "upload_texture",
         SceneCommand::UpdateTextureRegion { .. } => "update_texture_region",
+        SceneCommand::UploadLiveTexture { .. } => "upload_live_texture",
+        SceneCommand::UpdateLiveTextureRegion { .. } => "update_live_texture_region",
         SceneCommand::UploadGlyph { .. } => "upload_glyph",
         SceneCommand::ReleaseResource { .. } => "release_resource",
         SceneCommand::Sprite { .. } => "sprite",
@@ -3065,8 +3067,8 @@ fn production_package_request(
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v2".to_string(),
-                    abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
             .map_err(|error| error.to_string())
@@ -3094,8 +3096,8 @@ fn production_package_request(
                         packaged: true,
                         engine_version: env!("CARGO_PKG_VERSION").to_string(),
                         rustc_fingerprint: "rustc-stable".to_string(),
-                        feature_fingerprint: "runtime-envelope-v2".to_string(),
-                        abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+                        feature_fingerprint: "runtime-envelope-v3".to_string(),
+                        abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                     },
                 )
                 .collect(),

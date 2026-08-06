@@ -466,7 +466,6 @@ fn byte_source_error(source: astra_byte_source::ByteSourceError) -> LegacyProvid
         astra_byte_source::ByteSourceError::RangeBounds => "ASTRA_EMU_VFS_READ_BOUNDS",
         astra_byte_source::ByteSourceError::RevisionMismatch => "ASTRA_EMU_VFS_SOURCE_CHANGED",
         astra_byte_source::ByteSourceError::ShortRead => "ASTRA_EMU_VFS_SHORT_READ",
-        astra_byte_source::ByteSourceError::RepeatMismatch => "ASTRA_EMU_VFS_REPEAT_READ_CHANGED",
         astra_byte_source::ByteSourceError::Poisoned => "ASTRA_EMU_VFS_SOURCE_POISONED",
         astra_byte_source::ByteSourceError::Io(_) => "ASTRA_EMU_VFS_SOURCE_IO",
     };

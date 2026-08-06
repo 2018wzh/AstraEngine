@@ -6,5 +6,5 @@ mod text_presentation;
 
 pub use runner::{
     run_headless, run_native, HeadlessLaunch, HeadlessPerformanceArtifacts, HeadlessRunReportV3,
-    NativeLaunch,
+    NativeLaunch, NativeLaunchMode, WindowedE2ReportV1,
 };

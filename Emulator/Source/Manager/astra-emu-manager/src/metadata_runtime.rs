@@ -1,4 +1,8 @@
-use std::{sync::mpsc, thread, time::Duration};
+use std::{
+    sync::{mpsc, Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 use astra_emu_metadata::{
     BangumiPlayUpdate, BangumiProvider, BangumiProviderConfig, CompatibilityClient,
@@ -53,20 +57,40 @@ pub struct MetadataCompletion {
 pub struct MetadataRuntime {
     commands: mpsc::SyncSender<MetadataCommand>,
     completions: mpsc::Receiver<MetadataCompletion>,
+    wake: Arc<Mutex<Option<MetadataWake>>>,
 }
+
+pub type MetadataWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
 impl MetadataRuntime {
     pub fn start() -> Result<Self, String> {
         let (commands, command_rx) = mpsc::sync_channel(COMMAND_CAPACITY);
         let (completion_tx, completions) = mpsc::channel();
+        let wake = Arc::new(Mutex::new(None));
+        let worker_wake = Arc::clone(&wake);
         thread::Builder::new()
             .name("astra-emu-metadata".into())
-            .spawn(move || worker(command_rx, completion_tx))
+            .spawn(move || worker(command_rx, completion_tx, worker_wake))
             .map_err(|_| "ASTRA_EMU_METADATA_WORKER_START".to_owned())?;
         Ok(Self {
             commands,
             completions,
+            wake,
         })
+    }
+
+    pub fn set_wake(&mut self, wake: MetadataWake) {
+        if let Ok(mut current) = self.wake.lock() {
+            *current = Some(wake);
+        }
+        // Close the startup race: a completion may have been queued before the
+        // UI installed its wake callback.  One explicit edge lets the host
+        // drain it without reintroducing a timer.
+        if let Ok(current) = self.wake.lock() {
+            if let Some(callback) = current.as_ref() {
+                callback();
+            }
+        }
     }
 
     pub fn submit(&self, command: MetadataCommand) -> Result<(), String> {
@@ -94,6 +118,7 @@ impl MetadataRuntime {
 fn worker(
     commands: mpsc::Receiver<MetadataCommand>,
     completions: mpsc::Sender<MetadataCompletion>,
+    wake: Arc<Mutex<Option<MetadataWake>>>,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -114,6 +139,9 @@ fn worker(
             .is_err()
         {
             break;
+        }
+        if let Some(callback) = wake.lock().ok().and_then(|guard| guard.clone()) {
+            callback();
         }
     }
 }

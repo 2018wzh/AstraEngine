@@ -210,8 +210,8 @@ impl Default for PackageHandle {
             profile: "test".to_string(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v2".to_string(),
-            abi_fingerprint: "astra-plugin-abi-v2".to_string(),
+            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         }
     }
 }
@@ -299,9 +299,7 @@ pub struct TickReport {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-fn integrity_disabled_hash() -> Hash128 {
-    Hash128::from_blake3(b"astra.runtime.integrity.disabled.v1")
-}
+const INTEGRITY_DISABLED_HASH: Hash128 = Hash128::from_bytes([0; 16]);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PlayerInput {
@@ -702,6 +700,19 @@ impl RuntimeWorld {
             component.payload.hash(),
             component.payload.validated_postcard_bytes()?,
         ))
+    }
+
+    pub fn read_component_postcard_bytes(
+        &self,
+        component_id: ComponentId,
+    ) -> Result<Arc<[u8]>, RuntimeError> {
+        let component = self.actors.component(component_id).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_MISSING",
+                "runtime component does not exist",
+            ))
+        })?;
+        component.payload.validated_postcard_bytes()
     }
 
     pub fn replace_component<T: Serialize>(
@@ -1141,6 +1152,7 @@ impl RuntimeWorld {
             &self.actions,
             &mut self.id_source,
             self.machine_worker_count,
+            self.integrity_mode == TickIntegrityMode::Evidence,
         );
         let machine_ns = machine_started.elapsed().as_nanos() as u64;
         for diagnostic in &output.diagnostics {
@@ -1204,7 +1216,7 @@ impl RuntimeWorld {
                 presentation_hash_ns,
             )
         } else {
-            let disabled = integrity_disabled_hash();
+            let disabled = INTEGRITY_DISABLED_HASH;
             (disabled, disabled, disabled, 0, 0, 0)
         };
         let report = TickReport {
@@ -1259,7 +1271,7 @@ impl RuntimeWorld {
             state_hash: if self.integrity_mode == TickIntegrityMode::Evidence {
                 self.state_hash()
             } else {
-                integrity_disabled_hash()
+                INTEGRITY_DISABLED_HASH
             },
         };
         info!(state_hash = %report.state_hash, "runtime.load");

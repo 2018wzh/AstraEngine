@@ -1,13 +1,21 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender},
+        Arc,
+    },
+    thread,
+};
 
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
 use astra_emu_fvp::{
     fvp_movie_compatibility, open_fvp_movie_stream, FvpMovieAudioChunk, FvpMovieCompatibility,
     FvpMovieFrame, FvpMoviePacket, FvpMovieStreamDecoder,
 };
-use astra_media::{
-    open_windows_audio_stream, open_windows_video_stream, PlayerDecodedAudio,
-    WindowsAudioStreamDecoder, WindowsVideoStreamDecoder,
+use astra_media::PlayerDecodedAudio;
+use astra_platform::{
+    DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
 };
 
 use crate::audio_executor::HostAudioExecutor;
@@ -55,87 +63,619 @@ struct ActiveMovie {
 
 enum MovieDecoder {
     Native(FvpMovieStreamDecoder),
-    Platform {
-        video: WindowsVideoStreamDecoder,
-        audio: Option<WindowsAudioStreamDecoder>,
-        next_video: Option<FvpMovieFrame>,
-        next_audio: Option<FvpMovieAudioChunk>,
-        video_eof: bool,
-        audio_eof: bool,
-    },
+    Platform(Box<PlatformMovieDecoder>),
     #[cfg(test)]
     Buffered(VecDeque<FvpMoviePacket>),
 }
 
+struct PlatformMovieDecoder {
+    video: PlatformVideoStreamDecoder,
+    audio: Option<PlatformAudioStreamDecoder>,
+    next_video: Option<FvpMovieFrame>,
+    next_audio: Option<FvpMovieAudioChunk>,
+    video_eof: bool,
+    audio_eof: bool,
+}
+
+struct PlatformVideoStreamDecoder {
+    client: PlatformHostClient,
+    session: astra_platform::DecodeSessionHandle,
+    rx: Option<Receiver<Result<PlatformVideoOutput, String>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+    closed: bool,
+    ended: bool,
+}
+
+enum PlatformVideoOutput {
+    Frame(FvpMovieFrame),
+    End,
+}
+
+struct PlatformAudioStreamDecoder {
+    client: PlatformHostClient,
+    session: astra_platform::DecodeSessionHandle,
+    pending: Option<FvpMovieAudioChunk>,
+    rx: Option<Receiver<Result<PlatformAudioOutput, String>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+    closed: bool,
+    ended: bool,
+}
+
+enum PlatformAudioOutput {
+    Chunk(FvpMovieAudioChunk),
+    End,
+}
+
+enum PlatformDecodePoll<T> {
+    Pending,
+    Item(T),
+    End,
+}
+
+impl PlatformAudioStreamDecoder {
+    fn open(client: PlatformHostClient, codec: &str, bytes: Vec<u8>) -> Result<Self, String> {
+        let session = pollster::block_on(client.open_decode(DecodeKind::Audio))
+            .map_err(|error| error.to_string())?;
+        let output = pollster::block_on(client.decode(
+            session,
+            PlatformDecodeRequest {
+                sequence: 1,
+                kind: DecodeKind::Audio,
+                codec: codec.to_owned(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: true,
+                stream_action: DecodeStreamAction::Start,
+                bytes,
+            },
+        ));
+        let output = match output {
+            Ok(output) => output,
+            Err(error) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err(error.to_string());
+            }
+        };
+        let mut pending = match Self::parse_chunk(output) {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err(error);
+            }
+        };
+        pending.pts_ms = 0;
+        let next_pts_ms = match Self::chunk_duration_ms(&pending) {
+            Ok(duration) => duration,
+            Err(error) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err(error);
+            }
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::sync_channel(VIDEO_RING_FRAMES);
+        let worker_stop = Arc::clone(&stop);
+        let worker_client = client.clone();
+        let worker = match thread::Builder::new()
+            .name("astra-rfvp-platform-audio".to_string())
+            .spawn(move || {
+                platform_audio_worker(worker_client, session, next_pts_ms, worker_stop, tx);
+            }) {
+            Ok(worker) => worker,
+            Err(_) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err("ASTRA_EMU_VIDEO_AUDIO_PLATFORM_WORKER_START".to_owned());
+            }
+        };
+        Ok(Self {
+            client,
+            session,
+            pending: Some(pending),
+            rx: Some(rx),
+            stop,
+            worker: Some(worker),
+            closed: false,
+            ended: false,
+        })
+    }
+
+    fn parse_chunk(output: DecodeOutput) -> Result<FvpMovieAudioChunk, String> {
+        let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
+            return Err("ASTRA_EMU_VIDEO_AUDIO_PLATFORM_OUTPUT_KIND".to_owned());
+        };
+        let parsed = PlayerDecodedAudio::parse(&format, &bytes, bytes.len() / 2)
+            .map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_OUTPUT_INVALID".to_owned())?;
+        Ok(FvpMovieAudioChunk {
+            pts_ms: 0,
+            sample_rate: parsed.sample_rate,
+            channels: parsed.channels,
+            samples: parsed.samples,
+        })
+    }
+
+    fn poll_next_chunk(&mut self) -> Result<PlatformDecodePoll<FvpMovieAudioChunk>, String> {
+        if let Some(chunk) = self.pending.take() {
+            return Ok(PlatformDecodePoll::Item(chunk));
+        }
+        if self.ended {
+            return Ok(PlatformDecodePoll::End);
+        }
+        let output = match self
+            .rx
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_VIDEO_AUDIO_PLATFORM_CLOSED".to_owned())?
+            .try_recv()
+        {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return Ok(PlatformDecodePoll::Pending),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err("ASTRA_EMU_VIDEO_AUDIO_PLATFORM_WORKER_CLOSED".to_owned())
+            }
+        }?;
+        match output {
+            PlatformAudioOutput::Chunk(chunk) => Ok(PlatformDecodePoll::Item(chunk)),
+            PlatformAudioOutput::End => {
+                self.ended = true;
+                Ok(PlatformDecodePoll::End)
+            }
+        }
+    }
+
+    fn chunk_duration_ms(chunk: &FvpMovieAudioChunk) -> Result<u64, String> {
+        let frames = chunk
+            .samples
+            .len()
+            .checked_div(usize::from(chunk.channels))
+            .ok_or_else(|| "ASTRA_EMU_VIDEO_AUDIO_CHANNEL_BOUNDS".to_owned())?;
+        u64::try_from(frames)
+            .ok()
+            .and_then(|frames| {
+                frames
+                    .checked_mul(1_000)
+                    .and_then(|value| value.checked_div(u64::from(chunk.sample_rate)))
+            })
+            .map(|duration| duration.max(1))
+            .ok_or_else(|| "ASTRA_EMU_VIDEO_AUDIO_TIMELINE_BOUNDS".to_owned())
+    }
+
+    fn shutdown(&mut self) -> Result<(), String> {
+        if self.closed {
+            return Ok(());
+        }
+        self.stop.store(true, Ordering::Release);
+        self.rx.take();
+        let worker_result = self.worker.take().map_or(Ok(()), |worker| {
+            worker
+                .join()
+                .map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_PLATFORM_WORKER_PANIC".to_owned())
+        });
+        let close_result = pollster::block_on(self.client.close_decode(self.session))
+            .map_err(|error| error.to_string());
+        self.closed = true;
+        worker_result.and(close_result)
+    }
+
+    fn close(mut self) -> Result<(), String> {
+        self.shutdown()
+    }
+}
+
+impl Drop for PlatformAudioStreamDecoder {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}
+
+fn platform_audio_worker(
+    client: PlatformHostClient,
+    session: astra_platform::DecodeSessionHandle,
+    mut next_pts_ms: u64,
+    stop: Arc<AtomicBool>,
+    tx: SyncSender<Result<PlatformAudioOutput, String>>,
+) {
+    let mut sequence = 2_u64;
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+        let output = match pollster::block_on(client.decode(
+            session,
+            PlatformDecodeRequest {
+                sequence,
+                kind: DecodeKind::Audio,
+                codec: String::new(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: false,
+                stream_action: DecodeStreamAction::Next,
+                bytes: Vec::new(),
+            },
+        )) {
+            Ok(output) => output,
+            Err(error)
+                if error.operation == "decode.stream.next"
+                    && error.fields.get("diagnostic_code").is_some_and(|code| {
+                        code == astra_platform::DECODE_STREAM_EOS_DIAGNOSTIC
+                    }) =>
+            {
+                send_platform_audio_result(&tx, &stop, Ok(PlatformAudioOutput::End));
+                return;
+            }
+            Err(error) => {
+                send_platform_audio_result(&tx, &stop, Err(error.to_string()));
+                return;
+            }
+        };
+        let mut chunk = match PlatformAudioStreamDecoder::parse_chunk(output) {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                send_platform_audio_result(&tx, &stop, Err(error));
+                return;
+            }
+        };
+        chunk.pts_ms = next_pts_ms;
+        let duration = match PlatformAudioStreamDecoder::chunk_duration_ms(&chunk) {
+            Ok(duration) => duration,
+            Err(error) => {
+                send_platform_audio_result(&tx, &stop, Err(error));
+                return;
+            }
+        };
+        next_pts_ms = match next_pts_ms.checked_add(duration) {
+            Some(next_pts_ms) => next_pts_ms,
+            None => {
+                send_platform_audio_result(
+                    &tx,
+                    &stop,
+                    Err("ASTRA_EMU_VIDEO_AUDIO_TIMELINE_BOUNDS".to_owned()),
+                );
+                return;
+            }
+        };
+        send_platform_audio_result(&tx, &stop, Ok(PlatformAudioOutput::Chunk(chunk)));
+        sequence = match sequence.checked_add(1) {
+            Some(sequence) => sequence,
+            None => {
+                send_platform_audio_result(
+                    &tx,
+                    &stop,
+                    Err("ASTRA_EMU_VIDEO_AUDIO_PLATFORM_SEQUENCE".to_owned()),
+                );
+                return;
+            }
+        };
+    }
+}
+
+fn send_platform_audio_result(
+    tx: &SyncSender<Result<PlatformAudioOutput, String>>,
+    stop: &AtomicBool,
+    result: Result<PlatformAudioOutput, String>,
+) {
+    if stop.load(Ordering::Acquire) {
+        return;
+    }
+    // A full ring is backpressure, not a reason to spin.  The receiver is
+    // dropped during shutdown, which releases this blocking send with an
+    // error and lets the worker terminate without a polling loop.
+    let _ = tx.send(result);
+}
+
+impl PlatformVideoStreamDecoder {
+    fn open(client: PlatformHostClient, codec: &str, bytes: Vec<u8>) -> Result<Self, String> {
+        let session = pollster::block_on(client.open_decode(DecodeKind::Video))
+            .map_err(|error| error.to_string())?;
+        let start = pollster::block_on(client.decode(
+            session,
+            PlatformDecodeRequest {
+                sequence: 1,
+                kind: DecodeKind::Video,
+                codec: codec.to_owned(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: true,
+                stream_action: DecodeStreamAction::Start,
+                bytes,
+            },
+        ));
+        let output = match start {
+            Ok(output) => output,
+            Err(error) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err(error.to_string());
+            }
+        };
+        let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
+            let _ = pollster::block_on(client.close_decode(session));
+            return Err("ASTRA_EMU_VIDEO_PLATFORM_DESCRIPTOR_KIND".into());
+        };
+        if format
+            != format!(
+                "postcard:{}",
+                astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA
+            )
+        {
+            let _ = pollster::block_on(client.close_decode(session));
+            return Err("ASTRA_EMU_VIDEO_PLATFORM_DESCRIPTOR_FORMAT".into());
+        }
+        let cursor = match astra_media::DecodedVideoStreamCursor::decode(&bytes) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err(error.to_string());
+            }
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::sync_channel(VIDEO_RING_FRAMES);
+        let worker_stop = Arc::clone(&stop);
+        let worker_client = client.clone();
+        let worker_cursor = cursor.clone();
+        let worker = match thread::Builder::new()
+            .name("astra-rfvp-platform-video".to_string())
+            .spawn(move || {
+                platform_video_worker(worker_client, session, worker_cursor, worker_stop, tx);
+            }) {
+            Ok(worker) => worker,
+            Err(_) => {
+                let _ = pollster::block_on(client.close_decode(session));
+                return Err("ASTRA_EMU_VIDEO_PLATFORM_WORKER_START".to_owned());
+            }
+        };
+        Ok(Self {
+            client,
+            session,
+            rx: Some(rx),
+            stop,
+            worker: Some(worker),
+            closed: false,
+            ended: false,
+        })
+    }
+
+    fn poll_next_frame(&mut self) -> Result<PlatformDecodePoll<FvpMovieFrame>, String> {
+        if self.ended {
+            return Ok(PlatformDecodePoll::End);
+        }
+        let output = match self
+            .rx
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_VIDEO_PLATFORM_CLOSED".to_owned())?
+            .try_recv()
+        {
+            Ok(output) => output,
+            Err(mpsc::TryRecvError::Empty) => return Ok(PlatformDecodePoll::Pending),
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err("ASTRA_EMU_VIDEO_PLATFORM_WORKER_CLOSED".to_owned())
+            }
+        }?;
+        match output {
+            PlatformVideoOutput::Frame(frame) => Ok(PlatformDecodePoll::Item(frame)),
+            PlatformVideoOutput::End => {
+                self.ended = true;
+                Ok(PlatformDecodePoll::End)
+            }
+        }
+    }
+
+    fn shutdown(&mut self) -> Result<(), String> {
+        if self.closed {
+            return Ok(());
+        }
+        self.stop.store(true, Ordering::Release);
+        self.rx.take();
+        let worker_result = self.worker.take().map_or(Ok(()), |worker| {
+            worker
+                .join()
+                .map_err(|_| "ASTRA_EMU_VIDEO_PLATFORM_WORKER_PANIC".to_owned())
+        });
+        let close_result = pollster::block_on(self.client.close_decode(self.session))
+            .map_err(|error| error.to_string());
+        self.closed = true;
+        worker_result.and(close_result)
+    }
+
+    fn close(mut self) -> Result<(), String> {
+        self.shutdown()
+    }
+}
+
+impl Drop for PlatformVideoStreamDecoder {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}
+
+fn platform_video_worker(
+    client: PlatformHostClient,
+    session: astra_platform::DecodeSessionHandle,
+    cursor: astra_media::DecodedVideoStreamCursor,
+    stop: Arc<AtomicBool>,
+    tx: SyncSender<Result<PlatformVideoOutput, String>>,
+) {
+    let mut sequence = 2_u64;
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+        let output = match pollster::block_on(client.decode(
+            session,
+            PlatformDecodeRequest {
+                sequence,
+                kind: DecodeKind::Video,
+                codec: String::new(),
+                description: Vec::new(),
+                sample_rate: None,
+                channels: None,
+                coded_width: None,
+                coded_height: None,
+                keyframe: false,
+                stream_action: DecodeStreamAction::Next,
+                bytes: Vec::new(),
+            },
+        )) {
+            Ok(output) => output,
+            Err(error) => {
+                send_platform_video_result(&tx, &stop, Err(error.to_string()));
+                return;
+            }
+        };
+        let parsed = parse_platform_video_output(output, &cursor);
+        let is_end = matches!(parsed, Ok(PlatformVideoOutput::End));
+        send_platform_video_result(&tx, &stop, parsed);
+        if is_end {
+            return;
+        }
+        sequence = match sequence.checked_add(1) {
+            Some(sequence) => sequence,
+            None => {
+                send_platform_video_result(
+                    &tx,
+                    &stop,
+                    Err("ASTRA_EMU_VIDEO_PLATFORM_SEQUENCE".to_owned()),
+                );
+                return;
+            }
+        };
+    }
+}
+
+fn send_platform_video_result(
+    tx: &SyncSender<Result<PlatformVideoOutput, String>>,
+    stop: &AtomicBool,
+    result: Result<PlatformVideoOutput, String>,
+) {
+    if stop.load(Ordering::Acquire) {
+        return;
+    }
+    let _ = tx.send(result);
+}
+
+fn parse_platform_video_output(
+    output: DecodeOutput,
+    cursor: &astra_media::DecodedVideoStreamCursor,
+) -> Result<PlatformVideoOutput, String> {
+    let DecodeOutput::CpuBuffer {
+        format,
+        bytes,
+        hash,
+    } = output
+    else {
+        return Err("ASTRA_EMU_VIDEO_PLATFORM_FRAME_KIND".to_owned());
+    };
+    let frame = if format == format!("postcard:{}", astra_media::DECODED_VIDEO_FRAME_SCHEMA) {
+        astra_media::DecodedVideoFrame::decode(&bytes, MAX_DECODED_BYTES as u64)
+            .map_err(|error| error.to_string())?
+    } else if astra_media::is_decoded_video_cpu_buffer_format(&format) {
+        astra_media::DecodedVideoFrame::from_cpu_buffer(
+            &format,
+            bytes,
+            &hash,
+            MAX_DECODED_BYTES as u64,
+        )
+        .map_err(|error| error.to_string())?
+    } else if format
+        == format!(
+            "postcard:{}",
+            astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA
+        )
+    {
+        let end: astra_media::DecodedVideoStreamCursorEnd = postcard::from_bytes(&bytes)
+            .map_err(|error| format!("ASTRA_EMU_VIDEO_PLATFORM_END_DECODE:{error}"))?;
+        end.validate_against(cursor)
+            .map_err(|error| error.to_string())?;
+        return Ok(PlatformVideoOutput::End);
+    } else {
+        return Err("ASTRA_EMU_VIDEO_PLATFORM_FRAME_FORMAT".to_owned());
+    };
+    {
+        let mut rgba8 = frame.bgra8;
+        for pixel in rgba8.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        Ok(PlatformVideoOutput::Frame(FvpMovieFrame {
+            pts_ms: frame.pts_us / 1_000,
+            width: frame.width,
+            height: frame.height,
+            rgba8,
+        }))
+    }
+}
+
 impl MovieDecoder {
-    fn next_packet(&mut self) -> Result<FvpMoviePacket, String> {
+    fn close(self) -> Result<(), String> {
         match self {
-            Self::Native(decoder) => decoder.next_packet().map_err(|error| error.to_string()),
-            Self::Platform {
-                video,
-                audio,
-                next_video,
-                next_audio,
-                video_eof,
-                audio_eof,
-            } => {
-                if next_video.is_none() && !*video_eof {
-                    *next_video = video
-                        .next_frame()
+            Self::Platform(mut decoder) => {
+                let video_result = decoder.video.close();
+                let audio_result = decoder
+                    .audio
+                    .take()
+                    .map_or(Ok(()), PlatformAudioStreamDecoder::close);
+                video_result.and(audio_result)
+            }
+            Self::Native(_) => Ok(()),
+            #[cfg(test)]
+            Self::Buffered(_) => Ok(()),
+        }
+    }
+
+    fn next_packet(&mut self) -> Result<Option<FvpMoviePacket>, String> {
+        match self {
+            Self::Native(decoder) => decoder
+                .next_packet()
+                .map(Some)
+                .map_err(|error| error.to_string()),
+            Self::Platform(decoder) => {
+                if decoder.next_video.is_none() && !decoder.video_eof {
+                    match decoder
+                        .video
+                        .poll_next_frame()
                         .map_err(|_| "ASTRA_EMU_VIDEO_PLATFORM_DECODE_FAILED".to_owned())?
-                        .map(|frame| {
-                            let mut rgba8 = frame.bgra8;
-                            for pixel in rgba8.chunks_exact_mut(4) {
-                                pixel.swap(0, 2);
-                            }
-                            FvpMovieFrame {
-                                pts_ms: frame.pts_us / 1_000,
-                                width: frame.width,
-                                height: frame.height,
-                                rgba8,
-                            }
-                        });
-                    *video_eof = next_video.is_none();
+                    {
+                        PlatformDecodePoll::Pending => {}
+                        PlatformDecodePoll::Item(frame) => decoder.next_video = Some(frame),
+                        PlatformDecodePoll::End => decoder.video_eof = true,
+                    }
                 }
-                if next_audio.is_none() && !*audio_eof {
-                    *next_audio = match audio.as_mut() {
-                        Some(decoder) => decoder
-                            .next_chunk()
+                if decoder.next_audio.is_none() && !decoder.audio_eof {
+                    match decoder.audio.as_mut() {
+                        Some(audio) => match audio
+                            .poll_next_chunk()
                             .map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_DECODE_FAILED".to_owned())?
-                            .map(|chunk| {
-                                let parsed = PlayerDecodedAudio::parse(
-                                    &format!("pcm_s16le:{}:{}", chunk.sample_rate, chunk.channels),
-                                    &chunk.pcm_s16le,
-                                    chunk.pcm_s16le.len() / 2,
-                                )
-                                .map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_OUTPUT_INVALID".to_owned())?;
-                                Ok::<_, String>(FvpMovieAudioChunk {
-                                    pts_ms: chunk.pts_us / 1_000,
-                                    sample_rate: parsed.sample_rate,
-                                    channels: parsed.channels,
-                                    samples: parsed.samples,
-                                })
-                            })
-                            .transpose()?,
-                        None => None,
-                    };
-                    *audio_eof = next_audio.is_none();
+                        {
+                            PlatformDecodePoll::Pending => {}
+                            PlatformDecodePoll::Item(chunk) => decoder.next_audio = Some(chunk),
+                            PlatformDecodePoll::End => decoder.audio_eof = true,
+                        },
+                        None => decoder.audio_eof = true,
+                    }
                 }
-                let take_audio = match (next_audio.as_ref(), next_video.as_ref()) {
+                let take_audio = match (decoder.next_audio.as_ref(), decoder.next_video.as_ref()) {
                     (Some(audio), Some(video)) => audio.pts_ms <= video.pts_ms,
                     (Some(_), None) => true,
                     _ => false,
                 };
                 if take_audio {
-                    Ok(FvpMoviePacket::Audio(next_audio.take().unwrap()))
-                } else if let Some(frame) = next_video.take() {
-                    Ok(FvpMoviePacket::Video(frame))
+                    Ok(decoder.next_audio.take().map(FvpMoviePacket::Audio))
+                } else if let Some(frame) = decoder.next_video.take() {
+                    Ok(Some(FvpMoviePacket::Video(frame)))
+                } else if decoder.video_eof && decoder.audio_eof {
+                    Ok(Some(FvpMoviePacket::End))
                 } else {
-                    Ok(FvpMoviePacket::End)
+                    Ok(None)
                 }
             }
             #[cfg(test)]
-            Self::Buffered(packets) => Ok(packets.pop_front().unwrap_or(FvpMoviePacket::End)),
+            Self::Buffered(packets) => Ok(Some(packets.pop_front().unwrap_or(FvpMoviePacket::End))),
         }
     }
 }
@@ -145,9 +685,14 @@ pub(crate) struct HostVideoExecutor {
     active: Option<ActiveMovie>,
     completed: Vec<String>,
     audio_sequence: u32,
+    platform: Option<PlatformHostClient>,
 }
 
 impl HostVideoExecutor {
+    pub(crate) fn bind_platform(&mut self, platform: PlatformHostClient) {
+        self.platform = Some(platform);
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         self.active.is_some()
     }
@@ -219,28 +764,44 @@ impl HostVideoExecutor {
                 None,
             ),
             FvpMovieCompatibility::PlatformProviderRequired => {
+                let platform = self
+                    .platform
+                    .clone()
+                    .ok_or_else(|| "ASTRA_EMU_VIDEO_PLATFORM_HOST_MISSING".to_owned())?;
+                // A single encoded source hand-off is moved into the video session.  Only
+                // when a separate audio session is required do we make one bounded source
+                // clone; the previous path cloned the complete source for both sessions.
+                let audio_bytes = if matches!(mode, LegacyVideoMode::ModalWithAudio) {
+                    Some(bytes.clone())
+                } else {
+                    None
+                };
+                let video = PlatformVideoStreamDecoder::open(platform.clone(), extension, bytes)?;
                 let audio = if matches!(mode, LegacyVideoMode::ModalWithAudio) {
-                    Some(
-                        open_windows_audio_stream(&bytes, MAX_AUDIO_SAMPLES as u64)
-                            .map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_DECODE_FAILED".to_owned())?,
-                    )
+                    match PlatformAudioStreamDecoder::open(
+                        platform,
+                        extension,
+                        audio_bytes
+                            .ok_or_else(|| "ASTRA_EMU_VIDEO_AUDIO_SOURCE_MISSING".to_owned())?,
+                    ) {
+                        Ok(audio) => Some(audio),
+                        Err(error) => {
+                            let _ = video.close();
+                            return Err(error);
+                        }
+                    }
                 } else {
                     None
                 };
                 (
-                    MovieDecoder::Platform {
-                        video: open_windows_video_stream(
-                            &bytes,
-                            MAX_FRAMES as u64,
-                            MAX_DECODED_BYTES as u64,
-                        )
-                        .map_err(|_| "ASTRA_EMU_VIDEO_PLATFORM_DECODE_FAILED".to_owned())?,
+                    MovieDecoder::Platform(Box::new(PlatformMovieDecoder {
+                        video,
                         audio,
                         next_video: None,
                         next_audio: None,
                         video_eof: false,
                         audio_eof: false,
-                    },
+                    })),
                     None,
                 )
             }
@@ -271,7 +832,7 @@ impl HostVideoExecutor {
             eof: false,
         };
         pump_decoder(&mut active, audio)?;
-        if active.frames.is_empty() {
+        if active.frames.is_empty() && active.eof {
             return Err("ASTRA_EMU_VIDEO_DECODE_NO_FRAME".into());
         }
         self.active = Some(active);
@@ -327,6 +888,7 @@ impl HostVideoExecutor {
         if let Some(stream_id) = active.audio_stream_id.filter(|_| active.audio_started) {
             audio.stop_movie_pcm(stream_id)?;
         }
+        active.decoder.close()?;
         if complete {
             self.completed.push(playback_id.to_owned());
         }
@@ -355,6 +917,7 @@ impl HostVideoExecutor {
             if let Some(stream_id) = active.audio_stream_id.filter(|_| active.audio_started) {
                 audio.stop_movie_pcm(stream_id)?;
             }
+            active.decoder.close()?;
         }
         self.completed.clear();
         Ok(())
@@ -369,7 +932,13 @@ fn pump_decoder(active: &mut ActiveMovie, audio: &mut HostAudioExecutor) -> Resu
             .back()
             .is_none_or(|frame| frame.pts_ns <= active.elapsed_ns.saturating_add(VIDEO_PREFETCH_NS))
     {
-        match active.decoder.next_packet()? {
+        let Some(packet) = active.decoder.next_packet()? else {
+            // PlatformHost decode is producer-driven.  A slow hardware
+            // decoder must not block the Runtime tick waiting for the bounded
+            // ring; the next deadline/event will pump it again.
+            break;
+        };
+        match packet {
             FvpMoviePacket::Video(frame) => {
                 let pts_ns = frame
                     .pts_ms
@@ -469,5 +1038,40 @@ mod tests {
             executor.active.as_mut().unwrap().frames.pop_front();
         }
         assert_eq!(&*executor.current_frame().unwrap().rgba8, &[5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn raw_platform_video_frame_moves_payload_into_rgba_without_postcard() {
+        let bgra = vec![1, 2, 3, 255];
+        let payload_ptr = bgra.as_ptr();
+        let frame = astra_media::DecodedVideoFrame {
+            sequence: 1,
+            pts_us: 0,
+            duration_us: 10_000,
+            width: 1,
+            height: 1,
+            content_hash: astra_core::Hash256::from_sha256(&bgra),
+            bgra8: bgra,
+        };
+        let cursor = astra_media::DecodedVideoStreamCursor {
+            schema: astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA.into(),
+            source_hash: astra_core::Hash256::from_sha256(b"source"),
+            width: 1,
+            height: 1,
+            max_frames: 4,
+            max_decoded_byte_count: 64,
+        };
+        let output = DecodeOutput::CpuBuffer {
+            format: frame.cpu_buffer_format(),
+            hash: frame.content_hash.to_string(),
+            bytes: frame.bgra8,
+        };
+        let PlatformVideoOutput::Frame(frame) =
+            parse_platform_video_output(output, &cursor).unwrap()
+        else {
+            panic!("raw platform frame was not returned");
+        };
+        assert_eq!(frame.rgba8.as_ptr(), payload_ptr);
+        assert_eq!(&*frame.rgba8, &[3, 2, 1, 255]);
     }
 }

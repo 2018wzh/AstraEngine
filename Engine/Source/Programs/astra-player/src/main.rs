@@ -226,8 +226,8 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     use astra_core::Hash256;
     use astra_package::{PackageManifest, PackageReader};
     use astra_platform::{
-        HostLaunchProfile, InputState, PackageSourceRequest, PlatformEventKind,
-        PlatformHostFactory, PlatformId, SurfaceRequest, WindowRequest,
+        FixedDeadlineScheduler, HostLaunchProfile, InputState, PackageSourceRequest,
+        PlatformEventKind, PlatformHostFactory, PlatformId, SurfaceRequest, WindowRequest,
     };
     use astra_player::{
         NativeVnHostCommandSource, PlatformCommandSink, PlayerHostCommandExecutor,
@@ -480,31 +480,49 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
                     Vec::new(),
                 )
                 .await?;
-            let mut timeline_tick =
-                tokio::time::interval(std::time::Duration::from_nanos(16_666_667));
-            timeline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut timeline_tick = FixedDeadlineScheduler::new(
+                std::time::Duration::from_nanos(16_666_667),
+            )
+            .map_err(|code| astra_platform::PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "player.runtime.scheduler",
+                code,
+            ))?;
             loop {
                 let event = tokio::select! {
                     event = session.events.recv() => event?,
-                    _ = timeline_tick.tick() => {
-                        if let Some(batch) = vn.tick_presentation(16_666_667).map_err(|error| {
+                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(timeline_tick.next_deadline())) => {
+                        let due = timeline_tick.consume_due(std::time::Instant::now()).map_err(|debt| {
                             astra_platform::PlatformError::new(
                                 astra_platform::PlatformErrorCode::InvalidState,
-                                "player.runtime.presentation_tick",
-                                error.to_string(),
+                                "player.runtime.scheduler_debt",
+                                format!("{}:{}", debt.overdue_steps, debt.lateness.as_nanos()),
                             )
-                        })? {
-                            executor.execute_batch(batch).await.map_err(|error| {
+                        })?.ok_or_else(|| astra_platform::PlatformError::new(
+                            astra_platform::PlatformErrorCode::InvalidState,
+                            "player.runtime.scheduler",
+                            "scheduler woke before its deadline",
+                        ))?;
+                        for _ in 0..due.steps {
+                            if let Some(batch) = vn.tick_presentation(16_666_667).map_err(|error| {
                                 astra_platform::PlatformError::new(
                                     astra_platform::PlatformErrorCode::InvalidState,
-                                    "player.host.execute",
+                                    "player.runtime.presentation_tick",
                                     error.to_string(),
                                 )
-                            })?;
-                        }
-                        if media.is_active() {
-                            let now_ms = timeline_clock.elapsed().as_millis() as u64;
-                            media.poll_and_process(&mut vn, &mut executor, now_ms).await?;
+                            })? {
+                                executor.execute_batch(batch).await.map_err(|error| {
+                                    astra_platform::PlatformError::new(
+                                        astra_platform::PlatformErrorCode::InvalidState,
+                                        "player.host.execute",
+                                        error.to_string(),
+                                    )
+                                })?;
+                            }
+                            if media.is_active() {
+                                let now_ms = timeline_clock.elapsed().as_millis() as u64;
+                                media.poll_and_process(&mut vn, &mut executor, now_ms).await?;
+                            }
                         }
                         continue;
                     }

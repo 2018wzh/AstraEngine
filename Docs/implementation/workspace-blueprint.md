@@ -4,6 +4,9 @@ AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目�
 
 ## Layout
 
+The current AstraEMU boundary is Family ABI v7. Existing v6 references in
+historical status rows describe the migration that preceded the v7 hard cut.
+
 | 路径 | 状态 | 职责 |
 | --- | --- | --- |
 | `Engine/Source/Runtime/` | Stage 1/2 implemented, Stage 3 in progress, Stage 7 planned | EngineCore runtime crate：`astra-core`、`astra-runtime`、`astra-engine` Rust dylib facade、`astra-plugin-abi`、`astra-plugin`；Stage 2 `astra-media-core` 提供轻量 media contract，`astra-asset` 已成为 Provider URI VFS contract owner；Stage 3 `astra-player-core` automation report contract 已开始落地；Stage 7 planned `astra-policy` 承载通用 Luau policy runtime |
@@ -15,7 +18,7 @@ AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目�
 | `Engine/Plugins/Fixtures/` | Stage 1/3 implemented | 测试插件 fixture，覆盖真实 load/unload；`headless-presentation-provider` 覆盖 Stage 1 presentation/action provider，`vn-extension-provider` 覆盖 Stage 3 VN extension provider slots |
 | `Engine/Plugins/Providers/` | Stage 2 implemented, Stage 4 reopened | 通用 provider 插件由 Stage 1/2 registry 和 gate 管理；VFS backend provider 统一走 `vfs_provider` slot，NativeVN runtime provider 位于 AstraVN module，第三方 gameplay runtime provider、OpenAI、Ollama、ComfyUI 和 ONNX 仍是后续 provider |
 | `Editor/Source/` | Stage 4 not implemented | Qt/QML editor bridge 和应用入口 |
-| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 family ABI v6 typed lifecycle/VFS、ABI-owned bulk、FVP compatibility core、修复后的 fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、Trusted Luau、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
+| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 family ABI v7 typed lifecycle/VFS、ABI-owned bulk、FVP compatibility core、修复后的 fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、Trusted Luau、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
 | `Examples/` | Stage 3 in progress | 产品样例和发布样例；`Examples/NativeVN` 是可提交 commercial baseline sample，`Examples/TsuiNoSora/Docs/Title.png`、`Game.png` 作为 TsuiNoSora 视觉参考证据；`Examples/TsuiNoSora/Tools/original-patcher` 是不发布到 crates.io 的 1999 原版独立副本补丁器 |
 | `Tools/TsuiNoSora/` | Stage 3 in progress | 本地合法数据的 inventory、visual reference report 和 Asset analysis helper；输出脱敏 report，不提交商业 payload |
 
