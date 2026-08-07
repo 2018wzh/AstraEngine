@@ -854,6 +854,8 @@ impl HostState {
                                 matches!(
                                     command,
                                     SceneCommand::UploadTexture { .. }
+                                        | SceneCommand::UploadLiveTexture { .. }
+                                        | SceneCommand::UpdateLiveTextureRegion { .. }
                                         | SceneCommand::UploadGlyph { .. }
                                         | SceneCommand::ReleaseResource { .. }
                                 )
@@ -2243,6 +2245,35 @@ fn scene_submission_digest(
                     frame.height,
                     frame.rgba8.len(),
                     frame.hash,
+                ),
+            )?,
+            SceneCommand::UploadLiveTexture { resource_id, frame } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "upload_live_texture",
+                    resource_id,
+                    frame.width,
+                    frame.height,
+                    frame.rgba8.len(),
+                ),
+            )?,
+            SceneCommand::UpdateLiveTextureRegion {
+                resource_id,
+                x,
+                y,
+                width,
+                height,
+                rgba8,
+            } => write_json_digest_record(
+                &mut digest,
+                &(
+                    "update_live_texture_region",
+                    resource_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba8.len(),
                 ),
             )?,
             SceneCommand::UploadGlyph { resource_id, glyph } => write_json_digest_record(

@@ -570,6 +570,7 @@ impl Renderer2DProvider for CpuRendererProvider {
         Ok(HeadlessRenderer {
             request,
             textures: BTreeMap::new(),
+            live_texture_dimensions: BTreeMap::new(),
             glyphs: BTreeMap::new(),
             texture_ids: HashSet::new(),
             glyph_ids: HashSet::new(),
@@ -581,6 +582,7 @@ impl Renderer2DProvider for CpuRendererProvider {
 pub struct HeadlessRenderer {
     request: RendererCreateRequest,
     textures: BTreeMap<String, TextureFrame>,
+    live_texture_dimensions: BTreeMap<String, (u32, u32)>,
     glyphs: BTreeMap<String, GlyphBitmap>,
     texture_ids: HashSet<String>,
     glyph_ids: HashSet<String>,
@@ -659,7 +661,7 @@ impl HeadlessRenderer {
                     rgba8,
                     hash,
                 } => {
-                    let dimensions = retained_texture_dimensions(
+                    let dimensions = retained_hashed_texture_dimensions(
                         &self.textures,
                         &resource_overlay,
                         resource_id,
@@ -679,11 +681,57 @@ impl HeadlessRenderer {
                         rgba8,
                     });
                 }
-                DrawCommand::UploadLiveTexture { .. }
-                | DrawCommand::UpdateLiveTextureRegion { .. } => {
-                    return Err(MediaError::message(
-                        "ASTRA_MEDIA_LIVE_SCENE_HEADLESS: live scene resources require a platform renderer",
-                    ));
+                DrawCommand::UploadLiveTexture { resource_id, frame } => {
+                    validate_texture_dimensions(frame.width, frame.height, frame.rgba8.len())?;
+                    if retained_resource_exists_indexed(
+                        &self.texture_ids,
+                        &self.glyph_ids,
+                        &resource_overlay,
+                        resource_id,
+                    ) {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_DUPLICATE: live texture resource is already uploaded",
+                        ));
+                    }
+                    resource_overlay.insert(
+                        resource_id.as_str(),
+                        PendingResource::LiveTexture(frame.width, frame.height),
+                    );
+                    mutations.push(RetainedResourceMutation::UploadLiveTexture {
+                        resource_id,
+                        width: frame.width,
+                        height: frame.height,
+                    });
+                }
+                DrawCommand::UpdateLiveTextureRegion {
+                    resource_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba8,
+                } => {
+                    let dimensions = retained_live_texture_dimensions(
+                        &self.live_texture_dimensions,
+                        &resource_overlay,
+                        resource_id,
+                    )
+                    .ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: live texture update references an unknown texture",
+                        )
+                    })?;
+                    validate_texture_dimensions(*width, *height, rgba8.len())?;
+                    if x.checked_add(*width)
+                        .is_none_or(|right| right > dimensions.0)
+                        || y.checked_add(*height)
+                            .is_none_or(|bottom| bottom > dimensions.1)
+                    {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_TEXTURE_REGION_BOUNDS: live texture update exceeds texture dimensions",
+                        ));
+                    }
+                    mutations.push(RetainedResourceMutation::UpdateLiveTexture);
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph_metadata(glyph)?;
@@ -721,13 +769,17 @@ impl HeadlessRenderer {
                     ..
                 } => {
                     validate_opacity(*opacity)?;
-                    let dimensions =
-                        retained_texture_dimensions(&self.textures, &resource_overlay, texture_id)
-                            .ok_or_else(|| {
-                                MediaError::message(
-                                    "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
-                                )
-                            })?;
+                    let dimensions = retained_texture_dimensions(
+                        &self.textures,
+                        &self.live_texture_dimensions,
+                        &resource_overlay,
+                        texture_id,
+                    )
+                    .ok_or_else(|| {
+                        MediaError::message(
+                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
+                        )
+                    })?;
                     if let Some(source) = source {
                         validate_source_rect_dimensions(dimensions, *source)?;
                     }
@@ -779,6 +831,7 @@ impl HeadlessRenderer {
                         (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id))
                             if retained_texture_dimensions(
                                 &self.textures,
+                                &self.live_texture_dimensions,
                                 &resource_overlay,
                                 id,
                             )
@@ -866,6 +919,15 @@ impl HeadlessRenderer {
                     self.texture_ids.insert(resource_id.clone());
                     self.textures.insert(resource_id, frame);
                 }
+                OwnedRetainedResourceMutation::UploadLiveTexture {
+                    resource_id,
+                    width,
+                    height,
+                } => {
+                    self.texture_ids.insert(resource_id.clone());
+                    self.live_texture_dimensions
+                        .insert(resource_id, (width, height));
+                }
                 OwnedRetainedResourceMutation::UploadGlyph { resource_id, glyph } => {
                     self.glyph_ids.insert(resource_id.clone());
                     self.glyphs.insert(resource_id, glyph);
@@ -885,8 +947,10 @@ impl HeadlessRenderer {
                     apply_texture_region(frame, x, y, width, height, &rgba8)
                         .expect("validated texture region must commit");
                 }
+                OwnedRetainedResourceMutation::UpdateLiveTexture => {}
                 OwnedRetainedResourceMutation::Release { resource_id } => {
                     self.textures.remove(&resource_id);
+                    self.live_texture_dimensions.remove(&resource_id);
                     self.glyphs.remove(&resource_id);
                     self.texture_ids.remove(&resource_id);
                     self.glyph_ids.remove(&resource_id);
@@ -907,6 +971,11 @@ enum OwnedRetainedResourceMutation {
         resource_id: String,
         frame: TextureFrame,
     },
+    UploadLiveTexture {
+        resource_id: String,
+        width: u32,
+        height: u32,
+    },
     UploadGlyph {
         resource_id: String,
         glyph: GlyphBitmap,
@@ -919,6 +988,7 @@ enum OwnedRetainedResourceMutation {
         height: u32,
         rgba8: Arc<[u8]>,
     },
+    UpdateLiveTexture,
     Release {
         resource_id: String,
     },
@@ -929,6 +999,11 @@ enum RetainedResourceMutation<'a> {
     UploadTexture {
         resource_id: &'a str,
         frame: &'a TextureFrame,
+    },
+    UploadLiveTexture {
+        resource_id: &'a str,
+        width: u32,
+        height: u32,
     },
     UploadGlyph {
         resource_id: &'a str,
@@ -942,6 +1017,7 @@ enum RetainedResourceMutation<'a> {
         height: u32,
         rgba8: &'a Arc<[u8]>,
     },
+    UpdateLiveTexture,
     Release {
         resource_id: &'a str,
     },
@@ -953,6 +1029,15 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
             RetainedResourceMutation::UploadTexture { resource_id, frame } => Self::UploadTexture {
                 resource_id: resource_id.to_owned(),
                 frame: frame.clone(),
+            },
+            RetainedResourceMutation::UploadLiveTexture {
+                resource_id,
+                width,
+                height,
+            } => Self::UploadLiveTexture {
+                resource_id: resource_id.to_owned(),
+                width,
+                height,
             },
             RetainedResourceMutation::UploadGlyph { resource_id, glyph } => Self::UploadGlyph {
                 resource_id: resource_id.to_owned(),
@@ -973,6 +1058,7 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
                 height,
                 rgba8: Arc::clone(rgba8),
             },
+            RetainedResourceMutation::UpdateLiveTexture => Self::UpdateLiveTexture,
             RetainedResourceMutation::Release { resource_id } => Self::Release {
                 resource_id: resource_id.to_owned(),
             },
@@ -982,6 +1068,7 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
 
 enum PendingResource<'a> {
     Texture(&'a TextureFrame),
+    LiveTexture(u32, u32),
     Glyph(&'a GlyphBitmap),
     Released,
 }
@@ -993,7 +1080,11 @@ fn retained_resource_exists_indexed(
     resource_id: &str,
 ) -> bool {
     match overlay.get(resource_id) {
-        Some(PendingResource::Texture(_) | PendingResource::Glyph(_)) => true,
+        Some(
+            PendingResource::Texture(_)
+            | PendingResource::LiveTexture(_, _)
+            | PendingResource::Glyph(_),
+        ) => true,
         Some(PendingResource::Released) => false,
         None => texture_ids.contains(resource_id) || glyph_ids.contains(resource_id),
     }
@@ -1001,15 +1092,50 @@ fn retained_resource_exists_indexed(
 
 fn retained_texture_dimensions(
     textures: &BTreeMap<String, TextureFrame>,
+    live_texture_dimensions: &BTreeMap<String, (u32, u32)>,
     overlay: &BTreeMap<&str, PendingResource<'_>>,
     resource_id: &str,
 ) -> Option<(u32, u32)> {
     match overlay.get(resource_id) {
         Some(PendingResource::Texture(frame)) => Some((frame.width, frame.height)),
+        Some(PendingResource::LiveTexture(width, height)) => Some((*width, *height)),
         Some(PendingResource::Glyph(_) | PendingResource::Released) => None,
         None => textures
             .get(resource_id)
+            .map(|frame| (frame.width, frame.height))
+            .or_else(|| live_texture_dimensions.get(resource_id).copied()),
+    }
+}
+
+fn retained_hashed_texture_dimensions(
+    textures: &BTreeMap<String, TextureFrame>,
+    overlay: &BTreeMap<&str, PendingResource<'_>>,
+    resource_id: &str,
+) -> Option<(u32, u32)> {
+    match overlay.get(resource_id) {
+        Some(PendingResource::Texture(frame)) => Some((frame.width, frame.height)),
+        Some(
+            PendingResource::LiveTexture(_, _)
+            | PendingResource::Glyph(_)
+            | PendingResource::Released,
+        ) => None,
+        None => textures
+            .get(resource_id)
             .map(|frame| (frame.width, frame.height)),
+    }
+}
+
+fn retained_live_texture_dimensions(
+    live_texture_dimensions: &BTreeMap<String, (u32, u32)>,
+    overlay: &BTreeMap<&str, PendingResource<'_>>,
+    resource_id: &str,
+) -> Option<(u32, u32)> {
+    match overlay.get(resource_id) {
+        Some(PendingResource::LiveTexture(width, height)) => Some((*width, *height)),
+        Some(
+            PendingResource::Texture(_) | PendingResource::Glyph(_) | PendingResource::Released,
+        ) => None,
+        None => live_texture_dimensions.get(resource_id).copied(),
     }
 }
 
@@ -1023,7 +1149,11 @@ fn retained_glyph_exists(
             let _ = glyph;
             true
         }
-        Some(PendingResource::Texture(_) | PendingResource::Released) => false,
+        Some(
+            PendingResource::Texture(_)
+            | PendingResource::LiveTexture(_, _)
+            | PendingResource::Released,
+        ) => false,
         None => glyph_ids.contains(resource_id),
     }
 }
@@ -2191,7 +2321,7 @@ pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[
 
 #[cfg(test)]
 mod tests {
-    use super::{LiveTextureBuffer, LiveTextureFrame};
+    use super::*;
 
     #[astra_headless_test::test]
     fn live_texture_buffer_moves_the_pixel_allocation_without_copying() {
@@ -2211,5 +2341,53 @@ mod tests {
         let frame = LiveTextureFrame::from_vec(8, 4, pixels).unwrap();
 
         assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
+    }
+
+    #[astra_headless_test::test]
+    fn retained_validation_tracks_live_texture_metadata_without_pixel_mirror() {
+        let mut renderer = CpuRendererProvider
+            .create(RendererCreateRequest {
+                width: 64,
+                height: 64,
+                format: RenderTargetFormat::Rgba8Srgb,
+                profile: "live-metadata-test".into(),
+            })
+            .unwrap();
+        let pixels = vec![0x33; 16 * 8 * 4];
+        let pointer = pixels.as_ptr();
+        let frame = LiveTextureFrame::from_vec(16, 8, pixels).unwrap();
+        assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
+
+        renderer
+            .submit_frame(&[
+                SceneCommand::UploadLiveTexture {
+                    resource_id: "live.main".into(),
+                    frame,
+                },
+                SceneCommand::Sprite {
+                    id: "draw.main".into(),
+                    texture_id: "live.main".into(),
+                    source: None,
+                    destination: RectI::new(0, 0, 16, 8),
+                    opacity: 1.0,
+                    blend: BlendMode::Alpha,
+                },
+            ])
+            .unwrap();
+
+        let update = vec![0x44; 4 * 2 * 4];
+        let update_pointer = update.as_ptr();
+        let update = LiveTextureBuffer::from_vec(update);
+        renderer
+            .submit_frame(&[SceneCommand::UpdateLiveTextureRegion {
+                resource_id: "live.main".into(),
+                x: 2,
+                y: 3,
+                width: 4,
+                height: 2,
+                rgba8: update.clone(),
+            }])
+            .unwrap();
+        assert_eq!(update.as_slice().as_ptr(), update_pointer);
     }
 }
