@@ -51,8 +51,8 @@ use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, GpuAdapterPolicy,
     GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
     HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
-    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
-    SurfaceHandle, SurfaceRequest, WindowRequest,
+    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, SurfaceHandle, SurfaceRequest,
+    WindowRequest,
 };
 #[cfg(windows)]
 use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
@@ -965,7 +965,6 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             capture_performance_samples: false,
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
-            synchronous_gpu_presents: false,
             background_audio: true,
             audio_pump: AudioPumpPolicy::Realtime {
                 target_latency_ms: 180,
@@ -1510,7 +1509,6 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             frame_sample_interval: launch.frame_sample_interval,
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: (launch.presentation_rate_hz / 60) as u8,
-            synchronous_gpu_presents: launch.presentation_rate_hz == 120,
             perfetto_trace: launch.perfetto_trace.clone(),
             capture_performance_samples: launch.performance.is_some(),
         },
@@ -4012,7 +4010,6 @@ struct RuntimeDriver<'a> {
     pending_scene_metrics: Option<GpuScenePrepareMetrics>,
     pending_render_frame: Option<LegacyRenderFrameV1>,
     pending_scene_frame: Option<SceneFrame>,
-    pending_scene_presents: VecDeque<ScenePresentReceipt>,
     visual_dirty: bool,
     image_decoders: DecodeProviderRegistry,
     text_presenter: BoundTextPresenter,
@@ -4036,7 +4033,6 @@ struct RuntimeDriver<'a> {
     audio_pump: AudioPumpPolicy,
     frame_sample_interval: u64,
     presentation_substeps: u8,
-    synchronous_gpu_presents: bool,
     step_timings_ns: Vec<u64>,
     runtime_timings_ns: Vec<u64>,
     effect_timings_ns: Vec<u64>,
@@ -4070,7 +4066,6 @@ struct RuntimeDriverConfig<'a> {
     capture_performance_samples: bool,
     presentation: PresentationPath,
     presentation_substeps: u8,
-    synchronous_gpu_presents: bool,
     background_audio: bool,
     audio_pump: AudioPumpPolicy,
 }
@@ -4250,7 +4245,6 @@ struct ExecutionConfig<'a> {
     frame_sample_interval: u64,
     presentation: PresentationPath,
     presentation_substeps: u8,
-    synchronous_gpu_presents: bool,
     perfetto_trace: Option<PathBuf>,
     capture_performance_samples: bool,
 }
@@ -4590,7 +4584,6 @@ async fn execute_sequence(
             capture_performance_samples: config.capture_performance_samples,
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
-            synchronous_gpu_presents: config.synchronous_gpu_presents,
             background_audio: false,
             audio_pump: AudioPumpPolicy::FixedTick,
         },
@@ -4855,11 +4848,8 @@ impl<'a> RuntimeDriver<'a> {
         if config.presentation_substeps == 0 || config.presentation_substeps > 2 {
             return Err("ASTRA_EMU_PRESENTATION_SUBSTEPS_INVALID".into());
         }
-        if config.synchronous_gpu_presents && config.presentation != PresentationPath::NativeGpu {
-            return Err("ASTRA_EMU_SYNCHRONOUS_PRESENTATION_REQUIRES_GPU".into());
-        }
-        if !config.synchronous_gpu_presents && config.presentation_substeps != 1 {
-            return Err("ASTRA_EMU_ASYNC_PRESENTATION_SUBSTEPS_INVALID".into());
+        if config.presentation_substeps != 1 && config.presentation != PresentationPath::NativeGpu {
+            return Err("ASTRA_EMU_PRESENTATION_SUBSTEPS_REQUIRE_GPU".into());
         }
         let mut image_decoders = DecodeProviderRegistry::default();
         image_decoders
@@ -4884,7 +4874,6 @@ impl<'a> RuntimeDriver<'a> {
             pending_scene_metrics: None,
             pending_render_frame: None,
             pending_scene_frame: None,
-            pending_scene_presents: VecDeque::new(),
             visual_dirty: false,
             image_decoders,
             text_presenter: BoundTextPresenter::new(
@@ -4919,7 +4908,6 @@ impl<'a> RuntimeDriver<'a> {
             audio_pump: config.audio_pump,
             frame_sample_interval: config.frame_sample_interval,
             presentation_substeps: config.presentation_substeps,
-            synchronous_gpu_presents: config.synchronous_gpu_presents,
             step_timings_ns: Vec::new(),
             runtime_timings_ns: Vec::new(),
             effect_timings_ns: Vec::new(),
@@ -5131,7 +5119,6 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     async fn step(&mut self) -> Result<(), String> {
-        self.poll_native_scene_present()?;
         let step_started = Instant::now();
         self.begin_perfetto_phase("runtime.fixed_tick", 0, step_started)?;
         let step_result = self.step_body(step_started).await;
@@ -5469,10 +5456,6 @@ impl<'a> RuntimeDriver<'a> {
         }
         let presentation_changed = rendered || video_changed;
         let sample_due = self.fixed_step.is_multiple_of(self.frame_sample_interval);
-        self.record_perfetto_counter(
-            "gpu.present_queue_depth",
-            self.pending_scene_presents.len() as u64,
-        )?;
         if sample_due
             && self.gpu_scene.is_some()
             && (self.pending_scene_frame.is_some()
@@ -5481,49 +5464,20 @@ impl<'a> RuntimeDriver<'a> {
                     .as_ref()
                     .is_some_and(|scene| scene.width != 0 && scene.height != 0))
         {
-            if self.synchronous_gpu_presents {
-                if !self.pending_scene_presents.is_empty() {
-                    return Err("ASTRA_EMU_SYNCHRONOUS_PRESENT_RECEIPT_PENDING".into());
-                }
-                let mut submitted = 0u8;
-                if let Some(scene) = self.pending_scene_frame.take() {
-                    self.present_scene_sync(scene).await?;
-                    self.visual_dirty = false;
-                    submitted = 1;
-                }
-                while submitted < self.presentation_substeps {
-                    let scene = self
-                        .gpu_scene
-                        .as_ref()
-                        .expect("checked GPU presentation path")
-                        .draw_scene()?;
-                    self.present_scene_sync(scene).await?;
-                    submitted += 1;
-                }
-            } else if self.visual_dirty && self.pending_scene_frame.is_some() {
-                const MAX_IN_FLIGHT_SCENE_PRESENTS: usize = 32;
-                if self.pending_scene_presents.len() >= MAX_IN_FLIGHT_SCENE_PRESENTS {
-                    return Err("ASTRA_EMU_NATIVE_PRESENT_BACKLOG".into());
-                }
-                let present_started = Instant::now();
-                self.present_sequence = self
-                    .present_sequence
-                    .checked_add(1)
-                    .ok_or_else(|| "ASTRA_EMU_NATIVE_PRESENT_SEQUENCE_OVERFLOW".to_owned())?;
-                let mut scene = self
-                    .pending_scene_frame
-                    .take()
-                    .expect("checked pending native scene frame");
-                scene.sequence = self.present_sequence;
-                self.pending_scene_presents.push_back(
-                    self.platform
-                        .submit_scene(self.surface, scene)
-                        .map_err(|error| error.to_string())?,
-                );
-                self.present_timings_ns.push(elapsed_ns(present_started)?);
-                self.record_perfetto_phase("gpu.submit", 5, present_started)?;
-                self.record_perfetto_phase("gpu.present", 5, present_started)?;
+            let mut submitted = 0u8;
+            if let Some(scene) = self.pending_scene_frame.take() {
+                self.present_scene_sync(scene).await?;
                 self.visual_dirty = false;
+                submitted = 1;
+            }
+            while submitted < self.presentation_substeps {
+                let scene = self
+                    .gpu_scene
+                    .as_ref()
+                    .expect("checked GPU presentation path")
+                    .draw_scene()?;
+                self.present_scene_sync(scene).await?;
+                submitted += 1;
             }
         } else if sample_due && (self.visual_dirty || video_changed) {
             if self.visual_dirty {
@@ -5561,16 +5515,6 @@ impl<'a> RuntimeDriver<'a> {
             "deadline_debt_ns",
             step_duration_ns.saturating_sub(self.delta_ns),
         )
-    }
-
-    fn poll_native_scene_present(&mut self) -> Result<(), String> {
-        while let Some(receipt) = self.pending_scene_presents.front_mut() {
-            if !receipt.try_complete().map_err(|error| error.to_string())? {
-                break;
-            }
-            self.pending_scene_presents.pop_front();
-        }
-        Ok(())
     }
 
     async fn present_scene_sync(&mut self, mut scene: SceneFrame) -> Result<(), String> {
