@@ -5164,6 +5164,11 @@ impl<'a> RuntimeDriver<'a> {
                     mut read,
                     mut started,
                 } => {
+                    // Startup convergence must include resource work, not only
+                    // retained-scene mutations. Otherwise the deadline
+                    // scheduler can start while this read still owns the FVP
+                    // session worker and the next VM step waits behind it.
+                    self.last_step_resource_activity = true;
                     if read.is_none() {
                         let resource_uri = match &command {
                             LegacyAudioCommandV1::LoadResource { resource_uri, .. } => resource_uri,
@@ -5555,7 +5560,7 @@ impl<'a> RuntimeDriver<'a> {
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.end_perfetto_phase("runtime.live_output_routing", 2)?;
         if let Some(metrics) = self.pending_scene_metrics.take() {
-            self.last_step_resource_activity = metrics.resource_operations != 0
+            self.last_step_resource_activity |= metrics.resource_operations != 0
                 || metrics.create_bytes != 0
                 || metrics.update_bytes != 0;
             self.record_perfetto_counter("scene.resource_operations", metrics.resource_operations)?;

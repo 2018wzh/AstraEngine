@@ -3,7 +3,8 @@
 
 The family private key is accepted only through the process environment. A
 development-only ephemeral signer may be requested explicitly for local E3
-runs; its private key is never written to disk or included in evidence.
+runs. Development iteration may instead use a worktree-local signer and stable
+Cargo target under ignored `.tmp`; neither private key is included in evidence.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--target")
     parser.add_argument("--development-ephemeral-signer", action="store_true")
+    parser.add_argument("--development-reuse-build", action="store_true")
     parser.add_argument("--signer-identity")
     args = parser.parse_args()
 
@@ -50,10 +52,23 @@ def main() -> int:
     if target != rust_host(root):
         fail("ASTRA_EMU_DESKTOP_NATIVE_BUILD_REQUIRED")
 
+    if args.development_ephemeral_signer and args.development_reuse_build:
+        fail("ASTRA_EMU_DESKTOP_DEVELOPMENT_MODE_CONFLICT")
     environment = os.environ.copy()
-    configure_signer(environment, args.development_ephemeral_signer, args.signer_identity)
+    configure_signer(
+        root,
+        environment,
+        args.development_ephemeral_signer,
+        args.development_reuse_build,
+        args.signer_identity,
+    )
     identity = build_identity(root, target)
-    target_root = root / ".tmp" / "astraemu-desktop-target" / identity["identity_id"]
+    target_id = (
+        "development-" + hashlib.sha256(target.encode("utf-8")).hexdigest()[:16]
+        if args.development_reuse_build
+        else identity["identity_id"]
+    )
+    target_root = root / ".tmp" / "astraemu-desktop-target" / target_id
     target_root.mkdir(parents=True, exist_ok=True)
     environment["CARGO_TARGET_DIR"] = str(target_root)
 
@@ -92,7 +107,7 @@ def main() -> int:
             manifest,
             target,
             identity,
-            args.development_ephemeral_signer,
+            args.development_ephemeral_signer or args.development_reuse_build,
             environment["ASTRA_EMU_FAMILY_SIGNER_ID"],
         )
         write_json_new(temporary / "astraemu-desktop-package-evidence.json", report)
@@ -105,11 +120,35 @@ def main() -> int:
     return 0
 
 
-def configure_signer(environment: dict[str, str], ephemeral: bool, signer: str | None) -> None:
+def configure_signer(
+    root: pathlib.Path,
+    environment: dict[str, str],
+    ephemeral: bool,
+    reuse: bool,
+    signer: str | None,
+) -> None:
     if ephemeral:
         if environment.get("ASTRA_EMU_FAMILY_SIGNING_KEY_HEX"):
             fail("ASTRA_EMU_DESKTOP_EPHEMERAL_SIGNER_CONFLICT")
         environment["ASTRA_EMU_FAMILY_SIGNING_KEY_HEX"] = secrets.token_hex(32)
+        environment["ASTRA_EMU_FAMILY_SIGNER_ID"] = signer or "astra.development.local"
+        environment.pop("ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX", None)
+    elif reuse:
+        if environment.get("ASTRA_EMU_FAMILY_SIGNING_KEY_HEX"):
+            fail("ASTRA_EMU_DESKTOP_REUSE_SIGNER_CONFLICT")
+        key_path = root / ".tmp" / "astraemu-development-signer.key"
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        if key_path.exists():
+            key = key_path.read_text(encoding="ascii").strip()
+        else:
+            key = secrets.token_hex(32)
+            try:
+                with key_path.open("x", encoding="ascii", newline="\n") as handle:
+                    handle.write(key + "\n")
+                key_path.chmod(0o600)
+            except FileExistsError:
+                key = key_path.read_text(encoding="ascii").strip()
+        environment["ASTRA_EMU_FAMILY_SIGNING_KEY_HEX"] = key
         environment["ASTRA_EMU_FAMILY_SIGNER_ID"] = signer or "astra.development.local"
         environment.pop("ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX", None)
     else:
@@ -140,18 +179,17 @@ def cargo_build(
     target_root: pathlib.Path,
     environment: dict[str, str],
 ) -> pathlib.Path:
-    host_command = [
+    # Build the host and dynamic family in one Cargo invocation. Running these
+    # separately toggles `dynamic-plugin-export` in the same target directory
+    # and forces Cargo to relink the family graph twice on every iteration.
+    command = [
         "cargo", "build", "--locked", "--release", "--target", target,
-        "-p", "astra-emu-manager", "-p", "astra-emu-cli",
-    ]
-    run(host_command, root, environment)
-    family_command = [
-        "cargo", "build", "--locked", "--release", "--target", target,
-        "-p", "astra-emu-fvp", "--features", "dynamic-plugin-export",
+        "-p", "astra-emu-manager", "-p", "astra-emu-cli", "-p", "astra-emu-fvp",
+        "--features", "astra-emu-fvp/dynamic-plugin-export",
         "--message-format=json-render-diagnostics",
     ]
     process = subprocess.Popen(
-        family_command,
+        command,
         cwd=root,
         env=environment,
         text=True,
