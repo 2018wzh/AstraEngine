@@ -320,7 +320,6 @@ mod linux {
         gamepad_events: std_mpsc::Receiver<Vec<PlatformEventKind>>,
         gamepad_stop: Arc<AtomicBool>,
         gamepad_thread: Option<thread::JoinHandle<()>>,
-        event_loop_proxy: EventLoopProxy<()>,
     }
 
     struct PackageHostConfig {
@@ -394,7 +393,6 @@ mod linux {
                 gamepad_events,
                 gamepad_stop,
                 gamepad_thread: Some(gamepad_thread),
-                event_loop_proxy,
             })
         }
 
@@ -558,7 +556,6 @@ mod linux {
                         }
                         let _ = reply.send(result);
                     }
-                    #[cfg(feature = "platform-test-driver")]
                     HostCommand::InjectSurfaceDeviceLoss { surface, reply } => {
                         let result = self.surfaces.get(surface).map(|surface| {
                             surface.inject_device_loss_for_test();
@@ -666,7 +663,6 @@ mod linux {
                         let result = self.audio_outputs.remove(output).map(|_| ());
                         let _ = reply.send(result);
                     }
-                    #[cfg(feature = "platform-test-driver")]
                     HostCommand::InjectAudioDeviceLoss { output, reply } => {
                         let result = self
                             .audio_outputs
@@ -740,6 +736,9 @@ mod linux {
                     }
                     HostCommand::ReadSave { slot, reply } => {
                         let _ = reply.send(self.save_store.read(&slot));
+                    }
+                    HostCommand::ListSaves { reply } => {
+                        let _ = reply.send(self.save_store.list());
                     }
                     HostCommand::DeleteSave { slot, reply } => {
                         let _ = reply.send(self.save_store.delete(&slot));
@@ -1326,7 +1325,7 @@ mod linux {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [f32], _| {
-                            let _ = fill_f32(output, &mut consumer, &meter);
+                            fill_f32(output, &mut consumer, &meter);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1345,7 +1344,7 @@ mod linux {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [i16], _| {
-                            let _ = fill_i16(output, &mut consumer, &meter);
+                            fill_i16(output, &mut consumer, &meter);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1364,7 +1363,7 @@ mod linux {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [u16], _| {
-                            let _ = fill_u16(output, &mut consumer, &meter);
+                            fill_u16(output, &mut consumer, &meter);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1472,7 +1471,6 @@ mod linux {
             Ok(())
         }
 
-        #[cfg(feature = "platform-test-driver")]
         fn inject_device_loss(&mut self) {
             self.stream_error.store(true, Ordering::Release);
         }

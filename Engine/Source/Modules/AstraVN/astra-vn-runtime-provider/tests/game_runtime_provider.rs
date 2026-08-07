@@ -241,14 +241,9 @@ state start #@id state.start
         .unwrap();
     let audio_sequence = output
         .live
-        .effects
+        .audio_cues
         .iter()
-        .find_map(|effect| match effect {
-            astra_plugin_abi::RuntimeLiveEffect::AudioCue(cue) if cue.command_id == "bgm.main" => {
-                Some(cue.sequence)
-            }
-            _ => None,
-        })
+        .find_map(|cue| (cue.command_id == "bgm.main").then_some(cue.sequence))
         .expect("BGM must use the typed live audio cue contract");
     let stop_index = output
         .persisted
@@ -305,11 +300,7 @@ fn native_vn_shipping_step_uses_disabled_integrity_and_live_audio() {
         })
         .unwrap();
 
-    assert!(output
-        .live
-        .effects
-        .iter()
-        .any(|effect| { matches!(effect, astra_plugin_abi::RuntimeLiveEffect::AudioCue(_)) }));
+    assert!(!output.live.audio_cues.is_empty());
     assert!(!output
         .persisted
         .iter()

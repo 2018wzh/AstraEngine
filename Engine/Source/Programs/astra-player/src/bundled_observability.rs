@@ -157,9 +157,16 @@ mod tests {
 
     #[test]
     fn rejects_paths_outside_the_bundle_root() {
-        for invalid in ["../Logs", "/tmp/logs", "C:/logs", "Saved//Logs"] {
+        // `/tmp/logs` is rooted on both platforms via a `RootDir` component;
+        // `C:/logs` is absolute only on Windows (drive prefix).
+        let invalid = if cfg!(windows) {
+            ["../Logs", "C:/logs", "Saved//Logs"]
+        } else {
+            ["../Logs", "/tmp/logs", "Saved//Logs"]
+        };
+        for path in invalid {
             let root = tempfile::tempdir().unwrap();
-            write_config(root.path(), invalid, "Saved/Crashes");
+            write_config(root.path(), path, "Saved/Crashes");
             let error =
                 load_bundled_observability(root.path(), PlayerObservabilityOverrides::default())
                     .unwrap_err();

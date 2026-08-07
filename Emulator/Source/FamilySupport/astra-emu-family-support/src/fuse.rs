@@ -6,11 +6,12 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use astra_emu_family_core::{LegacyMountedVfs, LegacyVfsNodeKind};
+use astra_emu_family_core::LegacyMountedVfs;
 use fuser::{
-    BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags, INodeNo,
-    LockOwner, MountOption, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate, ReplyData,
-    ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow, WriteFlags,
+    BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, FopenFlags,
+    Generation, INodeNo, LockOwner, MountOption, OpenFlags, RenameFlags, ReplyAttr, ReplyCreate,
+    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow,
+    WriteFlags,
 };
 
 const TTL: Duration = Duration::from_secs(1);
@@ -133,7 +134,7 @@ impl Filesystem for ReadOnlyLegacyFs {
             .get(&(parent.0, name.into()))
             .and_then(|ino| self.attr(*ino))
         {
-            Some(attr) => reply.entry(&TTL, &attr, 0),
+            Some(attr) => reply.entry(&TTL, &attr, Generation(0)),
             None => reply.error(Errno::ENOENT),
         }
     }
@@ -301,17 +302,15 @@ pub fn mount_read_only(
         return Err("ASTRA_EMU_VFS_FUSE_MOUNTPOINT".into());
     }
     let family_id = vfs.manifest().family_id.clone();
-    let config = Config {
-        mount_options: vec![
-            MountOption::RO,
-            MountOption::NoDev,
-            MountOption::NoSuid,
-            MountOption::NoExec,
-            MountOption::DefaultPermissions,
-            MountOption::FSName(format!("astraemu-{family_id}")),
-        ],
-        ..Config::default()
-    };
+    let mut config = Config::default();
+    config.mount_options = vec![
+        MountOption::RO,
+        MountOption::NoDev,
+        MountOption::NoSuid,
+        MountOption::NoExec,
+        MountOption::DefaultPermissions,
+        MountOption::FSName(format!("astraemu-{family_id}")),
+    ];
     fuser::mount2(ReadOnlyLegacyFs::new(vfs)?, mountpoint, &config)?;
     Ok(())
 }

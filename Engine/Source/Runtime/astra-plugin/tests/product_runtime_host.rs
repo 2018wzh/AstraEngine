@@ -1,4 +1,4 @@
-use astra_core::SchemaVersion;
+use astra_core::{Hash256, SchemaVersion};
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -165,6 +165,7 @@ impl ProductRuntimeProvider for Provider {
                     schema: "test.state.v1".into(),
                     version: SchemaVersion::new(1, 0, 0),
                     codec: RuntimeSectionCodec::Postcard,
+                    hash: Hash256::from_sha256(&[]),
                     bytes: vec![],
                 }]
             } else {
@@ -528,6 +529,7 @@ fn host_validates_save_and_restore_sections_without_content_hashes() {
         schema: "test.state.v1".into(),
         version: SchemaVersion::new(1, 0, 0),
         codec: RuntimeSectionCodec::Postcard,
+        hash: Hash256::from_sha256(&[]),
         bytes: vec![],
     };
     assert_eq!(

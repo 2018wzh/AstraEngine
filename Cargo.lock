@@ -1260,6 +1260,7 @@ dependencies = [
  "astra-core",
  "astra-headless-test",
  "file-rotate",
+ "libc",
  "schemars",
  "serde",
  "serde_json",

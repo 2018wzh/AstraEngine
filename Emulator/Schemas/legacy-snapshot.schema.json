@@ -72,7 +72,6 @@
       "type": "object",
       "required": [
         "bytes",
-        "hash",
         "schema",
         "section_id",
         "version"
@@ -85,9 +84,6 @@
             "format": "uint8",
             "minimum": 0.0
           }
-        },
-        "hash": {
-          "$ref": "#/definitions/Hash256"
         },
         "schema": {
           "type": "string"

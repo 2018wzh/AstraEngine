@@ -1771,11 +1771,13 @@ fn native_vn_behavioral_evidence(
     let selection = package.runtime_provider_selection();
     let compiled_bytes = postcard::to_allocvec(&compiled.story)
         .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PACKAGE", err.to_string()))?;
+    let compiled_hash = astra_core::Hash256::from_sha256(&compiled_bytes);
     let compiled_section = astra_plugin_abi::RuntimeSectionPayload {
         section_id: "vn.story".to_string(),
         schema: "astra.vn.story".to_string(),
         version: astra_core::SchemaVersion::default(),
         codec: astra_plugin_abi::RuntimeSectionCodec::Postcard,
+        hash: compiled_hash,
         bytes: compiled_bytes,
     };
     let section_ids = package

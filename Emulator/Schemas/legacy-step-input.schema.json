@@ -54,27 +54,19 @@
     }
   },
   "definitions": {
-    "Hash256": {
-      "type": "array",
-      "items": {
-        "type": "integer",
-        "format": "uint8",
-        "minimum": 0.0
-      },
-      "maxItems": 32,
-      "minItems": 32
-    },
     "LegacyAwaitResult": {
       "type": "object",
       "required": [
-        "payload_hash",
+        "payload_len",
         "sequence",
         "status",
         "token_id"
       ],
       "properties": {
-        "payload_hash": {
-          "$ref": "#/definitions/Hash256"
+        "payload_len": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         },
         "sequence": {
           "type": "integer",
@@ -118,15 +110,17 @@
     "LegacyProviderResult": {
       "type": "object",
       "required": [
-        "payload_hash",
+        "payload_len",
         "provider_id",
         "request_id",
         "sequence",
         "status"
       ],
       "properties": {
-        "payload_hash": {
-          "$ref": "#/definitions/Hash256"
+        "payload_len": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         },
         "provider_id": {
           "type": "string"

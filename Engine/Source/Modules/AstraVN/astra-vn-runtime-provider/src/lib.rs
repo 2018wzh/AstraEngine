@@ -37,12 +37,8 @@ use astra_plugin_abi::{
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata,
-    RuntimeExecutorConfig, RuntimeExecutorKind, RuntimeLiveAudioBus, RuntimeLiveAudioCommand,
-    RuntimeLiveAudioCue, RuntimeLiveAudioEncoding, RuntimeLiveAudioSampleFormat,
-    RuntimeLiveAudioSync, RuntimeLiveBlendMode, RuntimeLiveControl, RuntimeLiveCoverage,
-    RuntimeLiveEffect, RuntimeLivePcmBuffer, RuntimeLiveSceneResourceOperation,
-    RuntimeLiveTextureFormat, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode,
-    RuntimeLiveWaitKind, RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputDomain,
+    RuntimeExecutorKind, RuntimeLiveAudioBus, RuntimeLiveAudioCue, RuntimeLiveAudioSync,
+    RuntimeLiveCoverage, RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputDomain,
     RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan, RuntimePersistedCodec,
     RuntimePersistedOutput, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
     RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
@@ -50,6 +46,14 @@ use astra_plugin_abi::{
     RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport, RuntimeStepInput,
     RuntimeStepMode, RuntimeStepOutput, RuntimeTickIntegrityMode, GAME_RUNTIME_PROVIDER_SLOT,
     NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
+};
+#[cfg(feature = "ffi")]
+use astra_plugin_abi::{
+    RuntimeExecutorConfig, RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding,
+    RuntimeLiveAudioSampleFormat, RuntimeLiveBlackboardMutation, RuntimeLiveBlendMode,
+    RuntimeLiveDirtySection, RuntimeLivePcmBuffer, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveTextureFormat, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode,
+    RuntimeLiveWaitKind,
 };
 use astra_runtime::{
     ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
@@ -1231,10 +1235,7 @@ impl NativeVnRuntimeProvider {
                         "typed audio presentation has no matching audio output",
                     )
                 })?;
-                audio_cues.push(RuntimeLiveEffect::AudioCue(runtime_live_audio_cue(
-                    sequence,
-                    audio_command,
-                )));
+                audio_cues.push(runtime_live_audio_cue(sequence, audio_command));
             }
         }
         if audio.next().is_some() {
@@ -1301,8 +1302,8 @@ impl NativeVnRuntimeProvider {
                     audio_commands: output.audio.len() as u64,
                     ..RuntimeLiveCoverage::default()
                 },
-                effects: audio_cues,
-                diagnostics: Vec::new(),
+                audio_cues,
+                ..astra_plugin_abi::RuntimeLiveOutput::default()
             },
             persisted: effects
                 .into_iter()
@@ -1415,6 +1416,7 @@ impl NativeVnRuntimeProvider {
                 schema: "astra.runtime.save_blob.v4".to_string(),
                 version: SchemaVersion::new(4, 0, 0),
                 codec: RuntimeSectionCodec::Raw,
+                hash: astra_core::Hash256::from_sha256(&save.0),
                 bytes: save.0,
             }],
             diagnostics: Vec::new(),
@@ -3165,6 +3167,7 @@ fn ffi_runtime_section(section: FfiRuntimeSection) -> RuntimeSectionPayload {
             FfiRuntimeSectionCodec::Raw => RuntimeSectionCodec::Raw,
             FfiRuntimeSectionCodec::Zstd => RuntimeSectionCodec::Zstd,
         },
+        hash: astra_core::Hash256::from_sha256(&bytes),
         bytes,
     }
 }
@@ -3316,217 +3319,233 @@ fn ffi_live_output(
     let mut events = Vec::new();
     let mut blackboard = Vec::new();
     let mut dirty_sections = Vec::new();
-    for effect in value.effects {
-        match effect {
-            RuntimeLiveEffect::Scene(transaction) => scenes.push(ffi_live_scene(transaction)),
-            RuntimeLiveEffect::ResourceScene(scene) => {
-                resource_scenes.push(FfiRuntimeResourceScene {
-                    sequence: scene.sequence,
-                    width: scene.width,
-                    height: scene.height,
-                    textures: RVec::from(
-                        scene
-                            .textures
-                            .into_iter()
-                            .map(|texture| FfiRuntimeResourceTexture {
-                                texture_id: texture.texture_id,
-                                resource_uri: texture.resource_uri.into(),
-                                codec: texture.codec.into(),
-                                revision: texture.revision,
-                                decoded_width: texture.decoded_width,
-                                decoded_height: texture.decoded_height,
-                                decoded_format: ffi_texture_format(texture.decoded_format),
-                            })
-                            .collect::<Vec<_>>(),
-                    ),
-                    draws: RVec::from(
-                        scene
-                            .draws
-                            .into_iter()
-                            .map(ffi_live_draw)
-                            .collect::<Vec<_>>(),
-                    ),
-                })
-            }
-            RuntimeLiveEffect::Audio(packet) => audio.push(FfiRuntimeAudioPacket {
-                sequence: packet.sequence,
-                stream_id: packet.stream_id,
-                sample_rate: packet.sample_rate,
-                channels: packet.channels,
-                pcm: match packet.pcm {
-                    RuntimeLivePcmBuffer::I16(samples) => {
-                        FfiRuntimePcmBuffer::I16(RVec::from(samples))
-                    }
-                    RuntimeLivePcmBuffer::F32(samples) => {
-                        FfiRuntimePcmBuffer::F32(RVec::from(samples))
-                    }
-                },
-            }),
-            RuntimeLiveEffect::AudioCommand(command) => {
-                audio_commands.push(ffi_live_audio_command(command))
-            }
-            RuntimeLiveEffect::AudioCue(cue) => {
-                let (sync_kind, sync_fence) = match cue.sync {
-                    RuntimeLiveAudioSync::None => (FfiRuntimeAudioSyncKind::None, RString::new()),
-                    RuntimeLiveAudioSync::Text => (FfiRuntimeAudioSyncKind::Text, RString::new()),
-                    RuntimeLiveAudioSync::Fence(fence) => {
-                        (FfiRuntimeAudioSyncKind::Fence, fence.into())
-                    }
-                };
-                audio_cues.push(FfiRuntimeAudioCue {
-                    sequence: cue.sequence,
-                    command_id: cue.command_id.into(),
-                    bus: match cue.bus {
-                        RuntimeLiveAudioBus::Voice => FfiRuntimeAudioBus::Voice,
-                        RuntimeLiveAudioBus::Bgm => FfiRuntimeAudioBus::Bgm,
-                        RuntimeLiveAudioBus::Se => FfiRuntimeAudioBus::Se,
-                        RuntimeLiveAudioBus::Movie => FfiRuntimeAudioBus::Movie,
-                    },
-                    asset: cue.asset.into(),
-                    looped: cue.looped,
-                    fade_ms: cue.fade_ms,
-                    sync_kind,
-                    sync_fence,
-                });
-            }
-            RuntimeLiveEffect::Text(lease) => text.push(FfiRuntimeTextLease {
-                sequence: lease.sequence,
-                lease_id: lease.lease_id.into(),
-                byte_len: lease.byte_len,
-                source_ref: lease.source_ref.into(),
-            }),
-            RuntimeLiveEffect::TextPresentation(presentation) => {
-                text_presentations.push(FfiRuntimeTextPresentation {
-                    sequence: presentation.sequence,
-                    lease_id: presentation.lease_id.into(),
-                    layout_id: presentation.layout_id.into(),
-                    language: presentation.language.into(),
-                    font_families: RVec::from(
-                        presentation
-                            .font_families
-                            .into_iter()
-                            .map(RString::from)
-                            .collect::<Vec<_>>(),
-                    ),
-                    body: ffi_live_text_region(presentation.body),
-                    speaker: presentation.speaker.map(ffi_live_text_region).into(),
-                    rgba: presentation.rgba,
-                })
-            }
-            RuntimeLiveEffect::Video(command) => video.push(FfiRuntimeVideoCommand {
-                sequence: command.sequence,
-                playback_id: match &command.command {
-                    RuntimeLiveVideoCommandKind::Play { playback_id, .. }
-                    | RuntimeLiveVideoCommandKind::Stop { playback_id } => {
-                        playback_id.clone().into()
-                    }
-                },
-                resource_uri: match &command.command {
-                    RuntimeLiveVideoCommandKind::Play { resource_uri, .. } => {
-                        resource_uri.clone().into()
-                    }
-                    RuntimeLiveVideoCommandKind::Stop { .. } => RString::new(),
-                },
-                mode: match &command.command {
-                    RuntimeLiveVideoCommandKind::Play { mode, .. } => match mode {
-                        RuntimeLiveVideoMode::ModalWithAudio => FfiRuntimeVideoMode::ModalWithAudio,
-                        RuntimeLiveVideoMode::LayerNoAudio => FfiRuntimeVideoMode::LayerNoAudio,
-                    },
-                    RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoMode::LayerNoAudio,
-                },
-                stage_width: match &command.command {
-                    RuntimeLiveVideoCommandKind::Play { stage_width, .. } => *stage_width,
-                    RuntimeLiveVideoCommandKind::Stop { .. } => 0,
-                },
-                stage_height: match &command.command {
-                    RuntimeLiveVideoCommandKind::Play { stage_height, .. } => *stage_height,
-                    RuntimeLiveVideoCommandKind::Stop { .. } => 0,
-                },
-                command: match command.command {
-                    RuntimeLiveVideoCommandKind::Play { .. } => FfiRuntimeVideoCommandKind::Play,
-                    RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoCommandKind::Stop,
-                },
-            }),
-            RuntimeLiveEffect::Wait(wait) => {
-                let (kind, number, name, keys, payload_len) = match wait.kind {
-                    RuntimeLiveWaitKind::Frame { frames } => (
-                        FfiRuntimeWaitKind::Frame,
-                        frames,
-                        String::new(),
-                        Vec::new(),
-                        0,
-                    ),
-                    RuntimeLiveWaitKind::Time { milliseconds } => (
-                        FfiRuntimeWaitKind::Time,
-                        milliseconds,
-                        String::new(),
-                        Vec::new(),
-                        0,
-                    ),
-                    RuntimeLiveWaitKind::Input { keys } => {
-                        (FfiRuntimeWaitKind::Input, 0, String::new(), keys, 0)
-                    }
-                    RuntimeLiveWaitKind::MediaFence { media_id } => {
-                        (FfiRuntimeWaitKind::MediaFence, 0, media_id, Vec::new(), 0)
-                    }
-                    RuntimeLiveWaitKind::PresentationFence { fence_id } => (
-                        FfiRuntimeWaitKind::PresentationFence,
-                        0,
-                        fence_id,
-                        Vec::new(),
-                        0,
-                    ),
-                    RuntimeLiveWaitKind::ProviderCompletion { request_id } => (
-                        FfiRuntimeWaitKind::ProviderCompletion,
-                        0,
-                        request_id,
-                        Vec::new(),
-                        0,
-                    ),
-                    RuntimeLiveWaitKind::FamilyOpaque {
-                        wait_kind,
-                        payload_len,
-                    } => (
-                        FfiRuntimeWaitKind::FamilyOpaque,
-                        0,
-                        wait_kind,
-                        Vec::new(),
-                        payload_len,
-                    ),
-                };
-                waits.push(FfiRuntimeWait {
-                    sequence: wait.sequence,
-                    token_id: wait.token_id.into(),
-                    kind,
-                    number,
-                    name: name.into(),
-                    keys: RVec::from(keys.into_iter().map(RString::from).collect::<Vec<_>>()),
-                    payload_len,
-                });
-            }
-            RuntimeLiveEffect::Event(event) => events.push(FfiRuntimeEvent {
-                sequence: event.sequence,
-                event: event.event.into(),
-                payload: RVec::from(event.payload),
-                due_tick: event.due_tick.into(),
-            }),
-            RuntimeLiveEffect::Control(RuntimeLiveControl::SetBlackboard {
-                sequence,
-                key,
-                value,
-            }) => blackboard.push(FfiRuntimeBlackboardMutation {
-                sequence,
-                key: key.into(),
-                value: RVec::from(value),
-            }),
-            RuntimeLiveEffect::Control(RuntimeLiveControl::SnapshotDirty {
-                sequence,
-                section_id,
-            }) => dirty_sections.push(FfiRuntimeDirtySection {
-                sequence,
-                section_id: section_id.into(),
-            }),
+    for transaction in value.scenes {
+        scenes.push(ffi_live_scene(transaction))
+    }
+    for scene in value.resource_scenes {
+        {
+            resource_scenes.push(FfiRuntimeResourceScene {
+                sequence: scene.sequence,
+                width: scene.width,
+                height: scene.height,
+                textures: RVec::from(
+                    scene
+                        .textures
+                        .into_iter()
+                        .map(|texture| FfiRuntimeResourceTexture {
+                            texture_id: texture.texture_id,
+                            resource_uri: texture.resource_uri.into(),
+                            codec: texture.codec.into(),
+                            revision: texture.revision,
+                            decoded_width: texture.decoded_width,
+                            decoded_height: texture.decoded_height,
+                            decoded_format: ffi_texture_format(texture.decoded_format),
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                draws: RVec::from(
+                    scene
+                        .draws
+                        .into_iter()
+                        .map(ffi_live_draw)
+                        .collect::<Vec<_>>(),
+                ),
+            })
         }
+    }
+    for packet in value.audio {
+        audio.push(FfiRuntimeAudioPacket {
+            sequence: packet.sequence,
+            stream_id: packet.stream_id,
+            sample_rate: packet.sample_rate,
+            channels: packet.channels,
+            pcm: match packet.pcm {
+                RuntimeLivePcmBuffer::I16(samples) => FfiRuntimePcmBuffer::I16(RVec::from(samples)),
+                RuntimeLivePcmBuffer::F32(samples) => FfiRuntimePcmBuffer::F32(RVec::from(samples)),
+            },
+        })
+    }
+    for command in value.audio_commands {
+        {
+            audio_commands.push(ffi_live_audio_command(command))
+        }
+    }
+    for cue in value.audio_cues {
+        {
+            let (sync_kind, sync_fence) = match cue.sync {
+                RuntimeLiveAudioSync::None => (FfiRuntimeAudioSyncKind::None, RString::new()),
+                RuntimeLiveAudioSync::Text => (FfiRuntimeAudioSyncKind::Text, RString::new()),
+                RuntimeLiveAudioSync::Fence(fence) => {
+                    (FfiRuntimeAudioSyncKind::Fence, fence.into())
+                }
+            };
+            audio_cues.push(FfiRuntimeAudioCue {
+                sequence: cue.sequence,
+                command_id: cue.command_id.into(),
+                bus: match cue.bus {
+                    RuntimeLiveAudioBus::Voice => FfiRuntimeAudioBus::Voice,
+                    RuntimeLiveAudioBus::Bgm => FfiRuntimeAudioBus::Bgm,
+                    RuntimeLiveAudioBus::Se => FfiRuntimeAudioBus::Se,
+                    RuntimeLiveAudioBus::Movie => FfiRuntimeAudioBus::Movie,
+                },
+                asset: cue.asset.into(),
+                looped: cue.looped,
+                fade_ms: cue.fade_ms,
+                sync_kind,
+                sync_fence,
+            });
+        }
+    }
+    for lease in value.text {
+        text.push(FfiRuntimeTextLease {
+            sequence: lease.sequence,
+            lease_id: lease.lease_id.into(),
+            byte_len: lease.byte_len,
+            source_ref: lease.source_ref.into(),
+        })
+    }
+    for presentation in value.text_presentations {
+        {
+            text_presentations.push(FfiRuntimeTextPresentation {
+                sequence: presentation.sequence,
+                lease_id: presentation.lease_id.into(),
+                layout_id: presentation.layout_id.into(),
+                language: presentation.language.into(),
+                font_families: RVec::from(
+                    presentation
+                        .font_families
+                        .into_iter()
+                        .map(RString::from)
+                        .collect::<Vec<_>>(),
+                ),
+                body: ffi_live_text_region(presentation.body),
+                speaker: presentation.speaker.map(ffi_live_text_region).into(),
+                rgba: presentation.rgba,
+            })
+        }
+    }
+    for command in value.video {
+        video.push(FfiRuntimeVideoCommand {
+            sequence: command.sequence,
+            playback_id: match &command.command {
+                RuntimeLiveVideoCommandKind::Play { playback_id, .. }
+                | RuntimeLiveVideoCommandKind::Stop { playback_id } => playback_id.clone().into(),
+            },
+            resource_uri: match &command.command {
+                RuntimeLiveVideoCommandKind::Play { resource_uri, .. } => {
+                    resource_uri.clone().into()
+                }
+                RuntimeLiveVideoCommandKind::Stop { .. } => RString::new(),
+            },
+            mode: match &command.command {
+                RuntimeLiveVideoCommandKind::Play { mode, .. } => match mode {
+                    RuntimeLiveVideoMode::ModalWithAudio => FfiRuntimeVideoMode::ModalWithAudio,
+                    RuntimeLiveVideoMode::LayerNoAudio => FfiRuntimeVideoMode::LayerNoAudio,
+                },
+                RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoMode::LayerNoAudio,
+            },
+            stage_width: match &command.command {
+                RuntimeLiveVideoCommandKind::Play { stage_width, .. } => *stage_width,
+                RuntimeLiveVideoCommandKind::Stop { .. } => 0,
+            },
+            stage_height: match &command.command {
+                RuntimeLiveVideoCommandKind::Play { stage_height, .. } => *stage_height,
+                RuntimeLiveVideoCommandKind::Stop { .. } => 0,
+            },
+            command: match command.command {
+                RuntimeLiveVideoCommandKind::Play { .. } => FfiRuntimeVideoCommandKind::Play,
+                RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoCommandKind::Stop,
+            },
+        })
+    }
+    for wait in value.waits {
+        {
+            let (kind, number, name, keys, payload_len) = match wait.kind {
+                RuntimeLiveWaitKind::Frame { frames } => (
+                    FfiRuntimeWaitKind::Frame,
+                    frames,
+                    String::new(),
+                    Vec::new(),
+                    0,
+                ),
+                RuntimeLiveWaitKind::Time { milliseconds } => (
+                    FfiRuntimeWaitKind::Time,
+                    milliseconds,
+                    String::new(),
+                    Vec::new(),
+                    0,
+                ),
+                RuntimeLiveWaitKind::Input { keys } => {
+                    (FfiRuntimeWaitKind::Input, 0, String::new(), keys, 0)
+                }
+                RuntimeLiveWaitKind::MediaFence { media_id } => {
+                    (FfiRuntimeWaitKind::MediaFence, 0, media_id, Vec::new(), 0)
+                }
+                RuntimeLiveWaitKind::PresentationFence { fence_id } => (
+                    FfiRuntimeWaitKind::PresentationFence,
+                    0,
+                    fence_id,
+                    Vec::new(),
+                    0,
+                ),
+                RuntimeLiveWaitKind::ProviderCompletion { request_id } => (
+                    FfiRuntimeWaitKind::ProviderCompletion,
+                    0,
+                    request_id,
+                    Vec::new(),
+                    0,
+                ),
+                RuntimeLiveWaitKind::FamilyOpaque {
+                    wait_kind,
+                    payload_len,
+                } => (
+                    FfiRuntimeWaitKind::FamilyOpaque,
+                    0,
+                    wait_kind,
+                    Vec::new(),
+                    payload_len,
+                ),
+            };
+            waits.push(FfiRuntimeWait {
+                sequence: wait.sequence,
+                token_id: wait.token_id.into(),
+                kind,
+                number,
+                name: name.into(),
+                keys: RVec::from(keys.into_iter().map(RString::from).collect::<Vec<_>>()),
+                payload_len,
+            });
+        }
+    }
+    for event in value.events {
+        events.push(FfiRuntimeEvent {
+            sequence: event.sequence,
+            event: event.event.into(),
+            payload: RVec::from(event.payload),
+            due_tick: event.due_tick.into(),
+        })
+    }
+    for RuntimeLiveBlackboardMutation {
+        sequence,
+        key,
+        value,
+    } in value.blackboard
+    {
+        blackboard.push(FfiRuntimeBlackboardMutation {
+            sequence,
+            key: key.into(),
+            value: RVec::from(value),
+        })
+    }
+    for RuntimeLiveDirtySection {
+        sequence,
+        section_id,
+    } in value.dirty_sections
+    {
+        dirty_sections.push(FfiRuntimeDirtySection {
+            sequence,
+            section_id: section_id.into(),
+        })
     }
     Ok((
         FfiRuntimeLiveOutput {

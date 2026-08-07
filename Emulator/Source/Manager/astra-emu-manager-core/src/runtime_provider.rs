@@ -22,17 +22,18 @@ use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, Produc
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeLiveAudioCommand,
     RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket, RuntimeLiveAudioSampleFormat,
-    RuntimeLiveBlendMode, RuntimeLiveControl, RuntimeLiveCoverage, RuntimeLiveDraw,
-    RuntimeLiveEffect, RuntimeLiveEvent, RuntimeLiveOutput, RuntimeLivePcmBuffer,
-    RuntimeLiveResourceScene, RuntimeLiveResourceTexture, RuntimeLiveSceneResourceOperation,
-    RuntimeLiveSceneTransaction, RuntimeLiveScissor, RuntimeLiveTextLease,
-    RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFormat,
-    RuntimeLiveVertex, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode,
-    RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenReport, RuntimeOpenRequest,
-    RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
-    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
-    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
-    RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, RuntimeTickIntegrityMode,
+    RuntimeLiveBlackboardMutation, RuntimeLiveBlendMode, RuntimeLiveCoverage,
+    RuntimeLiveDirtySection, RuntimeLiveDraw, RuntimeLiveEvent, RuntimeLiveOutput,
+    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveResourceTexture,
+    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveScissor,
+    RuntimeLiveTextLease, RuntimeLiveTextPresentation, RuntimeLiveTextRegion,
+    RuntimeLiveTextureFormat, RuntimeLiveVertex, RuntimeLiveVideoCommand,
+    RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind,
+    RuntimeOpenReport, RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest,
+    RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
+    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
+    RuntimeStepOutput, RuntimeTickIntegrityMode,
 };
 use astra_runtime::{
     ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
@@ -490,43 +491,51 @@ fn move_live_wait(sequence: u64, wait: LegacyWaitRequest) -> RuntimeLiveWait {
     }
 }
 
-fn move_live_output(live: LegacyLiveOutput) -> Result<Vec<RuntimeLiveEffect>, String> {
-    let mut output = Vec::with_capacity(live.len());
+fn move_live_output(live: LegacyLiveOutput) -> Result<RuntimeLiveOutput, String> {
+    let mut output = RuntimeLiveOutput::default();
+    output.scenes.reserve(live.scenes.len());
     for scene in live.scenes {
-        output.push(RuntimeLiveEffect::Scene(move_live_scene(scene)?));
+        output.scenes.push(move_live_scene(scene)?);
     }
+    output.resource_scenes.reserve(live.resource_scenes.len());
     for scene in live.resource_scenes {
         let mut value = move_live_resource_scene(scene.value)?;
         value.sequence = scene.sequence;
-        output.push(RuntimeLiveEffect::ResourceScene(value));
+        output.resource_scenes.push(value);
     }
+    output.audio.reserve(live.audio.len());
     for packet in live.audio {
-        output.push(RuntimeLiveEffect::Audio(move_live_audio(packet)?));
+        output.audio.push(move_live_audio(packet)?);
     }
+    output.audio_commands.reserve(live.audio_commands.len());
     for command in live.audio_commands {
-        output.push(RuntimeLiveEffect::AudioCommand(move_live_audio_command(
-            command.sequence,
-            command.value,
-        )?));
+        output
+            .audio_commands
+            .push(move_live_audio_command(command.sequence, command.value)?);
     }
+    output.text.reserve(live.text.len());
     for text in live.text {
-        output.push(RuntimeLiveEffect::Text(RuntimeLiveTextLease {
+        output.text.push(RuntimeLiveTextLease {
             sequence: text.sequence,
             lease_id: text.lease_id,
             byte_len: text.byte_len,
             source_ref: text.source_ref,
-        }));
+        });
     }
+    output
+        .text_presentations
+        .reserve(live.text_presentations.len());
     for binding in live.text_presentations {
-        output.push(RuntimeLiveEffect::TextPresentation(
-            move_live_text_presentation(binding.sequence, binding.value)?,
-        ));
+        output.text_presentations.push(move_live_text_presentation(
+            binding.sequence,
+            binding.value,
+        )?);
     }
+    output.video.reserve(live.video.len());
     for video in live.video {
-        output.push(RuntimeLiveEffect::Video(move_live_video(
-            video.sequence,
-            video.value,
-        )?));
+        output
+            .video
+            .push(move_live_video(video.sequence, video.value)?);
     }
     Ok(output)
 }
@@ -534,44 +543,46 @@ fn move_live_output(live: LegacyLiveOutput) -> Result<Vec<RuntimeLiveEffect>, St
 fn move_control_output(
     control: LegacyControlTransaction,
     wait_sequence_start: u64,
-) -> Result<Vec<RuntimeLiveEffect>, String> {
-    let mut output = Vec::with_capacity(control.len() + control.waits.len());
+) -> Result<RuntimeLiveOutput, String> {
+    let mut output = RuntimeLiveOutput::default();
+    output
+        .events
+        .reserve(control.events.len() + control.scheduled_events.len());
     for event in control.events {
-        output.push(RuntimeLiveEffect::Event(RuntimeLiveEvent {
+        output.events.push(RuntimeLiveEvent {
             sequence: event.sequence,
             event: event.event,
             payload: move_live_payload(event.payload)?,
             due_tick: None,
-        }));
+        });
     }
+    output.blackboard.reserve(control.blackboard.len());
     for mutation in control.blackboard {
-        output.push(RuntimeLiveEffect::Control(
-            RuntimeLiveControl::SetBlackboard {
-                sequence: mutation.sequence,
-                key: mutation.key,
-                value: move_live_payload(mutation.value)?,
-            },
-        ));
+        output.blackboard.push(RuntimeLiveBlackboardMutation {
+            sequence: mutation.sequence,
+            key: mutation.key,
+            value: move_live_payload(mutation.value)?,
+        });
     }
     for event in control.scheduled_events {
-        output.push(RuntimeLiveEffect::Event(RuntimeLiveEvent {
+        output.events.push(RuntimeLiveEvent {
             sequence: event.sequence,
             event: event.event,
             payload: move_live_payload(event.payload)?,
             due_tick: Some(event.due_tick),
-        }));
+        });
     }
+    output.dirty_sections.reserve(control.dirty_sections.len());
     for dirty in control.dirty_sections {
-        output.push(RuntimeLiveEffect::Control(
-            RuntimeLiveControl::SnapshotDirty {
-                sequence: dirty.sequence,
-                section_id: dirty.section_id,
-            },
-        ));
+        output.dirty_sections.push(RuntimeLiveDirtySection {
+            sequence: dirty.sequence,
+            section_id: dirty.section_id,
+        });
     }
+    output.waits.reserve(control.waits.len());
     let mut next_sequence = wait_sequence_start;
     for wait in control.waits {
-        output.push(RuntimeLiveEffect::Wait(move_live_wait(next_sequence, wait)));
+        output.waits.push(move_live_wait(next_sequence, wait));
         next_sequence = next_sequence.saturating_add(1);
     }
     Ok(output)
@@ -1559,35 +1570,34 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         let status = format!("{:?}", family_output.status).to_ascii_lowercase();
         let state_revision = family_output.state_revision;
         let coverage = family_output.coverage.clone();
-        let mut live_effects = move_live_output(live)?;
-        live_effects.extend(move_control_output(
-            std::mem::take(&mut control.control),
-            wait_sequence_start,
-        )?);
-        live_effects.sort_by_key(RuntimeLiveEffect::sequence);
+        let mut live = move_live_output(live)?;
+        let control_live =
+            move_control_output(std::mem::take(&mut control.control), wait_sequence_start)?;
+        live.events.extend(control_live.events);
+        live.blackboard.extend(control_live.blackboard);
+        live.dirty_sections.extend(control_live.dirty_sections);
+        live.waits.extend(control_live.waits);
+        live.state_revision = state_revision;
+        live.coverage = RuntimeLiveCoverage {
+            instructions: coverage.instructions,
+            syscalls: coverage.syscalls,
+            presentation_commands: coverage.presentation_commands,
+            audio_commands: coverage.audio_commands,
+            text_events: coverage.text_events,
+            capture_bytes: coverage.capture_bytes,
+            operation_bytes: coverage.operation_bytes,
+            pcm_moved_bytes: coverage.pcm_moved_bytes,
+            pcm_copied_bytes: coverage.pcm_copied_bytes,
+        };
         let diagnostics = family_diagnostics
             .into_iter()
             .map(|diagnostic| format!("{}:{}", diagnostic.code, diagnostic.message))
             .collect();
+        live.diagnostics = diagnostics;
         Ok(RuntimeStepOutput {
             session_id: input.session_id,
             status,
-            live: RuntimeLiveOutput {
-                effects: live_effects,
-                state_revision,
-                coverage: RuntimeLiveCoverage {
-                    instructions: coverage.instructions,
-                    syscalls: coverage.syscalls,
-                    presentation_commands: coverage.presentation_commands,
-                    audio_commands: coverage.audio_commands,
-                    text_events: coverage.text_events,
-                    capture_bytes: coverage.capture_bytes,
-                    operation_bytes: coverage.operation_bytes,
-                    pcm_moved_bytes: coverage.pcm_moved_bytes,
-                    pcm_copied_bytes: coverage.pcm_copied_bytes,
-                },
-                diagnostics,
-            },
+            live,
             persisted: Vec::new(),
             diagnostics: vec![],
         })
@@ -1809,11 +1819,13 @@ fn required_section<'a>(
     Ok(section)
 }
 fn raw_section(id: &str, schema: &str, major: u16, bytes: Vec<u8>) -> RuntimeSectionPayload {
+    let hash = Hash256::from_sha256(&bytes);
     RuntimeSectionPayload {
         section_id: id.into(),
         schema: schema.into(),
         version: SchemaVersion::new(major, 0, 0),
         codec: RuntimeSectionCodec::Raw,
+        hash,
         bytes,
     }
 }
@@ -2046,6 +2058,7 @@ mod tests {
                     schema: "astra.emu.case_profile.v1".into(),
                     version: SchemaVersion::new(1, 0, 0),
                     codec: RuntimeSectionCodec::Postcard,
+                    hash: Hash256::from_sha256(&bytes),
                     bytes,
                 }],
             })
@@ -2078,18 +2091,15 @@ mod tests {
         assert_eq!(output.status, "active");
         assert!(output.persisted.is_empty());
         let live = output.live;
-        assert!(live.effects.iter().any(|effect| {
-            matches!(
-                effect,
-                RuntimeLiveEffect::Event(event)
-                    if event.event == "patch.synthetic" && event.payload.len() == 3
-            )
-        }));
+        assert!(live
+            .events
+            .iter()
+            .any(|event| { event.event == "patch.synthetic" && event.payload.len() == 3 }));
         let mut output_observations = vec![(
             live.state_revision,
-            live.effects
+            live.events
                 .iter()
-                .map(RuntimeLiveEffect::sequence)
+                .map(|event| event.sequence)
                 .collect::<Vec<_>>(),
         )];
         let second = provider
@@ -2113,9 +2123,9 @@ mod tests {
         let live = second.live;
         output_observations.push((
             live.state_revision,
-            live.effects
+            live.events
                 .iter()
-                .map(RuntimeLiveEffect::sequence)
+                .map(|event| event.sequence)
                 .collect::<Vec<_>>(),
         ));
         let saved = provider

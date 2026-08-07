@@ -717,11 +717,13 @@ impl NativeVnHostCommandSource {
             .collect();
         let compiled_bytes = postcard::to_allocvec(&compiled.story)
             .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
+        let compiled_hash = Hash256::from_sha256(&compiled_bytes);
         let compiled_section = RuntimeSectionPayload {
             section_id: "vn.story".to_string(),
             schema: "astra.vn.story".to_string(),
             version: SchemaVersion::default(),
             codec: RuntimeSectionCodec::Postcard,
+            hash: compiled_hash,
             bytes: compiled_bytes,
         };
         let stage_director = ProductStageDirector::new(
@@ -4217,18 +4219,25 @@ impl NativeVnHostCommandSource {
             self.pending_timeline.push(player_timeline_task(task)?);
         }
         let mut live_audio_cues = Vec::new();
-        for effect in &output.live.effects {
-            match effect {
-                astra_plugin_abi::RuntimeLiveEffect::AudioCue(cue) => {
-                    live_audio_cues.push(cue.clone())
-                }
-                _ => {
-                    return Err(NativeVnHostError::RuntimeEvidence(
-                        "ASTRA_PLAYER_VN_LIVE_EFFECT_UNEXPECTED: VN provider emitted a non-audio live effect"
-                            .into(),
-                    ));
-                }
-            }
+        for cue in &output.live.audio_cues {
+            live_audio_cues.push(cue.clone());
+        }
+        if !output.live.scenes.is_empty()
+            || !output.live.resource_scenes.is_empty()
+            || !output.live.audio.is_empty()
+            || !output.live.audio_commands.is_empty()
+            || !output.live.text.is_empty()
+            || !output.live.text_presentations.is_empty()
+            || !output.live.video.is_empty()
+            || !output.live.waits.is_empty()
+            || !output.live.events.is_empty()
+            || !output.live.blackboard.is_empty()
+            || !output.live.dirty_sections.is_empty()
+        {
+            return Err(NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_LIVE_EFFECT_UNEXPECTED: VN provider emitted a non-audio live effect"
+                    .into(),
+            ));
         }
         let mut live_audio_cues = live_audio_cues.into_iter();
         let mut ordered_outputs = Vec::new();

@@ -405,7 +405,10 @@ mod tests {
     fn output_path_must_remain_project_relative() {
         assert!(validate_relative_path(Path::new("Evidence/AstraEMU")).is_ok());
         assert!(validate_relative_path(Path::new("../outside")).is_err());
+        #[cfg(windows)]
         assert!(validate_relative_path(&std::path::PathBuf::from("C:\\outside")).is_err());
+        #[cfg(not(windows))]
+        assert!(validate_relative_path(Path::new("/outside")).is_err());
     }
 
     #[test]

@@ -406,6 +406,53 @@ the authenticated encoding. VN presentation/view-state and timeline data still
 use the separate persisted contract, so whole-engine zero-serialization is not
 claimed until that remaining live DTO path is closed.
 
+## 2026-08-06 typed ABI v7 convergence update
+
+Provider ABI 与 Family ABI 的 typed 零拷贝收敛已推进：`RuntimeLiveEffect`/
+`RuntimeLiveControl` 通用 envelope 已删除，`RuntimeLiveOutput` 扁平化为
+scenes/resource_scenes/audio/audio_commands/audio_cues/text/text_presentations/
+video/waits/events/blackboard/dirty_sections 分类字段；FFI 直接转换分类 DTO，
+不再拆分、重建并排序 effect 列表。FVP 与 Minori 的 scene/PCM/audio/text/video
+输出已迁移 typed owned 路径，`LegacyEffect` 汇总通道删除，改为
+`LegacyLiveOutput` + `LegacyControlTransaction`。Manager 不再把大型 live output
+放入 RuntimeWorld control transaction，patch 持久化使用受限
+`QueuedPatchEffect`。运行时组件存储为 `PostcardOwned`（`Arc<[u8]>` + 预计算
+hash，marker 仅 Evidence 快照时认证），tick 不重编解码组件体，state fingerprint
+只序列化 metadata 并缓存，`RuntimeWorld` 热路径不再每 tick
+encode/decode 组件。
+
+`RuntimeSectionPayload` 恢复 `hash` + `validate_hash()`：save/package section
+完整性校验属 blocking 契约，交接中间态误删后已补回全部 15 个构造点。
+Perfetto 假零 counter 已删除，`pcm_moved/pcm_copied_bytes` 只来自真实 FVP copy
+telemetry（缺 telemetry 即 fail-fast），不允许默认零值充当测量。
+
+`RuntimeStepOutput.persisted` 双轨的剩余消费方已盘点：EMU 路径（FVP/Minori/
+Manager）不再产出 persisted；NativeVN 的 presentation/timeline/step-effect/
+view-state 仍经 persisted 返回，因为它们是 `astra_vn_core` 语义类型而非
+RGBA/PCM 媒体缓冲，`astra-plugin-abi` 不能反向依赖 VN 类型，强行中立 DTO 化
+只会在 60 Hz 热路径增加转换与拷贝。语义命令通道保留 persisted，媒体通道全部
+走 typed live，不再宣称全引擎零序列化，直到该语义通道有独立设计决策。
+
+验证：`cargo fmt --all`、`git diff --check`、`python Tools/check_docs.py`、
+`cargo clippy --workspace --all-targets -- -D warnings`、`cargo build -p
+astra-headless` 与 `cargo test --workspace` 全部通过。此前暴露的预存 Linux
+问题均已修复：`astra-platform-linux` 与 `astra-platform-headless` 强制开启
+`platform-test-driver` 导致 feature 统一后 match 非穷尽（linux crate 改为常开
+该 feature，与 headless 一致），并顺带暴露 `astra-platform-linux` 的 probe
+测试断言过期（Linux 实现已改为 `ASTRA_PLATFORM_RUNTIME_PROBE_REQUIRED`，
+与 macOS/Android/Web 一致）；`astra-observability` 补真实 Linux `/proc`
+内存/CPU 采样（原为 `Unsupported` 桩，headless 性能记录器依赖它），其 queue
+saturation 单测改为多线程突发（单生产者慢于 writer 排水，原 50k 单线程
+永远无法饱和）；`astra-emu-schema` 重新生成提交的 schema
+（`LegacySnapshotSection`/输入 DTO 的 `payload_hash` 已按迁移删除）并移除
+不再可序列化的 `legacy-step-output.schema.json` 孤儿文件；`astra-emu-evidence`
+与 `astra-player` 的 Windows 绝对路径断言按平台分流并补 Linux 覆盖；
+`astra-player-vn` 的 wait 完成测试改用 Evidence 模式（Shipping 模式状态 hash
+按设计为禁用零 marker）；`astra-player`/`astra-emu-cli`/`astra-vn-runtime-provider`/
+`astra-plugin` 的 cfg 遗漏与 unused import/dead code 按平台修正。Windows
+DX12 Shipping 10 分钟 Windowed E2 与 clean Release 同身份 Perfetto 基线仍需
+在 Windows 实机采集，属外部证据。
+
 ## 2026-08-04 Windowed E2 identity update
 
 `astra-emu-cli windowed-e2` now emits `astra.emu.windowed_e2_report.v1` with

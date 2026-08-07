@@ -9,7 +9,7 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_manager_core::EmuPlatformRunEvidenceV1;
-use astra_headless_protocol::{ButtonState, InputMessage, PhysicalInput, PointerButton};
+use astra_headless_protocol::{InputMessage, PhysicalInput};
 use serde::{Deserialize, Serialize};
 
 const MANIFEST_SCHEMA: &str = "astra.emu.manager_e3_manifest.v1";

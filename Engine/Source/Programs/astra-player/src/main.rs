@@ -300,6 +300,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     {
         return Err("invalid native Player display config".into());
     }
+    #[cfg(target_os = "windows")]
     let mut ui_component_processes = open_ui_component_processes(config.ui_components.as_ref())?;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if config.ui_components.is_some() {
@@ -328,8 +329,10 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
             return Err("unsupported Player source unlock config".into());
         }
         astra_platform::validate_safe_relative_path(&unlock.source_profile)?;
+        #[cfg(target_os = "windows")]
         let policy: astra_package::SourceUnlockPolicy =
             container.decode_postcard("source.unlock")?;
+        #[cfg(target_os = "windows")]
         let source_manifest: astra_package::SourceVerificationManifest =
             serde_json::from_slice(&fs::read(resource_root.join(&unlock.source_profile))?)?;
         #[cfg(target_os = "windows")]

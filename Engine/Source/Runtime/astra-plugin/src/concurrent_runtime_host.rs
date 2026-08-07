@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "dynamic-abi")]
 use astra_core::SchemaVersion;
 
 #[cfg(feature = "dynamic-abi")]
@@ -29,20 +30,24 @@ use astra_plugin_abi::{
     FfiRuntimeWaitKind, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
-    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeLiveAudioBus,
-    RuntimeLiveAudioCommand, RuntimeLiveAudioCue, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
-    RuntimeLiveAudioSampleFormat, RuntimeLiveAudioSync, RuntimeLiveBlendMode, RuntimeLiveControl,
-    RuntimeLiveCoverage, RuntimeLiveEffect, RuntimeLiveEvent, RuntimeLiveOutput,
-    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveResourceTexture,
-    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveScissor,
-    RuntimeLiveTextLease, RuntimeLiveTextPresentation, RuntimeLiveTextRegion,
-    RuntimeLiveTextureFormat, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind,
-    RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimeOutputDomain, RuntimePersistedOutput, RuntimePrepareReport,
-    RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
-    RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput,
-    RuntimeStepMode, RuntimeStepOutput, ValidatedRuntimeProviderSelection,
+    GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
+    RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
+    RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeShutdownReport,
+    RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, ValidatedRuntimeProviderSelection,
+};
+#[cfg(feature = "dynamic-abi")]
+use astra_plugin_abi::{
+    RuntimeLiveAudioBus, RuntimeLiveAudioCommand, RuntimeLiveAudioCue, RuntimeLiveAudioEncoding,
+    RuntimeLiveAudioPacket, RuntimeLiveAudioSampleFormat, RuntimeLiveAudioSync,
+    RuntimeLiveBlackboardMutation, RuntimeLiveBlendMode, RuntimeLiveCoverage,
+    RuntimeLiveDirtySection, RuntimeLiveEvent, RuntimeLiveOutput, RuntimeLivePcmBuffer,
+    RuntimeLiveResourceScene, RuntimeLiveResourceTexture, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveSceneTransaction, RuntimeLiveScissor, RuntimeLiveTextLease,
+    RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFormat,
+    RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait,
+    RuntimeLiveWaitKind, RuntimeOutputDomain, RuntimePersistedOutput, RuntimeSectionCodec,
+    RuntimeSectionPayload,
 };
 
 use crate::{RuntimeHostError, RuntimeHostSchemaRegistry, WorkerBudgetBroker};
@@ -1352,27 +1357,15 @@ fn runtime_live_audio_command(
 
 #[cfg(feature = "dynamic-abi")]
 fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput, String> {
-    let mut effects = Vec::with_capacity(
-        value.scenes.len()
-            + value.resource_scenes.len()
-            + value.audio.len()
-            + value.audio_commands.len()
-            + value.text.len()
-            + value.text_presentations.len()
-            + value.video.len()
-            + value.waits.len()
-            + value.events.len()
-            + value.blackboard.len()
-            + value.dirty_sections.len(),
-    );
-    effects.extend(
-        value
-            .scenes
-            .into_iter()
-            .map(|scene| RuntimeLiveEffect::Scene(runtime_live_scene(scene))),
-    );
-    effects.extend(value.resource_scenes.into_iter().map(|scene| {
-        RuntimeLiveEffect::ResourceScene(RuntimeLiveResourceScene {
+    let scenes = value
+        .scenes
+        .into_iter()
+        .map(runtime_live_scene)
+        .collect::<Vec<_>>();
+    let resource_scenes = value
+        .resource_scenes
+        .into_iter()
+        .map(|scene| RuntimeLiveResourceScene {
             sequence: scene.sequence,
             width: scene.width,
             height: scene.height,
@@ -1394,9 +1387,11 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
                 .collect(),
             draws: scene.draws.into_iter().map(runtime_live_draw).collect(),
         })
-    }));
-    effects.extend(value.audio.into_iter().map(|packet| {
-        RuntimeLiveEffect::Audio(RuntimeLiveAudioPacket {
+        .collect::<Vec<_>>();
+    let audio = value
+        .audio
+        .into_iter()
+        .map(|packet| RuntimeLiveAudioPacket {
             sequence: packet.sequence,
             stream_id: packet.stream_id,
             sample_rate: packet.sample_rate,
@@ -1406,14 +1401,15 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
                 FfiRuntimePcmBuffer::F32(samples) => RuntimeLivePcmBuffer::F32(samples.into_vec()),
             },
         })
-    }));
+        .collect::<Vec<_>>();
+    let mut audio_commands = Vec::with_capacity(value.audio_commands.len());
     for command in value.audio_commands {
-        effects.push(RuntimeLiveEffect::AudioCommand(runtime_live_audio_command(
-            command,
-        )?));
+        audio_commands.push(runtime_live_audio_command(command)?);
     }
-    effects.extend(value.audio_cues.into_iter().map(|cue| {
-        RuntimeLiveEffect::AudioCue(RuntimeLiveAudioCue {
+    let audio_cues = value
+        .audio_cues
+        .into_iter()
+        .map(|cue| RuntimeLiveAudioCue {
             sequence: cue.sequence,
             command_id: cue.command_id.to_string(),
             bus: match cue.bus {
@@ -1433,17 +1429,21 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
                 }
             },
         })
-    }));
-    effects.extend(value.text.into_iter().map(|text| {
-        RuntimeLiveEffect::Text(RuntimeLiveTextLease {
+        .collect::<Vec<_>>();
+    let text = value
+        .text
+        .into_iter()
+        .map(|text| RuntimeLiveTextLease {
             sequence: text.sequence,
             lease_id: text.lease_id.to_string(),
             byte_len: text.byte_len,
             source_ref: text.source_ref.to_string(),
         })
-    }));
-    effects.extend(value.text_presentations.into_iter().map(|text| {
-        RuntimeLiveEffect::TextPresentation(RuntimeLiveTextPresentation {
+        .collect::<Vec<_>>();
+    let text_presentations = value
+        .text_presentations
+        .into_iter()
+        .map(|text| RuntimeLiveTextPresentation {
             sequence: text.sequence,
             lease_id: text.lease_id.to_string(),
             layout_id: text.layout_id.to_string(),
@@ -1476,9 +1476,11 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
                 }),
             rgba: text.rgba,
         })
-    }));
-    effects.extend(value.video.into_iter().map(|video| {
-        RuntimeLiveEffect::Video(RuntimeLiveVideoCommand {
+        .collect::<Vec<_>>();
+    let video = value
+        .video
+        .into_iter()
+        .map(|video| RuntimeLiveVideoCommand {
             sequence: video.sequence,
             command: match video.command {
                 astra_plugin_abi::FfiRuntimeVideoCommandKind::Play => {
@@ -1502,9 +1504,11 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
                 }
             },
         })
-    }));
-    effects.extend(value.waits.into_iter().map(|wait| {
-        RuntimeLiveEffect::Wait(RuntimeLiveWait {
+        .collect::<Vec<_>>();
+    let waits = value
+        .waits
+        .into_iter()
+        .map(|wait| RuntimeLiveWait {
             sequence: wait.sequence,
             token_id: wait.token_id.to_string(),
             kind: match wait.kind {
@@ -1532,31 +1536,47 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
                 },
             },
         })
-    }));
-    effects.extend(value.events.into_iter().map(|event| {
-        RuntimeLiveEffect::Event(RuntimeLiveEvent {
+        .collect::<Vec<_>>();
+    let events = value
+        .events
+        .into_iter()
+        .map(|event| RuntimeLiveEvent {
             sequence: event.sequence,
             event: event.event.to_string(),
             payload: event.payload.into_vec(),
             due_tick: event.due_tick.into_option(),
         })
-    }));
-    effects.extend(value.blackboard.into_iter().map(|mutation| {
-        RuntimeLiveEffect::Control(RuntimeLiveControl::SetBlackboard {
+        .collect::<Vec<_>>();
+    let blackboard = value
+        .blackboard
+        .into_iter()
+        .map(|mutation| RuntimeLiveBlackboardMutation {
             sequence: mutation.sequence,
             key: mutation.key.to_string(),
             value: mutation.value.into_vec(),
         })
-    }));
-    effects.extend(value.dirty_sections.into_iter().map(|dirty| {
-        RuntimeLiveEffect::Control(RuntimeLiveControl::SnapshotDirty {
+        .collect::<Vec<_>>();
+    let dirty_sections = value
+        .dirty_sections
+        .into_iter()
+        .map(|dirty| RuntimeLiveDirtySection {
             sequence: dirty.sequence,
             section_id: dirty.section_id.to_string(),
         })
-    }));
-    effects.sort_by_key(RuntimeLiveEffect::sequence);
+        .collect::<Vec<_>>();
     Ok(RuntimeLiveOutput {
-        effects,
+        scenes,
+        resource_scenes,
+        audio,
+        audio_commands,
+        audio_cues,
+        text,
+        text_presentations,
+        video,
+        waits,
+        events,
+        blackboard,
+        dirty_sections,
         state_revision: value.state_revision,
         coverage: RuntimeLiveCoverage {
             instructions: value.instructions,
@@ -1639,6 +1659,7 @@ fn runtime_save_result(result: FfiRuntimeSaveResult) -> Result<RuntimeSaveSectio
                     FfiRuntimeSectionCodec::Raw => RuntimeSectionCodec::Raw,
                     FfiRuntimeSectionCodec::Zstd => RuntimeSectionCodec::Zstd,
                 },
+                hash: astra_core::Hash256::from_sha256(section.bytes.as_slice()),
                 bytes: section.bytes.into_vec(),
             })
             .collect(),

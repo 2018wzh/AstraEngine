@@ -102,28 +102,115 @@ fn file_time_ticks(value: windows::Win32::Foundation::FILETIME) -> u64 {
     (u64::from(value.dwHighDateTime) << 32) | u64::from(value.dwLowDateTime)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn parse_kib(value: &str) -> Option<u64> {
+    value
+        .split_whitespace()
+        .next()
+        .and_then(|bytes| bytes.parse::<u64>().ok())
+        .and_then(|kib| kib.checked_mul(1024))
+}
+
+#[cfg(target_os = "linux")]
+fn read_status_memory(pid: Option<u32>) -> Result<ProcessMemorySample, ProcessMemoryError> {
+    let path = match pid {
+        Some(process_id) => format!("/proc/{process_id}/status"),
+        None => "/proc/self/status".to_string(),
+    };
+    let status = std::fs::read_to_string(path).map_err(|_| ProcessMemoryError::QueryFailed)?;
+    let mut working_set_bytes = None;
+    let mut private_bytes = None;
+    for line in status.lines() {
+        if working_set_bytes.is_none() {
+            if let Some(value) = line.strip_prefix("VmRSS:") {
+                working_set_bytes = parse_kib(value);
+            }
+        }
+        if private_bytes.is_none() {
+            if let Some(value) = line.strip_prefix("RssAnon:") {
+                private_bytes = parse_kib(value);
+            }
+        }
+        if working_set_bytes.is_some() && private_bytes.is_some() {
+            break;
+        }
+    }
+    Ok(ProcessMemorySample {
+        working_set_bytes: working_set_bytes.ok_or(ProcessMemoryError::QueryFailed)?,
+        private_bytes: private_bytes.ok_or(ProcessMemoryError::QueryFailed)?,
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn sample_process_memory() -> Result<ProcessMemorySample, ProcessMemoryError> {
+    read_status_memory(None)
+}
+
+#[cfg(target_os = "linux")]
+pub fn sample_process_memory_by_pid(
+    process_id: u32,
+) -> Result<ProcessMemorySample, ProcessMemoryError> {
+    read_status_memory(Some(process_id))
+}
+
+#[cfg(target_os = "linux")]
+pub fn sample_process_cpu_time_us_by_pid(process_id: u32) -> Result<u64, ProcessMemoryError> {
+    // `stat` fields after the parenthesised command name: utime is field 14 and
+    // stime field 15 in proc(5) 1-based numbering, i.e. indexes 11 and 12 of the
+    // remainder once the trailing `)` has split the command token off.
+    let stat = std::fs::read_to_string(format!("/proc/{process_id}/stat"))
+        .map_err(|_| ProcessMemoryError::QueryFailed)?;
+    let Some(tail) = stat.rfind(')') else {
+        return Err(ProcessMemoryError::QueryFailed);
+    };
+    let fields: Vec<&str> = stat[tail + 1..].split_whitespace().collect();
+    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks_per_second <= 0 {
+        return Err(ProcessMemoryError::QueryFailed);
+    }
+    let utime = fields
+        .get(11)
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or(ProcessMemoryError::QueryFailed)?;
+    let stime = fields
+        .get(12)
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or(ProcessMemoryError::QueryFailed)?;
+    let ticks = utime
+        .checked_add(stime)
+        .ok_or(ProcessMemoryError::QueryFailed)?;
+    // `sysconf` returns a positive `c_long` here; the guard above rejects
+    // zero and negative values, so the cast is lossless.
+    let ticks_per_second = ticks_per_second as u64;
+    let micros_per_tick = 1_000_000 / ticks_per_second;
+    ticks
+        .checked_mul(micros_per_tick)
+        .ok_or(ProcessMemoryError::QueryFailed)
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn sample_process_memory() -> Result<ProcessMemorySample, ProcessMemoryError> {
     Err(ProcessMemoryError::Unsupported)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn sample_process_memory_by_pid(
     _process_id: u32,
 ) -> Result<ProcessMemorySample, ProcessMemoryError> {
     Err(ProcessMemoryError::Unsupported)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn sample_process_cpu_time_us_by_pid(_process_id: u32) -> Result<u64, ProcessMemoryError> {
     Err(ProcessMemoryError::Unsupported)
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(windows, target_os = "linux"))]
     use super::*;
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     #[astra_headless_test::test]
     fn samples_nonzero_working_set_and_private_bytes() {
         let sample = sample_process_memory().unwrap();
@@ -131,7 +218,7 @@ mod tests {
         assert!(sample.private_bytes > 0);
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     #[astra_headless_test::test]
     fn samples_nonzero_memory_by_process_id() {
         let sample = sample_process_memory_by_pid(std::process::id()).unwrap();
@@ -139,7 +226,7 @@ mod tests {
         assert!(sample.private_bytes > 0);
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     #[astra_headless_test::test]
     fn samples_process_cpu_time_by_process_id() {
         let before = sample_process_cpu_time_us_by_pid(std::process::id()).unwrap();

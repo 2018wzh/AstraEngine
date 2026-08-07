@@ -66,13 +66,13 @@ use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
     RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
-    RuntimeLiveAudioSampleFormat, RuntimeLiveControl, RuntimeLiveEffect, RuntimeLivePcmBuffer,
-    RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
-    RuntimeLiveTextureFormat, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind,
-    RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest,
-    RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget, RuntimeStepInput,
-    RuntimeStepMode,
+    RuntimeLiveAudioSampleFormat, RuntimeLiveBlackboardMutation, RuntimeLiveDirtySection,
+    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveSceneTransaction, RuntimeLiveTextureFormat, RuntimeLiveVideoCommand,
+    RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind,
+    RuntimeOpenRequest, RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget,
+    RuntimeStepInput, RuntimeStepMode,
 };
 use image::GenericImageView;
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
@@ -245,11 +245,13 @@ impl RuntimeBridge {
             family_options,
         };
         let bytes = postcard::to_allocvec(&emu_profile).map_err(|error| error.to_string())?;
+        let hash = Hash256::from_sha256(&bytes);
         let section = RuntimeSectionPayload {
             section_id: "emu.case_profile".into(),
             schema: "astra.emu.case_profile.v1".into(),
             version: SchemaVersion::new(1, 0, 0),
             codec: RuntimeSectionCodec::Postcard,
+            hash,
             bytes,
         };
         let seed = u64::from_le_bytes(package_hash.as_bytes()[..8].try_into().unwrap());
@@ -523,35 +525,42 @@ impl RuntimeBridge {
         let mut text_leases = Vec::new();
         let mut text_presentations = BTreeSet::new();
         let mut waits = Vec::new();
-        for effect in live.effects {
-            match effect {
-                RuntimeLiveEffect::Scene(transaction) => {
-                    self.queue_live_scene(transaction)?;
-                }
-                RuntimeLiveEffect::ResourceScene(scene) => {
-                    self.queue_resource_scene_live(&session_id, scene)?;
-                }
-                RuntimeLiveEffect::Audio(packet) => audio_packets.push(packet),
-                RuntimeLiveEffect::AudioCommand(command) => audio_commands.push(command),
-                RuntimeLiveEffect::AudioCue(_) => {
-                    return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
-                }
-                RuntimeLiveEffect::Text(lease) => text_leases.push(lease),
-                RuntimeLiveEffect::TextPresentation(presentation) => {
-                    if !text_presentations.insert(presentation.lease_id) {
-                        return Err("ASTRA_EMU_TEXT_PRESENTATION_DUPLICATE".into());
-                    }
-                }
-                RuntimeLiveEffect::Video(command) => video_commands.push(command),
-                RuntimeLiveEffect::Wait(wait) => waits.push(wait),
-                RuntimeLiveEffect::Event(event) => {
-                    if event.event.is_empty() || event.event.len() > 128 {
-                        return Err("ASTRA_EMU_LIVE_EVENT_INVALID".into());
-                    }
-                }
-                RuntimeLiveEffect::Control(control) => validate_live_control(control)?,
+        for transaction in live.scenes {
+            self.queue_live_scene(transaction)?;
+        }
+        for scene in live.resource_scenes {
+            self.queue_resource_scene_live(&session_id, scene)?;
+        }
+        for packet in live.audio {
+            audio_packets.push(packet);
+        }
+        for command in live.audio_commands {
+            audio_commands.push(command);
+        }
+        if !live.audio_cues.is_empty() {
+            return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
+        }
+        for lease in live.text {
+            text_leases.push(lease);
+        }
+        for presentation in live.text_presentations {
+            if !text_presentations.insert(presentation.lease_id) {
+                return Err("ASTRA_EMU_TEXT_PRESENTATION_DUPLICATE".into());
             }
         }
+        for command in live.video {
+            video_commands.push(command);
+        }
+        for wait in live.waits {
+            waits.push(wait);
+        }
+        for event in live.events {
+            if event.event.is_empty() || event.event.len() > 128 {
+                return Err("ASTRA_EMU_LIVE_EVENT_INVALID".into());
+            }
+        }
+        validate_live_blackboard(&live.blackboard)?;
+        validate_live_dirty_sections(&live.dirty_sections)?;
         if !live.diagnostics.is_empty() {
             tracing::debug!(
                 event = "astra.emu.manager.live_diagnostics",
@@ -1274,20 +1283,22 @@ fn legacy_live_video_command(command: RuntimeLiveVideoCommand) -> LegacyVideoCom
     }
 }
 
-fn validate_live_control(control: RuntimeLiveControl) -> Result<(), String> {
-    match control {
-        RuntimeLiveControl::SetBlackboard { key, value, .. } => {
-            if key.is_empty() || key.len() > 128 {
-                return Err("ASTRA_EMU_LIVE_CONTROL_SYMBOL_BOUNDS".into());
-            }
-            if value.len() > 256 * 1024 * 1024 {
-                return Err("ASTRA_EMU_LIVE_CONTROL_PAYLOAD_BOUNDS".into());
-            }
+fn validate_live_blackboard(blackboard: &[RuntimeLiveBlackboardMutation]) -> Result<(), String> {
+    for mutation in blackboard {
+        if mutation.key.is_empty() || mutation.key.len() > 128 {
+            return Err("ASTRA_EMU_LIVE_CONTROL_SYMBOL_BOUNDS".into());
         }
-        RuntimeLiveControl::SnapshotDirty { section_id, .. } => {
-            if section_id.is_empty() || section_id.len() > 128 {
-                return Err("ASTRA_EMU_LIVE_CONTROL_SYMBOL_BOUNDS".into());
-            }
+        if mutation.value.len() > 256 * 1024 * 1024 {
+            return Err("ASTRA_EMU_LIVE_CONTROL_PAYLOAD_BOUNDS".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_live_dirty_sections(dirty_sections: &[RuntimeLiveDirtySection]) -> Result<(), String> {
+    for dirty in dirty_sections {
+        if dirty.section_id.is_empty() || dirty.section_id.len() > 128 {
+            return Err("ASTRA_EMU_LIVE_CONTROL_SYMBOL_BOUNDS".into());
         }
     }
     Ok(())
@@ -3940,7 +3951,7 @@ mod manager_tests {
 
     use astra_emu_manager_core::{
         CancellationToken, GrantedSourceEntry, GrantedSourceReader, Library, LibraryScanner,
-        PatchHostAction, ScanLimits, SourceGrant, SourceScanError,
+        PatchHostAction, QueuedPatchEffect, ScanLimits, SourceGrant, SourceScanError,
     };
 
     use super::{

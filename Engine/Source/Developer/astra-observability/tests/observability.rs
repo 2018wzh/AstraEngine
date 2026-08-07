@@ -111,13 +111,23 @@ fn host_pipeline_writes_stable_bounded_redacted_logs_and_crash_tail() {
     assert_eq!(allocations_before, allocations_after);
 
     guard.reload_filter("trace").unwrap();
-    for sequence in 0_u64..50_000 {
-        tracing::trace!(
-            event = "test.saturation",
-            sequence,
-            "queue saturation event"
-        );
-    }
+    // A single producer is slower per event than the bounded writer drains, so
+    // saturation only happens when several producers burst concurrently. The
+    // worker/sequence fields keep every emitted event unique across threads.
+    std::thread::scope(|scope| {
+        for worker in 0..64_u64 {
+            scope.spawn(move || {
+                for sequence in 0_u64..20_000 {
+                    tracing::trace!(
+                        event = "test.saturation",
+                        worker,
+                        sequence,
+                        "queue saturation event"
+                    );
+                }
+            });
+        }
+    });
     guard.flush().unwrap();
     let critical = fs::read_to_string(log_dir.join("astra-critical.jsonl")).unwrap();
     assert!(critical.contains("observability.queue.saturated"));

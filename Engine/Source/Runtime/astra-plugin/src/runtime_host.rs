@@ -206,6 +206,12 @@ impl RuntimeHostSchemaRegistry {
                     "runtime save section ids must be unique",
                 ));
             }
+            if !section.validate_hash() {
+                return Err(RuntimeHostError::new(
+                    "ASTRA_RUNTIME_HOST_SECTION_HASH",
+                    "runtime save section hash does not match its bytes",
+                ));
+            }
             bytes = bytes.checked_add(section.bytes.len()).ok_or_else(|| {
                 RuntimeHostError::new(
                     "ASTRA_RUNTIME_HOST_SECTION_BYTES",

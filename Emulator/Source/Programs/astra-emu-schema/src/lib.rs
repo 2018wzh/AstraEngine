@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, fs, path::Path};
 use astra_emu_cli::HeadlessRunReportV3;
 use astra_emu_family_api::{
     LegacyFamilyPluginDescriptor, LegacyProbeReport, LegacySnapshotEnvelope, LegacyStepInput,
-    LegacyStepOutput,
 };
 use astra_emu_manager_core::{
     AndroidNativePluginManifest, EmuCaseProfile, EmuPlatformRunEvidenceV1,
@@ -58,10 +57,6 @@ pub fn schemas() -> BTreeMap<&'static str, RootSchema> {
         (
             "legacy-step-input.schema.json",
             schema_for!(LegacyStepInput),
-        ),
-        (
-            "legacy-step-output.schema.json",
-            schema_for!(LegacyStepOutput),
         ),
         (
             "library-migration.schema.json",

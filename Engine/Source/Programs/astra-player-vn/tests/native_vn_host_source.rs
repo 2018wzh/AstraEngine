@@ -7,7 +7,8 @@ use astra_media_core::SceneCommand;
 use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
 use astra_player_core::{PlayerHostCommand, PlayerHostResourceId};
 use astra_player_vn::{
-    NativeVnAudioOutput, NativeVnHostCommandSource, DEFAULT_NATIVE_VN_GPU_TEXTURE_CACHE_BYTES,
+    NativeVnAudioOutput, NativeVnHostCommandSource, NativeVnRuntimeExecution,
+    DEFAULT_NATIVE_VN_GPU_TEXTURE_CACHE_BYTES,
 };
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProviderBinding, ProviderBindingContext,
@@ -1400,7 +1401,19 @@ state start #@id state.start
     wait fence:voice.end #@id wait.voice
     text key:line.after #@id line.after
 "#;
-    let mut source = source_for(story);
+    // The step-effect state hashes are only bound to the runtime state in
+    // Evidence mode; Shipping deliberately uses disabled zero markers.
+    let bytes = product_package_for(story);
+    let package = PackageReader::open(&bytes).unwrap();
+    let mut source = NativeVnHostCommandSource::from_package_with_execution(
+        &package,
+        VnRunConfig::classic("en"),
+        320,
+        180,
+        PlayerHostResourceId(1),
+        NativeVnRuntimeExecution::evidence_parallel().unwrap(),
+    )
+    .unwrap();
     source.launch().unwrap();
     let before = source
         .last_step_evidence()

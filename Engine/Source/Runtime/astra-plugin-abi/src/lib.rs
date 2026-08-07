@@ -842,62 +842,25 @@ pub enum RuntimeStepMode {
 /// into the selected renderer/audio queue.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct RuntimeLiveOutput {
-    pub effects: Vec<RuntimeLiveEffect>,
-    pub state_revision: u64,
-    pub coverage: RuntimeLiveCoverage,
-    pub diagnostics: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RuntimeLiveEffect {
-    Scene(RuntimeLiveSceneTransaction),
-    ResourceScene(RuntimeLiveResourceScene),
-    Audio(RuntimeLiveAudioPacket),
-    AudioCommand(RuntimeLiveAudioCommand),
+    pub scenes: Vec<RuntimeLiveSceneTransaction>,
+    pub resource_scenes: Vec<RuntimeLiveResourceScene>,
+    pub audio: Vec<RuntimeLiveAudioPacket>,
+    pub audio_commands: Vec<RuntimeLiveAudioCommand>,
     /// Product audio cue.  A VN cue carries the command identity and sync
     /// contract that cannot be represented by the lower-level stream control
     /// commands.  It is still live-only and never encoded as an output
     /// envelope.
-    AudioCue(RuntimeLiveAudioCue),
-    Text(RuntimeLiveTextLease),
-    TextPresentation(RuntimeLiveTextPresentation),
-    Video(RuntimeLiveVideoCommand),
-    Wait(RuntimeLiveWait),
-    Event(RuntimeLiveEvent),
-    Control(RuntimeLiveControl),
-}
-
-impl RuntimeLiveEffect {
-    pub fn sequence(&self) -> u64 {
-        match self {
-            Self::Scene(value) => value.sequence,
-            Self::ResourceScene(value) => value.sequence,
-            Self::Audio(value) => value.sequence,
-            Self::AudioCommand(value) => match value {
-                RuntimeLiveAudioCommand::LoadResource { sequence, .. }
-                | RuntimeLiveAudioCommand::CreateStream { sequence, .. }
-                | RuntimeLiveAudioCommand::SubmitI16 { sequence, .. }
-                | RuntimeLiveAudioCommand::SubmitF32 { sequence, .. }
-                | RuntimeLiveAudioCommand::Play { sequence, .. }
-                | RuntimeLiveAudioCommand::Stop { sequence, .. }
-                | RuntimeLiveAudioCommand::Pause { sequence, .. }
-                | RuntimeLiveAudioCommand::Resume { sequence, .. }
-                | RuntimeLiveAudioCommand::SetParams { sequence, .. }
-                | RuntimeLiveAudioCommand::DestroyStream { sequence, .. }
-                | RuntimeLiveAudioCommand::MasterVolume { sequence, .. } => *sequence,
-            },
-            Self::AudioCue(value) => value.sequence,
-            Self::Text(value) => value.sequence,
-            Self::TextPresentation(value) => value.sequence,
-            Self::Video(value) => value.sequence,
-            Self::Wait(value) => value.sequence,
-            Self::Event(value) => value.sequence,
-            Self::Control(value) => match value {
-                RuntimeLiveControl::SetBlackboard { sequence, .. }
-                | RuntimeLiveControl::SnapshotDirty { sequence, .. } => *sequence,
-            },
-        }
-    }
+    pub audio_cues: Vec<RuntimeLiveAudioCue>,
+    pub text: Vec<RuntimeLiveTextLease>,
+    pub text_presentations: Vec<RuntimeLiveTextPresentation>,
+    pub video: Vec<RuntimeLiveVideoCommand>,
+    pub waits: Vec<RuntimeLiveWait>,
+    pub events: Vec<RuntimeLiveEvent>,
+    pub blackboard: Vec<RuntimeLiveBlackboardMutation>,
+    pub dirty_sections: Vec<RuntimeLiveDirtySection>,
+    pub state_revision: u64,
+    pub coverage: RuntimeLiveCoverage,
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1239,16 +1202,16 @@ pub struct RuntimeLiveEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeLiveControl {
-    SetBlackboard {
-        sequence: u64,
-        key: String,
-        value: Vec<u8>,
-    },
-    SnapshotDirty {
-        sequence: u64,
-        section_id: String,
-    },
+pub struct RuntimeLiveBlackboardMutation {
+    pub sequence: u64,
+    pub key: String,
+    pub value: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeLiveDirtySection {
+    pub sequence: u64,
+    pub section_id: String,
 }
 
 impl RuntimeLiveSceneTransaction {
@@ -1607,7 +1570,14 @@ pub struct RuntimeSectionPayload {
     pub schema: String,
     pub version: SchemaVersion,
     pub codec: RuntimeSectionCodec,
+    pub hash: Hash256,
     pub bytes: Vec<u8>,
+}
+
+impl RuntimeSectionPayload {
+    pub fn validate_hash(&self) -> bool {
+        Hash256::from_sha256(&self.bytes) == self.hash
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

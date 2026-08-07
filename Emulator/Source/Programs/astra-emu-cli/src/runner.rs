@@ -48,13 +48,18 @@ use astra_observability::{
     sample_process_memory, PerfettoTraceConfig, PerfettoTraceSummary, PerfettoTraceWriter,
 };
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput,
-    FixedDeadlineScheduler, GamepadControl as PlatformGamepadControl, GpuAdapterPolicy,
+    AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, GpuAdapterPolicy,
     GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
-    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, HostLaunchProfile,
-    InputState, PlatformDecodeRequest, PlatformEventKind, PlatformHostClient, PlatformHostFactory,
-    PointerButton as PlatformPointerButton, RgbaFrame, SceneFrame, ScenePresentReceipt,
-    SurfaceHandle, SurfaceRequest, TouchPhase as PlatformTouchPhase, WindowHandle, WindowRequest,
+    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
+    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
+    SurfaceHandle, SurfaceRequest, WindowRequest,
+};
+#[cfg(windows)]
+use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
+#[cfg(target_os = "windows")]
+use astra_platform::{
+    GamepadControl as PlatformGamepadControl, InputState, PlatformEventKind,
+    PointerButton as PlatformPointerButton, TouchPhase as PlatformTouchPhase, WindowHandle,
 };
 use astra_platform_headless::{
     HeadlessGpuFrameSample, HeadlessPerformanceObserver, HeadlessPlatformFactory,
@@ -63,14 +68,13 @@ use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
     RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
-    RuntimeLiveAudioSampleFormat, RuntimeLiveBlendMode, RuntimeLiveControl, RuntimeLiveDraw,
-    RuntimeLiveEffect, RuntimeLivePcmBuffer, RuntimeLiveResourceScene,
-    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveTextPresentation,
-    RuntimeLiveTextureFormat, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind,
-    RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest, RuntimeProviderResult,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeStepBudget, RuntimeStepInput, RuntimeStepMode,
-    RuntimeTickIntegrityMode,
+    RuntimeLiveAudioSampleFormat, RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLivePcmBuffer,
+    RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
+    RuntimeLiveTextPresentation, RuntimeLiveTextureFormat, RuntimeLiveVideoCommand,
+    RuntimeLiveVideoCommandKind, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest,
+    RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget, RuntimeStepInput,
+    RuntimeStepMode, RuntimeTickIntegrityMode,
 };
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use schemars::JsonSchema;
@@ -259,6 +263,7 @@ const MAX_MOVIE_AUDIO_SAMPLES: usize = 64 * 1024 * 1024;
 const MOVIE_AUDIO_STREAM_BASE: u32 = 0xF000_0000;
 const HEADLESS_RESUME_SNAPSHOT_SCHEMA: &str = "astra.emu.headless_resume_snapshot.v1";
 const MAX_RESUME_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(target_os = "windows")]
 /// Matches the shared WGPU scene resource budget.  Native semantic uploads
 /// are not RGBA frame payloads, so the platform command bound must admit a
 /// bounded texture delta without weakening the renderer's own resource cap.
@@ -361,6 +366,7 @@ pub struct WindowedE2ReportV1 {
 }
 
 impl NativeLaunchMode {
+    #[cfg(target_os = "windows")]
     fn is_windowed_e2(&self) -> bool {
         matches!(self, Self::WindowedE2 { .. })
     }
@@ -2200,6 +2206,7 @@ fn validate_runtime_sections(sections: &[RuntimeSectionPayload]) -> Result<(), S
     for section in sections {
         if section.section_id.is_empty()
             || section.schema.is_empty()
+            || !section.validate_hash()
             || !ids.insert(section.section_id.as_str())
         {
             return Err("ASTRA_EMU_HEADLESS_RESUME_SECTION_INVALID".into());
@@ -2671,11 +2678,13 @@ fn case_profile_section(
         family_options: profile.family_options.clone(),
     };
     let bytes = postcard::to_allocvec(&value).map_err(|error| error.to_string())?;
+    let hash = Hash256::from_sha256(&bytes);
     Ok(RuntimeSectionPayload {
         section_id: "emu.case_profile".into(),
         schema: "astra.emu.case_profile.v1".into(),
         version: SchemaVersion::new(1, 0, 0),
         codec: RuntimeSectionCodec::Postcard,
+        hash,
         bytes,
     })
 }
@@ -4075,6 +4084,7 @@ enum PresentationPath {
 #[derive(Clone, Copy)]
 enum AudioPumpPolicy {
     FixedTick,
+    #[allow(dead_code)] // Constructed only by the Windows native host, which is cfg'd out here.
     Realtime {
         target_latency_ms: u32,
         refill_low_water_ms: u32,
@@ -4242,6 +4252,7 @@ struct ExecutionConfig<'a> {
     capture_performance_samples: bool,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeEventAction {
     Continue,
@@ -4250,6 +4261,7 @@ enum NativeEventAction {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg(any(target_os = "windows", test))]
 struct NativeViewport {
     window_width: u32,
     window_height: u32,
@@ -4257,6 +4269,7 @@ struct NativeViewport {
     stage_height: u32,
 }
 
+#[cfg(target_os = "windows")]
 fn route_native_event(
     driver: &mut RuntimeDriver<'_>,
     window: WindowHandle,
@@ -4397,6 +4410,7 @@ fn route_native_event(
     }
 }
 
+#[cfg(target_os = "windows")]
 fn process_native_event(
     driver: &mut RuntimeDriver<'_>,
     window: WindowHandle,
@@ -4435,6 +4449,7 @@ fn process_native_event(
     }
 }
 
+#[cfg(target_os = "windows")]
 async fn capture_windowed_checkpoint(
     driver: &RuntimeDriver<'_>,
     platform: &PlatformHostClient,
@@ -4469,6 +4484,7 @@ fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&
     }
 }
 
+#[cfg(target_os = "windows")]
 /// Applies the portion of a validated physical input sequence that becomes due
 /// at the driver's current fixed-step boundary. Native replay deliberately
 /// shares the exact `consume_physical_input` mapper used by Headless: the host
@@ -4484,6 +4500,7 @@ struct NativeInputDue {
     checkpoints: Vec<String>,
 }
 
+#[cfg(target_os = "windows")]
 fn consume_native_inputs_due(
     driver: &mut RuntimeDriver<'_>,
     messages: &[InputMessage],
@@ -4520,6 +4537,7 @@ fn consume_native_inputs_due(
     Ok(due)
 }
 
+#[cfg(any(target_os = "windows", test))]
 impl NativeViewport {
     fn map_pointer(&self, x: f64, y: f64) -> Option<[f32; 2]> {
         if self.window_width == 0
@@ -5266,110 +5284,109 @@ impl<'a> RuntimeDriver<'a> {
         let mut text_leases = Vec::new();
         let effect_started = Instant::now();
         self.begin_perfetto_phase("runtime.live_output_routing", 2, effect_started)?;
-        for effect in live.effects {
-            match effect {
-                RuntimeLiveEffect::Scene(transaction) => {
-                    let scene_started = Instant::now();
-                    self.queue_scene_commit_live(transaction)?;
-                    self.record_perfetto_phase("scene.validation", 7, scene_started)?;
-                    self.record_perfetto_phase("scene.resource_mutation", 7, scene_started)?;
-                    self.record_perfetto_phase("gpu.upload", 7, scene_started)?;
-                    rendered = true;
-                }
-                RuntimeLiveEffect::ResourceScene(scene) => {
-                    let capture_started = Instant::now();
-                    self.queue_resource_scene_live(scene)?;
-                    self.record_perfetto_phase("rfvp.capture", 7, capture_started)?;
-                    self.record_perfetto_phase("vfs.range_read", 7, capture_started)?;
-                    self.record_perfetto_phase("media.worker", 9, capture_started)?;
-                    self.record_perfetto_phase("scene.format_conversion", 7, capture_started)?;
-                    self.record_perfetto_phase("scene.resource_mutation", 7, capture_started)?;
-                    self.record_perfetto_phase("gpu.upload", 7, capture_started)?;
-                    rendered = true;
-                }
-                RuntimeLiveEffect::Audio(packet) => {
-                    let audio_started = Instant::now();
-                    if self.audio_enabled {
-                        self.audio
-                            .execute_live_pcm(legacy_live_audio_packet(packet))
-                            .await?;
-                    }
-                    self.record_perfetto_phase("audio.queue", 8, audio_started)?;
-                }
-                RuntimeLiveEffect::AudioCommand(command) => {
-                    let audio_started = Instant::now();
-                    let decode = matches!(&command, RuntimeLiveAudioCommand::LoadResource { .. });
-                    let command = legacy_live_audio_command(command);
-                    if !self.audio_enabled {
-                        command.validate().map_err(|error| error.to_string())?;
-                    } else {
-                        let resource = match &command {
-                            LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
-                                Some(self.runtime.read_session_resource(
-                                    &self.session_id,
-                                    resource_uri,
-                                    512 * 1024 * 1024,
-                                )?)
-                            }
-                            _ => None,
-                        };
-                        self.audio.execute(command, resource, self.platform).await?;
-                    }
-                    self.record_perfetto_phase(
-                        if decode {
-                            "audio.decode"
-                        } else {
-                            "audio.queue"
-                        },
-                        8,
-                        audio_started,
-                    )?;
-                }
-                RuntimeLiveEffect::AudioCue(_) => {
-                    return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
-                }
-                RuntimeLiveEffect::Text(lease) => text_leases.push(lease),
-                RuntimeLiveEffect::TextPresentation(presentation) => {
-                    let lease_id = presentation.lease_id.clone();
-                    if text_presentations
-                        .insert(lease_id, legacy_live_text_presentation(presentation))
-                        .is_some()
-                    {
-                        return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_DUPLICATE".into());
-                    }
-                }
-                RuntimeLiveEffect::Video(command) => {
-                    let media_started = Instant::now();
-                    self.execute_video(legacy_live_video_command(command))
-                        .await?;
-                    self.record_perfetto_phase("media.worker", 9, media_started)?;
-                }
-                RuntimeLiveEffect::Wait(wait) => {
-                    let (token, condition) = live_wait_condition(wait, next_step, self.delta_ns);
-                    if self.pending_waits.insert(token, condition).is_some() {
-                        return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
-                    }
-                }
-                RuntimeLiveEffect::Event(event) => {
-                    self.state_trace.extend_from_slice(event.event.as_bytes());
-                    self.state_trace.push(b':');
-                    self.state_trace
-                        .extend_from_slice(&(event.payload.len() as u64).to_le_bytes());
-                    self.state_trace.push(b'\n');
-                }
-                RuntimeLiveEffect::Control(control) => {
-                    let (sequence, payload_len) = match control {
-                        RuntimeLiveControl::SetBlackboard {
-                            sequence, value, ..
-                        } => (sequence, value.len() as u64),
-                        RuntimeLiveControl::SnapshotDirty { sequence, .. } => (sequence, 0),
-                    };
-                    self.state_trace.extend_from_slice(&sequence.to_le_bytes());
-                    self.state_trace
-                        .extend_from_slice(&payload_len.to_le_bytes());
-                    self.state_trace.push(b'\n');
-                }
+        for transaction in live.scenes {
+            let scene_started = Instant::now();
+            self.queue_scene_commit_live(transaction)?;
+            self.record_perfetto_phase("scene.validation", 7, scene_started)?;
+            self.record_perfetto_phase("scene.resource_mutation", 7, scene_started)?;
+            self.record_perfetto_phase("gpu.upload", 7, scene_started)?;
+            rendered = true;
+        }
+        for scene in live.resource_scenes {
+            let capture_started = Instant::now();
+            self.queue_resource_scene_live(scene)?;
+            self.record_perfetto_phase("rfvp.capture", 7, capture_started)?;
+            self.record_perfetto_phase("vfs.range_read", 7, capture_started)?;
+            self.record_perfetto_phase("media.worker", 9, capture_started)?;
+            self.record_perfetto_phase("scene.format_conversion", 7, capture_started)?;
+            self.record_perfetto_phase("scene.resource_mutation", 7, capture_started)?;
+            self.record_perfetto_phase("gpu.upload", 7, capture_started)?;
+            rendered = true;
+        }
+        for packet in live.audio {
+            let audio_started = Instant::now();
+            if self.audio_enabled {
+                self.audio
+                    .execute_live_pcm(legacy_live_audio_packet(packet))
+                    .await?;
             }
+            self.record_perfetto_phase("audio.queue", 8, audio_started)?;
+        }
+        for command in live.audio_commands {
+            let audio_started = Instant::now();
+            let decode = matches!(&command, RuntimeLiveAudioCommand::LoadResource { .. });
+            let command = legacy_live_audio_command(command);
+            if !self.audio_enabled {
+                command.validate().map_err(|error| error.to_string())?;
+            } else {
+                let resource = match &command {
+                    LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
+                        Some(self.runtime.read_session_resource(
+                            &self.session_id,
+                            resource_uri,
+                            512 * 1024 * 1024,
+                        )?)
+                    }
+                    _ => None,
+                };
+                self.audio.execute(command, resource, self.platform).await?;
+            }
+            self.record_perfetto_phase(
+                if decode {
+                    "audio.decode"
+                } else {
+                    "audio.queue"
+                },
+                8,
+                audio_started,
+            )?;
+        }
+        if !live.audio_cues.is_empty() {
+            return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
+        }
+        for lease in live.text {
+            text_leases.push(lease);
+        }
+        for presentation in live.text_presentations {
+            let lease_id = presentation.lease_id.clone();
+            if text_presentations
+                .insert(lease_id, legacy_live_text_presentation(presentation))
+                .is_some()
+            {
+                return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_DUPLICATE".into());
+            }
+        }
+        for command in live.video {
+            let media_started = Instant::now();
+            self.execute_video(legacy_live_video_command(command))
+                .await?;
+            self.record_perfetto_phase("media.worker", 9, media_started)?;
+        }
+        for wait in live.waits {
+            let (token, condition) = live_wait_condition(wait, next_step, self.delta_ns);
+            if self.pending_waits.insert(token, condition).is_some() {
+                return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
+            }
+        }
+        for event in live.events {
+            self.state_trace.extend_from_slice(event.event.as_bytes());
+            self.state_trace.push(b':');
+            self.state_trace
+                .extend_from_slice(&(event.payload.len() as u64).to_le_bytes());
+            self.state_trace.push(b'\n');
+        }
+        for mutation in live.blackboard {
+            self.state_trace
+                .extend_from_slice(&mutation.sequence.to_le_bytes());
+            self.state_trace
+                .extend_from_slice(&(mutation.value.len() as u64).to_le_bytes());
+            self.state_trace.push(b'\n');
+        }
+        for dirty in live.dirty_sections {
+            self.state_trace
+                .extend_from_slice(&dirty.sequence.to_le_bytes());
+            self.state_trace.extend_from_slice(&0_u64.to_le_bytes());
+            self.state_trace.push(b'\n');
         }
         for lease in text_leases {
             let text = self
@@ -5521,7 +5538,6 @@ impl<'a> RuntimeDriver<'a> {
             "deadline_debt_ns",
             step_duration_ns.saturating_sub(self.delta_ns),
         )?;
-        self.record_perfetto_counter("intermediate_copy_bytes", 0)?;
         self.end_perfetto_phase("runtime.fixed_tick", 0)
     }
 
@@ -6505,6 +6521,7 @@ impl AudioExecutor {
         }
     }
 
+    #[cfg(target_os = "windows")]
     fn set_suspended(&self, suspended: bool) -> Result<(), String> {
         match self {
             Self::Deterministic(_) => Ok(()),
@@ -7702,6 +7719,7 @@ mod native_tests {
                 schema: "astra.runtime.save_blob.v2".into(),
                 version: SchemaVersion::new(2, 0, 0),
                 codec: RuntimeSectionCodec::Raw,
+                hash: Hash256::from_sha256(&bytes),
                 bytes,
             }],
             driver: HeadlessDriverResumeV1 {
