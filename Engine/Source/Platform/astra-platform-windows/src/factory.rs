@@ -411,6 +411,8 @@ mod windows {
         }
 
         fn process_commands(&mut self, event_loop: &ActiveEventLoop) {
+            const MAX_COMMANDS_PER_TURN: usize = 64;
+            let mut processed = 0usize;
             loop {
                 let command = match self.backend.try_next_command() {
                     Ok(Some(command)) => command,
@@ -849,6 +851,19 @@ mod windows {
                             u64::try_from(command_started.elapsed().as_nanos()).unwrap_or(u64::MAX),
                         "Windows platform host completed one command"
                     );
+                }
+                processed += 1;
+                if operation == "surface.present_scene" || processed == MAX_COMMANDS_PER_TURN {
+                    if operation != "host.shutdown" && self.event_loop_proxy.send_event(()).is_err()
+                    {
+                        tracing::error!(
+                            event = "platform.windows.command_reschedule.failed",
+                            diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                            "Windows platform host could not reschedule queued commands"
+                        );
+                        event_loop.exit();
+                    }
+                    break;
                 }
             }
         }
