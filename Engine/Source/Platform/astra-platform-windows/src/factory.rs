@@ -298,6 +298,9 @@ mod windows {
         surfaces: ResourceTable<SurfaceResource, SurfaceHandle>,
         surface_windows: BTreeMap<SurfaceHandle, WindowId>,
         audio_outputs: ResourceTable<AudioResource, AudioOutputHandle>,
+        audio_completion_tx: std_mpsc::Sender<AudioCompletion>,
+        audio_completion_rx: std_mpsc::Receiver<AudioCompletion>,
+        pending_audio_opens: usize,
         decode_sessions: ResourceTable<DecodeResource, DecodeSessionHandle>,
         save_store: AtomicSaveStore,
         package_cache: VerifiedPackageCache,
@@ -364,6 +367,7 @@ mod windows {
                     )
                 })?;
             let (package_completion_tx, package_completion_rx) = std_mpsc::channel();
+            let (audio_completion_tx, audio_completion_rx) = std_mpsc::channel();
             Ok(Self {
                 backend,
                 ready: Some(ready),
@@ -373,6 +377,9 @@ mod windows {
                 surfaces: ResourceTable::new("surface"),
                 surface_windows: BTreeMap::new(),
                 audio_outputs: ResourceTable::new("audio_output"),
+                audio_completion_tx,
+                audio_completion_rx,
+                pending_audio_opens: 0,
                 decode_sessions: ResourceTable::new("decode_session"),
                 save_store,
                 package_cache,
@@ -605,9 +612,7 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenAudioOutput { request, reply } => {
-                        let result = AudioResource::new(request, self.backend.audio_wake())
-                            .and_then(|resource| self.audio_outputs.insert(resource));
-                        let _ = reply.send(result);
+                        self.start_audio_output_open(request, reply);
                     }
                     HostCommand::QueryAudioOutputFormat { reply } => {
                         let result = preferred_audio_output_format();
@@ -822,6 +827,17 @@ mod windows {
                             .ensure_empty()
                             .and_then(|_| self.windows.ensure_empty())
                             .and_then(|_| self.audio_outputs.ensure_empty())
+                            .and_then(|_| {
+                                if self.pending_audio_opens == 0 {
+                                    Ok(())
+                                } else {
+                                    Err(PlatformError::new(
+                                        PlatformErrorCode::InvalidState,
+                                        "host.shutdown",
+                                        "audio output requests are still in flight",
+                                    ))
+                                }
+                            })
                             .and_then(|_| self.decode_sessions.ensure_empty())
                             .and_then(|_| self.save_transactions.ensure_empty())
                             .and_then(|_| self.package_sources.ensure_empty())
@@ -927,6 +943,41 @@ mod windows {
                     );
                 }
             });
+        }
+
+        fn start_audio_output_open(
+            &mut self,
+            request: AudioOutputRequest,
+            reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
+        ) {
+            let completion_tx = self.audio_completion_tx.clone();
+            let event_loop_proxy = self.event_loop_proxy.clone();
+            let audio_wake = self.backend.audio_wake();
+            self.pending_audio_opens += 1;
+            thread::spawn(move || {
+                let result = AudioResource::new(request, audio_wake);
+                if completion_tx
+                    .send(AudioCompletion { reply, result })
+                    .is_ok()
+                    && event_loop_proxy.send_event(()).is_err()
+                {
+                    tracing::error!(
+                        event = "platform.windows.audio_completion_wake.failed",
+                        diagnostic_code = "ASTRA_PLATFORM_EVENT_LOOP_CLOSED",
+                        "Windows audio completion could not wake the event loop"
+                    );
+                }
+            });
+        }
+
+        fn process_audio_completions(&mut self) {
+            while let Ok(completion) = self.audio_completion_rx.try_recv() {
+                self.pending_audio_opens = self.pending_audio_opens.saturating_sub(1);
+                let result = completion
+                    .result
+                    .and_then(|resource| self.audio_outputs.insert(resource));
+                let _ = completion.reply.send(result);
+            }
         }
 
         fn process_package_completions(&mut self) {
@@ -1045,6 +1096,7 @@ mod windows {
 
         fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
             self.process_package_completions();
+            self.process_audio_completions();
             self.process_commands(event_loop);
             let accessibility_actions = self
                 .accessibility
@@ -1076,6 +1128,11 @@ mod windows {
     struct PackageCompletion {
         reply: oneshot::Sender<Result<PackageSourceHandle, PlatformError>>,
         result: Result<CachedPackageSource, PlatformError>,
+    }
+
+    struct AudioCompletion {
+        reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
+        result: Result<AudioResource, PlatformError>,
     }
 
     enum PackageSourceResource {
