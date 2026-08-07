@@ -78,7 +78,7 @@ fn fixture() -> (SourceUnlockPolicy, SourceVerificationManifest, MemorySource) {
     )
 }
 
-#[test]
+#[astra_headless_test::test]
 fn source_fingerprint_provider_roundtrips_and_authenticates() {
     let (policy, manifest, mut source) = fixture();
     let provider = SourceFingerprintCryptoProvider::unlock(&policy, &manifest, &mut source)
@@ -106,7 +106,7 @@ fn source_fingerprint_provider_roundtrips_and_authenticates() {
     assert!(provider.decrypt(&descriptor, &tampered).is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn source_fingerprint_streams_large_files_in_bounded_ranges() {
     let bytes = vec![0x5a; 9 * 1024 * 1024 + 17];
     let mut manifest = SourceVerificationManifest {
@@ -140,7 +140,7 @@ fn source_fingerprint_streams_large_files_in_bounded_ranges() {
     assert_eq!(source.max_range_read, 4 * 1024 * 1024);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn modified_or_unsafe_source_fails_before_key_creation() {
     let (policy, mut manifest, mut source) = fixture();
     source.files.get_mut("GAME.DAT").unwrap()[0] ^= 1;
@@ -151,7 +151,7 @@ fn modified_or_unsafe_source_fails_before_key_creation() {
     assert!(SourceFingerprintCryptoProvider::unlock(&policy, &manifest, &mut source).is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn source_locked_container_requires_plain_bootstrap_and_encrypted_payload() {
     let (policy, manifest, mut source) = fixture();
     let provider =
@@ -188,7 +188,7 @@ fn source_locked_container_requires_plain_bootstrap_and_encrypted_payload() {
     assert_eq!(reader.read_section("story.main").unwrap(), b"secret");
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_builder_and_reader_use_source_crypto_on_product_sections() {
     let (policy, manifest, mut source) = fixture();
     let provider =
@@ -226,7 +226,7 @@ fn package_builder_and_reader_use_source_crypto_on_product_sections() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_builder_applies_source_policy_to_named_sections() {
     let (policy, manifest, mut source) = fixture();
     let provider =
@@ -261,7 +261,7 @@ fn package_builder_applies_source_policy_to_named_sections() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn source_locked_package_does_not_expose_common_payload_signatures() {
     let (mut policy, manifest, mut source) = fixture();
     policy.protected_sections = BTreeSet::from([
@@ -302,7 +302,7 @@ fn source_locked_package_does_not_expose_common_payload_signatures() {
     }
 }
 
-#[test]
+#[astra_headless_test::test]
 fn package_builder_rejects_missing_protected_section() {
     let (mut policy, manifest, mut source) = fixture();
     policy.protected_sections = BTreeSet::from(["story.missing".into()]);

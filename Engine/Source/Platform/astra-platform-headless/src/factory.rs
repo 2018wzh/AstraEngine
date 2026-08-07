@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::artifact::{ArtifactRecorder, AudioArtifactStream};
+use astra_headless_protocol::RendererExecutionIdentity;
 use astra_media::{
     DecodeKind as MediaDecodeKind, DecodeOutput as MediaDecodeOutput, DecodeProvider,
     DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
@@ -720,8 +721,17 @@ impl HostState {
                 };
                 let result = (|| {
                     if let Some(renderer) = &gpu_renderer {
+                        let identity = renderer.identity();
                         self.artifacts
-                            .set_renderer_identity(renderer.identity().clone())?;
+                            .set_renderer_identity(RendererExecutionIdentity {
+                                provider: identity.provider.clone(),
+                                backend: identity.backend.clone(),
+                                device_type: identity.device_type.clone(),
+                                vendor_id: identity.vendor_id,
+                                device_id: identity.device_id,
+                                adapter_name_hash: identity.adapter_name_hash.clone(),
+                                driver_identity_hash: identity.driver_identity_hash.clone(),
+                            })?;
                     }
                     let window = self.windows.get_mut(request.window)?;
                     let renderer = CpuRendererProvider

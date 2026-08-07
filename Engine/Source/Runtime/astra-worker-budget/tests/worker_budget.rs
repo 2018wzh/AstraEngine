@@ -41,7 +41,7 @@ fn worker_budget_rejects_zero_and_over_global_limit() {
     assert!(WorkerBudgetBroker::new(9).is_err());
 }
 
-#[test]
+#[astra_headless_test::test]
 fn nested_work_reuses_the_callers_scoped_token() {
     let broker = WorkerBudgetBroker::new(1).unwrap();
     broker

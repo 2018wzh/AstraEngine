@@ -4149,7 +4149,7 @@ mod runtime_view_tests {
         });
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn ordinary_runtime_view_is_bounded_but_preserves_authoritative_count() {
         let state = state();
         let hash = Hash128::from_bytes([7; 16]);
@@ -4164,7 +4164,7 @@ mod runtime_view_tests {
         assert!(view.state.route_flags.is_empty());
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn system_pages_expose_only_the_history_the_page_owns() {
         let mut backlog = state();
         open_page(&mut backlog, SystemPageKind::Backlog);
@@ -4186,7 +4186,7 @@ mod runtime_view_tests {
         assert!(route_view.state.voice_replay.is_empty());
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn terminal_runtime_view_exposes_route_completion_evidence() {
         let mut state = state();
         state.cursor = None;

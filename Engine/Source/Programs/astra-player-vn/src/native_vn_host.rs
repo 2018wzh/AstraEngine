@@ -6666,7 +6666,7 @@ mod native_vn_host_tests {
     };
     use std::collections::{BTreeMap, BTreeSet};
 
-    #[test]
+    #[astra_headless_test::test]
     fn reusable_ui_frame_does_not_replay_resource_lifecycle() {
         let draw = vec![
             astra_media_core::SceneCommand::ReleaseResource {
@@ -6688,7 +6688,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn image_prefetch_control_flow_prioritizes_branch_targets_over_linear_fallthrough() {
         let state = astra_vn_core::State {
             id: "root".into(),
@@ -6715,7 +6715,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn image_prefetch_control_flow_retains_call_return_fallthrough() {
         let state = astra_vn_core::State {
             id: "root".into(),
@@ -6737,7 +6737,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn image_prewarm_resolves_system_action_target_aliases_before_ranking_gameplay_entries() {
         let states = BTreeMap::from([
             (
@@ -6776,7 +6776,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn image_prewarm_starts_with_the_runtime_launch_state() {
         let stories = vec![
             astra_vn_core::Story {
@@ -6796,7 +6796,7 @@ mod native_vn_host_tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn retained_pointer_activation_prefers_the_topmost_enabled_actionable_node() {
         let bounds = astra_ui_core::UiRect {
             min: astra_ui_core::UiPoint { x: 0.0, y: 0.0 },

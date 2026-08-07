@@ -5,7 +5,7 @@ use astra_player_core::{
     PlayerRuntimeRouteEvidence, PlayerVisualComparisonEvidence, PlayerVisualRegionEvidence,
 };
 
-#[test]
+#[astra_headless_test::test]
 fn macos_cgevent_transcript_produces_full_playable_report() {
     let mut script = PlayerAutomationScript::new(
         "nativevn-game",

@@ -1474,7 +1474,7 @@ mod tests {
         Hash256, PerformanceMetricBudget, PerformanceUnit, PERFORMANCE_BUDGET_SCHEMA,
     };
 
-    #[test]
+    #[astra_headless_test::test]
     fn frame_deadlines_do_not_accumulate_fractional_rate_drift() {
         assert_eq!(
             frame_deadline_offset(120, 120).unwrap(),
@@ -1487,7 +1487,7 @@ mod tests {
         assert!(frame_deadline_offset(1, 0).is_err());
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn frame_pacing_drops_elapsed_slots_instead_of_catching_up_after_idle() {
         let started = Instant::now();
         let first = next_frame_deadline(None, started, 120).unwrap();
@@ -1506,7 +1506,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn trace_counters_emit_changes_and_bounded_heartbeats() {
         let previous = TraceCounterSample {
             value: 42,
@@ -1524,7 +1524,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn trace_phase_tracks_are_stable_and_distinct() {
         let names = [
             "physical_input.consume",
@@ -1564,7 +1564,7 @@ mod tests {
             .all(|track| ![TRACE_TRACK_INPUT_FLOW, TRACE_TRACK_GPU_FLOW].contains(track)));
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn detailed_trace_phase_sampling_is_fixed_and_includes_each_cadence_boundary() {
         assert!(!trace_detailed_phase(1));
         assert!(!trace_detailed_phase(
@@ -1576,7 +1576,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn deterministic_measurement_duration_covers_all_120hz_intervals() {
         assert_eq!(
             measurement_duration_us(
@@ -1593,7 +1593,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn product_recorder_writes_identity_bound_report_and_trace_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let profile_hash = hash(b"profile");

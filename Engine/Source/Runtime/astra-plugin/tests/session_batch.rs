@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 use astra_plugin::{run_session_batch, WorkerBudgetBroker};
 use tokio::sync::Barrier;
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn session_batch_bounds_workers_and_sorts_reports() {
     let budget = WorkerBudgetBroker::new(2).unwrap();
     let barrier = Arc::new(Barrier::new(2));
@@ -30,7 +30,7 @@ async fn session_batch_bounds_workers_and_sorts_reports() {
     );
 }
 
-#[tokio::test]
+#[astra_headless_test::tokio_test]
 async fn session_batch_collects_failures_without_cancelling_other_sessions() {
     let budget = WorkerBudgetBroker::new(2).unwrap();
     type Job = Box<

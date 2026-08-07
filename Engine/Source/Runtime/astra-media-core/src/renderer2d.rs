@@ -2193,7 +2193,7 @@ pub fn frame_hash(width: u32, height: u32, format: RenderTargetFormat, bytes: &[
 mod tests {
     use super::{LiveTextureBuffer, LiveTextureFrame};
 
-    #[test]
+    #[astra_headless_test::test]
     fn live_texture_buffer_moves_the_pixel_allocation_without_copying() {
         let pixels = vec![0x11; 64 * 64 * 4];
         let pointer = pixels.as_ptr();
@@ -2204,7 +2204,7 @@ mod tests {
         assert!(!buffer.is_empty());
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn live_texture_frame_preserves_the_buffer_allocation() {
         let pixels = vec![0x22; 8 * 4 * 4];
         let pointer = pixels.as_ptr();

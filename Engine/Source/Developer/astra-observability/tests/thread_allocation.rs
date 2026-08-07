@@ -3,7 +3,7 @@ use astra_observability::{thread_allocation_snapshot, TrackingAllocator};
 #[global_allocator]
 static GLOBAL_ALLOCATOR: TrackingAllocator = TrackingAllocator::new();
 
-#[test]
+#[astra_headless_test::test]
 fn thread_snapshot_excludes_allocations_owned_by_another_thread() {
     let before = thread_allocation_snapshot();
     let worker = std::thread::spawn(|| {

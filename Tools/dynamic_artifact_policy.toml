@@ -100,13 +100,13 @@ publishable = true
 audit_windows_exports = false
 
 [[artifact]]
-package = "astra-emu-fvp-rfvp-core"
-target = "rfvp"
+package = "astra-emu-minori"
+target = "astra_emu_minori"
 crate_types = ["cdylib", "rlib"]
-role = "emulator_runtime"
+role = "family_plugin"
 owner = "AstraEMU"
 platforms = ["windows", "linux", "macos"]
-publishable = false
+publishable = true
 audit_windows_exports = false
 
 [[artifact]]

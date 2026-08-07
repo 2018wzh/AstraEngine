@@ -139,7 +139,7 @@ fn component_payload_rejects_hash_mismatch() {
     assert!(error.to_string().contains("ASTRA_RUNTIME_COMPONENT_HASH"));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn component_payload_clone_shares_wire_compatible_immutable_bytes() {
     let payload = RuntimeComponentPayload::postcard(
         "astra.test.shared_payload",
@@ -166,7 +166,7 @@ fn component_payload_clone_shares_wire_compatible_immutable_bytes() {
     );
 }
 
-#[test]
+#[astra_headless_test::test]
 fn validated_component_encoding_binds_both_hashes_to_shared_bytes() {
     let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
         status: "validated".to_string(),
@@ -180,7 +180,7 @@ fn validated_component_encoding_binds_both_hashes_to_shared_bytes() {
     assert_eq!(encoding.state_hash(), Hash128::from_blake3(&bytes));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn blake3_component_encoding_reuses_one_digest_for_storage_and_state() {
     let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
         status: "blake3".to_string(),
@@ -200,7 +200,7 @@ fn blake3_component_encoding_reuses_one_digest_for_storage_and_state() {
     assert_eq!(encoding.state_hash(), Hash128::from_bytes(state_bytes));
 }
 
-#[test]
+#[astra_headless_test::test]
 fn shipping_owned_component_encoding_round_trips_with_disabled_hash_marker() {
     let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
         status: "shipping".to_string(),

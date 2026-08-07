@@ -453,6 +453,25 @@ saturation 单测改为多线程突发（单生产者慢于 writer 排水，原 
 DX12 Shipping 10 分钟 Windowed E2 与 clean Release 同身份 Perfetto 基线仍需
 在 Windows 实机采集，属外部证据。
 
+### 2026-08-07 Windows convergence verification
+
+Windows 工作树已通过 `check_docs.py`、动态产物与 Windows export 校验、
+`cargo fmt --check`、workspace all-target clippy、`astra-headless` build、
+workspace tests、Headless test convergence 与 shipping graph 检查。Windows
+PlatformHost、WASAPI/WMF、SendInput、text surface、Player/VN host 和 Runtime
+provider 的定向测试同时通过。
+
+本轮检查移除了 Shipping 依赖图中对 `astra-headless-protocol` 的间接依赖：
+硬件 renderer identity 由 `astra-platform-common` 持有，只有 Headless artifact
+记录边界转换为 Evidence DTO。受控 Runtime、Developer、Module 与 Program 测试
+已统一进入 `HeadlessTestContext`；当前 inventory 为 46 个禁用 doctest 的 library
+target、609 个 Headless tests、3 个 ignored tests 和 14 个平台豁免，静态检查为
+zero violation。
+
+这些结果只关闭 Windows 编译、测试和依赖图门禁。正式性能状态保持
+`IN_PROGRESS`：尚未在冻结的 clean Release revision 上完成 10 分钟 DX12
+Windowed E2，也尚未生成绑定同一 build/profile/input/device 的 Perfetto 数据。
+
 ## 2026-08-04 Windowed E2 identity update
 
 `astra-emu-cli windowed-e2` now emits `astra.emu.windowed_e2_report.v1` with

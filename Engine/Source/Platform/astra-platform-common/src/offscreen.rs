@@ -8,7 +8,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astra_headless_protocol::RendererExecutionIdentity;
 use astra_media_core::{FilterParam, FilterValidator, SceneCommand};
 use astra_platform::{
     CapturedFrame, GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy, PlatformError,
@@ -70,6 +69,39 @@ const READBACK_TIMEOUT: Duration = Duration::from_secs(5);
 const PERFORMANCE_ATLAS_SIDE: u32 = 4096;
 const PERFORMANCE_ATLAS_BYTES: u64 =
     PERFORMANCE_ATLAS_SIDE as u64 * PERFORMANCE_ATLAS_SIDE as u64 * 4;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RendererExecutionIdentity {
+    pub provider: String,
+    pub backend: String,
+    pub device_type: String,
+    pub vendor_id: u32,
+    pub device_id: u32,
+    pub adapter_name_hash: String,
+    pub driver_identity_hash: String,
+}
+
+impl RendererExecutionIdentity {
+    fn hash(&self) -> String {
+        let encoded = serde_json::to_vec(self)
+            .expect("the fixed renderer identity fields always serialize to JSON");
+        hash(&encoded)
+    }
+
+    fn is_valid(&self) -> bool {
+        !self.provider.is_empty()
+            && !self.backend.is_empty()
+            && !self.device_type.is_empty()
+            && self
+                .adapter_name_hash
+                .parse::<astra_core::Hash256>()
+                .is_ok()
+            && self
+                .driver_identity_hash
+                .parse::<astra_core::Hash256>()
+                .is_ok()
+    }
+}
 
 #[derive(Default)]
 struct ReadbackRing {
@@ -245,9 +277,9 @@ impl WgpuOffscreenRenderer {
             unavailable("offscreen.device", "GPU device creation failed")
         })?;
         let identity = renderer_execution_identity(&info);
-        identity
-            .validate()
-            .map_err(|_| unavailable("offscreen.identity", "GPU identity is invalid"))?;
+        if !identity.is_valid() {
+            return Err(unavailable("offscreen.identity", "GPU identity is invalid"));
+        }
         let scene_renderer = match atlas_reservation {
             Some(side) => WgpuGlyphAtlasRenderer::new_reserved(&device, &queue, side)?,
             None => WgpuGlyphAtlasRenderer::new(&device),
@@ -717,9 +749,7 @@ async fn select_adapter(
 }
 
 fn adapter_policy_identity(info: &wgpu::AdapterInfo) -> String {
-    renderer_execution_identity(info)
-        .hash()
-        .expect("a WGPU renderer identity is canonical and hashable")
+    renderer_execution_identity(info).hash()
 }
 
 fn renderer_execution_identity(info: &wgpu::AdapterInfo) -> RendererExecutionIdentity {
@@ -1446,7 +1476,7 @@ mod adapter_identity_tests {
         let info = adapter_info("1.2.3");
         assert_eq!(
             adapter_policy_identity(&info),
-            renderer_execution_identity(&info).hash().unwrap()
+            renderer_execution_identity(&info).hash()
         );
         assert_ne!(
             adapter_policy_identity(&info),

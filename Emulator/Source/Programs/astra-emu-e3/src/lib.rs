@@ -9,6 +9,8 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_manager_core::EmuPlatformRunEvidenceV1;
+#[cfg(windows)]
+use astra_headless_protocol::{ButtonState, PointerButton};
 use astra_headless_protocol::{InputMessage, PhysicalInput};
 use serde::{Deserialize, Serialize};
 

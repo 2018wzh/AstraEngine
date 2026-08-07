@@ -1186,7 +1186,7 @@ fn binding(operation: &str, error: impl std::fmt::Display) -> ProductHostError {
 mod cadence_tests {
     use super::presentation_substep_duration_ns;
 
-    #[test]
+    #[astra_headless_test::test]
     fn presentation_substeps_preserve_the_authoritative_tick_duration() {
         let tick = astra_headless_protocol::TICK_DURATION_NS;
         let first = presentation_substep_duration_ns(tick, 2, 0);

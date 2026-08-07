@@ -1131,7 +1131,7 @@ mod windows_live {
     mod tests {
         use super::drain_stderr;
 
-        #[test]
+        #[astra_headless_test::test]
         fn stderr_drain_keeps_reading_after_capture_limit() {
             let source = vec![b'x'; 256 * 1024];
             let capture = drain_stderr(source.as_slice(), 1024).unwrap();

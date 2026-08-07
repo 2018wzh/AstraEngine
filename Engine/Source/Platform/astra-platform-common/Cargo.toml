@@ -10,7 +10,6 @@ platform-test-driver = []
 
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
-astra-headless-protocol = { path = "../../Runtime/astra-headless-protocol" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-observability = { path = "../../Developer/astra-observability" }
 astra-platform = { path = "../astra-platform" }

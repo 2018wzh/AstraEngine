@@ -612,7 +612,7 @@ fn shared_layout_reuses_the_authoritative_cached_allocation() {
     assert_eq!(provider.cache_stats().unwrap().entries, 1);
 }
 
-#[test]
+#[astra_headless_test::test]
 fn validation_layouts_can_be_released_before_runtime_rendering() {
     let provider = provider();
     let request = request("cache clear validation");

@@ -135,7 +135,7 @@ mod tests {
         .unwrap();
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn loads_bundled_policy_and_applies_explicit_overrides() {
         let root = tempfile::tempdir().unwrap();
         write_config(root.path(), "Saved/Logs", "Saved/Crashes");
@@ -155,7 +155,7 @@ mod tests {
         assert_eq!(config.crash_reporting, CrashReportingMode::Required);
     }
 
-    #[test]
+    #[astra_headless_test::test]
     fn rejects_paths_outside_the_bundle_root() {
         // `/tmp/logs` is rooted on both platforms via a `RootDir` component;
         // `C:/logs` is absolute only on Windows (drive prefix).

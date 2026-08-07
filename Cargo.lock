@@ -1349,7 +1349,6 @@ name = "astra-platform-common"
 version = "0.1.0"
 dependencies = [
  "astra-core",
- "astra-headless-protocol",
  "astra-media-core",
  "astra-observability",
  "astra-platform",
