@@ -17,8 +17,8 @@ use astra_emu_family_api::{
 };
 use astra_media::{open_symphonia_audio_stream, MediaError, SymphoniaAudioStreamDecoder};
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioPacket, AudioWakeRegistration, HostLaunchProfile,
-    PlatformHostClient, PlatformHostFactory,
+    AudioOutputHandle, AudioOutputRequest, AudioOutputState, AudioPacket, AudioWakeRegistration,
+    HostLaunchProfile, PlatformHostClient, PlatformHostFactory,
 };
 use serde::Serialize;
 
@@ -908,19 +908,55 @@ impl WorkerState {
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         let mut active = 0_u64;
+        let mut submitted = 0_u64;
+        let mut consumed = 0_u64;
+        let mut queued = 0_u64;
+        let mut underflows = 0_u64;
+        let mut audible = false;
         for id in ids {
             active += 1;
-            self.refill_stream(id).await?;
+            let Some((state, channels)) = self.refill_stream(id).await? else {
+                continue;
+            };
+            let channels = u64::from(channels.max(1));
+            submitted = submitted
+                .checked_add(state.submitted_samples / channels)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            consumed = consumed
+                .checked_add(state.consumed_samples / channels)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            queued = queued
+                .checked_add(state.queued_frames as u64)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            underflows = underflows
+                .checked_add(state.underflow_count)
+                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
+            audible |= state.meter.peak_dbfs.is_finite() && state.meter.peak_dbfs > -90.0;
         }
         self.telemetry
             .active_streams
             .store(active, Ordering::Relaxed);
-        self.refresh_output_telemetry().await?;
+        self.telemetry
+            .submitted_frames
+            .store(submitted, Ordering::Relaxed);
+        self.telemetry
+            .consumed_frames
+            .store(consumed, Ordering::Relaxed);
+        self.telemetry
+            .queued_frames
+            .store(queued, Ordering::Relaxed);
+        self.telemetry
+            .underflow_count
+            .store(underflows, Ordering::Relaxed);
+        self.audible.store(audible, Ordering::Relaxed);
         Ok(())
     }
 
-    async fn refill_stream(&mut self, stream_id: u32) -> Result<(), String> {
-        let (output, rate, channels, state) = {
+    async fn refill_stream(
+        &mut self,
+        stream_id: u32,
+    ) -> Result<Option<(AudioOutputState, u16)>, String> {
+        let (output, rate, channels, mut state) = {
             let stream = self
                 .streams
                 .get(&stream_id)
@@ -962,13 +998,13 @@ impl WorkerState {
                     consumed_samples = state.consumed_samples
                 );
             }
-            return Ok(());
+            return Ok((state.consumed_samples < end_content_sample).then_some((state, channels)));
         }
         let queued = state.queued_frames;
         let low = frames_for_ms(rate, LOW_WATER_MS)?;
         let target = frames_for_ms(rate, TARGET_LATENCY_MS)?;
         if queued > low {
-            return Ok(());
+            return Ok(Some((state, channels)));
         }
         let frames = target.saturating_sub(queued);
         let source_frames = {
@@ -999,7 +1035,7 @@ impl WorkerState {
             && stream.decoder.is_none()
             && queued_samples(&stream.segments, stream.segment_cursor) == 0;
         if stream.source_buffer.is_empty() && !source_exhausted {
-            return Ok(());
+            return Ok(Some((state, channels)));
         }
         if stream.source_buffer.is_empty() {
             stream.mix_buffer.clear();
@@ -1050,6 +1086,7 @@ impl WorkerState {
                 .submitted_samples
                 .saturating_add(content_sample_count as u64)
         });
+        let packet_sample_count = stream.mix_buffer.len();
         stream.mix_buffer = self
             .client
             .submit_audio_owned(
@@ -1062,6 +1099,12 @@ impl WorkerState {
             )
             .await
             .map_err(|error| error.to_string())?;
+        state.submitted_samples = state
+            .submitted_samples
+            .saturating_add(packet_sample_count as u64);
+        state.queued_frames = state
+            .queued_frames
+            .saturating_add(packet_sample_count / usize::from(channels));
         if first_packet {
             self.client
                 .resume_audio(output)
@@ -1072,8 +1115,9 @@ impl WorkerState {
         self.telemetry.packet_count.fetch_add(1, Ordering::Relaxed);
         if stop_after_packet {
             self.stop(stream_id).await?;
+            return Ok(None);
         }
-        Ok(())
+        Ok(Some((state, channels)))
     }
 
     async fn refresh_output_telemetry(&mut self) -> Result<(), String> {
