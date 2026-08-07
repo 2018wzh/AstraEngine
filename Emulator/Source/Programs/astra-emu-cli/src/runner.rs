@@ -5272,13 +5272,16 @@ impl<'a> RuntimeDriver<'a> {
             .live_path_guards
             .intermediate_pcm_copy_bytes
             .saturating_add(coverage.pcm_copied_bytes);
+        self.next_step_mode = RuntimeStepMode::Live;
+        self.fixed_step = next_step;
+        // Complete the owner-side transaction slice before emitting counters
+        // observed at its end. Writing those counters first would make the
+        // later complete event carry an earlier start timestamp.
+        self.record_perfetto_phase("runtime.world_transaction", 1, world_transaction_started)?;
         self.record_perfetto_counter("rfvp.capture_bytes", coverage.capture_bytes)?;
         self.record_perfetto_counter("rfvp.operation_bytes", coverage.operation_bytes)?;
         self.record_perfetto_counter("rfvp.pcm_moved_bytes", coverage.pcm_moved_bytes)?;
         self.record_perfetto_counter("rfvp.pcm_copied_bytes", coverage.pcm_copied_bytes)?;
-        self.next_step_mode = RuntimeStepMode::Live;
-        self.fixed_step = next_step;
-        self.record_perfetto_phase("runtime.world_transaction", 1, world_transaction_started)?;
         let mut rendered = false;
         let mut text_presentations = BTreeMap::new();
         let mut text_leases = Vec::new();
