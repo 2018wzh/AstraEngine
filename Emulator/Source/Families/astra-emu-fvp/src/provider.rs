@@ -46,6 +46,7 @@ struct FvpSession {
     stage_width: u32,
     stage_height: u32,
     state_revision: u64,
+    next_live_sequence: u64,
     poisoned: bool,
     pending_movie: Option<PendingMovieV1>,
     ephemeral_text: BTreeMap<String, LegacyEphemeralText>,
@@ -77,6 +78,7 @@ struct FvpSessionSnapshotV1 {
     stage_width: u32,
     stage_height: u32,
     state_revision: u64,
+    next_live_sequence: u64,
     pending_movie: Option<PendingMovieV1>,
 }
 
@@ -398,6 +400,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             stage_width,
             stage_height,
             state_revision: 0,
+            next_live_sequence: 1,
             poisoned: false,
             pending_movie: None,
             ephemeral_text: BTreeMap::new(),
@@ -490,7 +493,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let text_operations = delta.text;
 
         let mut live = LegacyLiveOutput::default();
-        let mut next_sequence = 0_u64;
+        let mut next_sequence = session.next_live_sequence;
         let mut waits = Vec::new();
         let mut coverage = LegacyCoverageDelta {
             capture_bytes: delta.copy_telemetry.capture_bytes,
@@ -713,6 +716,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             state_revision: session.state_revision,
         };
         output.validate(&input.budget)?;
+        session.next_live_sequence = next_sequence;
         Ok(output)
     }
 
@@ -750,6 +754,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             stage_width: session.stage_width,
             stage_height: session.stage_height,
             state_revision: session.state_revision,
+            next_live_sequence: session.next_live_sequence,
             pending_movie: session.pending_movie.clone(),
         };
         let bytes = postcard::to_allocvec(&payload)
@@ -826,6 +831,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             || payload.fixed_delta_ns != session.fixed_delta_ns
             || payload.stage_width != session.stage_width
             || payload.stage_height != session.stage_height
+            || payload.next_live_sequence == 0
         {
             return Err(invalid(
                 "ASTRA_FVP_SNAPSHOT_BINDING",
@@ -845,6 +851,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         session.stage_width = payload.stage_width;
         session.stage_height = payload.stage_height;
         session.state_revision = payload.state_revision;
+        session.next_live_sequence = payload.next_live_sequence;
         session.pending_movie = payload.pending_movie.clone();
         // Leases are deliberately not replayed. A restore starts a fresh host
         // observation epoch, so pre-restore plaintext can never be fetched.
@@ -1325,11 +1332,14 @@ mod tests {
         transaction
             .validate()
             .expect("typed scene transaction must validate");
+        assert_eq!(transaction.sequence, 1);
         assert!(
             output.trace.is_empty(),
             "shipping profile must not format opcode trace"
         );
         let snapshot = provider.save(&ctx, &session_id).expect("save must succeed");
+        let saved_next_live_sequence = provider.sessions[&session_id.0].next_live_sequence;
+        assert!(saved_next_live_sequence > transaction.sequence);
         assert_eq!(snapshot.schema_version, SchemaVersion::new(7, 0, 0));
         assert_eq!(
             snapshot.family_sections[0].schema,
@@ -1367,6 +1377,10 @@ mod tests {
         assert_eq!(
             restored.state_revision, before,
             "canonical component mismatch: before={before_components:?} restored={restored_components:?}"
+        );
+        assert_eq!(
+            provider.sessions[&session_id.0].next_live_sequence,
+            saved_next_live_sequence
         );
         provider
             .shutdown(&ctx, &session_id)
