@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::mpsc::{sync_channel, Receiver, TryRecvError},
+    thread::{self, JoinHandle},
+};
 
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
@@ -2106,11 +2110,114 @@ pub trait LegacyRuntimeProvider: Send {
         resource_uri: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>, LegacyProviderError>;
+    fn begin_session_resource_read(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session: &LegacyRuntimeSessionId,
+        resource_uri: &str,
+        max_bytes: u64,
+    ) -> Result<LegacyResourceRead, LegacyProviderError>;
     fn shutdown(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
         session: &LegacyRuntimeSessionId,
     ) -> Result<LegacyShutdownReport, LegacyProviderError>;
+}
+
+/// One family-owned resource read running outside the fixed-tick caller.
+/// The result owns the original allocation and is consumed exactly once.
+pub struct LegacyResourceRead {
+    receiver: Receiver<Result<Vec<u8>, LegacyProviderError>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl LegacyResourceRead {
+    pub fn spawn(
+        job: impl FnOnce() -> Result<Vec<u8>, LegacyProviderError> + Send + 'static,
+    ) -> Result<Self, LegacyProviderError> {
+        let (sender, receiver) = sync_channel(1);
+        let worker = thread::Builder::new()
+            .name("astra-emu-resource-read".into())
+            .spawn(move || {
+                let _ = sender.send(job());
+            })
+            .map_err(|_| {
+                LegacyProviderError::invalid(
+                    "ASTRA_EMU_RESOURCE_WORKER_START",
+                    "family resource worker could not start",
+                )
+            })?;
+        Ok(Self {
+            receiver,
+            worker: Some(worker),
+        })
+    }
+
+    pub fn try_complete(&mut self) -> Result<Option<Vec<u8>>, LegacyProviderError> {
+        match self.receiver.try_recv() {
+            Ok(result) => {
+                self.join_worker()?;
+                result.map(Some)
+            }
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => {
+                self.join_worker()?;
+                Err(Self::worker_failed())
+            }
+        }
+    }
+
+    pub fn complete(&mut self) -> Result<Vec<u8>, LegacyProviderError> {
+        let result = self.receiver.recv().map_err(|_| Self::worker_failed())?;
+        self.join_worker()?;
+        result
+    }
+
+    fn join_worker(&mut self) -> Result<(), LegacyProviderError> {
+        let worker = self.worker.take().ok_or_else(Self::worker_failed)?;
+        worker.join().map_err(|_| Self::worker_failed())
+    }
+
+    fn worker_failed() -> LegacyProviderError {
+        LegacyProviderError::invalid(
+            "ASTRA_EMU_RESOURCE_WORKER_FAILED",
+            "family resource worker terminated without a result",
+        )
+    }
+}
+
+impl Drop for LegacyResourceRead {
+    fn drop(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod resource_read_tests {
+    use super::*;
+
+    #[test]
+    fn resource_worker_moves_the_original_allocation() {
+        let bytes = vec![1_u8, 2, 3, 4, 5];
+        let allocation = bytes.as_ptr() as usize;
+        let mut read = LegacyResourceRead::spawn(move || Ok(bytes)).unwrap();
+        let bytes = read.complete().unwrap();
+        assert_eq!(bytes.as_ptr() as usize, allocation);
+    }
+
+    #[test]
+    fn resource_worker_propagates_failure() {
+        let mut read = LegacyResourceRead::spawn(|| {
+            Err(LegacyProviderError::invalid(
+                "TEST_RESOURCE_FAILURE",
+                "resource failed",
+            ))
+        })
+        .unwrap();
+        assert_eq!(read.complete().unwrap_err().code(), "TEST_RESOURCE_FAILURE");
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

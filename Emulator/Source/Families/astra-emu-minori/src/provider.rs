@@ -5,13 +5,13 @@ use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyBlendMode,
     LegacyControlTransaction, LegacyCoverageDelta, LegacyDrawV1, LegacyEphemeralText,
     LegacyFamilyPluginDescriptor, LegacyLiveOutput, LegacyOpenRequest, LegacyProbeReport,
-    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyRestoreReport,
-    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
-    LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection,
-    LegacyStepInput, LegacyStepOutput, LegacyTextLease, LegacyTextPresentationLeaseV1,
-    LegacyTextPresentationV1, LegacyTextRegionV1, LegacyTextureFormat, LegacyTextureResourceV1,
-    LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyWaitRequest,
-    LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead,
+    LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
+    LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope,
+    LegacySnapshotSection, LegacyStepInput, LegacyStepOutput, LegacyTextLease,
+    LegacyTextPresentationLeaseV1, LegacyTextPresentationV1, LegacyTextRegionV1,
+    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
+    LegacyVfsReader, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 
 use crate::{
@@ -747,6 +747,32 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         }
         self.vfs()?
             .read_file(&ctx.mount_set_id, resource_uri, max_bytes)
+    }
+
+    fn begin_session_resource_read(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session_id: &LegacyRuntimeSessionId,
+        resource_uri: &str,
+        max_bytes: u64,
+    ) -> Result<LegacyResourceRead, LegacyProviderError> {
+        ctx.validate()?;
+        let session = self
+            .sessions
+            .get(&session_id.0)
+            .ok_or_else(session_missing)?;
+        validate_session_binding(ctx, session)?;
+        if max_bytes == 0 || max_bytes > MAX_RESOURCE_BYTES || !resource_uri.starts_with("minori:/")
+        {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_BOUNDS",
+                "resource request is outside the session VFS or byte budget",
+            ));
+        }
+        let vfs = Arc::clone(self.vfs()?);
+        let mount_set_id = ctx.mount_set_id.clone();
+        let resource_uri = resource_uri.to_owned();
+        LegacyResourceRead::spawn(move || vfs.read_file(&mount_set_id, &resource_uri, max_bytes))
     }
 
     fn shutdown(

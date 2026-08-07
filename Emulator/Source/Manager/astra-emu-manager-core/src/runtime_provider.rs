@@ -12,8 +12,8 @@ use astra_emu_family_api::{
     LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction,
     LegacyDiagnostic, LegacyEphemeralText, LegacyEvent, LegacyInputEdge, LegacyLiveOutput,
     LegacyOpenRequest, LegacyPayload, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
-    LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode, LegacyRuntimeHostCtx,
-    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
+    LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode, LegacyResourceRead,
+    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
     LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacySnapshotEnvelope,
     LegacyStepBudget, LegacyStepInput, LegacyTextPresentationLeaseV1, LegacyTextureFormat,
     LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
@@ -1054,6 +1054,29 @@ impl AstraEmuRuntimeProvider {
         }
         self.family
             .read_session_resource(
+                &session.host_ctx,
+                &session.family_session_id,
+                resource_uri,
+                max_bytes,
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn begin_session_resource_read(
+        &mut self,
+        session_id: &GameRuntimeSessionId,
+        resource_uri: &str,
+        max_bytes: u64,
+    ) -> Result<LegacyResourceRead, String> {
+        let session = self
+            .sessions
+            .get(&session_id.0)
+            .ok_or_else(|| "ASTRA_EMU_SESSION_MISSING".to_owned())?;
+        if session.poisoned {
+            return Err("ASTRA_EMU_SESSION_POISONED".into());
+        }
+        self.family
+            .begin_session_resource_read(
                 &session.host_ctx,
                 &session.family_session_id,
                 resource_uri,

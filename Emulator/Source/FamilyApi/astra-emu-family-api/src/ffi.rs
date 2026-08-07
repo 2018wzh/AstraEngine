@@ -285,4 +285,12 @@ mod tests {
         assert_eq!(clone.as_slice().as_ptr(), allocation);
         assert_eq!(clone.as_slice(), &[1, 2, 3, 4, 5]);
     }
+
+    #[test]
+    fn owned_resource_bytes_cross_ffi_without_reallocation() {
+        let bytes = vec![1_u8, 2, 3, 4, 5];
+        let allocation = bytes.as_ptr();
+        let bytes = FfiOwnedBytes::new(bytes).into_bytes();
+        assert_eq!(bytes.as_ptr(), allocation);
+    }
 }

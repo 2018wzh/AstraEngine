@@ -291,8 +291,10 @@ impl DynamicFamilyLoader {
         }
         self.signature_verifier
             .verify_official_signature(&binary, &manifest)?;
-        let library = unsafe { Library::new(path.as_ref()) }
-            .map_err(|_| FamilyPluginLoadError::AbiLoad("library"))?;
+        let library = Arc::new(
+            unsafe { Library::new(path.as_ref()) }
+                .map_err(|_| FamilyPluginLoadError::AbiLoad("library"))?,
+        );
         let module = unsafe { root_module(&library)? };
         let descriptor: LegacyFamilyPluginDescriptor =
             native_result((module.descriptor())()).map_err(provider_error)?;
@@ -339,7 +341,7 @@ pub struct DynamicLegacyRuntimeProvider {
     host_token: String,
     sessions: BTreeMap<String, LegacyRuntimeHostCtx>,
     module: AstraLegacyFamilyModuleRef,
-    _library: Library,
+    _library: Arc<Library>,
 }
 
 impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
@@ -481,7 +483,40 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
                 "family resource exceeds the requested byte bound",
             ));
         }
-        Ok(bytes.bytes.as_slice().to_vec())
+        Ok(bytes.into_bytes())
+    }
+
+    fn begin_session_resource_read(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session: &LegacyRuntimeSessionId,
+        resource_uri: &str,
+        max_bytes: u64,
+    ) -> Result<LegacyResourceRead, LegacyProviderError> {
+        self.validate_session(ctx, session)?;
+        let module = self.module;
+        let _library = Arc::clone(&self._library);
+        let call = FfiResourceReadCall {
+            instance_id: self.instance_id.clone().into(),
+            ctx: ctx.clone().into(),
+            session_id: session.0.clone().into(),
+            resource_uri: resource_uri.into(),
+            max_bytes,
+        };
+        LegacyResourceRead::spawn(move || {
+            let _library = _library;
+            let bytes = match (module.read_session_resource())(call) {
+                RResult::ROk(bytes) => bytes,
+                RResult::RErr(error) => return Err(error.into()),
+            };
+            if bytes.bytes.len() as u64 > max_bytes {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_FFI_RESOURCE_BOUNDS",
+                    "family resource exceeds the requested byte bound",
+                ));
+            }
+            Ok(bytes.into_bytes())
+        })
     }
 }
 
@@ -1008,6 +1043,13 @@ mod tests {
                 },
             )
             .unwrap();
+        let mut resource = provider
+            .begin_session_resource_read(&ctx, &session, "default.ttf", 4 * 1024 * 1024)
+            .unwrap();
+        assert_eq!(
+            resource.complete().unwrap_err().code(),
+            "ASTRA_FVP_RESOURCE_READ"
+        );
         let mut output = None;
         for tick_index in 1..=4 {
             let step = provider

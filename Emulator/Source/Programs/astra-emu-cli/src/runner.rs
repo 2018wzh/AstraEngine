@@ -16,9 +16,10 @@ use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
     LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7,
-    LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1, LegacyRuntimeHostCtx,
-    LegacySceneResourceOperationV1, LegacyTextPresentationV1, LegacyTextRegionV1,
-    LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1, LegacyResourceRead,
+    LegacyRuntimeHostCtx, LegacySceneResourceOperationV1, LegacyTextPresentationV1,
+    LegacyTextRegionV1, LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1,
+    LegacyVideoMode,
 };
 use astra_emu_family_support::{
     verify_vfs, LegacyAudioPlaybackService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
@@ -1176,6 +1177,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     .await;
     let fixed_step = driver.fixed_step;
     let terminal_reached = driver.terminal;
+    let audio_resource_cleanup = driver.flush_pending_audio_commands().await;
     let perfetto_cleanup = driver.finish_perfetto().map(|_| ());
     let media_cleanup = driver.close_active_media().await;
     let audio_cleanup = std::mem::take(&mut driver.audio)
@@ -1201,6 +1203,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .map_err(|error| error.to_string());
     prepared.evidence.cleanup();
     let cleanup_errors = [
+        ("audio_resource", audio_resource_cleanup),
         ("perfetto", perfetto_cleanup),
         ("media", media_cleanup),
         ("audio", audio_cleanup),
@@ -4025,6 +4028,7 @@ struct RuntimeDriver<'a> {
     state_revision: u64,
     terminal: bool,
     audio: AudioExecutor,
+    pending_audio_commands: VecDeque<PendingAudioCommand>,
     video: Option<ActiveVideo>,
     pending_video_restore: Option<HeadlessVideoResumeV1>,
     movie_audio_sequence: u32,
@@ -4051,6 +4055,15 @@ struct RuntimeDriver<'a> {
     scene_full_resync_count: u64,
     last_step_resource_activity: bool,
     live_path_guards: LivePathGuardCounters,
+}
+
+enum PendingAudioCommand {
+    Ready(LegacyAudioCommandV1),
+    Resource {
+        command: LegacyAudioCommandV1,
+        read: Option<LegacyResourceRead>,
+        started: Option<Instant>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -4712,6 +4725,14 @@ async fn execute_sequence(
         Ok(())
     }
     .await;
+    let run_result = match (run_result, driver.flush_pending_audio_commands().await) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(resource)) => Err(resource),
+        (Err(error), Err(resource)) => Err(format!(
+            "ASTRA_EMU_HEADLESS_RUN_AND_AUDIO_RESOURCE_FAILED:{error};resource={resource}"
+        )),
+    };
     let perfetto_trace = driver.finish_perfetto()?;
     let audio_underflow_count = driver.audio.underflow_count()?;
     let media_cleanup = driver.close_active_media().await;
@@ -4901,6 +4922,7 @@ impl<'a> RuntimeDriver<'a> {
             } else {
                 AudioExecutor::Deterministic(HeadlessAudioExecutor::default())
             },
+            pending_audio_commands: VecDeque::new(),
             video: None,
             pending_video_restore: None,
             movie_audio_sequence: 0,
@@ -5129,6 +5151,67 @@ impl<'a> RuntimeDriver<'a> {
         self.step_traced("runtime.fixed_tick", true).await
     }
 
+    async fn drain_pending_audio_commands(&mut self, wait: bool) -> Result<(), String> {
+        while let Some(pending) = self.pending_audio_commands.pop_front() {
+            match pending {
+                PendingAudioCommand::Ready(command) => {
+                    let started = Instant::now();
+                    self.audio.execute(command, None, self.platform).await?;
+                    self.record_perfetto_phase("audio.queue", 8, started)?;
+                }
+                PendingAudioCommand::Resource {
+                    command,
+                    mut read,
+                    mut started,
+                } => {
+                    if read.is_none() {
+                        let resource_uri = match &command {
+                            LegacyAudioCommandV1::LoadResource { resource_uri, .. } => resource_uri,
+                            _ => return Err("ASTRA_EMU_AUDIO_RESOURCE_COMMAND_INVALID".into()),
+                        };
+                        started = Some(Instant::now());
+                        read = Some(self.runtime.begin_session_resource_read(
+                            &self.session_id,
+                            resource_uri,
+                            512 * 1024 * 1024,
+                        )?);
+                    }
+                    let mut active = read.expect("resource read was created");
+                    let bytes = if wait {
+                        Some(active.complete().map_err(|error| error.to_string())?)
+                    } else {
+                        active.try_complete().map_err(|error| error.to_string())?
+                    };
+                    let Some(bytes) = bytes else {
+                        self.pending_audio_commands
+                            .push_front(PendingAudioCommand::Resource {
+                                command,
+                                read: Some(active),
+                                started,
+                            });
+                        break;
+                    };
+                    self.record_perfetto_phase(
+                        "vfs.range_read",
+                        8,
+                        started
+                            .ok_or_else(|| "ASTRA_EMU_AUDIO_RESOURCE_START_MISSING".to_owned())?,
+                    )?;
+                    let queued = Instant::now();
+                    self.audio
+                        .execute(command, Some(bytes), self.platform)
+                        .await?;
+                    self.record_perfetto_phase("audio.queue", 8, queued)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn flush_pending_audio_commands(&mut self) -> Result<(), String> {
+        self.drain_pending_audio_commands(true).await
+    }
+
     async fn prewarm_step(&mut self) -> Result<(), String> {
         self.step_traced("runtime.prewarm_tick", false).await
     }
@@ -5163,6 +5246,7 @@ impl<'a> RuntimeDriver<'a> {
 
     async fn step_body(&mut self, step_started: Instant) -> Result<(), String> {
         self.last_step_resource_activity = false;
+        self.drain_pending_audio_commands(false).await?;
         let next_step = self
             .fixed_step
             .checked_add(1)
@@ -5349,10 +5433,22 @@ impl<'a> RuntimeDriver<'a> {
         }
         for command in live.audio_commands {
             let audio_started = Instant::now();
-            let decode = matches!(&command, RuntimeLiveAudioCommand::LoadResource { .. });
             let command = legacy_live_audio_command(command);
             if !self.audio_enabled {
                 command.validate().map_err(|error| error.to_string())?;
+            } else if self.audio.uses_resource_worker() {
+                if matches!(command, LegacyAudioCommandV1::LoadResource { .. }) {
+                    self.pending_audio_commands
+                        .push_back(PendingAudioCommand::Resource {
+                            command,
+                            read: None,
+                            started: None,
+                        });
+                } else {
+                    self.pending_audio_commands
+                        .push_back(PendingAudioCommand::Ready(command));
+                }
+                self.drain_pending_audio_commands(false).await?;
             } else {
                 let resource = match &command {
                     LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
@@ -5365,16 +5461,8 @@ impl<'a> RuntimeDriver<'a> {
                     _ => None,
                 };
                 self.audio.execute(command, resource, self.platform).await?;
+                self.record_perfetto_phase("audio.queue", 8, audio_started)?;
             }
-            self.record_perfetto_phase(
-                if decode {
-                    "audio.decode"
-                } else {
-                    "audio.queue"
-                },
-                8,
-                audio_started,
-            )?;
         }
         if !live.audio_cues.is_empty() {
             return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
@@ -6378,6 +6466,10 @@ struct AudioPumpTelemetry {
 }
 
 impl AudioExecutor {
+    fn uses_resource_worker(&self) -> bool {
+        matches!(self, Self::Worker(_))
+    }
+
     fn underflow_count(&self) -> Result<u64, String> {
         match self {
             Self::Deterministic(executor) => executor.underflow_count(),

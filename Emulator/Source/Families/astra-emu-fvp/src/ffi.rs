@@ -8,7 +8,7 @@ use abi_stable::{
     std_types::{ROption, RResult, RString},
 };
 use astra_emu_family_api::{
-    bulk_bytes_from_vec, ffi_result, native_result, validate_symbol, AstraLegacyFamilyModule,
+    ffi_result, native_result, validate_symbol, AstraLegacyFamilyModule,
     AstraLegacyFamilyModuleRef, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiLegacyHostServices,
     FfiLegacyResult, FfiOpenCall, FfiOwnedBytes, FfiProbeCall, FfiProbeReport,
     FfiProviderInstanceRequest, FfiResourceReadCall, FfiRestoreCall, FfiRestoreReport,
@@ -247,7 +247,7 @@ extern "C" fn read_session_resource(call: FfiResourceReadCall) -> FfiLegacyResul
                 call.resource_uri.as_str(),
                 call.max_bytes,
             )
-            .map(|bytes| FfiOwnedBytes::new(bulk_bytes_from_vec(bytes)))
+            .map(FfiOwnedBytes::new)
     })())
 }
 

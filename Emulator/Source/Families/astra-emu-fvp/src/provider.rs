@@ -33,7 +33,7 @@ pub struct FvpCaseImage {
 
 struct FvpSession {
     case_fingerprint: Hash256,
-    runtime: HostedFvpSession,
+    runtime: Arc<HostedFvpSession>,
     last_step: u64,
     seed: u64,
     fixed_delta_ns: u64,
@@ -387,7 +387,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         };
         let session = FvpSession {
             case_fingerprint: request.case_fingerprint,
-            runtime,
+            runtime: Arc::new(runtime),
             last_step: 0,
             seed: request.session_seed,
             fixed_delta_ns: request.fixed_delta_ns,
@@ -941,6 +941,49 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             ));
         }
         Ok(bytes)
+    }
+
+    fn begin_session_resource_read(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session_id: &LegacyRuntimeSessionId,
+        resource_uri: &str,
+        max_bytes: u64,
+    ) -> Result<LegacyResourceRead, LegacyProviderError> {
+        ctx.validate()?;
+        if max_bytes == 0 || max_bytes > MAX_FILE_BYTES as u64 {
+            return Err(invalid(
+                "ASTRA_FVP_RESOURCE_READ_BOUNDS",
+                "session resource read limit is outside supported bounds",
+            ));
+        }
+        let resource_uri = normalize_vfs_path(resource_uri)
+            .map_err(|_| invalid("ASTRA_FVP_RESOURCE_URI", "resource URI is invalid"))?;
+        let session = self
+            .sessions
+            .get(&session_id.0)
+            .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
+        if session.poisoned {
+            return Err(invalid(
+                "ASTRA_FVP_SESSION_POISONED",
+                "poisoned session cannot expose resources",
+            ));
+        }
+        let runtime = Arc::clone(&session.runtime);
+        LegacyResourceRead::spawn(move || {
+            let bytes = runtime
+                .read_resource(resource_uri, max_bytes as usize)
+                .map_err(|_| {
+                    invalid("ASTRA_FVP_RESOURCE_READ", "session resource is unavailable")
+                })?;
+            if bytes.len() as u64 > max_bytes {
+                return Err(invalid(
+                    "ASTRA_FVP_RESOURCE_READ_BOUNDS",
+                    "session resource exceeds the requested byte limit",
+                ));
+            }
+            Ok(bytes)
+        })
     }
 }
 

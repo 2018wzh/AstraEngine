@@ -43,22 +43,22 @@ impl From<FfiHash256> for Hash256 {
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub struct FfiOwnedBytes {
-    pub bytes: FfiBulkBytes,
+    pub bytes: RVec<u8>,
 }
 
 impl FfiOwnedBytes {
     pub fn empty() -> Self {
+        Self { bytes: RVec::new() }
+    }
+
+    pub fn new(bytes: Vec<u8>) -> Self {
         Self {
-            bytes: RArc::new(RVec::new()),
+            bytes: bytes.into(),
         }
     }
 
-    pub fn new(bytes: FfiBulkBytes) -> Self {
-        Self { bytes }
-    }
-
-    pub fn into_bytes(self) -> FfiBulkBytes {
-        self.bytes
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes.into_vec()
     }
 }
 
