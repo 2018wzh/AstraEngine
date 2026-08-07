@@ -985,7 +985,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let mut windowed_checkpoints = Vec::<WindowedE2CheckpointV1>::new();
     let mut external_input_rejected = 0_u64;
     let fixed_step_duration = std::time::Duration::from_nanos(probe.runtime.fixed_delta_ns);
-    let mut windowed_diagnostics = Vec::new();
+    let windowed_diagnostics = Vec::new();
     if let Some(input) = native_input.as_ref() {
         let due = consume_native_inputs_due(
             &mut driver,
@@ -1003,37 +1003,42 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             }
         }
     }
-    // The first native fixed step creates the initial retained GPU resources.
-    // Run it as an explicit startup transaction so its one-time resource
-    // creation cannot turn into artificial steady-state catch-up debt. The
-    // duration remains observable and is included in the Windowed E2 report;
-    // an over-budget startup is a diagnostic, never a silently dropped tick.
+    // Build the initial retained resource set before starting the absolute-
+    // deadline scheduler or accepting gameplay input. Three quiet steps after
+    // the last resource mutation cover delayed startup transactions without a
+    // fixed family-specific tick count. A startup that never converges is a
+    // blocking error rather than an unbounded warmup or a hidden frame drop.
     if !native_shutdown_requested && !driver.terminal {
-        let startup_started = Instant::now();
-        driver.step().await?;
-        let startup_duration = startup_started.elapsed();
-        let startup_duration_ns = u64::try_from(startup_duration.as_nanos()).unwrap_or(u64::MAX);
-        tracing::info!(
-            event = "astra.emu.native_startup_tick",
-            fixed_step = driver.fixed_step,
-            duration_ns = startup_duration_ns,
-            budget_ns = probe.runtime.fixed_delta_ns,
-            over_budget = startup_duration > fixed_step_duration,
-            "completed explicit native startup fixed step"
-        );
-        if startup_duration > fixed_step_duration {
-            const DIAGNOSTIC: &str = "ASTRA_NATIVE_STARTUP_TICK_OVER_BUDGET";
-            tracing::warn!(
-                event = "astra.emu.native_startup_tick_over_budget",
-                diagnostic_code = DIAGNOSTIC,
-                duration_ns = startup_duration_ns,
-                budget_ns = probe.runtime.fixed_delta_ns,
-                "initial retained-resource transaction exceeded the fixed-step budget"
-            );
-            if windowed_e2 {
-                windowed_diagnostics.push(DIAGNOSTIC.to_owned());
+        const REQUIRED_STABLE_PREWARM_STEPS: u8 = 3;
+        const MAX_PREWARM_STEPS: u64 = 120;
+        let prewarm_started = Instant::now();
+        let mut prewarm_steps = 0_u64;
+        let mut resource_activity_seen = false;
+        let mut stable_steps = 0_u8;
+        while !driver.terminal && stable_steps < REQUIRED_STABLE_PREWARM_STEPS {
+            if prewarm_steps == MAX_PREWARM_STEPS {
+                return Err("ASTRA_EMU_NATIVE_PREWARM_DID_NOT_CONVERGE".into());
+            }
+            driver.prewarm_step().await?;
+            prewarm_steps += 1;
+            if driver.last_step_resource_activity {
+                resource_activity_seen = true;
+                stable_steps = 0;
+            } else if resource_activity_seen {
+                stable_steps += 1;
             }
         }
+        if !driver.terminal && !resource_activity_seen {
+            return Err("ASTRA_EMU_NATIVE_PREWARM_RESOURCE_ACTIVITY_MISSING".into());
+        }
+        tracing::info!(
+            event = "astra.emu.native_prewarm_completed",
+            fixed_step = driver.fixed_step,
+            prewarm_steps,
+            duration_ns = u64::try_from(prewarm_started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            stable_steps,
+            "completed native retained-resource prewarm"
+        );
         if let Some(input) = native_input.as_ref() {
             let input_due = consume_native_inputs_due(
                 &mut driver,
@@ -4044,6 +4049,7 @@ struct RuntimeDriver<'a> {
     capture_performance_samples: bool,
     performance_memory_after_warmup: Option<astra_observability::ProcessMemorySample>,
     scene_full_resync_count: u64,
+    last_step_resource_activity: bool,
     live_path_guards: LivePathGuardCounters,
 }
 
@@ -4922,6 +4928,7 @@ impl<'a> RuntimeDriver<'a> {
             capture_performance_samples: config.capture_performance_samples,
             performance_memory_after_warmup: None,
             scene_full_resync_count: 0,
+            last_step_resource_activity: false,
             live_path_guards: LivePathGuardCounters::default(),
         };
         if let Some(resume) = config.resume {
@@ -5119,12 +5126,33 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     async fn step(&mut self) -> Result<(), String> {
+        self.step_traced("runtime.fixed_tick", true).await
+    }
+
+    async fn prewarm_step(&mut self) -> Result<(), String> {
+        self.step_traced("runtime.prewarm_tick", false).await
+    }
+
+    async fn step_traced(
+        &mut self,
+        trace_name: &'static str,
+        deadline_budget_active: bool,
+    ) -> Result<(), String> {
         let step_started = Instant::now();
-        self.begin_perfetto_phase("runtime.fixed_tick", 0, step_started)?;
+        self.begin_perfetto_phase(trace_name, 0, step_started)?;
         let step_result = self.step_body(step_started).await;
-        let trace_result = self.end_perfetto_phase("runtime.fixed_tick", 0);
+        let trace_result = self.end_perfetto_phase(trace_name, 0);
         match (step_result, trace_result) {
-            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Ok(())) if deadline_budget_active => {
+                let step_duration_ns = elapsed_ns(step_started)?;
+                self.record_perfetto_counter(
+                    "deadline_debt_ns",
+                    step_duration_ns.saturating_sub(self.delta_ns),
+                )
+            }
+            (Ok(()), Ok(())) => {
+                self.record_perfetto_counter("startup.prewarm_tick_ns", elapsed_ns(step_started)?)
+            }
             (Err(error), Ok(())) => Err(error),
             (Ok(()), Err(error)) => Err(error),
             (Err(step_error), Err(trace_error)) => Err(format!(
@@ -5134,6 +5162,7 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     async fn step_body(&mut self, step_started: Instant) -> Result<(), String> {
+        self.last_step_resource_activity = false;
         let next_step = self
             .fixed_step
             .checked_add(1)
@@ -5425,6 +5454,9 @@ impl<'a> RuntimeDriver<'a> {
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.end_perfetto_phase("runtime.live_output_routing", 2)?;
         if let Some(metrics) = self.pending_scene_metrics.take() {
+            self.last_step_resource_activity = metrics.resource_operations != 0
+                || metrics.create_bytes != 0
+                || metrics.update_bytes != 0;
             self.record_perfetto_counter("scene.resource_operations", metrics.resource_operations)?;
             self.record_perfetto_counter("allocation_bytes", metrics.create_bytes)?;
             self.record_perfetto_counter("upload_bytes", metrics.update_bytes)?;
@@ -5510,11 +5542,7 @@ impl<'a> RuntimeDriver<'a> {
         }
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
-        let step_duration_ns = elapsed_ns(step_started)?;
-        self.record_perfetto_counter(
-            "deadline_debt_ns",
-            step_duration_ns.saturating_sub(self.delta_ns),
-        )
+        Ok(())
     }
 
     async fn present_scene_sync(&mut self, mut scene: SceneFrame) -> Result<(), String> {
