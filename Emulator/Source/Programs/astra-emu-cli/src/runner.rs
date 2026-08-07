@@ -5131,6 +5131,19 @@ impl<'a> RuntimeDriver<'a> {
         self.poll_native_scene_present()?;
         let step_started = Instant::now();
         self.begin_perfetto_phase("runtime.fixed_tick", 0, step_started)?;
+        let step_result = self.step_body(step_started).await;
+        let trace_result = self.end_perfetto_phase("runtime.fixed_tick", 0);
+        match (step_result, trace_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Err(step_error), Err(trace_error)) => Err(format!(
+                "ASTRA_EMU_NATIVE_STEP_AND_TRACE_FAILED:{step_error};{trace_error}"
+            )),
+        }
+    }
+
+    async fn step_body(&mut self, step_started: Instant) -> Result<(), String> {
         let next_step = self
             .fixed_step
             .checked_add(1)
@@ -5453,6 +5466,10 @@ impl<'a> RuntimeDriver<'a> {
         }
         let presentation_changed = rendered || video_changed;
         let sample_due = self.fixed_step.is_multiple_of(self.frame_sample_interval);
+        self.record_perfetto_counter(
+            "gpu.present_queue_depth",
+            self.pending_scene_presents.len() as u64,
+        )?;
         if sample_due
             && self.gpu_scene.is_some()
             && (self.pending_scene_frame.is_some()
@@ -5540,8 +5557,7 @@ impl<'a> RuntimeDriver<'a> {
         self.record_perfetto_counter(
             "deadline_debt_ns",
             step_duration_ns.saturating_sub(self.delta_ns),
-        )?;
-        self.end_perfetto_phase("runtime.fixed_tick", 0)
+        )
     }
 
     fn poll_native_scene_present(&mut self) -> Result<(), String> {
