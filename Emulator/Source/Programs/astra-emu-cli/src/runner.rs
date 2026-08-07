@@ -46,14 +46,15 @@ use astra_media_core::{
     SceneCommand, TextureFrame,
 };
 use astra_observability::{
-    sample_process_memory, PerfettoTraceConfig, PerfettoTraceSummary, PerfettoTraceWriter,
+    sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceSummary,
+    PerfettoTraceWriter,
 };
 use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, GpuAdapterPolicy,
     GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
     HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
-    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, SurfaceHandle, SurfaceRequest,
-    WindowRequest,
+    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
+    SurfaceHandle, SurfaceRequest, WindowRequest,
 };
 #[cfg(windows)]
 use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
@@ -1178,6 +1179,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let fixed_step = driver.fixed_step;
     let terminal_reached = driver.terminal;
     let audio_resource_cleanup = driver.flush_pending_audio_commands().await;
+    let scene_cleanup = driver.drain_pending_scene_presents().await;
     let perfetto_cleanup = driver.finish_perfetto().map(|_| ());
     let media_cleanup = driver.close_active_media().await;
     let audio_cleanup = std::mem::take(&mut driver.audio)
@@ -1204,6 +1206,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     prepared.evidence.cleanup();
     let cleanup_errors = [
         ("audio_resource", audio_resource_cleanup),
+        ("scene", scene_cleanup),
         ("perfetto", perfetto_cleanup),
         ("media", media_cleanup),
         ("audio", audio_cleanup),
@@ -4025,6 +4028,7 @@ struct RuntimeDriver<'a> {
     base_frame: Option<(u32, u32, Vec<u8>)>,
     latest_frame: Option<(u32, u32, Hash256)>,
     present_sequence: u64,
+    pending_scene_presents: VecDeque<PendingScenePresent>,
     state_revision: u64,
     terminal: bool,
     audio: AudioExecutor,
@@ -4064,6 +4068,12 @@ enum PendingAudioCommand {
         read: Option<LegacyResourceRead>,
         started: Option<Instant>,
     },
+}
+
+struct PendingScenePresent {
+    sequence: u64,
+    submitted: Instant,
+    receipt: ScenePresentReceipt,
 }
 
 #[derive(Clone, Copy)]
@@ -4175,6 +4185,30 @@ impl NativePerfettoCapture {
                 name,
                 elapsed_ns(self.started)?,
                 value,
+            )
+            .map_err(|error| error.to_string())?;
+        self.recorded = self
+            .recorded
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_PERFETTO_EVENT_OVERFLOW".to_owned())?;
+        Ok(())
+    }
+
+    fn flow(
+        &mut self,
+        name: &'static str,
+        track: u32,
+        flow_id: u64,
+        phase: PerfettoFlowPhase,
+    ) -> Result<(), String> {
+        self.writer
+            .flow(
+                perfetto_domain(name),
+                name,
+                track,
+                flow_id,
+                elapsed_ns(self.started)?,
+                phase,
             )
             .map_err(|error| error.to_string())?;
         self.recorded = self
@@ -4733,6 +4767,14 @@ async fn execute_sequence(
             "ASTRA_EMU_HEADLESS_RUN_AND_AUDIO_RESOURCE_FAILED:{error};resource={resource}"
         )),
     };
+    let run_result = match (run_result, driver.drain_pending_scene_presents().await) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(scene)) => Err(scene),
+        (Err(error), Err(scene)) => Err(format!(
+            "ASTRA_EMU_HEADLESS_RUN_AND_SCENE_PRESENT_FAILED:{error};scene={scene}"
+        )),
+    };
     let perfetto_trace = driver.finish_perfetto()?;
     let audio_underflow_count = driver.audio.underflow_count()?;
     let media_cleanup = driver.close_active_media().await;
@@ -4815,6 +4857,19 @@ impl<'a> RuntimeDriver<'a> {
     fn record_perfetto_counter(&mut self, name: &'static str, value: u64) -> Result<(), String> {
         if let Some(perfetto) = self.perfetto.as_mut() {
             perfetto.counter(name, value)?;
+        }
+        Ok(())
+    }
+
+    fn record_perfetto_flow(
+        &mut self,
+        name: &'static str,
+        track: u32,
+        flow_id: u64,
+        phase: PerfettoFlowPhase,
+    ) -> Result<(), String> {
+        if let Some(perfetto) = self.perfetto.as_mut() {
+            perfetto.flow(name, track, flow_id, phase)?;
         }
         Ok(())
     }
@@ -4912,6 +4967,7 @@ impl<'a> RuntimeDriver<'a> {
             base_frame: None,
             latest_frame: None,
             present_sequence: 0,
+            pending_scene_presents: VecDeque::new(),
             state_revision: 0,
             terminal: false,
             audio: if config.background_audio {
@@ -5264,6 +5320,7 @@ impl<'a> RuntimeDriver<'a> {
 
     async fn step_body(&mut self, step_started: Instant) -> Result<(), String> {
         self.last_step_resource_activity = false;
+        self.poll_pending_scene_presents()?;
         self.drain_pending_audio_commands(false).await?;
         let next_step = self
             .fixed_step
@@ -5604,7 +5661,7 @@ impl<'a> RuntimeDriver<'a> {
         {
             let mut submitted = 0u8;
             if let Some(scene) = self.pending_scene_frame.take() {
-                self.present_scene_sync(scene).await?;
+                self.submit_scene(scene)?;
                 self.visual_dirty = false;
                 submitted = 1;
             }
@@ -5614,7 +5671,7 @@ impl<'a> RuntimeDriver<'a> {
                     .as_ref()
                     .expect("checked GPU presentation path")
                     .draw_scene()?;
-                self.present_scene_sync(scene).await?;
+                self.submit_scene(scene)?;
                 submitted += 1;
             }
         } else if sample_due && (self.visual_dirty || video_changed) {
@@ -5651,26 +5708,88 @@ impl<'a> RuntimeDriver<'a> {
         Ok(())
     }
 
-    async fn present_scene_sync(&mut self, mut scene: SceneFrame) -> Result<(), String> {
-        let present_started = Instant::now();
+    fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {
+        let submitted = Instant::now();
         self.present_sequence = self
             .present_sequence
             .checked_add(1)
             .ok_or_else(|| "ASTRA_EMU_NATIVE_PRESENT_SEQUENCE_OVERFLOW".to_owned())?;
         scene.sequence = self.present_sequence;
-        self.platform
-            .present_scene(self.surface, scene)
-            .await
+        let receipt = self
+            .platform
+            .submit_scene(self.surface, scene)
             .map_err(|error| error.to_string())?;
-        if self.capture_performance_samples
-            && self.present_sequence == PERFORMANCE_WARMUP_PRESENTATIONS as u64
-        {
-            self.performance_memory_after_warmup =
-                Some(sample_process_memory().map_err(|error| error.to_string())?);
+        self.record_perfetto_phase("gpu.submit", 5, submitted)?;
+        self.record_perfetto_flow(
+            "gpu.present",
+            5,
+            self.present_sequence,
+            PerfettoFlowPhase::Start,
+        )?;
+        self.pending_scene_presents.push_back(PendingScenePresent {
+            sequence: self.present_sequence,
+            submitted,
+            receipt,
+        });
+        self.record_perfetto_counter(
+            "gpu.present_queue_depth",
+            u64::try_from(self.pending_scene_presents.len())
+                .map_err(|_| "ASTRA_EMU_NATIVE_PRESENT_QUEUE_DEPTH_OVERFLOW".to_owned())?,
+        )?;
+        Ok(())
+    }
+
+    fn poll_pending_scene_presents(&mut self) -> Result<(), String> {
+        let mut queue_changed = false;
+        loop {
+            let complete = match self.pending_scene_presents.front_mut() {
+                Some(pending) => pending
+                    .receipt
+                    .try_complete()
+                    .map_err(|error| error.to_string())?,
+                None => false,
+            };
+            if !complete {
+                break;
+            }
+            let pending = self
+                .pending_scene_presents
+                .pop_front()
+                .expect("front receipt was just observed");
+            self.present_timings_ns.push(elapsed_ns(pending.submitted)?);
+            self.record_perfetto_flow("gpu.present", 5, pending.sequence, PerfettoFlowPhase::End)?;
+            if self.capture_performance_samples
+                && pending.sequence == PERFORMANCE_WARMUP_PRESENTATIONS as u64
+            {
+                self.performance_memory_after_warmup =
+                    Some(sample_process_memory().map_err(|error| error.to_string())?);
+            }
+            queue_changed = true;
         }
-        self.present_timings_ns.push(elapsed_ns(present_started)?);
-        self.record_perfetto_phase("gpu.submit", 5, present_started)?;
-        self.record_perfetto_phase("gpu.present", 5, present_started)
+        if queue_changed {
+            self.record_perfetto_counter(
+                "gpu.present_queue_depth",
+                u64::try_from(self.pending_scene_presents.len())
+                    .map_err(|_| "ASTRA_EMU_NATIVE_PRESENT_QUEUE_DEPTH_OVERFLOW".to_owned())?,
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn drain_pending_scene_presents(&mut self) -> Result<(), String> {
+        let mut first_error = None;
+        while let Some(pending) = self.pending_scene_presents.pop_front() {
+            if let Err(error) = pending.receipt.complete().await {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+            self.present_timings_ns.push(elapsed_ns(pending.submitted)?);
+            self.record_perfetto_flow("gpu.present", 5, pending.sequence, PerfettoFlowPhase::End)?;
+        }
+        self.record_perfetto_counter("gpu.present_queue_depth", 0)?;
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     fn queue_scene_commit_live(
