@@ -1063,88 +1063,13 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         FixedDeadlineScheduler::after_completed_step(fixed_step_duration, driver.fixed_step)
             .map_err(str::to_owned)?;
     let mut scheduler = scheduler;
-    let run_result = loop {
-        if native_shutdown_requested {
-            break Ok(());
-        }
-        if suspended {
-            let event = match host.events.recv().await {
-                Ok(event) => event,
-                Err(error) => break Err(error.to_string()),
-            };
-            match process_native_event(
-                &mut driver,
-                window,
-                &mut viewport,
-                event.kind,
-                windowed_e2,
-                &mut external_input_rejected,
-            ) {
-                Ok(NativeEventAction::Continue) => {}
-                Ok(NativeEventAction::Suspend(value)) => {
-                    driver.audio.set_suspended(value)?;
-                    suspended = value;
-                }
-                Ok(NativeEventAction::Close) => break Ok(()),
-                Err(error) => break Err(error),
+    let run_result: Result<(), String> = async {
+        loop {
+            if native_shutdown_requested {
+                break Ok(());
             }
-            continue;
-        }
-        let deadline =
-            tokio::time::sleep_until(tokio::time::Instant::from_std(scheduler.next_deadline()));
-        tokio::pin!(deadline);
-        tokio::select! {
-            // A burst of native window/user events must not starve an already
-            // due fixed tick.  The default unbiased selection can repeatedly
-            // choose the ready event branch while the deadline is ready too,
-            // turning a bounded event burst into artificial fixed-step debt.
-            // Keep the absolute-deadline branch first and drain events only
-            // when no tick is due.
-            biased;
-            _ = &mut deadline => {
-                let due = scheduler.consume_due(Instant::now()).map_err(|debt| {
-                    format!(
-                        "ASTRA_FIXED_DEADLINE_DEBT:{}:{}",
-                        debt.overdue_steps,
-                        debt.lateness.as_nanos()
-                    )
-                })?;
-                let Some(due) = due else { continue };
-                for _ in 0..due.steps {
-                    driver.step().await?;
-                    if driver.terminal {
-                        break;
-                    }
-                    if let Some(input) = native_input.as_ref() {
-                        let input_due = consume_native_inputs_due(
-                            &mut driver,
-                            &input.messages,
-                            &mut native_input_cursor,
-                            windowed_e2,
-                        )?;
-                        native_shutdown_requested = input_due.shutdown_requested;
-                        if windowed_e2 {
-                            for checkpoint_id in input_due.checkpoints {
-                                windowed_checkpoints.push(
-                                    capture_windowed_checkpoint(
-                                        &driver,
-                                        &host.client,
-                                        surface,
-                                        checkpoint_id,
-                                    )
-                                    .await?,
-                                );
-                            }
-                        }
-                    }
-                    if launch.max_fixed_steps.is_some_and(|limit| driver.fixed_step >= limit) {
-                        native_shutdown_requested = true;
-                        break;
-                    }
-                }
-            }
-            event = host.events.recv() => {
-                let event = match event {
+            if suspended {
+                let event = match host.events.recv().await {
                     Ok(event) => event,
                     Err(error) => break Err(error.to_string()),
                 };
@@ -1164,9 +1089,87 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                     Ok(NativeEventAction::Close) => break Ok(()),
                     Err(error) => break Err(error),
                 }
+                continue;
+            }
+            let deadline =
+                tokio::time::sleep_until(tokio::time::Instant::from_std(scheduler.next_deadline()));
+            tokio::pin!(deadline);
+            tokio::select! {
+                // A burst of native window/user events must not starve an already
+                // due fixed tick.  The default unbiased selection can repeatedly
+                // choose the ready event branch while the deadline is ready too,
+                // turning a bounded event burst into artificial fixed-step debt.
+                // Keep the absolute-deadline branch first and drain events only
+                // when no tick is due.
+                biased;
+                _ = &mut deadline => {
+                    let due = scheduler.consume_due(Instant::now()).map_err(|debt| {
+                        format!(
+                            "ASTRA_FIXED_DEADLINE_DEBT:{}:{}",
+                            debt.overdue_steps,
+                            debt.lateness.as_nanos()
+                        )
+                    })?;
+                    let Some(due) = due else { continue };
+                    for _ in 0..due.steps {
+                        driver.step().await?;
+                        if driver.terminal {
+                            break;
+                        }
+                        if let Some(input) = native_input.as_ref() {
+                            let input_due = consume_native_inputs_due(
+                                &mut driver,
+                                &input.messages,
+                                &mut native_input_cursor,
+                                windowed_e2,
+                            )?;
+                            native_shutdown_requested = input_due.shutdown_requested;
+                            if windowed_e2 {
+                                for checkpoint_id in input_due.checkpoints {
+                                    windowed_checkpoints.push(
+                                        capture_windowed_checkpoint(
+                                            &driver,
+                                            &host.client,
+                                            surface,
+                                            checkpoint_id,
+                                        )
+                                        .await?,
+                                    );
+                                }
+                            }
+                        }
+                        if launch.max_fixed_steps.is_some_and(|limit| driver.fixed_step >= limit) {
+                            native_shutdown_requested = true;
+                            break;
+                        }
+                    }
+                }
+                event = host.events.recv() => {
+                    let event = match event {
+                        Ok(event) => event,
+                        Err(error) => break Err(error.to_string()),
+                    };
+                    match process_native_event(
+                        &mut driver,
+                        window,
+                        &mut viewport,
+                        event.kind,
+                        windowed_e2,
+                        &mut external_input_rejected,
+                    ) {
+                        Ok(NativeEventAction::Continue) => {}
+                        Ok(NativeEventAction::Suspend(value)) => {
+                            driver.audio.set_suspended(value)?;
+                            suspended = value;
+                        }
+                        Ok(NativeEventAction::Close) => break Ok(()),
+                        Err(error) => break Err(error),
+                    }
+                }
             }
         }
-    };
+    }
+    .await;
     let fixed_step = driver.fixed_step;
     let terminal_reached = driver.terminal;
     let perfetto_cleanup = driver.finish_perfetto().map(|_| ());
