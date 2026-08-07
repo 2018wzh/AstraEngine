@@ -869,7 +869,15 @@ mod windows {
                     );
                 }
                 processed += 1;
-                if operation == "surface.present_scene" || processed == MAX_COMMANDS_PER_TURN {
+                // Every successful client submission already wakes this event
+                // loop through `command_wake`. Yield after presentation so OS
+                // messages run, but do not enqueue an additional empty wake
+                // per frame. Only a deliberately truncated command batch must
+                // reschedule itself because those commands are already queued.
+                if operation == "surface.present_scene" {
+                    break;
+                }
+                if processed == MAX_COMMANDS_PER_TURN {
                     if operation != "host.shutdown" && self.event_loop_proxy.send_event(()).is_err()
                     {
                         tracing::error!(
