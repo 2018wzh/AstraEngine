@@ -5169,18 +5169,35 @@ impl<'a> RuntimeDriver<'a> {
                             LegacyAudioCommandV1::LoadResource { resource_uri, .. } => resource_uri,
                             _ => return Err("ASTRA_EMU_AUDIO_RESOURCE_COMMAND_INVALID".into()),
                         };
-                        started = Some(Instant::now());
+                        let read_started = Instant::now();
                         read = Some(self.runtime.begin_session_resource_read(
                             &self.session_id,
                             resource_uri,
                             512 * 1024 * 1024,
                         )?);
+                        self.begin_perfetto_phase("vfs.range_read", 8, read_started)?;
+                        started = Some(read_started);
                     }
                     let mut active = read.expect("resource read was created");
-                    let bytes = if wait {
-                        Some(active.complete().map_err(|error| error.to_string())?)
+                    let completion = if wait {
+                        active
+                            .complete()
+                            .map(Some)
+                            .map_err(|error| error.to_string())
                     } else {
-                        active.try_complete().map_err(|error| error.to_string())?
+                        active.try_complete().map_err(|error| error.to_string())
+                    };
+                    let bytes = match completion {
+                        Ok(bytes) => bytes,
+                        Err(error) => {
+                            let trace = self.end_perfetto_phase("vfs.range_read", 8);
+                            return match trace {
+                                Ok(()) => Err(error),
+                                Err(trace) => Err(format!(
+                                    "ASTRA_EMU_AUDIO_RESOURCE_AND_TRACE_FAILED:{error};trace={trace}"
+                                )),
+                            };
+                        }
                     };
                     let Some(bytes) = bytes else {
                         self.pending_audio_commands
@@ -5191,12 +5208,8 @@ impl<'a> RuntimeDriver<'a> {
                             });
                         break;
                     };
-                    self.record_perfetto_phase(
-                        "vfs.range_read",
-                        8,
-                        started
-                            .ok_or_else(|| "ASTRA_EMU_AUDIO_RESOURCE_START_MISSING".to_owned())?,
-                    )?;
+                    started.ok_or_else(|| "ASTRA_EMU_AUDIO_RESOURCE_START_MISSING".to_owned())?;
+                    self.end_perfetto_phase("vfs.range_read", 8)?;
                     let queued = Instant::now();
                     self.audio
                         .execute(command, Some(bytes), self.platform)
