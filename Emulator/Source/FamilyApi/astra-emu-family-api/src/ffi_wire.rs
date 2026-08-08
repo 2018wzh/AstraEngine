@@ -4,7 +4,7 @@ use abi_stable::{
     std_types::{ROption, RString, RVec},
     StableAbi,
 };
-use astra_byte_source::FfiOwnedByteBuffer;
+use astra_byte_source::{FfiOwnedByteBuffer, FfiOwnedF32Buffer, FfiOwnedI16Buffer};
 use astra_core::{Hash256, SchemaVersion};
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
     LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepBudget,
     LegacyStepInput, LegacyStepOutput, LegacyTextLease, LegacyTextPresentationLeaseV1,
     LegacyTextureFormat, LegacyTraceEntry, LegacyVertexV1, LegacyVfsListedFile,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
+    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
 };
 
 #[repr(C)]
@@ -838,6 +838,13 @@ pub enum FfiLiveBlendMode {
     Screen,
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveTextureFilter {
+    Nearest,
+    Linear,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub struct FfiLiveScissor {
@@ -853,6 +860,7 @@ pub struct FfiLiveDraw {
     pub texture_id: u32,
     pub vertices: [FfiLiveVertex; 4],
     pub blend: FfiLiveBlendMode,
+    pub texture_filter: FfiLiveTextureFilter,
     pub scissor: ROption<FfiLiveScissor>,
 }
 
@@ -894,9 +902,17 @@ pub struct FfiLiveSceneTransaction {
     pub sequence: u64,
     pub width: u32,
     pub height: u32,
+    pub compositing: FfiLiveSceneCompositing,
     pub resources: RVec<FfiLiveSceneResourceOperation>,
     pub draws: RVec<FfiLiveDraw>,
     pub reset_resources: bool,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub enum FfiLiveSceneCompositing {
+    LinearSrgb,
+    EncodedSrgb,
 }
 
 #[repr(C)]
@@ -922,14 +938,14 @@ pub struct FfiLiveResourceScene {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub enum FfiLivePcmBuffer {
-    I16(RVec<i16>),
-    F32(RVec<f32>),
+    I16(FfiOwnedI16Buffer),
+    F32(FfiOwnedF32Buffer),
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiLiveAudioPacket {
     pub sequence: u64,
     pub stream_id: u32,
@@ -956,7 +972,7 @@ pub enum FfiLiveAudioSampleFormat {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub enum FfiLiveAudioCommand {
     LoadResource {
         sequence: u64,
@@ -974,12 +990,12 @@ pub enum FfiLiveAudioCommand {
     SubmitI16 {
         sequence: u64,
         stream_id: u32,
-        samples: RVec<i16>,
+        samples: FfiOwnedI16Buffer,
     },
     SubmitF32 {
         sequence: u64,
         stream_id: u32,
-        samples: RVec<f32>,
+        samples: FfiOwnedF32Buffer,
     },
     Play {
         sequence: u64,
@@ -1126,6 +1142,10 @@ fn ffi_live_draw(value: LegacyDrawV1) -> FfiLiveDraw {
             LegacyBlendMode::Multiply => FfiLiveBlendMode::Multiply,
             LegacyBlendMode::Screen => FfiLiveBlendMode::Screen,
         },
+        texture_filter: match value.texture_filter {
+            crate::LegacyTextureFilter::Nearest => FfiLiveTextureFilter::Nearest,
+            crate::LegacyTextureFilter::Linear => FfiLiveTextureFilter::Linear,
+        },
         scissor: value
             .scissor
             .map(|value| FfiLiveScissor {
@@ -1153,6 +1173,10 @@ fn legacy_live_draw(value: FfiLiveDraw) -> LegacyDrawV1 {
             FfiLiveBlendMode::Multiply => LegacyBlendMode::Multiply,
             FfiLiveBlendMode::Screen => LegacyBlendMode::Screen,
         },
+        texture_filter: match value.texture_filter {
+            FfiLiveTextureFilter::Nearest => crate::LegacyTextureFilter::Nearest,
+            FfiLiveTextureFilter::Linear => crate::LegacyTextureFilter::Linear,
+        },
         scissor: value.scissor.into_option().map(|value| LegacyScissorV1 {
             x: value.x,
             y: value.y,
@@ -1167,6 +1191,10 @@ fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
         sequence: value.sequence,
         width: value.width,
         height: value.height,
+        compositing: match value.compositing {
+            crate::LegacySceneCompositingV1::LinearSrgb => FfiLiveSceneCompositing::LinearSrgb,
+            crate::LegacySceneCompositingV1::EncodedSrgb => FfiLiveSceneCompositing::EncodedSrgb,
+        },
         resources: value
             .resources
             .into_iter()
@@ -1230,6 +1258,10 @@ fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7
         sequence: value.sequence,
         width: value.width,
         height: value.height,
+        compositing: match value.compositing {
+            FfiLiveSceneCompositing::LinearSrgb => crate::LegacySceneCompositingV1::LinearSrgb,
+            FfiLiveSceneCompositing::EncodedSrgb => crate::LegacySceneCompositingV1::EncodedSrgb,
+        },
         resources: value
             .resources
             .into_iter()
@@ -1277,8 +1309,8 @@ fn ffi_live_audio(value: LegacyAudioPacketV7) -> FfiLiveAudioPacket {
         sample_rate: value.sample_rate,
         channels: value.channels,
         pcm: match value.pcm {
-            LegacyPcmBufferV7::I16(samples) => FfiLivePcmBuffer::I16(samples.into()),
-            LegacyPcmBufferV7::F32(samples) => FfiLivePcmBuffer::F32(samples.into()),
+            LegacyPcmBufferV7::I16(samples) => FfiLivePcmBuffer::I16(samples.into_ffi()),
+            LegacyPcmBufferV7::F32(samples) => FfiLivePcmBuffer::F32(samples.into_ffi()),
         },
     }
 }
@@ -1290,8 +1322,8 @@ fn legacy_live_audio(value: FfiLiveAudioPacket) -> LegacyAudioPacketV7 {
         sample_rate: value.sample_rate,
         channels: value.channels,
         pcm: match value.pcm {
-            FfiLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples.into_vec()),
-            FfiLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples.into_vec()),
+            FfiLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples.into_owned()),
+            FfiLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples.into_owned()),
         },
     }
 }
@@ -1332,12 +1364,12 @@ fn ffi_live_audio_command(sequence: u64, value: LegacyAudioCommandV1) -> FfiLive
         LegacyAudioCommandV1::SubmitI16 { stream_id, samples } => FfiLiveAudioCommand::SubmitI16 {
             sequence,
             stream_id,
-            samples: samples.into(),
+            samples: samples.into_ffi(),
         },
         LegacyAudioCommandV1::SubmitF32 { stream_id, samples } => FfiLiveAudioCommand::SubmitF32 {
             sequence,
             stream_id,
-            samples: samples.into(),
+            samples: samples.into_ffi(),
         },
         LegacyAudioCommandV1::Play {
             stream_id,
@@ -1435,7 +1467,7 @@ fn legacy_live_audio_command(value: FfiLiveAudioCommand) -> LegacySequenced<Lega
             sequence,
             LegacyAudioCommandV1::SubmitI16 {
                 stream_id,
-                samples: samples.into_vec(),
+                samples: samples.into_owned(),
             },
         ),
         FfiLiveAudioCommand::SubmitF32 {
@@ -1446,7 +1478,7 @@ fn legacy_live_audio_command(value: FfiLiveAudioCommand) -> LegacySequenced<Lega
             sequence,
             LegacyAudioCommandV1::SubmitF32 {
                 stream_id,
-                samples: samples.into_vec(),
+                samples: samples.into_owned(),
             },
         ),
         FfiLiveAudioCommand::Play {
@@ -1944,6 +1976,7 @@ mod live_zero_copy_tests {
             sequence: 7,
             width: 1,
             height: 1,
+            compositing: crate::LegacySceneCompositingV1::LinearSrgb,
             resources: vec![LegacySceneResourceOperationV7::CreateTexture {
                 texture_id: 11,
                 generation: 1,
@@ -1980,7 +2013,7 @@ mod live_zero_copy_tests {
             stream_id: 2,
             sample_rate: 48_000,
             channels: 2,
-            pcm: LegacyPcmBufferV7::I16(samples),
+            pcm: LegacyPcmBufferV7::I16(samples.into()),
         };
 
         let ffi = ffi_live_audio(packet);
@@ -1996,6 +2029,32 @@ mod live_zero_copy_tests {
             LegacyPcmBufferV7::F32(_) => panic!("expected i16 PCM"),
         };
         assert_eq!(returned_ptr, source_ptr);
+    }
+
+    #[test]
+    fn pcm_submit_command_moves_across_family_ffi_wire() {
+        let samples = vec![-0.25_f32, 0.0, 0.25, 1.0];
+        let source_ptr = samples.as_ptr();
+        let ffi = ffi_live_audio_command(
+            12,
+            LegacyAudioCommandV1::SubmitF32 {
+                stream_id: 5,
+                samples: samples.into(),
+            },
+        );
+        let ffi_ptr = match &ffi {
+            FfiLiveAudioCommand::SubmitF32 { samples, .. } => samples.as_ptr(),
+            _ => panic!("expected f32 submit"),
+        };
+        assert_eq!(ffi_ptr, source_ptr);
+
+        let command = legacy_live_audio_command(ffi);
+        match command.value {
+            LegacyAudioCommandV1::SubmitF32 { samples, .. } => {
+                assert_eq!(samples.as_ptr(), source_ptr);
+            }
+            _ => panic!("expected f32 submit"),
+        }
     }
 
     #[test]
@@ -2143,14 +2202,50 @@ pub struct FfiShutdownReport {
     pub final_state_revision: u64,
     pub instruction_count: u64,
     pub syscall_count: u64,
+    pub evidence_vm_trace: RVec<FfiVmTraceRecord>,
     pub diagnostics: RVec<FfiDiagnostic>,
 }
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub struct FfiVmTraceRecord {
+    pub context_id: u32,
+    pub program_counter: u32,
+    pub opcode: u8,
+}
+
+impl From<LegacyVmTraceRecord> for FfiVmTraceRecord {
+    fn from(value: LegacyVmTraceRecord) -> Self {
+        Self {
+            context_id: value.context_id,
+            program_counter: value.program_counter,
+            opcode: value.opcode,
+        }
+    }
+}
+
+impl From<FfiVmTraceRecord> for LegacyVmTraceRecord {
+    fn from(value: FfiVmTraceRecord) -> Self {
+        Self {
+            context_id: value.context_id,
+            program_counter: value.program_counter,
+            opcode: value.opcode,
+        }
+    }
+}
+
 impl From<LegacyShutdownReport> for FfiShutdownReport {
     fn from(value: LegacyShutdownReport) -> Self {
         Self {
             final_state_revision: value.final_state_revision,
             instruction_count: value.instruction_count,
             syscall_count: value.syscall_count,
+            evidence_vm_trace: value
+                .evidence_vm_trace
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>()
+                .into(),
             diagnostics: value
                 .diagnostics
                 .into_iter()
@@ -2166,6 +2261,11 @@ impl From<FfiShutdownReport> for LegacyShutdownReport {
             final_state_revision: value.final_state_revision,
             instruction_count: value.instruction_count,
             syscall_count: value.syscall_count,
+            evidence_vm_trace: value
+                .evidence_vm_trace
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
             diagnostics: value.diagnostics.iter().cloned().map(Into::into).collect(),
         }
     }

@@ -1819,6 +1819,7 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                 vertices,
                 indices,
                 draws,
+                ..
             } => {
                 let vertices_valid = !vertices.is_empty()
                     && vertices.len() <= 250_000

@@ -7,17 +7,18 @@ use std::{
 
 use astra_media_core::{
     BlendMode, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D, MeshVertex2D, OwnedPixelBuffer,
-    RectI, SceneCommand, TextureFrame, Transform2D,
+    RectI, SceneCommand, SceneCompositing2D, TextureFilter2D, TextureFrame, Transform2D,
 };
 use astra_platform::{PlatformError, PlatformErrorCode, SceneFrame};
 use sha2::{Digest, Sha256};
 use smallvec::{smallvec, SmallVec};
 
 const ATLAS_SIDE: u32 = 4096;
+const MAX_ATLAS_WIDTH: u32 = 8192;
 const MIN_ATLAS_SIDE: u32 = 1024;
 const ATLAS_PADDING: u32 = 1;
-const MAX_GLYPH_RESOURCES: usize = 65_536;
-const MAX_GLYPH_BYTES: usize = 64 * 1024 * 1024;
+const MAX_SCENE_RESOURCES: usize = 65_536;
+const MAX_SCENE_RESOURCE_BYTES: usize = MAX_ATLAS_WIDTH as usize * ATLAS_SIDE as usize * 4;
 const MAX_ATLAS_UPLOAD_BYTES: usize = ATLAS_SIDE as usize * ATLAS_SIDE as usize * 4;
 const ATLAS_STAGING_RING_SIZE: usize = 1;
 const ATLAS_STAGING_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
@@ -27,7 +28,8 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
     resources: BTreeMap<String, AtlasResource>,
     atlas: Option<GpuAtlas>,
     layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
     pipelines: BlendPipelines,
     output: Option<CachedOutput>,
     vertex_buffer: Option<wgpu::Buffer>,
@@ -53,6 +55,7 @@ pub(crate) struct WgpuGlyphAtlasRenderer {
 struct CachedOutput {
     width: u32,
     height: u32,
+    compositing: SceneCompositing2D,
     texture: wgpu::Texture,
 }
 
@@ -60,6 +63,11 @@ struct CachedOutput {
 /// compositor equation differs. Keeping these pipelines adjacent prevents a
 /// non-alpha legacy blend from falling back to a CPU framebuffer.
 struct BlendPipelines {
+    linear: BlendPipelineSet,
+    encoded: BlendPipelineSet,
+}
+
+struct BlendPipelineSet {
     alpha: wgpu::RenderPipeline,
     opaque: wgpu::RenderPipeline,
     add: wgpu::RenderPipeline,
@@ -67,12 +75,20 @@ struct BlendPipelines {
 }
 
 impl BlendPipelines {
-    fn select(&self, blend: BlendMode) -> Result<&wgpu::RenderPipeline, PlatformError> {
+    fn select(
+        &self,
+        compositing: SceneCompositing2D,
+        blend: BlendMode,
+    ) -> Result<&wgpu::RenderPipeline, PlatformError> {
+        let pipelines = match compositing {
+            SceneCompositing2D::LinearSrgb => &self.linear,
+            SceneCompositing2D::EncodedSrgb => &self.encoded,
+        };
         match blend {
-            BlendMode::Alpha => Ok(&self.alpha),
-            BlendMode::Opaque => Ok(&self.opaque),
-            BlendMode::Add => Ok(&self.add),
-            BlendMode::Multiply => Ok(&self.multiply),
+            BlendMode::Alpha => Ok(&pipelines.alpha),
+            BlendMode::Opaque => Ok(&pipelines.opaque),
+            BlendMode::Add => Ok(&pipelines.add),
+            BlendMode::Multiply => Ok(&pipelines.multiply),
             BlendMode::Screen => Err(invalid(
                 "screen blend is unsupported by the semantic GPU path",
             )),
@@ -108,7 +124,8 @@ struct AtlasUpdateContext<'a> {
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
     layout: &'a wgpu::BindGroupLayout,
-    sampler: &'a wgpu::Sampler,
+    linear_sampler: &'a wgpu::Sampler,
+    nearest_sampler: &'a wgpu::Sampler,
     staging_belt: &'a mut wgpu::util::StagingBelt,
     timestamp_query: Option<(&'a wgpu::QuerySet, u32, u32)>,
 }
@@ -212,7 +229,10 @@ impl<'a> AtlasResourceView<'a> {
 
 struct GpuAtlas {
     texture: wgpu::Texture,
-    bind_group: wgpu::BindGroup,
+    linear_bind_group: wgpu::BindGroup,
+    nearest_bind_group: wgpu::BindGroup,
+    encoded_linear_bind_group: wgpu::BindGroup,
+    encoded_nearest_bind_group: wgpu::BindGroup,
     packed: PackedAtlas,
 }
 
@@ -389,6 +409,8 @@ struct MeshRun<'a> {
     vertices: &'a [MeshVertex2D],
     indices: &'a [u32],
     texture_id: Option<&'a str>,
+    texture_filter: TextureFilter2D,
+    compositing: SceneCompositing2D,
     opacity: f32,
     blend: BlendMode,
     clip: RectI,
@@ -415,6 +437,8 @@ struct DrawBatch {
     vertex_count: u32,
     clip: RectI,
     blend: BlendMode,
+    texture_filter: TextureFilter2D,
+    compositing: SceneCompositing2D,
 }
 
 impl WgpuGlyphAtlasRenderer {
@@ -437,19 +461,21 @@ impl WgpuGlyphAtlasRenderer {
             device,
             queue,
             &renderer.layout,
-            &renderer.sampler,
+            &renderer.linear_sampler,
+            &renderer.nearest_sampler,
             side,
         ));
         Ok(renderer)
     }
 
     fn new_internal(device: &wgpu::Device, reserved_side: Option<u32>) -> Self {
-        let (layout, sampler, pipelines) = create_pipelines(device);
+        let (layout, linear_sampler, nearest_sampler, pipelines) = create_pipelines(device);
         Self {
             resources: BTreeMap::new(),
             atlas: None,
             layout,
-            sampler,
+            linear_sampler,
+            nearest_sampler,
             pipelines,
             output: None,
             vertex_buffer: None,
@@ -474,12 +500,20 @@ impl WgpuGlyphAtlasRenderer {
     }
 
     pub(super) fn recover(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        let (layout, sampler, pipelines) = create_pipelines(device);
+        let (layout, linear_sampler, nearest_sampler, pipelines) = create_pipelines(device);
         self.layout = layout;
-        self.sampler = sampler;
+        self.linear_sampler = linear_sampler;
+        self.nearest_sampler = nearest_sampler;
         self.pipelines = pipelines;
         self.atlas = self.reserved_side.map(|side| {
-            create_reserved_gpu_atlas(device, queue, &self.layout, &self.sampler, side)
+            create_reserved_gpu_atlas(
+                device,
+                queue,
+                &self.layout,
+                &self.linear_sampler,
+                &self.nearest_sampler,
+                side,
+            )
         });
         self.output = None;
         self.vertex_buffer = None;
@@ -767,11 +801,6 @@ impl WgpuGlyphAtlasRenderer {
                         rgba8,
                     });
                     if apply_mutations {
-                        if committed_mutations.contains_key(resource_id) {
-                            return Err(invalid(
-                                "texture resource id is mutated more than once in a frame",
-                            ));
-                        }
                         let texture = updated_retained_texture(
                             current,
                             *x,
@@ -1009,6 +1038,7 @@ impl WgpuGlyphAtlasRenderer {
                     indices,
                     material,
                     texture_id,
+                    texture_filter,
                     opacity,
                     blend,
                 } => {
@@ -1070,6 +1100,8 @@ impl WgpuGlyphAtlasRenderer {
                         vertices,
                         indices,
                         texture_id: resolved_texture,
+                        texture_filter: *texture_filter,
+                        compositing: SceneCompositing2D::LinearSrgb,
                         opacity: *opacity * opacity_stack.last().copied().unwrap_or(1.0),
                         blend: *blend,
                         clip: clip_stack.last().copied().unwrap_or(RectI::new(
@@ -1096,6 +1128,7 @@ impl WgpuGlyphAtlasRenderer {
                     vertices,
                     indices,
                     draws,
+                    compositing,
                 } => {
                     if vertices.is_empty()
                         || draws.is_empty()
@@ -1159,6 +1192,8 @@ impl WgpuGlyphAtlasRenderer {
                             vertices: &vertices[vertex_start..vertex_end],
                             indices: &indices[index_start..index_end],
                             texture_id: resolved_texture,
+                            texture_filter: draw.texture_filter,
+                            compositing: *compositing,
                             opacity: draw.opacity * opacity_stack.last().copied().unwrap_or(1.0),
                             blend: draw.blend,
                             clip: draw.scissor.unwrap_or_else(|| {
@@ -1396,7 +1431,8 @@ impl WgpuGlyphAtlasRenderer {
                     device,
                     queue,
                     layout: &self.layout,
-                    sampler: &self.sampler,
+                    linear_sampler: &self.linear_sampler,
+                    nearest_sampler: &self.nearest_sampler,
                     staging_belt: &mut self.atlas_staging_belts[staging_index],
                     timestamp_query: atlas_upload_query,
                 },
@@ -1419,19 +1455,31 @@ impl WgpuGlyphAtlasRenderer {
             .allocated_bytes
             .saturating_sub(command_allocation_after.allocated_bytes);
         self.last_upload_bytes = upload_bytes;
-        let (active_bind_group, placement_view) = match &atlas_update {
+        let (
+            active_linear_bind_group,
+            active_nearest_bind_group,
+            active_encoded_linear_bind_group,
+            active_encoded_nearest_bind_group,
+            placement_view,
+        ) = match &atlas_update {
             PreparedAtlasUpdate::None => {
                 let atlas = self
                     .atlas
                     .as_ref()
                     .ok_or_else(|| invalid("glyph atlas is unavailable"))?;
                 (
-                    &atlas.bind_group,
+                    &atlas.linear_bind_group,
+                    &atlas.nearest_bind_group,
+                    &atlas.encoded_linear_bind_group,
+                    &atlas.encoded_nearest_bind_group,
                     AtlasPlacementView::committed(&atlas.packed),
                 )
             }
             PreparedAtlasUpdate::Replace(atlas) => (
-                &atlas.bind_group,
+                &atlas.linear_bind_group,
+                &atlas.nearest_bind_group,
+                &atlas.encoded_linear_bind_group,
+                &atlas.encoded_nearest_bind_group,
                 AtlasPlacementView::committed(&atlas.packed),
             ),
             PreparedAtlasUpdate::Mutate(mutation) => {
@@ -1440,7 +1488,10 @@ impl WgpuGlyphAtlasRenderer {
                     .as_ref()
                     .ok_or_else(|| invalid("incremental atlas update has no base atlas"))?;
                 (
-                    &atlas.bind_group,
+                    &atlas.linear_bind_group,
+                    &atlas.nearest_bind_group,
+                    &atlas.encoded_linear_bind_group,
+                    &atlas.encoded_nearest_bind_group,
                     AtlasPlacementView::pending(&atlas.packed, &mutation.placements),
                 )
             }
@@ -1457,6 +1508,20 @@ impl WgpuGlyphAtlasRenderer {
             &mut self.vertex_bytes,
             &mut self.draw_batches,
         )?;
+        let compositing = self
+            .draw_batches
+            .first()
+            .map(|batch| batch.compositing)
+            .unwrap_or_default();
+        if self
+            .draw_batches
+            .iter()
+            .any(|batch| batch.compositing != compositing)
+        {
+            return Err(invalid(
+                "a scene frame cannot mix linear and encoded compositing batches",
+            ));
+        }
         let geometry_ns = profiled_elapsed_ns(profile_cpu, geometry_started)?;
         let engine_allocation_after = astra_observability::thread_allocation_snapshot();
         self.last_geometry_allocation_bytes = engine_allocation_after
@@ -1509,14 +1574,15 @@ impl WgpuGlyphAtlasRenderer {
         }
         let vertex_upload_ns = profiled_elapsed_ns(profile_cpu, vertex_upload_started)?;
         let render_submit_started = Instant::now();
-        if self
-            .output
-            .as_ref()
-            .is_none_or(|output| output.width != frame.width || output.height != frame.height)
-        {
+        if self.output.as_ref().is_none_or(|output| {
+            output.width != frame.width
+                || output.height != frame.height
+                || output.compositing != compositing
+        }) {
             self.output = Some(CachedOutput {
                 width: frame.width,
                 height: frame.height,
+                compositing,
                 texture: device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("astra-glyph-output"),
                     size: wgpu::Extent3d {
@@ -1527,7 +1593,7 @@ impl WgpuGlyphAtlasRenderer {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    format: scene_target_format(compositing),
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                         | wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_SRC,
@@ -1547,6 +1613,10 @@ impl WgpuGlyphAtlasRenderer {
         });
         {
             let clear = frame.clear_rgba;
+            let clear_channel = |channel: u8| match compositing {
+                SceneCompositing2D::LinearSrgb => f64::from(srgb_byte_to_linear(channel)),
+                SceneCompositing2D::EncodedSrgb => f64::from(channel) / 255.0,
+            };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("astra-glyph-render-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1554,9 +1624,9 @@ impl WgpuGlyphAtlasRenderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(srgb_byte_to_linear(clear[0])),
-                            g: f64::from(srgb_byte_to_linear(clear[1])),
-                            b: f64::from(srgb_byte_to_linear(clear[2])),
+                            r: clear_channel(clear[0]),
+                            g: clear_channel(clear[1]),
+                            b: clear_channel(clear[2]),
                             a: f64::from(clear[3]) / 255.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -1575,10 +1645,27 @@ impl WgpuGlyphAtlasRenderer {
                 multiview_mask: None,
             });
             if let Some(vertex_buffer) = &self.vertex_buffer {
-                pass.set_bind_group(0, active_bind_group, &[]);
                 pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 for batch in &self.draw_batches {
-                    pass.set_pipeline(self.pipelines.select(batch.blend)?);
+                    pass.set_bind_group(
+                        0,
+                        match (batch.compositing, batch.texture_filter) {
+                            (SceneCompositing2D::LinearSrgb, TextureFilter2D::Nearest) => {
+                                active_nearest_bind_group
+                            }
+                            (SceneCompositing2D::LinearSrgb, TextureFilter2D::Linear) => {
+                                active_linear_bind_group
+                            }
+                            (SceneCompositing2D::EncodedSrgb, TextureFilter2D::Nearest) => {
+                                active_encoded_nearest_bind_group
+                            }
+                            (SceneCompositing2D::EncodedSrgb, TextureFilter2D::Linear) => {
+                                active_encoded_linear_bind_group
+                            }
+                        },
+                        &[],
+                    );
+                    pass.set_pipeline(self.pipelines.select(batch.compositing, batch.blend)?);
                     pass.set_scissor_rect(
                         batch.clip.x as u32,
                         batch.clip.y as u32,
@@ -1637,8 +1724,25 @@ fn validate_resource_budget(resources: &AtlasResourceView<'_>) -> Result<(), Pla
             .checked_add(resource.byte_len())
             .ok_or_else(|| invalid("scene resource byte count overflowed"))
     })?;
-    if resources.len() > MAX_GLYPH_RESOURCES || bytes > MAX_GLYPH_BYTES {
-        return Err(invalid("glyph atlas resource budget was exceeded"));
+    if resources.len() > MAX_SCENE_RESOURCES || bytes > MAX_SCENE_RESOURCE_BYTES {
+        let (glyph_count, texture_count) =
+            resources
+                .values()
+                .fold((0_u64, 0_u64), |counts, resource| match resource {
+                    AtlasResource::Glyph(_) => (counts.0 + 1, counts.1),
+                    AtlasResource::Texture(_) => (counts.0, counts.1 + 1),
+                });
+        tracing::error!(
+            event = "platform.wgpu.scene.resource_budget_exceeded",
+            resource_count = resources.len(),
+            resource_bytes = bytes,
+            glyph_count,
+            texture_count,
+            max_resource_count = MAX_SCENE_RESOURCES,
+            max_resource_bytes = MAX_SCENE_RESOURCE_BYTES,
+            "retained scene resources exceeded the renderer budget"
+        );
+        return Err(invalid("scene resource budget was exceeded"));
     }
     Ok(())
 }
@@ -1882,12 +1986,26 @@ fn pack_atlas_with_min_side(
     Err(invalid("glyph atlas capacity was exceeded"))
 }
 
-fn pack_atlas_at_side(
-    resources: &AtlasResourceView<'_>,
+fn pack_atlas_for_side(
+    ordered: &[(&String, &AtlasResource)],
     side: u32,
 ) -> Result<Option<PackedAtlas>, PlatformError> {
-    if !(MIN_ATLAS_SIDE..=ATLAS_SIDE).contains(&side) || !side.is_power_of_two() {
-        return Err(invalid("glyph atlas side is outside the supported range"));
+    pack_atlas_for_extent(ordered, side, side)
+}
+
+fn pack_atlas_at_extent(
+    resources: &AtlasResourceView<'_>,
+    width: u32,
+    height: u32,
+) -> Result<Option<PackedAtlas>, PlatformError> {
+    if width < MIN_ATLAS_SIDE
+        || height < MIN_ATLAS_SIDE
+        || width > MAX_ATLAS_WIDTH
+        || height > ATLAS_SIDE
+        || !width.is_power_of_two()
+        || !height.is_power_of_two()
+    {
+        return Err(invalid("glyph atlas extent is outside the supported range"));
     }
     let mut ordered = resources.iter().collect::<Vec<_>>();
     ordered.sort_by(|(left_id, left), (right_id, right)| {
@@ -1897,31 +2015,32 @@ fn pack_atlas_at_side(
             .then_with(|| right.width().cmp(&left.width()))
             .then_with(|| left_id.cmp(right_id))
     });
-    pack_atlas_for_side(&ordered, side)
+    pack_atlas_for_extent(&ordered, width, height)
 }
 
-fn pack_atlas_for_side(
+fn pack_atlas_for_extent(
     ordered: &[(&String, &AtlasResource)],
-    side: u32,
+    width: u32,
+    height: u32,
 ) -> Result<Option<PackedAtlas>, PlatformError> {
     let mut placements = BTreeMap::new();
     let mut x = ATLAS_PADDING * 3;
     let mut y = ATLAS_PADDING;
     let mut row_height = 0;
     for &(resource_id, resource) in ordered {
-        if resource.width() + ATLAS_PADDING * 2 > side
-            || resource.height() + ATLAS_PADDING * 2 > side
+        if resource.width() + ATLAS_PADDING * 2 > width
+            || resource.height() + ATLAS_PADDING * 2 > height
         {
             return Ok(None);
         }
-        if x + resource.width() + ATLAS_PADDING > side {
+        if x + resource.width() + ATLAS_PADDING > width {
             x = ATLAS_PADDING * 3;
             y = y
                 .checked_add(row_height + ATLAS_PADDING)
                 .ok_or_else(|| invalid("glyph atlas row overflowed"))?;
             row_height = 0;
         }
-        if y + resource.height() + ATLAS_PADDING > side {
+        if y + resource.height() + ATLAS_PADDING > height {
             return Ok(None);
         }
         placements.insert(
@@ -1938,8 +2057,8 @@ fn pack_atlas_for_side(
     }
     Ok(Some(PackedAtlas {
         placements,
-        width: side,
-        height: side,
+        width,
+        height,
         cursor_x: x,
         cursor_y: y,
         row_height,
@@ -2111,15 +2230,60 @@ fn repack_gpu_atlas(
     new_resources: &AtlasResourceView<'_>,
     upload_pixels: &mut Vec<u8>,
 ) -> Result<(PreparedAtlasUpdate, u64), PlatformError> {
-    let mut side = current.packed.width;
-    let packed = loop {
-        if let Some(packed) = pack_atlas_at_side(new_resources, side)? {
-            break packed;
+    let current_area = u64::from(current.packed.width) * u64::from(current.packed.height);
+    let max_dimension = context.device.limits().max_texture_dimension_2d;
+    let candidates = [
+        (MIN_ATLAS_SIDE, MIN_ATLAS_SIDE),
+        (2048, 2048),
+        (ATLAS_SIDE, 2048),
+        (ATLAS_SIDE, ATLAS_SIDE),
+        (MAX_ATLAS_WIDTH, 2048),
+        (MAX_ATLAS_WIDTH, ATLAS_SIDE),
+    ];
+    let mut packed = None;
+    for (width, height) in candidates {
+        let area = u64::from(width) * u64::from(height);
+        if area < current_area || width > max_dimension || height > max_dimension {
+            continue;
         }
-        if side == ATLAS_SIDE {
+        if let Some(candidate) = pack_atlas_at_extent(new_resources, width, height)? {
+            packed = Some(candidate);
+            break;
+        }
+    }
+    let packed = match packed {
+        Some(packed) => packed,
+        None => {
+            let (resource_bytes, padded_area, widest, tallest) = new_resources.values().try_fold(
+                (0_u64, 0_u64, 0_u32, 0_u32),
+                |(bytes, area, widest, tallest), resource| {
+                    let padded_width = resource.width() + ATLAS_PADDING * 2;
+                    let padded_height = resource.height() + ATLAS_PADDING * 2;
+                    Ok::<_, PlatformError>((
+                        bytes
+                            .checked_add(resource.byte_len() as u64)
+                            .ok_or_else(|| invalid("scene resource byte count overflowed"))?,
+                        area.checked_add(u64::from(padded_width) * u64::from(padded_height))
+                            .ok_or_else(|| invalid("glyph atlas total area overflowed"))?,
+                        widest.max(padded_width),
+                        tallest.max(padded_height),
+                    ))
+                },
+            )?;
+            tracing::error!(
+                event = "platform.wgpu.atlas.capacity_exceeded",
+                resource_count = new_resources.len(),
+                resource_bytes,
+                padded_area,
+                widest,
+                tallest,
+                max_texture_dimension_2d = max_dimension,
+                max_atlas_width = MAX_ATLAS_WIDTH,
+                max_atlas_height = ATLAS_SIDE,
+                "retained scene resources cannot be packed into the GPU atlas"
+            );
             return Err(invalid("glyph atlas capacity was exceeded"));
         }
-        side = side.saturating_mul(2).min(ATLAS_SIDE);
     };
     let atlas = create_empty_gpu_atlas(context, packed);
     let mut encoder = context
@@ -2214,32 +2378,73 @@ fn create_empty_gpu_atlas(context: &AtlasUpdateContext<'_>, packed: PackedAtlas)
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST
             | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
     });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let bind_group = context
-        .device
-        .create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("astra-glyph-atlas-bind-group"),
-            layout: context.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(context.sampler),
-                },
-            ],
-        });
+    // Solid-color primitives sample the reserved texel at the atlas origin.
+    // Every replacement atlas must establish the same invariant as the
+    // initial/full atlas before any draw can observe it.
+    context.queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &[255, 255, 255, 255],
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4),
+            rows_per_image: Some(1),
+        },
+        wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    let linear_view = texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        ..Default::default()
+    });
+    let encoded_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let linear_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &linear_view,
+        context.linear_sampler,
+        "astra-glyph-atlas-linear-bind-group",
+    );
+    let nearest_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &linear_view,
+        context.nearest_sampler,
+        "astra-glyph-atlas-nearest-bind-group",
+    );
+    let encoded_linear_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &encoded_view,
+        context.linear_sampler,
+        "astra-glyph-atlas-encoded-linear-bind-group",
+    );
+    let encoded_nearest_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &encoded_view,
+        context.nearest_sampler,
+        "astra-glyph-atlas-encoded-nearest-bind-group",
+    );
     GpuAtlas {
         texture,
-        bind_group,
+        linear_bind_group,
+        nearest_bind_group,
+        encoded_linear_bind_group,
+        encoded_nearest_bind_group,
         packed,
     }
 }
@@ -2248,7 +2453,8 @@ fn create_reserved_gpu_atlas(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
+    linear_sampler: &wgpu::Sampler,
+    nearest_sampler: &wgpu::Sampler,
     side: u32,
 ) -> GpuAtlas {
     let packed = PackedAtlas {
@@ -2266,31 +2472,12 @@ fn create_reserved_gpu_atlas(
         device,
         queue,
         layout,
-        sampler,
+        linear_sampler,
+        nearest_sampler,
         staging_belt: &mut staging_belt,
         timestamp_query: None,
     };
-    let atlas = create_empty_gpu_atlas(&context, packed);
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &atlas.texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &[255, 255, 255, 255],
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(4),
-            rows_per_image: Some(1),
-        },
-        wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        },
-    );
-    atlas
+    create_empty_gpu_atlas(&context, packed)
 }
 
 fn create_full_gpu_atlas(
@@ -2323,27 +2510,69 @@ fn create_full_gpu_atlas_with_min_side(
     )?;
     upload_pixels.clear();
     upload_pixels.shrink_to(ATLAS_STAGING_CHUNK_BYTES as usize);
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let bind_group = context
-        .device
-        .create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("astra-glyph-atlas-bind-group"),
-            layout: context.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(context.sampler),
-                },
-            ],
-        });
+    let linear_view = texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+        ..Default::default()
+    });
+    let encoded_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let linear_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &linear_view,
+        context.linear_sampler,
+        "astra-glyph-atlas-linear-bind-group",
+    );
+    let nearest_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &linear_view,
+        context.nearest_sampler,
+        "astra-glyph-atlas-nearest-bind-group",
+    );
+    let encoded_linear_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &encoded_view,
+        context.linear_sampler,
+        "astra-glyph-atlas-encoded-linear-bind-group",
+    );
+    let encoded_nearest_bind_group = create_atlas_bind_group(
+        context.device,
+        context.layout,
+        &encoded_view,
+        context.nearest_sampler,
+        "astra-glyph-atlas-encoded-nearest-bind-group",
+    );
     Ok(GpuAtlas {
         texture,
-        bind_group,
+        linear_bind_group,
+        nearest_bind_group,
+        encoded_linear_bind_group,
+        encoded_nearest_bind_group,
         packed,
+    })
+}
+
+fn create_atlas_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    label: &'static str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
     })
 }
 
@@ -2904,11 +3133,11 @@ fn upload_atlas(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST
             | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
     });
     if let Some((query_set, begin, end)) = timestamp_query {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -3096,6 +3325,14 @@ fn build_vertices(
             DrawPrimitive::Quads(_) => BlendMode::Alpha,
             DrawPrimitive::Mesh(run) => run.blend,
         };
+        let texture_filter = match primitive {
+            DrawPrimitive::Quads(_) => TextureFilter2D::Linear,
+            DrawPrimitive::Mesh(run) => run.texture_filter,
+        };
+        let compositing = match primitive {
+            DrawPrimitive::Quads(_) => SceneCompositing2D::LinearSrgb,
+            DrawPrimitive::Mesh(run) => run.compositing,
+        };
         if clip.width == 0 || clip.height == 0 {
             continue;
         }
@@ -3188,16 +3425,15 @@ fn build_vertices(
                     } else {
                         (0.5 / atlas.width() as f32, 0.5 / atlas.height() as f32)
                     };
-                    push_vertex(
-                        bytes,
-                        x,
-                        y,
-                        u,
-                        v,
-                        premultiplied_linear(vertex.premultiplied_rgba, run.opacity),
-                        frame.width,
-                        frame.height,
-                    );
+                    let color = match run.compositing {
+                        SceneCompositing2D::LinearSrgb => {
+                            premultiplied_linear(vertex.premultiplied_rgba, run.opacity)
+                        }
+                        SceneCompositing2D::EncodedSrgb => {
+                            premultiplied_encoded(vertex.premultiplied_rgba, run.opacity)
+                        }
+                    };
+                    push_vertex(bytes, x, y, u, v, color, frame.width, frame.height);
                     vertex_count = vertex_count
                         .checked_add(1)
                         .ok_or_else(|| invalid("scene vertex count overflowed"))?;
@@ -3210,6 +3446,8 @@ fn build_vertices(
                 vertex_count: vertex_count - first_vertex,
                 clip,
                 blend,
+                texture_filter,
+                compositing,
             });
         }
     }
@@ -3232,6 +3470,15 @@ fn premultiplied_linear(rgba: [u8; 4], opacity: f32) -> [f32; 4] {
         convert(rgba[1]),
         convert(rgba[2]),
         alpha * opacity,
+    ]
+}
+
+fn premultiplied_encoded(rgba: [u8; 4], opacity: f32) -> [f32; 4] {
+    [
+        f32::from(rgba[0]) / 255.0 * opacity,
+        f32::from(rgba[1]) / 255.0 * opacity,
+        f32::from(rgba[2]) / 255.0 * opacity,
+        f32::from(rgba[3]) / 255.0 * opacity,
     ]
 }
 
@@ -3442,7 +3689,12 @@ fn transformed_bounds(transform: Transform2D, rect: RectI) -> Result<RectI, Plat
 
 fn create_pipelines(
     device: &wgpu::Device,
-) -> (wgpu::BindGroupLayout, wgpu::Sampler, BlendPipelines) {
+) -> (
+    wgpu::BindGroupLayout,
+    wgpu::Sampler,
+    wgpu::Sampler,
+    BlendPipelines,
+) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("astra-glyph-atlas-layout"),
         entries: &[
@@ -3464,10 +3716,16 @@ fn create_pipelines(
             },
         ],
     });
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("astra-glyph-atlas-sampler"),
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("astra-glyph-atlas-nearest-sampler"),
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -3479,48 +3737,68 @@ fn create_pipelines(
         bind_group_layouts: &[Some(&layout)],
         immediate_size: 0,
     });
-    let pipeline = |label, blend| {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(label),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            compilation_options: Default::default(),
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: VERTEX_STRIDE,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4],
-            }],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
-            compilation_options: Default::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                blend: Some(blend),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    })
-    };
     let pipelines = BlendPipelines {
-        alpha: pipeline(
-            "astra-glyph-atlas-alpha-pipeline",
-            wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+        linear: create_blend_pipeline_set(
+            device,
+            &pipeline_layout,
+            &shader,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "linear",
         ),
-        opaque: pipeline(
-            "astra-glyph-atlas-opaque-pipeline",
-            wgpu::BlendState::REPLACE,
+        encoded: create_blend_pipeline_set(
+            device,
+            &pipeline_layout,
+            &shader,
+            wgpu::TextureFormat::Rgba8Unorm,
+            "encoded",
         ),
+    };
+    (layout, linear_sampler, nearest_sampler, pipelines)
+}
+
+fn create_blend_pipeline_set(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    target_format: wgpu::TextureFormat,
+    compositing: &str,
+) -> BlendPipelineSet {
+    let pipeline = |blend: wgpu::BlendState, blend_name: &str| {
+        let label = format!("astra-glyph-atlas-{compositing}-{blend_name}-pipeline");
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(&label),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(blend),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    BlendPipelineSet {
+        alpha: pipeline(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING, "alpha"),
+        opaque: pipeline(wgpu::BlendState::REPLACE, "opaque"),
         add: pipeline(
-            "astra-glyph-atlas-add-pipeline",
             wgpu::BlendState {
                 color: wgpu::BlendComponent {
                     src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -3529,9 +3807,9 @@ fn create_pipelines(
                 },
                 alpha: wgpu::BlendComponent::OVER,
             },
+            "add",
         ),
         multiply: pipeline(
-            "astra-glyph-atlas-multiply-pipeline",
             wgpu::BlendState {
                 color: wgpu::BlendComponent {
                     src_factor: wgpu::BlendFactor::Dst,
@@ -3540,9 +3818,16 @@ fn create_pipelines(
                 },
                 alpha: wgpu::BlendComponent::OVER,
             },
+            "multiply",
         ),
-    };
-    (layout, sampler, pipelines)
+    }
+}
+
+fn scene_target_format(compositing: SceneCompositing2D) -> wgpu::TextureFormat {
+    match compositing {
+        SceneCompositing2D::LinearSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+        SceneCompositing2D::EncodedSrgb => wgpu::TextureFormat::Rgba8Unorm,
+    }
 }
 
 fn invalid(message: &'static str) -> PlatformError {
@@ -3583,11 +3868,11 @@ struct VertexOutput {
 #[cfg(test)]
 mod tests {
     use super::{
-        allocate_pending_atlas_slot, insert_unique, pack_atlas, prepare_upload_pixels,
-        release_pending_atlas_slot, updated_retained_texture, vertex_upload_required,
-        write_padded_resource, AtlasAllocatorState, AtlasResource, AtlasResourceView,
-        ResourceMutationJournal, RetainedTexture, ATLAS_PADDING, ATLAS_SIDE,
-        MAX_ATLAS_UPLOAD_BYTES,
+        allocate_pending_atlas_slot, insert_unique, pack_atlas, pack_atlas_at_extent,
+        prepare_upload_pixels, release_pending_atlas_slot, updated_retained_texture,
+        vertex_upload_required, write_padded_resource, AtlasAllocatorState, AtlasResource,
+        AtlasResourceView, ResourceMutationJournal, RetainedTexture, ATLAS_PADDING, ATLAS_SIDE,
+        MAX_ATLAS_UPLOAD_BYTES, MAX_ATLAS_WIDTH,
     };
     use astra_media_core::TextureFrame;
     use astra_platform::PlatformErrorCode;
@@ -3634,6 +3919,32 @@ mod tests {
         assert_eq!(packed.placements.len(), 8);
         assert_eq!(packed.width, 4096);
         assert_eq!(packed.height, 4096);
+    }
+
+    #[test]
+    fn rectangular_growth_packs_wide_stage_resources_without_raising_resource_budget() {
+        let texture = |width, height| {
+            AtlasResource::texture(TextureFrame {
+                width,
+                height,
+                rgba8: Vec::new().into(),
+            })
+        };
+        let mut resources =
+            BTreeMap::from([("texture.stage.large".to_string(), texture(2560, 1840))]);
+        for index in 0..20 {
+            resources.insert(format!("texture.stage.strip.{index}"), texture(512, 1000));
+        }
+        let mutations = ResourceMutationJournal::new();
+        let view = AtlasResourceView::new(&resources, &mutations);
+
+        assert!(pack_atlas_at_extent(&view, ATLAS_SIDE, ATLAS_SIDE)
+            .expect("square packing must be evaluated")
+            .is_none());
+        let packed = pack_atlas_at_extent(&view, MAX_ATLAS_WIDTH, ATLAS_SIDE)
+            .expect("rectangular packing must be evaluated")
+            .expect("wide stage resources must fit the bounded rectangular atlas");
+        assert_eq!((packed.width, packed.height), (8192, 4096));
     }
 
     #[test]
@@ -3766,6 +4077,35 @@ mod tests {
         let pixels = destination.chunks_exact(4).collect::<Vec<_>>();
         assert_eq!(pixels[5], &[1, 2, 3, 4]);
         assert_eq!(pixels[6], &[9, 10, 11, 12]);
+    }
+
+    #[test]
+    fn ordered_partial_updates_retain_each_owned_patch_without_full_payload_copy() {
+        let rgba8 = astra_media_core::OwnedPixelBuffer::from_vec(vec![
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+        ]);
+        let base_pointer = rgba8.as_ptr();
+        let retained = RetainedTexture {
+            base: Arc::new(TextureFrame {
+                width: 3,
+                height: 1,
+                rgba8,
+            }),
+            patches: vec![],
+            patch_bytes: 0,
+        };
+        let first = astra_media_core::OwnedPixelBuffer::from_vec(vec![13, 14, 15, 16]);
+        let first_pointer = first.as_ptr();
+        let updated = updated_retained_texture(&retained, 0, 0, 1, 1, first).unwrap();
+        let second = astra_media_core::OwnedPixelBuffer::from_vec(vec![17, 18, 19, 20]);
+        let second_pointer = second.as_ptr();
+        let updated = updated_retained_texture(&updated, 2, 0, 1, 1, second).unwrap();
+
+        assert_eq!(updated.base.rgba8.as_ptr(), base_pointer);
+        assert_eq!(updated.patches.len(), 2);
+        assert_eq!(updated.patches[0].rgba8.as_ptr(), first_pointer);
+        assert_eq!(updated.patches[1].rgba8.as_ptr(), second_pointer);
+        assert_eq!(updated.patch_bytes, 8);
     }
 
     #[test]

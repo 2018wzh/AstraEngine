@@ -305,6 +305,13 @@ impl HostedFvpSession {
             .execute_result(|state| Ok::<_, HostedRuntimeError>(state.core.is_terminal()))?
     }
 
+    pub fn evidence_vm_trace(
+        &self,
+    ) -> Result<Vec<rfvp_hosted::hosted::HostedVmTraceRecord>, HostedRuntimeError> {
+        self.worker
+            .execute_result(|state| state.core.crash_trace().map_err(HostedRuntimeError::Core))?
+    }
+
     pub fn shutdown(self) -> Result<(), HostedRuntimeError> {
         self.worker.shutdown().map_err(HostedRuntimeError::Worker)
     }

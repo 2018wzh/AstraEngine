@@ -155,6 +155,7 @@ impl Transform2D {
 pub struct TextureFrame {
     pub width: u32,
     pub height: u32,
+    /// sRGBA8 texture bytes; material and blend mode define compositing semantics.
     pub rgba8: OwnedPixelBuffer,
 }
 
@@ -302,6 +303,21 @@ pub enum MeshMaterial2D {
     GlyphMask,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TextureFilter2D {
+    Nearest,
+    Linear,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SceneCompositing2D {
+    #[default]
+    LinearSrgb,
+    EncodedSrgb,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshDraw2D {
     pub vertex_start: u32,
@@ -310,6 +326,7 @@ pub struct MeshDraw2D {
     pub index_count: u32,
     pub material: MeshMaterial2D,
     pub texture_id: Option<String>,
+    pub texture_filter: TextureFilter2D,
     pub opacity: f32,
     pub blend: BlendMode,
     pub scissor: Option<RectI>,
@@ -357,6 +374,7 @@ pub enum SceneCommand {
         indices: Arc<[u32]>,
         material: MeshMaterial2D,
         texture_id: Option<String>,
+        texture_filter: TextureFilter2D,
         opacity: f32,
         blend: BlendMode,
     },
@@ -364,6 +382,7 @@ pub enum SceneCommand {
         vertices: Arc<[MeshVertex2D]>,
         indices: Arc<[u32]>,
         draws: Arc<[MeshDraw2D]>,
+        compositing: SceneCompositing2D,
     },
     Clear {
         rgba: [u8; 4],
@@ -716,6 +735,7 @@ impl HeadlessRenderer {
                     vertices,
                     indices,
                     draws,
+                    ..
                 } => {
                     if vertices.is_empty() || draws.is_empty() {
                         return Err(MediaError::message(
@@ -1196,6 +1216,7 @@ impl Renderer2D for HeadlessRenderer {
                     indices,
                     material,
                     texture_id,
+                    texture_filter,
                     opacity,
                     blend,
                     ..
@@ -1229,6 +1250,7 @@ impl Renderer2D for HeadlessRenderer {
                         indices,
                         *material,
                         texture,
+                        *texture_filter,
                         *opacity * opacities.last().copied().unwrap_or(1.0),
                         *blend,
                     )?;
@@ -1237,6 +1259,7 @@ impl Renderer2D for HeadlessRenderer {
                     vertices,
                     indices,
                     draws,
+                    ..
                 } => {
                     for draw in draws.iter() {
                         let vertex_start = draw.vertex_start as usize;
@@ -1278,6 +1301,7 @@ impl Renderer2D for HeadlessRenderer {
                             &indices[index_start..index_end],
                             draw.material,
                             texture,
+                            draw.texture_filter,
                             draw.opacity * opacities.last().copied().unwrap_or(1.0),
                             draw.blend,
                         )?;
@@ -1772,6 +1796,7 @@ fn draw_mesh(
     indices: &[u32],
     material: MeshMaterial2D,
     texture: Option<&TextureFrame>,
+    texture_filter: TextureFilter2D,
     opacity: f32,
     blend: BlendMode,
 ) -> Result<(), MediaError> {
@@ -1861,7 +1886,7 @@ fn draw_mesh(
                         .clamp(0.0, 255.0) as u8;
                 }
                 if let Some(texture) = texture {
-                    let texel = sample_texture(texture, uv);
+                    let texel = sample_texture(texture, uv, texture_filter);
                     match material {
                         MeshMaterial2D::ColorTexture => {
                             for (channel, texel_channel) in color.iter_mut().zip(texel) {
@@ -1889,9 +1914,30 @@ fn edge(a: [f32; 2], b: [f32; 2], point: [f32; 2]) -> f32 {
     (point[0] - a[0]) * (b[1] - a[1]) - (point[1] - a[1]) * (b[0] - a[0])
 }
 
-fn sample_texture(frame: &TextureFrame, uv: [f32; 2]) -> [u8; 4] {
-    let x = (uv[0].clamp(0.0, 1.0) * (frame.width.saturating_sub(1)) as f32).round() as usize;
-    let y = (uv[1].clamp(0.0, 1.0) * (frame.height.saturating_sub(1)) as f32).round() as usize;
+fn sample_texture(frame: &TextureFrame, uv: [f32; 2], texture_filter: TextureFilter2D) -> [u8; 4] {
+    let u = uv[0].clamp(0.0, 1.0) * frame.width.saturating_sub(1) as f32;
+    let v = uv[1].clamp(0.0, 1.0) * frame.height.saturating_sub(1) as f32;
+    if texture_filter == TextureFilter2D::Nearest {
+        return texture_pixel(frame, u.round() as usize, v.round() as usize);
+    }
+    let x0 = u.floor() as usize;
+    let y0 = v.floor() as usize;
+    let x1 = (x0 + 1).min(frame.width as usize - 1);
+    let y1 = (y0 + 1).min(frame.height as usize - 1);
+    let tx = u - x0 as f32;
+    let ty = v - y0 as f32;
+    let c00 = texture_pixel(frame, x0, y0);
+    let c10 = texture_pixel(frame, x1, y0);
+    let c01 = texture_pixel(frame, x0, y1);
+    let c11 = texture_pixel(frame, x1, y1);
+    std::array::from_fn(|channel| {
+        let top = c00[channel] as f32 + (c10[channel] as f32 - c00[channel] as f32) * tx;
+        let bottom = c01[channel] as f32 + (c11[channel] as f32 - c01[channel] as f32) * tx;
+        (top + (bottom - top) * ty).round().clamp(0.0, 255.0) as u8
+    })
+}
+
+fn texture_pixel(frame: &TextureFrame, x: usize, y: usize) -> [u8; 4] {
     let offset = (y * frame.width as usize + x) * 4;
     frame.rgba8[offset..offset + 4]
         .try_into()
@@ -2110,6 +2156,21 @@ mod tests {
         let frame = TextureFrame::from_vec(8, 4, pixels).unwrap();
 
         assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
+    }
+
+    #[astra_headless_test::test]
+    fn mesh_texture_sampling_preserves_channels_and_filter_semantics() {
+        let frame =
+            TextureFrame::from_vec(2, 1, vec![100, 50, 25, 128, 200, 100, 50, 255]).unwrap();
+
+        assert_eq!(
+            sample_texture(&frame, [0.49, 0.0], TextureFilter2D::Nearest),
+            [100, 50, 25, 128]
+        );
+        assert_eq!(
+            sample_texture(&frame, [0.5, 0.0], TextureFilter2D::Linear),
+            [150, 75, 38, 192]
+        );
     }
 
     #[astra_headless_test::test]

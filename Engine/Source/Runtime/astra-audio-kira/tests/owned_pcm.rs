@@ -40,6 +40,33 @@ impl AudioOutputLane for ConsumingEndpoint {
     }
 }
 
+struct DeterministicEndpoint {
+    consumed: u64,
+}
+
+impl AudioOutputLane for DeterministicEndpoint {
+    fn wait_for_capacity(
+        &mut self,
+        _requested_samples: usize,
+        _stop: &AtomicBool,
+    ) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        self.consumed += samples.len() as u64;
+        Ok(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.consumed
+    }
+
+    fn underflow_count(&self) -> u64 {
+        0
+    }
+}
+
 fn asset() -> AudioAssetRevision {
     AudioAssetRevision {
         package_id: "test.package".into(),
@@ -47,6 +74,34 @@ fn asset() -> AudioAssetRevision {
         revision: "1".into(),
         byte_len: 256,
     }
+}
+
+#[astra_headless_test::test]
+fn deterministic_backend_advances_a_long_route_without_wall_clock_deadline() {
+    let mut session = AudioServiceSession::new(
+        AudioServiceConfig {
+            max_voices: 1,
+            max_buses: 1,
+            max_events: 1,
+            pcm_cache_bytes: 1024,
+        },
+        AstraChunkBackendSettings {
+            sample_rate: 48_000,
+            channels: 2,
+            chunk_frames: 800,
+            endpoint: Box::new(DeterministicEndpoint { consumed: 0 }),
+            deterministic_fixed_tick_hz: Some(60),
+        },
+    )
+    .expect("deterministic audio service");
+
+    for _ in 0..15_000 {
+        session.poll_fixed_tick().expect("deterministic fixed tick");
+    }
+
+    let telemetry = session.telemetry();
+    assert_eq!(telemetry.submitted_samples, 15_000 * 800 * 2);
+    assert_eq!(telemetry.consumed_samples, telemetry.submitted_samples);
 }
 
 #[astra_headless_test::test]

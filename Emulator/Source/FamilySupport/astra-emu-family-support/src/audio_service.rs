@@ -11,14 +11,14 @@ use std::{
 };
 
 use astra_audio_kira::{AstraChunkBackendSettings, AudioServiceConfig, AudioServiceSession};
-use astra_byte_source::OwnedByteBuffer;
+use astra_byte_source::{OwnedByteBuffer, OwnedF32Buffer, OwnedI16Buffer};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
     LegacyPcmBufferV7,
 };
 use astra_media::{open_symphonia_audio_stream, MediaError, SymphoniaAudioStreamDecoder};
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioWakeRegistration, HostLaunchProfile,
+    AudioOutputHandle, AudioOutputRequest, AudioWakeRegistration, HostKind, HostLaunchProfile,
     PlatformHostClient, PlatformHostFactory,
 };
 use serde::Serialize;
@@ -69,6 +69,7 @@ impl TelemetryAtomics {
 
 enum WorkerCommand {
     Wake,
+    FixedTick(SyncSender<Result<(), String>>),
     Execute {
         command: LegacyAudioCommandV1,
         resource: Option<OwnedByteBuffer>,
@@ -96,6 +97,7 @@ impl WorkerCommand {
     fn diagnostic_context(&self) -> (&'static str, Option<u32>) {
         match self {
             Self::Wake => ("wake", None),
+            Self::FixedTick(_) => ("fixed_tick", None),
             Self::Execute { command, .. } => match command {
                 LegacyAudioCommandV1::LoadResource { stream_id, .. } => {
                     ("load_resource", Some(*stream_id))
@@ -142,6 +144,7 @@ pub struct FamilyAudioService {
     wake_stop: Arc<AtomicBool>,
     wake: AudioWakeRegistration,
     wake_forwarder: Option<JoinHandle<()>>,
+    deterministic: bool,
 }
 
 impl FamilyAudioService {
@@ -162,6 +165,7 @@ impl FamilyAudioService {
         client: PlatformHostClient,
         shutdown_host: bool,
     ) -> Result<Self, String> {
+        let deterministic = client.launch_profile().kind() == HostKind::Headless;
         let (commands, receiver) = sync_channel(COMMAND_CAPACITY);
         let telemetry = Arc::new(TelemetryAtomics::default());
         let failure = Arc::new(Mutex::new(None));
@@ -216,6 +220,7 @@ impl FamilyAudioService {
             wake_stop,
             wake,
             wake_forwarder: Some(wake_forwarder),
+            deterministic,
         })
     }
 
@@ -278,7 +283,12 @@ impl FamilyAudioService {
     }
 
     pub fn pump(&self) -> Result<(), String> {
-        self.check_failure()
+        self.check_failure()?;
+        if self.deterministic {
+            self.request(WorkerCommand::FixedTick)
+                .and_then(|result| result)?;
+        }
+        Ok(())
     }
 
     pub fn telemetry(&self) -> LegacyAudioTelemetry {
@@ -388,8 +398,8 @@ fn forward_audio_wakes(
 }
 
 enum AudioSegment {
-    I16(Vec<i16>),
-    F32(Vec<f32>),
+    I16(OwnedI16Buffer),
+    F32(OwnedF32Buffer),
 }
 
 struct AudioStream {
@@ -512,6 +522,12 @@ fn run_worker(
             Ok(WorkerCommand::Reset(reply)) => {
                 let _ = reply.send(state.reset());
             }
+            Ok(WorkerCommand::FixedTick(reply)) => {
+                let result = state.poll_fixed_tick();
+                let terminal = result.as_ref().map(|_| ()).map_err(Clone::clone);
+                let _ = reply.send(result);
+                terminal?;
+            }
             Ok(WorkerCommand::Wake) => {}
             Ok(command) => {
                 let (operation, stream_id) = command.diagnostic_context();
@@ -548,6 +564,7 @@ impl WorkerState {
         telemetry: Arc<TelemetryAtomics>,
         audible: Arc<AtomicBool>,
     ) -> Result<Self, String> {
+        let deterministic = client.launch_profile().kind() == HostKind::Headless;
         let limits = client.launch_profile().limits();
         let chunk_frames = limits.audio_chunk_frames;
         let opened = client
@@ -578,7 +595,7 @@ impl WorkerState {
                 channels: opened.format.channels,
                 chunk_frames,
                 endpoint: opened.lane,
-                deterministic_fixed_tick_hz: None,
+                deterministic_fixed_tick_hz: deterministic.then_some(60),
             },
         )
         .map_err(|error| error.to_string())?;
@@ -623,7 +640,10 @@ impl WorkerState {
             } => self.append_f32(stream_id, sample_rate, channels, samples),
             WorkerCommand::StopMovie(stream_id) => self.remove_stream(stream_id),
             WorkerCommand::Suspend(value) => self.set_suspended(value),
-            WorkerCommand::Wake | WorkerCommand::Reset(_) | WorkerCommand::Shutdown(_) => Ok(()),
+            WorkerCommand::Wake
+            | WorkerCommand::FixedTick(_)
+            | WorkerCommand::Reset(_)
+            | WorkerCommand::Shutdown(_) => Ok(()),
         }
     }
 
@@ -773,7 +793,7 @@ impl WorkerState {
         self.push_segment(
             stream_id,
             LegacyAudioSampleFormat::F32,
-            AudioSegment::F32(samples),
+            AudioSegment::F32(samples.into()),
         )
     }
 
@@ -978,6 +998,14 @@ impl WorkerState {
         Ok(())
     }
 
+    fn poll_fixed_tick(&mut self) -> Result<(), String> {
+        self.service
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_SERVICE_CLOSED".to_owned())?
+            .poll_fixed_tick()
+            .map_err(|error| error.to_string())
+    }
+
     fn refill_one(&mut self, stream_id: u32) -> Result<bool, String> {
         if self
             .streams
@@ -1007,17 +1035,15 @@ impl WorkerState {
         let can_move_source_allocation = stream.source_rate == self.output_rate
             && stream.source_channels == self.output_channels;
         if can_move_source_allocation {
-            if let Some(buffer) = take_owned_f32_chunk(
-                &mut stream.segments,
-                &mut stream.segment_cursor,
-                source_needed,
-            ) {
+            if let Some(buffer) =
+                take_owned_f32_segment(&mut stream.segments, &mut stream.segment_cursor)
+            {
+                let submitted_frames = buffer.len() / usize::from(self.output_channels);
                 let exhausted = stream.decoder_eof
                     && stream.decoder.is_none()
                     && queued_samples(&stream.segments, stream.segment_cursor) == 0;
                 let audible = buffer.iter().any(|sample| sample.abs() > 0.000_03);
-                stream.mix_buffer = self
-                    .service
+                self.service
                     .as_mut()
                     .ok_or_else(|| "ASTRA_EMU_AUDIO_SERVICE_CLOSED".to_owned())?
                     .submit_stream_owned(kira_stream_id(stream_id), buffer)
@@ -1028,7 +1054,7 @@ impl WorkerState {
                 }
                 let was_stopping = stream.stop_after_frames != 0;
                 stream.stop_after_frames =
-                    stream.stop_after_frames.saturating_sub(self.chunk_frames);
+                    stream.stop_after_frames.saturating_sub(submitted_frames);
                 let fade_stop_completed = was_stopping && stream.stop_after_frames == 0;
                 if exhausted || fade_stop_completed {
                     self.service
@@ -1041,22 +1067,54 @@ impl WorkerState {
                 return Ok(true);
             }
         }
-        stream.source_buffer.clear();
-        if stream.source_buffer.capacity() < source_needed {
-            stream
-                .source_buffer
-                .reserve(source_needed - stream.source_buffer.capacity());
+        if !self
+            .service
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_SERVICE_CLOSED".to_owned())?
+            .stream_has_recyclable_capacity(kira_stream_id(stream_id))
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(false);
         }
-        take_segmented(
-            &mut stream.segments,
-            &mut stream.segment_cursor,
-            source_needed,
-            &mut stream.source_buffer,
-        );
         let exhausted = stream.decoder_eof
             && stream.decoder.is_none()
-            && queued_samples(&stream.segments, stream.segment_cursor) == 0;
-        if stream.source_buffer.is_empty() {
+            && queued_samples(&stream.segments, stream.segment_cursor) <= source_needed;
+        if can_move_source_allocation {
+            stream.mix_buffer.clear();
+            if stream.mix_buffer.capacity() < source_needed {
+                stream
+                    .mix_buffer
+                    .reserve(source_needed - stream.mix_buffer.capacity());
+            }
+            take_segmented(
+                &mut stream.segments,
+                &mut stream.segment_cursor,
+                source_needed,
+                &mut stream.mix_buffer,
+            );
+        } else {
+            stream.source_buffer.clear();
+            if stream.source_buffer.capacity() < source_needed {
+                stream
+                    .source_buffer
+                    .reserve(source_needed - stream.source_buffer.capacity());
+            }
+            take_segmented(
+                &mut stream.segments,
+                &mut stream.segment_cursor,
+                source_needed,
+                &mut stream.source_buffer,
+            );
+            resample_chunk_into(
+                &stream.source_buffer,
+                stream.source_rate,
+                stream.source_channels,
+                self.output_rate,
+                self.output_channels,
+                &mut stream.mix_buffer,
+            )?;
+        }
+        if stream.mix_buffer.is_empty() {
             if exhausted && !stream.finish_submitted {
                 self.service
                     .as_mut()
@@ -1067,14 +1125,6 @@ impl WorkerState {
             }
             return Ok(false);
         }
-        resample_chunk_into(
-            &stream.source_buffer,
-            stream.source_rate,
-            stream.source_channels,
-            self.output_rate,
-            self.output_channels,
-            &mut stream.mix_buffer,
-        )?;
         let target_samples = self
             .chunk_frames
             .checked_mul(usize::from(self.output_channels))
@@ -1092,7 +1142,7 @@ impl WorkerState {
             .service
             .as_mut()
             .ok_or_else(|| "ASTRA_EMU_AUDIO_SERVICE_CLOSED".to_owned())?
-            .submit_stream_owned(kira_stream_id(stream_id), buffer)
+            .submit_stream_recyclable(kira_stream_id(stream_id), buffer)
             .map_err(|error| error.to_string())?;
         self.telemetry.packet_count.fetch_add(1, Ordering::Relaxed);
         if audible {
@@ -1137,7 +1187,9 @@ impl WorkerState {
                     {
                         return Err("ASTRA_EMU_AUDIO_STREAM_FORMAT_CHANGE".into());
                     }
-                    stream.segments.push_back(AudioSegment::I16(chunk.samples));
+                    stream
+                        .segments
+                        .push_back(AudioSegment::I16(chunk.samples.into()));
                     self.telemetry
                         .decoder_refills
                         .fetch_add(1, Ordering::Relaxed);
@@ -1263,16 +1315,15 @@ fn queued_samples(segments: &VecDeque<AudioSegment>, cursor: usize) -> usize {
         .sum()
 }
 
-fn take_owned_f32_chunk(
+fn take_owned_f32_segment(
     segments: &mut VecDeque<AudioSegment>,
     cursor: &mut usize,
-    count: usize,
-) -> Option<Vec<f32>> {
+) -> Option<OwnedF32Buffer> {
     if *cursor != 0 {
         return None;
     }
     match segments.front() {
-        Some(AudioSegment::F32(samples)) if samples.len() == count => {}
+        Some(AudioSegment::F32(_)) => {}
         _ => return None,
     }
     match segments.pop_front() {
@@ -1423,7 +1474,7 @@ fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String>
 }
 #[cfg(target_os = "windows")]
 fn native_audio_factory() -> impl PlatformHostFactory {
-    astra_platform_windows::factory()
+    astra_platform_windows::service_factory()
 }
 #[cfg(target_os = "linux")]
 fn native_audio_factory() -> impl PlatformHostFactory {
@@ -1440,7 +1491,7 @@ mod tests {
 
     #[test]
     fn segmented_i16_conversion_is_bounded_and_ordered() {
-        let mut segments = VecDeque::from([AudioSegment::I16(vec![i16::MIN, 0, i16::MAX])]);
+        let mut segments = VecDeque::from([AudioSegment::I16(vec![i16::MIN, 0, i16::MAX].into())]);
         let mut cursor = 0;
         let mut output = Vec::new();
         take_segmented(&mut segments, &mut cursor, 3, &mut output);
@@ -1451,13 +1502,13 @@ mod tests {
     }
 
     #[test]
-    fn exact_f32_chunk_moves_the_original_allocation() {
+    fn same_format_f32_segment_moves_the_original_allocation() {
         let samples = vec![0.25_f32; 128];
         let pointer = samples.as_ptr();
-        let mut segments = VecDeque::from([AudioSegment::F32(samples)]);
+        let mut segments = VecDeque::from([AudioSegment::F32(samples.into())]);
         let mut cursor = 0;
-        let moved =
-            take_owned_f32_chunk(&mut segments, &mut cursor, 128).expect("exact chunk should move");
+        let moved = take_owned_f32_segment(&mut segments, &mut cursor)
+            .expect("same-format segment should move");
         assert_eq!(moved.as_ptr(), pointer);
         assert!(segments.is_empty());
         assert_eq!(cursor, 0);

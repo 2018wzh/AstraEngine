@@ -25,8 +25,8 @@ use astra_plugin_abi::{
     FfiRuntimeProviderResultItem, FfiRuntimeReportResult, FfiRuntimeRestoreRequest,
     FfiRuntimeSaveRequest, FfiRuntimeSaveResult, FfiRuntimeSceneResourceOperation,
     FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeShutdownRequest, FfiRuntimeStepMode,
-    FfiRuntimeStepRequest, FfiRuntimeStepResult, FfiRuntimeTextureFormat, FfiRuntimeVideoMode,
-    FfiRuntimeWaitKind, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
+    FfiRuntimeStepRequest, FfiRuntimeStepResult, FfiRuntimeTextureFilter, FfiRuntimeTextureFormat,
+    FfiRuntimeVideoMode, FfiRuntimeWaitKind, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
@@ -43,9 +43,10 @@ use astra_plugin_abi::{
     RuntimeLiveDirtySection, RuntimeLiveEvent, RuntimeLiveOutput, RuntimeLivePcmBuffer,
     RuntimeLiveResourceScene, RuntimeLiveResourceTexture, RuntimeLiveSceneResourceOperation,
     RuntimeLiveSceneTransaction, RuntimeLiveScissor, RuntimeLiveTextLease,
-    RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFormat,
-    RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait,
-    RuntimeLiveWaitKind, RuntimeSectionCodec, RuntimeSectionPayload,
+    RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFilter,
+    RuntimeLiveTextureFormat, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind,
+    RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeSectionCodec,
+    RuntimeSectionPayload,
 };
 
 use crate::{RuntimeHostError, RuntimeHostLimits, WorkerBudgetBroker};
@@ -1125,6 +1126,14 @@ fn runtime_live_scene(
         sequence: transaction.sequence,
         width: transaction.width,
         height: transaction.height,
+        compositing: match transaction.compositing {
+            astra_plugin_abi::FfiRuntimeSceneCompositing::LinearSrgb => {
+                astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb
+            }
+            astra_plugin_abi::FfiRuntimeSceneCompositing::EncodedSrgb => {
+                astra_plugin_abi::RuntimeLiveSceneCompositing::EncodedSrgb
+            }
+        },
         resources: transaction
             .resources
             .into_iter()
@@ -1191,6 +1200,10 @@ fn runtime_live_scene(
                     FfiRuntimeBlendMode::Multiply => RuntimeLiveBlendMode::Multiply,
                     FfiRuntimeBlendMode::Screen => RuntimeLiveBlendMode::Screen,
                 },
+                texture_filter: match draw.texture_filter {
+                    FfiRuntimeTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
+                    FfiRuntimeTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
+                },
                 scissor: draw.scissor.into_option().map(|value| RuntimeLiveScissor {
                     x: value.x,
                     y: value.y,
@@ -1222,6 +1235,10 @@ fn runtime_live_draw(draw: astra_plugin_abi::FfiRuntimeDraw) -> astra_plugin_abi
             FfiRuntimeBlendMode::Opaque => RuntimeLiveBlendMode::Opaque,
             FfiRuntimeBlendMode::Multiply => RuntimeLiveBlendMode::Multiply,
             FfiRuntimeBlendMode::Screen => RuntimeLiveBlendMode::Screen,
+        },
+        texture_filter: match draw.texture_filter {
+            FfiRuntimeTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
+            FfiRuntimeTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
         },
         scissor: draw.scissor.into_option().map(|value| RuntimeLiveScissor {
             x: value.x,
@@ -1277,7 +1294,7 @@ fn runtime_live_audio_command(
         } => RuntimeLiveAudioCommand::SubmitI16 {
             sequence,
             stream_id,
-            samples: samples.into_vec(),
+            samples: samples.into_owned(),
         },
         astra_plugin_abi::FfiRuntimeAudioCommand::SubmitF32 {
             sequence,
@@ -1286,7 +1303,7 @@ fn runtime_live_audio_command(
         } => RuntimeLiveAudioCommand::SubmitF32 {
             sequence,
             stream_id,
-            samples: samples.into_vec(),
+            samples: samples.into_owned(),
         },
         astra_plugin_abi::FfiRuntimeAudioCommand::Play {
             sequence,
@@ -1388,16 +1405,7 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
     let audio = value
         .audio
         .into_iter()
-        .map(|packet| RuntimeLiveAudioPacket {
-            sequence: packet.sequence,
-            stream_id: packet.stream_id,
-            sample_rate: packet.sample_rate,
-            channels: packet.channels,
-            pcm: match packet.pcm {
-                FfiRuntimePcmBuffer::I16(samples) => RuntimeLivePcmBuffer::I16(samples.into_vec()),
-                FfiRuntimePcmBuffer::F32(samples) => RuntimeLivePcmBuffer::F32(samples.into_vec()),
-            },
-        })
+        .map(runtime_live_audio_packet)
         .collect::<Vec<_>>();
     let mut audio_commands = Vec::with_capacity(value.audio_commands.len());
     for command in value.audio_commands {
@@ -1616,6 +1624,22 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
 }
 
 #[cfg(feature = "dynamic-abi")]
+fn runtime_live_audio_packet(
+    packet: astra_plugin_abi::FfiRuntimeAudioPacket,
+) -> RuntimeLiveAudioPacket {
+    RuntimeLiveAudioPacket {
+        sequence: packet.sequence,
+        stream_id: packet.stream_id,
+        sample_rate: packet.sample_rate,
+        channels: packet.channels,
+        pcm: match packet.pcm {
+            FfiRuntimePcmBuffer::I16(samples) => RuntimeLivePcmBuffer::I16(samples.into_owned()),
+            FfiRuntimePcmBuffer::F32(samples) => RuntimeLivePcmBuffer::F32(samples.into_owned()),
+        },
+    }
+}
+
+#[cfg(feature = "dynamic-abi")]
 fn runtime_step_result(result: FfiRuntimeStepResult) -> Result<RuntimeStepOutput, String> {
     diagnostics(result.ok, result.diagnostics.as_slice())?;
     Ok(RuntimeStepOutput {
@@ -1729,5 +1753,54 @@ fn poison_session(entry: &Arc<Mutex<ConcurrentSession>>) {
     match entry.lock() {
         Ok(mut session) => session.poisoned = true,
         Err(poisoned) => poisoned.into_inner().poisoned = true,
+    }
+}
+
+#[cfg(all(test, feature = "dynamic-abi"))]
+mod dynamic_pcm_tests {
+    use astra_byte_source::{OwnedF32Buffer, OwnedI16Buffer};
+    use astra_plugin_abi::{
+        FfiRuntimeAudioCommand, FfiRuntimeAudioPacket, FfiRuntimePcmBuffer,
+        RuntimeLiveAudioCommand, RuntimeLivePcmBuffer,
+    };
+
+    use super::{runtime_live_audio_command, runtime_live_audio_packet};
+
+    #[test]
+    fn provider_packet_preserves_i16_allocation() {
+        let samples = vec![-9_i16, 0, 9, i16::MAX];
+        let source_ptr = samples.as_ptr();
+        let packet = FfiRuntimeAudioPacket {
+            sequence: 4,
+            stream_id: 7,
+            sample_rate: 48_000,
+            channels: 2,
+            pcm: FfiRuntimePcmBuffer::I16(OwnedI16Buffer::from_vec(samples).into_ffi()),
+        };
+
+        let packet = runtime_live_audio_packet(packet);
+        match packet.pcm {
+            RuntimeLivePcmBuffer::I16(samples) => assert_eq!(samples.as_ptr(), source_ptr),
+            RuntimeLivePcmBuffer::F32(_) => panic!("expected i16 PCM"),
+        }
+    }
+
+    #[test]
+    fn provider_submit_command_preserves_f32_allocation() {
+        let samples = vec![-0.5_f32, 0.0, 0.5, 1.0];
+        let source_ptr = samples.as_ptr();
+        let command = FfiRuntimeAudioCommand::SubmitF32 {
+            sequence: 8,
+            stream_id: 3,
+            samples: OwnedF32Buffer::from_vec(samples).into_ffi(),
+        };
+
+        let command = runtime_live_audio_command(command).expect("typed audio command");
+        match command {
+            RuntimeLiveAudioCommand::SubmitF32 { samples, .. } => {
+                assert_eq!(samples.as_ptr(), source_ptr);
+            }
+            _ => panic!("expected f32 submit"),
+        }
     }
 }

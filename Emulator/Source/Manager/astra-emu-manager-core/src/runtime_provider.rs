@@ -14,9 +14,9 @@ use astra_emu_family_api::{
     LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
     LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode, LegacyResourceRead,
     LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacySnapshotEnvelope,
-    LegacyStepBudget, LegacyStepInput, LegacyTextPresentationLeaseV1, LegacyTextureFormat,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
+    LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacyShutdownReport,
+    LegacySnapshotEnvelope, LegacyStepBudget, LegacyStepInput, LegacyTextPresentationLeaseV1,
+    LegacyTextureFormat, LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
 };
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 use astra_plugin_abi::{
@@ -27,7 +27,7 @@ use astra_plugin_abi::{
     RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveResourceTexture,
     RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveScissor,
     RuntimeLiveTextLease, RuntimeLiveTextPresentation, RuntimeLiveTextRegion,
-    RuntimeLiveTextureFormat, RuntimeLiveVertex, RuntimeLiveVideoCommand,
+    RuntimeLiveTextureFilter, RuntimeLiveTextureFormat, RuntimeLiveVertex, RuntimeLiveVideoCommand,
     RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind,
     RuntimeOpenReport, RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest,
     RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
@@ -45,6 +45,32 @@ use astra_runtime::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+pub fn evidence_terminal_hash(seed: u64, fixed_step: u64, state_revision: u64) -> Hash256 {
+    Hash256::from_sha256(
+        format!("fvp\0terminal\0{fixed_step}\0{state_revision}\0{seed}").as_bytes(),
+    )
+}
+
+pub fn evidence_vm_coverage_ids(
+    trace: &[astra_emu_family_api::LegacyVmTraceRecord],
+) -> Vec<String> {
+    trace
+        .iter()
+        .map(|record| {
+            format!(
+                "fvp.vm.c{}.pc{:08x}.op{:02x}",
+                record.context_id, record.program_counter, record.opcode
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+pub fn evidence_vm_coverage_hash(ids: &[String]) -> Hash256 {
+    Hash256::from_sha256(format!("{}\n", ids.join("\n")).as_bytes())
+}
 
 fn live_texture_format(format: LegacyTextureFormat) -> RuntimeLiveTextureFormat {
     match format {
@@ -158,6 +184,14 @@ fn move_live_scene(
                 texture_id: draw.texture_id,
                 vertices,
                 blend,
+                texture_filter: match draw.texture_filter {
+                    astra_emu_family_api::LegacyTextureFilter::Nearest => {
+                        RuntimeLiveTextureFilter::Nearest
+                    }
+                    astra_emu_family_api::LegacyTextureFilter::Linear => {
+                        RuntimeLiveTextureFilter::Linear
+                    }
+                },
                 scissor,
             })
         })
@@ -166,6 +200,14 @@ fn move_live_scene(
         sequence: transaction.sequence,
         width: transaction.width,
         height: transaction.height,
+        compositing: match transaction.compositing {
+            astra_emu_family_api::LegacySceneCompositingV1::LinearSrgb => {
+                astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb
+            }
+            astra_emu_family_api::LegacySceneCompositingV1::EncodedSrgb => {
+                astra_plugin_abi::RuntimeLiveSceneCompositing::EncodedSrgb
+            }
+        },
         resources,
         draws,
         reset_resources: transaction.reset_resources,
@@ -233,6 +275,10 @@ fn move_live_draw(draw: astra_emu_family_api::LegacyDrawV1) -> Result<RuntimeLiv
         texture_id: draw.texture_id,
         vertices,
         blend,
+        texture_filter: match draw.texture_filter {
+            astra_emu_family_api::LegacyTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
+            astra_emu_family_api::LegacyTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
+        },
         scissor,
     })
 }
@@ -926,6 +972,32 @@ impl AstraEmuRuntimeProvider {
             family,
             sessions: BTreeMap::new(),
         })
+    }
+
+    /// Shuts down one concrete AstraEMU session and returns the family-owned
+    /// cold-path evidence alongside the generic provider lifecycle report.
+    pub fn shutdown_with_family_report(
+        &mut self,
+        session_id: GameRuntimeSessionId,
+    ) -> Result<(RuntimeShutdownReport, LegacyShutdownReport), String> {
+        let session = self
+            .sessions
+            .remove(&session_id.0)
+            .ok_or("ASTRA_EMU_SESSION_MISSING")?;
+        let family_report = self
+            .family
+            .shutdown(&session.host_ctx, &session.family_session_id)
+            .map_err(|error| error.to_string())?;
+        let report = RuntimeShutdownReport {
+            session_id,
+            status: "shutdown".into(),
+            diagnostics: family_report
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect(),
+        };
+        Ok((report, family_report))
     }
 
     pub fn descriptor_value() -> ProductRuntimeDescriptor {
@@ -1721,18 +1793,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         &mut self,
         session_id: GameRuntimeSessionId,
     ) -> Result<RuntimeShutdownReport, String> {
-        let session = self
-            .sessions
-            .remove(&session_id.0)
-            .ok_or("ASTRA_EMU_SESSION_MISSING")?;
-        self.family
-            .shutdown(&session.host_ctx, &session.family_session_id)
-            .map_err(|error| error.to_string())?;
-        Ok(RuntimeShutdownReport {
-            session_id,
-            status: "shutdown".into(),
-            diagnostics: vec![],
-        })
+        self.shutdown_with_family_report(session_id)
+            .map(|(report, _)| report)
     }
 }
 
@@ -1894,6 +1956,7 @@ mod tests {
                 sequence: 0,
                 width: 1,
                 height: 1,
+                compositing: astra_emu_family_api::LegacySceneCompositingV1::LinearSrgb,
                 resources: vec![LegacySceneResourceOperationV7::CreateTexture {
                     texture_id: 1,
                     generation: 1,

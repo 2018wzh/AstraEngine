@@ -790,6 +790,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             final_state_revision: session.vm.state().fixed_tick,
             instruction_count: session.vm.state().instruction_count,
             syscall_count: 0,
+            evidence_vm_trace: Vec::new(),
             diagnostics: Vec::new(),
         })
     }
@@ -1225,6 +1226,7 @@ fn append_resource_layer(
             vertex(right, bottom, 1.0, 1.0),
         ],
         blend: LegacyBlendMode::Alpha,
+        texture_filter: astra_emu_family_api::LegacyTextureFilter::Linear,
         scissor: None,
     });
     Ok(())

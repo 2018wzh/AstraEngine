@@ -7,9 +7,9 @@
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyBlendMode,
-    LegacyDrawV1, LegacySceneResourceOperationV7, LegacySceneResourceStateV1,
-    LegacySceneTransactionV7, LegacyScissorV1, LegacyTextureFormat, LegacyVertexV1,
-    LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyDrawV1, LegacySceneCompositingV1, LegacySceneResourceOperationV7,
+    LegacySceneResourceStateV1, LegacySceneTransactionV7, LegacyScissorV1, LegacyTextureFilter,
+    LegacyTextureFormat, LegacyVertexV1, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use rfvp_hosted::{
     host_api::{BlendMode, DrawSolidCommand, PixelFormat, TextureId},
@@ -162,6 +162,7 @@ impl HostedSceneTranslator {
                     sequence: 0,
                     width,
                     height,
+                    compositing: LegacySceneCompositingV1::EncodedSrgb,
                     resources,
                     draws,
                     reset_resources: self.rehydrate_resources,
@@ -287,13 +288,13 @@ pub fn audio_commands_from_delta(
                 HostedAudioOperation::SubmitI16 { id, samples } => {
                     LegacyAudioCommandV1::SubmitI16 {
                         stream_id: id.0,
-                        samples,
+                        samples: samples.into(),
                     }
                 }
                 HostedAudioOperation::SubmitF32 { id, samples } => {
                     LegacyAudioCommandV1::SubmitF32 {
                         stream_id: id.0,
-                        samples,
+                        samples: samples.into(),
                     }
                 }
                 HostedAudioOperation::Play {
@@ -374,14 +375,12 @@ fn texture_payload_owned(
     ))
 }
 
-fn map_blend(blend: BlendMode) -> LegacyBlendMode {
-    match blend {
-        BlendMode::Opaque => LegacyBlendMode::Opaque,
-        BlendMode::Alpha => LegacyBlendMode::Alpha,
-        BlendMode::Add => LegacyBlendMode::Add,
-        BlendMode::Multiply => LegacyBlendMode::Multiply,
-        BlendMode::Screen => LegacyBlendMode::Screen,
-    }
+fn map_blend(_blend: BlendMode) -> LegacyBlendMode {
+    // RFVP records the VM's requested blend mode, but both authoritative RFVP
+    // renderers submit every sprite and solid through normal alpha blending.
+    // Preserve that renderer behavior here instead of changing Astra's generic
+    // blend contract to match an RFVP-specific compatibility rule.
+    LegacyBlendMode::Alpha
 }
 
 fn solid_draw(command: &DrawSolidCommand) -> LegacyDrawV1 {
@@ -420,6 +419,7 @@ fn solid_draw(command: &DrawSolidCommand) -> LegacyDrawV1 {
             },
         ],
         blend: map_blend(command.blend),
+        texture_filter: LegacyTextureFilter::Linear,
         scissor: command.scissor.map(|scissor| LegacyScissorV1 {
             x: scissor.x,
             y: scissor.y,
@@ -443,6 +443,10 @@ fn sprite_draw(draw: &rfvp_hosted::host_api::DrawSpriteCommand) -> LegacyDrawV1 
             ],
         }),
         blend: map_blend(draw.blend),
+        texture_filter: match draw.filter {
+            rfvp_hosted::host_api::TextureFilter::Nearest => LegacyTextureFilter::Nearest,
+            rfvp_hosted::host_api::TextureFilter::Linear => LegacyTextureFilter::Linear,
+        },
         scissor: draw.scissor.map(|scissor| LegacyScissorV1 {
             x: scissor.x,
             y: scissor.y,
@@ -496,6 +500,20 @@ mod tests {
             logs: Vec::new(),
             log_dropped_count: 0,
             copy_telemetry: Default::default(),
+            visual_state: None,
+        }
+    }
+
+    #[test]
+    fn normalizes_recorded_rfvp_blend_modes_to_authoritative_alpha_rendering() {
+        for blend in [
+            BlendMode::Opaque,
+            BlendMode::Alpha,
+            BlendMode::Add,
+            BlendMode::Multiply,
+            BlendMode::Screen,
+        ] {
+            assert_eq!(map_blend(blend), LegacyBlendMode::Alpha);
         }
     }
 

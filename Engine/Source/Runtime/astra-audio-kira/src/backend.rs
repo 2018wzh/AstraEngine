@@ -1,10 +1,10 @@
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Condvar, Mutex,
+        Arc,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use astra_platform::{AudioOutputLane, PlatformError};
@@ -36,19 +36,8 @@ pub enum AstraChunkBackendError {
     Endpoint(#[from] PlatformError),
     #[error("audio chunk worker could not be started")]
     WorkerStart,
-    #[error("deterministic audio chunk worker missed the fixed-tick deadline")]
-    DeterministicDeadline,
-}
-
-#[derive(Default)]
-struct DeterministicClockState {
-    requested_samples: u64,
-}
-
-#[derive(Default)]
-struct DeterministicClock {
-    state: Mutex<DeterministicClockState>,
-    wake: Condvar,
+    #[error("deterministic audio sample count overflowed")]
+    DeterministicSampleCount,
 }
 
 #[derive(Default)]
@@ -66,7 +55,11 @@ pub struct AstraChunkBackend {
     stop: Arc<AtomicBool>,
     telemetry: Arc<SharedTelemetry>,
     worker: Option<JoinHandle<Result<(), PlatformError>>>,
-    deterministic_clock: Option<Arc<DeterministicClock>>,
+    deterministic_renderer: Option<Renderer>,
+    deterministic_endpoint: Option<Box<dyn AudioOutputLane>>,
+    deterministic_chunk: Vec<f32>,
+    deterministic_channels: u16,
+    deterministic_requested_samples: u64,
     deterministic_samples_per_tick: u64,
     chunk_samples: u64,
 }
@@ -86,55 +79,80 @@ impl AstraChunkBackend {
 
     pub fn take_worker_error(&mut self) -> Result<(), AstraChunkBackendError> {
         if self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
-            let worker = self.worker.take().expect("finished worker must exist");
-            worker
-                .join()
-                .map_err(|_| AstraChunkBackendError::WorkerStart)??;
+            self.join_worker()?;
         }
         Ok(())
     }
 
+    fn join_worker(&mut self) -> Result<(), AstraChunkBackendError> {
+        let worker = self
+            .worker
+            .take()
+            .ok_or(AstraChunkBackendError::WorkerStart)?;
+        worker
+            .join()
+            .map_err(|_| AstraChunkBackendError::WorkerStart)??;
+        Ok(())
+    }
+
     pub fn advance_fixed_tick(&mut self) -> Result<(), AstraChunkBackendError> {
-        let Some(clock) = self.deterministic_clock.clone() else {
+        if self.deterministic_renderer.is_none() {
             return Ok(());
-        };
-        self.take_worker_error()?;
-        let target = {
-            let mut state = clock
-                .state
-                .lock()
-                .map_err(|_| AstraChunkBackendError::DeterministicDeadline)?;
-            state.requested_samples = state
-                .requested_samples
-                .checked_add(self.deterministic_samples_per_tick)
-                .ok_or(AstraChunkBackendError::DeterministicDeadline)?;
-            let target = state.requested_samples / self.chunk_samples * self.chunk_samples;
-            clock.wake.notify_all();
-            target
-        };
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let mut state = clock
-            .state
-            .lock()
-            .map_err(|_| AstraChunkBackendError::DeterministicDeadline)?;
-        while self.telemetry.submitted_samples.load(Ordering::Acquire) < target {
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(AstraChunkBackendError::DeterministicDeadline);
-            }
-            let (next, timeout) = clock
-                .wake
-                .wait_timeout(state, deadline.duration_since(now))
-                .map_err(|_| AstraChunkBackendError::DeterministicDeadline)?;
-            state = next;
-            if timeout.timed_out()
-                && self.telemetry.submitted_samples.load(Ordering::Acquire) < target
-            {
-                return Err(AstraChunkBackendError::DeterministicDeadline);
-            }
         }
-        drop(state);
-        self.take_worker_error()
+        self.deterministic_requested_samples = self
+            .deterministic_requested_samples
+            .checked_add(self.deterministic_samples_per_tick)
+            .ok_or(AstraChunkBackendError::DeterministicSampleCount)?;
+        let target = self.deterministic_requested_samples / self.chunk_samples * self.chunk_samples;
+        while self.telemetry.submitted_samples.load(Ordering::Acquire) < target {
+            let endpoint = self
+                .deterministic_endpoint
+                .as_mut()
+                .ok_or(AstraChunkBackendError::InvalidSettings)?;
+            let renderer = self
+                .deterministic_renderer
+                .as_mut()
+                .ok_or(AstraChunkBackendError::InvalidSettings)?;
+            let wait_started = Instant::now();
+            endpoint.wait_for_capacity(self.chunk_samples as usize, &self.stop)?;
+            self.telemetry
+                .consumed_samples
+                .store(endpoint.consumed_samples(), Ordering::Release);
+            self.telemetry
+                .underflow_count
+                .store(endpoint.underflow_count(), Ordering::Relaxed);
+            self.telemetry
+                .submit_wait_ns
+                .fetch_add(elapsed_ns(wait_started), Ordering::Relaxed);
+            let render_started = Instant::now();
+            renderer.on_start_processing();
+            renderer.process(&mut self.deterministic_chunk, self.deterministic_channels);
+            self.telemetry
+                .render_ns
+                .fetch_add(elapsed_ns(render_started), Ordering::Relaxed);
+            self.telemetry
+                .rendered_samples
+                .fetch_add(self.chunk_samples, Ordering::Release);
+            let chunk = std::mem::take(&mut self.deterministic_chunk);
+            self.deterministic_chunk = endpoint.submit(chunk)?;
+            if self.deterministic_chunk.len() as u64 != self.chunk_samples {
+                return Err(AstraChunkBackendError::Endpoint(PlatformError::new(
+                    astra_platform::PlatformErrorCode::IntegrityMismatch,
+                    "audio.lane.recycle",
+                    "endpoint returned an allocation with the wrong length",
+                )));
+            }
+            self.telemetry
+                .consumed_samples
+                .store(endpoint.consumed_samples(), Ordering::Release);
+            self.telemetry
+                .underflow_count
+                .store(endpoint.underflow_count(), Ordering::Relaxed);
+            self.telemetry
+                .submitted_samples
+                .fetch_add(self.chunk_samples, Ordering::Release);
+        }
+        Ok(())
     }
 }
 
@@ -169,16 +187,17 @@ impl Backend for AstraChunkBackend {
             })
             .transpose()?
             .unwrap_or(0);
-        let deterministic_clock = settings
-            .deterministic_fixed_tick_hz
-            .map(|_| Arc::new(DeterministicClock::default()));
         Ok((
             Self {
                 settings: Some(settings),
                 stop: Arc::new(AtomicBool::new(false)),
                 telemetry: Arc::new(SharedTelemetry::default()),
                 worker: None,
-                deterministic_clock,
+                deterministic_renderer: None,
+                deterministic_endpoint: None,
+                deterministic_chunk: Vec::new(),
+                deterministic_channels: 0,
+                deterministic_requested_samples: 0,
                 deterministic_samples_per_tick,
                 chunk_samples,
             },
@@ -191,8 +210,8 @@ impl Backend for AstraChunkBackend {
             sample_rate: _,
             channels,
             chunk_frames,
-            mut endpoint,
-            deterministic_fixed_tick_hz: _,
+            endpoint,
+            deterministic_fixed_tick_hz,
         } = self
             .settings
             .take()
@@ -200,84 +219,65 @@ impl Backend for AstraChunkBackend {
         let sample_count = chunk_frames
             .checked_mul(usize::from(channels))
             .ok_or(AstraChunkBackendError::InvalidSettings)?;
+        if deterministic_fixed_tick_hz.is_some() {
+            self.deterministic_renderer = Some(renderer);
+            self.deterministic_endpoint = Some(endpoint);
+            self.deterministic_chunk = vec![0.0; sample_count];
+            self.deterministic_channels = channels;
+            return Ok(());
+        }
+        let mut endpoint = endpoint;
         let stop = Arc::clone(&self.stop);
         let telemetry = Arc::clone(&self.telemetry);
-        let deterministic_clock = self.deterministic_clock.clone();
         let worker = thread::Builder::new()
             .name("astra-kira-audio".into())
             .spawn(move || {
-                let mut chunk = vec![0.0; sample_count];
-                while !stop.load(Ordering::Acquire) {
-                    if let Some(clock) = &deterministic_clock {
-                        let mut state = clock.state.lock().map_err(|_| {
-                            PlatformError::new(
-                                astra_platform::PlatformErrorCode::InvalidState,
-                                "audio.fixed_tick.wait",
-                                "deterministic audio clock lock is poisoned",
-                            )
-                        })?;
-                        while telemetry.submitted_samples.load(Ordering::Acquire)
-                            + sample_count as u64
-                            > state.requested_samples
-                            && !stop.load(Ordering::Acquire)
-                        {
-                            state = clock.wake.wait(state).map_err(|_| {
-                                PlatformError::new(
-                                    astra_platform::PlatformErrorCode::InvalidState,
-                                    "audio.fixed_tick.wait",
-                                    "deterministic audio clock lock is poisoned",
-                                )
-                            })?;
-                        }
+                (|| {
+                    let mut chunk = vec![0.0; sample_count];
+                    while !stop.load(Ordering::Acquire) {
+                        let wait_started = Instant::now();
+                        endpoint.wait_for_capacity(sample_count, &stop)?;
+                        telemetry
+                            .consumed_samples
+                            .store(endpoint.consumed_samples(), Ordering::Release);
+                        telemetry
+                            .underflow_count
+                            .store(endpoint.underflow_count(), Ordering::Relaxed);
+                        telemetry
+                            .submit_wait_ns
+                            .fetch_add(elapsed_ns(wait_started), Ordering::Relaxed);
                         if stop.load(Ordering::Acquire) {
                             break;
                         }
+                        let render_started = Instant::now();
+                        renderer.on_start_processing();
+                        renderer.process(&mut chunk, channels);
+                        telemetry
+                            .render_ns
+                            .fetch_add(elapsed_ns(render_started), Ordering::Relaxed);
+                        telemetry
+                            .rendered_samples
+                            .fetch_add(sample_count as u64, Ordering::Release);
+                        chunk = endpoint.submit(chunk)?;
+                        telemetry
+                            .consumed_samples
+                            .store(endpoint.consumed_samples(), Ordering::Release);
+                        telemetry
+                            .underflow_count
+                            .store(endpoint.underflow_count(), Ordering::Relaxed);
+                        if chunk.len() != sample_count {
+                            return Err(PlatformError::new(
+                                astra_platform::PlatformErrorCode::IntegrityMismatch,
+                                "audio.lane.recycle",
+                                "endpoint returned an allocation with the wrong length",
+                            ));
+                        }
+                        telemetry
+                            .submitted_samples
+                            .fetch_add(sample_count as u64, Ordering::Relaxed);
                     }
-                    let wait_started = Instant::now();
-                    endpoint.wait_for_capacity(sample_count, &stop)?;
-                    telemetry
-                        .consumed_samples
-                        .store(endpoint.consumed_samples(), Ordering::Release);
-                    telemetry
-                        .underflow_count
-                        .store(endpoint.underflow_count(), Ordering::Relaxed);
-                    telemetry
-                        .submit_wait_ns
-                        .fetch_add(elapsed_ns(wait_started), Ordering::Relaxed);
-                    if stop.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let render_started = Instant::now();
-                    renderer.on_start_processing();
-                    renderer.process(&mut chunk, channels);
-                    telemetry
-                        .render_ns
-                        .fetch_add(elapsed_ns(render_started), Ordering::Relaxed);
-                    telemetry
-                        .rendered_samples
-                        .fetch_add(sample_count as u64, Ordering::Release);
-                    chunk = endpoint.submit(chunk)?;
-                    telemetry
-                        .consumed_samples
-                        .store(endpoint.consumed_samples(), Ordering::Release);
-                    telemetry
-                        .underflow_count
-                        .store(endpoint.underflow_count(), Ordering::Relaxed);
-                    if chunk.len() != sample_count {
-                        return Err(PlatformError::new(
-                            astra_platform::PlatformErrorCode::IntegrityMismatch,
-                            "audio.lane.recycle",
-                            "endpoint returned an allocation with the wrong length",
-                        ));
-                    }
-                    telemetry
-                        .submitted_samples
-                        .fetch_add(sample_count as u64, Ordering::Relaxed);
-                    if let Some(clock) = &deterministic_clock {
-                        clock.wake.notify_all();
-                    }
-                }
-                Ok(())
+                    Ok(())
+                })()
             })
             .map_err(|_| AstraChunkBackendError::WorkerStart)?;
         self.worker = Some(worker);
@@ -288,9 +288,6 @@ impl Backend for AstraChunkBackend {
 impl Drop for AstraChunkBackend {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        if let Some(clock) = &self.deterministic_clock {
-            clock.wake.notify_all();
-        }
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }

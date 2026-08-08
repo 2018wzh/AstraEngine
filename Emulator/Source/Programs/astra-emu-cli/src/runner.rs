@@ -16,8 +16,8 @@ use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
     LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
-    LegacyRenderFrameV1, LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextPresentationV1,
-    LegacyTextRegionV1, LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1,
+    LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextPresentationV1, LegacyTextRegionV1,
+    LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1,
     LegacyVideoMode,
 };
 use astra_emu_family_support::{
@@ -28,6 +28,7 @@ use astra_emu_fvp::{
     FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
 };
 use astra_emu_manager_core::{
+    evidence_terminal_hash, evidence_vm_coverage_hash, evidence_vm_coverage_ids,
     AstraEmuRuntimeProvider, CancellationToken, CaseRecord, DesktopGrantedSource,
     DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits, SourceGrant,
 };
@@ -43,7 +44,7 @@ use astra_media::{
 };
 use astra_media_core::{
     BlendMode, MeshDraw2D, MeshMaterial2D, MeshVertex2D, OwnedPixelBuffer, RectI, SceneCommand,
-    TextureFrame,
+    SceneCompositing2D, TextureFilter2D, TextureFrame,
 };
 use astra_observability::{
     sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceSummary,
@@ -71,11 +72,11 @@ use astra_plugin_abi::{
     RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
     RuntimeLiveAudioSampleFormat, RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLivePcmBuffer,
     RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
-    RuntimeLiveTextPresentation, RuntimeLiveTextureFormat, RuntimeLiveVideoCommand,
-    RuntimeLiveVideoCommandKind, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest,
-    RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget, RuntimeStepInput,
-    RuntimeStepMode, RuntimeTickIntegrityMode,
+    RuntimeLiveTextPresentation, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat,
+    RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveWait, RuntimeLiveWaitKind,
+    RuntimeOpenRequest, RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget,
+    RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
 };
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use schemars::JsonSchema;
@@ -85,7 +86,7 @@ use tokio::{sync::mpsc as tokio_mpsc, task::JoinHandle};
 use crate::{
     family_host::CliFamilyHostConfig,
     input::{read_input_sequence, ValidatedInputSequence},
-    rasterizer::CpuStageRasterizer,
+    rasterizer::{CpuStageRasterizer, PreparedRenderFrame},
     text_presentation::BoundTextPresenter,
 };
 
@@ -267,14 +268,6 @@ const MAX_RESUME_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
 /// are not RGBA frame payloads, so the platform command bound must admit a
 /// bounded texture delta without weakening the renderer's own resource cap.
 const MAX_NATIVE_SCENE_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
-// Hosted RFVP requires `default.ttf` during core boot.  Some original FVP
-// installations rely on the platform renderer's system-font fallback and do
-// not ship that file.  The CLI supplies this public OFL font through the
-// already-bounded, mount-scoped VFS overlay port only when the installation
-// lacks its own default font; it never mutates or shadows game content.
-const FVP_HOSTED_FALLBACK_FONT: &[u8] =
-    include_bytes!("../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf");
-
 #[derive(Debug, Clone)]
 pub struct HeadlessLaunch {
     pub family_id: String,
@@ -424,6 +417,16 @@ pub struct HeadlessPhaseTimingEvidenceV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct HeadlessFrameHashV1 {
+    pub sequence: u64,
+    pub fixed_step: u64,
+    pub frame_hash: Hash256,
+    pub difference_hash: u64,
+    pub mean_rgba: [u8; 4],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HeadlessRunReportV3 {
     pub schema: String,
     pub status: String,
@@ -439,6 +442,7 @@ pub struct HeadlessRunReportV3 {
     pub input_sequence_hash: Hash256,
     pub consumed_input_trace_hash: Hash256,
     pub visual_trace_hash: Hash256,
+    pub frame_hashes: Vec<HeadlessFrameHashV1>,
     pub audio_meter_hash: Hash256,
     pub runtime_state_trace_hash: Hash256,
     pub artifact_manifest_hash: Hash256,
@@ -450,6 +454,9 @@ pub struct HeadlessRunReportV3 {
     pub resumed_from_fixed_step: Option<u64>,
     pub resume_snapshot_exported: bool,
     pub terminal_reached: bool,
+    pub route_terminal_hash: Option<Hash256>,
+    pub coverage_ids: Vec<String>,
+    pub coverage_hash: Hash256,
     pub vfs_access: HeadlessVfsAccessEvidenceV1,
     pub resource_audit: Option<HeadlessResourceAuditEvidenceV1>,
     pub phase_timings: HeadlessPhaseTimingEvidenceV1,
@@ -604,7 +611,6 @@ fn prepare_fvp_case(
         .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
     let registry = Arc::new(DesktopVfsRegistry::default());
     registry.bind(mount_set_id, &game_root.to_string_lossy())?;
-    install_fvp_hosted_font_overlay(registry.as_ref(), mount_set_id)?;
     Ok(PreparedFamilyCase {
         family_id: "fvp".into(),
         case_identity: case.case_identity,
@@ -632,25 +638,6 @@ fn normalize_fvp_pack_path(path: &str) -> Result<String, String> {
         return Err("ASTRA_EMU_FVP_ARCHIVE_PATH".into());
     }
     Ok(normalized)
-}
-
-fn install_fvp_hosted_font_overlay(
-    registry: &DesktopVfsRegistry,
-    mount_set_id: &str,
-) -> Result<(), String> {
-    if registry
-        .list_resources(mount_set_id)?
-        .iter()
-        .any(|resource| resource.path.eq_ignore_ascii_case("default.ttf"))
-    {
-        return Ok(());
-    }
-    registry.install_overlays(
-        mount_set_id,
-        [("default.ttf".into(), FVP_HOSTED_FALLBACK_FONT.to_vec())]
-            .into_iter()
-            .collect(),
-    )
 }
 
 fn prepare_minori_case(
@@ -1311,7 +1298,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     let family_provider_id = family.descriptor().provider_id.clone();
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.headless.instance".into()))?;
-    let probe = probe_profile(
+    let mut probe = probe_profile(
         &runtime,
         &prepared,
         ProbeProfileRequest {
@@ -1323,6 +1310,12 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             stage_size: (launch.viewport_width, launch.viewport_height),
         },
     )?;
+    if launch.perfetto_trace.is_none() && launch.performance.is_none() {
+        probe
+            .runtime
+            .family_options
+            .insert("astra.hosted_trace_profile".into(), "evidence".into());
+    }
     let stage_width = probe
         .runtime
         .family_options
@@ -1534,17 +1527,20 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             .destroy_window(window)
             .await
             .map_err(|error| error.to_string())?;
-        runtime.shutdown(open.session_id.clone())?;
+        let (_, family_report) = runtime.shutdown_with_family_report(open.session_id.clone())?;
         host.client
             .shutdown()
             .await
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>(family_report)
     }
     .await;
     prepared.evidence.cleanup();
-    let (mut execution, vfs_access, resource_audit) = match (result, cleanup) {
-        (Ok(evidence), Ok(())) => evidence,
-        (Err(error), Ok(())) => return Err(error),
+    let (mut execution, vfs_access, resource_audit, family_report) = match (result, cleanup) {
+        (Ok((execution, access, audit)), Ok(family_report)) => {
+            (execution, access, audit, family_report)
+        }
+        (Err(error), Ok(_)) => return Err(error),
         (Ok(_), Err(cleanup)) => return Err(cleanup),
         (Err(error), Err(cleanup)) => {
             return Err(format!(
@@ -1552,6 +1548,11 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             ))
         }
     };
+    let coverage_ids = evidence_vm_coverage_ids(&family_report.evidence_vm_trace);
+    let coverage_hash = evidence_vm_coverage_hash(&coverage_ids);
+    let route_terminal_hash = execution
+        .terminal
+        .then(|| evidence_terminal_hash(seed, execution.fixed_step, execution.state_revision));
     if let Some(observer) = gpu_observer {
         execution.gpu_samples = observer.finish()?;
     }
@@ -1660,6 +1661,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         input_sequence_hash: input.hash,
         consumed_input_trace_hash: Hash256::from_sha256(&execution.input_trace),
         visual_trace_hash: Hash256::from_sha256(&execution.visual_trace),
+        frame_hashes: execution.frame_hashes,
         audio_meter_hash: Hash256::from_sha256(&execution.audio_trace),
         runtime_state_trace_hash: Hash256::from_sha256(&execution.state_trace),
         artifact_manifest_hash,
@@ -1671,6 +1673,9 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         resumed_from_fixed_step,
         resume_snapshot_exported: launch.snapshot_output.is_some(),
         terminal_reached: execution.terminal,
+        route_terminal_hash,
+        coverage_ids,
+        coverage_hash,
         vfs_access,
         resource_audit,
         phase_timings: execution.phase_timings,
@@ -2696,6 +2701,7 @@ fn case_profile_section(
 struct ExecutionEvidence {
     input_trace: Vec<u8>,
     visual_trace: Vec<u8>,
+    frame_hashes: Vec<HeadlessFrameHashV1>,
     audio_trace: Vec<u8>,
     state_trace: Vec<u8>,
     checkpoints: Vec<HeadlessCheckpointEvidenceV1>,
@@ -2705,6 +2711,7 @@ struct ExecutionEvidence {
     present_sequence: u64,
     snapshot_verified: bool,
     terminal: bool,
+    state_revision: u64,
     phase_timings: HeadlessPhaseTimingEvidenceV1,
     runtime_samples_ns: Vec<u64>,
     presentation_samples_ns: Vec<u64>,
@@ -3488,7 +3495,9 @@ struct GpuSceneAdapter {
     width: u32,
     height: u32,
     draws: Vec<LegacyDrawV1>,
+    compositing: SceneCompositing2D,
     last_live_sequence: u64,
+    resource_epoch: u64,
 }
 
 #[derive(Clone)]
@@ -3544,6 +3553,12 @@ impl GpuSceneAdapter {
             return Err("ASTRA_EMU_NATIVE_GPU_LIVE_SEQUENCE_REWIND".into());
         }
         let reset_resources = transaction.reset_resources;
+        if reset_resources {
+            self.resource_epoch = self
+                .resource_epoch
+                .checked_add(1)
+                .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_RESOURCE_EPOCH_OVERFLOW".to_owned())?;
+        }
         let mut mutations: BTreeMap<u32, Option<GpuSceneTexture>> = BTreeMap::new();
         let mut commands = Vec::with_capacity(
             transaction.resources.len().saturating_mul(2)
@@ -3583,7 +3598,7 @@ impl GpuSceneAdapter {
                         .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
                     let format = runtime_live_texture_format(format);
                     let rgba8 = gpu_rgba8_owned(width, height, format, pixels)?;
-                    let resource_id = gpu_resource_id(texture_id, generation);
+                    let resource_id = gpu_resource_id(self.resource_epoch, texture_id, generation);
                     let frame = TextureFrame::from_buffer(width, height, rgba8)
                         .map_err(|error| error.to_string())?;
                     commands.push(SceneCommand::UploadTexture {
@@ -3674,12 +3689,13 @@ impl GpuSceneAdapter {
                 }
             }
         }
+        let compositing = gpu_scene_compositing(transaction.compositing);
         let draws = transaction
             .draws
             .into_iter()
             .map(legacy_draw_from_live)
             .collect::<Result<Vec<_>, String>>()?;
-        commands.extend(gpu_draw_commands(&draws, |texture_id| {
+        commands.extend(gpu_draw_commands(&draws, compositing, |texture_id| {
             resolve_gpu_texture(&self.textures, &mutations, reset_resources, texture_id)
                 .map(|texture| texture.resource_id.clone())
         })?);
@@ -3699,6 +3715,7 @@ impl GpuSceneAdapter {
         self.width = transaction.width;
         self.height = transaction.height;
         self.draws = draws;
+        self.compositing = compositing;
         self.last_live_sequence = transaction.sequence;
         metrics.live_textures = self.textures.len() as u64;
         metrics.generation = self.last_live_sequence;
@@ -3727,7 +3744,7 @@ impl GpuSceneAdapter {
             width: self.width,
             height: self.height,
             clear_rgba: [0, 0, 0, 255],
-            commands: gpu_draw_commands(&self.draws, |texture_id| {
+            commands: gpu_draw_commands(&self.draws, self.compositing, |texture_id| {
                 self.textures
                     .get(&texture_id)
                     .map(|texture| texture.resource_id.clone())
@@ -3785,6 +3802,7 @@ fn resolve_gpu_texture<'a>(
 
 fn gpu_draw_commands(
     draws: &[LegacyDrawV1],
+    compositing: SceneCompositing2D,
     resolve_texture: impl Fn(u32) -> Option<String>,
 ) -> Result<Vec<SceneCommand>, String> {
     if draws.is_empty() {
@@ -3828,6 +3846,10 @@ fn gpu_draw_commands(
             index_count: 6,
             material,
             texture_id,
+            texture_filter: match draw.texture_filter {
+                LegacyTextureFilter::Nearest => TextureFilter2D::Nearest,
+                LegacyTextureFilter::Linear => TextureFilter2D::Linear,
+            },
             opacity: 1.0,
             blend: match draw.blend {
                 astra_emu_family_api::LegacyBlendMode::Alpha => BlendMode::Alpha,
@@ -3843,11 +3865,23 @@ fn gpu_draw_commands(
         vertices: vertices.into(),
         indices: indices.into(),
         draws: mesh_draws.into(),
+        compositing,
     }])
 }
 
-fn gpu_resource_id(texture_id: u32, generation: u64) -> String {
-    format!("rfvp-texture-{texture_id}-{generation}")
+fn gpu_scene_compositing(
+    compositing: astra_plugin_abi::RuntimeLiveSceneCompositing,
+) -> SceneCompositing2D {
+    match compositing {
+        astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb => SceneCompositing2D::LinearSrgb,
+        astra_plugin_abi::RuntimeLiveSceneCompositing::EncodedSrgb => {
+            SceneCompositing2D::EncodedSrgb
+        }
+    }
+}
+
+fn gpu_resource_id(epoch: u64, texture_id: u32, generation: u64) -> String {
+    format!("astra-emu-texture-{epoch}-{texture_id}-{generation}")
 }
 
 fn runtime_live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextureFormat {
@@ -3904,6 +3938,10 @@ fn legacy_draw_from_live(draw: astra_plugin_abi::RuntimeLiveDraw) -> Result<Lega
             RuntimeLiveBlendMode::Opaque => astra_emu_family_api::LegacyBlendMode::Opaque,
             RuntimeLiveBlendMode::Multiply => astra_emu_family_api::LegacyBlendMode::Multiply,
             RuntimeLiveBlendMode::Screen => astra_emu_family_api::LegacyBlendMode::Screen,
+        },
+        texture_filter: match draw.texture_filter {
+            RuntimeLiveTextureFilter::Nearest => LegacyTextureFilter::Nearest,
+            RuntimeLiveTextureFilter::Linear => LegacyTextureFilter::Linear,
         },
         scissor,
     })
@@ -3971,7 +4009,7 @@ struct RuntimeDriver<'a> {
     rasterizer: CpuStageRasterizer,
     gpu_scene: Option<GpuSceneAdapter>,
     pending_scene_metrics: Option<GpuScenePrepareMetrics>,
-    pending_render_frame: Option<LegacyRenderFrameV1>,
+    pending_render_frame: Option<PreparedRenderFrame>,
     pending_scene_frame: Option<SceneFrame>,
     visual_dirty: bool,
     image_decoders: DecodeProviderRegistry,
@@ -3991,6 +4029,7 @@ struct RuntimeDriver<'a> {
     completed_media: Vec<String>,
     input_trace: Vec<u8>,
     visual_trace: Vec<u8>,
+    frame_hashes: Vec<HeadlessFrameHashV1>,
     state_trace: Vec<u8>,
     diagnostics: BTreeSet<String>,
     active_touch: Option<u64>,
@@ -4575,8 +4614,9 @@ async fn execute_sequence(
     let mut checkpoint_frames = Vec::new();
     let mut snapshot_verified = false;
     let mut resume_snapshot = None;
+    let mut quick_save: Option<RuntimeSaveSections> = None;
     let run_result: Result<(), String> = async {
-        for message in messages {
+        for (message_index, message) in messages.iter().enumerate() {
             while driver.fixed_step < message.tick && !driver.terminal {
                 driver.step().await?;
             }
@@ -4591,6 +4631,44 @@ async fn execute_sequence(
                     }
                 }
                 PhysicalInput::Checkpoint { id } => {
+                    let trailing_same_tick = &messages[message_index + 1..];
+                    if trailing_same_tick
+                        .iter()
+                        .take_while(|candidate| candidate.tick == message.tick)
+                        .any(|candidate| {
+                            !matches!(
+                                &candidate.event,
+                                PhysicalInput::Checkpoint { .. } | PhysicalInput::Shutdown
+                            )
+                        })
+                    {
+                        return Err("ASTRA_EMU_HEADLESS_CHECKPOINT_ORDER".into());
+                    }
+                    let shutdown_same_tick = trailing_same_tick
+                        .iter()
+                        .take_while(|candidate| candidate.tick == message.tick)
+                        .any(|candidate| matches!(&candidate.event, PhysicalInput::Shutdown));
+                    // Input ticks are zero-based, while Runtime fixed steps are
+                    // one-based. A checkpoint observes the frame produced for
+                    // its tick, after all earlier messages at that tick have
+                    // been queued. Advancing here also makes tick-zero capture
+                    // deterministic instead of depending on whether the host
+                    // happened to have submitted an initialization frame. A
+                    // same-tick shutdown ends the oracle tick before rendering,
+                    // so its preceding checkpoint observes the last committed
+                    // frame without advancing.
+                    let checkpoint_step = message
+                        .tick
+                        .checked_add(1)
+                        .ok_or_else(|| "ASTRA_EMU_HEADLESS_CHECKPOINT_TICK_OVERFLOW".to_owned())?;
+                    if !shutdown_same_tick {
+                        while driver.fixed_step < checkpoint_step && !driver.terminal {
+                            driver.step().await?;
+                        }
+                        if driver.fixed_step < checkpoint_step {
+                            return Err("ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL".into());
+                        }
+                    }
                     let captured = platform
                         .capture_surface(surface)
                         .await
@@ -4663,6 +4741,49 @@ async fn execute_sequence(
                         return Err("ASTRA_EMU_HEADLESS_AWAIT_TIMEOUT".into());
                     }
                 }
+                PhysicalInput::Keyboard {
+                    physical_key,
+                    state: ButtonState::Pressed,
+                    ..
+                } if physical_key == "F5" => {
+                    let saved = driver.runtime.save(RuntimeSaveRequest {
+                        session_id: driver.session_id.clone(),
+                        slot: "headless-user-slot".into(),
+                    })?;
+                    validate_runtime_save_sections(&saved)?;
+                    quick_save = Some(saved);
+                }
+                PhysicalInput::Keyboard {
+                    physical_key,
+                    state: ButtonState::Pressed,
+                    ..
+                } if physical_key == "F9" => {
+                    let saved = quick_save
+                        .as_ref()
+                        .ok_or_else(|| "ASTRA_EMU_SAVE_SLOT_MISSING".to_owned())?;
+                    let restored = driver.runtime.restore(RuntimeRestoreRequest {
+                        session_id: driver.session_id.clone(),
+                        sections: saved.sections.clone(),
+                    })?;
+                    if restored.session_id != driver.session_id
+                        || restored.status != "restored"
+                        || !restored.diagnostics.is_empty()
+                    {
+                        return Err("ASTRA_EMU_HEADLESS_RESTORE_INVALID".into());
+                    }
+                    driver.fixed_step = restored.restored_fixed_step;
+                    driver.audio.reset_for_restore(driver.platform).await?;
+                    let active_video = driver.capture_active_video();
+                    driver.video = None;
+                    driver.pending_video_restore = active_video;
+                    driver.restore_pending_video().await?;
+                    driver.next_step_mode = RuntimeStepMode::RestoreContinuation;
+                }
+                PhysicalInput::Keyboard {
+                    physical_key,
+                    state: ButtonState::Released,
+                    ..
+                } if matches!(physical_key.as_str(), "F5" | "F9") => {}
                 input => driver.consume_physical_input(input)?,
             }
             driver.input_trace.extend_from_slice(
@@ -4749,6 +4870,7 @@ async fn execute_sequence(
     Ok(ExecutionEvidence {
         input_trace: driver.input_trace,
         visual_trace: driver.visual_trace,
+        frame_hashes: driver.frame_hashes,
         audio_trace,
         state_trace: driver.state_trace,
         checkpoints,
@@ -4758,6 +4880,7 @@ async fn execute_sequence(
         present_sequence: driver.present_sequence,
         snapshot_verified,
         terminal: driver.terminal,
+        state_revision: driver.state_revision,
         phase_timings,
         runtime_samples_ns,
         presentation_samples_ns,
@@ -4903,6 +5026,7 @@ impl<'a> RuntimeDriver<'a> {
             completed_media: Vec::new(),
             input_trace: Vec::new(),
             visual_trace: Vec::new(),
+            frame_hashes: Vec::new(),
             state_trace: Vec::new(),
             diagnostics: BTreeSet::new(),
             active_touch: None,
@@ -5554,7 +5678,7 @@ impl<'a> RuntimeDriver<'a> {
         {
             let mut submitted = 0u8;
             if let Some(scene) = self.pending_scene_frame.take() {
-                self.submit_scene(scene)?;
+                self.submit_scene(scene).await?;
                 self.visual_dirty = false;
                 submitted = 1;
             }
@@ -5564,7 +5688,7 @@ impl<'a> RuntimeDriver<'a> {
                     .as_ref()
                     .expect("checked GPU presentation path")
                     .draw_scene()?;
-                self.submit_scene(scene)?;
+                self.submit_scene(scene).await?;
                 submitted += 1;
             }
         } else if sample_due && (self.visual_dirty || video_changed) {
@@ -5574,8 +5698,7 @@ impl<'a> RuntimeDriver<'a> {
                         .pending_render_frame
                         .as_ref()
                         .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
-                    let width = frame.width;
-                    let height = frame.height;
+                    let (width, height) = frame.dimensions();
                     let raster_started = Instant::now();
                     let rgba8 = self.rasterizer.render_prepared(frame)?;
                     self.raster_timings_ns.push(elapsed_ns(raster_started)?);
@@ -5601,7 +5724,7 @@ impl<'a> RuntimeDriver<'a> {
         Ok(())
     }
 
-    fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {
+    async fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {
         let submitted = Instant::now();
         self.present_sequence = self
             .present_sequence
@@ -5611,7 +5734,12 @@ impl<'a> RuntimeDriver<'a> {
         let receipt = self
             .platform
             .submit_scene(self.surface, scene)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                format!(
+                    "{error}; fixed_step={}; present_sequence={}",
+                    self.fixed_step, self.present_sequence
+                )
+            })?;
         self.record_perfetto_phase("gpu.submit", 5, submitted)?;
         self.record_perfetto_flow(
             "gpu.present",
@@ -5619,16 +5747,56 @@ impl<'a> RuntimeDriver<'a> {
             self.present_sequence,
             PerfettoFlowPhase::Start,
         )?;
-        self.pending_scene_presents.push_back(PendingScenePresent {
-            sequence: self.present_sequence,
-            submitted,
-            receipt,
-        });
+        if self.capture_performance_samples {
+            self.pending_scene_presents.push_back(PendingScenePresent {
+                sequence: self.present_sequence,
+                submitted,
+                receipt,
+            });
+        } else {
+            receipt.complete().await.map_err(|error| {
+                format!(
+                    "{error}; fixed_step={}; present_sequence={}",
+                    self.fixed_step, self.present_sequence
+                )
+            })?;
+            self.present_timings_ns.push(elapsed_ns(submitted)?);
+            self.record_perfetto_flow(
+                "gpu.present",
+                5,
+                self.present_sequence,
+                PerfettoFlowPhase::End,
+            )?;
+            self.record_current_surface_frame().await?;
+        }
         self.record_perfetto_counter(
             "gpu.present_queue_depth",
             u64::try_from(self.pending_scene_presents.len())
                 .map_err(|_| "ASTRA_EMU_NATIVE_PRESENT_QUEUE_DEPTH_OVERFLOW".to_owned())?,
         )?;
+        Ok(())
+    }
+
+    async fn record_current_surface_frame(&mut self) -> Result<(), String> {
+        let captured = self
+            .platform
+            .capture_surface(self.surface)
+            .await
+            .map_err(|error| error.to_string())?;
+        let hash = Hash256::from_sha256(&captured.rgba8);
+        let (difference_hash, mean_rgba) =
+            frame_visual_signature(&captured.rgba8, captured.width, captured.height)?;
+        self.visual_trace
+            .extend_from_slice(hash.to_string().as_bytes());
+        self.visual_trace.push(b'\n');
+        self.frame_hashes.push(HeadlessFrameHashV1 {
+            sequence: self.present_sequence,
+            fixed_step: self.fixed_step,
+            frame_hash: hash,
+            difference_hash,
+            mean_rgba,
+        });
+        self.latest_frame = Some((captured.width, captured.height, hash));
         Ok(())
     }
 
@@ -5840,6 +6008,10 @@ impl<'a> RuntimeDriver<'a> {
                     }
                     astra_emu_family_api::LegacyBlendMode::Screen => RuntimeLiveBlendMode::Screen,
                 },
+                texture_filter: match draw.texture_filter {
+                    LegacyTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
+                    LegacyTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
+                },
                 scissor: draw
                     .scissor
                     .map(|scissor| astra_plugin_abi::RuntimeLiveScissor {
@@ -5854,6 +6026,7 @@ impl<'a> RuntimeDriver<'a> {
             sequence: scene.sequence,
             width: scene.width,
             height: scene.height,
+            compositing: astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb,
             resources,
             draws,
             reset_resources: false,
@@ -5880,6 +6053,7 @@ impl<'a> RuntimeDriver<'a> {
             .checked_add(1)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_PRESENT_SEQUENCE_OVERFLOW".to_owned())?;
         let hash = Hash256::from_sha256(&rgba8);
+        let (difference_hash, mean_rgba) = frame_visual_signature(&rgba8, width, height)?;
         self.platform
             .present_rgba(
                 self.surface,
@@ -5895,6 +6069,13 @@ impl<'a> RuntimeDriver<'a> {
         self.visual_trace
             .extend_from_slice(hash.to_string().as_bytes());
         self.visual_trace.push(b'\n');
+        self.frame_hashes.push(HeadlessFrameHashV1 {
+            sequence: self.present_sequence,
+            fixed_step: self.fixed_step,
+            frame_hash: hash,
+            difference_hash,
+            mean_rgba,
+        });
         self.latest_frame = Some((width, height, hash));
         Ok(())
     }
@@ -6260,6 +6441,51 @@ impl<'a> RuntimeDriver<'a> {
     }
 }
 
+fn frame_visual_signature(rgba8: &[u8], width: u32, height: u32) -> Result<(u64, [u8; 4]), String> {
+    let pixel_count = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .ok_or_else(|| "ASTRA_EMU_HEADLESS_FRAME_SIGNATURE_BOUNDS".to_owned())?;
+    if pixel_count == 0 || rgba8.len() != pixel_count.saturating_mul(4) {
+        return Err("ASTRA_EMU_HEADLESS_FRAME_SIGNATURE_LENGTH".into());
+    }
+    let mut sums = [0_u64; 4];
+    for pixel in rgba8.chunks_exact(4) {
+        for channel in 0..4 {
+            sums[channel] += u64::from(pixel[channel]);
+        }
+    }
+    let mut difference_hash = 0_u64;
+    for y in 0..8_u32 {
+        let sample_y =
+            ((u64::from(y) * 2 + 1) * u64::from(height) / 16).min(u64::from(height - 1)) as u32;
+        let mut previous = None;
+        for x in 0..9_u32 {
+            let sample_x =
+                ((u64::from(x) * 2 + 1) * u64::from(width) / 18).min(u64::from(width - 1)) as u32;
+            let offset = (u64::from(sample_y) * u64::from(width) + u64::from(sample_x)) * 4;
+            let offset = usize::try_from(offset)
+                .map_err(|_| "ASTRA_EMU_HEADLESS_FRAME_SIGNATURE_BOUNDS".to_owned())?;
+            let pixel = &rgba8[offset..offset + 4];
+            let luma =
+                u32::from(pixel[0]) * 77 + u32::from(pixel[1]) * 150 + u32::from(pixel[2]) * 29;
+            if let Some(previous) = previous {
+                difference_hash <<= 1;
+                difference_hash |= u64::from(luma >= previous);
+            }
+            previous = Some(luma);
+        }
+    }
+    Ok((
+        difference_hash,
+        sums.map(|sum| (sum / pixel_count as u64) as u8),
+    ))
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct AudioPumpTelemetry {
     active_streams: u64,
@@ -6446,6 +6672,20 @@ mod native_tests {
     use astra_emu_family_api::FamilyId;
 
     #[test]
+    fn visual_signature_preserves_mean_and_horizontal_structure() {
+        let mut frame = vec![0_u8; 9 * 8 * 4];
+        for y in 0..8 {
+            for x in 0..9 {
+                let offset = (y * 9 + x) * 4;
+                frame[offset..offset + 4].copy_from_slice(&[x as u8, x as u8, x as u8, 255]);
+            }
+        }
+        let (difference_hash, mean) = frame_visual_signature(&frame, 9, 8).unwrap();
+        assert_eq!(difference_hash, u64::MAX);
+        assert_eq!(mean, [4, 4, 4, 255]);
+    }
+
+    #[test]
     fn coalesced_gpu_scene_retains_resource_generations_without_full_resync() {
         let queued = SceneFrame {
             sequence: 0,
@@ -6454,7 +6694,7 @@ mod native_tests {
             clear_rgba: [0, 0, 0, 255],
             commands: vec![
                 SceneCommand::ReleaseResource {
-                    resource_id: "rfvp-texture-1-1".into(),
+                    resource_id: "astra-emu-texture-1-1".into(),
                 },
                 SceneCommand::Clear {
                     rgba: [1, 2, 3, 255],
@@ -6469,7 +6709,7 @@ mod native_tests {
             clear_rgba: [4, 5, 6, 255],
             commands: vec![
                 SceneCommand::ReleaseResource {
-                    resource_id: "rfvp-texture-1-2".into(),
+                    resource_id: "astra-emu-texture-1-2".into(),
                 },
                 SceneCommand::Clear {
                     rgba: [7, 8, 9, 255],
@@ -6483,11 +6723,11 @@ mod native_tests {
         assert_eq!(merged.commands.len(), 3);
         assert!(matches!(
             &merged.commands[0],
-            SceneCommand::ReleaseResource { resource_id } if resource_id == "rfvp-texture-1-1"
+            SceneCommand::ReleaseResource { resource_id } if resource_id == "astra-emu-texture-1-1"
         ));
         assert!(matches!(
             &merged.commands[1],
-            SceneCommand::ReleaseResource { resource_id } if resource_id == "rfvp-texture-1-2"
+            SceneCommand::ReleaseResource { resource_id } if resource_id == "astra-emu-texture-1-2"
         ));
         assert!(matches!(
             merged.commands[2],
@@ -6495,44 +6735,6 @@ mod native_tests {
                 rgba: [7, 8, 9, 255]
             }
         ));
-    }
-
-    #[test]
-    fn fvp_hosted_font_overlay_fills_only_a_missing_game_font() {
-        let directory = tempfile::tempdir().expect("temporary source directory");
-        let registry = DesktopVfsRegistry::default();
-        registry
-            .bind(
-                "font.missing",
-                directory.path().to_str().expect("utf-8 path"),
-            )
-            .expect("mount without a font");
-        install_fvp_hosted_font_overlay(&registry, "font.missing").expect("install fallback");
-        let fallback = registry
-            .list_resources("font.missing")
-            .expect("list fallback mount")
-            .into_iter()
-            .find(|resource| resource.path == "default.ttf")
-            .expect("fallback font must be mounted");
-        assert_eq!(fallback.source_layer, "overlay");
-        assert_eq!(fallback.byte_size, FVP_HOSTED_FALLBACK_FONT.len() as u64);
-
-        std::fs::write(directory.path().join("default.ttf"), b"game-font")
-            .expect("write game font");
-        let game_registry = DesktopVfsRegistry::default();
-        game_registry
-            .bind("font.game", directory.path().to_str().expect("utf-8 path"))
-            .expect("mount with a font");
-        install_fvp_hosted_font_overlay(&game_registry, "font.game")
-            .expect("leave game font intact");
-        let game_font = game_registry
-            .list_resources("font.game")
-            .expect("list game font mount")
-            .into_iter()
-            .find(|resource| resource.path == "default.ttf")
-            .expect("game font must be mounted");
-        assert_eq!(game_font.source_layer, "base");
-        assert_eq!(game_font.byte_size, b"game-font".len() as u64);
     }
 
     fn case_record() -> CaseRecord {
@@ -6756,6 +6958,7 @@ mod native_tests {
         let execution = ExecutionEvidence {
             input_trace: Vec::new(),
             visual_trace: Vec::new(),
+            frame_hashes: Vec::new(),
             audio_trace: Vec::new(),
             state_trace: Vec::new(),
             checkpoints: vec![HeadlessCheckpointEvidenceV1 {
@@ -6770,6 +6973,7 @@ mod native_tests {
             present_sequence: 1,
             snapshot_verified: true,
             terminal: false,
+            state_revision: 0,
             phase_timings: HeadlessPhaseTimingEvidenceV1 {
                 step_total: zero,
                 runtime_step: zero,

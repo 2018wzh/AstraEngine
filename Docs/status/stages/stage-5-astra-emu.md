@@ -8,6 +8,27 @@ FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 W
 
 后续 clean Release 诊断已确认动态 VFS 小读放大是开屏等待的独立根因：加入 1 MiB 有界分页后，同一授权样本的 `runtime_open` 从 50,789 ms 降到约 220–400 ms；页尾跨页读取 panic 已修复并有真实越界形状回归。RFVP hosted 的脱敏 log record 也已改为通过 Family ABI v7 diagnostic DTO 到达可执行宿主，再由 `astra-observability` 输出；宿主消费后会清空 diagnostic，避免进入 Runtime output、save/replay/report 或状态 hash。修复后的 trace 进一步证明 present backlog 不是 RFVP core 或 WGPU draw 成本，而是 Windows PlatformHost 的 Tokio command queue 没有唤醒 Winit：单次 WGPU present 很短，命令却受 `about_to_wait` fixed polling 和 Windows timer 粒度支配。现在成功入队会经 `EventLoopProxy` 立即唤醒并由 `user_event` 排空，HTTPS completion 同样显式唤醒；Manager gamepad/metadata/translation completion 也改为 worker wake + UI-thread drain。800-step signed Release 已无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms。标题 hover 动画、Family ABI scene bulk 零拷贝、10 分钟 CLI/Manager audio soak 与正式 E3 仍开放。
 
+2026 年 8 月 8 日的颜色差异审计确认 texture filter 在 Family/Provider ABI 间丢失，同时证明 RFVP 上游原版渲染必须保持为视觉权威。此前改变 premultiplied-alpha 行为的尝试已撤销；hosted fork revision `a1d9abd201e6a0baf6259309543da5166a814c1c` 保留 typed ownership，并恢复上游原版 renderer。nearest/linear 现在逐层显式传递，FVP adapter 只把 NVSG bytes、vertex color、blend 与 filter 映射到 Astra 通用 draw state，不改写 Astra、Yakui 或 Minori 的 renderer。600 tick 同物理输入 Headless GPU 已通过，稳定标题帧相对上游 software oracle 的平均 RGBA MAE 为 2.211、最大 2.389，背景特效完整可见。相同 build/input 的第二次运行得到一致的 scene、raster 与 audio stream hash；Headless Kira 已改为 fixed tick 驱动，消除了 wall-clock 补水造成的 audio artifact overflow。Windows native GPU parity、Windowed E3 和同 revision Perfetto 尚未形成，因此不提升 Stage 状态。
+
+2026 年 8 月 9 日的首线路复核把 hosted fork 更新到
+`ce921717f043a8a035eadff1f41fc060c7de7c3c`。RFVP 的四个固定字体由 hosted fork 自己持有，
+Astra 不再注入替代字体。上游 RFVP Headless oracle 与 AstraEMU Headless 使用同一物理输入，
+均完成 33,682 帧。按 oracle 零基帧 `N` 对 Astra 一基 fixed step `N+1` 比较，dHash
+p50/p95/p99/max 为 1/4/5/26，平均通道差异为 0/1/1/1，512 帧 RGBA SHA 完全一致。
+原第 8,606 帧偏移的根因是 hosted core 漏掉上游在 dissolve 完成边沿、正常帧 tick 之前执行的
+同步零时长 VM tick；修复留在 RFVP adapter，并持久化前一帧 dissolve 状态。完整线路已无语义
+帧边界偏移，但软件栅格器仍有小幅像素差异，不能声明逐像素完全一致。最终 hosted revision 的
+dirty 900 帧 Perfetto trace 实测 scene/PCM copied bytes 为零；I16 必要格式转换直接写入最终
+Kira mix chunk，避免额外 F32 source buffer。Headless 未打开物理音频端点，确定性 Kira
+mixer/service 的 underflow 为零。clean Release Windowed Perfetto 和人工 E3 仍是 Stage 门禁。
+
+人工 E3 启动检查另行修复了 Manager auto-probe 未声明 `fvp.pack_paths` 的问题。Manager 只从
+已绑定 VFS 中选择与 HCB 同目录的 `.bin`，生成唯一有序列表并注入本次 provider open；该列表
+不写入 symbol-only runtime profile，也不会误收 save 子目录。Windows Kira worker 同时改用
+无窗口、无 Winit event loop 的 media-service host 承载 audio/decode，Slint 保持进程内唯一窗口
+event loop owner。开发复用 Release 分发包已通过签名、ABI、FVP probe、Runtime/Kira open，
+真实 Manager 窗口保持响应；人工视觉、输入、音频、save/restore 和正常 shutdown 尚待确认。
+
 Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspace。它只从 ignored 本地 manifest 读取授权 source、entry、`astra.user_input_sequence.v1` JSONL 和私有输出目录，启动实际 Manager 可执行文件，以 Win32 `SendInput` 重放键盘、鼠标和滚轮，并对窗口、焦点、客户区、逐事件捕获与超时严格失败。harness 使用独立 Manager 数据目录，不污染日常资料库；可提交摘要只保留 schema、hash、计数、生命周期和 diagnostic。Manager 现记录已消费输入、terminal、输出音频 meter、session/package/profile identity 与正常 shutdown 的脱敏事件；游戏页提供真实用户可用的 F5 save、F9 restore，且只调用 RuntimeWorld/provider 的 save/restore lifecycle。harness 在真实关闭路径后读取这些事件，不把进程 kill 当作 shutdown。FVP coverage 与同 run build identity 的完整外部证据仍未形成，任一缺失继续 blocking，不能输出成功 E3。因此仍为 `IN_PROGRESS`；授权样本尚未运行时，不产生 Windows E3 证据。
 
 ## S5-GAME-RUNTIME-01 AstraEmuRuntimeProvider gameplay runtime

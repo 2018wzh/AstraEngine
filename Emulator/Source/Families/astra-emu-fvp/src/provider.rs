@@ -488,7 +488,6 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             pcm_moved_bytes = delta.copy_telemetry.pcm_moved_bytes,
             pcm_copied_bytes = delta.copy_telemetry.pcm_copied_bytes
         );
-
         let frame_index = delta.tick.frame_index;
         let audio_operations = delta.audio;
         let video_operations = delta.video;
@@ -879,10 +878,22 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             .sessions
             .remove(&session_id.0)
             .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
+        let evidence_vm_trace = session
+            .runtime
+            .evidence_vm_trace()
+            .map_err(|error| invalid("ASTRA_FVP_EVIDENCE_TRACE", error.to_string()))?
+            .into_iter()
+            .map(|record| LegacyVmTraceRecord {
+                context_id: record.context_id,
+                program_counter: record.program_counter,
+                opcode: record.opcode,
+            })
+            .collect();
         Ok(LegacyShutdownReport {
             final_state_revision: session.state_revision,
             instruction_count: session.instruction_count,
             syscall_count: session.syscall_count,
+            evidence_vm_trace,
             diagnostics: Vec::new(),
         })
     }

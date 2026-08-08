@@ -40,6 +40,7 @@ pub use patch::{
 pub use play_record::{PlaySessionRecord, PlayStats, RecentWorkRecord};
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
 pub use runtime_provider::{
+    evidence_terminal_hash, evidence_vm_coverage_hash, evidence_vm_coverage_ids,
     AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory, EmuCaseProfile, QueuedPatchEffect,
 };
 pub use scanner::{

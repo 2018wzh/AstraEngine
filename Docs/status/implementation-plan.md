@@ -334,6 +334,17 @@ ABI-owned RGBA8 allocation；native GPU adapter 对同尺寸 partial update 只�
 transaction、generation、原子提交和 allocation pointer 定向测试已通过；最终 clean
 Release 的 copy telemetry、同身份 Perfetto trace 与真实游戏窗口证据仍需重跑。
 
+2026-08-08 scene 色彩与过滤语义收束：RFVP 上游原版渲染是视觉权威，hosted fork
+固定到 `a1d9abd201e6a0baf6259309543da5166a814c1c`，其中 typed ownership 改造保留，
+renderer 行为恢复为上游原版。RFVP 特有的 NVSG alpha、vertex color、blend 与 filter
+组合只由 FVP adapter 映射；Astra Scene2D、Yakui 和 Minori 的通用契约不随 family 改写。
+draw 现在显式携带 nearest/linear filter，FFI 逐字段传递，不新增默认值、shim 或第二条
+scene path。600 tick 同物理输入 Headless GPU 已通过，稳定标题帧相对上游 software oracle
+的平均 RGBA MAE 为 2.211、最大 2.389，缺失的花瓣、光点、右下花树和菜单辉光已恢复。
+同 build/input 重跑得到相同 scene、raster 与 audio stream hash；Headless Kira 改由 fixed
+tick 精确驱动，不再按 wall clock 过量生成音频。Windows native GPU parity、clean Release
+Perfetto 与人工 E3 仍是开放验收项。
+
 Manager 的 RuntimeWorld bridge 不再用 `Arc<Mutex<Option<LegacyStepOutput>>>`
 暂存完整 Family 输出。step 只扫描一次 effect list，将 event、blackboard、scheduled
 event、snapshot 和 wait 移入轻量 control transaction；scene、PCM、video 和 text
@@ -566,6 +577,43 @@ logo、游戏标题以及多段正文帧，确认日文 glyph、对话框、功�
 实际可见；本段内容处于黑底序章，尚未证明背景、角色或完整路线视觉 parity。报告未到
 terminal，且 package 使用开发期构建复用、工作树不是冻结 clean revision，因此本次结果是
 E3 候选与回归证据，不替代正式 clean Release/Shipping signoff，状态保持 `IN_PROGRESS`。
+
+### 2026-08-09 RFVP 字体、逐帧对照与 owner telemetry
+
+hosted fork 已固定到 `ce921717f043a8a035eadff1f41fc060c7de7c3c`。普通 hosted 构建直接嵌入
+RFVP 上游使用的 MS Gothic、MS Mincho、MS PGothic 和 MS PMincho 字体，不再由 Astra
+注入 Noto `default.ttf`。该差异只在 RFVP hosted adapter 内处理，Astra Scene2D 和通用
+字体服务没有新增 family 特例。fork 的 hosted library check、FVP 25 项测试和 CLI 23 项
+测试通过。
+
+同一物理输入已分别驱动上游 RFVP Headless oracle 与 AstraEMU Headless 跑完首条真实线路，
+两侧均产出 33,682 帧。上游 oracle 的零基帧 `N` 对应 Astra 的一基 fixed step `N+1`。
+按该映射比较，dHash 差异 p50/p95/p99/max 为 1/4/5/26，平均通道差异
+p50/p95/p99/max 为 0/1/1/1，512 帧 RGBA SHA 完全一致。原第 8,606 帧转场偏移来自
+hosted core 漏掉上游在 dissolve 完成边沿、正常帧 tick 之前执行的同步零时长 VM tick。
+修复已放在 RFVP hosted adapter，并把前一帧 dissolve 状态写入 snapshot/canonical state；
+完整线路不再出现语义帧边界偏移。软件栅格器之间仍有小幅像素差异，因此本轮不声明逐像素
+完全一致，也不替代人工 E3。
+
+当前 dirty identity 的 900 帧标题 Perfetto trace 记录到
+`rfvp.scene_copied_bytes=0`、`rfvp.pcm_copied_bytes=0`，scene owner 移动峰值约 9.04 MiB。
+RGBA8 allocation 从 RFVP capture 经 Family/Provider ABI 移交 Scene2D；同格式 F32 PCM 可直接
+移交 Kira，I16 在必要的样本格式转换时直接写入最终可回收 mix chunk，不再先构造第二个
+F32 source buffer。启动阶段的长 slice 来自 VFS range read；900 帧稳态
+`runtime.provider_step` p99 为 2.763 ms，`audio.refill` p99 为 0.138 ms，
+`runtime.fixed_tick` p99 为 13.138 ms，`runtime.live_output_routing` p99 为 0.049 ms，
+`gpu.submit` p99 为 0.030 ms。Headless 未打开物理音频端点，仍运行确定性 Kira mixer/service，
+audio underflow 为零。该 trace 来自最终 hosted revision 的 dirty development identity，只用于
+定位，不能替代 clean Release Windowed Perfetto 和人工 E3。
+
+人工 E3 启动检查还修复了两处 Manager 主路径漂移。FVP auto-probe 现在从已绑定 VFS 生成与
+HCB 同目录的唯一有序 `.bin` 列表，只在本次 provider open 时注入 `fvp.pack_paths`；save
+目录和其他子目录中的 `.bin` 不会被误当成资源包，该列表也不进入 symbol-only 的 SQLite
+runtime profile。Windows `FamilyAudioService` 改用只承载 audio/decode command 的
+media-service host，不再提前创建完整 PlatformHost/Winit event loop；Slint 继续独占窗口 event
+loop，其他 HostCommand 明确拒绝。开发复用 Release 分发包已通过签名、ABI、FVP probe、
+Runtime/Kira open 并保持 Manager 窗口响应。该结果只证明人工 E3 已可执行，最终状态仍取决于
+人工视觉、输入、音频、save/restore 和正常 shutdown 确认。
 
 ## 2026-08-04 Windowed E2 identity update
 

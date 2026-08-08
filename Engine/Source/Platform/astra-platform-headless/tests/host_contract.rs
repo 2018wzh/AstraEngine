@@ -2,7 +2,10 @@ use std::fs;
 use std::sync::{atomic::AtomicBool, Arc};
 
 use astra_headless_protocol::ArtifactManifest;
-use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
+use astra_media_core::{
+    BlendMode, MeshDraw2D, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, SceneCompositing2D,
+    TextureFilter2D, TextureFrame,
+};
 #[cfg(feature = "ffmpeg-vcpkg")]
 use astra_platform::DecodeOutput;
 use astra_platform::{
@@ -462,6 +465,122 @@ async fn gpu_sparse_frames_defer_retained_resource_mutations_until_materializati
 
 #[tokio::test]
 #[ignore = "requires a native hardware GPU runner"]
+async fn gpu_atlas_repack_preserves_reserved_white_texel_for_solid_meshes() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut profile = HeadlessHostProfile::reference(
+        "headless-gpu-test",
+        "com.example.gpu-solid-after-repack",
+        hash(b"build"),
+        hash(b"package"),
+    );
+    profile.providers.renderer = "wgpu_offscreen".into();
+    let session = HeadlessPlatformFactory::new(temp.path().join("artifacts"), temp.path())
+        .with_gpu(true)
+        .start(profile.into())
+        .await
+        .unwrap();
+    let client = session.client;
+    let window = client
+        .create_window(WindowRequest {
+            title: "Solid after atlas repack".into(),
+            width: 8,
+            height: 8,
+            visible: false,
+        })
+        .await
+        .unwrap();
+    let surface = client
+        .create_surface(SurfaceRequest {
+            window,
+            width: 8,
+            height: 8,
+        })
+        .await
+        .unwrap();
+
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 1,
+                width: 8,
+                height: 8,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::UploadTexture {
+                    resource_id: "wide.texture".into(),
+                    frame: TextureFrame::from_vec(1200, 1, vec![255; 1200 * 4]).unwrap(),
+                }],
+                semantics: None,
+            },
+        )
+        .await
+        .unwrap();
+    client
+        .present_scene(
+            surface,
+            SceneFrame {
+                sequence: 2,
+                width: 8,
+                height: 8,
+                clear_rgba: [0, 0, 0, 255],
+                commands: vec![SceneCommand::MeshBatch2D {
+                    vertices: vec![
+                        MeshVertex2D {
+                            position: [0.0, 0.0],
+                            uv: [0.0, 0.0],
+                            premultiplied_rgba: [128; 4],
+                        },
+                        MeshVertex2D {
+                            position: [8.0, 0.0],
+                            uv: [0.0, 0.0],
+                            premultiplied_rgba: [128; 4],
+                        },
+                        MeshVertex2D {
+                            position: [0.0, 8.0],
+                            uv: [0.0, 0.0],
+                            premultiplied_rgba: [128; 4],
+                        },
+                        MeshVertex2D {
+                            position: [8.0, 8.0],
+                            uv: [0.0, 0.0],
+                            premultiplied_rgba: [128; 4],
+                        },
+                    ]
+                    .into(),
+                    indices: vec![0, 1, 2, 2, 1, 3].into(),
+                    draws: vec![MeshDraw2D {
+                        vertex_start: 0,
+                        vertex_count: 4,
+                        index_start: 0,
+                        index_count: 6,
+                        material: MeshMaterial2D::Solid,
+                        texture_id: None,
+                        texture_filter: TextureFilter2D::Linear,
+                        opacity: 1.0,
+                        blend: BlendMode::Alpha,
+                        scissor: None,
+                    }]
+                    .into(),
+                    compositing: SceneCompositing2D::EncodedSrgb,
+                }],
+                semantics: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let captured = client.capture_surface(surface).await.unwrap();
+    assert!(captured
+        .rgba8
+        .chunks_exact(4)
+        .all(|pixel| pixel == [128, 128, 128, 255]));
+    client.destroy_surface(surface).await.unwrap();
+    client.destroy_window(window).await.unwrap();
+    client.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a native hardware GPU runner"]
 async fn performance_gpu_submits_every_frame_but_reads_back_only_checkpoints() {
     let temp = tempfile::tempdir().unwrap();
     let mut profile = HeadlessHostProfile::reference(
@@ -834,6 +953,20 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
         client.close_audio(audio.handle).await.unwrap_err().code,
         PlatformErrorCode::StaleHandle
     );
+
+    let mut uncaptured_audio = client
+        .open_audio_output(AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            chunk_frames: 800,
+            max_buffered_frames: 800,
+            start_paused: false,
+            capture_samples: false,
+        })
+        .await
+        .unwrap();
+    uncaptured_audio.lane.submit(vec![0.0; 1_600]).unwrap();
+    client.close_audio(uncaptured_audio.handle).await.unwrap();
 
     // Recreated outputs restart their packet sequence after restore. Artifact paths must
     // remain unique for the whole host session instead of reusing the packet sequence.

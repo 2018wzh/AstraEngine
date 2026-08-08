@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_media_core::{BlendMode, MeshMaterial2D, MeshVertex2D, SceneCommand, TextureFrame};
+use astra_media_core::{
+    BlendMode, MeshMaterial2D, MeshVertex2D, SceneCommand, TextureFilter2D, TextureFrame,
+};
 use astra_ui_core::{
     UiMaterialKind, UiMeshPrimitive, UiPoint, UiRect, UiRenderFrame, UiTextureDelta,
     UiTextureFormat, UiTextureId, UiTextureRelease, UiTextureUpload, UiValidationError, UiVertex,
@@ -368,6 +370,7 @@ pub fn ui_frame_to_scene_commands(
                 UiMaterialKind::GlyphMask => MeshMaterial2D::GlyphMask,
             },
             texture_id,
+            texture_filter: TextureFilter2D::Linear,
             opacity: 1.0,
             blend: BlendMode::Alpha,
         });

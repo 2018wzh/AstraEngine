@@ -6,8 +6,8 @@ use abi_stable::{
     StableAbi,
 };
 #[cfg(feature = "ffi")]
-use astra_byte_source::FfiOwnedByteBuffer;
-use astra_byte_source::OwnedByteBuffer;
+use astra_byte_source::{FfiOwnedByteBuffer, FfiOwnedF32Buffer, FfiOwnedI16Buffer};
+use astra_byte_source::{OwnedByteBuffer, OwnedF32Buffer, OwnedI16Buffer};
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -863,9 +863,17 @@ pub struct RuntimeLiveSceneTransaction {
     pub sequence: u64,
     pub width: u32,
     pub height: u32,
+    pub compositing: RuntimeLiveSceneCompositing,
     pub resources: Vec<RuntimeLiveSceneResourceOperation>,
     pub draws: Vec<RuntimeLiveDraw>,
     pub reset_resources: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuntimeLiveSceneCompositing {
+    #[default]
+    LinearSrgb,
+    EncodedSrgb,
 }
 
 /// RFVP reserves the maximum texture handle for its immutable 1x1 white
@@ -921,6 +929,7 @@ pub enum RuntimeLiveSceneResourceOperation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLiveTextureFormat {
+    /// Straight-alpha sRGBA8. Blend and sampling semantics are explicit draw state.
     Rgba8,
     LumaAlpha8,
 }
@@ -939,6 +948,7 @@ pub struct RuntimeLiveDraw {
     pub texture_id: u32,
     pub vertices: [RuntimeLiveVertex; 4],
     pub blend: RuntimeLiveBlendMode,
+    pub texture_filter: RuntimeLiveTextureFilter,
     pub scissor: Option<RuntimeLiveScissor>,
 }
 
@@ -958,6 +968,12 @@ pub enum RuntimeLiveBlendMode {
     Opaque,
     Multiply,
     Screen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveTextureFilter {
+    Nearest,
+    Linear,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1021,12 +1037,12 @@ pub enum RuntimeLiveAudioCommand {
     SubmitI16 {
         sequence: u64,
         stream_id: u32,
-        samples: Vec<i16>,
+        samples: OwnedI16Buffer,
     },
     SubmitF32 {
         sequence: u64,
         stream_id: u32,
-        samples: Vec<f32>,
+        samples: OwnedF32Buffer,
     },
     Play {
         sequence: u64,
@@ -1083,8 +1099,8 @@ pub enum RuntimeLiveAudioSampleFormat {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeLivePcmBuffer {
-    I16(Vec<i16>),
-    F32(Vec<f32>),
+    I16(OwnedI16Buffer),
+    F32(OwnedF32Buffer),
 }
 
 impl RuntimeLivePcmBuffer {
@@ -1619,6 +1635,14 @@ pub enum FfiRuntimeBlendMode {
     Screen,
 }
 
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub enum FfiRuntimeTextureFilter {
+    Nearest,
+    Linear,
+}
+
 #[repr(C)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, Copy, StableAbi)]
@@ -1685,6 +1709,7 @@ pub struct FfiRuntimeDraw {
     pub texture_id: u32,
     pub vertices: [FfiRuntimeVertex; 4],
     pub blend: FfiRuntimeBlendMode,
+    pub texture_filter: FfiRuntimeTextureFilter,
     pub scissor: ROption<FfiRuntimeScissor>,
 }
 
@@ -1695,6 +1720,7 @@ pub struct FfiRuntimeSceneTransaction {
     pub sequence: u64,
     pub width: u32,
     pub height: u32,
+    pub compositing: FfiRuntimeSceneCompositing,
     pub resources: RVec<FfiRuntimeSceneResourceOperation>,
     pub draws: RVec<FfiRuntimeDraw>,
     pub reset_resources: bool,
@@ -1702,15 +1728,23 @@ pub struct FfiRuntimeSceneTransaction {
 
 #[repr(u8)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub enum FfiRuntimeSceneCompositing {
+    LinearSrgb,
+    EncodedSrgb,
+}
+
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
 pub enum FfiRuntimePcmBuffer {
-    I16(RVec<i16>),
-    F32(RVec<f32>),
+    I16(FfiOwnedI16Buffer),
+    F32(FfiOwnedF32Buffer),
 }
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeAudioPacket {
     pub sequence: u64,
     pub stream_id: u32,
@@ -1847,7 +1881,7 @@ pub enum FfiRuntimeAudioSampleFormat {
 
 #[repr(u8)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub enum FfiRuntimeAudioCommand {
     LoadResource {
         sequence: u64,
@@ -1865,12 +1899,12 @@ pub enum FfiRuntimeAudioCommand {
     SubmitI16 {
         sequence: u64,
         stream_id: u32,
-        samples: RVec<i16>,
+        samples: FfiOwnedI16Buffer,
     },
     SubmitF32 {
         sequence: u64,
         stream_id: u32,
-        samples: RVec<f32>,
+        samples: FfiOwnedF32Buffer,
     },
     Play {
         sequence: u64,

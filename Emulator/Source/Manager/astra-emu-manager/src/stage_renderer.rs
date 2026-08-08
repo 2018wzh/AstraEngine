@@ -4,12 +4,14 @@ use std::borrow::Cow;
 
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{
-    LegacyBlendMode, LegacyDrawV1, LegacyTextureFormat, LegacyVertexV1, LegacyVideoMode,
+    LegacyBlendMode, LegacyDrawV1, LegacyTextureFilter, LegacyTextureFormat, LegacyVertexV1,
+    LegacyVideoMode,
 };
 use astra_emu_manager::{AstraUnderlayRenderer, TranslationOverlayView, WgpuFrameContext};
 use astra_plugin_abi::{
-    RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLiveSceneResourceOperation,
-    RuntimeLiveSceneTransaction, RuntimeLiveTextureFormat,
+    RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLiveSceneCompositing,
+    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveTextureFilter,
+    RuntimeLiveTextureFormat,
 };
 use wgpu::util::DeviceExt;
 
@@ -28,16 +30,23 @@ pub(crate) struct ManagerStageRenderer {
     pub(crate) stage_height: u32,
     pub(crate) texture_dirty: bool,
     pub(crate) scene_initialized: bool,
+    pub(crate) scene_compositing: Option<RuntimeLiveSceneCompositing>,
 }
 
 pub(crate) struct StageGpu {
     bind_group_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
     alpha_pipeline: wgpu::RenderPipeline,
     opaque_pipeline: wgpu::RenderPipeline,
     add_pipeline: wgpu::RenderPipeline,
     multiply_pipeline: wgpu::RenderPipeline,
     screen_pipeline: wgpu::RenderPipeline,
+    encoded_alpha_pipeline: wgpu::RenderPipeline,
+    encoded_opaque_pipeline: wgpu::RenderPipeline,
+    encoded_add_pipeline: wgpu::RenderPipeline,
+    encoded_multiply_pipeline: wgpu::RenderPipeline,
+    encoded_screen_pipeline: wgpu::RenderPipeline,
     filter_bind_group_layout: wgpu::BindGroupLayout,
     filter_pipeline: wgpu::RenderPipeline,
     textures: BTreeMap<u32, TextureResource>,
@@ -46,11 +55,13 @@ pub(crate) struct StageGpu {
 
 struct TextureResource {
     _texture: wgpu::Texture,
-    bind_group: wgpu::BindGroup,
+    linear_bind_group: wgpu::BindGroup,
+    nearest_bind_group: wgpu::BindGroup,
     generation: u64,
     width: u32,
     height: u32,
     format: LegacyTextureFormat,
+    compositing: RuntimeLiveSceneCompositing,
 }
 
 impl AstraUnderlayRenderer for ManagerStageRenderer {
@@ -62,6 +73,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.scene_texture = Some(create_stage_texture(context.device));
         self.stage_width = STAGE_WIDTH;
         self.stage_height = STAGE_HEIGHT;
+        self.scene_compositing = None;
         self.gpu = Some(StageGpu::new(context.device));
         Ok(())
     }
@@ -108,16 +120,30 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             )
         };
         if let Some(scene_commit) = scene_commit {
+            if self.scene_compositing != Some(scene_commit.compositing) {
+                if self.scene_initialized && !scene_commit.reset_resources {
+                    return Err("ASTRA_EMU_STAGE_COMPOSITING_REQUIRES_RESOURCE_RESET".into());
+                }
+                self.scene_texture = Some(create_scene_texture_with_dimensions(
+                    context.device,
+                    scene_commit.width,
+                    scene_commit.height,
+                    scene_commit.compositing,
+                ));
+                self.scene_compositing = Some(scene_commit.compositing);
+                self.scene_initialized = false;
+            }
             if scene_commit.width != self.stage_width || scene_commit.height != self.stage_height {
                 self.texture = Some(create_stage_texture_with_dimensions(
                     context.device,
                     scene_commit.width,
                     scene_commit.height,
                 ));
-                self.scene_texture = Some(create_stage_texture_with_dimensions(
+                self.scene_texture = Some(create_scene_texture_with_dimensions(
                     context.device,
                     scene_commit.width,
                     scene_commit.height,
+                    scene_commit.compositing,
                 ));
                 self.stage_width = scene_commit.width;
                 self.stage_height = scene_commit.height;
@@ -146,10 +172,11 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
                 .scene_texture
                 .as_ref()
                 .ok_or_else(|| "ASTRA_EMU_STAGE_RENDERER_NOT_SETUP".to_owned())?;
+            let compositing = self.scene_compositing.unwrap_or_default();
             self.gpu
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_STAGE_RENDERER_NOT_SETUP".to_owned())?
-                .render_video(&context, texture, video)?;
+                .render_video(&context, texture, video, compositing)?;
             self.scene_initialized = true;
         }
         if self.scene_initialized {
@@ -164,7 +191,13 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             self.gpu
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_STAGE_RENDERER_NOT_SETUP".to_owned())?
-                .apply_final_filter(&context, source, target, &filter_preset)?;
+                .apply_final_filter(
+                    &context,
+                    source,
+                    target,
+                    &filter_preset,
+                    self.scene_compositing.unwrap_or_default(),
+                )?;
         }
         Ok(())
     }
@@ -174,6 +207,7 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         self.texture = None;
         self.scene_texture = None;
         self.scene_initialized = false;
+        self.scene_compositing = None;
     }
 }
 
@@ -200,10 +234,16 @@ impl StageGpu {
                 },
             ],
         });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("astra.emu.stage.sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("astra.emu.stage.nearest-sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
         let alpha_pipeline = create_pipeline(device, &bind_group_layout, alpha_blend(), "alpha");
@@ -217,6 +257,41 @@ impl StageGpu {
         let multiply_pipeline =
             create_pipeline(device, &bind_group_layout, multiply_blend(), "multiply");
         let screen_pipeline = create_pipeline(device, &bind_group_layout, screen_blend(), "screen");
+        let encoded_alpha_pipeline = create_pipeline_for_format(
+            device,
+            &bind_group_layout,
+            alpha_blend(),
+            "encoded-alpha",
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let encoded_opaque_pipeline = create_pipeline_for_format(
+            device,
+            &bind_group_layout,
+            wgpu::BlendState::REPLACE,
+            "encoded-opaque",
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let encoded_add_pipeline = create_pipeline_for_format(
+            device,
+            &bind_group_layout,
+            add_blend(),
+            "encoded-add",
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let encoded_multiply_pipeline = create_pipeline_for_format(
+            device,
+            &bind_group_layout,
+            multiply_blend(),
+            "encoded-multiply",
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let encoded_screen_pipeline = create_pipeline_for_format(
+            device,
+            &bind_group_layout,
+            screen_blend(),
+            "encoded-screen",
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
         let filter_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("astra.emu.filter.texture-layout"),
@@ -252,12 +327,18 @@ impl StageGpu {
         let filter_pipeline = create_filter_pipeline(device, &filter_bind_group_layout);
         Self {
             bind_group_layout,
-            sampler,
+            linear_sampler,
+            nearest_sampler,
             alpha_pipeline,
             opaque_pipeline,
             add_pipeline,
             multiply_pipeline,
             screen_pipeline,
+            encoded_alpha_pipeline,
+            encoded_opaque_pipeline,
+            encoded_add_pipeline,
+            encoded_multiply_pipeline,
+            encoded_screen_pipeline,
             filter_bind_group_layout,
             filter_pipeline,
             textures: BTreeMap::new(),
@@ -271,6 +352,7 @@ impl StageGpu {
         source: &wgpu::Texture,
         target: &wgpu::Texture,
         preset_id: &str,
+        compositing: RuntimeLiveSceneCompositing,
     ) -> Result<(), String> {
         let mode = match preset_id {
             "none" => 0_u32,
@@ -291,7 +373,11 @@ impl StageGpu {
                 contents: &params,
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-        let source_view = source.create_view(&wgpu::TextureViewDescriptor::default());
+        let source_view = source.create_view(&wgpu::TextureViewDescriptor {
+            format: (compositing == RuntimeLiveSceneCompositing::EncodedSrgb)
+                .then_some(wgpu::TextureFormat::Rgba8UnormSrgb),
+            ..Default::default()
+        });
         let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = context
             .device
@@ -305,7 +391,7 @@ impl StageGpu {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        resource: wgpu::BindingResource::Sampler(&self.linear_sampler),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
@@ -358,6 +444,7 @@ impl StageGpu {
         let RuntimeLiveSceneTransaction {
             width,
             height,
+            compositing,
             resources,
             draws,
             reset_resources,
@@ -377,6 +464,12 @@ impl StageGpu {
         if reset_resources {
             self.textures.clear();
             self.video_source = None;
+        } else if self
+            .textures
+            .values()
+            .any(|resource| resource.compositing != compositing)
+        {
+            return Err("ASTRA_EMU_STAGE_COMPOSITING_RESOURCE_EPOCH".into());
         }
         for operation in resources {
             match operation {
@@ -392,7 +485,14 @@ impl StageGpu {
                         return Err("ASTRA_EMU_STAGE_LIVE_TEXTURE_DUPLICATE".into());
                     }
                     self.upload_live(
-                        context, texture_id, generation, width, height, format, pixels,
+                        context,
+                        texture_id,
+                        generation,
+                        width,
+                        height,
+                        format,
+                        pixels,
+                        compositing,
                     )?;
                 }
                 RuntimeLiveSceneResourceOperation::UpdateTexture {
@@ -405,7 +505,16 @@ impl StageGpu {
                     format,
                     pixels,
                 } => self.upload_live_partial(
-                    context, texture_id, generation, x, y, width, height, format, pixels,
+                    context,
+                    texture_id,
+                    generation,
+                    x,
+                    y,
+                    width,
+                    height,
+                    format,
+                    pixels,
+                    compositing,
                 )?,
                 RuntimeLiveSceneResourceOperation::DestroyTexture {
                     texture_id,
@@ -459,7 +568,7 @@ impl StageGpu {
                 pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             }
             for (draw_index, draw) in draws.iter().enumerate() {
-                self.draw_live(&mut pass, draw, draw_index, width, height)?;
+                self.draw_live(&mut pass, draw, draw_index, width, height, compositing)?;
             }
         }
         context.queue.submit([encoder.finish()]);
@@ -476,6 +585,7 @@ impl StageGpu {
         height: u32,
         format: RuntimeLiveTextureFormat,
         pixels: OwnedByteBuffer,
+        compositing: RuntimeLiveSceneCompositing,
     ) -> Result<(), String> {
         let format = legacy_texture_format(format);
         let rgba = to_rgba(format, pixels.as_slice())?;
@@ -492,7 +602,7 @@ impl StageGpu {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: scene_texture_format(compositing),
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -516,31 +626,31 @@ impl StageGpu {
             },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("astra.emu.stage.live-resource-bind-group"),
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
+        let linear_bind_group = texture_bind_group(
+            context.device,
+            &self.bind_group_layout,
+            &view,
+            &self.linear_sampler,
+            "astra.emu.stage.live-resource-linear-bind-group",
+        );
+        let nearest_bind_group = texture_bind_group(
+            context.device,
+            &self.bind_group_layout,
+            &view,
+            &self.nearest_sampler,
+            "astra.emu.stage.live-resource-nearest-bind-group",
+        );
         self.textures.insert(
             texture_id,
             TextureResource {
                 _texture: texture,
-                bind_group,
+                linear_bind_group,
+                nearest_bind_group,
                 generation,
                 width,
                 height,
                 format,
+                compositing,
             },
         );
         Ok(())
@@ -558,6 +668,7 @@ impl StageGpu {
         height: u32,
         format: RuntimeLiveTextureFormat,
         pixels: OwnedByteBuffer,
+        compositing: RuntimeLiveSceneCompositing,
     ) -> Result<(), String> {
         let format = legacy_texture_format(format);
         let resource = self
@@ -567,6 +678,7 @@ impl StageGpu {
         if resource.generation == 0
             || generation <= resource.generation
             || resource.format != format
+            || resource.compositing != compositing
             || x.checked_add(width)
                 .is_none_or(|right| right > resource.width)
             || y.checked_add(height)
@@ -609,6 +721,7 @@ impl StageGpu {
         context: &WgpuFrameContext<'_>,
         target: &wgpu::Texture,
         frame: HostVideoFrame,
+        compositing: RuntimeLiveSceneCompositing,
     ) -> Result<(), String> {
         if !self
             .video_source
@@ -637,7 +750,7 @@ impl StageGpu {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                format: scene_texture_format(compositing),
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
@@ -661,31 +774,31 @@ impl StageGpu {
                 },
             );
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let bind_group = context
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("astra.emu.video.frame-bind-group"),
-                    layout: &self.bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler),
-                        },
-                    ],
-                });
+            let linear_bind_group = texture_bind_group(
+                context.device,
+                &self.bind_group_layout,
+                &view,
+                &self.linear_sampler,
+                "astra.emu.video.frame-linear-bind-group",
+            );
+            let nearest_bind_group = texture_bind_group(
+                context.device,
+                &self.bind_group_layout,
+                &view,
+                &self.nearest_sampler,
+                "astra.emu.video.frame-nearest-bind-group",
+            );
             self.textures.insert(
                 VIDEO_TEXTURE_ID,
                 TextureResource {
                     _texture: texture,
-                    bind_group,
+                    linear_bind_group,
+                    nearest_bind_group,
                     generation: 0,
                     width: frame.width,
                     height: frame.height,
                     format: LegacyTextureFormat::Rgba8,
+                    compositing,
                 },
             );
             self.video_source = Some(Arc::clone(&frame.rgba8));
@@ -725,6 +838,7 @@ impl StageGpu {
                 &draw,
                 frame.stage_width,
                 frame.stage_height,
+                compositing,
             )?;
         }
         context.queue.submit([encoder.finish()]);
@@ -738,18 +852,13 @@ impl StageGpu {
         draw: &LegacyDrawV1,
         stage_width: u32,
         stage_height: u32,
+        compositing: RuntimeLiveSceneCompositing,
     ) -> Result<(), String> {
         let resource = self
             .textures
             .get(&draw.texture_id)
             .ok_or_else(|| "ASTRA_EMU_STAGE_TEXTURE_MISSING".to_owned())?;
-        let pipeline = match draw.blend {
-            LegacyBlendMode::Alpha => &self.alpha_pipeline,
-            LegacyBlendMode::Add => &self.add_pipeline,
-            LegacyBlendMode::Opaque => &self.opaque_pipeline,
-            LegacyBlendMode::Multiply => &self.multiply_pipeline,
-            LegacyBlendMode::Screen => &self.screen_pipeline,
-        };
+        let pipeline = self.pipeline(compositing, draw.blend);
         let bytes = vertex_bytes(draw, stage_width, stage_height)?;
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("astra.emu.stage.vertices"),
@@ -757,7 +866,14 @@ impl StageGpu {
             usage: wgpu::BufferUsages::VERTEX,
         });
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &resource.bind_group, &[]);
+        pass.set_bind_group(
+            0,
+            match draw.texture_filter {
+                LegacyTextureFilter::Nearest => &resource.nearest_bind_group,
+                LegacyTextureFilter::Linear => &resource.linear_bind_group,
+            },
+            &[],
+        );
         if let Some(scissor) = draw.scissor {
             if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
                 return Err("ASTRA_EMU_STAGE_SCISSOR_INVALID".into());
@@ -794,20 +910,28 @@ impl StageGpu {
         draw_index: usize,
         stage_width: u32,
         stage_height: u32,
+        compositing: RuntimeLiveSceneCompositing,
     ) -> Result<(), String> {
         let resource = self
             .textures
             .get(&draw.texture_id)
             .ok_or_else(|| "ASTRA_EMU_STAGE_LIVE_TEXTURE_MISSING".to_owned())?;
         let pipeline = match draw.blend {
-            RuntimeLiveBlendMode::Alpha => &self.alpha_pipeline,
-            RuntimeLiveBlendMode::Additive => &self.add_pipeline,
-            RuntimeLiveBlendMode::Opaque => &self.opaque_pipeline,
-            RuntimeLiveBlendMode::Multiply => &self.multiply_pipeline,
-            RuntimeLiveBlendMode::Screen => &self.screen_pipeline,
+            RuntimeLiveBlendMode::Alpha => self.pipeline(compositing, LegacyBlendMode::Alpha),
+            RuntimeLiveBlendMode::Additive => self.pipeline(compositing, LegacyBlendMode::Add),
+            RuntimeLiveBlendMode::Opaque => self.pipeline(compositing, LegacyBlendMode::Opaque),
+            RuntimeLiveBlendMode::Multiply => self.pipeline(compositing, LegacyBlendMode::Multiply),
+            RuntimeLiveBlendMode::Screen => self.pipeline(compositing, LegacyBlendMode::Screen),
         };
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &resource.bind_group, &[]);
+        pass.set_bind_group(
+            0,
+            match draw.texture_filter {
+                RuntimeLiveTextureFilter::Nearest => &resource.nearest_bind_group,
+                RuntimeLiveTextureFilter::Linear => &resource.linear_bind_group,
+            },
+            &[],
+        );
         if let Some(scissor) = draw.scissor {
             if scissor.width == 0
                 || scissor.height == 0
@@ -832,6 +956,43 @@ impl StageGpu {
             .ok_or_else(|| "ASTRA_EMU_STAGE_LIVE_DRAW_INDEX".to_owned())?;
         pass.draw(first_vertex..first_vertex + 4, 0..1);
         Ok(())
+    }
+
+    fn pipeline(
+        &self,
+        compositing: RuntimeLiveSceneCompositing,
+        blend: LegacyBlendMode,
+    ) -> &wgpu::RenderPipeline {
+        match (compositing, blend) {
+            (RuntimeLiveSceneCompositing::LinearSrgb, LegacyBlendMode::Alpha) => {
+                &self.alpha_pipeline
+            }
+            (RuntimeLiveSceneCompositing::LinearSrgb, LegacyBlendMode::Add) => &self.add_pipeline,
+            (RuntimeLiveSceneCompositing::LinearSrgb, LegacyBlendMode::Opaque) => {
+                &self.opaque_pipeline
+            }
+            (RuntimeLiveSceneCompositing::LinearSrgb, LegacyBlendMode::Multiply) => {
+                &self.multiply_pipeline
+            }
+            (RuntimeLiveSceneCompositing::LinearSrgb, LegacyBlendMode::Screen) => {
+                &self.screen_pipeline
+            }
+            (RuntimeLiveSceneCompositing::EncodedSrgb, LegacyBlendMode::Alpha) => {
+                &self.encoded_alpha_pipeline
+            }
+            (RuntimeLiveSceneCompositing::EncodedSrgb, LegacyBlendMode::Add) => {
+                &self.encoded_add_pipeline
+            }
+            (RuntimeLiveSceneCompositing::EncodedSrgb, LegacyBlendMode::Opaque) => {
+                &self.encoded_opaque_pipeline
+            }
+            (RuntimeLiveSceneCompositing::EncodedSrgb, LegacyBlendMode::Multiply) => {
+                &self.encoded_multiply_pipeline
+            }
+            (RuntimeLiveSceneCompositing::EncodedSrgb, LegacyBlendMode::Screen) => {
+                &self.encoded_screen_pipeline
+            }
+        }
     }
 }
 
@@ -868,6 +1029,29 @@ fn texture_byte_len(width: u32, height: u32, bytes_per_pixel: usize) -> Result<u
         })
         .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
         .ok_or_else(|| "ASTRA_EMU_STAGE_TEXTURE_BOUNDS".to_owned())
+}
+
+fn texture_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    label: &'static str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
 }
 
 fn runtime_live_scene_vertex_bytes(
@@ -940,6 +1124,7 @@ fn fullscreen_video_draw(
             },
         ],
         blend: LegacyBlendMode::Alpha,
+        texture_filter: LegacyTextureFilter::Linear,
         scissor: None,
     }
 }
@@ -992,11 +1177,60 @@ fn create_stage_texture_with_dimensions(
     })
 }
 
+fn scene_texture_format(compositing: RuntimeLiveSceneCompositing) -> wgpu::TextureFormat {
+    match compositing {
+        RuntimeLiveSceneCompositing::LinearSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+        RuntimeLiveSceneCompositing::EncodedSrgb => wgpu::TextureFormat::Rgba8Unorm,
+    }
+}
+
+fn create_scene_texture_with_dimensions(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    compositing: RuntimeLiveSceneCompositing,
+) -> wgpu::Texture {
+    let encoded_view_formats = [wgpu::TextureFormat::Rgba8UnormSrgb];
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("astra.emu.scene"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: scene_texture_format(compositing),
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: match compositing {
+            RuntimeLiveSceneCompositing::LinearSrgb => &[],
+            RuntimeLiveSceneCompositing::EncodedSrgb => &encoded_view_formats,
+        },
+    })
+}
+
 fn create_pipeline(
     device: &wgpu::Device,
     bind_group_layout: &wgpu::BindGroupLayout,
     blend: wgpu::BlendState,
     name: &str,
+) -> wgpu::RenderPipeline {
+    create_pipeline_for_format(
+        device,
+        bind_group_layout,
+        blend,
+        name,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    )
+}
+
+fn create_pipeline_for_format(
+    device: &wgpu::Device,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    blend: wgpu::BlendState,
+    name: &str,
+    target_format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("astra.emu.stage.shader"),
@@ -1041,7 +1275,7 @@ fn create_pipeline(
             entry_point: Some("fs_main"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                format: target_format,
                 blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
@@ -1240,6 +1474,7 @@ mod tests {
                 },
             ],
             blend: LegacyBlendMode::Alpha,
+            texture_filter: LegacyTextureFilter::Linear,
             scissor: Some(LegacyScissorV1 {
                 x: 0,
                 y: 0,
@@ -1278,8 +1513,14 @@ mod tests {
             queue: &queue,
         };
         for preset in ["none", "grayscale", "crt-soft", "warm"] {
-            gpu.apply_final_filter(&context, &source, &target, preset)
-                .unwrap();
+            gpu.apply_final_filter(
+                &context,
+                &source,
+                &target,
+                preset,
+                RuntimeLiveSceneCompositing::LinearSrgb,
+            )
+            .unwrap();
         }
         device
             .poll(wgpu::PollType::wait_indefinitely())
