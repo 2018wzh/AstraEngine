@@ -194,33 +194,39 @@ Bundled、on-demand 和 external 分发只改变 package source，不改变读�
 
 ## AstraEMU Manager 社区兼容性库与本地记录
 
-AstraEMU Manager 的作品级数据分两类：社区维护的只读兼容性库（网络 JSON）和 Manager 本地 SQLite 记录。两者都不进入 package/save/release report，也不携带商业 payload、正文或本地绝对路径。
+AstraEMU Manager 的作品级数据分两类：社区维护的只读兼容性库（网络 JSON）和 Manager 本地 SQLite 记录。两者都不进入 package/save/release report，也不携带商业 payload、正文或本地绝对路径。**VNDB 是游戏与版本标识的唯一权威源，Bangumi 仅用于游玩进度记录**，因此兼容性库完全由 VNDB 标识键控。
 
-### 社区兼容性库 `astra.emu.compatibility.v1`
+### 社区兼容性库 `astra.emu.compatibility.v2`
 
-中央兼容性库是一份静态 JSON 文档，由社区在独立数据仓维护并经 GitHub Pages 托管，Manager 只读拉取。Rust 类型是 schema 真源，经 `schemars` 导出 JSON Schema：
+中央兼容性库是一份静态 JSON 文档，由社区在独立数据仓维护并经 GitHub Pages 托管，Manager 只读拉取。Rust 类型是 schema 真源，经 `schemars` 导出 JSON Schema。贡献者通过仓库的 ISSUE_TEMPLATE 提交 vID/rID 结构化报告，维护者运行验证/生成器把通过校验的报告合并进该文档：
 
 | Rust 类型 | 角色 |
 | --- | --- |
-| `CompatibilityDatabase` | 文档根，`schema` 必须等于 `astra.emu.compatibility.v1`，含 `generated_at_unix_ms` 与 `entries` |
-| `CompatibilityEntry` | 单条记录，按 `(provider, remote_id)` 标识；`provider` 只允许 `bangumi`/`vndb`，`remote_id` 是 Bangumi subject id 或 VNDB `v123` |
+| `CompatibilityDatabase` | 文档根，`schema` 必须等于 `astra.emu.compatibility.v2`，含 `generated_at_unix_ms` 与 `entries` |
+| `CompatibilityEntry` | 单条记录，按 VNDB `(vn_id, release_id)` 键控；`vn_id` 是 vID（游戏名标识，`v<decimal>`），`release_id` 是 rID（版本标识，`r<decimal>`） |
 | `CompatibilityStatus` | 五级适配分级 `perfect`/`completable`/`flawed`/`boot_only`/`unplayable`（完美运行/可通关/有瑕疵/仅能启动/无法运行） |
 
-校验边界：`entries` 不超过 100,000 条，payload 不超过 8 MiB，`remote_id` 非空且不超过 64 字符，`notes` 不超过 1024 字符，`reporter` 不超过 128 字符；schema 版本、provider 或边界不符必须 blocking。拉取受 metadata network-consent gate 约束，只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步，命中缓存或 HTTP 304 返回 `NotModified`。
+v2 让兼容性精确到特定游戏版本：同一款游戏（同一 vID）的不同发布（不同 rID）可以携带不同的分级。`provider`/Bangumi 维度已从兼容性库移除。
 
-JSON Schema 由 `astra-emu-metadata` 的 `compatibility_json_schema()` 从 Rust 类型导出，供数据仓在 CI 中校验文档；默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖；数据仓由用户单独创建维护。匹配按 work 的 `external_identity(provider, remote_id)` join 本地缓存，无匹配返回未知，不显示徽章。
+校验边界：`entries` 不超过 100,000 条，payload 不超过 8 MiB，`vn_id`/`release_id` 必须分别是合法 vID/rID 且不超过 64 字符，`notes` 不超过 1024 字符，`reporter` 不超过 128 字符；schema 版本、vID/rID 或边界不符必须 blocking。拉取受 metadata network-consent gate 约束，只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步，命中缓存或 HTTP 304 返回 `NotModified`。
 
-### Manager 本地 SQLite 记录（Library v9）
+JSON Schema 由 `astra-emu-metadata` 的 `compatibility_json_schema()` 从 Rust 类型导出，供数据仓在 CI 中校验文档；默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖；数据仓由用户单独创建维护。匹配脚本先把 ISSUE 模板的 vID/rID 落成兼容 v2 的记录，再合并进文档。
 
-Library v7 迁移在 Manager 本地库新增三张表，只记录计时与兼容性缓存；v8/v9 迁移在此之上补充输入映射与逐游戏设置：
+### Manager 本地 SQLite 记录（Library v10）
+
+Library v7 迁移在 Manager 本地库新增三张表，只记录计时与兼容性缓存；v8/v9/v10 迁移在此之上补充输入映射、逐游戏设置与逐版本兼容性/发布缓存：
 
 | 表 | 用途 |
 | --- | --- |
 | `play_session` | 游玩会话，记录 work_id、case_identity、start/end_unix_ms、duration_ms 与 ended_by（`active`/`leave`/`shutdown`/`crash`）；崩溃残留会话在恢复时按上次已知时间结算 |
-| `compatibility_entry_cache` | 兼容性库本地只读缓存，按 `(provider, remote_id)` 主键 |
+| `compatibility_entry_cache` | 兼容性库本地只读缓存，按 VNDB `(vn_id, release_id)` 主键，`vn_id` 为 vID、`release_id` 为 rID |
 | `compatibility_sync_state` | 单例同步状态，记录 source_url、response_hash、last_fetched_unix_ms 与 diagnostic_code |
+| `vn_release` | 从 VNDB 拉取的某 work 的发布（rID）列表，用于把本地安装钉到具体版本；按 `(work_id, release_id)` 主键 |
+| `case_release` | 某个安装实例（case）钉到的 rID，按 case_identity 主键 |
 | `input_settings` | 单例全局设备→键名输入映射（`InputMapping` 的 JSON 序列化） |
 | `work_settings` | 逐游戏设置覆盖，按 work_id 主键（`WorkSettings` 的 JSON 序列化），`None` 字段沿用全局值，随 work 级联删除 |
+
+版本精确匹配：先取 work 的 VNDB vID（`external_identity(provider='vndb')`），再看该安装 case 钉到的 rID（`case_release`），以 v2 缓存 `(vID, rID)` 返回对应分级；未钉 rID 时回退到该 vID 最近更新的记录。Bangumi 的 external identity 只用于进度同步，不参与兼容性匹配。
 
 游玩统计经 SQL 聚合派生（`SUM(duration_ms)`/`MAX(start_unix_ms)`/`COUNT`），不另存冗余汇总字段。
 

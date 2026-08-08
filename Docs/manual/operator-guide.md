@@ -187,9 +187,11 @@ FVP 的固定行为基线是 rfvp `0.5.0` commit `3b5ea6c96a925c12f95aef8554905e
 
 ## AstraEMU 兼容性数据仓
 
-AstraEMU 社区兼容性库是独立维护的只读数据仓，经 GitHub Pages 托管为静态 JSON（schema `astra.emu.compatibility.v1`），不进入本仓 workspace、依赖图或 release gate。数据仓 CI 用 `astra-emu-metadata` 的 `compatibility_json_schema()` 导出的 JSON Schema 校验文档；Rust 类型是 schema 真源，修改分级或字段必须先改 `compatibility.rs` 再重新导出。格式与边界见 [Data Formats](../contracts/data-formats.md) 的社区兼容性库节。
+AstraEMU 社区兼容性库是独立维护的只读数据仓，经 GitHub Pages 托管为静态 JSON（schema `astra.emu.compatibility.v2`），不进入本仓 workspace、依赖图或 release gate。数据仓 CI 用 `astra-emu-metadata` 的 `compatibility_json_schema()` 导出的 JSON Schema 校验文档；Rust 类型是 schema 真源，修改分级或字段必须先改 `compatibility.rs` 再重新导出。格式与边界见 [Data Formats](../contracts/data-formats.md) 的社区兼容性库节。
 
-Manager 默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖。拉取复用 metadata network-consent gate（启用 VNDB 或 Bangumi 网络访问后才允许），只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步。相关 observability 事件为 `emu.compatibility.fetch`、`astra.emu.compatibility.cache`/`match`/`diagnostic` 与 `astra.emu.play.session_start`/`session_end`，字段只含 work_id、hash、status、diagnostic code 和计数，不含商业文本或本地路径。数据仓本身不在本计划交付范围，由用户单独创建维护。
+v2 让兼容性由 **VNDB 一键控**：游戏用 vID（`v<decimal>`，游戏名标识）键控，具体版本用 rID（`r<decimal>`，版本标识）键控，因此一条记录精确到某个游戏版本；同一 vID 的不同 rID 可携带不同分级。社区贡献者通过本仓 `.github/ISSUE_TEMPLATE/vndb-game-compatibility.yml` 提交结构化报告（vID、rID、分级、引擎、平台），维护者运行验证脚本把通过的条目落成 v2 记录并合并进数据仓。Bangumi 只用于游玩进度记录，不再参与兼容性库。
+
+Manager 默认源由常量 `DEFAULT_COMPATIBILITY_SOURCE_URL` 给出，可经设置覆盖。拉取复用 metadata network-consent gate（启用 VNDB 网络访问后才允许），只接受 HTTPS、拒绝重定向，并以 SHA-256 content hash 做增量同步。相关 observability 事件为 `emu.compatibility.fetch`、`astra.emu.compatibility.cache`/`match`/`diagnostic` 与 `astra.emu.play.session_start`/`session_end`，字段只含 work_id、vID/rID、hash、status、diagnostic code 和计数，不含商业文本或本地路径。数据仓本身不在本计划交付范围，由用户单独创建维护。
 
 ## 日志命令
 
