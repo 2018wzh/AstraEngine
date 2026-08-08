@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+astra-byte-source = { path = "../astra-byte-source" }
 astra-platform = { path = "../../Platform/astra-platform" }
 kira.workspace = true
 schemars.workspace = true

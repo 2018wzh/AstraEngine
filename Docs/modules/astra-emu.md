@@ -10,7 +10,7 @@ manifest、runtime section 和 snapshot 在 loader/provider 边界 fail-fast，
 
 Manager 负责窗口、输入、配置、family 选择、provider selection、插件分发、报告、overlay、文本管线和滤镜 preset。Manager 自身是 Program target；被启动的 legacy case 通过 `AstraEmuRuntimeProvider` 作为 gameplay runtime session 运行。Provider 创建并驱动 AstraEngine `RuntimeWorld`，legacy family 以 engine-native in-process family plugin/provider 接入。
 
-Manager 分为不依赖 UI 的 `astra-emu-manager-core`、只做 ViewModel/响应布局/accessibility/input routing 的 `astra-emu-manager-ui-slint`，以及装配平台服务的 `astra-emu-manager` Program。Slint host 持有单一窗口、event loop、surface 与同一套 wgpu 29.0.4 `Device`/`Queue`；游戏画面作为 GPU texture underlay 导入，Slint 只绘制 Manager 和 overlay，不做 CPU 整帧回读或跨设备复制。桌面采用导航、封面网格与 inspector 三栏；手机采用双列封面、bottom sheet 和底部导航；大屏移动设备切换桌面式自适应布局。
+Manager 分为不依赖 UI 的 `astra-emu-manager-core`、只做 ViewModel/响应布局/accessibility/input routing 的 `astra-emu-manager-ui-slint`，以及装配平台服务的 `astra-emu-manager` Program。Slint host 持有单一窗口、event loop、surface 与同一套 wgpu 29.0.4 `Device`/`Queue`；Windows audio/decode 由不创建窗口和 event loop 的 media-service host 提供。游戏画面作为 GPU texture underlay 导入，Slint 只绘制 Manager 和 overlay，不做 CPU 整帧回读或跨设备复制。桌面采用导航、封面网格与 inspector 三栏；手机采用双列封面、bottom sheet 和底部导航；大屏移动设备切换桌面式自适应布局。
 
 ## Library identity 与外部元数据
 

@@ -25,6 +25,7 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+astra-byte-source = { path = "../astra-byte-source" }
 astra-headless-test = { path = "../../Developer/astra-headless-test" }
 
 [lib]

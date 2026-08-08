@@ -9,11 +9,14 @@
     "checkpoints",
     "consumed_input_messages",
     "consumed_input_trace_hash",
+    "coverage_hash",
+    "coverage_ids",
     "diagnostic_codes",
     "entry_identity_hash",
     "family_id",
     "family_provider_id",
     "fixed_steps",
+    "frame_hashes",
     "frame_sample_interval",
     "game_identity_hash",
     "host_kind",
@@ -57,6 +60,15 @@
     "consumed_input_trace_hash": {
       "$ref": "#/definitions/Hash256"
     },
+    "coverage_hash": {
+      "$ref": "#/definitions/Hash256"
+    },
+    "coverage_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "diagnostic_codes": {
       "type": "array",
       "items": {
@@ -76,6 +88,12 @@
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
+    },
+    "frame_hashes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/HeadlessFrameHashV1"
+      }
     },
     "frame_sample_interval": {
       "type": "integer",
@@ -148,6 +166,16 @@
       ],
       "format": "uint64",
       "minimum": 0.0
+    },
+    "route_terminal_hash": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Hash256"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "runtime_provider_id": {
       "type": "string"
@@ -252,6 +280,47 @@
           "minimum": 0.0
         },
         "total_ns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "HeadlessFrameHashV1": {
+      "type": "object",
+      "required": [
+        "difference_hash",
+        "fixed_step",
+        "frame_hash",
+        "mean_rgba",
+        "sequence"
+      ],
+      "properties": {
+        "difference_hash": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "fixed_step": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "frame_hash": {
+          "$ref": "#/definitions/Hash256"
+        },
+        "mean_rgba": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          },
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "sequence": {
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0

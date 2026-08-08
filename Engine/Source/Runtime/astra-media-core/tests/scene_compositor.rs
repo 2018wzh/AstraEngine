@@ -1,7 +1,7 @@
 use astra_media_core::{
     BlendMode, CpuRendererProvider, DrawCommand, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D,
     MeshVertex2D, RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
-    TextureFrame, Transform2D,
+    TextureFilter2D, TextureFrame, Transform2D,
 };
 
 #[astra_headless_test::test]
@@ -28,6 +28,7 @@ fn cpu_reference_compositor_screens_premultiplied_ui_meshes() {
                 indices: vec![0, 1, 2].into(),
                 material: MeshMaterial2D::Solid,
                 texture_id: None,
+                texture_filter: TextureFilter2D::Linear,
                 opacity: 1.0,
                 blend: BlendMode::Screen,
             },

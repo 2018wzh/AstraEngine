@@ -315,7 +315,22 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 match controller.borrow_mut().advance_runtime() {
                     Ok(Some(model)) => adapter.apply(&model),
                     Ok(None) => {}
-                    Err(error) => window.set_global_diagnostic(error.into()),
+                    Err(error) => {
+                        let termination = controller.borrow_mut().leave_game();
+                        let message = match termination {
+                            Ok(model) => {
+                                adapter.apply(&model);
+                                window.set_game_active(false);
+                                error
+                            }
+                            Err(termination_error) => {
+                                format!("{error}\nSession cleanup also failed: {termination_error}")
+                            }
+                        };
+                        window.set_global_diagnostic(message.clone().into());
+                        window.set_fatal_error_message(message.into());
+                        window.set_fatal_error_active(true);
+                    }
                 }
             }
             fire_host_callback(&slot);

@@ -68,6 +68,8 @@ export component ManagerWindow inherits Window {
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
+    in-out property <bool> fatal-error-active: false;
+    in-out property <string> fatal-error-message;
 
     // ===== Game view =====
     in property <image> stage-frame;
@@ -426,6 +428,50 @@ export component ManagerWindow inherits Window {
             vertical-alignment: center;
             x: 12px;
             width: parent.width - 24px;
+        }
+    }
+
+    if root.fatal-error-active : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        background: #99000000;
+        z: 1000;
+
+        TouchArea {}
+
+        Rectangle {
+            width: min(parent.width - 32px, 560px);
+            min-height: 220px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.surface-raised;
+            border-color: Theme.danger;
+            border-width: 2px;
+            border-radius: Theme.radius;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+
+                Text {
+                    text: "Runtime session terminated";
+                    color: Theme.danger;
+                    font-size: 20px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: root.fatal-error-message;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    vertical-stretch: 1;
+                }
+                Button {
+                    text: "Acknowledge";
+                    clicked => { root.fatal-error-active = false; }
+                }
+            }
         }
     }
 }

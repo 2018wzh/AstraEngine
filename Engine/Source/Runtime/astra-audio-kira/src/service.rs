@@ -79,6 +79,7 @@ pub struct AudioServiceSession {
     buses: BTreeMap<String, AudioBus>,
     voices: BTreeMap<String, ActiveVoice>,
     streams: BTreeMap<u64, ActiveStream>,
+    retiring_streams: Vec<AstraStreamSoundHandle>,
     pcm_cache: BTreeMap<DevicePcmKey, CachedPcm>,
     pcm_cache_bytes: usize,
     lru_sequence: u64,
@@ -132,6 +133,7 @@ impl AudioServiceSession {
             buses: BTreeMap::new(),
             voices: BTreeMap::new(),
             streams: BTreeMap::new(),
+            retiring_streams: Vec::with_capacity(config.max_voices),
             pcm_cache: BTreeMap::new(),
             pcm_cache_bytes: 0,
             lru_sequence: 0,
@@ -381,6 +383,8 @@ impl AudioServiceSession {
                 AudioServiceError::Kira(error.to_string())
             })?;
         self.poll_backend()?;
+        self.retiring_streams
+            .retain(|handle| !handle.is_completed());
         let telemetry = self.manager.backend_mut().telemetry();
         self.timeline.consumed_frames =
             telemetry.consumed_samples / u64::from(self.timeline.device_channels);
@@ -542,6 +546,16 @@ impl AudioServiceSession {
             .ok_or(AudioServiceError::InvalidCommand("stream does not exist"))
     }
 
+    pub fn stream_has_recyclable_capacity(
+        &self,
+        stream_id: u64,
+    ) -> Result<bool, AudioServiceError> {
+        self.streams
+            .get(&stream_id)
+            .map(|stream| stream.handle.has_recyclable_capacity())
+            .ok_or(AudioServiceError::InvalidCommand("stream does not exist"))
+    }
+
     pub fn stream_is_completed(&self, stream_id: u64) -> Result<bool, AudioServiceError> {
         self.streams
             .get(&stream_id)
@@ -552,6 +566,20 @@ impl AudioServiceSession {
     pub fn submit_stream_owned(
         &mut self,
         stream_id: u64,
+        samples: astra_byte_source::OwnedF32Buffer,
+    ) -> Result<(), AudioServiceError> {
+        self.ensure_healthy()?;
+        self.streams
+            .get_mut(&stream_id)
+            .ok_or(AudioServiceError::InvalidCommand("stream does not exist"))?
+            .handle
+            .submit_owned(samples)
+            .map_err(AudioServiceError::InvalidCommand)
+    }
+
+    pub fn submit_stream_recyclable(
+        &mut self,
+        stream_id: u64,
         samples: Vec<f32>,
     ) -> Result<Vec<f32>, AudioServiceError> {
         self.ensure_healthy()?;
@@ -559,7 +587,7 @@ impl AudioServiceSession {
             .get_mut(&stream_id)
             .ok_or(AudioServiceError::InvalidCommand("stream does not exist"))?
             .handle
-            .submit(samples)
+            .submit_recyclable(samples)
             .map_err(AudioServiceError::InvalidCommand)
     }
 
@@ -579,8 +607,12 @@ impl AudioServiceSession {
     }
 
     pub fn destroy_stream(&mut self, stream_id: u64) -> Result<(), AudioServiceError> {
-        self.stream(stream_id)?.handle.stop();
-        self.streams.remove(&stream_id);
+        let stream = self
+            .streams
+            .remove(&stream_id)
+            .ok_or(AudioServiceError::InvalidCommand("stream does not exist"))?;
+        stream.handle.stop();
+        self.retiring_streams.push(stream.handle);
         Ok(())
     }
 

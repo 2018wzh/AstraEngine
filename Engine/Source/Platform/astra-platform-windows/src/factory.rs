@@ -9,6 +9,9 @@ pub struct WindowsPlatformFactory {
     roots: Option<HostRoots>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WindowsServiceFactory;
+
 #[cfg(target_os = "windows")]
 #[derive(Debug, Clone)]
 struct HostRoots {
@@ -18,6 +21,10 @@ struct HostRoots {
 
 pub fn factory() -> WindowsPlatformFactory {
     WindowsPlatformFactory::default()
+}
+
+pub fn service_factory() -> WindowsServiceFactory {
+    WindowsServiceFactory
 }
 
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
@@ -47,6 +54,27 @@ impl PlatformHostFactory for WindowsPlatformFactory {
                     PlatformErrorCode::UnsupportedPlatform,
                     "host.start",
                     "Windows host can only start on Windows",
+                )
+                .with_field("platform", PlatformId::Windows.as_str()))
+            })
+        }
+    }
+}
+
+impl PlatformHostFactory for WindowsServiceFactory {
+    fn start(&self, profile: HostLaunchProfile) -> HostStartFuture {
+        #[cfg(target_os = "windows")]
+        {
+            Box::pin(crate::factory::windows::start_services(profile))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Box::pin(async move {
+                profile.require_platform()?;
+                Err(PlatformError::new(
+                    PlatformErrorCode::UnsupportedPlatform,
+                    "host.services.start",
+                    "Windows services can only start on Windows",
                 )
                 .with_field("platform", PlatformId::Windows.as_str()))
             })
@@ -149,6 +177,170 @@ mod windows {
             events,
             profile: launch_profile,
         })
+    }
+
+    pub async fn start_services(
+        launch_profile: HostLaunchProfile,
+    ) -> Result<PlatformHostSession, PlatformError> {
+        let profile = launch_profile.require_platform()?.clone();
+        if profile.platform != astra_platform::PlatformId::Windows {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidProfile,
+                "host.services.start",
+                "Windows services require a Windows profile",
+            ));
+        }
+        let command_wake = PlatformCommandWakeRegistration::default();
+        let (client, backend, events) = host_channel_with_command_wake(
+            HostLaunchProfile::platform(profile.clone()),
+            profile.limits.command_queue_capacity,
+            profile.limits.event_queue_capacity,
+            command_wake.clone(),
+        )?;
+        let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("astra-platform-windows-services".to_owned())
+            .spawn(move || run_service_backend(backend, command_wake, ready_tx))
+            .map_err(|_| {
+                PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "host.services.start",
+                    "Windows service thread could not be started",
+                )
+            })?;
+        ready_rx.recv().map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::QueueClosed,
+                "host.services.start",
+                "Windows service thread stopped during startup",
+            )
+        })??;
+        Ok(PlatformHostSession {
+            client,
+            events,
+            profile: launch_profile,
+        })
+    }
+
+    fn run_service_backend(
+        mut backend: PlatformBackendChannels,
+        command_wake: PlatformCommandWakeRegistration,
+        ready: std_mpsc::SyncSender<Result<(), PlatformError>>,
+    ) {
+        let (wake_tx, wake_rx) = std_mpsc::sync_channel(1);
+        let wake_sender = wake_tx.clone();
+        if let Err(error) = command_wake.bind(move || {
+            let _ = wake_sender.try_send(());
+        }) {
+            let _ = ready.send(Err(error));
+            return;
+        }
+        let mut audio_outputs =
+            ResourceTable::<AudioResource, AudioOutputHandle>::new("audio_output");
+        let mut decode_sessions =
+            ResourceTable::<DecodeResource, DecodeSessionHandle>::new("decode_session");
+        if backend
+            .emit_event(PlatformEvent::new(1, PlatformEventKind::Resumed))
+            .is_err()
+        {
+            let _ = ready.send(Err(host_error(
+                "host.services.start",
+                "Windows service event channel is unavailable",
+            )));
+            return;
+        }
+        if ready.send(Ok(())).is_err() {
+            return;
+        }
+
+        loop {
+            if wake_rx.recv().is_err() {
+                return;
+            }
+            loop {
+                let command = match backend.try_next_command() {
+                    Ok(Some(command)) => command,
+                    Ok(None) => break,
+                    Err(_) => return,
+                };
+                match command {
+                    HostCommand::OpenAudioOutput { request, reply } => {
+                        let result = AudioResource::new(request, backend.audio_wake()).and_then(
+                            |(resource, lane, format)| {
+                                let handle = audio_outputs.insert(resource)?;
+                                Ok(OpenedAudioOutput {
+                                    handle,
+                                    format,
+                                    lane: Box::new(lane),
+                                    capture: None,
+                                })
+                            },
+                        );
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::PauseAudio { output, reply } => {
+                        let _ = reply
+                            .send(audio_outputs.get_mut(output).and_then(AudioResource::pause));
+                    }
+                    HostCommand::ResumeAudio { output, reply } => {
+                        let _ = reply.send(
+                            audio_outputs
+                                .get_mut(output)
+                                .and_then(AudioResource::resume),
+                        );
+                    }
+                    HostCommand::AbortAudio { output, reply }
+                    | HostCommand::CloseAudio { output, reply } => {
+                        let _ = reply.send(audio_outputs.remove(output).map(|_| ()));
+                    }
+                    #[cfg(feature = "platform-test-driver")]
+                    HostCommand::InjectAudioDeviceLoss { output, reply } => {
+                        let _ = reply.send(
+                            audio_outputs
+                                .get_mut(output)
+                                .map(AudioResource::inject_device_loss),
+                        );
+                    }
+                    HostCommand::OpenDecode { kind, reply } => {
+                        let _ = reply.send(
+                            DecodeResource::new(kind)
+                                .and_then(|resource| decode_sessions.insert(resource)),
+                        );
+                    }
+                    HostCommand::Decode {
+                        session,
+                        request,
+                        reply,
+                    } => {
+                        if let Ok(resource) = decode_sessions.get(session) {
+                            resource.submit(request, reply);
+                        } else {
+                            let _ = reply.send(Err(host_error(
+                                "decode.submit",
+                                "decode session handle is stale or unknown",
+                            )));
+                        }
+                    }
+                    HostCommand::CloseDecode { session, reply } => {
+                        let _ = reply.send(decode_sessions.remove(session).map(|_| ()));
+                    }
+                    HostCommand::Shutdown { reply } => {
+                        drop(decode_sessions);
+                        drop(audio_outputs);
+                        let _ = reply.send(Ok(()));
+                        return;
+                    }
+                    unsupported => {
+                        let operation = unsupported.operation();
+                        let _ = unsupported.reply_error(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            operation,
+                            "Windows service host only supports audio and decode commands",
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     fn run_backend(

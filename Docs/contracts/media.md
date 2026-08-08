@@ -51,6 +51,8 @@ Player 的音频路径固定为 `OpenDecode -> Decode -> CloseDecode -> AudioSer
 
 PlatformHost 通过 `AudioOutputLane::submit` 消费 Kira 填满的 owned chunk，并归还一个耗尽 allocation 供下一次 render 复用。native callback 使用 chunk+offset 批量消费，不能逐 sample push/pop，也不能分配或解码。AstraEMU Manager、CLI、Headless 与 Windowed E2 共用同一 Kira worker；Runtime tick、GPU present 与 Slint event loop 只提交 typed command 和读取 telemetry。
 
+Windows Manager 使用不创建窗口或 Winit event loop 的 media-service host 提供 audio/decode lane。Slint host 是进程内唯一窗口 event loop owner；media-service host 收到 window、surface、save 或 package command 时必须拒绝，不能转交完整 PlatformHost 或启动第二个 event loop。
+
 RFVP 的 SubmitI16/SubmitF32 不再把样本放进 audio command postcard。Family ABI v7
 直接移动 typed `I16`/`F32` packet，跨 ABI、Manager 和 worker 保留同一 ABI-owned
 allocation。相同格式的 PCM 不允许重建；worker 只在实际 mix/resample 边界读取 chunk，

@@ -4,7 +4,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use astra_byte_source::OwnedByteBuffer;
+use astra_byte_source::{OwnedByteBuffer, OwnedF32Buffer, OwnedI16Buffer};
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -799,9 +799,19 @@ pub struct LegacySceneTransactionV7 {
     pub sequence: u64,
     pub width: u32,
     pub height: u32,
+    pub compositing: LegacySceneCompositingV1,
     pub resources: Vec<LegacySceneResourceOperationV7>,
     pub draws: Vec<LegacyDrawV1>,
     pub reset_resources: bool,
+}
+
+/// Defines how sampled RGB and the render target participate in blending.
+/// Legacy families can request encoded-sRGB math without changing Astra's
+/// renderer-wide default for native content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacySceneCompositingV1 {
+    LinearSrgb,
+    EncodedSrgb,
 }
 
 /// RFVP reserves the maximum texture handle for its immutable 1x1 white
@@ -935,8 +945,8 @@ impl LegacySceneTransactionV7 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LegacyPcmBufferV7 {
-    I16(Vec<i16>),
-    F32(Vec<f32>),
+    I16(OwnedI16Buffer),
+    F32(OwnedF32Buffer),
 }
 
 impl LegacyPcmBufferV7 {
@@ -1034,6 +1044,7 @@ pub struct LegacyTextureUpdateV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LegacyTextureFormat {
+    /// Straight-alpha sRGBA8. Blend and sampling semantics are explicit draw state.
     Rgba8,
     LumaAlpha8,
 }
@@ -1052,6 +1063,7 @@ pub struct LegacyDrawV1 {
     pub texture_id: u32,
     pub vertices: [LegacyVertexV1; 4],
     pub blend: LegacyBlendMode,
+    pub texture_filter: LegacyTextureFilter,
     pub scissor: Option<LegacyScissorV1>,
 }
 
@@ -1073,6 +1085,13 @@ pub enum LegacyBlendMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyTextureFilter {
+    Nearest,
+    Linear,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyScissorV1 {
     pub x: i32,
     pub y: i32,
@@ -1083,8 +1102,7 @@ pub struct LegacyScissorV1 {
 /// Deterministic audio intent. Resource commands carry only a VFS URI; encoded
 /// commercial bytes are resolved by the host and never enter save/replay or a
 /// release report.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LegacyAudioCommandV1 {
     LoadResource {
         stream_id: u32,
@@ -1099,11 +1117,11 @@ pub enum LegacyAudioCommandV1 {
     },
     SubmitI16 {
         stream_id: u32,
-        samples: Vec<i16>,
+        samples: OwnedI16Buffer,
     },
     SubmitF32 {
         stream_id: u32,
-        samples: Vec<f32>,
+        samples: OwnedF32Buffer,
     },
     Play {
         stream_id: u32,
@@ -1679,10 +1697,20 @@ pub struct LegacyRestoreReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyVmTraceRecord {
+    pub context_id: u32,
+    pub program_counter: u32,
+    pub opcode: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyShutdownReport {
     pub final_state_revision: u64,
     pub instruction_count: u64,
     pub syscall_count: u64,
+    /// Evidence-only VM observations collected outside the live step result.
+    /// Shipping sessions leave this empty.
+    pub evidence_vm_trace: Vec<LegacyVmTraceRecord>,
     pub diagnostics: Vec<LegacyDiagnostic>,
 }
 
@@ -1974,6 +2002,7 @@ mod tests {
                 color: [1.0; 4],
             }; 4],
             blend: LegacyBlendMode::Alpha,
+            texture_filter: LegacyTextureFilter::Linear,
             scissor: None,
         };
         let frame = LegacyRenderResourceFrameV1 {
@@ -2074,7 +2103,7 @@ mod tests {
                 request_id: "request.test".into(),
             },
         ]);
-        round_trip(&vec![
+        let audio_commands = vec![
             LegacyAudioCommandV1::LoadResource {
                 stream_id: 1,
                 encoding: LegacyAudioEncoding::Ogg,
@@ -2088,11 +2117,11 @@ mod tests {
             },
             LegacyAudioCommandV1::SubmitI16 {
                 stream_id: 2,
-                samples: vec![1, -1],
+                samples: vec![1, -1].into(),
             },
             LegacyAudioCommandV1::SubmitF32 {
                 stream_id: 2,
-                samples: vec![0.25, -0.25],
+                samples: vec![0.25, -0.25].into(),
             },
             LegacyAudioCommandV1::Play {
                 stream_id: 2,
@@ -2115,7 +2144,10 @@ mod tests {
             },
             LegacyAudioCommandV1::DestroyStream { stream_id: 2 },
             LegacyAudioCommandV1::MasterVolume { volume: 0.75 },
-        ]);
+        ];
+        for command in &audio_commands {
+            command.validate().expect("typed live audio command");
+        }
         round_trip(&vec![
             LegacyVideoCommandV1::Play {
                 playback_id: "movie.test".into(),

@@ -32,9 +32,10 @@ use std::{
 
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyEphemeralText, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
-    LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
+    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyEphemeralText, LegacyInputEdge,
+    LegacyPcmBufferV7, LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_fvp::FvpVfsFamilyFactory;
@@ -42,6 +43,7 @@ use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
+    evidence_terminal_hash, evidence_vm_coverage_hash, evidence_vm_coverage_ids,
     AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord,
     CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord,
     GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord, MatchDecisionRecord,
@@ -134,6 +136,35 @@ fn platform_grant_kind() -> &'static str {
     "platform-source-unavailable-v1"
 }
 
+const MAX_FVP_PACK_FILES: u32 = 4_096;
+
+fn fvp_pack_paths_option(
+    reader: &dyn LegacyVfsReader,
+    mount_set_id: &str,
+    script_uri: &str,
+) -> Result<String, String> {
+    let script_parent = script_uri
+        .rsplit_once('/')
+        .map_or("", |(parent, _)| parent)
+        .to_ascii_lowercase();
+    let entries = reader
+        .enumerate_by_extension(mount_set_id, &script_parent, "bin", MAX_FVP_PACK_FILES)
+        .map_err(|error| error.code().to_owned())?;
+    let pack_paths = entries
+        .into_iter()
+        .map(|entry| entry.uri)
+        .filter(|uri| {
+            uri.rsplit_once('/')
+                .map_or("", |(parent, _)| parent)
+                .eq_ignore_ascii_case(&script_parent)
+        })
+        .collect::<Vec<_>>();
+    if pack_paths.is_empty() {
+        return Err("ASTRA_EMU_FVP_PACK_PATHS_MISSING".into());
+    }
+    serde_json::to_string(&pack_paths).map_err(|_| "ASTRA_EMU_FVP_PACK_PATHS_ENCODING".into())
+}
+
 struct ActiveRuntimeSession {
     session_id: GameRuntimeSessionId,
     package_hash: Hash256,
@@ -146,14 +177,14 @@ struct ActiveRuntimeSession {
     input_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
     saved_sections: Option<RuntimeSaveSections>,
-    coverage_opcodes: BTreeMap<String, u64>,
     coverage_syscalls: u64,
     next_tick: Instant,
+    next_step_mode: RuntimeStepMode,
 }
 
 enum PendingWait {
     DueStep(u64),
-    Input(u64),
+    Input(BTreeSet<String>),
     PresentationFence,
     MediaFence(String),
     ProviderCompletion,
@@ -163,6 +194,7 @@ struct RuntimeBridge {
     provider: AstraEmuRuntimeProvider,
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
+    failed: bool,
     live_scene_commits: VecDeque<RuntimeLiveSceneTransaction>,
     resource_revisions: BTreeMap<u32, (u64, u32, u32, RuntimeLiveTextureFormat)>,
     audio: Option<HostAudioExecutor>,
@@ -185,6 +217,7 @@ impl RuntimeBridge {
             provider,
             active: None,
             terminal: false,
+            failed: false,
             live_scene_commits: VecDeque::new(),
             resource_revisions: BTreeMap::new(),
             audio: None,
@@ -227,6 +260,9 @@ impl RuntimeBridge {
             .parse()
             .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
         let mut family_options = profile.family_options;
+        if env::var("ASTRA_EMU_QUICK_EVIDENCE").as_deref() == Ok("1") {
+            family_options.insert("astra.hosted_trace_profile".into(), "evidence".into());
+        }
         let script_fingerprint: Hash256 = family_options
             .remove("fvp.hcb_content_hash")
             .ok_or_else(|| "ASTRA_EMU_FVP_HCB_IDENTITY_MISSING".to_owned())?
@@ -296,14 +332,15 @@ impl RuntimeBridge {
             input_sequence: 0,
             pending_inputs: Vec::new(),
             saved_sections: None,
-            coverage_opcodes: BTreeMap::new(),
             coverage_syscalls: 0,
             next_tick: Instant::now(),
+            next_step_mode: RuntimeStepMode::Live,
         });
         tracing::info!(
             event = "astra.emu.manager.session_opened",
             session_hash = %Hash256::from_sha256(open.session_id.0.as_bytes()),
             package_hash = %package_hash,
+            profile_hash = %hash,
             profile_id = %"astra.emu.case_profile.v1"
         );
         self.audio = Some(audio);
@@ -311,6 +348,7 @@ impl RuntimeBridge {
         self.text_hooks = text_hooks;
         self.media_hooks = media_hooks;
         self.terminal = false;
+        self.failed = false;
         self.live_scene_commits.clear();
         self.resource_revisions.clear();
         self.text_captures.clear();
@@ -417,6 +455,8 @@ impl RuntimeBridge {
             return Ok(false);
         }
         let next_step = active.fixed_step.saturating_add(1);
+        let session_seed = active.seed;
+        let step_mode = active.next_step_mode;
         let completed_media = self.video.take_completed();
         for media_id in completed_media {
             let mut matched = false;
@@ -431,16 +471,19 @@ impl RuntimeBridge {
                 return Err("ASTRA_EMU_VIDEO_COMPLETION_UNSOLICITED".into());
             }
         }
-        let input_mask = active
+        let input_controls = active
             .pending_inputs
             .iter()
-            .fold(0_u64, |mask, edge| mask | input_control_mask(&edge.control));
+            .map(|edge| edge.control.as_str())
+            .collect::<BTreeSet<_>>();
         let ready = active
             .pending_waits
             .iter()
             .filter(|(_, wait)| match wait {
                 PendingWait::DueStep(due) => *due <= next_step,
-                PendingWait::Input(mask) => input_mask & *mask != 0,
+                PendingWait::Input(keys) => {
+                    keys.iter().any(|key| input_controls.contains(key.as_str()))
+                }
                 PendingWait::PresentationFence
                 | PendingWait::MediaFence(_)
                 | PendingWait::ProviderCompletion => false,
@@ -471,7 +514,7 @@ impl RuntimeBridge {
             fixed_step: next_step,
             delta_ns: active.fixed_delta_ns,
             session_seed: active.seed,
-            mode: RuntimeStepMode::Live,
+            mode: step_mode,
             action: "emu.step".into(),
             argument: None,
             auxiliary: None,
@@ -505,6 +548,7 @@ impl RuntimeBridge {
         let fixed_delta_ns = active.fixed_delta_ns;
         active.fixed_step = next_step;
         active.next_tick += Duration::from_nanos(fixed_delta_ns);
+        active.next_step_mode = RuntimeStepMode::Live;
         let live = output.live;
         let active = self
             .active
@@ -660,18 +704,43 @@ impl RuntimeBridge {
         self.video.advance(fixed_delta_ns, audio)?;
         self.terminal = output.status == "terminal";
         if self.terminal {
+            let terminal_hash =
+                evidence_terminal_hash(session_seed, next_step, live.state_revision);
             tracing::info!(
                 event = "astra.emu.manager.terminal_observed",
                 session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
                 fixed_step = next_step,
-                state_revision = live.state_revision
+                state_revision = live.state_revision,
+                terminal_hash = %terminal_hash
             );
         }
         Ok(true)
     }
 
     fn runtime_deadline(&self) -> Option<Instant> {
-        self.active.as_ref().map(|active| active.next_tick)
+        (!self.failed)
+            .then(|| self.active.as_ref().map(|active| active.next_tick))
+            .flatten()
+    }
+
+    fn mark_failed(&mut self, error: &str) {
+        if self.failed {
+            return;
+        }
+        self.failed = true;
+        let fixed_step = self.active.as_ref().map_or(0, |active| active.fixed_step);
+        let session_hash = self
+            .active
+            .as_ref()
+            .map(|active| Hash256::from_sha256(active.session_id.0.as_bytes()).to_string())
+            .unwrap_or_else(|| "none".into());
+        tracing::error!(
+            event = "astra.emu.manager.runtime_failed",
+            diagnostic_code = error,
+            session_hash,
+            fixed_step,
+            "AstraEMU runtime session stopped at its first fatal error"
+        );
     }
 
     fn shutdown(&mut self) -> Result<(), String> {
@@ -680,15 +749,17 @@ impl RuntimeBridge {
             .take()
             .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
         let session_hash = Hash256::from_sha256(active.session_id.0.as_bytes());
-        let coverage_ids = active.coverage_opcodes.keys().cloned().collect::<Vec<_>>();
-        let coverage_hash =
-            Hash256::from_sha256(format!("{}\n", coverage_ids.join("\n")).as_bytes());
-        self.provider.shutdown(active.session_id)?;
+        let (_, family_report) = self
+            .provider
+            .shutdown_with_family_report(active.session_id)?;
+        let coverage_ids = evidence_vm_coverage_ids(&family_report.evidence_vm_trace);
+        let coverage_hash = evidence_vm_coverage_hash(&coverage_ids);
         if let Some(mut audio) = self.audio.take() {
             let audio_telemetry = audio.telemetry();
             let audio_non_silent = audio.has_audible_output();
             self.video.reset(&mut audio)?;
-            let _meter_trace = audio.shutdown()?;
+            let meter_trace = audio.shutdown()?;
+            let audio_meter_hash = Hash256::from_sha256(&meter_trace);
             tracing::info!(
                 event = "astra.emu.manager.audio_meter_observed",
                 session_hash = %session_hash,
@@ -696,9 +767,11 @@ impl RuntimeBridge {
                 submitted_frames = audio_telemetry.submitted_frames,
                 consumed_frames = audio_telemetry.consumed_frames,
                 underflow_count = audio_telemetry.underflow_count,
+                audio_meter_hash = %audio_meter_hash,
             );
         }
         self.terminal = false;
+        self.failed = false;
         self.live_scene_commits.clear();
         self.resource_revisions.clear();
         self.text_captures.clear();
@@ -711,7 +784,7 @@ impl RuntimeBridge {
             session_hash = %session_hash,
             coverage_hash = %coverage_hash,
             opcode_count = coverage_ids.len(),
-            syscall_count = active.coverage_syscalls
+            syscall_count = family_report.syscall_count.max(active.coverage_syscalls)
         );
         tracing::info!(
             event = "astra.emu.manager.shutdown_completed",
@@ -783,12 +856,19 @@ impl RuntimeBridge {
         {
             return Err("ASTRA_EMU_RESTORE_EVIDENCE_INVALID".into());
         }
+        let audio = self
+            .audio
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_EXECUTOR_MISSING".to_owned())?;
+        self.video.reset(audio)?;
+        audio.reset()?;
         let active = self
             .active
             .as_mut()
             .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
         active.fixed_step = restored.restored_fixed_step;
         active.next_tick = Instant::now() + Duration::from_nanos(active.fixed_delta_ns);
+        active.next_step_mode = RuntimeStepMode::RestoreContinuation;
         tracing::info!(
             event = "astra.emu.manager.snapshot_restored",
             session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
@@ -825,21 +905,7 @@ impl RuntimeBridge {
         if active.pending_inputs.len() >= 4096 {
             return Err("ASTRA_EMU_INPUT_QUEUE_BOUNDS".into());
         }
-        if !matches!(
-            control,
-            "confirm"
-                | "cancel"
-                | "up"
-                | "down"
-                | "left"
-                | "right"
-                | "space"
-                | "pointer.x"
-                | "pointer.y"
-                | "pointer.primary"
-                | "pointer.secondary"
-                | "wheel"
-        ) {
+        if !is_valid_input_control(control) {
             return Err("ASTRA_EMU_INPUT_INVALID".into());
         }
         let value = normalize_legacy_input_value(control, value)?;
@@ -964,6 +1030,7 @@ impl RuntimeBridge {
             sequence: scene.sequence,
             width: scene.width,
             height: scene.height,
+            compositing: astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb,
             resources,
             draws: scene.draws,
             reset_resources: false,
@@ -1310,33 +1377,12 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
             let delay_ns = u64::from(milliseconds).saturating_mul(1_000_000);
             PendingWait::DueStep(step.saturating_add(delay_ns.div_ceil(delta_ns).max(1)))
         }
-        RuntimeLiveWaitKind::Input { keys } => {
-            let mask = keys
-                .iter()
-                .fold(0_u64, |mask, key| mask | input_control_mask(key));
-            PendingWait::Input(mask)
-        }
+        RuntimeLiveWaitKind::Input { keys } => PendingWait::Input(keys.into_iter().collect()),
         RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::MediaFence(media_id),
         RuntimeLiveWaitKind::PresentationFence { .. } => PendingWait::PresentationFence,
         RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::ProviderCompletion,
     };
     (token_id, condition)
-}
-
-fn input_control_mask(control: &str) -> u64 {
-    match control {
-        "enter" => 1 << 0,
-        "escape" => 1 << 1,
-        "arrow_up" => 1 << 2,
-        "arrow_down" => 1 << 3,
-        "arrow_left" => 1 << 4,
-        "arrow_right" => 1 << 5,
-        "space" => 1 << 6,
-        "pointer.primary" => 1 << 7,
-        "pointer.secondary" => 1 << 8,
-        "wheel" => 1 << 9,
-        _ => 0,
-    }
 }
 
 fn parse_glossary(input: &str) -> Result<Vec<(String, String)>, String> {
@@ -3685,6 +3731,14 @@ impl ManagerController for AstraEmuManagerController {
                 .map_err(|error| error.to_string())?,
         };
         self.vfs.bind(&mount_set_id, &grant.platform_token)?;
+        let pack_paths =
+            match fvp_pack_paths_option(self.vfs.as_ref(), &mount_set_id, &case.relative_path) {
+                Ok(pack_paths) => pack_paths,
+                Err(error) => {
+                    self.vfs.unbind(&mount_set_id);
+                    return Err(error);
+                }
+            };
         let detected = self
             .runtime
             .try_borrow()
@@ -3712,7 +3766,11 @@ impl ManagerController for AstraEmuManagerController {
                 return Err(error);
             }
         }
-        let profile = profile.ok_or_else(|| "ASTRA_EMU_CASE_PROFILE_NOT_CONFIGURED".to_owned())?;
+        let mut profile =
+            profile.ok_or_else(|| "ASTRA_EMU_CASE_PROFILE_NOT_CONFIGURED".to_owned())?;
+        profile
+            .family_options
+            .insert("fvp.pack_paths".into(), pack_paths);
         if let Err(error) = self.apply_trusted_patch(&profile, &mount_set_id) {
             self.vfs.unbind(&mount_set_id);
             return Err(error);
@@ -3832,11 +3890,19 @@ impl ManagerController for AstraEmuManagerController {
     }
 
     fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String> {
-        let mut runtime = self
-            .runtime
-            .try_borrow_mut()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?;
-        let advanced = runtime.step_if_due()?;
+        let advanced = {
+            let mut runtime = self
+                .runtime
+                .try_borrow_mut()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?;
+            match runtime.step_if_due() {
+                Ok(advanced) => advanced,
+                Err(error) => {
+                    runtime.mark_failed(&error);
+                    return Err(error);
+                }
+            }
+        };
         if advanced {
             self.model().map(Some)
         } else {
@@ -4019,6 +4085,7 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
             stage_height: 768,
             texture_dirty: false,
             scene_initialized: false,
+            scene_compositing: None,
         },
         quick_launch,
     )?;
@@ -4030,10 +4097,20 @@ fn main() -> std::process::ExitCode {
     match run_application() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
-            tracing::error!(
-                event = "astra.emu.manager.fatal",
-                diagnostic_code = %startup_diagnostic_code(error.as_ref())
-            );
+            if let Some(astra_emu_manager::HostError::Backend(backend)) =
+                error.downcast_ref::<astra_emu_manager::HostError>()
+            {
+                tracing::error!(
+                    event = "astra.emu.manager.fatal",
+                    diagnostic_code = %startup_diagnostic_code(error.as_ref()),
+                    error_kind = %backend
+                );
+            } else {
+                tracing::error!(
+                    event = "astra.emu.manager.fatal",
+                    diagnostic_code = %startup_diagnostic_code(error.as_ref())
+                );
+            }
             std::process::ExitCode::FAILURE
         }
     }
@@ -4074,20 +4151,41 @@ use audio_executor::HostAudioExecutor;
 
 #[cfg(test)]
 mod manager_tests {
-    use std::{collections::BTreeMap, io::Cursor, sync::Arc};
+    use std::{collections::BTreeMap, fs, io::Cursor, sync::Arc};
 
     use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
 
     use astra_emu_manager_core::{
-        CancellationToken, GrantedSourceEntry, GrantedSourceReader, Library, LibraryScanner,
-        PatchHostAction, QueuedPatchEffect, ScanLimits, SourceGrant, SourceScanError,
+        CancellationToken, DesktopVfsRegistry, GrantedSourceEntry, GrantedSourceReader, Library,
+        LibraryScanner, PatchHostAction, QueuedPatchEffect, ScanLimits, SourceGrant,
+        SourceScanError,
     };
 
     use super::{
-        apply_audio_media_hook, parse_glossary, refresh_cover_cache, validate_patch_actions,
+        apply_audio_media_hook, fvp_pack_paths_option, parse_glossary, refresh_cover_cache,
+        validate_patch_actions,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
+
+    #[test]
+    fn fvp_profile_declares_sorted_pack_paths_from_the_bound_vfs() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("voice.bin"), b"voice").unwrap();
+        fs::write(directory.path().join("BGM.BIN"), b"bgm").unwrap();
+        fs::write(directory.path().join("ignored.dat"), b"ignored").unwrap();
+        fs::create_dir(directory.path().join("save")).unwrap();
+        fs::write(directory.path().join("save/global.bin"), b"save").unwrap();
+        let registry = DesktopVfsRegistry::default();
+        registry
+            .bind("mount.fvp", directory.path().to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            fvp_pack_paths_option(&registry, "mount.fvp", "Sakura.hcb").unwrap(),
+            r#"["bgm.bin","voice.bin"]"#
+        );
+    }
 
     impl GrantedSourceReader for MemorySource {
         fn enumerate(

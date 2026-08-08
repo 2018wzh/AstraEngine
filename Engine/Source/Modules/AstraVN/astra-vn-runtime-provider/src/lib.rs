@@ -29,8 +29,8 @@ use astra_plugin_abi::{
     FfiRuntimeScissor, FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeSectionResult,
     FfiRuntimeShutdownRequest, FfiRuntimeShutdownResult, FfiRuntimeStepMode, FfiRuntimeStepRequest,
     FfiRuntimeStepResult, FfiRuntimeTextLease, FfiRuntimeTextPresentation, FfiRuntimeTextRegion,
-    FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand, FfiRuntimeVideoMode,
-    FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    FfiRuntimeTextureFilter, FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand,
+    FfiRuntimeVideoMode, FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
     PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
@@ -2927,8 +2927,8 @@ fn ffi_live_output(
             sample_rate: packet.sample_rate,
             channels: packet.channels,
             pcm: match packet.pcm {
-                RuntimeLivePcmBuffer::I16(samples) => FfiRuntimePcmBuffer::I16(RVec::from(samples)),
-                RuntimeLivePcmBuffer::F32(samples) => FfiRuntimePcmBuffer::F32(RVec::from(samples)),
+                RuntimeLivePcmBuffer::I16(samples) => FfiRuntimePcmBuffer::I16(samples.into_ffi()),
+                RuntimeLivePcmBuffer::F32(samples) => FfiRuntimePcmBuffer::F32(samples.into_ffi()),
             },
         })
     }
@@ -3124,6 +3124,14 @@ fn ffi_live_scene(
         sequence: transaction.sequence,
         width: transaction.width,
         height: transaction.height,
+        compositing: match transaction.compositing {
+            astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb => {
+                astra_plugin_abi::FfiRuntimeSceneCompositing::LinearSrgb
+            }
+            astra_plugin_abi::RuntimeLiveSceneCompositing::EncodedSrgb => {
+                astra_plugin_abi::FfiRuntimeSceneCompositing::EncodedSrgb
+            }
+        },
         resources: RVec::from(
             transaction
                 .resources
@@ -3196,6 +3204,14 @@ fn ffi_live_scene(
                         RuntimeLiveBlendMode::Multiply => FfiRuntimeBlendMode::Multiply,
                         RuntimeLiveBlendMode::Screen => FfiRuntimeBlendMode::Screen,
                     },
+                    texture_filter: match draw.texture_filter {
+                        astra_plugin_abi::RuntimeLiveTextureFilter::Nearest => {
+                            FfiRuntimeTextureFilter::Nearest
+                        }
+                        astra_plugin_abi::RuntimeLiveTextureFilter::Linear => {
+                            FfiRuntimeTextureFilter::Linear
+                        }
+                    },
                     scissor: draw
                         .scissor
                         .map(|scissor| FfiRuntimeScissor {
@@ -3232,6 +3248,10 @@ fn ffi_live_draw(draw: astra_plugin_abi::RuntimeLiveDraw) -> astra_plugin_abi::F
             RuntimeLiveBlendMode::Opaque => FfiRuntimeBlendMode::Opaque,
             RuntimeLiveBlendMode::Multiply => FfiRuntimeBlendMode::Multiply,
             RuntimeLiveBlendMode::Screen => FfiRuntimeBlendMode::Screen,
+        },
+        texture_filter: match draw.texture_filter {
+            astra_plugin_abi::RuntimeLiveTextureFilter::Nearest => FfiRuntimeTextureFilter::Nearest,
+            astra_plugin_abi::RuntimeLiveTextureFilter::Linear => FfiRuntimeTextureFilter::Linear,
         },
         scissor: draw
             .scissor
@@ -3301,7 +3321,7 @@ fn ffi_live_audio_command(command: RuntimeLiveAudioCommand) -> FfiRuntimeAudioCo
         } => FfiRuntimeAudioCommand::SubmitI16 {
             sequence,
             stream_id,
-            samples: samples.into(),
+            samples: samples.into_ffi(),
         },
         RuntimeLiveAudioCommand::SubmitF32 {
             sequence,
@@ -3310,7 +3330,7 @@ fn ffi_live_audio_command(command: RuntimeLiveAudioCommand) -> FfiRuntimeAudioCo
         } => FfiRuntimeAudioCommand::SubmitF32 {
             sequence,
             stream_id,
-            samples: samples.into(),
+            samples: samples.into_ffi(),
         },
         RuntimeLiveAudioCommand::Play {
             sequence,

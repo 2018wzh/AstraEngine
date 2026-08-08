@@ -254,6 +254,7 @@ fn run_windows(manifest: ManagerE3Manifest) -> Result<(), String> {
             &manifest.authorized_source_directory,
         )
         .env("ASTRA_EMU_QUICK_ENTRY", &manifest.entry)
+        .env("ASTRA_EMU_QUICK_EVIDENCE", "1")
         .env("ASTRA_EMU_DATA_DIR", &data_root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -672,6 +673,7 @@ fn virtual_key(key: &str) -> Result<u16, String> {
         "ArrowLeft" | "Left" => Ok(0x25),
         "ArrowRight" | "Right" => Ok(0x27),
         "Space" => Ok(0x20),
+        "ControlLeft" | "ControlRight" | "Control" => Ok(0x11),
         "F5" => Ok(0x74),
         "F9" => Ok(0x78),
         _ => Err("ASTRA_EMU_E3_KEY_UNSUPPORTED".into()),
@@ -702,6 +704,13 @@ mod tests {
     use super::*;
     use astra_headless_protocol::USER_INPUT_SEQUENCE_SCHEMA;
     use std::collections::BTreeMap;
+
+    #[cfg(windows)]
+    #[test]
+    fn physical_control_keys_map_to_windows_control() {
+        assert_eq!(virtual_key("ControlLeft"), Ok(0x11));
+        assert_eq!(virtual_key("ControlRight"), Ok(0x11));
+    }
 
     fn log_event(event: &str, fields: &[(&str, String)]) -> astra_observability::LogEventV1 {
         astra_observability::LogEventV1 {

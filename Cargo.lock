@@ -650,6 +650,7 @@ dependencies = [
 name = "astra-audio-kira"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-headless-test",
  "astra-platform",
  "kira",
@@ -1665,6 +1666,7 @@ name = "astra-plugin"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "astra-plugin-abi",
@@ -8743,7 +8745,7 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=ee6bd6a8ae7470a073216d2d110e1042fad7cc25#ee6bd6a8ae7470a073216d2d110e1042fad7cc25"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=ce921717f043a8a035eadff1f41fc060c7de7c3c#ce921717f043a8a035eadff1f41fc060c7de7c3c"
 dependencies = [
  "ab_glyph",
  "anyhow",

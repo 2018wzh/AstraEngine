@@ -13,7 +13,8 @@ use astra_core::{
 };
 use astra_media_core::{
     BlendMode, FilterGraph, FilterNode, FilterParam, FilterTarget, GlyphBitmap, GlyphBitmapFormat,
-    GlyphInstance, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, TextureFrame, Transform2D,
+    GlyphInstance, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, TextureFilter2D,
+    TextureFrame, Transform2D,
 };
 use astra_observability::{
     sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceWriter,
@@ -1080,6 +1081,7 @@ fn draw_commands() -> Vec<SceneCommand> {
             indices: vec![0, 1, 2].into(),
             material: MeshMaterial2D::Solid,
             texture_id: None,
+            texture_filter: TextureFilter2D::Linear,
             opacity: 0.9,
             blend: BlendMode::Alpha,
         },

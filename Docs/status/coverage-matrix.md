@@ -22,6 +22,23 @@ AstraEMU FVP 当前实现边界以 Family ABI v7 为准：显式 `StableAbi` lif
 
 2026-08-08 的开发复用 package 已在同一 build/profile/device 上完成 36,000 tick Windowed E2、Perfetto 和独立 29-checkpoint 视觉线路：fixed tick p99 3.082 ms，deadline debt、audio underflow 与 scene/PCM copy counter 为零，实际帧可见启动 logo、标题和黑底序章 UI/正文。该 run 未到 terminal，且不是冻结 clean Release identity，只作为 E3 候选与回归证据；正式性能 evidence 等级不提升。
 
+同日的 RFVP/Astra 颜色差异审计确认 RFVP 上游原版渲染是视觉权威；此前尝试统一 premultiplied source-over 会改变产品色值，已撤销。hosted fork 固定到 `a1d9abd201e6a0baf6259309543da5166a814c1c`，保留 typed ownership，并恢复上游原版 renderer 行为。Family ABI v7、Provider ABI v3、Headless CPU、Manager GPU 与 PlatformHost GPU 原样传递 nearest/linear；FVP adapter 只映射上游 draw state，不改写 Astra 通用 renderer。600 tick 同物理输入 Headless GPU 运行通过，599 个可对照帧均已生成；第 60–599 帧相对上游 software oracle 的平均 RGBA MAE 为 2.211，最大 2.389，标题花瓣、光点、右下花树和菜单辉光均可见。相同 build/input 重跑的 scene、raster 与 audio stream hash 完全一致，音频为 479744 frame、无 clipping，原先由 wall-clock 补水导致的 artifact duration overflow 已由 Headless 固定 tick Kira 驱动消除。该 oracle 不是 Windows native GPU capture，clean Release Perfetto 与人工 E3 仍未完成，因此 coverage 等级不提升。
+
+2026 年 8 月 9 日继续按 RFVP Headless oracle 校准 hosted adapter。fork revision
+`ce921717f043a8a035eadff1f41fc060c7de7c3c` 在 hosted 构建内使用与上游相同的四个固定字体，
+删除 Astra 侧 Noto 字体覆盖，并补回上游在 dissolve 完成边沿、正常帧 tick 之前执行的同步
+零时长 VM tick。首条真实线路两侧均完成 33,682 帧；按 oracle 零基帧 `N` 对 Astra 一基
+fixed step `N+1` 比较，dHash p50/p95/p99/max 为 1/4/5/26，平均通道差异为
+0/1/1/1，512 帧 RGBA SHA 完全一致。完整线路已无语义帧边界偏移，但软件栅格器仍有小幅
+像素差异，不能写成逐像素完全一致。最终 hosted revision 的 dirty Headless Perfetto trace
+实测 scene/PCM copied bytes 均为零，audio underflow 为零；Headless 未打开物理音频端点。
+clean Release Windowed Perfetto 和人工 E3 继续 blocking，因此 coverage 等级不提升。
+
+同日人工 E3 启动检查修复 Manager auto-probe 的 `fvp.pack_paths` 漏项和完整 Windows
+PlatformHost 抢先创建 Winit event loop 的冲突。pack 列表现在只取 HCB 同目录的已绑定 VFS
+条目，并仅注入本次 provider open；Windows Kira worker 改用无窗口 media-service host 承载
+audio/decode。开发复用 Release 包已打开真实 Manager 窗口并保持响应，人工路线确认仍未完成。
+
 | 模块 | Design | Contract | Public API | Data Format | Test Scenario | Release Gate | Manual |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | EngineCore | [module](../modules/engine-core.md) | [runtime](../contracts/runtime.md) | `Engine/Source/Runtime/astra-runtime` implemented, `Engine/Source/Runtime/astra-engine` Rust dylib facade implemented；Runtime v3 包含 inverse journal/overlay、增量 root、compiled dispatch 和 conflict-DAG executor | shared `astra-package` save container；RuntimeSnapshot 包含 StableId generator、typed component、完整 Event/Await/Delayed queue、mutation/effect trace；`RuntimeReplayTranscript` 包含 input/await/provider output/checkpoint | `cargo test -p astra-runtime` 覆盖 tick/action/access/1-8 worker/save/replay/event ordinal，`cargo test --workspace` 与 clean Release 72,000 帧产品性能运行通过 | runtime determinism, run-to-quiescence flat StateMachine transaction, Await replay policy, save/load continuation, provider-free replay, bounded candidate work, structured logs, Rust dylib facade | [operator](../manual/operator-guide.md) |

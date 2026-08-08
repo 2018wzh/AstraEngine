@@ -348,10 +348,7 @@ struct AudioState {
 }
 
 struct HeadlessAudioLane {
-    sample_rate: u32,
-    channels: u16,
     chunk_samples: usize,
-    started: Instant,
     submitted_samples: u64,
     consumed_samples: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
@@ -396,21 +393,6 @@ impl AudioOutputLane for HeadlessAudioLane {
             .submitted_samples
             .checked_add(samples.len() as u64)
             .ok_or_else(|| invalid("audio.lane.submit", "sample count overflowed"))?;
-        let next_frames = next_samples / u64::from(self.channels);
-        let deadline_ns = u128::from(next_frames)
-            .checked_mul(1_000_000_000)
-            .ok_or_else(|| invalid("audio.lane.submit", "audio deadline overflowed"))?
-            / u128::from(self.sample_rate);
-        let deadline = self
-            .started
-            .checked_add(Duration::from_nanos(u64::try_from(deadline_ns).map_err(
-                |_| invalid("audio.lane.submit", "audio deadline overflowed"),
-            )?))
-            .ok_or_else(|| invalid("audio.lane.submit", "audio deadline overflowed"))?;
-        let now = Instant::now();
-        if deadline > now {
-            std::thread::sleep(deadline.duration_since(now));
-        }
         {
             let mut stream = self
                 .artifact_stream
@@ -1078,10 +1060,11 @@ impl HostState {
                     ))
                 } else {
                     (|| {
-                        let artifact_stream = if matches!(
-                            self.profile.artifacts.retention,
-                            astra_platform::HeadlessArtifactRetention::ManifestOnly
-                        ) {
+                        let artifact_stream = if !request.capture_samples
+                            || matches!(
+                                self.profile.artifacts.retention,
+                                astra_platform::HeadlessArtifactRetention::ManifestOnly
+                            ) {
                             None
                         } else {
                             Some(
@@ -1119,10 +1102,7 @@ impl HostState {
                             },
                             capture: capture.clone(),
                             lane: Box::new(HeadlessAudioLane {
-                                sample_rate: request.sample_rate,
-                                channels: request.channels,
                                 chunk_samples,
-                                started: Instant::now(),
                                 submitted_samples: 0,
                                 consumed_samples,
                                 paused,

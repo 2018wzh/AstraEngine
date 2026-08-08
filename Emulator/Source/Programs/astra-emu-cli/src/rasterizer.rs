@@ -2,12 +2,12 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use astra_emu_family_api::{
     LegacyBlendMode, LegacyDrawV1, LegacyRenderFrameV1, LegacySceneResourceStateV1,
-    LegacyTextureFormat, LegacyVertexV1,
+    LegacyTextureFilter, LegacyTextureFormat, LegacyVertexV1,
 };
 use astra_media_core::OwnedPixelBuffer;
 use astra_plugin_abi::{
-    RuntimeLiveBlendMode, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
-    RuntimeLiveTextureFormat,
+    RuntimeLiveBlendMode, RuntimeLiveSceneCompositing, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveSceneTransaction, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat,
 };
 use rayon::prelude::*;
 
@@ -25,6 +25,25 @@ pub struct CpuStageRasterizer {
     width: u32,
     height: u32,
     rgba8: Vec<u8>,
+    compositing: RuntimeLiveSceneCompositing,
+}
+
+pub enum PreparedRenderFrame {
+    Legacy(LegacyRenderFrameV1),
+    Live {
+        width: u32,
+        height: u32,
+        draws: Vec<astra_plugin_abi::RuntimeLiveDraw>,
+    },
+}
+
+impl PreparedRenderFrame {
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            Self::Legacy(frame) => (frame.width, frame.height),
+            Self::Live { width, height, .. } => (*width, *height),
+        }
+    }
 }
 
 impl CpuStageRasterizer {
@@ -35,7 +54,7 @@ impl CpuStageRasterizer {
     pub fn prepare_scene_live(
         &mut self,
         transaction: RuntimeLiveSceneTransaction,
-    ) -> Result<LegacyRenderFrameV1, String> {
+    ) -> Result<PreparedRenderFrame, String> {
         transaction.validate().map_err(|error| error.to_string())?;
         if transaction.reset_resources {
             self.textures.clear();
@@ -122,23 +141,18 @@ impl CpuStageRasterizer {
         }
         self.width = transaction.width;
         self.height = transaction.height;
-        let draws = transaction
-            .draws
-            .into_iter()
-            .map(live_draw)
-            .collect::<Result<Vec<_>, String>>()?;
-        Ok(LegacyRenderFrameV1 {
+        self.compositing = transaction.compositing;
+        Ok(PreparedRenderFrame::Live {
             width: transaction.width,
             height: transaction.height,
-            texture_updates: Vec::new(),
-            draws,
+            draws: transaction.draws,
         })
     }
 
     pub fn prepare(
         &mut self,
         mut frame: LegacyRenderFrameV1,
-    ) -> Result<LegacyRenderFrameV1, String> {
+    ) -> Result<PreparedRenderFrame, String> {
         frame.validate().map_err(|error| error.to_string())?;
         for update in std::mem::take(&mut frame.texture_updates) {
             self.insert_texture(
@@ -158,7 +172,7 @@ impl CpuStageRasterizer {
                     .iter()
                     .any(|draw| draw.texture_id == *texture_id)
         });
-        Ok(frame)
+        Ok(PreparedRenderFrame::Legacy(frame))
     }
 
     pub fn render(&mut self, frame: LegacyRenderFrameV1) -> Result<Vec<u8>, String> {
@@ -166,19 +180,34 @@ impl CpuStageRasterizer {
         self.render_prepared(&frame)
     }
 
-    pub fn render_prepared(&mut self, frame: &LegacyRenderFrameV1) -> Result<Vec<u8>, String> {
-        if !frame.texture_updates.is_empty()
-            || frame.width != self.width
-            || frame.height != self.height
-        {
+    pub fn render_prepared(&mut self, frame: &PreparedRenderFrame) -> Result<Vec<u8>, String> {
+        let (width, height) = match frame {
+            PreparedRenderFrame::Legacy(frame) => {
+                if !frame.texture_updates.is_empty() {
+                    return Err("ASTRA_EMU_HEADLESS_FRAME_NOT_PREPARED".into());
+                }
+                (frame.width, frame.height)
+            }
+            PreparedRenderFrame::Live { width, height, .. } => (*width, *height),
+        };
+        if width != self.width || height != self.height {
             return Err("ASTRA_EMU_HEADLESS_FRAME_NOT_PREPARED".into());
         }
-        self.rgba8 = vec![0; checked_len(frame.width, frame.height, 4)?];
+        self.rgba8 = vec![0; checked_len(width, height, 4)?];
         for alpha in self.rgba8[3..].iter_mut().step_by(4) {
             *alpha = 255;
         }
-        for draw in &frame.draws {
-            self.draw(draw)?;
+        match frame {
+            PreparedRenderFrame::Legacy(frame) => {
+                for draw in &frame.draws {
+                    self.draw(draw)?;
+                }
+            }
+            PreparedRenderFrame::Live { draws, .. } => {
+                for draw in draws {
+                    self.draw_runtime(draw)?;
+                }
+            }
         }
         Ok(std::mem::take(&mut self.rgba8))
     }
@@ -261,6 +290,7 @@ impl CpuStageRasterizer {
             self.draw_triangle(
                 texture.as_ref(),
                 draw.blend,
+                draw.texture_filter,
                 [
                     draw.vertices[triangle[0]],
                     draw.vertices[triangle[1]],
@@ -272,10 +302,16 @@ impl CpuStageRasterizer {
         Ok(())
     }
 
+    fn draw_runtime(&mut self, draw: &astra_plugin_abi::RuntimeLiveDraw) -> Result<(), String> {
+        let draw = live_draw(draw)?;
+        self.draw(&draw)
+    }
+
     fn draw_triangle(
         &mut self,
         texture: &Texture,
         blend: LegacyBlendMode,
+        texture_filter: LegacyTextureFilter,
         vertices: [LegacyVertexV1; 3],
         clip: (i32, i32, i32, i32),
     ) -> Result<(), String> {
@@ -336,6 +372,7 @@ impl CpuStageRasterizer {
             .ok()
             .and_then(|width| width.checked_mul(4))
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_FRAME_BOUNDS".to_owned())?;
+        let compositing = self.compositing;
         self.rgba8
             .par_chunks_mut(row_bytes)
             .enumerate()
@@ -354,22 +391,56 @@ impl CpuStageRasterizer {
                     }
                     let uv = interpolate2(&vertices, weights, |vertex| vertex.tex_coord);
                     let color = interpolate4(&vertices, weights, |vertex| vertex.color);
-                    let mut source = sample_linear(texture, uv);
+                    let mut source = match (compositing, texture_filter) {
+                        (RuntimeLiveSceneCompositing::LinearSrgb, LegacyTextureFilter::Nearest) => {
+                            sample_nearest(texture, uv)
+                        }
+                        (RuntimeLiveSceneCompositing::LinearSrgb, LegacyTextureFilter::Linear) => {
+                            sample_linear(texture, uv)
+                        }
+                        (
+                            RuntimeLiveSceneCompositing::EncodedSrgb,
+                            LegacyTextureFilter::Nearest,
+                        ) => sample_nearest_encoded(texture, uv),
+                        (RuntimeLiveSceneCompositing::EncodedSrgb, LegacyTextureFilter::Linear) => {
+                            sample_linear_encoded(texture, uv)
+                        }
+                    };
                     for channel in 0..4 {
                         source[channel] *= color[channel];
                     }
                     let index = x * 4;
-                    let destination = [
-                        f32::from(row[index]) / 255.0,
-                        f32::from(row[index + 1]) / 255.0,
-                        f32::from(row[index + 2]) / 255.0,
-                        f32::from(row[index + 3]) / 255.0,
-                    ];
+                    let destination = match compositing {
+                        RuntimeLiveSceneCompositing::LinearSrgb => [
+                            srgb_byte_to_linear(row[index]),
+                            srgb_byte_to_linear(row[index + 1]),
+                            srgb_byte_to_linear(row[index + 2]),
+                            f32::from(row[index + 3]) / 255.0,
+                        ],
+                        RuntimeLiveSceneCompositing::EncodedSrgb => [
+                            f32::from(row[index]) / 255.0,
+                            f32::from(row[index + 1]) / 255.0,
+                            f32::from(row[index + 2]) / 255.0,
+                            f32::from(row[index + 3]) / 255.0,
+                        ],
+                    };
                     let output = blend_pixel(source, destination, blend);
+                    let rgb = match compositing {
+                        RuntimeLiveSceneCompositing::LinearSrgb => [
+                            linear_to_srgb_byte(output[0]),
+                            linear_to_srgb_byte(output[1]),
+                            linear_to_srgb_byte(output[2]),
+                        ],
+                        RuntimeLiveSceneCompositing::EncodedSrgb => [
+                            encode_unorm(output[0]),
+                            encode_unorm(output[1]),
+                            encode_unorm(output[2]),
+                        ],
+                    };
                     row[index..index + 4].copy_from_slice(&[
-                        encode_unorm(output[0]),
-                        encode_unorm(output[1]),
-                        encode_unorm(output[2]),
+                        rgb[0],
+                        rgb[1],
+                        rgb[2],
                         encode_unorm(output[3]),
                     ]);
                 }
@@ -429,7 +500,7 @@ fn rgba8_pixels_owned(
     })
 }
 
-fn live_draw(draw: astra_plugin_abi::RuntimeLiveDraw) -> Result<LegacyDrawV1, String> {
+fn live_draw(draw: &astra_plugin_abi::RuntimeLiveDraw) -> Result<LegacyDrawV1, String> {
     let vertices = draw
         .vertices
         .map(|vertex| astra_emu_family_api::LegacyVertexV1 {
@@ -461,6 +532,10 @@ fn live_draw(draw: astra_plugin_abi::RuntimeLiveDraw) -> Result<LegacyDrawV1, St
             RuntimeLiveBlendMode::Opaque => LegacyBlendMode::Opaque,
             RuntimeLiveBlendMode::Multiply => LegacyBlendMode::Multiply,
             RuntimeLiveBlendMode::Screen => LegacyBlendMode::Screen,
+        },
+        texture_filter: match draw.texture_filter {
+            RuntimeLiveTextureFilter::Nearest => LegacyTextureFilter::Nearest,
+            RuntimeLiveTextureFilter::Linear => LegacyTextureFilter::Linear,
         },
         scissor,
     })
@@ -538,12 +613,56 @@ fn sample_linear(texture: &Texture, uv: [f32; 2]) -> [f32; 4] {
     })
 }
 
-fn texel(texture: &Texture, x: u32, y: u32) -> [f32; 4] {
+fn sample_nearest(texture: &Texture, uv: [f32; 2]) -> [f32; 4] {
+    let x = (uv[0].clamp(0.0, 1.0) * texture.width.saturating_sub(1) as f32).round() as u32;
+    let y = (uv[1].clamp(0.0, 1.0) * texture.height.saturating_sub(1) as f32).round() as u32;
+    texel(texture, x, y)
+}
+
+fn sample_linear_encoded(texture: &Texture, uv: [f32; 2]) -> [f32; 4] {
+    let x = uv[0].clamp(0.0, 1.0) * texture.width.saturating_sub(1) as f32;
+    let y = uv[1].clamp(0.0, 1.0) * texture.height.saturating_sub(1) as f32;
+    let x0 = x.floor() as u32;
+    let y0 = y.floor() as u32;
+    let x1 = (x0 + 1).min(texture.width - 1);
+    let y1 = (y0 + 1).min(texture.height - 1);
+    let tx = x - x0 as f32;
+    let ty = y - y0 as f32;
+    let values = [
+        texel_encoded(texture, x0, y0),
+        texel_encoded(texture, x1, y0),
+        texel_encoded(texture, x0, y1),
+        texel_encoded(texture, x1, y1),
+    ];
+    [0, 1, 2, 3].map(|channel| {
+        let top = values[0][channel] + (values[1][channel] - values[0][channel]) * tx;
+        let bottom = values[2][channel] + (values[3][channel] - values[2][channel]) * tx;
+        top + (bottom - top) * ty
+    })
+}
+
+fn sample_nearest_encoded(texture: &Texture, uv: [f32; 2]) -> [f32; 4] {
+    let x = (uv[0].clamp(0.0, 1.0) * texture.width.saturating_sub(1) as f32).round() as u32;
+    let y = (uv[1].clamp(0.0, 1.0) * texture.height.saturating_sub(1) as f32).round() as u32;
+    texel_encoded(texture, x, y)
+}
+
+fn texel_encoded(texture: &Texture, x: u32, y: u32) -> [f32; 4] {
     let offset = ((y as usize * texture.width as usize) + x as usize) * 4;
     [
         f32::from(texture.rgba8[offset]) / 255.0,
         f32::from(texture.rgba8[offset + 1]) / 255.0,
         f32::from(texture.rgba8[offset + 2]) / 255.0,
+        f32::from(texture.rgba8[offset + 3]) / 255.0,
+    ]
+}
+
+fn texel(texture: &Texture, x: u32, y: u32) -> [f32; 4] {
+    let offset = ((y as usize * texture.width as usize) + x as usize) * 4;
+    [
+        srgb_byte_to_linear(texture.rgba8[offset]),
+        srgb_byte_to_linear(texture.rgba8[offset + 1]),
+        srgb_byte_to_linear(texture.rgba8[offset + 2]),
         f32::from(texture.rgba8[offset + 3]) / 255.0,
     ]
 }
@@ -579,11 +698,62 @@ fn encode_unorm(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+fn srgb_byte_to_linear(value: u8) -> f32 {
+    let encoded = f32::from(value) / 255.0;
+    if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb_byte(value: f32) -> u8 {
+    let linear = value.clamp(0.0, 1.0);
+    let encoded = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round() as u8
+}
+
 #[cfg(test)]
 mod tests {
     use astra_emu_family_api::{LegacyTextureUpdateV1, LegacyVertexV1};
+    use astra_plugin_abi::RuntimeLiveSceneResourceOperation;
 
     use super::*;
+
+    #[test]
+    fn live_rgba8_capture_allocation_is_retained_without_rebuild() {
+        let pixels = vec![12, 34, 56, 255];
+        let capture_ptr = pixels.as_ptr();
+        let transaction = RuntimeLiveSceneTransaction {
+            sequence: 1,
+            width: 1,
+            height: 1,
+            compositing: RuntimeLiveSceneCompositing::EncodedSrgb,
+            resources: vec![RuntimeLiveSceneResourceOperation::CreateTexture {
+                texture_id: 7,
+                generation: 1,
+                width: 1,
+                height: 1,
+                format: RuntimeLiveTextureFormat::Rgba8,
+                pixels: pixels.into(),
+            }],
+            draws: Vec::new(),
+            reset_resources: false,
+        };
+        let mut rasterizer = CpuStageRasterizer::default();
+
+        let prepared = rasterizer.prepare_scene_live(transaction).unwrap();
+
+        assert!(matches!(prepared, PreparedRenderFrame::Live { .. }));
+        assert_eq!(
+            rasterizer.textures.get(&7).unwrap().rgba8.allocation_ptr(),
+            capture_ptr
+        );
+    }
 
     #[test]
     fn renders_textured_quad_and_preserves_texture_across_frames() {
@@ -597,6 +767,7 @@ mod tests {
                 vertex(2.0, 2.0, 1.0, 1.0),
             ],
             blend: LegacyBlendMode::Alpha,
+            texture_filter: LegacyTextureFilter::Linear,
             scissor: None,
         };
         let mut rasterizer = CpuStageRasterizer::default();
@@ -638,6 +809,7 @@ mod tests {
                 vertex(1.0, 1.0, 1.0, 1.0),
             ],
             blend: LegacyBlendMode::Alpha,
+            texture_filter: LegacyTextureFilter::Linear,
             scissor: None,
         };
         let mut rasterizer = CpuStageRasterizer::default();
@@ -693,16 +865,17 @@ mod tests {
     }
 
     #[test]
-    fn blends_rfvp_texture_channels_as_unorm_values() {
+    fn linear_compositing_decodes_srgb_texture_channels_before_blending() {
         let texture = Texture {
             width: 1,
             height: 1,
             rgba8: vec![128, 64, 32, 255].into(),
         };
-        assert_eq!(
-            texel(&texture, 0, 0),
-            [128.0 / 255.0, 64.0 / 255.0, 32.0 / 255.0, 1.0]
-        );
+        let sampled = texel(&texture, 0, 0);
+        assert!((sampled[0] - srgb_byte_to_linear(128)).abs() < 1.0e-6);
+        assert!((sampled[1] - srgb_byte_to_linear(64)).abs() < 1.0e-6);
+        assert!((sampled[2] - srgb_byte_to_linear(32)).abs() < 1.0e-6);
+        assert_eq!(sampled[3], 1.0);
         let result = blend_pixel(
             [0.0, 0.0, 0.0, 0.5],
             [1.0, 1.0, 1.0, 1.0],
@@ -710,6 +883,84 @@ mod tests {
         );
         assert_eq!(result, [0.5, 0.5, 0.5, 1.0]);
         assert_eq!(encode_unorm(result[0]), 128);
+    }
+
+    #[test]
+    fn encoded_srgb_compositing_matches_rfvp_byte_domain_alpha() {
+        let mut rasterizer = CpuStageRasterizer {
+            compositing: RuntimeLiveSceneCompositing::EncodedSrgb,
+            ..Default::default()
+        };
+        let white = LegacyDrawV1 {
+            texture_id: 1,
+            vertices: [
+                vertex(0.0, 0.0, 0.0, 0.0),
+                vertex(2.0, 0.0, 1.0, 0.0),
+                vertex(0.0, 1.0, 0.0, 1.0),
+                vertex(2.0, 1.0, 1.0, 1.0),
+            ],
+            blend: LegacyBlendMode::Opaque,
+            texture_filter: LegacyTextureFilter::Nearest,
+            scissor: None,
+        };
+        let mut black_overlay = white.clone();
+        black_overlay.texture_id = 2;
+        black_overlay.blend = LegacyBlendMode::Alpha;
+        for vertex in &mut black_overlay.vertices {
+            vertex.color[3] = 128.0 / 255.0;
+        }
+        let output = rasterizer
+            .render(LegacyRenderFrameV1 {
+                width: 2,
+                height: 1,
+                texture_updates: vec![
+                    LegacyTextureUpdateV1 {
+                        texture_id: 1,
+                        width: 1,
+                        height: 1,
+                        format: LegacyTextureFormat::Rgba8,
+                        pixels: vec![255, 255, 255, 255],
+                    },
+                    LegacyTextureUpdateV1 {
+                        texture_id: 2,
+                        width: 1,
+                        height: 1,
+                        format: LegacyTextureFormat::Rgba8,
+                        pixels: vec![0, 0, 0, 255],
+                    },
+                ],
+                draws: vec![white, black_overlay],
+            })
+            .expect("encoded-sRGB scene renders");
+
+        assert_eq!(output, vec![127, 127, 127, 255, 127, 127, 127, 255]);
+    }
+
+    #[test]
+    fn alpha_blend_uses_straight_alpha_source_semantics() {
+        let result = blend_pixel(
+            [100.0 / 255.0, 50.0 / 255.0, 25.0 / 255.0, 128.0 / 255.0],
+            [1.0, 1.0, 1.0, 1.0],
+            LegacyBlendMode::Alpha,
+        );
+
+        assert_eq!(result.map(encode_unorm), [177, 152, 140, 255]);
+    }
+
+    #[test]
+    fn texture_filter_selects_nearest_or_linear_sampling() {
+        let texture = Texture {
+            width: 2,
+            height: 1,
+            rgba8: vec![0, 0, 0, 255, 200, 100, 50, 255].into(),
+        };
+
+        assert_eq!(sample_nearest(&texture, [0.49, 0.0]), [0.0, 0.0, 0.0, 1.0]);
+        let linear = sample_linear(&texture, [0.5, 0.0]);
+        assert!((linear[0] - srgb_byte_to_linear(200) * 0.5).abs() < 1.0e-6);
+        assert!((linear[1] - srgb_byte_to_linear(100) * 0.5).abs() < 1.0e-6);
+        assert!((linear[2] - srgb_byte_to_linear(50) * 0.5).abs() < 1.0e-6);
+        assert_eq!(linear[3], 1.0);
     }
 
     fn vertex(x: f32, y: f32, u: f32, v: f32) -> LegacyVertexV1 {
