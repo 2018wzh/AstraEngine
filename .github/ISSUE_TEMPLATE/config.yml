@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: AstraEMU discord / discussion
+    url: https://github.com/AstraEngine/AstraEngine/discussions
+    about: Questions and gameplay discussion that are not a version-precise compatibility report go here.

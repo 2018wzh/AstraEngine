@@ -1,0 +1,99 @@
+name: VNDB Game Compatibility Report
+description: Report how a specific version of a visual novel runs in an AstraEMU family (engine). VNDB is the single authoritative identity source — use the VNDB vID for the game and the VNDB rID for the exact release/version you tested.
+title: "[compat] <vID> / <rID> · <status>"
+labels: ["compatibility", "community-db"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for contributing to the AstraEMU community compatibility database. This report is precise to a **specific game version**.
+
+        - **vID** (VNDB visual novel id) names the **game**. Example: `v17`
+        - **rID** (VNDB release id) names the **version** you actually ran. Example: `r12345`
+        - Confirm the vID/rID on [VNDB](https://vndb.org/) before filing. Corrupt or guessed ids are rejected by the generator.
+
+  - type: input
+    id: vid
+    attributes:
+      label: VNDB vID (visual novel id)
+      description: The game identity, e.g. `v17`. Must match `v<decimal>`.
+      placeholder: "v17"
+    validations:
+      required: true
+
+  - type: input
+    id: rid
+    attributes:
+      label: VNDB rID (release id)
+      description: The exact version identity you tested, e.g. `r12345`. Must match `r<decimal>`.
+      placeholder: "r12345"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Compatibility status
+      description: The overall grade for this release on this engine.
+      options:
+        - perfect
+        - completable
+        - flawed
+        - boot_only
+        - unplayable
+    validations:
+      required: true
+
+  - type: dropdown
+    id: family
+    attributes:
+      label: Engine (family)
+      description: Which engine you ran the game under.
+      options:
+        - fvp
+        - krkr
+        - artemis
+        - bgi
+        - siglus
+        - softpal
+        - minori
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Host platform
+      options:
+        - windows
+        - linux
+        - macos
+    validations:
+      required: true
+
+  - type: input
+    id: astra_version
+    attributes:
+      label: AstraEMU version
+      description: The Manager/engine version string (shown on the About page). Keep it short and symbol-safe.
+      placeholder: "0.1.0"
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional, plain text, ≤ 1024 characters. Describe what works and what breaks on THIS release. No secrets, local paths, or commercial payloads.
+      placeholder: >
+        Boots to title, audio ok, but chapter 2 video is garbled.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        > After review, a maintainer runs the validator/generator which merges this report into the canonical `compatibility.json`
+        > (`astra.emu.compatibility.v2`). The AstraEMU Manager fetches that file and shows this grade for **vID / rID**.
+        > Bangumi is used only for your own progress tracking and is not part of this database.
