@@ -14,7 +14,13 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// JSON Schema identifier for the central compatibility document.
-pub const COMPATIBILITY_SCHEMA_VERSION: &str = "astra.emu.compatibility.v1";
+///
+/// v2 makes VNDB the single authoritative source for game and version
+/// identity: each entry is keyed by the VN id (`vID`, the game name identity)
+/// and a release id (`rID`, the specific version identity). Compatibility is
+/// therefore precise to a particular version of a game. Bangumi is not part of
+/// the compatibility store — it is used only for progress tracking.
+pub const COMPATIBILITY_SCHEMA_VERSION: &str = "astra.emu.compatibility.v2";
 
 /// Default community-hosted source. Configurable; the data repository is
 /// created and maintained separately.
@@ -52,26 +58,45 @@ impl CompatibilityStatus {
     }
 }
 
-/// A single compatibility record keyed by metadata provider identity.
+/// Max length of a VNDB release id (`rID`).
+const MAX_RELEASE_ID_CHARS: usize = 64;
+
+/// A single VNDB compatibility record. The VN id (`remote_id` = vID) names the
+/// game; the release id (`release_id` = rID) names the specific version the
+/// report applies to, making compatibility version-precise.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CompatibilityEntry {
-    /// "bangumi" | "vndb".
-    pub provider: String,
-    /// Bangumi subject id (e.g. "12345") or VNDB id (e.g. "v17").
-    pub remote_id: String,
+    /// VNDB VN id / vID (e.g. "v17") — the game-name identity.
+    pub vn_id: String,
+    /// VNDB release id / rID (e.g. "r12345") — the version identity.
+    pub release_id: String,
     pub status: CompatibilityStatus,
     pub notes: Option<String>,
     pub updated_at_unix_ms: i64,
     pub reporter: Option<String>,
 }
 
+fn is_vndb_id(value: &str) -> bool {
+    value.strip_prefix('v').is_some_and(|digits| {
+        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
+fn is_vndb_release_id(value: &str) -> bool {
+    value.strip_prefix('r').is_some_and(|digits| {
+        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
 impl CompatibilityEntry {
     pub fn validate(&self) -> Result<(), CompatibilityError> {
-        if !matches!(self.provider.as_str(), "bangumi" | "vndb") {
-            return Err(CompatibilityError::SchemaMismatch("provider"));
+        if !is_vndb_id(&self.vn_id) || self.vn_id.chars().count() > 64 {
+            return Err(CompatibilityError::SchemaMismatch("vn_id"));
         }
-        if self.remote_id.trim().is_empty() || self.remote_id.chars().count() > 64 {
-            return Err(CompatibilityError::SchemaMismatch("remote_id"));
+        if !is_vndb_release_id(&self.release_id)
+            || self.release_id.chars().count() > MAX_RELEASE_ID_CHARS
+        {
+            return Err(CompatibilityError::SchemaMismatch("release_id"));
         }
         if self
             .notes
@@ -259,17 +284,17 @@ mod tests {
             generated_at_unix_ms: 1_700_000_000_000,
             entries: vec![
                 CompatibilityEntry {
-                    provider: "vndb".into(),
-                    remote_id: "v17".into(),
+                    vn_id: "v17".into(),
+                    release_id: "r123".into(),
                     status: CompatibilityStatus::Perfect,
                     notes: Some("Runs flawlessly.".into()),
                     updated_at_unix_ms: 1_700_000_000_000,
                     reporter: Some("tester".into()),
                 },
                 CompatibilityEntry {
-                    provider: "bangumi".into(),
-                    remote_id: "12345".into(),
-                    status: CompatibilityStatus::BootOnly,
+                    vn_id: "v17".into(),
+                    release_id: "r456".into(),
+                    status: CompatibilityStatus::Flawed,
                     notes: None,
                     updated_at_unix_ms: 1_700_000_000_001,
                     reporter: None,
@@ -329,18 +354,37 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_unknown_provider_and_malformed_json() {
+    fn parse_rejects_invalid_vid_and_malformed_json() {
         let mut database = sample_database();
-        database.entries[0].provider = "igdb".into();
+        database.entries[0].vn_id = "1234".into();
         let bytes = serde_json::to_vec(&database).unwrap();
         assert!(matches!(
             parse_compatibility_response(&bytes, None),
-            Err(CompatibilityError::SchemaMismatch("provider"))
+            Err(CompatibilityError::SchemaMismatch("vn_id"))
         ));
         assert!(matches!(
             parse_compatibility_response(b"{not-json", None),
             Err(CompatibilityError::SchemaMismatch("json"))
         ));
+    }
+
+    #[test]
+    fn v2_requires_vndb_rid_version_precision() {
+        // A compatibility record must be precise to a release (non-empty rID).
+        let mut missing_release = sample_database();
+        missing_release.entries[0].release_id = String::new();
+        assert!(matches!(
+            missing_release.validate().unwrap_err(),
+            CompatibilityError::SchemaMismatch("release_id")
+        ));
+        let mut bad_release = sample_database();
+        bad_release.entries[0].release_id = "v17".into();
+        assert!(matches!(
+            bad_release.validate().unwrap_err(),
+            CompatibilityError::SchemaMismatch("release_id")
+        ));
+        // The same game (vID) may carry different status per release (rID).
+        sample_database().validate().unwrap();
     }
 
     #[test]

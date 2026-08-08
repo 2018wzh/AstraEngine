@@ -418,6 +418,11 @@ impl Library {
                  );",
             )?;
             tx.pragma_update(None, "user_version", 9)?;
+            version = 9;
+        }
+        if version == 9 {
+            crate::identity::migrate_v10(&tx)?;
+            tx.pragma_update(None, "user_version", 10)?;
         }
         tx.commit()?;
         Ok(())
@@ -1413,19 +1418,20 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         let table_count: i64 = library
             .connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
                  AND name IN ('cover_cache', 'source_diagnostic', 'case_runtime_profile',
                     'translation_profile', 'play_session', 'compatibility_entry_cache',
-                    'compatibility_sync_state', 'input_settings', 'work_settings')",
+                    'compatibility_sync_state', 'input_settings', 'work_settings',
+                    'vn_release', 'case_release')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(table_count, 9);
+        assert_eq!(table_count, 11);
     }
 
     #[test]

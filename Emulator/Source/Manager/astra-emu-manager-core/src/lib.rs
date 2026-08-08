@@ -14,7 +14,7 @@ mod scanner;
 mod work_settings;
 
 pub use compatibility_cache::{
-    CompatibilityCacheEntry, CompatibilityMatch, CompatibilitySyncState,
+    CompatibilityCacheEntry, CompatibilityMatch, CompatibilitySyncState, VnReleaseRecord,
 };
 pub use desktop_source::{
     DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary, VfsResourceInfo,

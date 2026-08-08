@@ -169,7 +169,12 @@ pub struct ManagerViewModel {
     pub selected_compatibility_status: String,
     pub selected_compatibility_notes: String,
     pub selected_compatibility_updated: String,
-    pub selected_compatibility_provider: String,
+    /// VNDB game/version identity: `vID / rID` (VNDB is the authoritative
+    /// source for compatibility).
+    pub selected_compatibility_vndb_id: String,
+    /// Selectable VNDB releases (rID + human label) used to pin the local
+    /// installation to a specific game version. `(release_id, label)`.
+    pub selected_releases: Vec<(String, String)>,
     /// Navigation. Empty `current_page` means "do not change the current page".
     pub current_page: String,
     /// VFS browser state.
@@ -193,6 +198,7 @@ pub struct SlintManagerAdapter {
     reviews: Rc<VecModel<MatchReview>>,
     vfs_entries: Rc<VecModel<VfsEntry>>,
     play_history: Rc<VecModel<PlaySession>>,
+    releases: Rc<VecModel<ReleaseOption>>,
     gamepad_bindings: Rc<VecModel<GamepadBinding>>,
 }
 
@@ -203,11 +209,13 @@ impl SlintManagerAdapter {
         let reviews = Rc::new(VecModel::default());
         let vfs_entries = Rc::new(VecModel::default());
         let play_history = Rc::new(VecModel::default());
+        let releases = Rc::new(VecModel::default());
         let gamepad_bindings = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
         window.set_match_reviews(ModelRc::from(reviews.clone()));
         window.set_vfs_entries(ModelRc::from(vfs_entries.clone()));
         window.set_play_history(ModelRc::from(play_history.clone()));
+        window.set_releases(ModelRc::from(releases.clone()));
         window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
         Ok(Self {
             window,
@@ -215,6 +223,7 @@ impl SlintManagerAdapter {
             reviews,
             vfs_entries,
             play_history,
+            releases,
             gamepad_bindings,
         })
     }
@@ -308,13 +317,21 @@ impl SlintManagerAdapter {
             .set_compatibility_sync_summary(model.compatibility_sync_summary.as_str().into());
         self.window
             .set_selected_compatibility_status(model.selected_compatibility_status.as_str().into());
-        self.window
-            .set_selected_compatibility_notes(model.selected_compatibility_notes.as_str().into());
         self.window.set_selected_compatibility_updated(
             model.selected_compatibility_updated.as_str().into(),
         );
-        self.window.set_selected_compatibility_provider(
-            model.selected_compatibility_provider.as_str().into(),
+        self.window.set_selected_compatibility_vndb_id(
+            model.selected_compatibility_vndb_id.as_str().into(),
+        );
+        self.releases.set_vec(
+            model
+                .selected_releases
+                .iter()
+                .map(|(release_id, label)| ReleaseOption {
+                    release_id: release_id.as_str().into(),
+                    label: label.as_str().into(),
+                })
+                .collect::<Vec<_>>(),
         );
         self.play_history.set_vec(
             model

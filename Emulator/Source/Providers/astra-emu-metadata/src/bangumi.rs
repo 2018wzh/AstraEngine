@@ -10,7 +10,8 @@ use bangumi_api::{
 
 use crate::{
     BangumiPlayStatus, BangumiPlayUpdate, CoverAsset, CoverFetcher, CoverPolicy, MetadataError,
-    MetadataProvider, MetadataProviderId, MetadataRecord, MetadataSearchQuery, RemoteCover,
+    MetadataProvider, MetadataProviderId, MetadataRecord, MetadataRelease, MetadataSearchQuery,
+    RemoteCover,
 };
 
 const BANGUMI_BASE_URL: &str = "https://api.bgm.tv";
@@ -159,6 +160,15 @@ impl MetadataProvider for BangumiProvider {
             return Err(MetadataError::InvalidRequest("provider"));
         }
         self.cover_fetcher.fetch(record, allow_sensitive).await
+    }
+
+    /// Bangumi is used only for progress tracking and is not authoritative for
+    /// releases or compatibility. Releases therefore stay empty here.
+    async fn fetch_releases(
+        &self,
+        _remote_id: &str,
+    ) -> Result<Vec<MetadataRelease>, MetadataError> {
+        Ok(Vec::new())
     }
 }
 

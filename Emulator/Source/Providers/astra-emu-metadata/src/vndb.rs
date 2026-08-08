@@ -4,7 +4,8 @@ use vn::Vndb;
 
 use crate::{
     CoverAsset, CoverFetcher, CoverPolicy, MetadataError, MetadataLicenseManifest,
-    MetadataProvider, MetadataProviderId, MetadataRecord, MetadataSearchQuery, RemoteCover,
+    MetadataProvider, MetadataProviderId, MetadataRecord, MetadataRelease, MetadataSearchQuery,
+    RemoteCover,
 };
 
 const ASTRA_EMU_USER_AGENT: &str =
@@ -90,6 +91,44 @@ impl VndbProvider {
             .map_err(map_vndb_error)?;
         Ok(response.results.into_iter().map(convert_record).collect())
     }
+
+    /// Query the concrete releases (rIDs) of a VN, newest first, so the local
+    /// installation can be pinned to a specific version.
+    async fn query_releases(
+        &self,
+        vn_id: &vn::VisualNovelId,
+    ) -> Result<Vec<MetadataRelease>, MetadataError> {
+        let response = self
+            .client
+            .post()
+            .release()
+            .filters(vn::http::JsonQueryFilter::new(serde_json::json!([
+                "vns",
+                "=",
+                ["id", "=", vn_id.to_string()]
+            ])))
+            .raw_fields([
+                "id".to_owned(),
+                "title".to_owned(),
+                "alttitle".to_owned(),
+                "released".to_owned(),
+                "platforms".to_owned(),
+            ])
+            .sort(vn::model::release::SortReleaseBy::Released)
+            .reverse()
+            .results(100)
+            .send()
+            .await
+            .map_err(map_vndb_error)?;
+        let mut releases = response
+            .results
+            .into_iter()
+            .map(convert_release)
+            .collect::<Vec<_>>();
+        releases
+            .sort_by_key(|release| std::cmp::Reverse(release.released.clone().unwrap_or_default()));
+        Ok(releases)
+    }
 }
 
 impl MetadataProvider for VndbProvider {
@@ -136,12 +175,31 @@ impl MetadataProvider for VndbProvider {
         }
         self.cover_fetcher.fetch(record, allow_sensitive).await
     }
+
+    async fn fetch_releases(&self, remote_id: &str) -> Result<Vec<MetadataRelease>, MetadataError> {
+        self.authorize()?;
+        if !is_vndb_id(remote_id) {
+            return Err(MetadataError::InvalidRemoteId(remote_id.to_owned()));
+        }
+        let id = vn::VisualNovelId::new(remote_id)
+            .ok_or_else(|| MetadataError::InvalidRemoteId(remote_id.to_owned()))?;
+        self.query_releases(&id).await
+    }
 }
 
 fn is_vndb_id(value: &str) -> bool {
     value.strip_prefix('v').is_some_and(|digits| {
         !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
     })
+}
+
+fn convert_release(value: vn::model::release::Release) -> MetadataRelease {
+    MetadataRelease {
+        release_id: value.id.to_string(),
+        title: value.title.or(value.alttitle),
+        released: value.released,
+        platforms: value.platforms.unwrap_or_default(),
+    }
 }
 
 fn convert_record(value: vn::VisualNovel) -> MetadataRecord {

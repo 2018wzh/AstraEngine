@@ -78,6 +78,21 @@ pub struct CoverAsset {
     pub height: u32,
 }
 
+/// A concrete release / version of a visual novel, keyed by VNDB release id
+/// (`rID`). Used to disambiguate a local installation down to a specific
+/// game version so compatibility can be reported per-version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MetadataRelease {
+    /// VNDB release id (`rID`, e.g. "r123").
+    pub release_id: String,
+    /// Release title, if any (often identical to the VN title).
+    pub title: Option<String>,
+    /// Release date in ISO 8601 `YYYY-MM-DD` form, if known.
+    pub released: Option<String>,
+    /// Target platforms (e.g. "win", "linux").
+    pub platforms: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MatchEvidence {
     pub kind: String,

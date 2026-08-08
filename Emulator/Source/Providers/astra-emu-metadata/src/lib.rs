@@ -31,4 +31,10 @@ pub trait MetadataProvider: Send + Sync {
         record: &MetadataRecord,
         allow_sensitive: bool,
     ) -> Result<CoverAsset, MetadataError>;
+    /// Fetch the concrete releases (versions) of a visual novel, keyed by the
+    /// VNDB release id (`rID`). Used to pin a local installation to a specific
+    /// game version so compatibility can be reported per-version. Only the VNDB
+    /// provider returns releases; Bangumi is used solely for progress tracking
+    /// and returns an empty list.
+    async fn fetch_releases(&self, remote_id: &str) -> Result<Vec<MetadataRelease>, MetadataError>;
 }

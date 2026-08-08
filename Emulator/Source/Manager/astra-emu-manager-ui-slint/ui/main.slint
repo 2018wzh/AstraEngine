@@ -9,13 +9,13 @@ import { GameCard } from "./components/cover-card.slint";
 import { VfsEntry, VfsPreview } from "./components/file-tree.slint";
 import { MatchReview } from "./settings/metadata.slint";
 import { GamepadBinding } from "./settings/input.slint";
-import { LibraryPage, PlaySession } from "./pages/library.slint";
+import { LibraryPage, PlaySession, ReleaseOption } from "./pages/library.slint";
 import { AboutPage } from "./pages/about.slint";
 import { SettingsPage } from "./pages/settings.slint";
 import { VfsBrowserPage } from "./pages/vfs-browser.slint";
 import { GameViewPage } from "./pages/game-view.slint";
 
-export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession }
+export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession, ReleaseOption }
 
 export component ManagerWindow inherits Window {
     title: "AstraEMU Manager";
@@ -61,7 +61,10 @@ export component ManagerWindow inherits Window {
     in property <string> selected-compatibility-status;
     in property <string> selected-compatibility-notes;
     in property <string> selected-compatibility-updated;
-    in property <string> selected-compatibility-provider;
+    // VNDB game + version identity (`vID / rID`).
+    in property <string> selected-compatibility-vndb-id;
+    // VNDB releases (rIDs) pinned to a specific game version.
+    in property <[ReleaseOption]> releases;
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
@@ -162,6 +165,8 @@ export component ManagerWindow inherits Window {
     callback set-library-sort(string);
     callback refresh-compatibility();
     callback set-compatibility-filter(string);
+    callback fetch-releases();
+    callback pin-release(string);
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
     callback set-translation-cache(bool);
@@ -274,7 +279,8 @@ export component ManagerWindow inherits Window {
                     selected-compatibility-status: root.selected-compatibility-status;
                     selected-compatibility-notes: root.selected-compatibility-notes;
                     selected-compatibility-updated: root.selected-compatibility-updated;
-                    selected-compatibility-provider: root.selected-compatibility-provider;
+                    selected-compatibility-vndb-id: root.selected-compatibility-vndb-id;
+                    releases: root.releases;
                     bangumi-play-status <=> root.bangumi-play-status;
                     bangumi-rating <=> root.bangumi-rating;
                     bangumi-note <=> root.bangumi-note;
@@ -290,6 +296,8 @@ export component ManagerWindow inherits Window {
                     set-library-sort(mode) => { root.set-library-sort(mode); }
                     refresh-compatibility => { root.refresh-compatibility(); }
                     set-compatibility-filter(filter) => { root.set-compatibility-filter(filter); }
+                    fetch-releases => { root.fetch-releases(); }
+                    pin-release(release-id) => { root.pin-release(release-id); }
                     update-bangumi-play-status(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
                 }
 

@@ -163,6 +163,17 @@ pub trait ManagerController: 'static {
     fn refresh_compatibility(&mut self) -> Result<ManagerViewModel, String> {
         Err("ASTRA_EMU_COMPATIBILITY_NOT_CONFIGURED".into())
     }
+    /// Fetch the VNDB releases (rIDs) of the selected work so its local
+    /// installation can be pinned to a specific game version. Default:
+    /// not configured.
+    fn fetch_releases(&mut self) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_VNDB_RELEASES_NOT_CONFIGURED".into())
+    }
+    /// Pin the selected installation to a specific VNDB release (rID). Default:
+    /// not configured.
+    fn pin_release(&mut self, _release_id: &str) -> Result<ManagerViewModel, String> {
+        Err("ASTRA_EMU_VNDB_RELEASES_NOT_CONFIGURED".into())
+    }
     fn save_input_config(
         &mut self,
         _confirm_key: &str,
@@ -658,6 +669,33 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             .refresh_compatibility()
         {
             Ok(model) => compat_refresh_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let release_fetch_weak = adapter.window().as_weak();
+    let release_fetch_controller = controller.clone();
+    let release_fetch_adapter = adapter.clone();
+    adapter.window().on_fetch_releases(move || {
+        let Some(window) = release_fetch_weak.upgrade() else {
+            return;
+        };
+        match release_fetch_controller.borrow_mut().fetch_releases() {
+            Ok(model) => release_fetch_adapter.apply(&model),
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let release_pin_weak = adapter.window().as_weak();
+    let release_pin_controller = controller.clone();
+    let release_pin_adapter = adapter.clone();
+    adapter.window().on_pin_release(move |release_id| {
+        let Some(window) = release_pin_weak.upgrade() else {
+            return;
+        };
+        match release_pin_controller
+            .borrow_mut()
+            .pin_release(release_id.as_str())
+        {
+            Ok(model) => release_pin_adapter.apply(&model),
             Err(error) => window.set_global_diagnostic(error.into()),
         }
     });

@@ -1854,8 +1854,8 @@ impl AstraEmuManagerController {
                         .entries
                         .iter()
                         .map(|entry| CompatibilityCacheEntry {
-                            provider: entry.provider.clone(),
-                            remote_id: entry.remote_id.clone(),
+                            vn_id: entry.vn_id.clone(),
+                            release_id: entry.release_id.clone(),
                             status: entry.status.as_str().to_owned(),
                             notes: entry.notes.clone(),
                             entry_updated_unix_ms: entry.updated_at_unix_ms,
@@ -2021,6 +2021,27 @@ impl AstraEmuManagerController {
             // Compatibility refreshes are handled in `apply_compatibility_completion`
             // before reaching this point; ignore if one ever arrives here.
             MetadataPayload::Compatibility(_) => {}
+            MetadataPayload::Releases(releases) => {
+                // VNDB is the authoritative release source. Persist the fetched
+                // rIDs for the work so the user can pin their installation to a
+                // specific game version.
+                let records = releases
+                    .into_iter()
+                    .map(|release| astra_emu_manager_core::VnReleaseRecord {
+                        work_id: work.work_id.clone(),
+                        release_id: release.release_id,
+                        title: release.title,
+                        released: release.released,
+                        platforms_json: serde_json::to_string(&release.platforms)
+                            .unwrap_or_else(|_| "[]".into()),
+                        fetched_at_unix_ms: now,
+                    })
+                    .collect::<Vec<_>>();
+                self.library
+                    .replace_vn_releases(&work.work_id, &records)
+                    .map_err(|error| error.to_string())?;
+                self.diagnostic.clear();
+            }
         }
         Ok(())
     }
@@ -2566,12 +2587,17 @@ impl ManagerController for AstraEmuManagerController {
                     None => (String::new(), String::new(), 0, 0),
                 };
                 let compatibility_status = match work.as_ref() {
-                    Some(work) => self
-                        .library
-                        .compatibility_match(&work.work_id)
-                        .map_err(|error| error.to_string())?
-                        .map(|matched| matched.status)
-                        .unwrap_or_default(),
+                    Some(work) => {
+                        let pinned = self
+                            .library
+                            .case_release(&case.case_identity)
+                            .map_err(|error| error.to_string())?;
+                        self.library
+                            .compatibility_match(&work.work_id, pinned.as_deref())
+                            .map_err(|error| error.to_string())?
+                            .map(|matched| matched.status)
+                            .unwrap_or_default()
+                    }
                     None => String::new(),
                 };
                 Ok((
@@ -2802,10 +2828,15 @@ impl ManagerController for AstraEmuManagerController {
                     .work_for_case(case_id)
                     .map_err(|error| error.to_string())?;
                 match work {
-                    Some(work) => self
-                        .library
-                        .compatibility_match(&work.work_id)
-                        .map_err(|error| error.to_string()),
+                    Some(work) => {
+                        let pinned = self
+                            .library
+                            .case_release(case_id)
+                            .map_err(|error| error.to_string())?;
+                        self.library
+                            .compatibility_match(&work.work_id, pinned.as_deref())
+                            .map_err(|error| error.to_string())
+                    }
                     None => Ok(None),
                 }
             })
@@ -2823,9 +2854,53 @@ impl ManagerController for AstraEmuManagerController {
             .as_ref()
             .map(|matched| human_relative(matched.entry_updated_unix_ms, now_ms))
             .unwrap_or_default();
-        let selected_compatibility_provider = selected_compatibility
+        // The vID (VNDB game identity) is shown in place of the legacy provider
+        // field, since VNDB is now the single authoritative source.
+        let selected_compatibility_vndb_id = selected_compatibility
             .as_ref()
-            .map(|matched| matched.provider.clone())
+            .map(|matched| format!("{} / {}", matched.vn_id, matched.release_id))
+            .unwrap_or_default();
+        let selected_releases = self
+            .selected_case_id
+            .as_deref()
+            .map(|case_id| {
+                let work = self
+                    .library
+                    .work_for_case(case_id)
+                    .map_err(|error| error.to_string())?;
+                let Some(work) = work else {
+                    return Ok(Vec::new());
+                };
+                let pinned = self
+                    .library
+                    .case_release(case_id)
+                    .map_err(|error| error.to_string())?;
+                self.library
+                    .vn_releases(&work.work_id)
+                    .map_err(|error| error.to_string())
+                    .map(|releases| {
+                        releases
+                            .into_iter()
+                            .map(|release| {
+                                let padded =
+                                    if release.release_id == pinned.as_deref().unwrap_or("") {
+                                        format!("* {0}", release.release_id)
+                                    } else {
+                                        release.release_id.clone()
+                                    };
+                                let mut label =
+                                    format!("{padded} {0}", release.title.unwrap_or_default())
+                                        .trim()
+                                        .to_owned();
+                                if let Some(date) = release.released {
+                                    label.push_str(&format!(" ({date})"));
+                                }
+                                (release.release_id.clone(), label.trim_end().to_owned())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            })
+            .transpose()?
             .unwrap_or_default();
         let compatibility_sync_summary = self
             .library
@@ -2937,7 +3012,8 @@ impl ManagerController for AstraEmuManagerController {
             selected_compatibility_status,
             selected_compatibility_notes,
             selected_compatibility_updated,
-            selected_compatibility_provider,
+            selected_compatibility_vndb_id,
+            selected_releases,
             selected_vfs_status: if self.active_mount_set_id.is_some() {
                 "Mounted".into()
             } else {
@@ -3021,6 +3097,63 @@ impl ManagerController for AstraEmuManagerController {
             },
         })?;
         self.diagnostic = "Compatibility refresh queued".into();
+        self.model()
+    }
+
+    /// Queue a background fetch of the VNDB releases (rIDs) for the selected
+    /// work so its local installation can be pinned to a specific game version.
+    /// VNDB is the single authoritative release source; gated on VNDB consent.
+    fn fetch_releases(&mut self) -> Result<ManagerViewModel, String> {
+        if !self
+            .library
+            .provider_consent("vndb")
+            .map_err(|error| error.to_string())?
+            .is_some_and(|value| value.network_enabled)
+        {
+            return Err("ASTRA_EMU_METADATA_CONSENT_REQUIRED: vndb".into());
+        }
+        let case_identity = self
+            .selected_case_id
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
+        let work = self
+            .library
+            .work_for_case(&case_identity)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_WORK_MISSING".to_owned())?;
+        let vndb_id = self
+            .library
+            .external_identities(&work.work_id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|identity| identity.provider == "vndb")
+            .map(|identity| identity.remote_id)
+            .ok_or_else(|| "ASTRA_EMU_VNDB_ID_MISSING".to_owned())?;
+        let request_id = self.next_metadata_request("release")?;
+        self.metadata.submit(MetadataCommand {
+            request_id,
+            case_identity,
+            provider: MetadataProviderId::Vndb,
+            access_token: None,
+            allow_sensitive_cover: false,
+            kind: MetadataCommandKind::FetchReleases(vndb_id),
+        })?;
+        self.diagnostic = "Fetching VNDB releases…".into();
+        self.model()
+    }
+
+    /// Pin the selected installation to a specific VNDB release (rID) so its
+    /// compatibility reads at that version.
+    fn pin_release(&mut self, release_id: &str) -> Result<ManagerViewModel, String> {
+        let case_identity = self
+            .selected_case_id
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
+        let now = unix_time_ms()?;
+        self.library
+            .set_case_release(&case_identity, release_id, now)
+            .map_err(|error| error.to_string())?;
+        self.diagnostic = format!("Pinned to VNDB release {release_id}.");
         self.model()
     }
 

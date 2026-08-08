@@ -10,6 +10,11 @@ export struct PlaySession {
     ended-by: string,
 }
 
+export struct ReleaseOption {
+    release-id: string,
+    label: string,
+}
+
 component InspectorRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
@@ -102,7 +107,8 @@ export component LibraryPage inherits Rectangle {
     in property <string> selected-compatibility-status;
     in property <string> selected-compatibility-notes;
     in property <string> selected-compatibility-updated;
-    in property <string> selected-compatibility-provider;
+    in property <string> selected-compatibility-vndb-id;
+    in property <[ReleaseOption]> releases;
     in-out property <string> bangumi-play-status: "doing";
     in-out property <int> bangumi-rating: 1;
     in-out property <string> bangumi-note;
@@ -118,6 +124,8 @@ export component LibraryPage inherits Rectangle {
     callback set-library-sort(string);
     callback refresh-compatibility();
     callback set-compatibility-filter(string);
+    callback fetch-releases();
+    callback pin-release(string);
     callback update-bangumi-play-status(string, int, string);
 
     background: Theme.background;
@@ -235,8 +243,24 @@ export component LibraryPage inherits Rectangle {
 
                             Text { text: "Compatibility"; color: Theme.text; font-size: 13px; font-weight: 600; }
                             InspectorRow { label: "Status"; value: root.selected-compatibility-status == "" ? "Not listed" : root.selected-compatibility-status; }
-                            if root.selected-compatibility-provider != "" : InspectorRow { label: "Source"; value: root.selected-compatibility-provider; }
+                            if root.selected-compatibility-vndb-id != "" : InspectorRow { label: "VNDB (vID / rID)"; value: root.selected-compatibility-vndb-id; }
                             if root.selected-compatibility-updated != "" : InspectorRow { label: "Updated"; value: root.selected-compatibility-updated; }
+
+                            Text { text: "Game version (VNDB release)"; color: Theme.text-muted; font-size: 12px; }
+                            for rel[index] in root.releases : Button {
+                                horizontal-stretch: 1;
+                                text: rel.label;
+                                clicked => { root.pin-release(rel.release-id); }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Button {
+                                    text: "Fetch releases";
+                                    enabled: root.selected-case-id != "";
+                                    clicked => { root.fetch-releases(); }
+                                }
+                            }
+
                             if root.selected-compatibility-notes != "" : Text {
                                 text: root.selected-compatibility-notes;
                                 color: Theme.text-muted;

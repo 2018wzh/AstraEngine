@@ -256,6 +256,56 @@ pub(crate) fn migrate_v6(tx: &Transaction<'_>) -> Result<(), LibraryError> {
     Ok(())
 }
 
+pub(crate) fn migrate_v10(tx: &Transaction<'_>) -> Result<(), LibraryError> {
+    // v10 makes VNDB the single authoritative source for compatibility. The
+    // old cache was keyed by (provider, remote_id) and mixed bangumi/vndb;
+    // compatibility is now VNDB-only and precise to a specific release.
+    //
+    // - compatibility_entry_cache: (vn_id, release_id) -> status. release_id is
+    //   the VNDB rID (version identity); vn_id is the VNDB vID (game identity).
+    // - vn_release: per-work VNDB releases (rIDs) fetched from VNDB, used to pin
+    //   a local installation to a concrete version.
+    // - case_release: per-installation-case choice of which release (rID) the
+    //   current game copy corresponds to.
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS compatibility_entry_cache;
+         DROP TABLE IF EXISTS compatibility_sync_state;
+         CREATE TABLE compatibility_entry_cache (
+            vn_id TEXT NOT NULL,
+            release_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            notes TEXT,
+            entry_updated_unix_ms INTEGER NOT NULL,
+            fetched_at_unix_ms INTEGER NOT NULL,
+            PRIMARY KEY(vn_id, release_id)
+         );
+         CREATE INDEX compatibility_entry_cache_vn ON compatibility_entry_cache(vn_id);
+         CREATE TABLE compatibility_sync_state (
+            singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
+            source_url TEXT NOT NULL,
+            response_hash TEXT NOT NULL,
+            last_fetched_unix_ms INTEGER NOT NULL,
+            diagnostic_code TEXT
+         );
+         CREATE TABLE vn_release (
+            work_id TEXT NOT NULL REFERENCES library_work(work_id) ON DELETE CASCADE,
+            release_id TEXT NOT NULL,
+            title TEXT,
+            released TEXT,
+            platforms_json TEXT NOT NULL,
+            fetched_at_unix_ms INTEGER NOT NULL,
+            PRIMARY KEY(work_id, release_id)
+         );
+         CREATE INDEX vn_release_work ON vn_release(work_id);
+         CREATE TABLE case_release (
+            case_identity TEXT PRIMARY KEY NOT NULL REFERENCES library_case(case_identity) ON DELETE CASCADE,
+            release_id TEXT NOT NULL,
+            picked_at_unix_ms INTEGER NOT NULL
+         );",
+    )?;
+    Ok(())
+}
+
 pub(crate) fn ensure_work_for_candidate(
     tx: &Transaction<'_>,
     candidate: &ScanCandidate,

@@ -7,7 +7,8 @@ use std::{
 use astra_emu_metadata::{
     BangumiPlayUpdate, BangumiProvider, BangumiProviderConfig, CompatibilityClient,
     CompatibilityFetch, CoverAsset, MetadataLicenseManifest, MetadataProvider, MetadataProviderId,
-    MetadataRecord, MetadataSearchQuery, ReleaseUse, VndbProvider, VndbProviderConfig,
+    MetadataRecord, MetadataRelease, MetadataSearchQuery, ReleaseUse, VndbProvider,
+    VndbProviderConfig,
 };
 
 const COMMAND_CAPACITY: usize = 64;
@@ -23,6 +24,10 @@ pub enum MetadataCommandKind {
         source_url: String,
         cached_hash: Option<String>,
     },
+    /// Fetch the concrete VNDB releases (rIDs) of a visual novel so a local
+    /// installation can be pinned to a specific game version. VNDB is the
+    /// authoritative source; Bangumi returns an empty list for this.
+    FetchReleases(String),
 }
 
 #[derive(Debug)]
@@ -44,6 +49,7 @@ pub enum MetadataPayload {
     },
     BangumiPlaySynced,
     Compatibility(CompatibilityFetch),
+    Releases(Vec<MetadataRelease>),
 }
 
 #[derive(Debug)]
@@ -228,5 +234,10 @@ async fn execute_provider(
         MetadataCommandKind::RefreshCompatibility { .. } => {
             Err("ASTRA_EMU_METADATA_PROVIDER_MISMATCH".into())
         }
+        MetadataCommandKind::FetchReleases(remote_id) => provider
+            .fetch_releases(remote_id)
+            .await
+            .map(MetadataPayload::Releases)
+            .map_err(|error| error.to_string()),
     }
 }
