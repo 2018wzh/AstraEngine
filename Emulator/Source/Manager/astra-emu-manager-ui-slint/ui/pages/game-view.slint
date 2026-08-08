@@ -25,6 +25,11 @@ export component GameViewPage inherits Rectangle {
     // Toolbar auto-hide: visible while pointer is near the top edge
     property <length> last-pointer-y: 0px;
     property <bool> toolbar-hover: root.last-pointer-y < 60px;
+    property <float> stage-aspect: root.stage-native-width / root.stage-native-height;
+    property <length> stage-width: root.width / root.height > root.stage-aspect ? root.height * root.stage-aspect : root.width;
+    property <length> stage-height: root.width / root.height > root.stage-aspect ? root.height : root.width / root.stage-aspect;
+    property <length> stage-x: (root.width - root.stage-width) / 2;
+    property <length> stage-y: (root.height - root.stage-height) / 2;
 
     // Translation panel state
     in-out property <length> translation-x: 20px;
@@ -65,9 +70,11 @@ export component GameViewPage inherits Rectangle {
     // Game stage image
     Image {
         source: root.stage-frame;
-        width: parent.width;
-        height: parent.height;
-        image-fit: contain;
+        x: root.stage-x;
+        y: root.stage-y;
+        width: root.stage-width;
+        height: root.stage-height;
+        image-fit: fill;
         accessible-label: "Legacy game stage";
     }
 
@@ -103,14 +110,18 @@ export component GameViewPage inherits Rectangle {
         TouchArea {
             moved => {
                 root.last-pointer-y = self.mouse-y;
-                root.game-input("pointer.x", true, self.mouse-x / root.width * root.stage-native-width);
-                root.game-input("pointer.y", true, self.mouse-y / root.height * root.stage-native-height);
+                if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
+                    root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
+                    root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
+                }
             }
             clicked => {
-                root.game-input("pointer.x", true, self.mouse-x / root.width * root.stage-native-width);
-                root.game-input("pointer.y", true, self.mouse-y / root.height * root.stage-native-height);
-                root.game-input("pointer.primary", true, 1);
-                root.game-input("pointer.primary", false, 0);
+                if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
+                    root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
+                    root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
+                    root.game-input("pointer.primary", true, 1);
+                    root.game-input("pointer.primary", false, 0);
+                }
             }
             scroll-event(event) => {
                 root.game-input("wheel", false, event.delta-y / 1px);

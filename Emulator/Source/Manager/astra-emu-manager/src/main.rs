@@ -179,6 +179,7 @@ struct ActiveRuntimeSession {
     saved_sections: Option<RuntimeSaveSections>,
     coverage_syscalls: u64,
     next_tick: Instant,
+    next_step_mode: RuntimeStepMode,
 }
 
 enum PendingWait {
@@ -333,6 +334,7 @@ impl RuntimeBridge {
             saved_sections: None,
             coverage_syscalls: 0,
             next_tick: Instant::now(),
+            next_step_mode: RuntimeStepMode::Live,
         });
         tracing::info!(
             event = "astra.emu.manager.session_opened",
@@ -454,6 +456,7 @@ impl RuntimeBridge {
         }
         let next_step = active.fixed_step.saturating_add(1);
         let session_seed = active.seed;
+        let step_mode = active.next_step_mode;
         let completed_media = self.video.take_completed();
         for media_id in completed_media {
             let mut matched = false;
@@ -511,7 +514,7 @@ impl RuntimeBridge {
             fixed_step: next_step,
             delta_ns: active.fixed_delta_ns,
             session_seed: active.seed,
-            mode: RuntimeStepMode::Live,
+            mode: step_mode,
             action: "emu.step".into(),
             argument: None,
             auxiliary: None,
@@ -545,6 +548,7 @@ impl RuntimeBridge {
         let fixed_delta_ns = active.fixed_delta_ns;
         active.fixed_step = next_step;
         active.next_tick += Duration::from_nanos(fixed_delta_ns);
+        active.next_step_mode = RuntimeStepMode::Live;
         let live = output.live;
         let active = self
             .active
@@ -864,6 +868,7 @@ impl RuntimeBridge {
             .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
         active.fixed_step = restored.restored_fixed_step;
         active.next_tick = Instant::now() + Duration::from_nanos(active.fixed_delta_ns);
+        active.next_step_mode = RuntimeStepMode::RestoreContinuation;
         tracing::info!(
             event = "astra.emu.manager.snapshot_restored",
             session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
