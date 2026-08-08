@@ -1016,7 +1016,7 @@ fn read_source_range(
                 DEFAULT_MAX_RANGE_BYTES,
             )
             .map_err(|error| ContainerError::message(error.to_string()))?;
-        bytes.extend_from_slice(&result.bytes);
+        bytes.extend_from_slice(result.bytes.as_slice());
         offset = offset
             .checked_add(len)
             .ok_or_else(|| ContainerError::message("byte source range overflow"))?;

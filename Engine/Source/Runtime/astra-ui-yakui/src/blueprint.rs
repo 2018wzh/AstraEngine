@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-use astra_core::Hash256;
 use astra_media_core::TextureFrame;
 use astra_ui_core::{
     UiActionEnvelope, UiBindingRoot, UiBlueprintBundle, UiBlueprintFrameModel, UiEventBinding,
@@ -51,7 +50,7 @@ pub struct BlueprintYakuiRenderer {
     virtual_grids: BTreeMap<String, VirtualGridState>,
     accessibility_actions: BTreeMap<String, Vec<(UiEventBinding, Option<UiValue>)>>,
     retained_frame: Option<UiBlueprintFrameModel>,
-    retained_semantic_hash: Option<Hash256>,
+    retained_semantic_generation: Option<u64>,
     text_inputs: BTreeMap<String, TextInputState>,
     focused_text_input: Option<String>,
     semantic_focus_override: Option<String>,
@@ -79,7 +78,7 @@ impl BlueprintYakuiRenderer {
             virtual_grids: BTreeMap::new(),
             accessibility_actions: BTreeMap::new(),
             retained_frame: None,
-            retained_semantic_hash: None,
+            retained_semantic_generation: None,
             text_inputs: BTreeMap::new(),
             focused_text_input: None,
             semantic_focus_override: None,
@@ -114,11 +113,11 @@ impl BlueprintYakuiRenderer {
 
     pub fn resolve_retained_activation(
         &self,
-        semantic_snapshot_hash: Hash256,
+        semantic_generation: u64,
         semantic_target_id: &str,
         input_sequence: u64,
     ) -> Result<UiActionEnvelope, UiValidationError> {
-        if self.retained_semantic_hash != Some(semantic_snapshot_hash) {
+        if self.retained_semantic_generation != Some(semantic_generation) {
             return Err(UiValidationError::invalid(
                 "ASTRA_UI_RETAINED_SEMANTIC_STALE",
                 "retained activation does not match the live semantic generation",
@@ -166,15 +165,15 @@ impl BlueprintYakuiRenderer {
             ));
         }
         let (binding, item) = matching[0];
-        let mut action = action_from_event_sequence(
+        let action = action_from_event_sequence(
             binding,
             semantic_target_id,
             input_sequence,
+            semantic_generation,
             frame,
             item.as_ref(),
             None,
         )?;
-        action.semantic_snapshot_hash = semantic_snapshot_hash;
         action.validate()?;
         Ok(action)
     }
@@ -1039,10 +1038,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         for managed in self.pending_removed_managed_textures.drain(..) {
             yakui.paint_dom().textures_mut().remove(managed);
         }
-        let frame: UiBlueprintFrameModel =
-            postcard::from_bytes(&request.model_payload).map_err(|error| {
-                UiValidationError::invalid("ASTRA_UI_BLUEPRINT_MODEL_DECODE", error.to_string())
-            })?;
+        let frame = &request.model;
         frame.validate()?;
         self.text_input_consumed_sequences.clear();
         self.accessibility_dispatched_events.clear();
@@ -1221,7 +1217,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
                     binding,
                     semantic_id,
                     request,
-                    &frame,
+                    frame,
                     item.as_ref(),
                     event_value.as_ref(),
                 )?);
@@ -1270,7 +1266,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             ));
         }
         let mut required_assets = BTreeSet::new();
-        self.collect_visual_assets(&view.root, &frame, None, request, &mut required_assets)?;
+        self.collect_visual_assets(&view.root, frame, None, request, &mut required_assets)?;
         for modal in &frame.modals {
             let modal_view = self.views.get(&modal.view_id).cloned().ok_or_else(|| {
                 UiValidationError::invalid(
@@ -1335,7 +1331,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         let mut render_error = None;
         Stack::new().show(|| {
             if let Err(error) =
-                self.render_node(&view.root, None, &frame, None, request, &mut actions)
+                self.render_node(&view.root, None, frame, None, request, &mut actions)
             {
                 render_error = Some(error);
                 return;
@@ -1472,7 +1468,7 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
         } else {
             None
         };
-        self.retained_frame = Some(frame);
+        self.retained_frame = Some(frame.clone());
         Ok(YakuiViewOutput {
             actions,
             repaint_after_ns: None,
@@ -1556,16 +1552,14 @@ impl YakuiViewRenderer for BlueprintYakuiRenderer {
             .ok_or_else(|| {
                 UiValidationError::invalid("ASTRA_UI_SEMANTIC_EMPTY", "view is empty")
             })?;
-        let mut snapshot = UiSemanticSnapshot {
+        let snapshot = UiSemanticSnapshot {
             schema: "astra.ui_semantic_snapshot.v1".into(),
             session_id: request.session_id.clone(),
             generation: request.generation,
             root_id,
             nodes,
-            hash: Hash256::from_sha256(&[]),
         };
-        snapshot.hash = snapshot.compute_hash()?;
-        self.retained_semantic_hash = Some(snapshot.hash);
+        self.retained_semantic_generation = Some(snapshot.generation);
         if focus_settled {
             self.semantic_focus_override = None;
         }
@@ -1597,12 +1591,6 @@ fn validate_image_resource(asset: &str, frame: &TextureFrame) -> Result<(), UiVa
         return Err(UiValidationError::invalid(
             "ASTRA_UI_IMAGE_RESOURCE_SIZE",
             "UI image resource dimensions do not match its bounded RGBA payload",
-        ));
-    }
-    if Hash256::from_sha256(&frame.rgba8) != frame.hash {
-        return Err(UiValidationError::invalid(
-            "ASTRA_UI_IMAGE_RESOURCE_HASH",
-            "UI image resource payload hash mismatch",
         ));
     }
     Ok(())
@@ -2109,13 +2097,22 @@ fn action_from_event(
         .last()
         .map(|event| event.sequence)
         .unwrap_or(0);
-    action_from_event_sequence(event, target, input_sequence, frame, item, event_value)
+    action_from_event_sequence(
+        event,
+        target,
+        input_sequence,
+        request.generation,
+        frame,
+        item,
+        event_value,
+    )
 }
 
 fn action_from_event_sequence(
     event: &UiEventBinding,
     target: &str,
     input_sequence: u64,
+    semantic_generation: u64,
     frame: &UiBlueprintFrameModel,
     item: Option<&UiValue>,
     event_value: Option<&UiValue>,
@@ -2130,7 +2127,7 @@ fn action_from_event_sequence(
         semantic_target_id: target.into(),
         action_id: event.action_id.clone(),
         arguments,
-        semantic_snapshot_hash: Hash256::from_sha256(&[]),
+        semantic_generation,
     })
 }
 

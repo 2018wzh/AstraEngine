@@ -93,7 +93,7 @@ Family ABI v7 对 descriptor、instance、probe、open、step、save、restore�
 
 v7 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径；range result 只返回 range、revision、length/bounds 可验证的 owned bytes，不计算或传输 per-read content hash。scene bytes、encoded bytes 和 PCM bulk 以 ABI-owned allocation 过边界；host 只借用 slice 做尺寸校验、decode 或上传，不用 `into_vec()` 跨 allocator 复制。FVP live step 直接发 Family ABI v7 typed scene transaction，RGBA8 `Vec<u8>` 从 hosted capture allocation 移交到 Runtime、Scene2D 和 GPU adapter；同尺寸 partial update 只携带变化区域，LumaAlpha8 只在明确的格式转换边界生成一次 RGBA8。live 路径不发 `astra.emu.scene_packet.v1`，不执行 scene postcard reader，也不计算 texture/frame content hash；旧 scene packet translator 只属于独立的冷/测试 contract，不能由 v7 live provider 选择。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
 
-Typed PCM 由 `LegacyEffect::AudioPcmV7` 直接携带 `LegacyAudioPacketV7` 和 ABI-owned
+Typed PCM 由 `LegacyLiveOutput.audio` 直接携带 `LegacyAudioPacketV7` 和 ABI-owned
 `I16`/`F32` buffer，不再拆成 control、bulk reference 和第二条 payload envelope。
 Family FFI、Manager 与音频队列按所有权移动同一 allocation，并校验 stream id、采样格式、
 sample count、channel count 和边界。相同格式不得重建 PCM；只有 decoder 或 resampler 的
@@ -149,7 +149,7 @@ pub struct EmuFilterPresetBinding {
 }
 ```
 
-默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。Luau 是唯一用户脚本语言；旧 Lua/TJS 只描述 family 内部 legacy 事实。Trusted script 可以提交 `LegacyEffect`、Blackboard、input 或 tag intent，但这些 intent 必须在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本；只有 case profile 已显式允许无补丁启动时才能继续，否则启动被阻断。
+默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。Luau 是唯一用户脚本语言；旧 Lua/TJS 只描述 family 内部 legacy 事实。Trusted script 只能提交 typed blackboard、input、tag 或 media intent，这些 intent 必须在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本；只有 case profile 已显式允许无补丁启动时才能继续，否则启动被阻断。
 
 Text dump 默认只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译 overlay 是非权威 UI 状态，不进入 replay hash。Filter preset 复用 `FilterGraph`；family 缺少 layer metadata 时，只启用 final-frame preset 并输出 diagnostic。
 
@@ -168,11 +168,10 @@ pub struct LegacyStepInput {
 
 pub struct LegacyStepOutput {
     pub status: LegacyRuntimeStatus,
-    pub effects: Vec<LegacyEffect>,
-    pub waits: Vec<LegacyWaitRequest>,
+    pub live: LegacyLiveOutput,
+    pub control: LegacyControlTransaction,
     pub trace: Vec<StateMachineTrace>,
     pub diagnostics: Vec<Diagnostic>,
-    pub snapshot_hint: Option<LegacySnapshotHint>,
     pub coverage: LegacyCoverageDelta,
 }
 ```
@@ -181,19 +180,16 @@ Runtime 每个 tick 按固定顺序把 input、await result 和 provider result 
 
 Family session 可以把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机。多线程、多 fiber 或多 context VM 必须由 deterministic scheduler 推进，排序键固定为 `(priority, context_id, sequence)`。Host 只接收 `LegacyStepOutput`、trace 和 snapshot envelope，不读取 family private child state。
 
-## Effects And Wait
+## Typed Live And Control
 
 ```rust
-pub enum LegacyEffect {
-    RuntimeEvent(RuntimeEvent),
-    Presentation(PresentationCommand),
-    Audio(AudioCommand),
-    TextCapture(TextCaptureEvent),
-    Trace(StateMachineTrace),
-    SetBlackboard { key: String, value: BlackboardValue },
-    Await(AwaitToken),
-    ScheduleEvent(ScheduledRuntimeEvent),
-    SnapshotSection(PackageSectionRef),
+pub struct LegacyLiveOutput {
+    pub scenes: Vec<LegacySceneTransactionV7>,
+    pub audio: Vec<LegacyAudioPacketV7>,
+    pub audio_commands: Vec<LegacyAudioCommandV7>,
+    pub text: Vec<LegacyTextPresentationV7>,
+    pub video: Vec<LegacyVideoCommandV7>,
+    pub waits: Vec<LegacyWaitRequest>,
 }
 
 pub enum LegacyWaitRequest {
@@ -203,11 +199,10 @@ pub enum LegacyWaitRequest {
     MediaFence { media_id: StableId },
     PresentationFence { fence_id: StableId },
     ProviderCompletion { request_id: StableId },
-    FamilyOpaque { kind: String, payload_hash: Hash256 },
 }
 ```
 
-Framework adapter 把 `LegacyEffect` 逐条应用到 `DeterministicActionContext`。任何异步 IO、decode、timer、audio/video completion 和平台回调都必须变成 `AwaitToken` 或 provider result，在下一 fixed tick 回到 `step`。Replay 消费录制结果，不重新询问平台 provider。
+Framework adapter 只把轻量 `LegacyControlTransaction` 原子提交到 `DeterministicActionContext`；scene、PCM 和其他 live allocation 在 transaction 成功后直接移动给 host owner。任何异步 IO、decode、timer、audio/video completion 和平台回调都必须变成 typed completion，在下一 fixed tick 回到 `step`。Replay 消费已验证 transcript，不重新调用 family provider。
 
 ## Snapshot
 
@@ -236,12 +231,12 @@ AstraEMU Manager
   -> register gameplay StateMachine action adapter
   -> tick RuntimeWorld
   -> StateMachine invokes emu.step
-  -> adapter applies LegacyEffect list
-  -> collect RuntimeEvent / PresentationCommand / AudioCommand / TextCaptureEvent
+  -> atomically apply LegacyControlTransaction
+  -> move typed scene / PCM / text / video output to host owners
   -> write LocalCaseReport
 ```
 
-family plugin 可以持有 private interpreter state，但权威推进必须通过 StateMachine action 和可序列化 effect list。每个 effect 在固定 tick 边界进入 Runtime，有 source span、trace id 和 replay hash。
+family plugin 可以持有 private interpreter state，但权威推进必须通过 StateMachine typed action 和 control transaction。实时输出不编码、不计算 content hash；Evidence observer 只能在提交完成后异步观察。
 
 ## VFS And Pack Readers
 

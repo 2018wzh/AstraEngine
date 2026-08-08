@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use astra_core::{Diagnostic, Hash128, Hash256, SchemaId, SchemaVersion, StableId};
+use astra_core::{Diagnostic, SchemaVersion, StableId};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,6 @@ use crate::{
     AwaitReplayPolicy, AwaitToken, AwaitTokenId, BlackboardValue, ComponentId, ComponentRecord,
     DelayedEventId, EventId, EventPayload, EventSource, PresentationCommand,
     RuntimeComponentPayload, RuntimeError, RuntimeEvent, RuntimeMutationRecord, ScheduledEvent,
-    SerializedEffectEnvelope,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -52,7 +51,6 @@ pub enum ActionResourceKey {
     DelayedEventQueue,
     Presentation,
     MutationLog,
-    EffectTrace,
     StableIdSource,
     ComponentSchema(String),
     BlackboardKey(String),
@@ -103,97 +101,6 @@ pub struct ActionTrace {
     pub payload: BTreeMap<String, BlackboardValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ActionCallRequest {
-    pub step: u64,
-    pub action_id: String,
-    #[serde(default)]
-    pub input: BTreeMap<String, BlackboardValue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trigger_event: Option<RuntimeEvent>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub enum ActionCallResult {
-    Ok {
-        trace: ActionTrace,
-        #[serde(default)]
-        effects: Vec<ActionEffect>,
-    },
-    Err {
-        code: String,
-        message: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ComponentSelector {
-    ComponentId { component_id: ComponentId },
-    ActorSchema { actor_id: ActorId, schema: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub enum ActionEffect {
-    SetBlackboard {
-        key: String,
-        value: BlackboardValue,
-    },
-    CreateActor {
-        name: String,
-        #[serde(default)]
-        tags: Vec<String>,
-        #[serde(default)]
-        store_actor_id_key: Option<String>,
-    },
-    AttachComponent {
-        actor_id: ActorId,
-        schema: String,
-        data: BlackboardValue,
-        #[serde(default)]
-        store_component_id_key: Option<String>,
-    },
-    ReplaceComponent {
-        selector: ComponentSelector,
-        expected_schema: String,
-        expected_hash: Hash256,
-        data: BlackboardValue,
-    },
-    PatchComponentMap {
-        selector: ComponentSelector,
-        expected_schema: String,
-        expected_hash: Hash256,
-        #[serde(default)]
-        set: BTreeMap<String, BlackboardValue>,
-        #[serde(default)]
-        remove: BTreeSet<String>,
-    },
-    RemoveActor {
-        actor_id: ActorId,
-    },
-    DetachComponent {
-        component_id: ComponentId,
-    },
-    EmitEvent {
-        source: EventSource,
-        payload: EventPayload,
-    },
-    Presentation {
-        command: PresentationCommand,
-    },
-    Await {
-        token: AwaitToken,
-    },
-    ScheduleDelayedEvent {
-        due_tick: u64,
-        source: EventSource,
-        payload: EventPayload,
-    },
-    CancelDelayedEvent {
-        id: DelayedEventId,
-    },
-}
-
 pub struct DeterministicActionContext<'a> {
     step: u64,
     id_source: &'a mut dyn FnMut() -> StableId,
@@ -205,7 +112,6 @@ pub struct DeterministicActionContext<'a> {
     delayed_events: &'a mut Vec<ScheduledEvent>,
     delayed_cancellations: &'a mut Vec<DelayedEventId>,
     mutations: &'a mut Vec<RuntimeMutationRecord>,
-    effects: &'a mut Vec<SerializedEffectEnvelope>,
     source: String,
     trigger_event: Option<RuntimeEvent>,
     evidence_mode: bool,
@@ -226,7 +132,6 @@ impl<'a> DeterministicActionContext<'a> {
         delayed_events: &'a mut Vec<ScheduledEvent>,
         delayed_cancellations: &'a mut Vec<DelayedEventId>,
         mutations: &'a mut Vec<RuntimeMutationRecord>,
-        effects: &'a mut Vec<SerializedEffectEnvelope>,
         source: String,
         trigger_event: Option<RuntimeEvent>,
         evidence_mode: bool,
@@ -242,7 +147,6 @@ impl<'a> DeterministicActionContext<'a> {
             delayed_events,
             delayed_cancellations,
             mutations,
-            effects,
             source,
             trigger_event,
             evidence_mode,
@@ -320,7 +224,7 @@ impl<'a> DeterministicActionContext<'a> {
         if self.actors.attach_component(ComponentRecord {
             component_id,
             actor_id,
-            payload: RuntimeComponentPayload::postcard(schema, SchemaVersion::default(), &data)?,
+            payload: RuntimeComponentPayload::typed(schema, SchemaVersion::default(), data),
         }) {
             Ok(component_id)
         } else {
@@ -341,10 +245,10 @@ impl<'a> DeterministicActionContext<'a> {
         self.actors.detach_component(component_id).is_some()
     }
 
-    pub fn read_component<T: DeserializeOwned>(
-        &self,
-        component_id: ComponentId,
-    ) -> Result<T, RuntimeError> {
+    pub fn read_component<T>(&self, component_id: ComponentId) -> Result<T, RuntimeError>
+    where
+        T: Serialize + DeserializeOwned + Clone + std::fmt::Debug + Send + Sync + 'static,
+    {
         let component = self.actors.component(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
@@ -357,55 +261,14 @@ impl<'a> DeterministicActionContext<'a> {
         component.payload.decode()
     }
 
-    pub fn read_component_postcard_bytes(
-        &self,
-        component_id: ComponentId,
-    ) -> Result<Arc<[u8]>, RuntimeError> {
-        let component = self.actors.component(component_id).ok_or_else(|| {
-            RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_MISSING",
-                "runtime component does not exist",
-            ))
-        })?;
-        self.observe_read(ActionResourceKey::ComponentSchema(
-            component.payload.schema.as_str().to_string(),
-        ));
-        component.payload.validated_postcard_bytes()
-    }
-
-    pub fn read_component_postcard_payload(
-        &self,
-        component_id: ComponentId,
-    ) -> Result<(Hash256, Arc<[u8]>), RuntimeError> {
-        let component = self.actors.component(component_id).ok_or_else(|| {
-            RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_MISSING",
-                "runtime component does not exist",
-            ))
-        })?;
-        self.observe_read(ActionResourceKey::ComponentSchema(
-            component.payload.schema.as_str().to_string(),
-        ));
-        Ok((
-            component.payload.hash,
-            component.payload.validated_postcard_bytes()?,
-        ))
-    }
-
-    pub fn replace_component<T: Serialize>(
+    pub fn replace_component<T>(
         &mut self,
         component_id: ComponentId,
         data: &T,
-    ) -> Result<(), RuntimeError> {
-        self.replace_component_hashed(component_id, data)
-            .map(|_| ())
-    }
-
-    pub fn replace_component_hashed<T: Serialize>(
-        &mut self,
-        component_id: ComponentId,
-        data: &T,
-    ) -> Result<(Hash256, Hash128), RuntimeError> {
+    ) -> Result<(), RuntimeError>
+    where
+        T: Serialize + Clone + std::fmt::Debug + Send + Sync + 'static,
+    {
         let schema = self
             .actors
             .component(component_id)
@@ -425,195 +288,31 @@ impl<'a> DeterministicActionContext<'a> {
                 "runtime component does not exist",
             ))
         })?;
-        let before_hash = component.payload.hash;
+        let before_revision = component.payload.revision;
         let schema = component.payload.schema.clone();
-        let payload = RuntimeComponentPayload::postcard(
+        let payload = RuntimeComponentPayload::typed(
             component.payload.schema.clone(),
             component.payload.version,
-            data,
-        )?;
-        let after_hash = payload.hash;
-        let state_hash = Hash128::from_blake3(&payload.bytes);
-        component.payload = payload;
-        self.mutations.push(RuntimeMutationRecord {
-            step: self.step,
-            component_id,
-            schema,
-            before_hash,
-            after_hash,
-            source: self.source.clone(),
-        });
-        Ok((after_hash, state_hash))
-    }
-
-    pub fn replace_component_encoded_postcard(
-        &mut self,
-        component_id: ComponentId,
-        bytes: Arc<[u8]>,
-    ) -> Result<(Hash256, Hash128), RuntimeError> {
-        let encoding = crate::ValidatedRuntimeComponentEncoding::postcard(bytes);
-        self.replace_component_validated_postcard(component_id, encoding)
-    }
-
-    /// Replaces a hot component by moving its encoded bytes without computing
-    /// a content hash. Evidence callers must use the authenticated variant.
-    pub fn replace_component_owned_postcard(
-        &mut self,
-        component_id: ComponentId,
-        bytes: Arc<[u8]>,
-    ) -> Result<(Hash256, Hash128), RuntimeError> {
-        let encoding = crate::ValidatedRuntimeComponentEncoding::postcard_owned(bytes);
-        self.replace_component_validated_postcard(component_id, encoding)
-    }
-
-    /// Encodes a hot component once and moves the owned bytes into the actor
-    /// store. The Shipping path deliberately does not hash those bytes.
-    pub fn replace_component_owned<T: Serialize>(
-        &mut self,
-        component_id: ComponentId,
-        data: &T,
-    ) -> Result<(Hash256, Hash128), RuntimeError> {
-        let bytes = postcard::to_allocvec(data)
-            .map_err(|err| RuntimeError::message(format!("encode runtime component: {err}")))?;
-        self.replace_component_owned_postcard(component_id, bytes.into())
-    }
-
-    /// Replaces an encoded postcard component whose SHA-256 storage hash and
-    /// BLAKE3 state hash were computed together from the owned bytes.
-    pub fn replace_component_validated_postcard(
-        &mut self,
-        component_id: ComponentId,
-        encoding: crate::ValidatedRuntimeComponentEncoding,
-    ) -> Result<(Hash256, Hash128), RuntimeError> {
-        let schema = self
-            .actors
-            .component(component_id)
-            .map(|component| component.payload.schema.as_str().to_string())
-            .ok_or_else(|| {
-                RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_RUNTIME_COMPONENT_MISSING",
-                    "runtime component does not exist",
-                ))
-            })?;
-        self.observe_read(ActionResourceKey::ComponentSchema(schema.clone()));
-        self.observe_write(ActionResourceKey::ComponentSchema(schema));
-        self.observe_write(ActionResourceKey::MutationLog);
-        let component = self.actors.component_mut(component_id).ok_or_else(|| {
-            RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_MISSING",
-                "runtime component does not exist",
-            ))
-        })?;
-        let before_hash = component.payload.hash;
-        let schema = component.payload.schema.clone();
-        let state_hash = encoding.state_hash();
-        let payload = crate::RuntimeComponentPayload::validated_encoded_postcard(
-            component.payload.schema.clone(),
-            component.payload.version,
-            encoding,
+            data.clone(),
         );
-        let after_hash = payload.hash;
+        let after_revision = before_revision.checked_add(1).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_REVISION_OVERFLOW",
+                "runtime component revision overflowed",
+            ))
+        })?;
+        let mut payload = payload;
+        payload.revision = after_revision;
         component.payload = payload;
         self.mutations.push(RuntimeMutationRecord {
             step: self.step,
             component_id,
             schema,
-            before_hash,
-            after_hash,
+            before_revision,
+            after_revision,
             source: self.source.clone(),
         });
-        Ok((after_hash, state_hash))
-    }
-
-    fn resolve_component(&self, selector: &ComponentSelector) -> Result<ComponentId, RuntimeError> {
-        match selector {
-            ComponentSelector::ComponentId { component_id } => self
-                .actors
-                .component(*component_id)
-                .map(|_| *component_id)
-                .ok_or_else(component_missing),
-            ComponentSelector::ActorSchema { actor_id, schema } => {
-                let schema_id = SchemaId::from(schema.clone());
-                let matches = self
-                    .actors
-                    .component_ids_for_actor_schema(*actor_id, &schema_id);
-                match matches.as_slice() {
-                    [component_id] => Ok(*component_id),
-                    [] => Err(component_missing()),
-                    _ => Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                        "ASTRA_RUNTIME_COMPONENT_SELECTOR_AMBIGUOUS",
-                        "actor and schema selector resolves to multiple components",
-                    ))),
-                }
-            }
-        }
-    }
-
-    fn validate_component_precondition(
-        &self,
-        component_id: ComponentId,
-        expected_schema: &str,
-        expected_hash: Hash256,
-    ) -> Result<(), RuntimeError> {
-        let component = self
-            .actors
-            .component(component_id)
-            .ok_or_else(component_missing)?;
-        if component.payload.schema.as_str() != expected_schema {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_SCHEMA_MISMATCH",
-                "runtime component schema does not match effect precondition",
-            )));
-        }
-        if component.payload.hash != expected_hash {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_HASH_MISMATCH",
-                "runtime component hash does not match effect precondition",
-            )));
-        }
         Ok(())
-    }
-
-    fn replace_component_value(
-        &mut self,
-        selector: ComponentSelector,
-        expected_schema: String,
-        expected_hash: Hash256,
-        data: BlackboardValue,
-    ) -> Result<(), RuntimeError> {
-        let component_id = self.resolve_component(&selector)?;
-        self.validate_component_precondition(component_id, &expected_schema, expected_hash)?;
-        self.replace_component(component_id, &data)
-    }
-
-    fn patch_component_map(
-        &mut self,
-        selector: ComponentSelector,
-        expected_schema: String,
-        expected_hash: Hash256,
-        set: BTreeMap<String, BlackboardValue>,
-        remove: BTreeSet<String>,
-    ) -> Result<(), RuntimeError> {
-        if set.keys().any(|key| remove.contains(key)) {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_PATCH_CONFLICT",
-                "component map patch cannot set and remove the same key",
-            )));
-        }
-        let component_id = self.resolve_component(&selector)?;
-        self.validate_component_precondition(component_id, &expected_schema, expected_hash)?;
-        let value = self.read_component::<BlackboardValue>(component_id)?;
-        let BlackboardValue::Map(mut values) = value else {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_NOT_MAP",
-                "component map patch requires a BlackboardValue::Map payload",
-            )));
-        };
-        for key in remove {
-            values.remove(&key);
-        }
-        values.extend(set);
-        self.replace_component(component_id, &BlackboardValue::Map(values))
     }
 
     pub fn emit_event(&mut self, source: EventSource, payload: EventPayload) {
@@ -631,18 +330,6 @@ impl<'a> DeterministicActionContext<'a> {
     pub fn emit_presentation(&mut self, command: PresentationCommand) {
         self.observe_write(ActionResourceKey::Presentation);
         self.presentation.push(command);
-    }
-
-    pub fn emit_serialized_effect<T: Serialize>(
-        &mut self,
-        domain: impl Into<String>,
-        schema: impl Into<String>,
-        value: &T,
-    ) -> Result<(), RuntimeError> {
-        self.observe_write(ActionResourceKey::EffectTrace);
-        self.effects
-            .push(SerializedEffectEnvelope::postcard(domain, schema, value)?);
-        Ok(())
     }
 
     pub fn push_await(&mut self, token: AwaitToken) -> Result<(), RuntimeError> {
@@ -684,73 +371,6 @@ impl<'a> DeterministicActionContext<'a> {
         self.observe_write(ActionResourceKey::DelayedEventQueue);
         self.delayed_cancellations.push(id);
     }
-
-    pub fn apply_effect(&mut self, effect: ActionEffect) -> Result<(), RuntimeError> {
-        match effect {
-            ActionEffect::SetBlackboard { key, value } => {
-                self.set_blackboard(key, value);
-            }
-            ActionEffect::CreateActor {
-                name,
-                tags,
-                store_actor_id_key,
-            } => {
-                let actor_id = self.create_actor(name, tags);
-                if let Some(key) = store_actor_id_key {
-                    self.set_blackboard(key, BlackboardValue::StableId(actor_id.0));
-                }
-            }
-            ActionEffect::AttachComponent {
-                actor_id,
-                schema,
-                data,
-                store_component_id_key,
-            } => {
-                let component_id = self.attach_component(actor_id, schema, data)?;
-                if let Some(key) = store_component_id_key {
-                    self.set_blackboard(key, BlackboardValue::StableId(component_id.0));
-                }
-            }
-            ActionEffect::ReplaceComponent {
-                selector,
-                expected_schema,
-                expected_hash,
-                data,
-            } => self.replace_component_value(selector, expected_schema, expected_hash, data)?,
-            ActionEffect::PatchComponentMap {
-                selector,
-                expected_schema,
-                expected_hash,
-                set,
-                remove,
-            } => self.patch_component_map(selector, expected_schema, expected_hash, set, remove)?,
-            ActionEffect::RemoveActor { actor_id } => {
-                self.remove_actor(actor_id);
-            }
-            ActionEffect::DetachComponent { component_id } => {
-                self.detach_component(component_id);
-            }
-            ActionEffect::EmitEvent { source, payload } => self.emit_event(source, payload),
-            ActionEffect::Presentation { command } => self.emit_presentation(command),
-            ActionEffect::Await { token } => self.push_await(token)?,
-            ActionEffect::ScheduleDelayedEvent {
-                due_tick,
-                source,
-                payload,
-            } => {
-                self.schedule_event(due_tick, source, payload);
-            }
-            ActionEffect::CancelDelayedEvent { id } => self.cancel_delayed_event(id),
-        }
-        Ok(())
-    }
-}
-
-fn component_missing() -> RuntimeError {
-    RuntimeError::diagnostic(Diagnostic::blocking(
-        "ASTRA_RUNTIME_COMPONENT_MISSING",
-        "runtime component does not exist",
-    ))
 }
 
 pub trait RuntimeAction: Send + Sync {

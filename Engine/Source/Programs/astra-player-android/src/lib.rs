@@ -49,10 +49,7 @@ mod android {
                 .map_err(|error| player_error("player.package.profiles", error))?,
         )
         .map_err(|error| player_error("player.package.profiles", error))?;
-        if !matches!(
-            profiles.schema.as_str(),
-            "astra.platform_profiles.v1" | "astra.platform_profiles.v2"
-        ) {
+        if !matches!(profiles.schema.as_str(), "astra.platform_profiles.v3") {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidProfile,
                 "player.package.profiles",

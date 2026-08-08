@@ -91,9 +91,8 @@ fn cpu_filter_executor_runs_deterministic_filter_graph_on_real_frame() {
     let (first, first_report) = CpuFilterExecutor.execute(&graph, frame.clone()).unwrap();
     let (second, second_report) = CpuFilterExecutor.execute(&graph, frame).unwrap();
 
-    assert_eq!(first.hash, second.hash);
-    assert_ne!(first_report.input_hash, first_report.output_hash);
-    assert_eq!(first_report.output_hash, second_report.output_hash);
+    assert_eq!(first.bytes.as_slice(), second.bytes.as_slice());
+    assert_eq!(first_report.executed_nodes, second_report.executed_nodes);
     assert_eq!(first_report.executed_nodes[0].id, "bloom_main");
     assert!(first_report.executed_nodes[0].fallback_used);
     let hero_pixel = ((2 * 8 + 2) * 4) as usize;

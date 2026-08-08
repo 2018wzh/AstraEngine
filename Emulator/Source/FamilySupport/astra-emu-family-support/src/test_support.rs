@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, io::Cursor};
+use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 
 use astra_core::Hash256;
 use astra_emu_family_core::{
@@ -9,14 +9,14 @@ use astra_emu_family_core::{
 
 pub(crate) struct MemoryVfs {
     manifest: LegacyPackManifest,
-    bytes: BTreeMap<String, Vec<u8>>,
+    bytes: BTreeMap<String, Arc<Vec<u8>>>,
 }
 
 impl MemoryVfs {
     pub(crate) fn new(entries: &[(&str, &[u8], &str)]) -> Self {
         let bytes = entries
             .iter()
-            .map(|(uri, bytes, _)| ((*uri).to_owned(), bytes.to_vec()))
+            .map(|(uri, bytes, _)| ((*uri).to_owned(), Arc::new(bytes.to_vec())))
             .collect::<BTreeMap<_, _>>();
         let entries = entries
             .iter()
@@ -125,7 +125,6 @@ impl LegacyMountedVfs for MemoryVfs {
             entry_id: Some(entry.entry_id.clone()),
             kind: LegacyVfsNodeKind::File,
             size: entry.decoded_size,
-            content_hash: entry.content_hash,
             archive_role: Some("test".into()),
             method: Some(entry.method.clone()),
         })
@@ -147,7 +146,14 @@ impl LegacyMountedVfs for MemoryVfs {
         Ok(LegacyVfsReadResult {
             uri: uri.to_owned(),
             offset,
-            bytes: bytes[start..end].to_vec(),
+            bytes: astra_byte_source::OwnedByteBuffer::from_owner(
+                MemoryRange {
+                    bytes: Arc::clone(bytes),
+                    start,
+                    end,
+                },
+                MemoryRange::as_slice,
+            ),
             eof: end == bytes.len(),
             cache_hit: true,
         })
@@ -155,7 +161,23 @@ impl LegacyMountedVfs for MemoryVfs {
 
     fn open_stream(&self, uri: &str) -> Result<Box<dyn LegacyVfsStream>, LegacyCoreError> {
         Ok(Box::new(Cursor::new(
-            self.bytes.get(uri).ok_or_else(Self::invalid)?.clone(),
+            self.bytes
+                .get(uri)
+                .ok_or_else(Self::invalid)?
+                .as_ref()
+                .clone(),
         )))
+    }
+}
+
+struct MemoryRange {
+    bytes: Arc<Vec<u8>>,
+    start: usize,
+    end: usize,
+}
+
+impl MemoryRange {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[self.start..self.end]
     }
 }

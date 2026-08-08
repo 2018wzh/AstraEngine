@@ -35,7 +35,8 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(windows.platform, PlatformId::Windows);
     assert_eq!(windows.renderer.providers, ["wgpu_hardware"]);
     assert_eq!(windows.decode.providers, ["wmf"]);
-    assert_eq!(windows.audio.providers, ["wasapi"]);
+    assert_eq!(windows.audio_mixer.providers, ["kira"]);
+    assert_eq!(windows.audio_output.providers, ["wasapi"]);
     assert_eq!(windows.save.providers, ["saved_games"]);
     assert_eq!(
         windows.package_cache.max_entry_bytes,
@@ -53,7 +54,8 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(linux.platform, PlatformId::Linux);
     assert_eq!(linux.renderer.providers, ["wgpu_vulkan"]);
     assert_eq!(linux.decode.providers, ["gstreamer"]);
-    assert_eq!(linux.audio.providers, ["alsa"]);
+    assert_eq!(linux.audio_mixer.providers, ["kira"]);
+    assert_eq!(linux.audio_output.providers, ["alsa"]);
     assert_eq!(linux.save.providers, ["xdg_data"]);
     assert!(validate_host_profile(&linux).is_ok());
 
@@ -61,7 +63,8 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(macos.platform, PlatformId::Macos);
     assert_eq!(macos.renderer.providers, ["wgpu_metal"]);
     assert_eq!(macos.decode.providers, ["avfoundation"]);
-    assert_eq!(macos.audio.providers, ["coreaudio"]);
+    assert_eq!(macos.audio_mixer.providers, ["kira"]);
+    assert_eq!(macos.audio_output.providers, ["coreaudio"]);
     assert_eq!(macos.save.providers, ["application_support"]);
     assert!(validate_host_profile(&macos).is_ok());
 
@@ -69,14 +72,15 @@ fn release_profiles_lock_selected_providers_without_hidden_fallbacks() {
     assert_eq!(web.platform, PlatformId::Web);
     assert_eq!(web.renderer.providers, ["webgpu"]);
     assert_eq!(web.decode.providers, ["webcodecs"]);
-    assert_eq!(web.audio.providers, ["webaudio"]);
+    assert_eq!(web.audio_mixer.providers, ["kira"]);
+    assert_eq!(web.audio_output.providers, ["webaudio"]);
     assert_eq!(web.save.providers, ["opfs"]);
     assert!(validate_host_profile(&web).is_ok());
 }
 
 #[test]
-fn v1_profile_migrates_to_v2_with_explicit_cache_limits() {
-    let profile = migrate_host_profile_json(serde_json::json!({
+fn legacy_profile_is_rejected_without_migration() {
+    let error = migrate_host_profile_json(serde_json::json!({
         "schema": "astra.platform_host_profile.v1",
         "id": "windows-release",
         "platform": "windows",
@@ -95,17 +99,8 @@ fn v1_profile_migrates_to_v2_with_explicit_cache_limits() {
             "max_package_read_bytes": 1024
         }
     }))
-    .expect("v1 profile migration");
-
-    assert_eq!(profile.schema, PLATFORM_HOST_PROFILE_SCHEMA);
-    assert_eq!(
-        profile.package_cache.max_entry_bytes,
-        16 * 1024 * 1024 * 1024
-    );
-    assert_eq!(
-        profile.package_cache.max_total_bytes,
-        64 * 1024 * 1024 * 1024
-    );
+    .expect_err("legacy profile must fail fast");
+    assert_eq!(error.code, PlatformErrorCode::InvalidProfile);
 }
 
 #[test]
@@ -119,11 +114,14 @@ fn profile_rejects_invalid_cache_limits() {
 }
 
 #[test]
-fn release_profile_rejects_undeclared_fallback_and_invalid_https_origin() {
+fn release_profile_rejects_decode_fallback_and_invalid_https_origin() {
     let mut windows = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     windows.decode.providers.push("ffmpeg".to_string());
     windows.decode.allow_software = true;
-    assert!(validate_host_profile(&windows).is_ok());
+    assert_eq!(
+        validate_host_profile(&windows).unwrap_err().code,
+        PlatformErrorCode::InvalidProfile
+    );
 
     let mut wrong_order = windows.clone();
     wrong_order.decode.providers.reverse();

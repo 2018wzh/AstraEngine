@@ -30,7 +30,6 @@ pub struct MinoriRuntimeState {
     pub audio: BTreeMap<u32, MinoriAudioState>,
     pub movie: Option<MinoriMovieState>,
     pub system_ui: MinoriSystemUiState,
-    pub gallery_unlocks: Vec<Hash256>,
     pub fixed_tick: u64,
     pub session_seed: u64,
     pub random_state: u64,
@@ -68,22 +67,17 @@ pub enum MinoriWaitState {
 pub struct MinoriMessageState {
     pub source: SourceSpan,
     pub message_id: i64,
-    pub text_hash: Hash256,
-    pub speaker_hash: Option<Hash256>,
-    pub voice_hash: Option<Hash256>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriChoiceState {
     pub source: SourceSpan,
-    pub option_hashes: Vec<Hash256>,
     pub selected_index: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriLayerState {
     pub resource_uri: String,
-    pub content_hash: Option<Hash256>,
     pub x_milli: i32,
     pub y_milli: i32,
     pub scale_x_milli: i32,
@@ -384,7 +378,6 @@ impl MinoriVm {
             audio: BTreeMap::new(),
             movie: None,
             system_ui: MinoriSystemUiState::default(),
-            gallery_unlocks: Vec::new(),
             fixed_tick: 0,
             session_seed,
             random_state: session_seed,
@@ -401,11 +394,6 @@ impl MinoriVm {
 
     pub fn state(&self) -> &MinoriRuntimeState {
         &self.state
-    }
-
-    pub fn state_hash(&self) -> Result<Hash256, MinoriRuntimeError> {
-        let bytes = postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::Snapshot)?;
-        Ok(Hash256::from_sha256(&bytes))
     }
 
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, MinoriRuntimeError> {
@@ -876,7 +864,6 @@ fn execute_stage(
             layer_id,
             MinoriLayerState {
                 resource_uri: stand.resource_uri.clone(),
-                content_hash: None,
                 // The original passes position and offset as separate stage parameters;
                 // they are not pixel coordinates and remain on the typed stage event.
                 x_milli: 0,
@@ -917,7 +904,6 @@ fn stage_layer(
 fn stage_layer_state(layer: &MinoriStageLayer, blend: &str) -> MinoriLayerState {
     MinoriLayerState {
         resource_uri: layer.resource_uri.clone(),
-        content_hash: None,
         x_milli: layer.x.saturating_mul(1000),
         y_milli: layer.y.saturating_mul(1000),
         scale_x_milli: 1000,
@@ -1256,33 +1242,23 @@ fn execute_message(
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MinoriRuntimeError::Operand)?;
-    let (message_id, voice, speaker, text) = if tokens.len() >= 4 {
+    let (message_id, speaker, text) = if tokens.len() >= 4 {
         let message_id = tokens[0]
             .parse::<i64>()
             .map_err(|_| MinoriRuntimeError::Operand)?;
         (
             message_id,
-            (!tokens[1].is_empty()).then(|| tokens[1].clone()),
             (!tokens[2].is_empty()).then(|| tokens[2].clone()),
             tokens[3..].join(" "),
         )
     } else {
         // The original CommandMessage parser leaves constructor defaults intact when fewer
         // than four operands are present, then still executes the empty message update.
-        (-1, None, None, String::new())
+        (-1, None, String::new())
     };
-    let text_hash = Hash256::from_sha256(text.as_bytes());
-    let speaker_hash = speaker
-        .as_ref()
-        .map(|value| Hash256::from_sha256(value.as_bytes()));
     state.message = Some(MinoriMessageState {
         source: command.span,
         message_id,
-        text_hash,
-        speaker_hash,
-        // The voice archive/path mapping has not yet been verified, so only its identity enters
-        // deterministic state and no resource URI is guessed.
-        voice_hash: voice.map(|value| Hash256::from_sha256(value.as_bytes())),
     });
     let presentation_sequence = next_effect_sequence(state)?;
     let capture_sequence = next_effect_sequence(state)?;
@@ -1438,11 +1414,11 @@ mod tests {
         assert_eq!(milliseconds, 200);
         assert_eq!(vm.state().variables.get("count"), Some(&3));
         let snapshot = vm.snapshot_bytes().unwrap();
-        let hash = vm.state_hash().unwrap();
+        let state = vm.state().clone();
         vm.resolve_wait(&token_id).unwrap();
         assert_eq!(vm.step(2, 4).unwrap(), Some(MinoriVmEvent::Terminal));
         vm.restore_state(&snapshot).unwrap();
-        assert_eq!(vm.state_hash().unwrap(), hash);
+        assert_eq!(vm.state(), &state);
     }
 
     #[test]
@@ -1631,8 +1607,7 @@ mod tests {
         assert_eq!(token_id, "minori.message.1");
         let state = vm.state().message.as_ref().unwrap();
         assert_eq!(state.message_id, 42);
-        assert_eq!(state.text_hash, Hash256::from_sha256(b"hello world"));
-        assert_eq!(state.voice_hash, Some(Hash256::from_sha256(b"voice")));
+        assert!(state.source.length > 0);
     }
 
     #[test]
@@ -1653,9 +1628,6 @@ mod tests {
         assert!(speaker.is_none());
         let state = vm.state().message.as_ref().unwrap();
         assert_eq!(state.message_id, 42);
-        assert_eq!(state.text_hash, Hash256::from_sha256(b"body words"));
-        assert!(state.voice_hash.is_none());
-        assert!(state.speaker_hash.is_none());
     }
 
     #[test]
@@ -1674,7 +1646,7 @@ mod tests {
         };
         assert_eq!(text, "body");
         assert_eq!(speaker.as_deref(), Some("speaker"));
-        assert!(vm.state().message.as_ref().unwrap().voice_hash.is_none());
+        assert_eq!(vm.state().message.as_ref().unwrap().message_id, 42);
     }
 
     #[test]

@@ -1,6 +1,10 @@
 {
   "schema": "astra.logging_coverage.v1",
   "crates": {
+    "astra-audio-kira": {
+      "status": "instrumented",
+      "reason": "Kira audio service session lifecycle and terminal failure ownership"
+    },
     "astra-core": {
       "status": "not_applicable",
       "reason": "pure schema, identifiers, hashes and diagnostic value types"

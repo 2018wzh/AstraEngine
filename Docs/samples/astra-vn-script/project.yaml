@@ -2,36 +2,38 @@ schema: astra.project.v1
 id: com.example.astra_vn_script_sample
 platform_profiles:
   windows-release:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: windows-release
     platform: windows
     target: nativevn-game
     package_id: com.example.astra_vn_script_sample
     renderer: { providers: [wgpu_hardware], allow_software: false }
     decode: { providers: [wmf], allow_software: false }
-    audio: { providers: [wasapi], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [wasapi], allow_software: false }
     save: { providers: [saved_games], allow_software: false }
     package_sources:
       - { kind: bundled }
       - { kind: user_authorized }
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
   web-release-chrome:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: web-release-chrome
     platform: web
     target: nativevn-game
     package_id: com.example.astra_vn_script_sample
     renderer: { providers: [webgpu], allow_software: false }
     decode: { providers: [webcodecs], allow_software: false }
-    audio: { providers: [webaudio], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [webaudio], allow_software: false }
     save: { providers: [opfs], allow_software: false }
     package_sources:
       - { kind: bundled }
       - { kind: user_authorized }
       - kind: https_range
         allowed_origins: [https://cdn.example.invalid]
-    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, max_package_read_bytes: 8388608 }
+    limits: { command_queue_capacity: 256, event_queue_capacity: 1024, max_frame_bytes: 67108864, max_audio_frames: 192000, audio_pcm_cache_bytes: 268435456, audio_chunk_frames: 512, max_package_read_bytes: 8388608 }
     package_cache: { max_entry_bytes: 17179869184, max_total_bytes: 68719476736 }
 
 

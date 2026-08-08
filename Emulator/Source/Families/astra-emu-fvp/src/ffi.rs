@@ -7,14 +7,15 @@ use abi_stable::{
     prefix_type::PrefixTypeTrait,
     std_types::{ROption, RResult, RString},
 };
+use astra_byte_source::FfiOwnedByteBuffer;
 use astra_emu_family_api::{
     ffi_result, native_result, validate_symbol, AstraLegacyFamilyModule,
     AstraLegacyFamilyModuleRef, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiLegacyHostServices,
-    FfiLegacyResult, FfiOpenCall, FfiOwnedBytes, FfiProbeCall, FfiProbeReport,
-    FfiProviderInstanceRequest, FfiResourceReadCall, FfiRestoreCall, FfiRestoreReport,
-    FfiSessionCall, FfiShutdownReport, FfiSnapshotEnvelope, FfiStepCall, FfiStepOutput,
-    FfiTextLeaseCall, FfiVfsEnumerateCall, FfiVfsRangeCall, FfiVfsStatCall, LegacyProviderError,
-    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyVfsListedFile, LegacyVfsReader,
+    FfiLegacyResult, FfiOpenCall, FfiProbeCall, FfiProbeReport, FfiProviderInstanceRequest,
+    FfiResourceReadCall, FfiRestoreCall, FfiRestoreReport, FfiSessionCall, FfiShutdownReport,
+    FfiSnapshotEnvelope, FfiStepCall, FfiStepOutput, FfiTextLeaseCall, FfiVfsEnumerateCall,
+    FfiVfsRangeCall, FfiVfsStatCall, LegacyProviderError, LegacyRuntimeProvider,
+    LegacyRuntimeSessionId, LegacyVfsListedFile, LegacyVfsReader,
 };
 
 use crate::FvpRuntimeProvider;
@@ -57,7 +58,7 @@ impl LegacyVfsReader for FfiVfsReader {
                 FfiVfsRangeCall {
                     mount_set_id: mount_set_id.into(),
                     uri: uri.into(),
-                    expected_revision: expected_revision.0.into(),
+                    expected_revision: expected_revision.0,
                     range: range.into(),
                     max_bytes,
                 },
@@ -236,7 +237,9 @@ extern "C" fn take_ephemeral_text(
     })())
 }
 
-extern "C" fn read_session_resource(call: FfiResourceReadCall) -> FfiLegacyResult<FfiOwnedBytes> {
+extern "C" fn read_session_resource(
+    call: FfiResourceReadCall,
+) -> FfiLegacyResult<FfiOwnedByteBuffer> {
     ffi_result((|| {
         let provider = provider(call.instance_id.as_str())?;
         let mut provider = provider.lock().map_err(|_| lock_error())?;
@@ -247,7 +250,7 @@ extern "C" fn read_session_resource(call: FfiResourceReadCall) -> FfiLegacyResul
                 call.resource_uri.as_str(),
                 call.max_bytes,
             )
-            .map(FfiOwnedBytes::new)
+            .map(astra_byte_source::OwnedByteBuffer::into_ffi)
     })())
 }
 

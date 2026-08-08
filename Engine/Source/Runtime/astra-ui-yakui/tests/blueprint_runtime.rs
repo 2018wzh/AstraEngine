@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use astra_core::Hash256;
 use astra_media_core::TextureFrame;
@@ -72,15 +75,14 @@ fn explicit_max_size_bounds_an_absolutely_positioned_window() {
         hash: Hash256::from_sha256(&[]),
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.classic".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let frame = UiBlueprintFrameModel {
         schema: "astra.ui_blueprint_frame_model.v1".into(),
         view_id: "ui.fixed_window".into(),
@@ -113,7 +115,8 @@ fn explicit_max_size_bounds_an_absolutely_positioned_window() {
         },
         theme,
         model_schema: "model.fixed_window.v1".into(),
-        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+        model_revision: 1,
+        model: frame,
     };
     let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
     let mut backend =
@@ -176,15 +179,14 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         hash: Hash256::from_sha256(&[]),
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.classic".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let frame = UiBlueprintFrameModel {
         schema: "astra.ui_blueprint_frame_model.v1".into(),
         view_id: "ui.base".into(),
@@ -222,7 +224,8 @@ fn modal_stack_is_rendered_as_bounded_dialog_semantics() {
         },
         theme,
         model_schema: "model.base.v1".into(),
-        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+        model_revision: 1,
+        model: frame,
     };
     let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
     let mut backend =
@@ -294,15 +297,14 @@ fn ten_thousand_items_instantiate_only_visible_rows() {
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
 
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.classic".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let entries = (0..10_000)
         .map(|index| {
             UiValue::Map(BTreeMap::from([(
@@ -343,7 +345,8 @@ fn ten_thousand_items_instantiate_only_visible_rows() {
         },
         theme,
         model_schema: "astra.vn.ui_model.backlog.v1".into(),
-        model_payload: postcard::to_allocvec(&model).expect("model encode"),
+        model_revision: 1,
+        model,
     };
     let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
     let mut backend =
@@ -420,15 +423,14 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
 
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.classic".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let items = (0..1_000)
         .map(|index| {
             UiValue::Map(BTreeMap::from([
@@ -460,13 +462,11 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
                 TextureFrame {
                     width: 1,
                     height: 1,
-                    hash: Hash256::from_sha256(&rgba8),
                     rgba8: rgba8.into(),
                 },
             )
         })
         .collect();
-    let encoded = postcard::to_allocvec(&frame).expect("frame encode");
     let request = |sequence: u64, wheel: bool| UiFrameRequest {
         schema: "astra.ui_frame_request.v1".into(),
         session_id: "session.gallery".into(),
@@ -498,7 +498,8 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
         },
         theme: theme.clone(),
         model_schema: "astra.vn.ui_model.gallery.v1".into(),
-        model_payload: encoded.clone(),
+        model_revision: 1,
+        model: frame.clone(),
     };
     let renderer = BlueprintYakuiRenderer::new(bundle)
         .expect("renderer")
@@ -519,7 +520,6 @@ fn thousand_gallery_images_are_virtualized_and_bounded_by_lru() {
             TextureFrame {
                 width: 1,
                 height: 1,
-                hash: Hash256::from_sha256(&replacement_rgba8),
                 rgba8: replacement_rgba8.into(),
             },
         )
@@ -589,15 +589,14 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         hash: Hash256::from_sha256(&[]),
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.classic".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let frame = UiBlueprintFrameModel {
         schema: "astra.ui_blueprint_frame_model.v1".into(),
         view_id: "ui.config".into(),
@@ -630,7 +629,8 @@ fn accessibility_range_action_uses_typed_change_binding_and_is_consumed() {
         },
         theme: theme.clone(),
         model_schema: "model.config.v1".into(),
-        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+        model_revision: 1,
+        model: frame.clone(),
     };
     let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
     let mut backend =
@@ -717,15 +717,14 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
         hash: Hash256::from_sha256(&[]),
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.focus".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let request = |focus_request, events| {
         let frame = UiBlueprintFrameModel {
             schema: "astra.ui_blueprint_frame_model.v1".into(),
@@ -759,7 +758,8 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
             },
             theme: theme.clone(),
             model_schema: "model.focus.v1".into(),
-            model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+            model_revision: 1,
+            model: frame.clone(),
         }
     };
     let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
@@ -780,14 +780,14 @@ fn requested_focus_activates_a_button_without_prior_navigation() {
     );
     let retained = backend
         .renderer_mut()
-        .resolve_retained_activation(focused.semantics.hash, "root/confirm", 1)
+        .resolve_retained_activation(focused.semantics.generation, "root/confirm", 1)
         .expect("retained activation");
     assert_eq!(retained.action_id, "vn.advance");
     assert_eq!(retained.semantic_target_id, "root/confirm");
-    assert_eq!(retained.semantic_snapshot_hash, focused.semantics.hash);
+    assert_eq!(retained.semantic_generation, focused.semantics.generation);
     let stale = backend
         .renderer_mut()
-        .resolve_retained_activation(Hash256::from_sha256(b"stale"), "root/confirm", 1)
+        .resolve_retained_activation(focused.semantics.generation + 1, "root/confirm", 1)
         .expect_err("stale retained activation");
     assert_eq!(stale.code(), "ASTRA_UI_RETAINED_SEMANTIC_STALE");
     let activated = backend
@@ -902,15 +902,14 @@ fn missing_focus_target_reports_bounded_focusable_semantic_ids() {
         hash: Hash256::from_sha256(&[]),
     };
     bundle.hash = bundle.compute_hash().expect("bundle hash");
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.focus".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     let frame = UiBlueprintFrameModel {
         schema: "astra.ui_blueprint_frame_model.v1".into(),
         view_id: "ui.focus.missing".into(),
@@ -943,7 +942,8 @@ fn missing_focus_target_reports_bounded_focusable_semantic_ids() {
         },
         theme,
         model_schema: "model.focus.v1".into(),
-        model_payload: postcard::to_allocvec(&frame).expect("frame encode"),
+        model_revision: 1,
+        model: frame,
     };
     let renderer = BlueprintYakuiRenderer::new(bundle).expect("renderer");
     let mut backend = AstraYakuiBackend::new(renderer, Hash256::from_sha256(b"missing-focus-test"))

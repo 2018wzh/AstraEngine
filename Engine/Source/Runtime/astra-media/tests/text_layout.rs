@@ -82,9 +82,9 @@ fn frame_resource_journal_is_incremental_shared_and_transactional() {
     assert!(stable.lifecycle.is_empty());
 
     let mut conflicting = layout.clone();
-    std::sync::Arc::make_mut(&mut conflicting.glyph_resources[0].bitmap.pixels)[0] ^= 0xff;
-    conflicting.glyph_resources[0].bitmap.hash =
-        Hash256::from_sha256(&conflicting.glyph_resources[0].bitmap.pixels);
+    let mut conflicting_pixels = conflicting.glyph_resources[0].bitmap.pixels.to_vec();
+    conflicting_pixels[0] ^= 0xff;
+    conflicting.glyph_resources[0].bitmap.pixels = conflicting_pixels.into();
     let error = owner
         .update_frame(
             &[TextRenderLayoutUpdate {
@@ -555,9 +555,9 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     assert_eq!(redraw.len(), 1);
     renderer.capture_frame(&redraw).unwrap();
     let mut conflicting = layout.clone();
-    std::sync::Arc::make_mut(&mut conflicting.glyph_resources[0].bitmap.pixels)[0] ^= 0xff;
-    conflicting.glyph_resources[0].bitmap.hash =
-        Hash256::from_sha256(&conflicting.glyph_resources[0].bitmap.pixels);
+    let mut conflicting_pixels = conflicting.glyph_resources[0].bitmap.pixels.to_vec();
+    conflicting_pixels[0] ^= 0xff;
+    conflicting.glyph_resources[0].bitmap.pixels = conflicting_pixels.into();
     assert!(resource_owner
         .update_layout("line.production", &conflicting, [255; 4])
         .unwrap_err()
@@ -575,7 +575,7 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
         .unwrap();
 
     let repeated = provider.layout(&request).unwrap();
-    assert_eq!(layout.hash, repeated.hash);
+    assert_eq!(layout.revision, repeated.revision);
     let stats = provider.cache_stats().unwrap();
     assert_eq!(stats.entries, 1);
     assert_eq!(stats.misses, 1);
@@ -594,7 +594,7 @@ fn measurement_reuses_the_authoritative_layout_cache_without_glyph_clone_contrac
     let layout = provider.layout(&request).unwrap();
     assert_eq!(measured.width, layout.width);
     assert_eq!(measured.height, layout.height);
-    assert_eq!(measured.hash, layout.hash);
+    assert_eq!(measured.revision, layout.revision);
     let stats_after_layout = provider.cache_stats().unwrap();
     assert_eq!(stats_after_layout.misses, 1);
     assert_eq!(stats_after_layout.hits, 1);
@@ -716,7 +716,7 @@ fn licensed_multiscript_fallback_shapes_cjk_arabic_and_emoji_clusters() {
         .glyph_resources
         .iter()
         .any(|resource| resource.font_asset_id.ends_with("noto-emoji")));
-    assert_eq!(layout.hash, provider.layout(&request).unwrap().hash);
+    assert_eq!(layout.revision, provider.layout(&request).unwrap().revision);
 }
 
 #[astra_headless_test::test]
@@ -782,7 +782,10 @@ fn cjk_vertical_layout_places_columns_ruby_rotated_glyphs_and_tate_chu_yoko() {
         assert!(glyphs
             .iter()
             .all(|glyph| glyph.render_x.is_some() && glyph.render_y.is_some()));
-        assert_eq!(layout.hash, provider.layout(&vertical).unwrap().hash);
+        assert_eq!(
+            layout.revision,
+            provider.layout(&vertical).unwrap().revision
+        );
     }
 }
 
@@ -935,7 +938,7 @@ fn font_replacement_is_transactional_and_invalidates_layout_cache() {
     assert_eq!(replaced.font_generation, 2);
     assert_eq!(replaced.entries, 0);
     let second = provider.layout(&request).unwrap();
-    assert_ne!(first.hash, second.hash);
+    assert_ne!(first.revision, second.revision);
 
     let before_failure = provider.cache_stats().unwrap();
     let invalid = font(vec![1, 2, 3]);
@@ -1163,7 +1166,7 @@ fn multiscript_fallback_database_is_loaded_from_verified_package_sections() {
         .map(|run| run.font_family.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(families.len(), 4);
-    assert_eq!(layout.hash, provider.layout(&mixed).unwrap().hash);
+    assert_eq!(layout.revision, provider.layout(&mixed).unwrap().revision);
 }
 
 #[astra_headless_test::test]
@@ -1193,8 +1196,8 @@ fn layout_snapshot_restore_and_provider_free_replay_are_deterministic() {
     let mut replay =
         TextLayoutReplaySession::restore_replay(&transcript, &binding, limits.max_snapshot_bytes)
             .unwrap();
-    let first_request_hash = provider.request_hash(&first).unwrap();
-    let second_request_hash = provider.request_hash(&second).unwrap();
+    let first_request_hash = astra_media::text_layout_replay_request_hash(&first).unwrap();
+    let second_request_hash = astra_media::text_layout_replay_request_hash(&second).unwrap();
     assert_eq!(
         replay
             .replay_next(TextLayoutReplayInput {
@@ -1236,7 +1239,7 @@ fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     let binding = replay_binding(&provider);
     let limits = TextLayoutReplayLimits::production_defaults();
     let request = request("recorded layout");
-    let request_hash = provider.request_hash(&request).unwrap();
+    let request_hash = astra_media::text_layout_replay_request_hash(&request).unwrap();
     let mut live = TextLayoutReplaySession::live(binding.clone(), limits).unwrap();
     let expected = live.record_live(&provider, &request).unwrap();
     let bytes = live.snapshot().unwrap();
@@ -1273,8 +1276,12 @@ fn layout_replay_blocks_request_provider_and_payload_drift_without_advancing() {
     assert!(error.to_string().contains("ASTRA_TEXT_PROVIDER_DRIFT"));
 
     let mut decoded: TextLayoutReplaySnapshot = postcard::from_bytes(&bytes).unwrap();
-    std::sync::Arc::make_mut(&mut decoded.records[0].layout.glyph_resources[0].bitmap.pixels)[0] ^=
-        0xff;
+    let mut tampered_pixels = decoded.records[0].layout.glyph_resources[0]
+        .bitmap
+        .pixels
+        .to_vec();
+    tampered_pixels[0] ^= 0xff;
+    decoded.records[0].layout.glyph_resources[0].bitmap.pixels = tampered_pixels.into();
     let tampered = postcard::to_allocvec(&decoded).unwrap();
     let error =
         TextLayoutReplaySession::restore_replay(&tampered, &binding, limits.max_snapshot_bytes)

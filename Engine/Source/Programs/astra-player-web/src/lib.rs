@@ -121,10 +121,7 @@ pub fn validate_package(
                 format!("platform profile section is invalid: {error}"),
             )
         })?;
-    if !matches!(
-        profiles.schema.as_str(),
-        "astra.platform_profiles.v1" | "astra.platform_profiles.v2"
-    ) {
+    if !matches!(profiles.schema.as_str(), "astra.platform_profiles.v3") {
         return Err(PlatformError::new(
             PlatformErrorCode::InvalidProfile,
             "web_player.package",

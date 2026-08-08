@@ -7,6 +7,7 @@ members = [
     "Engine/Source/Runtime/astra-byte-source",
     "Engine/Source/Runtime/astra-media-core",
     "Engine/Source/Runtime/astra-media",
+    "Engine/Source/Runtime/astra-audio-kira",
     "Engine/Source/Runtime/astra-ui-core",
     "Engine/Source/Runtime/astra-ui-yakui",
     "Engine/Source/Runtime/astra-ui-plugin-abi",
@@ -109,6 +110,7 @@ clap = { version = "4", features = ["derive"] }
 configparser = "3"
 cosmic-text = "=0.18.2"
 cpal = "0.17"
+kira = { version = "=0.12.2", default-features = false }
 directories = "6"
 dunce = "1"
 flate2 = "=1.1.9"

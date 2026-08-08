@@ -216,7 +216,7 @@ pub fn package_sections_for_project_with_components(
         )?,
         SectionPayload::postcard(
             "vn.system_ui_profile_manifest",
-            "astra.vn.system_ui_profile_manifest.v2",
+            "astra.vn.system_ui_profile_manifest.v3",
             &VnSystemUiProfileManifest::from_compiled(project, vec!["zh-Hans".to_string()]),
         )?,
     ];
@@ -486,9 +486,9 @@ pub fn decode_compiled_project(
     let system_ui: VnSystemUiProfileManifest = package
         .container()
         .decode_postcard("vn.system_ui_profile_manifest")?;
-    if system_ui.schema != "astra.vn.system_ui_profile_manifest.v2" {
+    if system_ui.schema != "astra.vn.system_ui_profile_manifest.v3" {
         return Err(ContainerError::message(
-            "ASTRA_VN_SYSTEM_UI_PROFILE_SCHEMA: packaged system UI policy is not v2",
+            "ASTRA_VN_SYSTEM_UI_PROFILE_SCHEMA: packaged system UI policy is not v3",
         ));
     }
     if components.schema != "astra.vn.ui_component_bundle.v1"

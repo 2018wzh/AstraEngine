@@ -1,7 +1,7 @@
 use astra_platform::{
-    host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputStatus, DecodeKind,
-    DecodeOutput, DecodeSessionHandle, HostCommand, PackageSourceHandle, PlatformDecodeRequest,
-    PlatformHostProfile, RgbaFrame, SaveTransactionHandle, SurfaceHandle, WindowHandle,
+    host_channel, AudioOutputHandle, DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand,
+    PackageSourceHandle, PlatformDecodeRequest, PlatformHostProfile, RgbaFrame,
+    SaveTransactionHandle, SurfaceHandle, WindowHandle,
 };
 
 #[tokio::test]
@@ -93,59 +93,6 @@ async fn client_exposes_explicit_present_close_and_storage_lifecycle() {
     }
     assert_eq!(read_package.await.unwrap().unwrap(), [4, 3, 2, 1]);
 
-    let drain = tokio::spawn({
-        let client = client.clone();
-        async move { client.drain_audio(audio).await }
-    });
-    match backend.next_command().await.unwrap() {
-        HostCommand::DrainAudio { reply, .. } => reply
-            .send(Ok(AudioMeter {
-                sample_count: 2,
-                peak_dbfs: -6.0,
-                rms_dbfs: -9.0,
-            }))
-            .unwrap(),
-        other => panic!("unexpected command: {}", other.operation()),
-    }
-    assert_eq!(drain.await.unwrap().unwrap().sample_count, 2);
-
-    let query = tokio::spawn({
-        let client = client.clone();
-        async move { client.query_audio_output(audio).await }
-    });
-    match backend.next_command().await.unwrap() {
-        HostCommand::QueryAudioOutput { reply, .. } => reply
-            .send(Ok(AudioOutputStatus {
-                submitted_frames: 2,
-                played_frames: 1,
-                buffered_frames: 1,
-                underflow_count: 0,
-                meter: AudioMeter {
-                    sample_count: 2,
-                    peak_dbfs: -6.0,
-                    rms_dbfs: -9.0,
-                },
-            }))
-            .unwrap(),
-        other => panic!("unexpected command: {}", other.operation()),
-    }
-    assert_eq!(query.await.unwrap().unwrap().buffered_frames, 1);
-
-    let device_format = tokio::spawn({
-        let client = client.clone();
-        async move { client.query_audio_device_format().await }
-    });
-    match backend.next_command().await.unwrap() {
-        HostCommand::QueryAudioDeviceFormat { reply } => reply
-            .send(Ok(AudioDeviceFormat {
-                sample_rate: 48_000,
-                channels: 2,
-            }))
-            .unwrap(),
-        other => panic!("unexpected command: {}", other.operation()),
-    }
-    assert_eq!(device_format.await.unwrap().unwrap().sample_rate, 48_000);
-
     for (operation, task) in [
         (
             "audio.pause",
@@ -200,7 +147,7 @@ async fn client_exposes_explicit_present_close_and_storage_lifecycle() {
                         coded_height: None,
                         keyframe: true,
                         stream_action: astra_platform::DecodeStreamAction::OneShot,
-                        bytes: vec![1, 2, 3],
+                        bytes: vec![1, 2, 3].into(),
                     },
                 )
                 .await
@@ -210,8 +157,7 @@ async fn client_exposes_explicit_present_close_and_storage_lifecycle() {
         HostCommand::Decode { reply, .. } => reply
             .send(Ok(DecodeOutput::CpuBuffer {
                 format: "bgra8:1x1".to_string(),
-                bytes: vec![1, 2, 3, 255],
-                hash: "sha256:frame".to_string(),
+                bytes: vec![1, 2, 3, 255].into(),
             }))
             .unwrap(),
         other => panic!("unexpected command: {}", other.operation()),

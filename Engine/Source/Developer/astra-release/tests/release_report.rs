@@ -32,8 +32,8 @@ fn release_gate_blocks_headless_profile_schema_in_package() {
         nativevn_target_manifest(),
         vec![SectionPayload::raw(
             "headless.profile",
-            "astra.headless_host_profile.v2",
-            br#"{"schema":"astra.headless_host_profile.v2"}"#.to_vec(),
+            "astra.headless_host_profile.v3",
+            br#"{"schema":"astra.headless_host_profile.v3"}"#.to_vec(),
         )],
     );
 
@@ -93,12 +93,12 @@ fn release_gate_blocks_headless_launch_profile_in_cooked_platform_profiles() {
         nativevn_target_manifest(),
         vec![SectionPayload::raw(
             "platform.profiles",
-            "astra.platform_profiles.v2",
+            "astra.platform_profiles.v3",
             serde_json::json!({
-                "schema": "astra.platform_profiles.v2",
+                "schema": "astra.platform_profiles.v3",
                 "profiles": [{
                     "kind": "headless",
-                    "profile": {"schema": "astra.headless_host_profile.v2"}
+                    "profile": {"schema": "astra.headless_host_profile.v3"}
                 }]
             })
             .to_string()
@@ -1234,7 +1234,7 @@ fn release_report_includes_web_platform_provider_evidence() {
     let platform_report = platform_capability(
         PlatformId::Web,
         "nativevn-web",
-        &["webgpu", "webcodecs", "webaudio", "opfs"],
+        &["webgpu", "webcodecs", "kira", "webaudio", "opfs"],
     );
 
     let report = ReleaseValidator
@@ -1258,6 +1258,14 @@ fn release_report_includes_web_platform_provider_evidence() {
         .evidence
         .iter()
         .any(|entry| entry.key == "provider.decode.selected" && entry.value == "webcodecs"));
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "provider.audio_mixer.selected" && entry.value == "kira"));
+    assert!(platform_check
+        .evidence
+        .iter()
+        .any(|entry| entry.key == "provider.audio_output.selected" && entry.value == "webaudio"));
     assert!(platform_check
         .evidence
         .iter()

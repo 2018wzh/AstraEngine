@@ -4,9 +4,10 @@
 //! is the only place where RFVP's typed hosted delta is translated into the
 //! existing renderer-neutral family packet.
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyBlendMode,
-    LegacyDrawV1, LegacyPayload, LegacySceneResourceOperationV7, LegacySceneResourceStateV1,
+    LegacyDrawV1, LegacySceneResourceOperationV7, LegacySceneResourceStateV1,
     LegacySceneTransactionV7, LegacyScissorV1, LegacyTextureFormat, LegacyVertexV1,
     LegacyVideoCommandV1, LegacyVideoMode,
 };
@@ -21,7 +22,7 @@ const MAX_UPLOAD_BYTES: usize = 256 * 1024 * 1024;
 /// metadata is intentionally serializable, so a save/restore boundary can
 /// reconstruct the same incremental resource validation without retaining
 /// decoded pixels outside the renderer.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct HostedSceneTranslator {
     resources: LegacySceneResourceStateV1,
     // RFVP can allocate or update a texture before beginning the frame that
@@ -88,7 +89,7 @@ impl HostedSceneTranslator {
                         width: texture.desc.width,
                         height: texture.desc.height,
                         format,
-                        pixels: LegacyPayload::Native(pixels),
+                        pixels,
                     });
                 }
                 HostedSceneOperation::UpdateTexture(update) => {
@@ -109,7 +110,7 @@ impl HostedSceneTranslator {
                         width: update.rect.width,
                         height: update.rect.height,
                         format,
-                        pixels: LegacyPayload::Native(pixels),
+                        pixels,
                     });
                 }
                 HostedSceneOperation::DestroyTexture(id) => {
@@ -343,8 +344,8 @@ fn texture_payload_owned(
     width: u32,
     height: u32,
     format: PixelFormat,
-    pixels: Vec<u8>,
-) -> Result<(LegacyTextureFormat, Vec<u8>), HostedAdapterError> {
+    pixels: rfvp_hosted::host_api::HostedPixelBuffer,
+) -> Result<(LegacyTextureFormat, OwnedByteBuffer), HostedAdapterError> {
     let format = match format {
         PixelFormat::Rgba8 => LegacyTextureFormat::Rgba8,
         PixelFormat::LumaA8 => LegacyTextureFormat::LumaAlpha8,
@@ -367,7 +368,10 @@ fn texture_payload_owned(
     if *bytes > MAX_UPLOAD_BYTES {
         return Err(HostedAdapterError::UploadBudget);
     }
-    Ok((format, pixels))
+    Ok((
+        format,
+        OwnedByteBuffer::from_owner(pixels, |pixels| pixels.as_slice()),
+    ))
 }
 
 fn map_blend(blend: BlendMode) -> LegacyBlendMode {
@@ -507,7 +511,9 @@ mod tests {
                     format: PixelFormat::Rgba8,
                     mip_count: 1,
                 },
-                pixels: Some(vec![0, 0, 0, 255, 255, 255, 255, 255]),
+                pixels: Some(rfvp_hosted::host_api::HostedPixelBuffer::from_bytes(vec![
+                    0, 0, 0, 255, 255, 255, 255, 255,
+                ])),
             }),
             HostedSceneOperation::BeginFrame {
                 width: 640,
@@ -531,7 +537,7 @@ mod tests {
                     height: 1,
                 },
                 format: PixelFormat::Rgba8,
-                pixels: vec![1, 2, 3, 4],
+                pixels: rfvp_hosted::host_api::HostedPixelBuffer::from_bytes(vec![1, 2, 3, 4]),
             }),
             HostedSceneOperation::BeginFrame {
                 width: 640,
@@ -564,7 +570,9 @@ mod tests {
                     format: PixelFormat::Rgba8,
                     mip_count: 1,
                 },
-                pixels: Some(vec![0, 0, 0, 255]),
+                pixels: Some(rfvp_hosted::host_api::HostedPixelBuffer::from_bytes(vec![
+                    0, 0, 0, 255,
+                ])),
             },
         )]);
         assert!(translator
@@ -605,7 +613,9 @@ mod tests {
                     format: PixelFormat::Rgba8,
                     mip_count: 1,
                 },
-                pixels: Some(vec![0, 0, 0, 255]),
+                pixels: Some(rfvp_hosted::host_api::HostedPixelBuffer::from_bytes(vec![
+                    0, 0, 0, 255,
+                ])),
             }),
             HostedSceneOperation::BeginFrame {
                 width: 640,

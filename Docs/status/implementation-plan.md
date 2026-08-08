@@ -37,7 +37,7 @@
 
 > 2026-08-03 native soak：10 分钟 mixed-run 完成 35,578 个配对 fixed tick，RFVP core p99 为 2.923 ms，但 fixed tick p99 为 16.690 ms、最大值为 5.892 s，累计 656 次 device underflow。第 651 step 的 core 只用 2.696 ms，adapter effect dispatch 却阻塞 3.940 s；后段另有多次 0.2–2.98 s 的 media/effect 长帧。与 RFVP `0.5.0` 对照后确认，原版按 `GraphBuff generation` 对已有动态纹理执行原位 `queue.write_texture`，当前 hosted 链则复制和序列化像素、分配新 resource generation，并至少完整重传变化纹理。通用 WGPU atlas 能复用合适的空闲槽，只有容量或碎片化触发时才 repack；新计数将区分整纹理上传与实际 repack。音频 producer 又依赖 fixed tick 补水，任何超过 120–180 ms 的长帧都会耗尽 device queue。该 soak 失败，短跑结论不再作为原生音频通过项；稳定 texture update、增量 atlas upload 和独立 audio producer 完成前，不得关闭 60 FPS 原生门禁。
 
-> 2026-08-03 hot-path 重构：Family ABI 已从 v5 直接 hard cut 到 v7，descriptor/lifecycle/VFS 改用显式 `StableAbi` wire DTO，ABI-owned typed bulk clone/drop-once 与 v5/v6 rejection 有单元/动态 lifecycle 覆盖；FVP runtime snapshot 同步升为 v7。hosted fork pin 更新为 `1dea7b3e59069b958b118cb1e4192f62acd9a5cc`，scene/PCM delta 按值消费并输出脱敏 copy telemetry；同 id texture 的尺寸变化现按 generation 重建，不再把合法动画帧误判为 `InvalidData`。WGPU retained scene 已支持稳定 resource id 的 `UpdateTextureRegion`，保留 atlas placement 和 sparse patch；native async present 改为有界有序回执流水线，不再用单回执阻塞下一动画帧。Manager 私有 CPAL 链已删除，Manager/native CLI 共用 PlatformHost-backed bounded audio worker，按需 decode、分段 PCM、fade/repeat/pause、独立低水位 refill、可复用 mix buffer、owned platform submit 和批量 callback queue 已落地；EOF 尾包会用有界静音余量关闭，避免自然结束后的持续 underflow。启动阶段新增 case/family/probe/runtime/platform/driver 脱敏耗时事件。局部 contract/unit/dynamic lifecycle 已通过；最终 clean Release 三轮短跑和 10 分钟 CLI/Manager mixed-run 尚未重跑，因此本项仍为 `IN_PROGRESS`，不得沿用旧 soak identity 或宣称 60 FPS/零 underflow 已放行。
+> 2026-08-03 hot-path 重构：Family ABI 已从 v5 直接 hard cut 到 v7，descriptor/lifecycle/VFS 改用显式 `StableAbi` wire DTO，ABI-owned typed bulk clone/drop-once 与 v5/v6 rejection 有单元/动态 lifecycle 覆盖；FVP runtime snapshot 同步升为 v7。hosted fork pin 后续已推进到 `ee6bd6a8ae7470a073216d2d110e1042fad7cc25`，scene/PCM delta 按值消费并输出脱敏 copy telemetry；同 id texture 的尺寸变化现按 generation 重建，不再把合法动画帧误判为 `InvalidData`。WGPU retained scene 已支持稳定 resource id 的 `UpdateTextureRegion`，保留 atlas placement 和 sparse patch；native async present 改为有界有序回执流水线，不再用单回执阻塞下一动画帧。Manager 私有 CPAL 链已删除，Manager/native CLI 共用 PlatformHost-backed bounded audio worker，按需 decode、分段 PCM、fade/repeat/pause、独立低水位 refill、可复用 mix buffer、owned platform submit 和批量 callback queue 已落地；EOF 尾包会用有界静音余量关闭，避免自然结束后的持续 underflow。启动阶段新增 case/family/probe/runtime/platform/driver 脱敏耗时事件。局部 contract/unit/dynamic lifecycle 已通过；最终 clean Release 三轮短跑和 10 分钟 CLI/Manager mixed-run 尚未重跑，因此本项仍为 `IN_PROGRESS`，不得沿用旧 soak identity 或宣称 60 FPS/零 underflow 已放行。
 
 > 2026-08-03 startup/logging follow-up：授权样本同一输入的 clean Release 诊断把 `runtime_open` 从 50,789 ms 降到 220 ms，确认原先每次 RFVP 小读都穿透动态 VFS 的 open/stat/hash 是开屏延迟主因；hosted VFS 现使用有界 1 MiB read-through page。首次复跑同时发现跨页读取在页尾错误切片并 panic，现已改为最多逐页复制到调用方 buffer，并以真实越界形状的回归测试覆盖。RFVP hosted 的 payload-free log record 不再在 family dylib 内直接调用 `tracing`；它经 ABI v7 `LegacyDiagnostic` 返回可执行宿主，由宿主统一发送到 `astra-observability` 后从 Runtime output 移除，因此不进入 save、replay、report 或状态 hash。该复跑在进入主循环前被已修复的分页错误阻断，最终动画与音频门禁仍需在新 clean identity 上重跑。
 
@@ -105,9 +105,9 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | --- | --- | --- |
 | `S2-PLATFORM-01` | `IN_PROGRESS` | Migration 8 已落地 async typed-handle contract、`astra-platform-common`、capability v2 与 conformance schema；Windows/Web 同 commit 真实验收尚未闭合，不能恢复 `DONE` |
 | `S2-UI-BACKEND-01` | `IN_PROGRESS` | `astra-ui-core`、`astra-ui-yakui`、Scene2D indexed Mesh、事务化纹理 generation、输入消费、context restore、UIA/ARIA mirror 与产品性能 gate 已落地；最终 Windows/Web E3 与正式性能 report 待闭合 |
-| `S2-HEADLESS-CONTRACT-01` | `IN_PROGRESS` | `astra.headless_host_profile.v2` 已切换为稀疏 render policy、双帧预算和 CPU/WGPU 严格 flag-binding；manifest/report/checkpoint/review/preflight 已同步 v2，等待完整隔离门禁后恢复 `DONE` |
+| `S2-HEADLESS-CONTRACT-01` | `IN_PROGRESS` | `astra.headless_host_profile.v3` 已固定稀疏 render policy、双帧预算、CPU/WGPU 严格 flag-binding、GPU identity 与 120 Hz presentation cadence；旧 v1/v2 直接拒绝，等待完整隔离门禁后恢复 `DONE` |
 | `S2-HEADLESS-HOST-01` | `IN_PROGRESS` | 默认逐帧提交并校验 scene、仅首帧/checkpoint/末帧 rasterize；`--gpu` 绑定 surface-free WGPU，固定 Windows/DX12、Linux/Vulkan、macOS/Metal，Windows 使用 build-locked static DXC，禁止 backend/CPU fallback；等待三桌面正式 GPU runtime evidence |
-| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | CPU scene/PNG、Media-owned persistent mixer、48 kHz stereo PCM/WAV、真实 Image/Symphonia 与显式 `ffmpeg-vcpkg` 已接通；完整 timestamped BGRA 帧流先进入 session-private bounded spool，Player 通过 descriptor/single-frame/end DTO 按 fixed time 呈现，保存 package asset/hash、stream identity、cursor 与 loop index，restore/skip/shutdown 显式重建或关闭 decode session；比较器使用 BS.1770 积分响度和完整时间线 FFT，等待 clean feature matrix 与正式性能 evidence |
+| `S2-HEADLESS-MEDIA-01` | `IN_PROGRESS` | CPU scene/PNG、共享 Kira mixer、owned PCM chunk lane、48 kHz stereo WAV、真实 Image/Symphonia 与显式 `ffmpeg-vcpkg` 已接通；完整 typed BGRA 帧流按 fixed time 呈现，save 仅保存 asset identity、stream cursor 与 loop index，restore/skip/shutdown 显式重建或关闭 decode session；比较器使用 BS.1770 积分响度和完整时间线 FFT，等待 clean feature matrix 与正式性能 evidence |
 | `S2-HEADLESS-INPUT-01` | `IN_PROGRESS` | 强类型物理输入、fixed tick、双向 JSONL、sequence/session 校验与 NativeVN physical adapter 已实现；旧产品语义 YAML runner 已删除，等待 Windows CI runtime evidence |
 | `S2-HEADLESS-ARTIFACT-01` | `IN_PROGRESS` | v2 双流 hash/count、`checkpoint_ids` 去重、首尾强制证据、renderer identity-bound baseline 和双预算已实现；等待篡改/回滚全矩阵及正式 artifact evidence |
 | `S2-HEADLESS-CLI-01` | `IN_PROGRESS` | `run/serve --gpu`、`ASTRA_HEADLESS_GPU=1` workspace test job 和 `benchmark-render` machine-readable report 已接入；GPU 缺失、软件 adapter、binding/backend mismatch 均阻断，等待 Windows/Linux/macOS hardware jobs |
@@ -140,7 +140,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | `S3-LUAU-01` | `DONE` | `cargo test -p astra-vn-policy --test luau_sandbox` 和 `cargo test -p astra-vn-policy --test luau_mutation` 覆盖 capability sandbox、真实 `PolicyQueryContext` text/asset/backlog/savepoint/layout backing、query result hash、interrupt/memory/output/snapshot-depth budget、`astra.var.set` authority bypass blocking、记录型 mutation/command/trace、rollback/replay 和不可序列化 payload blocking |
 | `S3-LUAU-02` | `DONE` | `cargo test -p astra-vn-policy --test policy_bundle` 和 `cargo test -p astra-release --test release_report release_gate_` 覆盖官方 `astra.policy.standard` Luau source cache、真实 source hash/byte size、`vn.policy_bundle_manifest`、`vn.policy_bundle_source_cache`、required capabilities、package lock、缺 source cache blocking diagnostic、hash mismatch blocking diagnostic 和 sandbox 执行注册 command/trace/snapshot |
 | `S3-PLUGIN-01` | `DONE` | `cargo test -p astra-vn-plugin --test vn_plugin_extensions` 和 `cargo test -p astra-release --test release_report release_gate_` 覆盖 Luau policy bundle provider、VN command provider、presentation command provider、Graph/Timeline metadata extension、release check provider 显式绑定、缺失 binding 和重复 binding 阻断 |
-| `S3-PRESENT-01` | `IN_PROGRESS` | `.astra` standard presentation 已从 raw map 改为 typed `StageCommand` v2，package-bound manifest v2 固化 profile/preset/filter/fallback/budget。`ProductStageDirector` 已用 fixed-point 和事务提交持有 layer/entity/camera、tween、timeline、shake、movie/effect intent、snapshot/restore 与 frame hash；NativeVN Player 已通过它生成 background/sprite retained scene，执行 texture lifecycle、safe-area clip、camera translation/zoom 和 opacity。非法 tick、状态、timeline、snapshot identity、profile budget 失败均不部分提交。共享 `NativeVnProductMediaHost` 已接入 timeline completion、decode、持久 mixer、wait completion 和 cleanup；audio owner 覆盖设备格式协商、bounded sinc resampling、声道映射、BGM loop、bus fade、pause/resume/stop、stable voice completion、queue backpressure/underflow、时长感知 drain 和显式 close。Windows glyph subset 已进入 hardware atlas，`WgpuPresentationCore` 覆盖 ordered frame、resize/readback、context/device recovery policy 与 retained upload rebuild，WASAPI/WMF 也有真实 host service evidence。平台 frame tick、timeline completion 回注 Runtime await、movie/audio/effect、非 normal blend、camera rotation、设备热切换恢复、完整 Windows/Web command stream 与 formal evidence 尚未闭合；Web 本轮暂缓 |
+| `S3-PRESENT-01` | `IN_PROGRESS` | `.astra` standard presentation 已改为 typed `StageCommand` v2，package-bound manifest 固化 profile/preset/filter/budget。`ProductStageDirector` 使用 fixed-point 和事务提交持有 layer/entity/camera、tween、timeline、shake、movie/effect intent 与 snapshot/restore；NativeVN Player 通过它生成 retained scene 并执行 texture lifecycle、safe-area clip、camera translation/zoom 和 opacity。共享 `NativeVnProductMediaHost` 已接入 timeline completion、typed decode、Kira audio session、wait completion 和 cleanup；audio owner 覆盖设备格式协商、bounded resampling、声道映射、BGM loop、bus fade、pause/resume/stop、sample-clock completion、queue backpressure/underflow、drain 和显式 close。平台 frame tick、timeline completion 回注 Runtime await、非 normal blend、camera rotation、设备热切换恢复、完整 Windows/Web command stream 与 formal evidence 尚未闭合；Web 本轮暂缓 |
 | `S3-ADVANCED-01` | `IN_PROGRESS` | AdvancedVN 技术命令已并入两路线 `Examples/NativeVN`，重复 `Examples/AdvancedVN` 已删除；NativeVN script check/cook 通过，仍等待 Windows/Web formal advanced presentation evidence |
 | `S3-SYSTEM-01` | `IN_PROGRESS` | schema-bound Message/Choice/Title/Config/Save/Load/Backlog/Gallery/Replay/Voice Replay/Route Chart/Localization/text-input ViewModel 与 host-authoritative action 路由已替代固定 hit-test；save/load 继续使用平台 transaction。最终 formal host evidence 待闭合 |
 | `S3-UI-SCRIPT-01` | `IN_PROGRESS` | `.astra` `Story`/`Ui` source role、`ui_view/ui_bind/ui_component`、typed binding/action passes、Luau Controller、`CompiledVnProject`、target v2 与新 package root 已落地，旧公开 compiler/package/target reader 已删除；最终 Classic/Modern E3 待闭合 |
@@ -148,7 +148,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | `S3-EDIT-01` | `DONE` | `cargo test -p astra-vn-editor --test editor_metadata` 覆盖 Graph node、Timeline track、wait/fence metadata 到 command id/source map 的校验、缺 command blocking diagnostic 和 patch manifest 只引用同一 IR command id |
 | `S3-SAMPLE-01` | `IN_PROGRESS` | 旗舰项目已直接替换原两路线 NativeVN 技术样例；图片、字体、中文配音、BGM/SE/video 均有 sidecar、license、provenance、hash 与 byte size，script check/cook 纳入本轮验证；formal runner 未通过前保持进行中 |
 | `S3-GAME-TARGET-01` | `IN_PROGRESS` | Engine workspace 使用 `nativevn-minimal-test-game` 与 `minimal` profile 验证 package section、字体、本地化、UI/controller/theme、物理输入和 Headless checkpoint；`astra-release` 以 `ASTRA_ENGINE_TEST_PROFILE_RELEASE` 阻断该 profile 发布。正式 `nativevn-game`、Windows/Web bundle 和 E3 证据仍由独立验收关闭 |
-| `S3-PLAYER-AUTOMATION-01` | `IN_PROGRESS` | `cargo test -p astra-player-core`、Player automation tests、`cargo test -p astra-player-vn --test native_vn_host_source --test product_audio_host --features platform-test-driver`、`cargo test -p astra-player-web --test package_identity`、`cargo test -p astra-player --test windows_text_presentation --features platform-test-driver` 和 `cargo test -p astra-plugin --test product_runtime_host` 覆盖 transcript v2、scenario-derived physical input、Runtime route/terminal evidence、Windows/Web 原子 save/load、共享 media completion、persistent mixer、decode/audio cleanup，以及 versioned Web console evidence 的 package/provider/session/step/hash/route/choice/meter identity。bundled VN 已删除 bitmap/headless/`PresentRgba` presenter，dialogue/choice/system text 从 package localization/font shaping 进入 Windows retained GPU scene，shutdown release 也有真实 capture；runtime instance/session 来自 package validated provider selection，ABI 显式携带 delta/seed/mode，save/restore 使用完整 RuntimeWorld snapshot 并要求 restore continuation，live provider replay 被阻断。Player package open 会先校验 package-bound presentation profile/preset policy，并阻断未实现的 typed Stage command、未绑定 extension provider、headless、空画面和 identity drift。direct route/DOM/JS callback bypass 继续阻断；sample 的平台 frame tick、typed StageModel director、完整 camera/timeline/video/audio、多 route 独立 session、正式 Web CDP driver 和同 run screenshot/audio/route evidence 尚未闭合 |
+| `S3-PLAYER-AUTOMATION-01` | `IN_PROGRESS` | `cargo test -p astra-player-core`、Player automation tests、`cargo test -p astra-player-vn --test native_vn_host_source --test product_audio_host`、`cargo test -p astra-player-web --test package_identity`、Windows platform tests 与 `cargo test -p astra-plugin --test product_runtime_host` 覆盖 typed physical input、Runtime route/terminal evidence、原子 save/load、共享 Kira media completion、decode/audio cleanup，以及 package/provider/session/step/route/choice/meter identity。bundled VN 已删除 bitmap/headless/`PresentRgba` presenter，dialogue/choice/system text 从 package localization/font shaping 进入 retained GPU scene；runtime instance/session 来自 package validated provider selection，save/restore 使用完整 RuntimeWorld snapshot 并要求 restore continuation，live provider replay 被阻断。完整真实线路、Windows 输入、视觉、音频、route、shutdown 与同 revision Perfetto evidence 尚未闭合 |
 | `S3-FLAGSHIP-DEMO-01` | `IN_PROGRESS` | 15–20 分钟、三终局、中英双语、中文全配音和正式原创资产进入 `Docs/migrations/nativevn-flagship-demo-migration.md`；本轮不实现，SAPI/TTS 产物不得进入公开样例 |
 | `S3-TSUI-INTERNAL-DEMO-01` | `IN_PROGRESS` | TsuiNoSora 专用素材与真实游戏验收不进入 Engine workspace、NativeVN `minimal` 或公开 CI。私有 v16 已形成 source-locked Classic Windows bundle 和固定小群 delivery；只保证 Y、Title 与 Classic 系统页，其他 36 条路线仍为 present-but-unvalidated，不能据此关闭 Engine/NativeVN 状态 |
 | `S3-TSUI-GATE-01` | `IN_PROGRESS` | `Tools/TsuiNoSora` 的 257 项 Python 测试、22 项 original patcher 测试、source-unlock/package/platform/Player 定向 Rust 测试和硬件 Headless E2 已通过。v16 通过 43 个视觉 checkpoint、445 条物理输入与 27 次选择的 Y 路线、13 项同节点比较、安全扫描和 `2018wzh` formal signoff；Windows E3、其余路线与公开许可仍保持开放。Tsui 私有证据不阻断 NativeVN `minimal` profile |
@@ -197,7 +197,7 @@ Stage 3 补充证据：TsuiNoSora 本地 helper 已生成 `tsuinosora.projectorr
 | 1 | `S2-PACKAGE-01` package container | `DONE` | `astra-package` 提供共享 container、Zstd codec、crypto descriptor、bounded reader；Runtime save 已迁移 |
 | 2 | `S2-ASSET-01` + `S2-ASSET-02` asset/import/cook | `DONE` | `cargo test -p astra-asset --all-targets`、`cargo test -p astra-cook --all-targets` 和 NativeVN product cook test 覆盖 typed dependency、persistent DDC、bounded batch、取消/panic、规模、原子提交与失败回滚 |
 | 3 | `S2-GATE-01` release report | `DONE` | `astra-release` 和 `astra package validate` 输出 `astra.release_report.v1`；release profile 缺 `compiled.project` cook/project artifact 时阻断 |
-| 4 | `S2-MEDIA-01` 到 `S2-MEDIA-05` media contract/providers | `IN_PROGRESS` | shared contract、字体 E2、Windows hardware glyph visual E3 子证据、typed FilterGraph、AudioGraph v2、audio-master scheduler、WMF one-shot decode、optional FFmpeg timestamped stream、Windows WASAPI/wgpu native media session、product-profile-bound measured report 和 release same-run validator 已落地；真实 Player performance artifact、Web glyph consumer、GPU FilterGraph 和正式 release-reference performance pass 未闭合，不能沿用旧 `DONE` |
+| 4 | `S2-MEDIA-01` 到 `S2-MEDIA-05` media contract/providers | `IN_PROGRESS` | 新增 `astra-audio-kira`，Kira 以关闭默认 feature 的静态 mixer provider 接入；Windows、Linux、macOS、Android、Web 与 Headless 的源码均改走独立 `AudioOutputLane`，Player 与 AstraEMU 已删除实时音频 HostCommand refill、旧 `ProductionAudioMixer` 和 PCM content hash。Web AudioWorklet 改为 demand-driven chunk lane，不再逐样本计算 meter；Family 对设备同格式、无增益变换的完整 F32 chunk 直接移动原 allocation。Windows workspace all-target、Web code-check 与相关单测已通过；Linux/Android 交叉检查分别被本机缺少 GNU cross compiler/Android NDK sysroot 阻断。device loss 精确续播、正式 Perfetto 和 Windows 真实游戏 E2 尚未完成 |
 | 4a | P1-001 Text/Font 产品闭环 | `IN_PROGRESS` | 固定宽度根因已删除；固定 revision/hash/OFL 的 Noto Sans SC、Noto Sans Arabic、Noto Emoji 已通过真实 `astra.font_manifest.v1`、Package section 和 VFS 构造 provider，覆盖复杂 script/cluster 与 fallback；AssetSidecar 现在要求 typed family/face/subset/Unicode coverage，Cook 自动生成 profile-bound font manifest 和 locale config。bounded transcript 已覆盖 snapshot/restore、uninterrupted continuation、provider-free replay 和 drift blocking。Windows hardware atlas/golden、Player command/release consumer、bundled VN dialogue/choice/system text、事务回滚、release 和 loss/rebuild已闭合；仍需 WebGPU glyph consumer与 bundled VN 完整 presentation/audio 主路径，证据不足前不得标记完整字体系统 |
 | 5 | `S2-HEADLESS-*` Migration 11 | `IN_PROGRESS` | 实现已进入统一主路径；完成 worktree-local workspace test、`ffmpeg-vcpkg` job、正式 review 与 Windows/Web linked preflight evidence 后逐项关闭 |
 | 6 | `S2-WINDOWS-HOST-01` + `S2-WINDOWS-WMF-01` + `S2-WINDOWS-GATE-01` Windows platform repair | `IN_PROGRESS` | Windows real host 已接入 winit/wgpu/WASAPI/WMF/Saved Games/package range；Player 全服务接线和同 run conformance/automation evidence 尚未完成 |
@@ -362,7 +362,7 @@ validated CPU BGRA/i16 boundary. Manager platform movie workers use bounded
 producer rings with `Pending` rather than blocking or `try_send`/`yield_now`
 spins, so a slow decoder cannot stall a fixed runtime tick. Windows, Linux,
 macOS and Android native audio outputs now wake drain/refill waiters through
-`AudioWakeRegistration`; Web AudioWorklet meter/drain state uses MessagePort
+`AudioWakeRegistration`; Web AudioWorklet 通过 MessagePort 发出 refill demand，PCM 由进程内 `AudioOutputLane` 消费式移动，实时路径不再维护 meter/drain 镜像
 completion and oneshot waiters rather than a fixed 5 ms timer. These changes
 close the timer/polling and decoder-thread boundaries at contract level and
 targeted checks pass, but clean Release three-run/ten-minute evidence,
@@ -399,12 +399,11 @@ hash-backed repeat ledger were removed. Evidence/package/source revisions
 remain explicit identities, while asynchronous Evidence can hash committed
 artifacts after the live step. Runtime/VFS and FVP focused tests pass.
 
-The VN provider now moves product audio cues through `RuntimeLiveOutput` and
-rejects persisted audio at the Player boundary. Shipping hot component updates
-move one owned postcard allocation with disabled hash markers; Evidence keeps
-the authenticated encoding. VN presentation/view-state and timeline data still
-use the separate persisted contract, so whole-engine zero-serialization is not
-claimed until that remaining live DTO path is closed.
+The VN provider moves audio, presentation, timeline, UI projection and wait data
+through categorized typed live output. Runtime components retain typed values
+and revisions in memory; save is the only normal encoding boundary, while
+restore may lazily decode on first typed read. Evidence digest generation is
+post-commit and does not feed back into Shipping state.
 
 ## 2026-08-06 typed ABI v7 convergence update
 
@@ -416,22 +415,20 @@ video/waits/events/blackboard/dirty_sections 分类字段；FFI 直接转换分�
 输出已迁移 typed owned 路径，`LegacyEffect` 汇总通道删除，改为
 `LegacyLiveOutput` + `LegacyControlTransaction`。Manager 不再把大型 live output
 放入 RuntimeWorld control transaction，patch 持久化使用受限
-`QueuedPatchEffect`。运行时组件存储为 `PostcardOwned`（`Arc<[u8]>` + 预计算
-hash，marker 仅 Evidence 快照时认证），tick 不重编解码组件体，state fingerprint
-只序列化 metadata 并缓存，`RuntimeWorld` 热路径不再每 tick
-encode/decode 组件。
+`QueuedPatchEffect`。运行时组件在内存中保留 typed value 与 revision；restore
+载入 encoded bytes 后只在首次 typed read 解码，save 时才编码。RuntimeWorld 不再
+向 action 或普通调用方暴露 `read_component_postcard_bytes` 热路径入口。
 
 `RuntimeSectionPayload` 恢复 `hash` + `validate_hash()`：save/package section
 完整性校验属 blocking 契约，交接中间态误删后已补回全部 15 个构造点。
 Perfetto 假零 counter 已删除，`pcm_moved/pcm_copied_bytes` 只来自真实 FVP copy
 telemetry（缺 telemetry 即 fail-fast），不允许默认零值充当测量。
 
-`RuntimeStepOutput.persisted` 双轨的剩余消费方已盘点：EMU 路径（FVP/Minori/
-Manager）不再产出 persisted；NativeVN 的 presentation/timeline/step-effect/
-view-state 仍经 persisted 返回，因为它们是 `astra_vn_core` 语义类型而非
-RGBA/PCM 媒体缓冲，`astra-plugin-abi` 不能反向依赖 VN 类型，强行中立 DTO 化
-只会在 60 Hz 热路径增加转换与拷贝。语义命令通道保留 persisted，媒体通道全部
-走 typed live，不再宣称全引擎零序列化，直到该语义通道有独立设计决策。
+后续收束已删除 `RuntimeStepOutput.persisted`、output codec/schema registry、
+recorded provider output 与通用 effect envelope。NativeVN presentation、timeline、
+VN step metadata 与 host view projection 均改为 `astra-plugin-abi` typed DTO；live
+ViewModel 不再经过 JSON/postcard。Provider save、package、replay 与 Evidence 使用
+各自独立的 persisted contract。
 
 验证：`cargo fmt --all`、`git diff --check`、`python Tools/check_docs.py`、
 `cargo clippy --workspace --all-targets -- -D warnings`、`cargo build -p
@@ -471,6 +468,104 @@ zero violation。
 这些结果只关闭 Windows 编译、测试和依赖图门禁。正式性能状态保持
 `IN_PROGRESS`：尚未在冻结的 clean Release revision 上完成 10 分钟 DX12
 Windowed E2，也尚未生成绑定同一 build/profile/input/device 的 Perfetto 数据。
+
+### 2026-08-07 Kira 与 typed owner 收束
+
+Kira 已成为 Player、AstraEMU、Headless 与各平台 host 的统一 mixer。PCM refill
+不再进入 `HostCommand`；Windows、Linux、macOS、Android、Web 与 Headless 都由
+`AudioOutputLane` 接收 owned chunk。Web AudioWorklet 改为 demand-driven refill，
+删除每样本 meter、Rust 侧 query/drain 镜像。Family 在设备同格式、无 gain/pan/fade
+的完整 F32 chunk 上直接移动 decoder allocation，转换路径继续复用有界缓冲。
+
+Family scene 只保留 ABI v7 typed transaction。旧 `LegacyScenePacketV1`、
+`LegacyPreparedSceneCommitV1`、v1 resource operation、CLI/GPU/CPU 双重 prepare 和
+对应整表 clone 已删除。VFS `FfiRangeReadResult` 改用消费式 `FfiOwnedBytes`，测试
+确认 range allocation 跨 Family FFI 往返 pointer 不变。Windows workspace
+all-target check、Web code-check、Family/CLI 定向 clippy 与零拷贝测试已通过；Linux、
+Android、wasm 目标检查分别受缺少 GNU cross compiler、Android NDK sysroot 与既有
+wasm randomness feature graph 阻断。正式 DX12 Shipping Perfetto 与真实游戏路线
+仍是性能放行条件。
+
+CLI Perfetto 已停止把同一个 host 外层计时重复记成 `rfvp.vm`、
+`runtime.family_ffi`、scene validation/mutation/upload 和 audio callback。当前只记录
+host 实际拥有的 `runtime.provider_step`、`scene.transaction_enqueue`、audio refill 等
+边界；VM、Family FFI、GPU upload 和 callback 要等对应 owner 提供真实时间戳后再写入。
+这项修改只修正 trace 语义，不代表这些阶段已经完成性能验收。
+
+### 2026-08-08 单一 typed live 主路径继续收束
+
+Family ABI v7 与 Provider ABI v3 的 audio/video/wait/sync DTO 已从“kind + 全字段
+镜像”改为携带自身数据的 `StableAbi` enum。空 PCM、空 URI、默认尺寸和格式组合校验
+分支随之删除。动态 FFI action bytes invoke、persisted output envelope、generic
+control payload、recorded provider output 与 Runtime effect trace 已删除。
+
+NativeVN 不再每 tick 构造完整 `VnRuntimeState` 镜像。Provider 直接生成有界 host
+projection：普通对话只携带最后一条 backlog，只有对应系统页才携带 backlog、voice
+replay 或 route history。variables、read-state、call-stack 等权威数据只留在 provider
+Runtime component/save 中。Player save v7 envelope 也不再复制 runtime state，只保存
+唯一 `runtime.world` v4 section 与产品表现快照。
+
+实时 UI model 的 serde_json bridge、controller session-state postcard size pass 和
+Yakui texture content hash 已删除；typed `UiValue` 直接构建并按结构化 retained bytes
+做容量检查。Luau query trace 保存 typed result，不再为每次 query postcard + hash。
+
+TextLayout 普通 layout/measure/cache 已删除 JSON+SHA request key 和 per-miss layout
+content hash，改用覆盖完整 request 字段的 typed key、font generation 与 provider-local
+layout revision；request/record/transcript digest 只保留在 replay/save persisted 边界。
+CPU Headless renderer 的事务路径改为 touched-resource journal，不再每 frame clone 完整
+texture/glyph `BTreeMap`。进程内 `LegacyMountedVfs` live stat 删除 content hash，range
+result 改为 `OwnedByteBuffer`；FVP 直接移动 `BoundedByteSource` allocation，Minori 将已
+解码 allocation 连同 range owner 移交给调用方，不再为请求区间 `to_vec()`。VFS access
+去重使用 validated manifest resource index，不再对每次 URI read 计算 SHA-256。
+
+当前仅完成受影响生产 crate 的增量 `cargo check` 编译守卫。按本轮执行顺序，测试、
+schema 生成、全 workspace 门禁、Headless 视觉/音频和 Windowed Perfetto 均在架构收束
+后执行；在这些证据完成前状态保持 `IN_PROGRESS`。
+
+### 2026-08-08 Kira Headless 时钟与本轮门禁
+
+Headless 的 Kira backend 已改为 fixed tick 驱动。每个 60 Hz tick 只放行当前
+sample budget 能容纳的完整 chunk，并等待 worker 提交到对应 sample 位置；文件输入与
+stdin 输入不再因 wall-clock worker 调度差异产生不同 WAV 长度。真实设备路径仍由 endpoint
+容量和 callback 推进，不使用这套确定性时钟。零 sample 的 stream 不再写入伪 WAV artifact，
+协议校验会报告实际 byte、frame、sample rate、channel 和 duration 计数。
+
+本轮 `cargo fmt --check`、workspace all-target check/clippy、`astra-headless` build、
+动态导出、live hot-path、Headless 收敛、Shipping 依赖图和文档门禁已通过。低并发
+workspace tests 找到的 Headless video 旧错误码断言与 logging coverage 漏项已修复，
+对应定向测试通过。Windows `SendInput` 测试仍被当前非交互前台桌面阻断，不能据此声明
+完整 workspace tests 或 Windows 真实输入验收通过。10 分钟 DX12 Windowed E2 与同身份
+Perfetto 也尚未执行，性能状态继续保持 `IN_PROGRESS`。
+
+### 2026-08-08 Kira 完成态生命周期与真实线路复跑
+
+真实线路首先暴露 RFVP hosted 音频命令所有权错误：BGM/SE 空槽仍会产生
+`SetParams`，`stop_all` 还会为未播放槽位产生 `Stop`。修复已提交到 hosted fork
+`ee6bd6a8ae7470a073216d2d110e1042fad7cc25`，Astra 以精确 revision 更新依赖；空槽
+现在只更新 RFVP 逻辑参数，不向 host 生成命令。RFVP library 在 hosted feature 下通过
+`cargo check`，其现有全量 lib tests 仍被 fork 内与本次无关的旧测试编译错误阻断，不能
+把这次 check 写成 fork 全量测试通过。
+
+随后修复 AstraEMU Kira adapter 的完成态处理。自然播放完成后，逻辑 stream 继续保存
+volume、pan、repeat 与资源身份，但已销毁的 Kira voice 不再接收 `SetParams` 或 fade-stop；
+不存在的逻辑 stream 仍 fail-fast。worker 失败日志新增 operation 与 stream id，且 shutdown
+返回最初的 worker diagnostic，不再用 reply channel closed 覆盖根因。对应完成态参数更新、
+fade-stop、owned F32 allocation move、分段 I16 和非法 movie segment 共五个定向单测通过，
+FamilySupport clippy 通过。
+
+同一开发复用 package、Shipping runtime mode、DX12/真实音频设备和物理输入 JSONL 完成
+36,000 fixed tick（10 分钟）的标题点击 + Ctrl 快进运行，并 clean shutdown。Perfetto 中
+`runtime.fixed_tick` p99 为 3.082 ms，`runtime.provider_step` p99 为 2.919 ms，
+`gpu.submit` p99 为 0.297 ms，`audio.refill` p99 为 0.003 ms；deadline debt、audio
+underflow、scene copied bytes 与 PCM copied bytes 均为零。`vfs.range_read` 当前记录的是
+异步提交到 fixed tick 观察完成的墙钟等待，不是 worker CPU self-time；其 16.138 ms p95
+不能作为同步 I/O 热点或优化收益结论，后续要在 VFS owner 提供真实时间戳后再命名和比较。
+
+同 build 的视觉线路也完成 36,000 tick 和 29 个 checkpoint，无 diagnostic。人工查看启动
+logo、游戏标题以及多段正文帧，确认日文 glyph、对话框、功能按钮、skip 状态和连续文本更新
+实际可见；本段内容处于黑底序章，尚未证明背景、角色或完整路线视觉 parity。报告未到
+terminal，且 package 使用开发期构建复用、工作树不是冻结 clean revision，因此本次结果是
+E3 候选与回归证据，不替代正式 clean Release/Shipping signoff，状态保持 `IN_PROGRESS`。
 
 ## 2026-08-04 Windowed E2 identity update
 

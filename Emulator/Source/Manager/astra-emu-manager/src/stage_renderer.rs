@@ -2,6 +2,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use std::borrow::Cow;
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{
     LegacyBlendMode, LegacyDrawV1, LegacyTextureFormat, LegacyVertexV1, LegacyVideoMode,
 };
@@ -421,6 +422,16 @@ impl StageGpu {
                 }
             }
         }
+        let vertex_bytes = runtime_live_scene_vertex_bytes(&draws, width, height)?;
+        let vertex_buffer = (!vertex_bytes.is_empty()).then(|| {
+            context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("astra.emu.stage.live-scene-vertices"),
+                    contents: &vertex_bytes,
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = context
             .device
@@ -444,8 +455,11 @@ impl StageGpu {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            for draw in &draws {
-                self.draw_live(context.device, &mut pass, draw, width, height)?;
+            if let Some(vertex_buffer) = &vertex_buffer {
+                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            }
+            for (draw_index, draw) in draws.iter().enumerate() {
+                self.draw_live(&mut pass, draw, draw_index, width, height)?;
             }
         }
         context.queue.submit([encoder.finish()]);
@@ -461,10 +475,10 @@ impl StageGpu {
         width: u32,
         height: u32,
         format: RuntimeLiveTextureFormat,
-        pixels: Vec<u8>,
+        pixels: OwnedByteBuffer,
     ) -> Result<(), String> {
         let format = legacy_texture_format(format);
-        let rgba = to_rgba(format, &pixels)?;
+        let rgba = to_rgba(format, pixels.as_slice())?;
         if rgba.len() != texture_byte_len(width, height, 4)? {
             return Err("ASTRA_EMU_STAGE_LIVE_TEXTURE_LENGTH".into());
         }
@@ -543,7 +557,7 @@ impl StageGpu {
         width: u32,
         height: u32,
         format: RuntimeLiveTextureFormat,
-        pixels: Vec<u8>,
+        pixels: OwnedByteBuffer,
     ) -> Result<(), String> {
         let format = legacy_texture_format(format);
         let resource = self
@@ -560,7 +574,7 @@ impl StageGpu {
         {
             return Err("ASTRA_EMU_STAGE_LIVE_TEXTURE_REGION".into());
         }
-        let rgba = to_rgba(format, &pixels)?;
+        let rgba = to_rgba(format, pixels.as_slice())?;
         if rgba.len() != texture_byte_len(width, height, 4)? {
             return Err("ASTRA_EMU_STAGE_LIVE_TEXTURE_LENGTH".into());
         }
@@ -775,9 +789,9 @@ impl StageGpu {
 
     fn draw_live<'a>(
         &'a self,
-        device: &wgpu::Device,
         pass: &mut wgpu::RenderPass<'a>,
         draw: &RuntimeLiveDraw,
+        draw_index: usize,
         stage_width: u32,
         stage_height: u32,
     ) -> Result<(), String> {
@@ -792,12 +806,6 @@ impl StageGpu {
             RuntimeLiveBlendMode::Multiply => &self.multiply_pipeline,
             RuntimeLiveBlendMode::Screen => &self.screen_pipeline,
         };
-        let bytes = runtime_live_vertex_bytes(draw, stage_width, stage_height)?;
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("astra.emu.stage.live-vertices"),
-            contents: &bytes,
-            usage: wgpu::BufferUsages::VERTEX,
-        });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &resource.bind_group, &[]);
         if let Some(scissor) = draw.scissor {
@@ -818,8 +826,11 @@ impl StageGpu {
         } else {
             pass.set_scissor_rect(0, 0, stage_width, stage_height);
         }
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.draw(0..4, 0..1);
+        let first_vertex = u32::try_from(draw_index)
+            .ok()
+            .and_then(|index| index.checked_mul(4))
+            .ok_or_else(|| "ASTRA_EMU_STAGE_LIVE_DRAW_INDEX".to_owned())?;
+        pass.draw(first_vertex..first_vertex + 4, 0..1);
         Ok(())
     }
 }
@@ -859,31 +870,37 @@ fn texture_byte_len(width: u32, height: u32, bytes_per_pixel: usize) -> Result<u
         .ok_or_else(|| "ASTRA_EMU_STAGE_TEXTURE_BOUNDS".to_owned())
 }
 
-fn runtime_live_vertex_bytes(
-    draw: &RuntimeLiveDraw,
+fn runtime_live_scene_vertex_bytes(
+    draws: &[RuntimeLiveDraw],
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 {
         return Err("ASTRA_EMU_STAGE_LIVE_DIMENSIONS".into());
     }
-    let mut bytes = Vec::with_capacity(4 * 8 * 4);
-    for vertex in draw.vertices {
-        let values = [
-            vertex.x * 2.0 / width as f32 - 1.0,
-            1.0 - vertex.y * 2.0 / height as f32,
-            vertex.u,
-            vertex.v,
-            f32::from(vertex.color[0]) / 255.0,
-            f32::from(vertex.color[1]) / 255.0,
-            f32::from(vertex.color[2]) / 255.0,
-            f32::from(vertex.color[3]) / 255.0,
-        ];
-        if values.iter().any(|value| !value.is_finite()) {
-            return Err("ASTRA_EMU_STAGE_LIVE_VERTEX_INVALID".into());
-        }
-        for value in values {
-            bytes.extend_from_slice(&value.to_ne_bytes());
+    let capacity = draws
+        .len()
+        .checked_mul(4 * 8 * size_of::<f32>())
+        .ok_or_else(|| "ASTRA_EMU_STAGE_LIVE_VERTEX_BOUNDS".to_owned())?;
+    let mut bytes = Vec::with_capacity(capacity);
+    for draw in draws {
+        for vertex in draw.vertices {
+            let values = [
+                vertex.x * 2.0 / width as f32 - 1.0,
+                1.0 - vertex.y * 2.0 / height as f32,
+                vertex.u,
+                vertex.v,
+                f32::from(vertex.color[0]) / 255.0,
+                f32::from(vertex.color[1]) / 255.0,
+                f32::from(vertex.color[2]) / 255.0,
+                f32::from(vertex.color[3]) / 255.0,
+            ];
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err("ASTRA_EMU_STAGE_LIVE_VERTEX_INVALID".into());
+            }
+            for value in values {
+                bytes.extend_from_slice(&value.to_ne_bytes());
+            }
         }
     }
     Ok(bytes)

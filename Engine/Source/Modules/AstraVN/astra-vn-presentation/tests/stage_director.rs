@@ -49,7 +49,7 @@ fn configure(director: &mut ProductStageDirector) {
 #[astra_headless_test::test]
 fn stage_batch_prepares_one_atomic_next_state_without_mutating_source() {
     let director = director();
-    let initial = director.state().stable_hash().unwrap();
+    let initial = director.state().clone();
     let commands = [
         StageCommand::Backdrop {
             color: [12, 24, 36, 255],
@@ -62,7 +62,7 @@ fn stage_batch_prepares_one_atomic_next_state_without_mutating_source() {
 
     let (next, outputs) = director.prepare_batch(commands.iter()).unwrap();
 
-    assert_eq!(director.state().stable_hash().unwrap(), initial);
+    assert_eq!(director.state(), &initial);
     assert_eq!(outputs.len(), commands.len());
     assert_eq!(next.state().backdrop_color, Some([12, 24, 36, 255]));
     assert_eq!(next.state().shade_opacity, fixed(500_000));
@@ -71,7 +71,7 @@ fn stage_batch_prepares_one_atomic_next_state_without_mutating_source() {
 #[astra_headless_test::test]
 fn stage_batch_failure_discards_every_preceding_mutation() {
     let director = director();
-    let initial = director.state().stable_hash().unwrap();
+    let initial = director.state().clone();
     let commands = [
         StageCommand::Backdrop {
             color: [12, 24, 36, 255],
@@ -85,7 +85,7 @@ fn stage_batch_failure_discards_every_preceding_mutation() {
     let error = director.prepare_batch(commands.iter()).unwrap_err();
 
     assert_eq!(error.code(), "ASTRA_VN_STAGE_SHADE_COLOR_ALPHA");
-    assert_eq!(director.state().stable_hash().unwrap(), initial);
+    assert_eq!(director.state(), &initial);
 }
 
 #[astra_headless_test::test]
@@ -165,7 +165,7 @@ fn show_hero(director: &mut ProductStageDirector) {
 #[astra_headless_test::test]
 fn stage_director_applies_profile_bound_tween_without_partial_failure() {
     let mut director = director();
-    let initial = director.state().stable_hash().unwrap();
+    let initial = director.state().clone();
 
     let error = director
         .apply(&StageCommand::Show {
@@ -181,7 +181,7 @@ fn stage_director_applies_profile_bound_tween_without_partial_failure() {
         })
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_VN_STAGE_NOT_CONFIGURED");
-    assert_eq!(director.state().stable_hash().unwrap(), initial);
+    assert_eq!(director.state(), &initial);
 
     configure(&mut director);
     show_hero(&mut director);
@@ -291,7 +291,7 @@ fn stage_director_resizes_transactionally_without_losing_live_state() {
     assert_eq!(director.state().viewport.height, 1440);
     assert!(director.state().entities.contains_key("hero"));
 
-    let stable = director.state().stable_hash().unwrap();
+    let stable = director.state().clone();
     let error = director
         .resize_viewport(StageViewport {
             width: 0,
@@ -299,7 +299,7 @@ fn stage_director_resizes_transactionally_without_losing_live_state() {
         })
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_VN_STAGE_VIEWPORT");
-    assert_eq!(director.state().stable_hash().unwrap(), stable);
+    assert_eq!(director.state(), &stable);
 }
 
 #[astra_headless_test::test]
@@ -365,13 +365,13 @@ fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
     configure(&mut director);
     show_hero(&mut director);
     director.tick(300_000_000).unwrap();
-    let initial = director.state().stable_hash().unwrap();
+    let initial = director.state().clone();
 
     assert_eq!(
         director.tick(0).unwrap_err().code(),
         "ASTRA_VN_STAGE_TICK_DELTA"
     );
-    assert_eq!(director.state().stable_hash().unwrap(), initial);
+    assert_eq!(director.state(), &initial);
     let error = director
         .apply(&StageCommand::Timeline(TimelineCommand::Start(
             TimelineSpec {
@@ -398,7 +398,7 @@ fn stage_director_rejects_invalid_tick_and_timeline_without_mutation() {
         )))
         .unwrap_err();
     assert_eq!(error.code(), "ASTRA_VN_STAGE_TIMELINE_ORDER");
-    assert_eq!(director.state().stable_hash().unwrap(), initial);
+    assert_eq!(director.state(), &initial);
 }
 
 #[astra_headless_test::test]

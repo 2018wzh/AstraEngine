@@ -15,17 +15,17 @@ use astra_media_core::{
     TextureFrame, Transform2D,
 };
 use astra_player_core::{
-    PlayerAudioLifecyclePlan, PlayerDecodeKind, PlayerDecodeLifecyclePlan, PlayerDecodedAudio,
-    PlayerHostCommand, PlayerHostCommandBatch, PlayerHostCommandError, PlayerHostResourceId,
-    PlayerSaveTransactionPlan, PlayerTimelineTask, PlayerTimelineTaskAction,
+    PlayerDecodeKind, PlayerDecodeLifecyclePlan, PlayerHostCommand, PlayerHostCommandBatch,
+    PlayerHostCommandError, PlayerHostResourceId, PlayerSaveTransactionPlan, PlayerTimelineTask,
+    PlayerTimelineTaskAction,
 };
-use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostSchemaRegistry};
+use astra_plugin::{ProductRuntimeHost, RuntimeHostError, RuntimeHostLimits};
 use astra_plugin_abi::{
     GameRuntimeSessionId, RuntimeExecutorConfig, RuntimeLiveAudioBus, RuntimeLiveAudioSync,
-    RuntimeOpenRequest, RuntimeOutputDomain, RuntimePrepareRequest, RuntimeProbeRequest,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
-    ValidatedRuntimeProviderSelection, NATIVE_VN_PROVIDER_ID,
+    RuntimeOpenRequest, RuntimePrepareRequest, RuntimeProbeRequest, RuntimeRestoreRequest,
+    RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload,
+    RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode, ValidatedRuntimeProviderSelection,
+    NATIVE_VN_PROVIDER_ID,
 };
 use astra_ui_core::{
     UiBackend, UiBlueprintBundle, UiBlueprintFrameModel, UiBlueprintModalFrameModel, UiButtonState,
@@ -46,8 +46,7 @@ use astra_vn_core::{
     SaveCompletionPolicy, SkipMode, StageBlendMode, StageClipPolicy, StageCommand, StageFitMode,
     StageLayerKind, State, SystemPageKind, SystemUiProfilePolicy, SystemUnlockKind,
     TimelineCommand, VnAudioBus, VnAudioControlAction, VnPlayerCommand, VnRunConfig,
-    VnRuntimeState, VnRuntimeViewState, VnWaitKind, VN_RUNTIME_STATE_SCHEMA,
-    VN_RUNTIME_VIEW_STATE_SCHEMA, VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
+    VnRuntimeState, VnWaitKind, VN_RUNTIME_STATE_SCHEMA,
 };
 use astra_vn_package::{
     decode_compiled_project, load_localization as load_package_localization,
@@ -59,9 +58,8 @@ use astra_vn_package::{
 use astra_vn_policy::LuauUiControllerHost;
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
 use astra_vn_ui::{
-    model_to_ui_value, resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError,
-    VnUiBindingRequest, VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext,
-    VnUiSessionState,
+    resolve_binding, SaveSlotViewModel, VnUiAction, VnUiBindingError, VnUiBindingRequest,
+    VnUiControllerEffect, VnUiControllerUpdate, VnUiModelContext, VnUiSessionState,
 };
 
 use crate::package_assets::{PackageAssetStore, PackageImagePrefetcher};
@@ -191,7 +189,7 @@ pub struct NativeVnHostCommandSource {
     ui_view_localization_keys: BTreeMap<String, BTreeSet<String>>,
     ui_bindings: astra_ui_core::UiBindingManifest,
     ui_backend: AstraYakuiBackend<BlueprintYakuiRenderer>,
-    ui_themes: BTreeMap<String, UiThemeManifest>,
+    ui_themes: BTreeMap<String, Arc<UiThemeManifest>>,
     ui_profile: String,
     system_ui_policy: SystemUiProfilePolicy,
     ui_generation: u64,
@@ -230,14 +228,14 @@ struct NativeVnUiFrameResult {
 #[derive(Debug, Clone)]
 struct DirectorTransitionSnapshot {
     descriptor_id: String,
+    source_state: ProductStageState,
     source_draw: Vec<SceneCommand>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SavedDirectorTransitionSnapshot {
     descriptor_id: String,
-    source_draw_json: Vec<u8>,
-    source_draw_hash: Hash256,
+    source_state: ProductStageState,
 }
 
 #[derive(Clone, PartialEq)]
@@ -246,25 +244,25 @@ struct NativeVnUiFrameReuseKey {
     generation: u64,
     instance_id: String,
     viewport: UiViewport,
-    theme_hash: Hash256,
+    theme_revision: u64,
     model_schema: String,
-    model_payload: Vec<u8>,
+    model_revision: u64,
 }
 
 impl NativeVnUiFrameReuseKey {
     // `fixed_time_ns` is intentionally excluded. A time-driven view must return
     // `repaint_after_ns`; only outputs that explicitly declare no repaint are
-    // admitted to this cache. Controller animation progress is already part of
-    // the serialized model payload.
+    // admitted to this cache. Controller animation progress advances the
+    // explicit model revision.
     fn from_request(request: &UiFrameRequest, instance_id: &str) -> Self {
         Self {
             session_id: request.session_id.clone(),
             generation: request.generation,
             instance_id: instance_id.to_string(),
             viewport: request.viewport.clone(),
-            theme_hash: request.theme.content_hash,
+            theme_revision: request.theme.revision,
             model_schema: request.model_schema.clone(),
-            model_payload: request.model_payload.clone(),
+            model_revision: request.model_revision,
         }
     }
 
@@ -273,9 +271,9 @@ impl NativeVnUiFrameReuseKey {
             && self.generation == request.generation
             && self.instance_id == instance_id
             && self.viewport == request.viewport
-            && self.theme_hash == request.theme.content_hash
+            && self.theme_revision == request.theme.revision
             && self.model_schema == request.model_schema
-            && self.model_payload == request.model_payload
+            && self.model_revision == request.model_revision
     }
 }
 
@@ -317,16 +315,16 @@ pub struct NativeVnAudioRequest {
     pub attributes: BTreeMap<String, String>,
     pub asset_id: String,
     pub codec: String,
-    pub encoded_bytes: Arc<[u8]>,
-    pub encoded_hash: Hash256,
+    pub encoded_bytes: astra_byte_source::OwnedByteBuffer,
+    pub encoded_length: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeVnAudioPreloadRequest {
     pub asset_id: String,
     pub codec: String,
-    pub encoded_bytes: Arc<[u8]>,
-    pub encoded_hash: Hash256,
+    pub encoded_bytes: astra_byte_source::OwnedByteBuffer,
+    pub encoded_length: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -354,13 +352,11 @@ pub struct NativeVnVideoRequest {
     pub layer: String,
     pub asset_id: String,
     pub codec: String,
-    pub encoded_bytes: Arc<[u8]>,
-    pub encoded_hash: Hash256,
+    pub encoded_bytes: astra_byte_source::OwnedByteBuffer,
+    pub encoded_length: u64,
     pub alpha_millionths: i64,
     pub looping: bool,
     pub fence: Option<String>,
-    pub fallback_asset_id: Option<String>,
-    pub allow_fallback: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -368,11 +364,7 @@ pub struct NativeVnStepEvidence {
     pub schema: String,
     pub fixed_step: u64,
     pub coverage_reached: std::collections::BTreeSet<String>,
-    pub vn_state_hash_before: String,
-    pub vn_state_hash_after: String,
-    pub runtime_state_hash: String,
-    pub runtime_event_hash: String,
-    pub runtime_presentation_hash: String,
+    pub presentation_count: usize,
     pub current_state_id: Option<String>,
     pub pending_wait_command_id: Option<String>,
     pub pending_wait_await_id: Option<String>,
@@ -397,48 +389,40 @@ pub struct NativeVnProductObservationEvidence {
     pub occupied_save_slot_count: usize,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct RuntimeStepEffectEvidence {
-    coverage_reached: std::collections::BTreeSet<String>,
-    state_hash_before_advance: String,
-    state_hash_after_advance: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct RuntimeStepTraceEvidence {
-    runtime_state_hash: String,
-    runtime_event_hash: String,
-    runtime_presentation_hash: String,
-}
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct NativeVnPlayerSavePayload {
     schema: String,
     slot: String,
     sections: RuntimeSaveSections,
-    runtime_state: VnRuntimeState,
     stage_director: ProductStageDirector,
     director_transition_snapshot: Option<SavedDirectorTransitionSnapshot>,
     step_evidence: NativeVnStepEvidence,
-    draw_commands_json: Vec<u8>,
-    draw_commands_hash: Hash256,
     product_media_snapshot_json: Option<Vec<u8>>,
-    product_media_snapshot_hash: Option<Hash256>,
-    save_metadata: NativeVnSaveMetadata,
+    save_metadata: SavedNativeVnSaveMetadata,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct NativeVnPlayerSaveEnvelope {
     schema: String,
-    payload_hash: Hash256,
     payload: NativeVnPlayerSavePayload,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 struct NativeVnSaveMetadata {
     slot_id: String,
     thumbnail_asset: String,
     thumbnail: TextureFrame,
+    timestamp_text: String,
+    playtime_text: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct SavedNativeVnSaveMetadata {
+    slot_id: String,
+    thumbnail_asset: String,
+    thumbnail_width: u32,
+    thumbnail_height: u32,
+    thumbnail_rgba8: Vec<u8>,
     timestamp_text: String,
     playtime_text: String,
 }
@@ -779,7 +763,7 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        let schemas = RuntimeHostSchemaRegistry::from_descriptor(runtime_provider.descriptor());
+        let limits = RuntimeHostLimits::from_descriptor(runtime_provider.descriptor());
         if runtime_provider.provider_id() != NATIVE_VN_PROVIDER_ID {
             return Err(NativeVnHostError::Package(format!(
                 "ASTRA_PLAYER_RUNTIME_PROVIDER_UNAVAILABLE: package selected unlinked provider {}",
@@ -797,7 +781,7 @@ impl NativeVnHostCommandSource {
             instance_id,
             runtime_provider,
             NativeVnRuntimeProvider::default(),
-            schemas,
+            limits,
         )?;
         let prepare = match host.prepare(RuntimePrepareRequest {
             target_id: runtime_provider.target().to_string(),
@@ -938,7 +922,11 @@ impl NativeVnHostCommandSource {
             ui_view_localization_keys,
             ui_bindings: compiled.ui_bindings,
             ui_backend,
-            ui_themes: compiled.themes,
+            ui_themes: compiled
+                .themes
+                .into_iter()
+                .map(|(id, theme)| (id, Arc::new(theme)))
+                .collect(),
             ui_profile,
             system_ui_policy: binding.system_ui_policy.clone(),
             ui_generation: 1,
@@ -1065,13 +1053,11 @@ impl NativeVnHostCommandSource {
                         layer: movie.layer,
                         asset_id: movie.asset,
                         codec: asset.codec.clone(),
-                        encoded_bytes: Arc::clone(&asset.bytes),
-                        encoded_hash: asset.hash,
+                        encoded_bytes: asset.bytes.clone(),
+                        encoded_length: asset.byte_length,
                         alpha_millionths: movie.alpha.millionths,
                         looping: matches!(movie.loop_mode, MovieLoopMode::Loop),
                         fence: movie.fence,
-                        fallback_asset_id: movie.fallback,
-                        allow_fallback: next.state().profile != "advanced-vn",
                     });
                 }
                 StageDirectorOutput::Preload { .. }
@@ -1200,11 +1186,9 @@ impl NativeVnHostCommandSource {
         );
         let rgba8 = thumbnail.into_raw();
         self.gameplay_thumbnail_capture = Some(
-            TextureFrame::from_rgba8(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, rgba8.into()).map_err(
-                |error| {
-                    NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_CAPTURE_TEXTURE: {error}"))
-                },
-            )?,
+            TextureFrame::from_vec(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, rgba8).map_err(|error| {
+                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_CAPTURE_TEXTURE: {error}"))
+            })?,
         );
         tracing::debug!(
             event = "player.vn.save.thumbnail_cached",
@@ -1409,8 +1393,8 @@ impl NativeVnHostCommandSource {
         self.prepare_audio_asset_decode(
             &request.asset_id,
             &request.codec,
-            Arc::clone(&request.encoded_bytes),
-            request.encoded_hash,
+            request.encoded_bytes.clone(),
+            request.encoded_length,
         )
     }
 
@@ -1421,8 +1405,8 @@ impl NativeVnHostCommandSource {
         self.prepare_audio_asset_decode(
             &request.asset_id,
             &request.codec,
-            Arc::clone(&request.encoded_bytes),
-            request.encoded_hash,
+            request.encoded_bytes.clone(),
+            request.encoded_length,
         )
     }
 
@@ -1430,12 +1414,12 @@ impl NativeVnHostCommandSource {
         &mut self,
         asset_id: &str,
         codec: &str,
-        encoded_bytes: Arc<[u8]>,
-        encoded_hash: Hash256,
+        encoded_bytes: astra_byte_source::OwnedByteBuffer,
+        encoded_length: u64,
     ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
-        if encoded_bytes.is_empty() || Hash256::from_sha256(&encoded_bytes) != encoded_hash {
+        if encoded_bytes.is_empty() || encoded_bytes.len() as u64 != encoded_length {
             return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_AUDIO_ENCODED_HASH: {}",
+                "ASTRA_PLAYER_AUDIO_ENCODED_LENGTH: {}",
                 asset_id
             )));
         }
@@ -1460,7 +1444,7 @@ impl NativeVnHostCommandSource {
                 coded_height: None,
                 keyframe: true,
                 stream_action: astra_player_core::PlayerDecodeStreamAction::OneShot,
-                bytes: encoded_bytes.as_ref().to_vec(),
+                bytes: encoded_bytes,
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
                 sequence: self.next_command_sequence()?,
@@ -1474,10 +1458,10 @@ impl NativeVnHostCommandSource {
         request: &NativeVnVideoRequest,
     ) -> Result<PlayerDecodeLifecyclePlan, NativeVnHostError> {
         if request.encoded_bytes.is_empty()
-            || Hash256::from_sha256(&request.encoded_bytes) != request.encoded_hash
+            || request.encoded_bytes.len() as u64 != request.encoded_length
         {
             return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_VIDEO_ENCODED_HASH: {}",
+                "ASTRA_PLAYER_VIDEO_ENCODED_LENGTH: {}",
                 request.asset_id
             )));
         }
@@ -1502,7 +1486,7 @@ impl NativeVnHostCommandSource {
                 coded_height: None,
                 keyframe: true,
                 stream_action: astra_player_core::PlayerDecodeStreamAction::Start,
-                bytes: request.encoded_bytes.as_ref().to_vec(),
+                bytes: request.encoded_bytes.clone(),
             }])?,
             close: PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseDecode {
                 sequence: self.next_command_sequence()?,
@@ -1529,7 +1513,7 @@ impl NativeVnHostCommandSource {
             coded_height: None,
             keyframe: false,
             stream_action: astra_player_core::PlayerDecodeStreamAction::Next,
-            bytes: Vec::new(),
+            bytes: Vec::new().into(),
         }])
         .map_err(Into::into)
     }
@@ -1586,9 +1570,9 @@ impl NativeVnHostCommandSource {
         snapshot: &crate::NativeVnVideoStreamSnapshot,
     ) -> Result<NativeVnVideoRequest, NativeVnHostError> {
         let asset = self.asset_store.load_media(&snapshot.asset_id)?;
-        if asset.hash != snapshot.encoded_hash {
+        if asset.byte_length != snapshot.encoded_length {
             return Err(NativeVnHostError::Asset(format!(
-                "ASTRA_PLAYER_VIDEO_RESTORE_HASH_MISMATCH: {}",
+                "ASTRA_PLAYER_VIDEO_RESTORE_LENGTH_MISMATCH: {}",
                 snapshot.asset_id
             )));
         }
@@ -1596,185 +1580,12 @@ impl NativeVnHostCommandSource {
             layer: snapshot.layer.clone(),
             asset_id: snapshot.asset_id.clone(),
             codec: asset.codec.clone(),
-            encoded_bytes: Arc::clone(&asset.bytes),
-            encoded_hash: asset.hash,
+            encoded_bytes: asset.bytes.clone(),
+            encoded_length: asset.byte_length,
             alpha_millionths: snapshot.alpha_millionths,
             looping: snapshot.looping,
             fence: snapshot.fence.clone(),
-            fallback_asset_id: snapshot.fallback_asset_id.clone(),
-            allow_fallback: snapshot.allow_fallback,
         })
-    }
-
-    pub fn bind_video_fallback(
-        &mut self,
-        request: &NativeVnVideoRequest,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        let fallback = request.fallback_asset_id.as_deref().ok_or_else(|| {
-            NativeVnHostError::Asset("ASTRA_PLAYER_VIDEO_FALLBACK_MISSING".into())
-        })?;
-        if !self.textures.contains_key(fallback) && !self.asset_store.contains_image(fallback) {
-            return Err(missing_texture(fallback));
-        }
-        let resolved = self
-            .stage_director
-            .fail_video(&request.layer)
-            .map_err(stage_director_error)?;
-        if resolved.as_deref() != Some(fallback) {
-            return Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_VIDEO_FALLBACK_IDENTITY: region fallback does not match the decoded request"
-                    .into(),
-            ));
-        }
-        self.render(&[], 0)
-    }
-
-    pub fn prepare_audio_playback(
-        &mut self,
-        audio: &PlayerDecodedAudio,
-    ) -> Result<PlayerAudioLifecyclePlan, NativeVnHostError> {
-        const PACKET_FRAMES: usize = 4096;
-        if audio.samples.is_empty() || audio.frame_count() == 0 {
-            return Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_AUDIO_EMPTY: decoded audio contains no frames".into(),
-            ));
-        }
-        let frame_count = u32::try_from(audio.frame_count()).map_err(|_| {
-            NativeVnHostError::Asset(
-                "ASTRA_PLAYER_AUDIO_FRAME_BUDGET: frame count exceeds platform contract".into(),
-            )
-        })?;
-        let output = self.next_media_resource()?;
-        let open = PlayerHostCommandBatch::new(vec![PlayerHostCommand::OpenAudio {
-            sequence: self.next_command_sequence()?,
-            output,
-            sample_rate: audio.sample_rate,
-            channels: audio.channels,
-            max_buffered_frames: frame_count,
-        }])?;
-        let samples_per_packet = PACKET_FRAMES
-            .checked_mul(usize::from(audio.channels))
-            .ok_or_else(|| NativeVnHostError::Asset("ASTRA_PLAYER_AUDIO_PACKET_BUDGET".into()))?;
-        let mut submits = Vec::new();
-        for (index, samples) in audio.samples.chunks(samples_per_packet).enumerate() {
-            submits.push(PlayerHostCommandBatch::new(vec![
-                PlayerHostCommand::SubmitAudio {
-                    sequence: self.next_command_sequence()?,
-                    output,
-                    packet_sequence: u64::try_from(index + 1).map_err(|_| {
-                        NativeVnHostError::Asset("ASTRA_PLAYER_AUDIO_PACKET_SEQUENCE".into())
-                    })?,
-                    channels: audio.channels,
-                    samples: samples.to_vec(),
-                },
-            ])?);
-        }
-        let drain = PlayerHostCommandBatch::new(vec![PlayerHostCommand::DrainAudio {
-            sequence: self.next_command_sequence()?,
-            output,
-        }])?;
-        let close = PlayerHostCommandBatch::new(vec![PlayerHostCommand::CloseAudio {
-            sequence: self.next_command_sequence()?,
-            output,
-        }])?;
-        Ok(PlayerAudioLifecyclePlan {
-            output,
-            expected_sample_count: audio.samples.len() as u64,
-            open,
-            submits,
-            drain,
-            close,
-        })
-    }
-
-    pub fn prepare_persistent_audio_open(
-        &mut self,
-        sample_rate: u32,
-        channels: u16,
-        max_buffered_frames: u32,
-    ) -> Result<(PlayerHostResourceId, PlayerHostCommandBatch), NativeVnHostError> {
-        if max_buffered_frames == 0 {
-            return Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_AUDIO_BUFFER_BUDGET: persistent output capacity is zero".into(),
-            ));
-        }
-        let output = self.next_media_resource()?;
-        let batch = PlayerHostCommandBatch::new(vec![PlayerHostCommand::OpenAudio {
-            sequence: self.next_command_sequence()?,
-            output,
-            sample_rate,
-            channels,
-            max_buffered_frames,
-        }])?;
-        Ok((output, batch))
-    }
-
-    pub fn prepare_audio_output_format_query(
-        &mut self,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::QueryAudioFormat {
-                sequence: self.next_command_sequence()?,
-            },
-        ])?)
-    }
-
-    pub fn prepare_persistent_audio_query(
-        &mut self,
-        output: PlayerHostResourceId,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::QueryAudio {
-                sequence: self.next_command_sequence()?,
-                output,
-            },
-        ])?)
-    }
-
-    pub fn prepare_persistent_audio_submit(
-        &mut self,
-        output: PlayerHostResourceId,
-        packet_sequence: u64,
-        audio: astra_player_core::PlayerMixedAudio,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        if audio.samples.is_empty() {
-            return Err(NativeVnHostError::Asset(
-                "ASTRA_PLAYER_AUDIO_PACKET_EMPTY: mixer produced no samples".into(),
-            ));
-        }
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::SubmitAudio {
-                sequence: self.next_command_sequence()?,
-                output,
-                packet_sequence,
-                channels: audio.channels,
-                samples: audio.samples,
-            },
-        ])?)
-    }
-
-    pub fn prepare_persistent_audio_drain(
-        &mut self,
-        output: PlayerHostResourceId,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::DrainAudio {
-                sequence: self.next_command_sequence()?,
-                output,
-            },
-        ])?)
-    }
-
-    pub fn prepare_persistent_audio_close(
-        &mut self,
-        output: PlayerHostResourceId,
-    ) -> Result<PlayerHostCommandBatch, NativeVnHostError> {
-        Ok(PlayerHostCommandBatch::new(vec![
-            PlayerHostCommand::CloseAudio {
-                sequence: self.next_command_sequence()?,
-                output,
-            },
-        ])?)
     }
 
     pub fn complete_wait(
@@ -1815,31 +1626,6 @@ impl NativeVnHostCommandSource {
             session_id: self.session_id.clone(),
             slot: slot.clone(),
         })?;
-        let runtime_state = saved_runtime_state(&sections)?;
-        let retained_draw = std::iter::once(SceneCommand::rect(
-            "vn.frame.clear",
-            0,
-            0,
-            self.width,
-            self.height,
-            [8, 10, 16, 255],
-        ))
-        .chain(self.scene_draw.iter().cloned())
-        .chain(self.ui_draw.iter().cloned())
-        .filter(|command| {
-            !matches!(
-                command,
-                SceneCommand::UploadTexture { .. }
-                    | SceneCommand::UploadGlyph { .. }
-                    | SceneCommand::ReleaseResource { .. }
-            )
-        })
-        .collect::<Vec<_>>();
-        let draw_commands_json = serde_json::to_vec(&retained_draw)
-            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-        let product_media_snapshot_hash = product_media_snapshot_json
-            .as_ref()
-            .map(|bytes| Hash256::from_sha256(bytes));
         let save_metadata = self.pending_save_metadata.clone().ok_or_else(|| {
             NativeVnHostError::Save(
                 "ASTRA_PLAYER_SAVE_METADATA_MISSING: save serialization requires prepared metadata"
@@ -1852,26 +1638,19 @@ impl NativeVnHostCommandSource {
             ));
         }
         let payload = NativeVnPlayerSavePayload {
-            schema: "astra.player.native_vn_save_payload.v5".into(),
+            schema: "astra.player.native_vn_save_payload.v7".into(),
             slot,
             sections,
-            runtime_state,
             stage_director: self.stage_director.clone(),
             director_transition_snapshot: save_director_transition_snapshot(
                 self.director_transition_snapshot.as_ref(),
             )?,
             step_evidence,
-            draw_commands_hash: Hash256::from_sha256(&draw_commands_json),
-            draw_commands_json,
             product_media_snapshot_json,
-            product_media_snapshot_hash,
-            save_metadata,
+            save_metadata: save_metadata_for_persistence(&save_metadata),
         };
-        let payload_bytes = postcard::to_allocvec(&payload)
-            .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
         postcard::to_allocvec(&NativeVnPlayerSaveEnvelope {
-            schema: "astra.player.native_vn_save.v5".into(),
-            payload_hash: Hash256::from_sha256(&payload_bytes),
+            schema: "astra.player.native_vn_save.v7".into(),
             payload,
         })
         .map_err(|error| NativeVnHostError::Save(error.to_string()))
@@ -1885,14 +1664,15 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        validate_save_metadata(&envelope.payload.save_metadata, &envelope.payload.slot)?;
-        let restored_locale = envelope.payload.runtime_state.locale.clone();
+        let save_metadata = restore_save_metadata(envelope.payload.save_metadata.clone())?;
+        validate_save_metadata(&save_metadata, &envelope.payload.slot)?;
+        let restored_runtime_state = saved_runtime_state(&envelope.payload.sections)?;
+        let restored_locale = restored_runtime_state.locale.clone();
         if !self.localizations.contains_key(&restored_locale) {
             return Err(NativeVnHostError::Localization(format!(
                 "ASTRA_PLAYER_RESTORE_LOCALE_UNAVAILABLE: locale {restored_locale} is not packaged"
             )));
         }
-        validate_saved_runtime_state(&envelope.payload.sections)?;
         let report = self.host.restore(RuntimeRestoreRequest {
             session_id: self.session_id.clone(),
             sections: envelope.payload.sections.sections,
@@ -1907,40 +1687,23 @@ impl NativeVnHostCommandSource {
         self.fixed_step = report.restored_fixed_step;
         self.session_seed = report.session_seed;
         self.next_step_mode = RuntimeStepMode::RestoreContinuation;
-        if Hash256::from_sha256(&envelope.payload.draw_commands_json)
-            != envelope.payload.draw_commands_hash
-        {
-            return Err(NativeVnHostError::Save(
-                "ASTRA_PLAYER_SAVE_INTEGRITY: presentation command hash mismatch".into(),
-            ));
-        }
-        match (
-            envelope.payload.product_media_snapshot_json.as_ref(),
-            envelope.payload.product_media_snapshot_hash,
-        ) {
-            (Some(bytes), Some(expected)) if Hash256::from_sha256(bytes) == expected => {}
-            (None, None) => {}
-            _ => {
-                return Err(NativeVnHostError::Save(
-                    "ASTRA_PLAYER_SAVE_INTEGRITY: product media snapshot hash mismatch".into(),
-                ));
-            }
-        }
-        let _: Vec<SceneCommand> = serde_json::from_slice(&envelope.payload.draw_commands_json)
-            .map_err(|error| {
-                NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
-            })?;
-        let save_metadata = envelope.payload.save_metadata;
-        let restored_transition_snapshot = restore_director_transition_snapshot(
-            envelope.payload.director_transition_snapshot.as_ref(),
-        )?;
-        self.runtime_state = Some(envelope.payload.runtime_state);
+        self.runtime_state = Some(restored_runtime_state);
         self.runtime_backlog_count = self
             .runtime_state
             .as_ref()
             .map_or(0, |state| state.backlog.len());
         self.activate_locale(&restored_locale)?;
         self.stage_director = envelope.payload.stage_director;
+        if let Some(snapshot) = envelope.payload.director_transition_snapshot.as_ref() {
+            self.ensure_stage_textures(&snapshot.source_state)?;
+        }
+        let restored_transition_snapshot = restore_director_transition_snapshot(
+            envelope.payload.director_transition_snapshot.as_ref(),
+            &self.textures,
+            &self.texture_dimensions,
+            self.width,
+            self.height,
+        )?;
         self.director_transition_snapshot = restored_transition_snapshot;
         self.last_step_evidence = Some(envelope.payload.step_evidence);
         self.restored_product_media_snapshot = envelope.payload.product_media_snapshot_json;
@@ -2069,8 +1832,9 @@ impl NativeVnHostCommandSource {
                     .into(),
             ));
         }
-        validate_save_metadata(&envelope.payload.save_metadata, expected_slot)?;
-        self.apply_save_metadata(envelope.payload.save_metadata)
+        let metadata = restore_save_metadata(envelope.payload.save_metadata)?;
+        validate_save_metadata(&metadata, expected_slot)?;
+        self.apply_save_metadata(metadata)
     }
 
     fn apply_save_metadata(
@@ -2373,19 +2137,28 @@ impl NativeVnHostCommandSource {
                 asset_id,
                 codec: asset.codec,
                 encoded_bytes: asset.bytes,
-                encoded_hash: asset.hash,
+                encoded_length: asset.byte_length,
             });
         }
-        let pending_hashes = self
+        let pending_assets = self
             .pending_audio_preloads
             .iter()
-            .map(|request| request.encoded_hash)
+            .map(|request| {
+                (
+                    request.asset_id.clone(),
+                    request.codec.clone(),
+                    request.encoded_length,
+                )
+            })
             .collect::<BTreeSet<_>>();
-        self.pending_audio_preloads.extend(
-            requests
-                .into_iter()
-                .filter(|request| !pending_hashes.contains(&request.encoded_hash)),
-        );
+        self.pending_audio_preloads
+            .extend(requests.into_iter().filter(|request| {
+                !pending_assets.contains(&(
+                    request.asset_id.clone(),
+                    request.codec.clone(),
+                    request.encoded_length,
+                ))
+            }));
         self.audio_preload_story_ids.insert(story_id.to_string());
         Ok(())
     }
@@ -2426,13 +2199,13 @@ impl NativeVnHostCommandSource {
         }
         let fallback_events = events.clone();
         if !self.has_active_ui_surface() {
-            let semantic_snapshot_hash = self
+            let semantic_generation = self
                 .ui_semantics
                 .as_ref()
-                .map(|snapshot| snapshot.hash)
-                .unwrap_or_else(|| astra_core::Hash256::from_sha256(b""));
+                .map(|snapshot| snapshot.generation)
+                .unwrap_or(self.ui_generation);
             return if let Some(action) =
-                self.bubbled_ui_action(&fallback_events, semantic_snapshot_hash)
+                self.bubbled_ui_action(&fallback_events, semantic_generation)
             {
                 self.dispatch_ui_action(&action)
             } else if let Some(command) = self.bubbled_ui_command(&fallback_events) {
@@ -2470,7 +2243,9 @@ impl NativeVnHostCommandSource {
             .iter()
             .any(|item| item.disposition == UiInputDispositionKind::Consumed);
         if !consumed {
-            if let Some(action) = self.bubbled_ui_action(&fallback_events, frame.semantics.hash) {
+            if let Some(action) =
+                self.bubbled_ui_action(&fallback_events, frame.semantics.generation)
+            {
                 return self.dispatch_ui_action(&action);
             }
             if let Some(command) = self.bubbled_ui_command(&fallback_events) {
@@ -2554,7 +2329,7 @@ impl NativeVnHostCommandSource {
         }
         self.ui_backend
             .renderer_mut()
-            .resolve_retained_activation(semantics.hash, &target.id, event.sequence)
+            .resolve_retained_activation(semantics.generation, &target.id, event.sequence)
             .map(Some)
             .map_err(NativeVnHostError::Ui)
     }
@@ -2686,7 +2461,7 @@ impl NativeVnHostCommandSource {
     fn bubbled_ui_action(
         &self,
         events: &[UiInputEvent],
-        semantic_snapshot_hash: astra_core::Hash256,
+        semantic_generation: u64,
     ) -> Option<astra_ui_core::UiActionEnvelope> {
         let state = self.runtime_state.as_ref()?;
         if !state.system_stack.is_empty() {
@@ -2717,7 +2492,7 @@ impl NativeVnHostCommandSource {
             semantic_target_id: "root".into(),
             action_id: "vn.open_system".into(),
             arguments: BTreeMap::from([("page".into(), UiValue::String(page.into()))]),
-            semantic_snapshot_hash,
+            semantic_generation,
         })
     }
 
@@ -3431,7 +3206,7 @@ impl NativeVnHostCommandSource {
             (
                 "choice".to_string(),
                 None,
-                model_to_ui_value(&context.build_choice()?)?,
+                context.build_choice()?.to_ui_value()?,
             )
         } else if let Some(frame) = state.system_stack.last() {
             let page_model = context.build_system_page(frame.page)?;
@@ -3446,7 +3221,7 @@ impl NativeVnHostCommandSource {
                 .window
                 .clone()
                 .unwrap_or_else(|| "message".to_string());
-            (surface, None, model_to_ui_value(&message)?)
+            (surface, None, message.to_ui_value()?)
         };
         let binding = resolve_binding(
             &self.ui_bindings,
@@ -3649,8 +3424,6 @@ impl NativeVnHostCommandSource {
             focus_request: self.pending_ui_focus.take(),
             localization,
         };
-        let model_payload = postcard::to_allocvec(&frame)
-            .map_err(|error| NativeVnHostError::Serialize(error.to_string()))?;
         let request = UiFrameRequest {
             schema: "astra.ui_frame_request.v1".to_string(),
             session_id: format!("vn.ui.{}", self.session_id.0),
@@ -3663,7 +3436,8 @@ impl NativeVnHostCommandSource {
             },
             theme,
             model_schema: active_model_schema.clone(),
-            model_payload,
+            model_revision: self.fixed_step,
+            model: frame,
         };
         let active = self.ui_modals.last().map_or(
             ActiveUiController {
@@ -3706,7 +3480,7 @@ impl NativeVnHostCommandSource {
                             view_id = %active_view_id,
                             generation = self.ui_generation,
                             input_count = request.input.events.len(),
-                            semantic_hash = %semantics.hash,
+                            semantic_generation = semantics.generation,
                             "reused an unchanged NativeVN UI frame"
                         );
                         let result = NativeVnUiFrameResult {
@@ -3877,10 +3651,8 @@ impl NativeVnHostCommandSource {
         for (asset_id, result) in self.image_prefetcher.shutdown()? {
             self.image_prefetch_inflight.remove(&asset_id);
             if let Err(error) = result {
-                self.image_prefetch_failure = Some(format!(
-                    "ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: asset_hash={}, cause={error}",
-                    Hash256::from_sha256(asset_id.as_bytes())
-                ));
+                self.image_prefetch_failure =
+                    Some(format!("ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: {error}"));
             }
         }
         if !self.image_prefetch_inflight.is_empty() {
@@ -4071,7 +3843,7 @@ impl NativeVnHostCommandSource {
             .ok_or(NativeVnHostError::SequenceOverflow)?;
         let runtime_step_started =
             performance_phase_started(self.ui_host_performance_sampling_enabled);
-        let output = self.host.step(RuntimeStepInput {
+        let mut output = self.host.step(RuntimeStepInput {
             session_id: self.session_id.clone(),
             fixed_step,
             delta_ns: 16_666_667,
@@ -4093,68 +3865,18 @@ impl NativeVnHostCommandSource {
             performance_phase_started(self.ui_host_performance_sampling_enabled);
         self.fixed_step = fixed_step;
         self.next_step_mode = RuntimeStepMode::Live;
-        let effect = output
-            .persisted
-            .iter()
-            .find(|envelope| {
-                envelope.domain == RuntimeOutputDomain::Effect
-                    && envelope.schema == "astra.vn.runtime_step_effect.v2"
-            })
-            .ok_or_else(|| {
-                NativeVnHostError::RuntimeEvidence(
-                    "ASTRA_PLAYER_VN_EFFECT_MISSING: runtime step effect is required".into(),
-                )
-            })?
-            .decode_postcard::<RuntimeStepEffectEvidence>(
-                RuntimeOutputDomain::Effect,
-                "astra.vn.runtime_step_effect.v2",
-                SchemaVersion::new(2, 0, 0),
+        let vn_step = output.live.vn_step.take().ok_or_else(|| {
+            NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_STEP_METADATA_MISSING: typed VN step metadata is required".into(),
             )
-            .map_err(|err| NativeVnHostError::RuntimeEvidence(err.to_string()))?;
-        let runtime_trace = output
-            .persisted
-            .iter()
-            .find(|envelope| {
-                envelope.domain == RuntimeOutputDomain::Trace
-                    && envelope.schema == "astra.vn.runtime_step_trace.v1"
-            })
-            .ok_or_else(|| {
-                NativeVnHostError::RuntimeEvidence(
-                    "ASTRA_PLAYER_VN_TRACE_MISSING: runtime step trace is required".into(),
-                )
-            })?
-            .decode_postcard::<RuntimeStepTraceEvidence>(
-                RuntimeOutputDomain::Trace,
-                "astra.vn.runtime_step_trace.v1",
-                SchemaVersion::new(1, 0, 0),
+        })?;
+        let runtime_view = output.live.vn_state.take().ok_or_else(|| {
+            NativeVnHostError::RuntimeEvidence(
+                "ASTRA_PLAYER_VN_VIEW_STATE_MISSING: typed runtime view state is required".into(),
             )
-            .map_err(|err| NativeVnHostError::RuntimeEvidence(err.to_string()))?;
-        let runtime_view = output
-            .persisted
-            .iter()
-            .find(|envelope| {
-                envelope.domain == RuntimeOutputDomain::Trace
-                    && envelope.schema == VN_RUNTIME_VIEW_STATE_SCHEMA
-            })
-            .ok_or_else(|| {
-                NativeVnHostError::RuntimeEvidence(
-                    "ASTRA_PLAYER_VN_VIEW_STATE_MISSING: runtime view state trace is required"
-                        .into(),
-                )
-            })?
-            .decode_postcard::<VnRuntimeViewState>(
-                RuntimeOutputDomain::Trace,
-                VN_RUNTIME_VIEW_STATE_SCHEMA,
-                SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
-            )
-            .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
-        if runtime_view.schema != VN_RUNTIME_VIEW_STATE_SCHEMA {
-            return Err(NativeVnHostError::RuntimeEvidence(
-                "ASTRA_PLAYER_VN_VIEW_STATE_SCHEMA: runtime view state schema is invalid".into(),
-            ));
-        }
+        })?;
         self.runtime_backlog_count = runtime_view.backlog_count;
-        self.runtime_state = Some(runtime_view.state);
+        self.runtime_state = Some(runtime_vn_state(runtime_view)?);
         self.ensure_text_region()?;
         self.schedule_current_image_prefetch()?;
         self.queue_current_story_audio_preloads()?;
@@ -4166,12 +3888,11 @@ impl NativeVnHostCommandSource {
         self.last_step_evidence = Some(NativeVnStepEvidence {
             schema: "astra.player_vn_step_evidence.v2".to_string(),
             fixed_step,
-            coverage_reached: effect.coverage_reached,
-            vn_state_hash_before: effect.state_hash_before_advance,
-            vn_state_hash_after: effect.state_hash_after_advance,
-            runtime_state_hash: runtime_trace.runtime_state_hash,
-            runtime_event_hash: runtime_trace.runtime_event_hash,
-            runtime_presentation_hash: runtime_trace.runtime_presentation_hash,
+            coverage_reached: unique_string_set(
+                vn_step.coverage_reached,
+                "ASTRA_PLAYER_VN_COVERAGE_DUPLICATE",
+            )?,
+            presentation_count: output.live.presentations.len(),
             current_state_id: runtime_state
                 .cursor
                 .as_ref()
@@ -4205,18 +3926,9 @@ impl NativeVnHostCommandSource {
                 Default::default()
             },
         });
-        for envelope in output.persisted.iter().filter(|envelope| {
-            envelope.domain == RuntimeOutputDomain::Effect
-                && envelope.schema == "astra.vn.timeline_task.v1"
-        }) {
-            let task = envelope
-                .decode_postcard::<astra_vn_core::VnTimelineTask>(
-                    RuntimeOutputDomain::Effect,
-                    "astra.vn.timeline_task.v1",
-                    SchemaVersion::new(1, 0, 0),
-                )
-                .map_err(|error| NativeVnHostError::RuntimeEvidence(error.to_string()))?;
-            self.pending_timeline.push(player_timeline_task(task)?);
+        for task in &output.live.timeline {
+            self.pending_timeline
+                .push(player_timeline_task(runtime_timeline_task(task.clone()))?);
         }
         let mut live_audio_cues = Vec::new();
         for cue in &output.live.audio_cues {
@@ -4242,69 +3954,53 @@ impl NativeVnHostCommandSource {
         let mut live_audio_cues = live_audio_cues.into_iter();
         let mut ordered_outputs = Vec::new();
         let mut presentation_count = 0_usize;
-        for envelope in &output.persisted {
-            match envelope.domain {
-                RuntimeOutputDomain::Audio => {
-                    return Err(NativeVnHostError::RuntimeEvidence(
-                        "ASTRA_PLAYER_VN_AUDIO_PERSISTED_REJECTED: audio must arrive through the live typed cue contract".into(),
-                    ));
-                }
-                RuntimeOutputDomain::Presentation => {
-                    let command = envelope
-                        .decode_postcard(
-                            RuntimeOutputDomain::Presentation,
-                            "astra.vn.presentation_command.v2",
-                            SchemaVersion::new(2, 0, 0),
-                        )
-                        .map_err(|err| NativeVnHostError::Serialize(err.to_string()))?;
-                    presentation_count += 1;
-                    if matches!(&command, PresentationCommand::Stage(StageCommand::Audio(_))) {
-                        let cue = live_audio_cues.next().ok_or_else(|| {
+        for live in &output.live.presentations {
+            let command = runtime_presentation_command(live.clone())?;
+            presentation_count = presentation_count.saturating_add(1);
+            if matches!(&command, PresentationCommand::Stage(StageCommand::Audio(_))) {
+                let cue = live_audio_cues.next().ok_or_else(|| {
                             NativeVnHostError::RuntimeEvidence(
                                 "ASTRA_PLAYER_VN_AUDIO_LIVE_MISSING: stage audio presentation has no live cue".into(),
                             )
                         })?;
-                        let asset_id = cue.asset.clone();
-                        let asset = self.asset_store.load_media(&asset_id)?;
-                        let command_kind = match cue.bus {
-                            RuntimeLiveAudioBus::Voice => "voice",
-                            RuntimeLiveAudioBus::Bgm => "bgm",
-                            RuntimeLiveAudioBus::Se => "se",
-                            RuntimeLiveAudioBus::Movie => "movie",
-                        };
-                        let mut attributes = BTreeMap::from([
-                            ("asset".to_string(), asset_id.clone()),
-                            ("loop".to_string(), cue.looped.to_string()),
-                            ("fade".to_string(), cue.fade_ms.to_string()),
-                        ]);
-                        match &cue.sync {
-                            RuntimeLiveAudioSync::None => {}
-                            RuntimeLiveAudioSync::Text => {
-                                attributes.insert("sync".to_string(), "text".to_string());
-                            }
-                            RuntimeLiveAudioSync::Fence(fence) => {
-                                attributes.insert("sync".to_string(), "fence".to_string());
-                                attributes.insert("fence".to_string(), fence.clone());
-                            }
-                        }
-                        let command_id = cue.command_id.clone();
-                        ordered_outputs.push(NativeVnOrderedRuntimeOutput::AudioStart(
-                            NativeVnAudioRequest {
-                                command_id: command_id.clone(),
-                                target_id: command_id,
-                                command: command_kind.to_string(),
-                                attributes,
-                                asset_id,
-                                codec: asset.codec.clone(),
-                                encoded_bytes: Arc::clone(&asset.bytes),
-                                encoded_hash: asset.hash,
-                            },
-                        ));
+                let asset_id = cue.asset.clone();
+                let asset = self.asset_store.load_media(&asset_id)?;
+                let command_kind = match cue.bus {
+                    RuntimeLiveAudioBus::Voice => "voice",
+                    RuntimeLiveAudioBus::Bgm => "bgm",
+                    RuntimeLiveAudioBus::Se => "se",
+                    RuntimeLiveAudioBus::Movie => "movie",
+                };
+                let mut attributes = BTreeMap::from([
+                    ("asset".to_string(), asset_id.clone()),
+                    ("loop".to_string(), cue.looped.to_string()),
+                    ("fade".to_string(), cue.fade_ms.to_string()),
+                ]);
+                match &cue.sync {
+                    RuntimeLiveAudioSync::None => {}
+                    RuntimeLiveAudioSync::Text => {
+                        attributes.insert("sync".to_string(), "text".to_string());
                     }
-                    ordered_outputs.push(NativeVnOrderedRuntimeOutput::Presentation(command));
+                    RuntimeLiveAudioSync::Fence(fence) => {
+                        attributes.insert("sync".to_string(), "fence".to_string());
+                        attributes.insert("fence".to_string(), fence.clone());
+                    }
                 }
-                _ => {}
+                let command_id = cue.command_id.clone();
+                ordered_outputs.push(NativeVnOrderedRuntimeOutput::AudioStart(
+                    NativeVnAudioRequest {
+                        command_id: command_id.clone(),
+                        target_id: command_id,
+                        command: command_kind.to_string(),
+                        attributes,
+                        asset_id,
+                        codec: asset.codec.clone(),
+                        encoded_bytes: asset.bytes.clone(),
+                        encoded_length: asset.byte_length,
+                    },
+                ));
             }
+            ordered_outputs.push(NativeVnOrderedRuntimeOutput::Presentation(command));
         }
         if live_audio_cues.next().is_some() {
             return Err(NativeVnHostError::RuntimeEvidence(
@@ -4465,23 +4161,11 @@ impl NativeVnHostCommandSource {
                                 layer: movie.layer,
                                 asset_id: movie.asset,
                                 codec: asset.codec.clone(),
-                                encoded_bytes: Arc::clone(&asset.bytes),
-                                encoded_hash: asset.hash,
+                                encoded_bytes: asset.bytes.clone(),
+                                encoded_length: asset.byte_length,
                                 alpha_millionths: movie.alpha.millionths,
                                 looping: matches!(movie.loop_mode, MovieLoopMode::Loop),
                                 fence: movie.fence,
-                                fallback_asset_id: movie.fallback,
-                                allow_fallback: next_stage_director
-                                    .as_ref()
-                                    .ok_or_else(|| {
-                                        NativeVnHostError::Asset(
-                                            "ASTRA_PLAYER_STAGE_BATCH_DIRECTOR_MISSING: movie output requires a prepared stage transaction"
-                                                .into(),
-                                        )
-                                    })?
-                                    .state()
-                                    .profile
-                                    != "advanced-vn",
                             });
                         }
                         StageDirectorOutput::Effect(_) => {}
@@ -4587,6 +4271,7 @@ impl NativeVnHostCommandSource {
             {
                 Some(DirectorTransitionSnapshot {
                     descriptor_id,
+                    source_state: self.stage_director.state().clone(),
                     source_draw: self.scene_draw.clone(),
                 })
             }
@@ -4754,7 +4439,6 @@ impl NativeVnHostCommandSource {
                 let duration_ns = performance_phase_duration(started)?;
                 tracing::debug!(
                     event = "player.stage_texture.materialized",
-                    asset_hash = %Hash256::from_sha256(asset_id.as_bytes()),
                     cache_hit,
                     duration_ns,
                     byte_count = frame.rgba8.len(),
@@ -4834,7 +4518,6 @@ impl NativeVnHostCommandSource {
             self.texture_cpu_last_used.remove(&candidate);
             tracing::debug!(
                 event = "player.image.cpu_residency.evicted",
-                asset_hash = %Hash256::from_sha256(candidate.as_bytes()),
                 resident_bytes = self.texture_cpu_bytes,
                 budget_bytes = self.texture_cpu_budget_bytes,
                 "evicted an inactive decoded stage texture within the profile-bound CPU budget"
@@ -4872,9 +4555,9 @@ impl NativeVnHostCommandSource {
             target_height,
             image::imageops::FilterType::Lanczos3,
         );
-        TextureFrame::from_rgba8(target_width, target_height, resized.into_raw().into()).map_err(
-            |error| NativeVnHostError::Asset(format!("ASTRA_PLAYER_STAGE_TEXTURE_RESIZE: {error}")),
-        )
+        TextureFrame::from_vec(target_width, target_height, resized.into_raw()).map_err(|error| {
+            NativeVnHostError::Asset(format!("ASTRA_PLAYER_STAGE_TEXTURE_RESIZE: {error}"))
+        })
     }
 
     fn remove_texture(
@@ -4987,10 +4670,7 @@ impl NativeVnHostCommandSource {
         for (asset_id, result) in self.image_prefetcher.drain_completions()? {
             self.image_prefetch_inflight.remove(&asset_id);
             if let Err(error) = result {
-                let error = format!(
-                    "ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: asset_hash={}, cause={error}",
-                    Hash256::from_sha256(asset_id.as_bytes())
-                );
+                let error = format!("ASTRA_PLAYER_IMAGE_PREFETCH_FAILED: {error}");
                 self.image_prefetch_failure = Some(error.clone());
                 return Err(NativeVnHostError::Asset(error));
             }
@@ -5256,10 +4936,6 @@ fn validate_product_provider_bindings(
     Ok(())
 }
 
-fn validate_saved_runtime_state(sections: &RuntimeSaveSections) -> Result<(), NativeVnHostError> {
-    saved_runtime_state(sections).map(|_| ())
-}
-
 fn saved_runtime_state(
     sections: &RuntimeSaveSections,
 ) -> Result<VnRuntimeState, NativeVnHostError> {
@@ -5307,6 +4983,735 @@ fn saved_runtime_state(
         ));
     }
     Ok(states.remove(0))
+}
+
+fn runtime_vn_state(
+    value: astra_plugin_abi::RuntimeLiveVnState,
+) -> Result<VnRuntimeState, NativeVnHostError> {
+    let mut config = BTreeMap::new();
+    for entry in value.system.config {
+        if config.insert(entry.key, entry.value).is_some() {
+            return Err(typed_vn_state_error("ASTRA_PLAYER_VN_CONFIG_DUPLICATE"));
+        }
+    }
+    let mut voice_replay = BTreeMap::new();
+    for entry in value.voice_replay {
+        if voice_replay
+            .insert(
+                entry.id,
+                astra_vn_core::VoiceReplayEntry {
+                    voice: entry.voice,
+                    line_key: entry.line_key,
+                    speaker: entry.speaker,
+                },
+            )
+            .is_some()
+        {
+            return Err(typed_vn_state_error(
+                "ASTRA_PLAYER_VN_VOICE_REPLAY_DUPLICATE",
+            ));
+        }
+    }
+    let mut route_flags = BTreeMap::new();
+    for entry in value.route_flags {
+        let flag = astra_vn_core::VnRouteFlag {
+            schema: "astra.vn.route_flag.v1".into(),
+            kind: match entry.kind {
+                astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Launch => {
+                    astra_vn_core::VnRouteFlagKind::Launch
+                }
+                astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Choice => {
+                    astra_vn_core::VnRouteFlagKind::Choice
+                }
+                astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Jump => {
+                    astra_vn_core::VnRouteFlagKind::Jump
+                }
+                astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Branch => {
+                    astra_vn_core::VnRouteFlagKind::Branch
+                }
+                astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Call => {
+                    astra_vn_core::VnRouteFlagKind::Call
+                }
+                astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Return => {
+                    astra_vn_core::VnRouteFlagKind::Return
+                }
+            },
+            source: entry.source,
+            target: entry.target,
+            count: entry.count,
+        };
+        if route_flags.insert(entry.id, flag).is_some() {
+            return Err(typed_vn_state_error("ASTRA_PLAYER_VN_ROUTE_FLAG_DUPLICATE"));
+        }
+    }
+    Ok(VnRuntimeState {
+        schema: VN_RUNTIME_STATE_SCHEMA.into(),
+        revision: value.revision,
+        instance_id: value.instance_id,
+        profile: value.profile,
+        locale: value.locale,
+        cursor: value.cursor.map(runtime_vn_cursor),
+        call_stack: Vec::new(),
+        system_stack: value
+            .system_stack
+            .into_iter()
+            .map(|frame| {
+                Ok(astra_vn_core::VnSystemFrame {
+                    return_to: runtime_vn_cursor(frame.return_to),
+                    return_wait: frame.return_wait.map(runtime_vn_wait),
+                    return_choice: frame.return_choice.map(runtime_vn_choice).transpose()?,
+                    page: runtime_system_page(frame.page),
+                })
+            })
+            .collect::<Result<Vec<_>, NativeVnHostError>>()?,
+        system: astra_vn_core::VnSystemState {
+            auto_enabled: value.system.auto_enabled,
+            skip_mode: match value.system.skip_mode {
+                astra_plugin_abi::RuntimeLiveVnSkipMode::None => astra_vn_core::SkipMode::None,
+                astra_plugin_abi::RuntimeLiveVnSkipMode::Read => astra_vn_core::SkipMode::Read,
+                astra_plugin_abi::RuntimeLiveVnSkipMode::All => astra_vn_core::SkipMode::All,
+            },
+            config,
+            gallery_unlocks: unique_string_set(
+                value.system.gallery_unlocks,
+                "ASTRA_PLAYER_VN_GALLERY_UNLOCK_DUPLICATE",
+            )?,
+            replay_unlocks: unique_string_set(
+                value.system.replay_unlocks,
+                "ASTRA_PLAYER_VN_REPLAY_UNLOCK_DUPLICATE",
+            )?,
+            reading_mode: match value.system.reading_mode {
+                astra_plugin_abi::RuntimeLiveVnReadingMode::Hidden => {
+                    astra_vn_core::ReadingMode::Hidden
+                }
+                astra_plugin_abi::RuntimeLiveVnReadingMode::Manual => {
+                    astra_vn_core::ReadingMode::Manual
+                }
+                astra_plugin_abi::RuntimeLiveVnReadingMode::FastForward => {
+                    astra_vn_core::ReadingMode::FastForward
+                }
+            },
+            audio_enabled: value.system.audio_enabled,
+            skip_allowed: value.system.skip_allowed,
+        },
+        pending_choice: value.pending_choice.map(runtime_vn_choice).transpose()?,
+        variables: BTreeMap::new(),
+        backlog: value
+            .backlog
+            .into_iter()
+            .map(|entry| astra_vn_core::BacklogEntry {
+                command_id: entry.command_id,
+                key: entry.key,
+                speaker: entry.speaker,
+                voice: entry.voice,
+                story_id: entry.story_id,
+                state_id: entry.state_id,
+                route_position: entry.route_position,
+                read: entry.read,
+                layout: astra_vn_core::BacklogLayoutMetadata {
+                    window: entry.window,
+                },
+            })
+            .collect(),
+        read_state: BTreeSet::new(),
+        voice_replay,
+        route_coverage: unique_string_set(
+            value.route_coverage,
+            "ASTRA_PLAYER_VN_ROUTE_COVERAGE_DUPLICATE",
+        )?,
+        route_flags,
+        wait_sequence: 0,
+        pending_wait: value.pending_wait.map(runtime_vn_wait),
+    })
+}
+
+fn runtime_vn_cursor(
+    value: astra_plugin_abi::RuntimeLiveVnCursor,
+) -> astra_vn_core::VnCommandCursor {
+    astra_vn_core::VnCommandCursor {
+        story_id: value.story_id,
+        state_id: value.state_id,
+        scene_id: value.scene_id,
+        command_id: value.command_id,
+        ordinal: value.ordinal,
+    }
+}
+
+fn runtime_vn_choice(
+    value: astra_plugin_abi::RuntimeLiveVnPendingChoice,
+) -> Result<astra_vn_core::PendingChoice, NativeVnHostError> {
+    Ok(astra_vn_core::PendingChoice {
+        choice_id: value.choice_id,
+        key: value.key,
+        options: value
+            .options
+            .into_iter()
+            .map(runtime_choice_option)
+            .collect(),
+        enabled_option_ids: unique_string_set(
+            value.enabled_option_ids,
+            "ASTRA_PLAYER_VN_CHOICE_ENABLED_DUPLICATE",
+        )?,
+    })
+}
+
+fn runtime_vn_wait(value: astra_plugin_abi::RuntimeLiveVnWait) -> astra_vn_core::VnWaitState {
+    astra_vn_core::VnWaitState {
+        schema: "astra.vn.wait_state.v1".into(),
+        kind: match value.kind {
+            astra_plugin_abi::RuntimeLiveVnWaitKind::Dialogue => VnWaitKind::Dialogue,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::Choice => VnWaitKind::Choice,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::SystemPage => VnWaitKind::SystemPage,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::Fence => VnWaitKind::Fence,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::Timer => VnWaitKind::Timer,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::TimelineComplete => {
+                VnWaitKind::TimelineComplete
+            }
+            astra_plugin_abi::RuntimeLiveVnWaitKind::MovieEnd => VnWaitKind::MovieEnd,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::VoiceEnd => VnWaitKind::VoiceEnd,
+            astra_plugin_abi::RuntimeLiveVnWaitKind::Input => VnWaitKind::Input,
+        },
+        fence: value.fence,
+        command_id: value.command_id,
+        await_id: value.await_id,
+    }
+}
+
+fn unique_string_set(
+    values: Vec<String>,
+    code: &'static str,
+) -> Result<BTreeSet<String>, NativeVnHostError> {
+    let count = values.len();
+    let values = values.into_iter().collect::<BTreeSet<_>>();
+    if values.len() != count {
+        return Err(typed_vn_state_error(code));
+    }
+    Ok(values)
+}
+
+fn typed_vn_state_error(code: &'static str) -> NativeVnHostError {
+    NativeVnHostError::RuntimeEvidence(format!(
+        "{code}: typed VN state contains duplicate identity"
+    ))
+}
+
+fn runtime_presentation_command(
+    value: astra_plugin_abi::RuntimeLivePresentationCommand,
+) -> Result<PresentationCommand, NativeVnHostError> {
+    use astra_plugin_abi::RuntimeLivePresentationKind as Live;
+    Ok(match value.command {
+        Live::Dialogue {
+            key,
+            speaker,
+            voice,
+            window,
+        } => PresentationCommand::Dialogue {
+            key,
+            speaker,
+            voice,
+            window,
+        },
+        Live::Choice { key, options } => PresentationCommand::Choice {
+            key,
+            options: options.into_iter().map(runtime_choice_option).collect(),
+        },
+        Live::SystemPage { page } => PresentationCommand::SystemPage {
+            page: runtime_system_page(page),
+        },
+        Live::SystemOption { option } => PresentationCommand::SystemOption {
+            option: runtime_choice_option(option),
+        },
+        Live::Stage(command) => PresentationCommand::Stage(runtime_stage_command(command)?),
+        Live::Extension(command) => {
+            PresentationCommand::Extension(astra_vn_core::ExtensionPresentationCommand {
+                command: command.command,
+                provider_id: command.provider_id,
+                schema: command.schema,
+                fields: command
+                    .fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        (
+                            name,
+                            match value {
+                                astra_plugin_abi::RuntimeLiveExtensionValue::String(value) => {
+                                    astra_vn_core::ExtensionValue::String(value)
+                                }
+                                astra_plugin_abi::RuntimeLiveExtensionValue::Integer(value) => {
+                                    astra_vn_core::ExtensionValue::Integer(value)
+                                }
+                                astra_plugin_abi::RuntimeLiveExtensionValue::Fixed(millionths) => {
+                                    astra_vn_core::ExtensionValue::Fixed(
+                                        astra_vn_core::FixedScalar { millionths },
+                                    )
+                                }
+                                astra_plugin_abi::RuntimeLiveExtensionValue::Boolean(value) => {
+                                    astra_vn_core::ExtensionValue::Boolean(value)
+                                }
+                                astra_plugin_abi::RuntimeLiveExtensionValue::Symbol(value) => {
+                                    astra_vn_core::ExtensionValue::Symbol(value)
+                                }
+                                astra_plugin_abi::RuntimeLiveExtensionValue::AssetUri(value) => {
+                                    astra_vn_core::ExtensionValue::AssetUri(value)
+                                }
+                            },
+                        )
+                    })
+                    .collect(),
+            })
+        }
+        Live::Marker { id } => PresentationCommand::Marker { id },
+    })
+}
+
+fn runtime_choice_option(
+    value: astra_plugin_abi::RuntimeLiveChoiceOption,
+) -> astra_vn_core::ChoiceOption {
+    astra_vn_core::ChoiceOption {
+        id: value.id,
+        key: value.key,
+        target: value.target,
+        enabled_when: value
+            .enabled_when
+            .map(|condition| astra_vn_core::VariableCondition {
+                scope: condition.scope,
+                key: condition.key,
+                op: match condition.operation {
+                    astra_plugin_abi::RuntimeLiveComparison::Equal => astra_vn_core::BranchOp::Eq,
+                    astra_plugin_abi::RuntimeLiveComparison::NotEqual => {
+                        astra_vn_core::BranchOp::NotEq
+                    }
+                    astra_plugin_abi::RuntimeLiveComparison::Less => astra_vn_core::BranchOp::Less,
+                    astra_plugin_abi::RuntimeLiveComparison::LessEqual => {
+                        astra_vn_core::BranchOp::LessEq
+                    }
+                    astra_plugin_abi::RuntimeLiveComparison::Greater => {
+                        astra_vn_core::BranchOp::Greater
+                    }
+                    astra_plugin_abi::RuntimeLiveComparison::GreaterEqual => {
+                        astra_vn_core::BranchOp::GreaterEq
+                    }
+                },
+                value: condition.value,
+            }),
+    }
+}
+
+fn runtime_system_page(
+    value: astra_plugin_abi::RuntimeLiveSystemPage,
+) -> astra_vn_core::SystemPageKind {
+    use astra_plugin_abi::RuntimeLiveSystemPage as Live;
+    match value {
+        Live::Title => astra_vn_core::SystemPageKind::Title,
+        Live::QuickPanel => astra_vn_core::SystemPageKind::QuickPanel,
+        Live::Save => astra_vn_core::SystemPageKind::Save,
+        Live::Load => astra_vn_core::SystemPageKind::Load,
+        Live::Config => astra_vn_core::SystemPageKind::Config,
+        Live::Gallery => astra_vn_core::SystemPageKind::Gallery,
+        Live::Replay => astra_vn_core::SystemPageKind::Replay,
+        Live::VoiceReplay => astra_vn_core::SystemPageKind::VoiceReplay,
+        Live::RouteChart => astra_vn_core::SystemPageKind::RouteChart,
+        Live::Backlog => astra_vn_core::SystemPageKind::Backlog,
+        Live::LocalizationPreview => astra_vn_core::SystemPageKind::LocalizationPreview,
+        Live::Custom => astra_vn_core::SystemPageKind::Custom,
+        Live::Unknown => astra_vn_core::SystemPageKind::Unknown,
+    }
+}
+
+fn runtime_timeline_task(
+    value: astra_plugin_abi::RuntimeLiveTimelineTask,
+) -> astra_vn_core::VnTimelineTask {
+    astra_vn_core::VnTimelineTask {
+        command_id: value.command_id,
+        command: runtime_timeline_command(value.command),
+    }
+}
+
+fn runtime_timeline_command(
+    value: astra_plugin_abi::RuntimeLiveTimelineCommand,
+) -> astra_vn_core::TimelineCommand {
+    match value {
+        astra_plugin_abi::RuntimeLiveTimelineCommand::Start(spec) => {
+            astra_vn_core::TimelineCommand::Start(astra_vn_core::TimelineSpec {
+                id: spec.id,
+                join: match spec.join {
+                    astra_plugin_abi::RuntimeLiveTimelineJoin::FireAndForget => {
+                        astra_vn_core::VnTimelineJoinPolicy::FireAndForget
+                    }
+                    astra_plugin_abi::RuntimeLiveTimelineJoin::Block => {
+                        astra_vn_core::VnTimelineJoinPolicy::Block
+                    }
+                    astra_plugin_abi::RuntimeLiveTimelineJoin::ReplaceTarget => {
+                        astra_vn_core::VnTimelineJoinPolicy::ReplaceTarget
+                    }
+                },
+                tracks: spec
+                    .tracks
+                    .into_iter()
+                    .map(|track| astra_vn_core::VnTimelineTrack {
+                        target: track.target,
+                        property: track.property,
+                        keyframes: track
+                            .keyframes
+                            .into_iter()
+                            .map(|keyframe| astra_vn_core::VnTimelineKeyframe {
+                                time_ms: keyframe.time_ms,
+                                value: astra_vn_core::FixedScalar {
+                                    millionths: keyframe.value_millionths,
+                                },
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                fence: spec.fence,
+                fallback: spec.fallback,
+                budget_us: spec.budget_us,
+            })
+        }
+        astra_plugin_abi::RuntimeLiveTimelineCommand::Cancel { id, reason } => {
+            astra_vn_core::TimelineCommand::Cancel { id, reason }
+        }
+    }
+}
+
+fn runtime_stage_command(
+    value: astra_plugin_abi::RuntimeLiveStageCommand,
+) -> Result<StageCommand, NativeVnHostError> {
+    use astra_plugin_abi::RuntimeLiveStageCommand as Live;
+    Ok(match value {
+        Live::Preload { asset } => StageCommand::Preload { asset },
+        Live::Configure {
+            width,
+            height,
+            safe_area_width,
+            safe_area_height,
+        } => StageCommand::Configure {
+            viewport: astra_vn_core::StageViewport { width, height },
+            safe_area: astra_vn_core::AspectRatio {
+                width: safe_area_width,
+                height: safe_area_height,
+            },
+        },
+        Live::DeclareLayer {
+            id,
+            kind,
+            z,
+            blend,
+            clip,
+            input,
+        } => StageCommand::DeclareLayer {
+            id,
+            kind: match kind {
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Background => {
+                    astra_vn_core::StageLayerKind::Background
+                }
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Sprite => {
+                    astra_vn_core::StageLayerKind::Sprite
+                }
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Video => {
+                    astra_vn_core::StageLayerKind::Video
+                }
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Text => {
+                    astra_vn_core::StageLayerKind::Text
+                }
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Cg => {
+                    astra_vn_core::StageLayerKind::Cg
+                }
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Ui => {
+                    astra_vn_core::StageLayerKind::Ui
+                }
+                astra_plugin_abi::RuntimeLiveStageLayerKind::Effect => {
+                    astra_vn_core::StageLayerKind::Effect
+                }
+            },
+            z,
+            blend: match blend {
+                astra_plugin_abi::RuntimeLiveStageBlend::Normal => {
+                    astra_vn_core::StageBlendMode::Normal
+                }
+                astra_plugin_abi::RuntimeLiveStageBlend::Add => astra_vn_core::StageBlendMode::Add,
+                astra_plugin_abi::RuntimeLiveStageBlend::Multiply => {
+                    astra_vn_core::StageBlendMode::Multiply
+                }
+                astra_plugin_abi::RuntimeLiveStageBlend::Screen => {
+                    astra_vn_core::StageBlendMode::Screen
+                }
+            },
+            clip: clip.map(|clip| match clip {
+                astra_plugin_abi::RuntimeLiveStageClip::Stage => {
+                    astra_vn_core::StageClipPolicy::Stage
+                }
+                astra_plugin_abi::RuntimeLiveStageClip::SafeArea => {
+                    astra_vn_core::StageClipPolicy::SafeArea
+                }
+            }),
+            input,
+        },
+        Live::Background {
+            asset,
+            layer,
+            preset,
+            duration_ms,
+            interrupt,
+        } => StageCommand::Background {
+            asset,
+            layer,
+            preset,
+            duration_ms,
+            interrupt: runtime_interrupt_policy(interrupt),
+        },
+        Live::Show {
+            id,
+            asset,
+            pose,
+            layer,
+            placement,
+            fit,
+            opacity_millionths,
+            preset,
+            interrupt,
+        } => StageCommand::Show {
+            id,
+            asset,
+            pose,
+            layer,
+            placement: match placement {
+                astra_plugin_abi::RuntimeLiveStagePlacement::Left => {
+                    astra_vn_core::StagePlacement::Left
+                }
+                astra_plugin_abi::RuntimeLiveStagePlacement::Center => {
+                    astra_vn_core::StagePlacement::Center
+                }
+                astra_plugin_abi::RuntimeLiveStagePlacement::Right => {
+                    astra_vn_core::StagePlacement::Right
+                }
+            },
+            fit: match fit {
+                astra_plugin_abi::RuntimeLiveStageFit::ContainHeight => {
+                    astra_vn_core::StageFitMode::ContainHeight
+                }
+                astra_plugin_abi::RuntimeLiveStageFit::Native => {
+                    astra_vn_core::StageFitMode::Native
+                }
+            },
+            opacity: astra_vn_core::FixedScalar {
+                millionths: opacity_millionths,
+            },
+            preset,
+            interrupt: runtime_interrupt_policy(interrupt),
+        },
+        Live::Hide {
+            id,
+            preset,
+            duration_ms,
+            interrupt,
+        } => StageCommand::Hide {
+            id,
+            preset,
+            duration_ms,
+            interrupt: runtime_interrupt_policy(interrupt),
+        },
+        Live::ClearLayer {
+            layer,
+            duration_ms,
+            interrupt,
+        } => StageCommand::ClearLayer {
+            layer,
+            duration_ms,
+            interrupt: runtime_interrupt_policy(interrupt),
+        },
+        Live::SetLayerVisibility { layer, visible } => {
+            StageCommand::SetLayerVisibility { layer, visible }
+        }
+        Live::Backdrop { color } => StageCommand::Backdrop { color },
+        Live::Shade {
+            color,
+            opacity_millionths,
+        } => StageCommand::Shade {
+            color,
+            opacity: astra_vn_core::FixedScalar {
+                millionths: opacity_millionths,
+            },
+        },
+        Live::SetSkipAllowed { allowed } => StageCommand::SetSkipAllowed { allowed },
+        Live::Move {
+            id,
+            x_millionths,
+            y_millionths,
+            duration_ms,
+            preset,
+            interrupt,
+        } => StageCommand::Move {
+            id,
+            x: astra_vn_core::FixedScalar {
+                millionths: x_millionths,
+            },
+            y: astra_vn_core::FixedScalar {
+                millionths: y_millionths,
+            },
+            duration_ms,
+            preset,
+            interrupt: runtime_interrupt_policy(interrupt),
+        },
+        Live::Camera {
+            target,
+            x_millionths,
+            y_millionths,
+            zoom_millionths,
+            rotation_millionths,
+            duration_ms,
+            preset,
+        } => StageCommand::Camera {
+            target,
+            x: astra_vn_core::FixedScalar {
+                millionths: x_millionths,
+            },
+            y: astra_vn_core::FixedScalar {
+                millionths: y_millionths,
+            },
+            zoom: astra_vn_core::FixedScalar {
+                millionths: zoom_millionths,
+            },
+            rotation: astra_vn_core::FixedScalar {
+                millionths: rotation_millionths,
+            },
+            duration_ms,
+            preset,
+        },
+        Live::Movie {
+            layer,
+            asset,
+            alpha_millionths,
+            loop_mode,
+            end,
+            fence,
+            fallback,
+            interrupt,
+        } => StageCommand::Movie {
+            layer,
+            asset,
+            alpha: astra_vn_core::FixedScalar {
+                millionths: alpha_millionths,
+            },
+            loop_mode: match loop_mode {
+                astra_plugin_abi::RuntimeLiveMovieLoop::Once => astra_vn_core::MovieLoopMode::Once,
+                astra_plugin_abi::RuntimeLiveMovieLoop::Loop => astra_vn_core::MovieLoopMode::Loop,
+            },
+            end: match end {
+                astra_plugin_abi::RuntimeLiveMovieEnd::Continue => {
+                    astra_vn_core::VnMovieEndBehavior::Continue
+                }
+                astra_plugin_abi::RuntimeLiveMovieEnd::Wait => {
+                    astra_vn_core::VnMovieEndBehavior::Wait
+                }
+                astra_plugin_abi::RuntimeLiveMovieEnd::Hold => {
+                    astra_vn_core::VnMovieEndBehavior::Hold
+                }
+            },
+            fence,
+            fallback,
+            interrupt: runtime_interrupt_policy(interrupt),
+        },
+        Live::Audio(cue) => StageCommand::Audio(astra_vn_core::AudioCue {
+            id: cue.id,
+            bus: runtime_audio_bus(cue.bus),
+            asset: cue.asset,
+            looped: cue.looped,
+            fade_ms: cue.fade_ms,
+            sync: match cue.sync {
+                astra_plugin_abi::RuntimeLiveAudioSync::None => astra_vn_core::VnAudioSync::None,
+                astra_plugin_abi::RuntimeLiveAudioSync::Text => astra_vn_core::VnAudioSync::Text,
+                astra_plugin_abi::RuntimeLiveAudioSync::Fence(fence) => {
+                    astra_vn_core::VnAudioSync::Fence(fence)
+                }
+            },
+        }),
+        Live::AudioControl(control) => StageCommand::AudioControl(astra_vn_core::AudioControl {
+            id: control.id,
+            action: match control.action {
+                astra_plugin_abi::RuntimeLiveAudioControlAction::Pause => {
+                    astra_vn_core::VnAudioControlAction::Pause
+                }
+                astra_plugin_abi::RuntimeLiveAudioControlAction::Resume => {
+                    astra_vn_core::VnAudioControlAction::Resume
+                }
+                astra_plugin_abi::RuntimeLiveAudioControlAction::Stop => {
+                    astra_vn_core::VnAudioControlAction::Stop
+                }
+                astra_plugin_abi::RuntimeLiveAudioControlAction::FadeStop {
+                    duration_ms,
+                    fence,
+                } => astra_vn_core::VnAudioControlAction::FadeStop { duration_ms, fence },
+            },
+            target: control.target,
+        }),
+        Live::SetAudioBusEnabled { bus, enabled } => StageCommand::SetAudioBusEnabled {
+            bus: runtime_audio_bus(bus),
+            enabled,
+        },
+        Live::Transition {
+            preset,
+            duration_ms,
+            descriptor_id,
+        } => StageCommand::Transition {
+            preset,
+            duration_ms,
+            descriptor_id,
+        },
+        Live::Shake {
+            target,
+            strength_millionths,
+            duration_ms,
+        } => StageCommand::Shake {
+            target,
+            strength: astra_vn_core::FixedScalar {
+                millionths: strength_millionths,
+            },
+            duration_ms,
+        },
+        Live::Timeline(command) => StageCommand::Timeline(runtime_timeline_command(command)),
+        Live::Effect {
+            target,
+            lip_sync,
+            filter,
+            fallback,
+            budget_us,
+        } => StageCommand::Effect {
+            target,
+            lip_sync,
+            filter,
+            fallback,
+            budget_us,
+        },
+    })
+}
+
+fn runtime_interrupt_policy(
+    value: astra_plugin_abi::RuntimeLiveInterruptPolicy,
+) -> astra_vn_core::PresentationInterruptPolicy {
+    match value {
+        astra_plugin_abi::RuntimeLiveInterruptPolicy::Queue => {
+            astra_vn_core::PresentationInterruptPolicy::Queue
+        }
+        astra_plugin_abi::RuntimeLiveInterruptPolicy::ReplaceFromCurrent => {
+            astra_vn_core::PresentationInterruptPolicy::ReplaceFromCurrent
+        }
+        astra_plugin_abi::RuntimeLiveInterruptPolicy::SnapThenStart => {
+            astra_vn_core::PresentationInterruptPolicy::SnapThenStart
+        }
+        astra_plugin_abi::RuntimeLiveInterruptPolicy::Reject => {
+            astra_vn_core::PresentationInterruptPolicy::Reject
+        }
+    }
+}
+
+fn runtime_audio_bus(value: RuntimeLiveAudioBus) -> astra_vn_core::VnAudioBus {
+    match value {
+        RuntimeLiveAudioBus::Voice => astra_vn_core::VnAudioBus::Voice,
+        RuntimeLiveAudioBus::Bgm => astra_vn_core::VnAudioBus::Bgm,
+        RuntimeLiveAudioBus::Se => astra_vn_core::VnAudioBus::Se,
+        RuntimeLiveAudioBus::Movie => astra_vn_core::VnAudioBus::Movie,
+    }
 }
 
 fn player_timeline_task(
@@ -5831,36 +6236,31 @@ fn namespace_transition_scene_draw(
 fn save_director_transition_snapshot(
     snapshot: Option<&DirectorTransitionSnapshot>,
 ) -> Result<Option<SavedDirectorTransitionSnapshot>, NativeVnHostError> {
-    snapshot
-        .map(|snapshot| {
-            let source_draw_json = serde_json::to_vec(&snapshot.source_draw)
-                .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-            Ok(SavedDirectorTransitionSnapshot {
-                descriptor_id: snapshot.descriptor_id.clone(),
-                source_draw_hash: Hash256::from_sha256(&source_draw_json),
-                source_draw_json,
-            })
-        })
-        .transpose()
+    Ok(snapshot.map(|snapshot| SavedDirectorTransitionSnapshot {
+        descriptor_id: snapshot.descriptor_id.clone(),
+        source_state: snapshot.source_state.clone(),
+    }))
 }
 
 fn restore_director_transition_snapshot(
     snapshot: Option<&SavedDirectorTransitionSnapshot>,
+    textures: &BTreeMap<String, TextureFrame>,
+    texture_dimensions: &BTreeMap<String, (u32, u32)>,
+    width: u32,
+    height: u32,
 ) -> Result<Option<DirectorTransitionSnapshot>, NativeVnHostError> {
     snapshot
         .map(|snapshot| {
-            if Hash256::from_sha256(&snapshot.source_draw_json) != snapshot.source_draw_hash {
-                return Err(NativeVnHostError::Save(
-                    "ASTRA_PLAYER_SAVE_INTEGRITY: Director transition snapshot hash mismatch".into(),
-                ));
-            }
-            let source_draw = serde_json::from_slice(&snapshot.source_draw_json).map_err(|error| {
-                NativeVnHostError::Save(format!(
-                    "ASTRA_PLAYER_SAVE_INTEGRITY: Director transition snapshot decode failed: {error}"
-                ))
-            })?;
+            let source_draw = stage_scene_commands(
+                &snapshot.source_state,
+                textures,
+                texture_dimensions,
+                width,
+                height,
+            )?;
             Ok(DirectorTransitionSnapshot {
                 descriptor_id: snapshot.descriptor_id.clone(),
+                source_state: snapshot.source_state.clone(),
                 source_draw,
             })
         })
@@ -6021,7 +6421,41 @@ fn dissolve_pattern_rectangles(
 mod director_transition_tests {
     use super::{compose_director_transition_scene, DirectorTransitionSnapshot};
     use astra_media_core::SceneCommand;
-    use std::collections::BTreeSet;
+    use astra_vn_package::{
+        AspectRatio, FixedScalar, ProductStageCamera, ProductStageState, StageViewport,
+        PRODUCT_STAGE_STATE_SCHEMA,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn source_state() -> ProductStageState {
+        ProductStageState {
+            schema: PRODUCT_STAGE_STATE_SCHEMA.into(),
+            profile: "modern".into(),
+            configured: false,
+            viewport: StageViewport {
+                width: 800,
+                height: 600,
+            },
+            safe_area: AspectRatio {
+                width: 16,
+                height: 9,
+            },
+            preloaded_assets: BTreeSet::new(),
+            layers: BTreeMap::new(),
+            entities: BTreeMap::new(),
+            camera: ProductStageCamera::default(),
+            movies: BTreeMap::new(),
+            effects: BTreeMap::new(),
+            backdrop_color: None,
+            shade_color: [0, 0, 0, 255],
+            shade_opacity: FixedScalar::ZERO,
+            skip_allowed: true,
+            transition: None,
+            audio_bus_enabled: BTreeMap::new(),
+            frame_index: 0,
+            elapsed_ns: 0,
+        }
+    }
 
     fn next_scene() -> Vec<SceneCommand> {
         vec![SceneCommand::rect(
@@ -6038,6 +6472,7 @@ mod director_transition_tests {
     fn wipe_transition_clips_the_new_scene_by_fixed_progress() {
         let snapshot = DirectorTransitionSnapshot {
             descriptor_id: "director.puppet.1".into(),
+            source_state: source_state(),
             source_draw: vec![SceneCommand::rect(
                 "previous",
                 0,
@@ -6061,6 +6496,7 @@ mod director_transition_tests {
     fn transition_namespaces_outgoing_and_each_incoming_draw_instance() {
         let snapshot = DirectorTransitionSnapshot {
             descriptor_id: "director.puppet.26".into(),
+            source_state: source_state(),
             source_draw: vec![SceneCommand::rect(
                 "vn.scene.backdrop",
                 0,
@@ -6099,6 +6535,7 @@ mod director_transition_tests {
     fn dissolve_patterns_uses_the_fixed_native_pixel_mask() {
         let snapshot = DirectorTransitionSnapshot {
             descriptor_id: "director.puppet.26".into(),
+            source_state: source_state(),
             source_draw: Vec::new(),
         };
         let first = compose_director_transition_scene(&snapshot, &next_scene(), 500_000, 32, 32)
@@ -6832,7 +7269,6 @@ mod native_vn_host_tests {
                     BTreeSet::from([astra_ui_core::UiSemanticAction::Activate]),
                 ),
             ],
-            hash: astra_core::Hash256::from_sha256(b"retained-pointer"),
         };
         assert_eq!(
             retained_pointer_activation_target(
@@ -7337,18 +7773,11 @@ fn decode_save_envelope(bytes: &[u8]) -> Result<NativeVnPlayerSaveEnvelope, Nati
     let envelope: NativeVnPlayerSaveEnvelope = postcard::from_bytes(bytes).map_err(|error| {
         NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_INTEGRITY: {error}"))
     })?;
-    if envelope.schema != "astra.player.native_vn_save.v5"
-        || envelope.payload.schema != "astra.player.native_vn_save_payload.v5"
+    if envelope.schema != "astra.player.native_vn_save.v7"
+        || envelope.payload.schema != "astra.player.native_vn_save_payload.v7"
     {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_VERSION_UNSUPPORTED: save schema is not supported".into(),
-        ));
-    }
-    let payload_bytes = postcard::to_allocvec(&envelope.payload)
-        .map_err(|error| NativeVnHostError::Save(error.to_string()))?;
-    if Hash256::from_sha256(&payload_bytes) != envelope.payload_hash {
-        return Err(NativeVnHostError::Save(
-            "ASTRA_PLAYER_SAVE_INTEGRITY: save payload hash mismatch".into(),
         ));
     }
     Ok(envelope)
@@ -7385,13 +7814,44 @@ fn validate_save_metadata(
     if metadata.thumbnail.width != 160
         || metadata.thumbnail.height != 120
         || expected_bytes != Some(metadata.thumbnail.rgba8.len())
-        || Hash256::from_sha256(&metadata.thumbnail.rgba8) != metadata.thumbnail.hash
     {
         return Err(NativeVnHostError::Save(
             "ASTRA_PLAYER_SAVE_METADATA_THUMBNAIL: save thumbnail integrity check failed".into(),
         ));
     }
     Ok(())
+}
+
+fn save_metadata_for_persistence(metadata: &NativeVnSaveMetadata) -> SavedNativeVnSaveMetadata {
+    SavedNativeVnSaveMetadata {
+        slot_id: metadata.slot_id.clone(),
+        thumbnail_asset: metadata.thumbnail_asset.clone(),
+        thumbnail_width: metadata.thumbnail.width,
+        thumbnail_height: metadata.thumbnail.height,
+        thumbnail_rgba8: metadata.thumbnail.rgba8.as_slice().to_vec(),
+        timestamp_text: metadata.timestamp_text.clone(),
+        playtime_text: metadata.playtime_text.clone(),
+    }
+}
+
+fn restore_save_metadata(
+    metadata: SavedNativeVnSaveMetadata,
+) -> Result<NativeVnSaveMetadata, NativeVnHostError> {
+    let thumbnail = TextureFrame::from_vec(
+        metadata.thumbnail_width,
+        metadata.thumbnail_height,
+        metadata.thumbnail_rgba8,
+    )
+    .map_err(|error| {
+        NativeVnHostError::Save(format!("ASTRA_PLAYER_SAVE_METADATA_THUMBNAIL: {error}"))
+    })?;
+    Ok(NativeVnSaveMetadata {
+        slot_id: metadata.slot_id,
+        thumbnail_asset: metadata.thumbnail_asset,
+        thumbnail,
+        timestamp_text: metadata.timestamp_text,
+        playtime_text: metadata.playtime_text,
+    })
 }
 
 fn system_page_binding_key(page: SystemPageKind) -> Result<&'static str, NativeVnHostError> {

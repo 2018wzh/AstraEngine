@@ -8,7 +8,12 @@ publish = false
 [lib]
 doctest = false
 
+[features]
+default = []
+ffi = ["dep:abi_stable"]
+
 [dependencies]
+abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../astra-core" }
 schemars.workspace = true
 serde.workspace = true

@@ -8,12 +8,12 @@ use std::{
     sync::Arc,
 };
 
-use astra_byte_source::{ByteRange, SourceRevision};
+use astra_byte_source::{ByteRange, OwnedByteBuffer, SourceRevision};
 use astra_emu_family_api::LegacyVfsReader;
 use rfvp_hosted::host_api::{
     AudioParams, AudioStreamDesc, AudioStreamId, ColorRgba, DrawSolidCommand, DrawSpriteCommand,
-    EncodedAudioKind, RfvpAudio, RfvpClock, RfvpError, RfvpFile, RfvpFileInfo, RfvpFileSystem,
-    RfvpHost, RfvpRenderer, RfvpResult, TextureDesc, TextureId, TextureRect,
+    EncodedAudioKind, PixelBuffer, RfvpAudio, RfvpClock, RfvpError, RfvpFile, RfvpFileInfo,
+    RfvpFileSystem, RfvpHost, RfvpRenderer, RfvpResult, TextureDesc, TextureId, TextureRect,
 };
 
 pub const MAX_HOSTED_FILES: usize = 65_536;
@@ -154,7 +154,7 @@ pub enum HostedMemoryFile {
         len: u64,
         revision: SourceRevision,
         cache_offset: u64,
-        cache: Vec<u8>,
+        cache: OwnedByteBuffer,
     },
 }
 
@@ -186,7 +186,7 @@ impl RfvpFileSystem for HostedMemoryFileSystem {
                     len: stat.len,
                     revision: stat.revision,
                     cache_offset: 0,
-                    cache: Vec::new(),
+                    cache: OwnedByteBuffer::default(),
                 })
             }
         }
@@ -386,10 +386,20 @@ impl RfvpClock for StepClock {
 }
 pub struct RejectingRenderer;
 impl RfvpRenderer for RejectingRenderer {
-    fn create_texture(&mut self, _: TextureId, _: TextureDesc, _: Option<&[u8]>) -> RfvpResult<()> {
+    fn create_texture(
+        &mut self,
+        _: TextureId,
+        _: TextureDesc,
+        _: Option<PixelBuffer<'_>>,
+    ) -> RfvpResult<()> {
         Err(RfvpError::Backend)
     }
-    fn update_texture(&mut self, _: TextureId, _: TextureRect, _: &[u8]) -> RfvpResult<()> {
+    fn update_texture(
+        &mut self,
+        _: TextureId,
+        _: TextureRect,
+        _: PixelBuffer<'_>,
+    ) -> RfvpResult<()> {
         Err(RfvpError::Backend)
     }
     fn destroy_texture(&mut self, _: TextureId) {}
@@ -499,7 +509,7 @@ mod tests {
             }
             Ok(ByteSourceStat {
                 len: self.bytes.len() as u64,
-                revision: SourceRevision(astra_core::Hash256::from_sha256(&self.bytes)),
+                revision: SourceRevision(1),
             })
         }
 
@@ -530,7 +540,7 @@ mod tests {
             Ok(RangeReadResult {
                 range,
                 revision: stat.revision,
-                bytes,
+                bytes: bytes.into(),
             })
         }
     }

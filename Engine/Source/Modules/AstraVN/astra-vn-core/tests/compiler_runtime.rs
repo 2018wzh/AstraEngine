@@ -1,10 +1,7 @@
 use astra_vn_core::{
-    compile_astra_project, reduce_vn_step, reduce_vn_step_indexed,
-    reduce_vn_step_indexed_prehashed, reduce_vn_step_indexed_prehashed_encoded,
-    reduce_vn_step_indexed_prehashed_pending_encoded, AstraSource, PresentationCommand,
-    SystemPageKind, VnPlayerCommand, VnRunConfig, VnRuntime, VnRuntimeIndex, VnWaitKind,
+    compile_astra_project, reduce_vn_step, AstraSource, PresentationCommand, SystemPageKind,
+    VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind,
 };
-use std::sync::Arc;
 
 const MAIN: &str = r#"
 story main #@id story.main
@@ -34,68 +31,6 @@ story system.title #@id system.title
     system_page kind:title policy:astra.policy.standard #@id page.title
     option key:system.start -> story.main:state.prologue #@id system.start
 "#;
-
-#[astra_headless_test::test]
-fn prehashed_reducer_preserves_canonical_step_output() {
-    let compiled = Arc::new(
-        compile_astra_project([AstraSource::story("main.astra", MAIN)], Default::default())
-            .unwrap()
-            .story,
-    );
-    let index = Arc::new(VnRuntimeIndex::build(&compiled).unwrap());
-    let runtime = VnRuntime::new_shared_indexed(
-        Arc::clone(&compiled),
-        Arc::clone(&index),
-        VnRunConfig::classic("ja"),
-    )
-    .unwrap();
-    let state = runtime.state().clone();
-    let state_hash = astra_core::Hash128::from_blake3(&postcard::to_allocvec(&state).unwrap());
-    let command = VnPlayerCommand::Launch {
-        story_id: "story.main".into(),
-        state_id: "state.prologue".into(),
-    };
-
-    let regular = reduce_vn_step_indexed(
-        Arc::clone(&compiled),
-        Arc::clone(&index),
-        state.clone(),
-        command.clone(),
-    )
-    .unwrap();
-    let prehashed = reduce_vn_step_indexed_prehashed(
-        Arc::clone(&compiled),
-        Arc::clone(&index),
-        state.clone(),
-        state_hash,
-        command.clone(),
-    )
-    .unwrap();
-    assert_eq!(prehashed, regular);
-    let pending = reduce_vn_step_indexed_prehashed_pending_encoded(
-        Arc::clone(&compiled),
-        Arc::clone(&index),
-        state.clone(),
-        state_hash,
-        command.clone(),
-    )
-    .unwrap();
-    let pending_hash = astra_core::Hash128::from_blake3(&pending.2);
-    assert_eq!(pending.0, regular.0);
-    assert_eq!(pending.1.finalize(pending_hash), regular.1);
-    let encoded =
-        reduce_vn_step_indexed_prehashed_encoded(compiled, index, state, state_hash, command)
-            .unwrap();
-    assert_eq!((&encoded.0, &encoded.1), (&regular.0, &regular.1));
-    assert_eq!(
-        encoded.2.as_ref(),
-        postcard::to_allocvec(&regular.0).unwrap()
-    );
-    assert_eq!(
-        astra_core::Hash128::from_blake3(&encoded.2),
-        encoded.1.state_hash_after_advance
-    );
-}
 
 #[astra_headless_test::test]
 fn compiles_route_graph_source_map_and_stable_hash() {
@@ -215,7 +150,7 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
         Some(VnWaitKind::Choice)
     );
 
-    let saved_hash = runtime.state_hash();
+    let saved_state = runtime.state().clone();
     let save = runtime.save_slot("slot.auto").unwrap();
     let selected = runtime
         .apply(VnPlayerCommand::Choose {
@@ -247,7 +182,7 @@ fn runtime_drives_dialogue_choice_backlog_read_state_and_save_load() {
 
     let mut loaded = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     loaded.load_slot(save).unwrap();
-    assert_eq!(loaded.state_hash(), saved_hash);
+    assert_eq!(loaded.state(), &saved_state);
 }
 
 #[astra_headless_test::test]

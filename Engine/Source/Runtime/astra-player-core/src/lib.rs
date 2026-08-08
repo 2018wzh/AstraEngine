@@ -10,10 +10,6 @@ mod platform_sink;
 pub use astra_media::{PlayerAudioContractError, PlayerDecodedAudio};
 pub use platform_sink::*;
 mod media_lifecycle;
-pub use astra_media::{
-    PlayerAudioCompletion, PlayerAudioQueueController, PlayerMixedAudio,
-    PlayerPersistentAudioError, PlayerPersistentVoiceSpec,
-};
 pub use media_lifecycle::*;
 mod timeline;
 pub use timeline::*;
@@ -118,8 +114,7 @@ pub enum PlayerDecodeStreamAction {
     Next,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayerHostCommand {
     OpenPackage {
         sequence: u64,
@@ -165,35 +160,6 @@ pub enum PlayerHostCommand {
         sequence: u64,
         slot: String,
     },
-    OpenAudio {
-        sequence: u64,
-        output: PlayerHostResourceId,
-        sample_rate: u32,
-        channels: u16,
-        max_buffered_frames: u32,
-    },
-    QueryAudioFormat {
-        sequence: u64,
-    },
-    SubmitAudio {
-        sequence: u64,
-        output: PlayerHostResourceId,
-        packet_sequence: u64,
-        channels: u16,
-        samples: Vec<f32>,
-    },
-    QueryAudio {
-        sequence: u64,
-        output: PlayerHostResourceId,
-    },
-    DrainAudio {
-        sequence: u64,
-        output: PlayerHostResourceId,
-    },
-    CloseAudio {
-        sequence: u64,
-        output: PlayerHostResourceId,
-    },
     OpenDecode {
         sequence: u64,
         session: PlayerHostResourceId,
@@ -211,9 +177,8 @@ pub enum PlayerHostCommand {
         coded_width: Option<u32>,
         coded_height: Option<u32>,
         keyframe: bool,
-        #[serde(default = "default_decode_stream_action")]
         stream_action: PlayerDecodeStreamAction,
-        bytes: Vec<u8>,
+        bytes: astra_byte_source::OwnedByteBuffer,
     },
     CloseDecode {
         sequence: u64,
@@ -241,10 +206,6 @@ pub enum PlayerHostCommand {
     },
 }
 
-fn default_decode_stream_action() -> PlayerDecodeStreamAction {
-    PlayerDecodeStreamAction::OneShot
-}
-
 impl PlayerHostCommand {
     pub fn sequence(&self) -> u64 {
         match self {
@@ -258,12 +219,6 @@ impl PlayerHostCommand {
             | Self::ReadSave { sequence, .. }
             | Self::ListSaves { sequence }
             | Self::DeleteSave { sequence, .. }
-            | Self::OpenAudio { sequence, .. }
-            | Self::QueryAudioFormat { sequence }
-            | Self::SubmitAudio { sequence, .. }
-            | Self::QueryAudio { sequence, .. }
-            | Self::DrainAudio { sequence, .. }
-            | Self::CloseAudio { sequence, .. }
             | Self::OpenDecode { sequence, .. }
             | Self::Decode { sequence, .. }
             | Self::CloseDecode { sequence, .. }
@@ -274,7 +229,7 @@ impl PlayerHostCommand {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerHostCommandBatch {
     pub commands: Vec<PlayerHostCommand>,
 }
@@ -297,8 +252,7 @@ pub trait PlayerHostCommandSource {
     fn take_host_commands(&mut self) -> Result<PlayerHostCommandBatch, PlayerHostCommandError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayerHostCommandResult {
     PackageOpened {
         package: PlayerHostResourceId,
@@ -323,40 +277,12 @@ pub enum PlayerHostCommandResult {
     SaveList {
         slots: Vec<String>,
     },
-    AudioOpened {
-        output: PlayerHostResourceId,
-    },
-    AudioFormat {
-        sample_rate: u32,
-        channels: u16,
-    },
-    AudioState {
-        output: PlayerHostResourceId,
-        queued_frames: u64,
-        callback_count: u64,
-        submitted_samples: u64,
-        consumed_samples: u64,
-        underflow_count: u64,
-        peak_dbfs_bits: u32,
-        rms_dbfs_bits: u32,
-    },
-    AudioDrained {
-        output: PlayerHostResourceId,
-        sample_count: u64,
-        peak_dbfs_bits: u32,
-        rms_dbfs_bits: u32,
-    },
-    AudioClosed {
-        output: PlayerHostResourceId,
-    },
     DecodeOpened {
         session: PlayerHostResourceId,
     },
     Decoded {
         session: PlayerHostResourceId,
-        format: String,
-        hash: String,
-        bytes: Vec<u8>,
+        output: astra_platform::DecodeOutput,
     },
     DecodeClosed {
         session: PlayerHostResourceId,
@@ -775,11 +701,10 @@ impl PlayerPresentationReport {
         if changed_pixels == 0 {
             return Err(PlayerPresentationError::NoVisualOutput);
         }
-        let command_bytes = serde_json::to_vec(present_command)
-            .map_err(PlayerPresentationError::CommandSerialization)?;
         if commands.is_empty() {
             return Err(PlayerPresentationError::EmptyCommandStream);
         }
+        let command_hash = evidence_scene_command_hash(*sequence, *width, *height, commands);
         Ok(Self {
             schema: PLAYER_PRESENTATION_REPORT_SCHEMA.to_string(),
             status: PlayerAutomationStatus::Pass,
@@ -794,7 +719,7 @@ impl PlayerPresentationReport {
             presentation_path: identity.presentation_path,
             font_provider_hash: identity.font_provider_hash,
             layout_hash: layout_hash.to_string(),
-            command_hash: Hash256::from_sha256(&command_bytes).to_string(),
+            command_hash: command_hash.to_string(),
             capture_hash: Hash256::from_sha256(&capture.rgba8).to_string(),
             sequence: *sequence,
             width: capture.width,
@@ -819,8 +744,51 @@ pub enum PlayerPresentationError {
     EmptyCommandStream,
     #[error("player presentation evidence requires a PresentScene command")]
     UnsupportedCommand,
-    #[error("player presentation command stream is not serializable: {0}")]
-    CommandSerialization(serde_json::Error),
+}
+
+pub fn evidence_scene_command_hash(
+    sequence: u64,
+    width: u32,
+    height: u32,
+    commands: &[astra_media_core::SceneCommand],
+) -> Hash256 {
+    use astra_media_core::SceneCommand;
+
+    let mut material = Vec::with_capacity(24 + commands.len() * 33);
+    material.extend_from_slice(&sequence.to_le_bytes());
+    material.extend_from_slice(&width.to_le_bytes());
+    material.extend_from_slice(&height.to_le_bytes());
+    material.extend_from_slice(&(commands.len() as u64).to_le_bytes());
+    for command in commands {
+        let (kind, pixels): (u8, Option<&[u8]>) = match command {
+            SceneCommand::UploadTexture { frame, .. } => (0, Some(&frame.rgba8)),
+            SceneCommand::UpdateTextureRegion { rgba8, .. } => (1, Some(rgba8)),
+            SceneCommand::UploadGlyph { glyph, .. } => (2, Some(&glyph.pixels)),
+            SceneCommand::ReleaseResource { .. } => (3, None),
+            SceneCommand::Sprite { .. } => (4, None),
+            SceneCommand::GlyphRun { .. } => (5, None),
+            SceneCommand::Mesh2D { .. } => (6, None),
+            SceneCommand::MeshBatch2D { .. } => (20, None),
+            SceneCommand::Clear { .. } => (7, None),
+            SceneCommand::Rect { .. } => (8, None),
+            SceneCommand::Texture { frame, .. } => (9, Some(&frame.rgba8)),
+            SceneCommand::VideoFrame { frame, .. } => (10, Some(&frame.rgba8)),
+            SceneCommand::Glyph { glyph, .. } => (11, Some(&glyph.pixels)),
+            SceneCommand::PushClip { .. } => (12, None),
+            SceneCommand::PopClip => (13, None),
+            SceneCommand::PushTransform { .. } => (14, None),
+            SceneCommand::PopTransform => (15, None),
+            SceneCommand::SetCamera { .. } => (16, None),
+            SceneCommand::PushOpacity { .. } => (17, None),
+            SceneCommand::PopOpacity => (18, None),
+            SceneCommand::FilterGraph { .. } => (19, None),
+        };
+        material.push(kind);
+        if let Some(pixels) = pixels {
+            material.extend_from_slice(Hash256::from_sha256(pixels).as_bytes());
+        }
+    }
+    Hash256::from_sha256(&material)
 }
 
 fn validate_presentation_identity(

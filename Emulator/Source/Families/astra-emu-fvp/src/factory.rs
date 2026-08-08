@@ -7,7 +7,7 @@ use std::{
 
 use astra_byte_source::{
     audit_source, AccessedResourceLedger, BoundedByteSource, ByteRange, FileByteSource,
-    DEFAULT_MAX_RANGE_BYTES,
+    OwnedByteBuffer, DEFAULT_MAX_RANGE_BYTES,
 };
 use astra_core::Hash256;
 use astra_emu_family_core::{
@@ -258,7 +258,7 @@ impl FvpMountedVfs {
         entry: &MountedEntry,
         offset: u64,
         length: u64,
-    ) -> Result<Vec<u8>, LegacyCoreError> {
+    ) -> Result<OwnedByteBuffer, LegacyCoreError> {
         let descriptor = self.archives[entry.archive_index]
             .archive
             .entry(entry.entry_index)
@@ -379,7 +379,6 @@ impl LegacyMountedVfs for FvpMountedVfs {
                 entry_id: None,
                 kind: LegacyVfsNodeKind::Directory,
                 size: 0,
-                content_hash: None,
                 archive_role: None,
                 method: None,
             });
@@ -390,7 +389,6 @@ impl LegacyMountedVfs for FvpMountedVfs {
             entry_id: Some(entry.entry_id.clone()),
             kind: LegacyVfsNodeKind::File,
             size: entry.size,
-            content_hash: Some(entry.content_hash),
             archive_role: Some(entry.role.clone()),
             method: Some("raw".into()),
         })
@@ -510,7 +508,7 @@ fn read_bounded(
     offset: u64,
     length: u64,
     ledger: &Mutex<AccessedResourceLedger>,
-) -> Result<Vec<u8>, LegacyCoreError> {
+) -> Result<OwnedByteBuffer, LegacyCoreError> {
     let end = offset
         .checked_add(length)
         .ok_or_else(|| invalid("ASTRA_EMU_VFS_READ_OVERFLOW", "FVP source range overflowed"))?;
@@ -520,45 +518,39 @@ fn read_bounded(
             "FVP source range is outside the archive",
         ));
     }
-    let capacity = usize::try_from(length).map_err(|_| {
-        invalid(
+    if length > DEFAULT_MAX_RANGE_BYTES {
+        return Err(invalid(
             "ASTRA_EMU_VFS_READ_LIMIT",
-            "FVP source range does not fit memory",
-        )
-    })?;
-    let mut bytes = Vec::with_capacity(capacity);
-    let mut cursor = offset;
-    while cursor < end {
-        let chunk_length = (end - cursor).min(DEFAULT_MAX_RANGE_BYTES);
-        let result = source
-            .read_range(
-                stat.revision,
-                ByteRange {
-                    offset: cursor,
-                    len: chunk_length,
-                },
-                DEFAULT_MAX_RANGE_BYTES,
-            )
-            .map_err(byte_source_error)?;
-        ledger
-            .lock()
-            .map_err(|_| {
-                invalid(
-                    "ASTRA_EMU_VFS_LEDGER_POISONED",
-                    "FVP resource ledger is poisoned",
-                )
-            })?
-            .record(resource_id, &result)
-            .map_err(byte_source_error)?;
-        bytes.extend_from_slice(&result.bytes);
-        cursor = cursor.checked_add(chunk_length).ok_or_else(|| {
-            invalid(
-                "ASTRA_EMU_VFS_READ_OVERFLOW",
-                "FVP source cursor overflowed",
-            )
-        })?;
+            "FVP source range exceeds the owned range limit",
+        ));
     }
-    Ok(bytes)
+    let result = source
+        .read_range(
+            stat.revision,
+            ByteRange {
+                offset,
+                len: length,
+            },
+            DEFAULT_MAX_RANGE_BYTES,
+        )
+        .map_err(byte_source_error)?;
+    ledger
+        .lock()
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_VFS_LEDGER_POISONED",
+                "FVP resource ledger is poisoned",
+            )
+        })?
+        .record(resource_id, &result)
+        .map_err(byte_source_error)?;
+    if result.bytes.len() as u64 != length {
+        return Err(invalid(
+            "ASTRA_EMU_VFS_READ_SHORT",
+            "FVP source returned an invalid owned range length",
+        ));
+    }
+    Ok(result.bytes)
 }
 
 fn validate_options(options: &FvpVfsFamilyOptions) -> Result<(), LegacyCoreError> {

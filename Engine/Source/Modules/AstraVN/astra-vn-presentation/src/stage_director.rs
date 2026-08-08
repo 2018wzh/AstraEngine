@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use astra_core::{Diagnostic, Hash128};
+use astra_core::Diagnostic;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -38,12 +38,6 @@ pub struct ProductStageState {
     pub audio_bus_enabled: BTreeMap<VnAudioBus, bool>,
     pub frame_index: u64,
     pub elapsed_ns: u64,
-}
-
-impl ProductStageState {
-    pub fn stable_hash(&self) -> Result<Hash128, VnError> {
-        Ok(Hash128::from_blake3(&postcard::to_allocvec(self)?))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

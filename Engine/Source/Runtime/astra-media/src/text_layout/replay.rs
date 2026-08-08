@@ -15,6 +15,20 @@ use super::{
 pub const TEXT_LAYOUT_REPLAY_SCHEMA: &str = "astra.text_layout_replay.v1";
 pub const TEXT_LAYOUT_REPLAY_SNAPSHOT_SCHEMA: &str = "astra.text_layout_replay_snapshot.v1";
 
+/// Computes the persisted replay identity for a validated request.
+///
+/// This function belongs to the replay/save domain and must not be called by
+/// ordinary layout, measurement, rendering, or cache lookup paths.
+pub fn text_layout_replay_request_hash(request: &TextLayoutRequest) -> Result<Hash256, MediaError> {
+    canonical_hash(&(TEXT_LAYOUT_SCHEMA, request))
+}
+
+/// Computes a persisted/Evidence digest without adding identity work to the
+/// live layout result.
+pub fn text_layout_evidence_hash(layout: &TextLayoutResult) -> Result<Hash256, MediaError> {
+    canonical_hash(&PersistedLayoutRef(layout))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TextLayoutReplayLimits {
     pub max_records: usize,
@@ -51,7 +65,7 @@ pub struct TextLayoutReplayRecord {
     pub request_hash: Hash256,
     pub binding_hash: Hash256,
     #[serde(with = "binary_text_layout")]
-    #[schemars(with = "TextLayoutResult")]
+    #[schemars(with = "binary_text_layout::LayoutWire")]
     pub layout: TextLayoutResult,
     pub record_hash: Hash256,
 }
@@ -138,7 +152,9 @@ impl TextLayoutReplaySession {
                 "live text provider or packaged font identity changed",
             ));
         }
-        let request_hash = provider.request_hash(request)?;
+        // Replay identity is persisted-domain work. The ordinary layout/cache
+        // path never serializes or hashes the request.
+        let request_hash = text_layout_replay_request_hash(request)?;
         let layout = provider.layout(request)?;
         validate_layout(&layout, self.snapshot.limits)?;
         let binding_hash = binding_hash(&self.snapshot.binding)?;
@@ -170,7 +186,7 @@ impl TextLayoutReplaySession {
             event = "text.layout.recorded",
             sequence,
             request_hash = %request_hash,
-            layout_hash = %layout.hash,
+            layout_revision = layout.revision,
             record_count = self.snapshot.records.len(),
         );
         Ok(layout)
@@ -219,7 +235,7 @@ impl TextLayoutReplaySession {
             event = "text.layout.replayed",
             sequence,
             request_hash = %input.request_hash,
-            layout_hash = %layout.hash,
+            layout_revision = layout.revision,
         );
         Ok(layout)
     }
@@ -465,11 +481,10 @@ fn validate_layout(
             || !safe_resource_id(&resource.resource_id)
             || !resource_ids.insert(resource.resource_id.clone())
             || expected_len != resource.bitmap.pixels.len()
-            || Hash256::from_sha256(&resource.bitmap.pixels) != resource.bitmap.hash
         {
             return Err(text_replay_error(
                 "ASTRA_TEXT_REPLAY_GLYPH",
-                "recorded glyph resource identity, dimensions, or hash is invalid",
+                "recorded glyph resource identity or dimensions are invalid",
             ));
         }
         glyph_bytes = glyph_bytes.checked_add(expected_len).ok_or_else(|| {
@@ -528,8 +543,19 @@ fn record_hash(record: &TextLayoutReplayRecord) -> Result<Hash256, MediaError> {
         record.sequence,
         record.request_hash,
         record.binding_hash,
-        &record.layout,
+        PersistedLayoutRef(&record.layout),
     ))
+}
+
+struct PersistedLayoutRef<'a>(&'a TextLayoutResult);
+
+impl Serialize for PersistedLayoutRef<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        binary_text_layout::serialize(self.0, serializer)
+    }
 }
 
 fn transcript_hash(snapshot: &TextLayoutReplaySnapshot) -> Result<Hash256, MediaError> {
@@ -602,7 +628,8 @@ fn text_replay_error(code: &str, message: impl AsRef<str>) -> MediaError {
 
 mod binary_text_layout {
     use astra_core::{Diagnostic, DiagnosticSeverity, Hash256, SourceSpan};
-    use astra_media_core::GlyphBitmap;
+    use astra_media_core::{GlyphBitmap, GlyphBitmapFormat, OwnedPixelBuffer};
+    use schemars::JsonSchema;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     use super::super::{
@@ -610,8 +637,8 @@ mod binary_text_layout {
         ShapedGlyphRun, SourceRange, TextDirection, TextLayoutResult, VoiceReplayRefRecord,
     };
 
-    #[derive(Serialize, Deserialize)]
-    struct LayoutWire {
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    pub(super) struct LayoutWire {
         schema: String,
         key: String,
         width: f32,
@@ -625,10 +652,10 @@ mod binary_text_layout {
         clipped: bool,
         ellipsized: bool,
         diagnostics: Vec<DiagnosticWire>,
-        hash: Hash256,
+        revision: u64,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, JsonSchema)]
     struct LineWire {
         run_index: usize,
         role: RoleWire,
@@ -641,7 +668,7 @@ mod binary_text_layout {
         height: f32,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, JsonSchema)]
     struct RunWire {
         run_index: usize,
         role: RoleWire,
@@ -655,22 +682,30 @@ mod binary_text_layout {
         glyphs: Vec<ShapedGlyph>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, JsonSchema)]
     enum RoleWire {
         Base,
         Ruby(usize),
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, JsonSchema)]
     struct GlyphResourceWire {
         resource_id: String,
         font_asset_id: String,
         font_hash: Hash256,
         glyph_id: u16,
-        bitmap: GlyphBitmap,
+        bitmap: GlyphBitmapWire,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    struct GlyphBitmapWire {
+        width: u32,
+        height: u32,
+        format: GlyphBitmapFormat,
+        pixels: Vec<u8>,
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
     struct DiagnosticWire {
         severity: DiagnosticSeverity,
         code: String,
@@ -717,7 +752,7 @@ mod binary_text_layout {
                     .iter()
                     .map(DiagnosticWire::from)
                     .collect(),
-                hash: layout.hash,
+                revision: layout.revision,
             }
         }
     }
@@ -750,7 +785,7 @@ mod binary_text_layout {
                     .into_iter()
                     .map(Diagnostic::from)
                     .collect(),
-                hash: layout.hash,
+                revision: layout.revision,
             }
         }
     }
@@ -846,7 +881,7 @@ mod binary_text_layout {
                 font_asset_id: resource.font_asset_id.clone(),
                 font_hash: resource.font_hash,
                 glyph_id: resource.glyph_id,
-                bitmap: resource.bitmap.clone(),
+                bitmap: GlyphBitmapWire::from(&resource.bitmap),
             }
         }
     }
@@ -858,7 +893,29 @@ mod binary_text_layout {
                 font_asset_id: resource.font_asset_id,
                 font_hash: resource.font_hash,
                 glyph_id: resource.glyph_id,
-                bitmap: resource.bitmap,
+                bitmap: GlyphBitmap::from(resource.bitmap),
+            }
+        }
+    }
+
+    impl From<&GlyphBitmap> for GlyphBitmapWire {
+        fn from(bitmap: &GlyphBitmap) -> Self {
+            Self {
+                width: bitmap.width,
+                height: bitmap.height,
+                format: bitmap.format,
+                pixels: bitmap.pixels.as_slice().to_vec(),
+            }
+        }
+    }
+
+    impl From<GlyphBitmapWire> for GlyphBitmap {
+        fn from(bitmap: GlyphBitmapWire) -> Self {
+            Self {
+                width: bitmap.width,
+                height: bitmap.height,
+                format: bitmap.format,
+                pixels: OwnedPixelBuffer::from_vec(bitmap.pixels),
             }
         }
     }

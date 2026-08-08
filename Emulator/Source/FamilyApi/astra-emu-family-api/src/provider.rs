@@ -4,6 +4,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -148,7 +149,7 @@ pub trait LegacyVfsReader: Send + Sync {
         mount_set_id: &str,
         uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
+    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
         let stat = self.stat_file(mount_set_id, uri)?;
         if stat.len > max_bytes {
             return Err(LegacyProviderError::invalid(
@@ -349,7 +350,7 @@ pub enum LegacyRuntimeStatus {
     Faulted,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct LegacyStepOutput {
     pub status: LegacyRuntimeStatus,
     pub live: LegacyLiveOutput,
@@ -485,17 +486,12 @@ impl LegacyStepOutput {
         for event in &self.control.events {
             add_sequence(event.sequence)?;
             validate_symbol("runtime_event", &event.event)?;
-            add_payload(event.payload.len())?;
+            add_payload(event.value.len())?;
         }
         for mutation in &self.control.blackboard {
             add_sequence(mutation.sequence)?;
             validate_symbol("blackboard_key", &mutation.key)?;
             add_payload(mutation.value.len())?;
-        }
-        for event in &self.control.scheduled_events {
-            add_sequence(event.sequence)?;
-            validate_symbol("scheduled_event", &event.event)?;
-            add_payload(event.payload.len())?;
         }
         for dirty in &self.control.dirty_sections {
             add_sequence(dirty.sequence)?;
@@ -563,14 +559,6 @@ impl LegacyStepOutput {
                     validate_symbol("wait_request_id", request_id)?;
                     token_id
                 }
-                LegacyWaitRequest::FamilyOpaque {
-                    token_id,
-                    wait_kind,
-                    ..
-                } => {
-                    validate_symbol("wait_kind", wait_kind)?;
-                    token_id
-                }
             };
             validate_symbol("wait_token_id", token_id)?;
             if !wait_tokens.insert(token_id.as_str()) {
@@ -581,117 +569,6 @@ impl LegacyStepOutput {
             }
         }
         Ok(())
-    }
-}
-
-pub trait LegacyPayloadStorage: Send + Sync + 'static {
-    fn bytes(&self) -> &[u8];
-    fn as_any(&self) -> &dyn std::any::Any;
-}
-
-#[derive(Clone)]
-pub enum LegacyPayload {
-    Native(Vec<u8>),
-    Foreign(std::sync::Arc<dyn LegacyPayloadStorage>),
-}
-
-impl LegacyPayload {
-    pub fn from_foreign(storage: std::sync::Arc<dyn LegacyPayloadStorage>) -> Self {
-        Self::Foreign(storage)
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        match self {
-            Self::Native(bytes) => bytes,
-            Self::Foreign(storage) => storage.bytes(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.as_bytes().len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.as_bytes().is_empty()
-    }
-
-    pub fn into_native(self) -> Vec<u8> {
-        match self {
-            Self::Native(bytes) => bytes,
-            Self::Foreign(storage) => storage.bytes().to_vec(),
-        }
-    }
-
-    pub fn into_foreign_storage(self) -> Option<std::sync::Arc<dyn LegacyPayloadStorage>> {
-        match self {
-            Self::Foreign(storage) => Some(storage),
-            Self::Native(_) => None,
-        }
-    }
-}
-
-impl Default for LegacyPayload {
-    fn default() -> Self {
-        Self::Native(Vec::new())
-    }
-}
-
-impl From<Vec<u8>> for LegacyPayload {
-    fn from(value: Vec<u8>) -> Self {
-        Self::Native(value)
-    }
-}
-
-impl std::fmt::Debug for LegacyPayload {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LegacyPayload")
-            .field("byte_len", &self.len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl PartialEq for LegacyPayload {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
-    }
-}
-
-impl Eq for LegacyPayload {}
-
-impl std::ops::Deref for LegacyPayload {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_bytes()
-    }
-}
-
-impl Serialize for LegacyPayload {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.as_bytes().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for LegacyPayload {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Vec::<u8>::deserialize(deserializer).map(Self::Native)
-    }
-}
-
-impl JsonSchema for LegacyPayload {
-    fn schema_name() -> String {
-        "LegacyPayload".into()
-    }
-
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        Vec::<u8>::json_schema(generator)
     }
 }
 
@@ -713,22 +590,14 @@ pub struct LegacyTextLease {
 pub struct LegacyEvent {
     pub sequence: u64,
     pub event: String,
-    pub payload: LegacyPayload,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegacyBlackboardMutation {
     pub sequence: u64,
     pub key: String,
-    pub value: LegacyPayload,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LegacyScheduledEvent {
-    pub sequence: u64,
-    pub due_tick: u64,
-    pub event: String,
-    pub payload: LegacyPayload,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -737,7 +606,7 @@ pub struct LegacyDirtySection {
     pub section_id: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct LegacyLiveOutput {
     pub scenes: Vec<LegacySceneTransactionV7>,
     pub resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
@@ -781,17 +650,13 @@ impl LegacyLiveOutput {
 pub struct LegacyControlTransaction {
     pub events: Vec<LegacyEvent>,
     pub blackboard: Vec<LegacyBlackboardMutation>,
-    pub scheduled_events: Vec<LegacyScheduledEvent>,
     pub dirty_sections: Vec<LegacyDirtySection>,
     pub waits: Vec<LegacyWaitRequest>,
 }
 
 impl LegacyControlTransaction {
     pub fn len(&self) -> usize {
-        self.events.len()
-            + self.blackboard.len()
-            + self.scheduled_events.len()
-            + self.dirty_sections.len()
+        self.events.len() + self.blackboard.len() + self.dirty_sections.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -803,7 +668,6 @@ impl LegacyControlTransaction {
             .iter()
             .map(|value| value.sequence)
             .chain(self.blackboard.iter().map(|value| value.sequence))
-            .chain(self.scheduled_events.iter().map(|value| value.sequence))
             .chain(self.dirty_sections.iter().map(|value| value.sequence))
             .max()
     }
@@ -925,53 +789,12 @@ pub struct LegacyRenderFrameV1 {
     pub draws: Vec<LegacyDrawV1>,
 }
 
-/// Incremental, host-neutral scene packet.  This is the v5 rendering contract
-/// for providers which retain resources across steps: it sends only texture
-/// lifecycle operations and the current ordered draw list, never a rebuilt
-/// full texture set.  Consumers must validate and prepare the whole packet
-/// before committing any resource mutation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyScenePacketV1 {
-    pub width: u32,
-    pub height: u32,
-    pub resources: Vec<LegacySceneResourceOperationV1>,
-    pub draws: Vec<LegacyDrawV1>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LegacySceneResourceOperationV1 {
-    CreateTexture(LegacySceneTextureCreateV1),
-    UpdateTexture(LegacySceneTextureUpdateV1),
-    DestroyTexture { texture_id: u32 },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacySceneTextureCreateV1 {
-    pub texture_id: u32,
-    pub width: u32,
-    pub height: u32,
-    pub format: LegacyTextureFormat,
-    pub pixels: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacySceneTextureUpdateV1 {
-    pub texture_id: u32,
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-    pub format: LegacyTextureFormat,
-    pub pixels: Vec<u8>,
-}
-
 /// Live scene transaction used by Family ABI v7.  Unlike the v1 persisted
 /// packet this type has no postcard representation or content identity.  The
 /// provider moves the capture allocation into `pixels`; the RuntimeWorld and
 /// host must continue moving that owner until the renderer performs its final
 /// device upload.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct LegacySceneTransactionV7 {
     pub sequence: u64,
     pub width: u32,
@@ -987,7 +810,7 @@ pub struct LegacySceneTransactionV7 {
 /// pixels.
 pub const LIVE_BUILTIN_WHITE_TEXTURE_ID: u32 = u32::MAX;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum LegacySceneResourceOperationV7 {
     CreateTexture {
         texture_id: u32,
@@ -995,7 +818,7 @@ pub enum LegacySceneResourceOperationV7 {
         width: u32,
         height: u32,
         format: LegacyTextureFormat,
-        pixels: LegacyPayload,
+        pixels: OwnedByteBuffer,
     },
     UpdateTexture {
         texture_id: u32,
@@ -1005,7 +828,7 @@ pub enum LegacySceneResourceOperationV7 {
         width: u32,
         height: u32,
         format: LegacyTextureFormat,
-        pixels: LegacyPayload,
+        pixels: OwnedByteBuffer,
     },
     DestroyTexture {
         texture_id: u32,
@@ -1063,7 +886,7 @@ impl LegacySceneTransactionV7 {
                 && width == 1
                 && height == 1
                 && format == LegacyTextureFormat::Rgba8
-                && pixels.as_bytes() == [255, 255, 255, 255];
+                && pixels.as_slice() == [255, 255, 255, 255];
             if (texture_id == LIVE_BUILTIN_WHITE_TEXTURE_ID && !valid_builtin_white)
                 || generation == 0
                 || width == 0
@@ -1174,19 +997,6 @@ pub struct LegacySceneTextureDescriptorV1 {
     pub width: u32,
     pub height: u32,
     pub format: LegacyTextureFormat,
-}
-
-/// A packet that has passed all lifecycle and draw-reference checks.  Hosts
-/// must apply its resource operations atomically, then replace their retained
-/// metadata with `next_resources`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyPreparedSceneCommitV1 {
-    pub packet: LegacyScenePacketV1,
-    pub next_resources: LegacySceneResourceStateV1,
-    /// A restored provider may rehydrate every live texture before its next
-    /// draw. Consumers must atomically discard their retained scene resources
-    /// before validating and applying this commit.
-    pub reset_resources: bool,
 }
 
 /// Resource-backed presentation packet. Unlike [`LegacyRenderFrameV1`], this
@@ -1555,48 +1365,6 @@ impl LegacyRenderFrameV1 {
     }
 }
 
-impl LegacyScenePacketV1 {
-    pub fn validate(&self) -> Result<(), LegacyProviderError> {
-        validate_render_dimensions_and_counts(
-            self.width,
-            self.height,
-            self.resources.len(),
-            self.draws.len(),
-        )?;
-        let mut bytes = 0usize;
-        for operation in &self.resources {
-            match operation {
-                LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                    validate_scene_pixels(
-                        texture.width,
-                        texture.height,
-                        texture.format,
-                        &texture.pixels,
-                    )?;
-                    bytes = add_scene_upload_bytes(bytes, texture.pixels.len())?;
-                }
-                LegacySceneResourceOperationV1::UpdateTexture(texture) => {
-                    if texture.width == 0 || texture.height == 0 {
-                        return Err(LegacyProviderError::invalid(
-                            "ASTRA_EMU_SCENE_TEXTURE_REGION",
-                            "texture update region must be nonempty",
-                        ));
-                    }
-                    validate_scene_pixels(
-                        texture.width,
-                        texture.height,
-                        texture.format,
-                        &texture.pixels,
-                    )?;
-                    bytes = add_scene_upload_bytes(bytes, texture.pixels.len())?;
-                }
-                LegacySceneResourceOperationV1::DestroyTexture { .. } => {}
-            }
-        }
-        validate_render_draws(&self.draws)
-    }
-}
-
 impl LegacySceneResourceStateV1 {
     /// Validates the non-serialized Family ABI v7 transaction.  This is the
     /// live counterpart to `validate`; it checks retained texture metadata
@@ -1682,144 +1450,6 @@ impl LegacySceneResourceStateV1 {
         }
         Ok(next)
     }
-
-    /// Validates a complete transaction against retained resource metadata
-    /// without copying its texture payloads.  Renderer adapters use this when
-    /// they consume an already-owned packet: the returned state is still a
-    /// transactional replacement, while the packet can move directly into an
-    /// upload plan rather than being cloned solely for validation.
-    pub fn validate(
-        &self,
-        packet: &LegacyScenePacketV1,
-    ) -> Result<LegacySceneResourceStateV1, LegacyProviderError> {
-        packet.validate()?;
-        let mut next = self.clone();
-        for operation in &packet.resources {
-            match operation {
-                LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                    if next.textures.contains_key(&texture.texture_id) {
-                        return Err(LegacyProviderError::invalid(
-                            "ASTRA_EMU_SCENE_TEXTURE_EXISTS",
-                            "scene packet creates an existing texture",
-                        ));
-                    }
-                    next.textures.insert(
-                        texture.texture_id,
-                        LegacySceneTextureDescriptorV1 {
-                            width: texture.width,
-                            height: texture.height,
-                            format: texture.format,
-                        },
-                    );
-                }
-                LegacySceneResourceOperationV1::UpdateTexture(texture) => {
-                    let descriptor = next.textures.get(&texture.texture_id).ok_or_else(|| {
-                        LegacyProviderError::invalid(
-                            "ASTRA_EMU_SCENE_TEXTURE_MISSING",
-                            "scene packet updates an unknown texture",
-                        )
-                    })?;
-                    let right = texture.x.checked_add(texture.width);
-                    let bottom = texture.y.checked_add(texture.height);
-                    if descriptor.format != texture.format
-                        || right.is_none_or(|right| right > descriptor.width)
-                        || bottom.is_none_or(|bottom| bottom > descriptor.height)
-                    {
-                        return Err(LegacyProviderError::invalid(
-                            "ASTRA_EMU_SCENE_TEXTURE_REGION",
-                            "scene update format or region does not match retained texture",
-                        ));
-                    }
-                }
-                LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
-                    if next.textures.remove(texture_id).is_none() {
-                        return Err(LegacyProviderError::invalid(
-                            "ASTRA_EMU_SCENE_TEXTURE_MISSING",
-                            "scene packet destroys an unknown texture",
-                        ));
-                    }
-                }
-            }
-        }
-        for draw in &packet.draws {
-            if draw.texture_id != u32::MAX && !next.textures.contains_key(&draw.texture_id) {
-                return Err(LegacyProviderError::invalid(
-                    "ASTRA_EMU_SCENE_DRAW_TEXTURE_MISSING",
-                    "scene draw references a texture unavailable after commit",
-                ));
-            }
-        }
-        Ok(next)
-    }
-
-    /// Validates a complete transaction against retained resource metadata
-    /// without changing this state.  The caller chooses when to commit the
-    /// returned replacement state, so an invalid packet cannot partially
-    /// mutate a renderer or adapter.
-    pub fn prepare(
-        &self,
-        packet: LegacyScenePacketV1,
-    ) -> Result<LegacyPreparedSceneCommitV1, LegacyProviderError> {
-        let next = self.validate(&packet)?;
-        Ok(LegacyPreparedSceneCommitV1 {
-            packet,
-            next_resources: next,
-            reset_resources: false,
-        })
-    }
-
-    pub fn commit(&mut self, prepared: LegacyPreparedSceneCommitV1) {
-        *self = prepared.next_resources;
-    }
-}
-
-fn add_scene_upload_bytes(current: usize, bytes: usize) -> Result<usize, LegacyProviderError> {
-    let total = current.checked_add(bytes).ok_or_else(|| {
-        LegacyProviderError::invalid(
-            "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
-            "scene texture upload length overflow",
-        )
-    })?;
-    if total > MAX_EFFECT_PAYLOAD_BYTES_PER_STEP {
-        return Err(LegacyProviderError::invalid(
-            "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
-            "scene texture uploads exceed the per-step bound",
-        ));
-    }
-    Ok(total)
-}
-
-fn validate_scene_pixels(
-    width: u32,
-    height: u32,
-    format: LegacyTextureFormat,
-    pixels: &[u8],
-) -> Result<(), LegacyProviderError> {
-    let channels = match format {
-        LegacyTextureFormat::Rgba8 => 4usize,
-        LegacyTextureFormat::LumaAlpha8 => 2usize,
-    };
-    let expected = usize::try_from(width)
-        .ok()
-        .and_then(|width| {
-            usize::try_from(height)
-                .ok()
-                .and_then(|height| width.checked_mul(height))
-        })
-        .and_then(|pixels| pixels.checked_mul(channels))
-        .ok_or_else(|| {
-            LegacyProviderError::invalid(
-                "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
-                "scene texture length overflow",
-            )
-        })?;
-    if expected != pixels.len() {
-        return Err(LegacyProviderError::invalid(
-            "ASTRA_EMU_RENDER_TEXTURE_LENGTH",
-            "scene texture dimensions and bytes do not match",
-        ));
-    }
-    Ok(())
 }
 
 impl LegacyRenderResourceFrameV1 {
@@ -1947,11 +1577,6 @@ pub enum LegacyWaitRequest {
         token_id: String,
         request_id: String,
     },
-    FamilyOpaque {
-        token_id: String,
-        wait_kind: String,
-        payload_len: u64,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1982,6 +1607,8 @@ pub struct LegacyCoverageDelta {
     pub text_events: u64,
     pub capture_bytes: u64,
     pub operation_bytes: u64,
+    pub scene_moved_bytes: u64,
+    pub scene_copied_bytes: u64,
     pub pcm_moved_bytes: u64,
     pub pcm_copied_bytes: u64,
 }
@@ -2109,7 +1736,7 @@ pub trait LegacyRuntimeProvider: Send {
         session: &LegacyRuntimeSessionId,
         resource_uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError>;
+    ) -> Result<OwnedByteBuffer, LegacyProviderError>;
     fn begin_session_resource_read(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -2127,13 +1754,13 @@ pub trait LegacyRuntimeProvider: Send {
 /// One family-owned resource read running outside the fixed-tick caller.
 /// The result owns the original allocation and is consumed exactly once.
 pub struct LegacyResourceRead {
-    receiver: Receiver<Result<Vec<u8>, LegacyProviderError>>,
+    receiver: Receiver<Result<OwnedByteBuffer, LegacyProviderError>>,
     worker: Option<JoinHandle<()>>,
 }
 
 impl LegacyResourceRead {
     pub fn spawn(
-        job: impl FnOnce() -> Result<Vec<u8>, LegacyProviderError> + Send + 'static,
+        job: impl FnOnce() -> Result<OwnedByteBuffer, LegacyProviderError> + Send + 'static,
     ) -> Result<Self, LegacyProviderError> {
         let (sender, receiver) = sync_channel(1);
         let worker = thread::Builder::new()
@@ -2153,7 +1780,7 @@ impl LegacyResourceRead {
         })
     }
 
-    pub fn try_complete(&mut self) -> Result<Option<Vec<u8>>, LegacyProviderError> {
+    pub fn try_complete(&mut self) -> Result<Option<OwnedByteBuffer>, LegacyProviderError> {
         match self.receiver.try_recv() {
             Ok(result) => {
                 self.join_worker()?;
@@ -2167,7 +1794,7 @@ impl LegacyResourceRead {
         }
     }
 
-    pub fn complete(&mut self) -> Result<Vec<u8>, LegacyProviderError> {
+    pub fn complete(&mut self) -> Result<OwnedByteBuffer, LegacyProviderError> {
         let result = self.receiver.recv().map_err(|_| Self::worker_failed())?;
         self.join_worker()?;
         result
@@ -2202,7 +1829,7 @@ mod resource_read_tests {
     fn resource_worker_moves_the_original_allocation() {
         let bytes = vec![1_u8, 2, 3, 4, 5];
         let allocation = bytes.as_ptr() as usize;
-        let mut read = LegacyResourceRead::spawn(move || Ok(bytes)).unwrap();
+        let mut read = LegacyResourceRead::spawn(move || Ok(bytes.into())).unwrap();
         let bytes = read.complete().unwrap();
         assert_eq!(bytes.as_ptr() as usize, allocation);
     }
@@ -2338,58 +1965,6 @@ mod tests {
     }
 
     #[test]
-    fn prepared_scene_commit_is_atomic_and_accepts_partial_uploads() {
-        let pixels = vec![0, 0, 0, 255, 255, 255, 255, 255];
-        let create = LegacyScenePacketV1 {
-            width: 640,
-            height: 480,
-            resources: vec![LegacySceneResourceOperationV1::CreateTexture(
-                LegacySceneTextureCreateV1 {
-                    texture_id: 7,
-                    width: 2,
-                    height: 1,
-                    format: LegacyTextureFormat::Rgba8,
-                    pixels,
-                },
-            )],
-            draws: vec![],
-        };
-        let mut state = LegacySceneResourceStateV1::default();
-        let prepared = state.prepare(create).expect("create packet prepares");
-        state.commit(prepared);
-
-        let update_pixels = vec![1, 2, 3, 4];
-        let update = LegacyScenePacketV1 {
-            width: 640,
-            height: 480,
-            resources: vec![LegacySceneResourceOperationV1::UpdateTexture(
-                LegacySceneTextureUpdateV1 {
-                    texture_id: 7,
-                    x: 1,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                    format: LegacyTextureFormat::Rgba8,
-                    pixels: update_pixels,
-                },
-            )],
-            draws: vec![],
-        };
-        let prepared = state.prepare(update).expect("partial packet prepares");
-        state.commit(prepared);
-        assert!(state.textures.contains_key(&7));
-
-        let missing = LegacyScenePacketV1 {
-            width: 640,
-            height: 480,
-            resources: vec![LegacySceneResourceOperationV1::DestroyTexture { texture_id: 99 }],
-            draws: vec![],
-        };
-        assert!(state.prepare(missing).is_err());
-        assert!(state.textures.contains_key(&7));
-    }
-
-    #[test]
     fn resource_frame_is_uri_bound_and_rejects_undeclared_draw_textures() {
         let draw = LegacyDrawV1 {
             texture_id: 7,
@@ -2497,11 +2072,6 @@ mod tests {
             LegacyWaitRequest::ProviderCompletion {
                 token_id: "wait.provider".into(),
                 request_id: "request.test".into(),
-            },
-            LegacyWaitRequest::FamilyOpaque {
-                token_id: "wait.opaque".into(),
-                wait_kind: "opaque.test".into(),
-                payload_len: 6,
             },
         ]);
         round_trip(&vec![

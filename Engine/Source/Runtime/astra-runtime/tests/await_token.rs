@@ -8,11 +8,10 @@ use astra_runtime::{
 fn await_token_orders_out_of_order_results() {
     let left = run_with_order([2, 1]);
     let right = run_with_order([1, 2]);
-    assert_eq!(left.event_hash, right.event_hash);
-    assert_eq!(left.state_hash, right.state_hash);
+    assert_eq!(left, right);
 }
 
-fn run_with_order(order: [u64; 2]) -> astra_runtime::TickReport {
+fn run_with_order(order: [u64; 2]) -> Vec<astra_runtime::RuntimeEvent> {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
             seed: 13,
@@ -63,7 +62,8 @@ fn run_with_order(order: [u64; 2]) -> astra_runtime::TickReport {
             },
             ingress,
         ))
-        .unwrap()
+        .unwrap();
+    world.debug_session().event_trace()
 }
 
 fn token_for(value: u64, token_a: AwaitTokenId, token_b: AwaitTokenId) -> AwaitTokenId {

@@ -291,6 +291,8 @@ python Tools/check_docs.py
 3. 处理 Luau policy snapshot ref，但不保存 function、thread、userdata 或 native handle。
 4. 编写 save-load-resume、replay-from-start 和 invalid snapshot 测试。
 
+**Current Refactor State (2026-08-08):** 当前未发布契约已升为唯一 `runtime.world`/`astra.runtime.save_blob.v4`；Player save 不再复制 NativeVN runtime state，live view 只输出当前页面所需的 bounded typed projection，UI theme 使用 revision 而非逐帧 content hash。以下 v3 数据保留为历史基线，不能用于声明本轮 v4/Kira 重构已通过。
+
 **Current Evidence:** NativeVN 已切换到唯一 `runtime.world`/`astra.runtime.save_blob.v3` section；定向 provider/FFI 测试覆盖 v3 save/restore，Runtime 测试覆盖 inverse journal、compiled transition/event dispatch、稳定 event ordinal、Action ABI v2、conflict-DAG 和 1/2/4/8 worker hash 一致性。VN provider 的 `astra.vn.step_complexity_metrics.v1` 在 1k/10k/100k backlog 后各执行一次真实普通推进，均为 decoded-state cache hit、物化历史 0 条、追加 1 条、历史 chunk 逻辑写 1 次、hot-state 编码不超过 4 KiB、mutation journal 0 条，直接证明普通推进不扫描既有 backlog。2026-07-30 clean Release code commit `669a98a5`、build fingerprint `sha256:8318a18c9d9ab3925993c3b71926a42f06b020f77f485b5d395b1cbcf84f596c` 的两条 7,200 帧 performance Session 通过：配置上限 8、硬件并行度 24、自动并发度 2、串行单 Session 配额 8、并发每 Session 配额 4、总容量 8；串行 baseline 126,024,916 us、并发 wall time 63,124,857 us。performance-a 并发/串行 CPU p95 为 558,700/614,600 ns、e2e p99 为 874,000/915,640 ns，performance-b 为 577,800/597,800 ns 与 900,180/905,740 ns，逐 Session output identity 全部一致，所有 private-memory peak、CPU time、排队时间和配额均进入稳定排序报告。相同 clean build 的单 Session product run 完成 72,000 帧：CPU p95 603,900 ns、GPU p95 208,640 ns、e2e p99 913,840 ns、deadline miss 为零、private memory max 299,180,032 bytes、增长 max 22,257,664 bytes，稳定段 heap allocation、upload、readback 均为零；Perfetto manifest 记录 380,329 个事件、零丢失、未截断、时间戳单调。旗舰 `advanced-vn` 的 streaming E2 使用显式 `ffmpeg-vcpkg` binding、800×600 viewport、build identity `sha256:ddc02b39be12ee0456a8ec7c126d4f0e55ddeb11d31c1abf1f2f560c8bf3c3ac` 与 package `sha256:af6c5a592eee132174869526adf24261c39964a8ed7dab4bed0c5a6d7e44d155`，真实字体、Yakui、Runtime v3、音频和完整 288 帧 decode-to-private-spool 路径通过；Player 只跨 boundary 保留单帧，128 MiB decoded-cache profile 的外部 20 ms 采样得到 peak private 391,589,888 bytes（约 373.45 MiB），低于 384 MiB 门槛。3 GiB 是完整流的逻辑 decoded-byte/spool 上限，不再是内存聚合大小；run 仍只提交 8 帧、光栅化 2 帧。文档、fmt、workspace clippy、`astra-headless` build、workspace test 与 Windows dynamic-export audit 已在该代码提交通过；Stage 3 仍由 Windows/Web Player、其余路线和公开许可等独立产品 gate 阻断，不由 Runtime v3 工作项提前关闭。
 
 **Linked Test IDs:** `T-S3-CORE-03`
@@ -558,7 +560,7 @@ python Tools/check_docs.py
 
 1. 定义 `astra.player_automation_script.v1`、`astra.player_input_transcript.v1` 和 `astra.player_automation_report.v1`，只记录 hash、region id、event source、focus state、meter summary、host evidence 和 diagnostic。
 2. 新增 shared player core，校验 automation script/transcript/report，禁止 live-player gate 直接调用 `VnPlayerCommand`、DOM click、JS callback 或 `--route-scenario`。
-3. Windows driver 发现并 focus player window，用 Win32 `SendInput` 注入 mouse/keyboard，确认 winit event loop 收到事件，并采样真实窗口或 renderer readback 与 AudioGraph/WASAPI meter。
+3. Windows driver 发现并 focus player window，用 Win32 `SendInput` 注入 mouse/keyboard，确认 winit event loop 收到事件，并采样真实窗口或 renderer readback 与 Kira/WASAPI meter。
 4. Web driver 启动本地 HTTP server 和真实 Chrome/Edge 页面，用 CDP `Input.dispatchMouseEvent`、`Input.dispatchKeyEvent` 和必要时 touch event 注入输入，并采样 canvas/screenshot 与 WebAudio meter。
 5. Shared verifier 要求 dialogue、choice、system page、config、save/load、backlog 和 route check 都由平台输入触发；发现 `--route-scenario` 自推进、`--dump-dom`、DOM `element.click()`、JS callback 或 API 可用性 smoke 时必须 blocking。
 

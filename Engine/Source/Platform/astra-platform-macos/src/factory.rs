@@ -80,7 +80,7 @@ mod macos {
         collections::BTreeMap,
         future::Future,
         sync::{
-            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+            atomic::{AtomicBool, Ordering},
             mpsc as std_mpsc, Arc,
         },
         thread,
@@ -90,13 +90,13 @@ mod macos {
     use crate::accessibility::MacosAccessibilityBridge;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel_with_command_wake, AudioDeviceFormat, AudioMeter, AudioOutputHandle,
-        AudioOutputRequest, AudioOutputStatus, AudioPacket, AudioWakeRegistration, CapturedFrame,
-        DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
-        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
-        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
-        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
-        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
+        host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
+        AudioWakeRegistration, CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle,
+        HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput, PackageSourceHandle,
+        PackageSourceRequest, PlatformBackendChannels, PlatformCommandWakeRegistration,
+        PlatformDecodeRequest, PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind,
+        PlatformHostProfile, PlatformHostSession, PointerButton, SaveTransactionHandle,
+        SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -779,70 +779,16 @@ mod macos {
                     }
                     HostCommand::OpenAudioOutput { request, reply } => {
                         let result = AudioResource::new(request, self.backend.audio_wake())
-                            .and_then(|resource| self.audio_outputs.insert(resource));
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudioOutputFormat { reply } => {
-                        let result = preferred_audio_output_format();
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudioDeviceFormat { reply } => {
-                        let _ = reply.send(default_audio_device_format());
-                    }
-                    HostCommand::SubmitAudio {
-                        output,
-                        packet,
-                        reply,
-                    } => {
-                        let result = self
-                            .audio_outputs
-                            .get_mut(output)
-                            .and_then(|resource| resource.submit(packet));
-                        if result
-                            .as_ref()
-                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
-                        {
-                            let _ = self.audio_outputs.remove(output);
-                            self.emit(PlatformEventKind::DeviceLost {
-                                provider: "coreaudio".to_string(),
+                            .and_then(|(resource, lane, format)| {
+                                self.audio_outputs.insert(resource).map(|handle| {
+                                    OpenedAudioOutput {
+                                        handle,
+                                        format,
+                                        lane: Box::new(lane),
+                                        capture: None,
+                                    }
+                                })
                             });
-                        }
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudio { output, reply } => {
-                        let result = self.audio_outputs.get(output).map(AudioResource::state);
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::DrainAudio { output, reply } => {
-                        let result = self
-                            .audio_outputs
-                            .get_mut(output)
-                            .and_then(AudioResource::drain);
-                        if result
-                            .as_ref()
-                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
-                        {
-                            let _ = self.audio_outputs.remove(output);
-                            self.emit(PlatformEventKind::DeviceLost {
-                                provider: "coreaudio".to_string(),
-                            });
-                        }
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudioOutput { output, reply } => {
-                        let result = self
-                            .audio_outputs
-                            .get(output)
-                            .and_then(AudioResource::status);
-                        if result
-                            .as_ref()
-                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
-                        {
-                            let _ = self.audio_outputs.remove(output);
-                            self.emit(PlatformEventKind::DeviceLost {
-                                provider: "coreaudio".to_string(),
-                            });
-                        }
                         let _ = reply.send(result);
                     }
                     HostCommand::PauseAudio { output, reply } => {
@@ -872,15 +818,7 @@ mod macos {
                         let _ = reply.send(result);
                     }
                     HostCommand::CloseAudio { output, reply } => {
-                        let drain = self
-                            .audio_outputs
-                            .get_mut(output)
-                            .and_then(AudioResource::drain);
-                        let remove = self.audio_outputs.remove(output).map(|_| ());
-                        let result = match (drain, remove) {
-                            (Err(error), _) => Err(error),
-                            (Ok(_), result) => result,
-                        };
+                        let result = self.audio_outputs.remove(output).map(|_| ());
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenDecode { kind, reply } => {
@@ -1373,44 +1311,23 @@ mod macos {
 
     struct AudioResource {
         stream: cpal::Stream,
-        producer: astra_platform_common::NativeAudioProducer,
-        queue_telemetry: astra_platform_common::AudioQueueTelemetryReader,
-        meter: Arc<CallbackMeter>,
+        #[cfg(feature = "platform-test-driver")]
         stream_error: Arc<AtomicBool>,
-        channels: u16,
-        sample_rate: u32,
-        next_sequence: u64,
-        submitted_samples: u64,
         paused: bool,
-        audio_wake: AudioWakeRegistration,
-    }
-
-    fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or_else(|| {
-                host_error(
-                    "audio.format",
-                    "CoreAudio default output device is unavailable",
-                )
-            })?;
-        let supported = device.default_output_config().map_err(|_| {
-            host_error(
-                "audio.format",
-                "CoreAudio default output config is unavailable",
-            )
-        })?;
-        Ok(astra_platform::AudioOutputFormat {
-            sample_rate: supported.sample_rate(),
-            channels: supported.channels(),
-        })
     }
 
     impl AudioResource {
         fn new(
             request: AudioOutputRequest,
             audio_wake: AudioWakeRegistration,
-        ) -> Result<Self, PlatformError> {
+        ) -> Result<
+            (
+                Self,
+                astra_platform_common::NativeAudioProducer,
+                AudioDeviceFormat,
+            ),
+            PlatformError,
+        > {
             if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
             {
                 return Err(PlatformError::new(
@@ -1445,8 +1362,8 @@ mod macos {
                     )
                 })?;
             let config: cpal::StreamConfig = supported.clone().into();
-            let capacity = request
-                .max_buffered_frames
+            let chunk_samples = request
+                .chunk_frames
                 .checked_mul(usize::from(request.channels))
                 .ok_or_else(|| {
                     PlatformError::new(
@@ -1455,13 +1372,16 @@ mod macos {
                         "audio output queue capacity overflows",
                     )
                 })?;
-            let (producer, consumer, queue_telemetry) =
-                astra_platform_common::NativeAudioQueue::create(capacity)?;
-            let meter = Arc::new(CallbackMeter::default());
+            let chunk_capacity = request.max_buffered_frames.div_ceil(request.chunk_frames);
+            let (producer, consumer, _queue_telemetry) =
+                astra_platform_common::NativeAudioQueue::create(
+                    chunk_capacity,
+                    chunk_samples,
+                    audio_wake.clone(),
+                )?;
             let stream_error = Arc::new(AtomicBool::new(false));
             let stream = match supported.sample_format() {
                 cpal::SampleFormat::F32 => {
-                    let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
                     let wake = audio_wake.clone();
                     let error_wake = audio_wake.clone();
@@ -1469,7 +1389,7 @@ mod macos {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [f32], _| {
-                            let _ = fill_f32(output, &mut consumer, &meter);
+                            fill_f32(output, &mut consumer);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1480,7 +1400,6 @@ mod macos {
                     )
                 }
                 cpal::SampleFormat::I16 => {
-                    let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
                     let wake = audio_wake.clone();
                     let error_wake = audio_wake.clone();
@@ -1488,7 +1407,7 @@ mod macos {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [i16], _| {
-                            let _ = fill_i16(output, &mut consumer, &meter);
+                            fill_i16(output, &mut consumer);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1499,7 +1418,6 @@ mod macos {
                     )
                 }
                 cpal::SampleFormat::U16 => {
-                    let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
                     let wake = audio_wake.clone();
                     let error_wake = audio_wake.clone();
@@ -1507,7 +1425,7 @@ mod macos {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [u16], _| {
-                            let _ = fill_u16(output, &mut consumer, &meter);
+                            fill_u16(output, &mut consumer);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1530,59 +1448,19 @@ mod macos {
                     host_error("audio.open", "CoreAudio output stream could not start")
                 })?;
             }
-            Ok(Self {
-                stream,
+            Ok((
+                Self {
+                    stream,
+                    #[cfg(feature = "platform-test-driver")]
+                    stream_error,
+                    paused: request.start_paused,
+                },
                 producer,
-                queue_telemetry,
-                meter,
-                stream_error,
-                channels: request.channels,
-                sample_rate: request.sample_rate,
-                next_sequence: 1,
-                submitted_samples: 0,
-                paused: request.start_paused,
-                audio_wake,
-            })
-        }
-
-        fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
-            if self.stream_error.load(Ordering::Acquire) {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.submit",
-                    "CoreAudio output stream reported a device error",
-                ));
-            }
-            if packet.sequence != self.next_sequence
-                || packet.channels != self.channels
-                || packet.samples.is_empty()
-                || !packet
-                    .samples
-                    .len()
-                    .is_multiple_of(usize::from(packet.channels))
-                || packet.samples.iter().any(|sample| !sample.is_finite())
-            {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::InvalidState,
-                    "audio.submit",
-                    "audio packet sequence or channel count is invalid",
-                ));
-            }
-            let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
-                PlatformError::new(
-                    PlatformErrorCode::InvalidState,
-                    "audio.submit",
-                    "audio packet sequence overflowed",
-                )
-            })?;
-            let submitted_samples = self
-                .submitted_samples
-                .checked_add(packet.samples.len() as u64)
-                .ok_or_else(|| host_error("audio.submit", "audio sample counter overflowed"))?;
-            self.producer.push_samples(&packet.samples)?;
-            self.next_sequence = next_sequence;
-            self.submitted_samples = submitted_samples;
-            Ok(packet.samples)
+                AudioDeviceFormat {
+                    sample_rate: request.sample_rate,
+                    channels: request.channels,
+                },
+            ))
         }
 
         fn pause(&mut self) -> Result<(), PlatformError> {
@@ -1619,190 +1497,6 @@ mod macos {
         fn inject_device_loss(&mut self) {
             self.stream_error.store(true, Ordering::Release);
         }
-
-        fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
-            if self.paused {
-                self.resume()?;
-            }
-            let request = AudioOutputRequest {
-                sample_rate: self.sample_rate,
-                channels: self.channels,
-                max_buffered_frames: 1,
-                start_paused: false,
-            };
-            let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
-            let mut observed_wake = 0;
-            loop {
-                if self.stream_error.load(Ordering::Acquire) {
-                    return Err(PlatformError::new(
-                        PlatformErrorCode::DeviceLost,
-                        "audio.drain",
-                        "CoreAudio output stream reported a device error",
-                    ));
-                }
-                if self.queue_telemetry.snapshot().sample_count >= self.submitted_samples {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    return Err(host_error(
-                        "audio.drain",
-                        "CoreAudio output drain timed out",
-                    ));
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                observed_wake = self
-                    .audio_wake
-                    .wait_timeout(observed_wake, remaining)
-                    .ok_or_else(|| host_error("audio.drain", "CoreAudio output drain timed out"))?;
-            }
-            Ok(self.meter.snapshot())
-        }
-
-        fn state(&self) -> astra_platform::AudioOutputState {
-            let telemetry = self.queue_telemetry.snapshot();
-            let queued_samples = self
-                .submitted_samples
-                .saturating_sub(telemetry.sample_count);
-            astra_platform::AudioOutputState {
-                queued_frames: usize::try_from(queued_samples / u64::from(self.channels))
-                    .unwrap_or(usize::MAX),
-                callback_count: self.meter.callback_count.load(Ordering::Acquire),
-                submitted_samples: self.submitted_samples,
-                consumed_samples: telemetry.sample_count,
-                underflow_count: telemetry.underflow_count,
-                meter: self.meter.snapshot(),
-            }
-        }
-
-        fn status(&self) -> Result<AudioOutputStatus, PlatformError> {
-            if self.stream_error.load(Ordering::Acquire) {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.query",
-                    "CoreAudio output stream reported a device error",
-                ));
-            }
-            let consumed_samples = self.queue_telemetry.snapshot();
-            let channels = u64::from(self.channels);
-            if consumed_samples.sample_count > self.submitted_samples
-                || !self.submitted_samples.is_multiple_of(channels)
-            {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::IntegrityMismatch,
-                    "audio.query",
-                    "CoreAudio queue telemetry is inconsistent with submitted audio",
-                ));
-            }
-            let submitted_frames = self.submitted_samples / channels;
-            let played_frames = consumed_samples.sample_count / channels;
-            Ok(AudioOutputStatus {
-                submitted_frames,
-                played_frames,
-                buffered_frames: submitted_frames - played_frames,
-                underflow_count: consumed_samples.underflow_count,
-                meter: self.meter.snapshot(),
-            })
-        }
-    }
-
-    fn default_audio_device_format() -> Result<AudioDeviceFormat, PlatformError> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or_else(|| {
-                host_error(
-                    "audio.query_device_format",
-                    "CoreAudio default output device is unavailable",
-                )
-            })?;
-        let config = device.default_output_config().map_err(|_| {
-            host_error(
-                "audio.query_device_format",
-                "CoreAudio default output format is unavailable",
-            )
-        })?;
-        if sample_format_rank(config.sample_format()).is_none()
-            || config.sample_rate() == 0
-            || config.channels() == 0
-        {
-            return Err(host_error(
-                "audio.query_device_format",
-                "CoreAudio default output format is unsupported",
-            ));
-        }
-        Ok(AudioDeviceFormat {
-            sample_rate: config.sample_rate(),
-            channels: config.channels(),
-        })
-    }
-
-    #[derive(Default)]
-    struct CallbackMeter {
-        callback_count: AtomicU64,
-        sample_count: AtomicU64,
-        peak_bits: AtomicU32,
-        sum_squares_bits: AtomicU64,
-    }
-
-    impl CallbackMeter {
-        fn begin_callback(&self) {
-            self.callback_count.fetch_add(1, Ordering::Release);
-        }
-
-        fn record(&self, sample: f32) {
-            let magnitude = sample.abs();
-            let magnitude_bits = magnitude.to_bits();
-            let mut peak_bits = self.peak_bits.load(Ordering::Relaxed);
-            while magnitude_bits > peak_bits {
-                match self.peak_bits.compare_exchange_weak(
-                    peak_bits,
-                    magnitude_bits,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(actual) => peak_bits = actual,
-                }
-            }
-            let contribution = f64::from(sample) * f64::from(sample);
-            let mut sum_bits = self.sum_squares_bits.load(Ordering::Relaxed);
-            loop {
-                let next = f64::from_bits(sum_bits) + contribution;
-                match self.sum_squares_bits.compare_exchange_weak(
-                    sum_bits,
-                    next.to_bits(),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(actual) => sum_bits = actual,
-                }
-            }
-            self.sample_count.fetch_add(1, Ordering::Release);
-        }
-
-        fn snapshot(&self) -> AudioMeter {
-            let sample_count = self.sample_count.load(Ordering::Acquire);
-            let rms = if sample_count == 0 {
-                0.0
-            } else {
-                (f64::from_bits(self.sum_squares_bits.load(Ordering::Acquire))
-                    / sample_count as f64)
-                    .sqrt() as f32
-            };
-            AudioMeter {
-                sample_count,
-                peak_dbfs: amplitude_dbfs(f32::from_bits(self.peak_bits.load(Ordering::Acquire))),
-                rms_dbfs: amplitude_dbfs(rms),
-            }
-        }
-    }
-
-    fn amplitude_dbfs(value: f32) -> f32 {
-        if value <= 0.0 {
-            -120.0
-        } else {
-            20.0 * value.log10()
-        }
     }
 
     fn sample_format_rank(format: cpal::SampleFormat) -> Option<u8> {
@@ -1814,28 +1508,15 @@ mod macos {
         }
     }
 
-    fn fill_f32(
-        output: &mut [f32],
-        consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
-    ) {
-        meter.begin_callback();
+    fn fill_f32(output: &mut [f32], consumer: &mut astra_platform_common::NativeAudioConsumer) {
         let filled = consumer.pop_samples(output);
-        for sample in &output[..filled] {
-            meter.record(*sample);
-        }
         output[filled..].fill(0.0);
         if filled != output.len() {
             consumer.record_underflow();
         }
     }
 
-    fn fill_i16(
-        output: &mut [i16],
-        consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
-    ) {
-        meter.begin_callback();
+    fn fill_i16(output: &mut [i16], consumer: &mut astra_platform_common::NativeAudioConsumer) {
         let mut scratch = [0.0_f32; 1024];
         let mut written = 0;
         while written < output.len() {
@@ -1845,7 +1526,6 @@ mod macos {
                 .iter_mut()
                 .zip(&scratch[..filled])
             {
-                meter.record(*sample);
                 *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
             }
             written += filled;
@@ -1859,12 +1539,7 @@ mod macos {
         }
     }
 
-    fn fill_u16(
-        output: &mut [u16],
-        consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
-    ) {
-        meter.begin_callback();
+    fn fill_u16(output: &mut [u16], consumer: &mut astra_platform_common::NativeAudioConsumer) {
         let mut scratch = [0.0_f32; 1024];
         let mut written = 0;
         while written < output.len() {
@@ -1874,7 +1549,6 @@ mod macos {
                 .iter_mut()
                 .zip(&scratch[..filled])
             {
-                meter.record(*sample);
                 *target = ((sample.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
             }
             written += filled;
@@ -1959,15 +1633,12 @@ mod macos {
             })
             .map_err(media_decode_error)?;
         match result.output {
-            MediaDecodeOutput::CpuBuffer {
-                bytes,
-                format,
-                hash,
-            } => Ok(DecodeOutput::CpuBuffer {
-                format,
-                bytes,
-                hash: hash.to_string(),
-            }),
+            MediaDecodeOutput::CpuBuffer { bytes, format } => {
+                Ok(DecodeOutput::CpuBuffer { format, bytes })
+            }
+            MediaDecodeOutput::AudioPcmI16 { .. } | MediaDecodeOutput::AudioPcmF32 { .. } => Err(
+                host_error("decode.submit", "image decoder returned audio PCM"),
+            ),
             MediaDecodeOutput::MediaSurfaceToken(_) => Err(host_error(
                 "decode.submit",
                 "image decoder returned an unsupported external media surface",
@@ -2037,6 +1708,8 @@ mod macos {
                     NSString::from_str("AVLinearPCMBitDepthKey"),
                     NSString::from_str("AVLinearPCMIsBigEndianKey"),
                     NSString::from_str("AVLinearPCMIsNonInterleavedKey"),
+                    NSString::from_str("AVSampleRateKey"),
+                    NSString::from_str("AVNumberOfChannelsKey"),
                 ];
                 let values = [
                     NSNumber::numberWithUnsignedInt(u32::from_be_bytes(*b"lpcm")),
@@ -2044,6 +1717,8 @@ mod macos {
                     NSNumber::numberWithInt(32),
                     NSNumber::numberWithBool(false),
                     NSNumber::numberWithBool(false),
+                    NSNumber::numberWithInt(48_000),
+                    NSNumber::numberWithInt(2),
                 ];
                 NSDictionary::from_slices(
                     &keys.iter().map(|value| &**value).collect::<Vec<_>>(),
@@ -2075,23 +1750,34 @@ mod macos {
                 return Err(host_error("decode.submit", "AVAssetReader could not start"));
             }
             let mut bytes = Vec::new();
+            let mut audio_samples = Vec::<f32>::new();
             while let Some(sample) = output.copyNextSampleBuffer() {
                 if request.kind == DecodeKind::Audio {
                     let block = sample.data_buffer().ok_or_else(|| {
                         host_error("decode.submit", "AVFoundation audio sample has no data")
                     })?;
                     let length = block.data_length();
-                    let start = bytes.len();
-                    bytes.resize(
+                    if !length.is_multiple_of(std::mem::size_of::<f32>()) {
+                        return Err(host_error(
+                            "decode.submit",
+                            "AVFoundation audio sample ends inside an f32 value",
+                        ));
+                    }
+                    let sample_count = length / std::mem::size_of::<f32>();
+                    let start = audio_samples.len();
+                    audio_samples.resize(
                         start
-                            .checked_add(length)
-                            .filter(|size| *size <= MAX_DECODED_BYTES)
+                            .checked_add(sample_count)
+                            .filter(|size| {
+                                size.saturating_mul(std::mem::size_of::<f32>()) <= MAX_DECODED_BYTES
+                            })
                             .ok_or_else(|| {
                                 host_error("decode.submit", "decoded audio exceeds the byte limit")
                             })?,
                         0,
                     );
-                    let destination = NonNull::new(bytes[start..].as_mut_ptr().cast()).unwrap();
+                    let destination =
+                        NonNull::new(audio_samples[start..].as_mut_ptr().cast()).unwrap();
                     if block.copy_data_bytes(0, length, destination) != 0 {
                         return Err(host_error(
                             "decode.submit",
@@ -2146,22 +1832,24 @@ mod macos {
                     let _ = CVPixelBufferUnlockBaseAddress(&image, flags);
                 }
             }
-            if bytes.is_empty() {
+            if bytes.is_empty() && audio_samples.is_empty() {
                 return Err(host_error(
                     "decode.submit",
                     "AVFoundation produced no decoded samples",
                 ));
             }
-            Ok(DecodeOutput::CpuBuffer {
-                format: if request.kind == DecodeKind::Audio {
-                    "f32le"
-                } else {
-                    "rgba8"
-                }
-                .to_string(),
-                hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
-                bytes,
-            })
+            if request.kind == DecodeKind::Audio {
+                Ok(DecodeOutput::AudioPcmF32 {
+                    sample_rate: 48_000,
+                    channels: 2,
+                    samples: audio_samples,
+                })
+            } else {
+                Ok(DecodeOutput::CpuBuffer {
+                    format: "rgba8".to_string(),
+                    bytes: bytes.into(),
+                })
+            }
         }
     }
 

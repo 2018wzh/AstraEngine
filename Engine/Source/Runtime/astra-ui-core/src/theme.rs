@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -32,29 +31,7 @@ pub struct UiThemeManifest {
     pub parent: Option<String>,
     pub tokens: BTreeMap<String, UiThemeValue>,
     pub high_contrast_tokens: BTreeMap<String, UiThemeValue>,
-    pub content_hash: Hash256,
-}
-
-impl UiThemeManifest {
-    pub fn compute_hash(&self) -> Result<Hash256, UiValidationError> {
-        #[derive(Serialize)]
-        struct Hashable<'a> {
-            schema: &'a str,
-            id: &'a str,
-            parent: &'a Option<String>,
-            tokens: &'a BTreeMap<String, UiThemeValue>,
-            high_contrast_tokens: &'a BTreeMap<String, UiThemeValue>,
-        }
-        let bytes = postcard::to_allocvec(&Hashable {
-            schema: &self.schema,
-            id: &self.id,
-            parent: &self.parent,
-            tokens: &self.tokens,
-            high_contrast_tokens: &self.high_contrast_tokens,
-        })
-        .map_err(|error| UiValidationError::invalid("ASTRA_UI_THEME_ENCODE", error.to_string()))?;
-        Ok(Hash256::from_sha256(&bytes))
-    }
+    pub revision: u64,
 }
 
 impl ValidateUi for UiThemeManifest {
@@ -87,13 +64,13 @@ impl ValidateUi for UiThemeManifest {
                 "theme must define at least one token",
             ));
         }
-        if self.compute_hash()? != self.content_hash {
+        if self.revision == 0 {
             return Err(UiValidationError::invalid(
-                "ASTRA_UI_THEME_HASH",
-                "theme content hash mismatch",
+                "ASTRA_UI_THEME_REVISION",
+                "theme revision must be non-zero",
             ));
         }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }
 

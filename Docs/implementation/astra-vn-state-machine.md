@@ -18,7 +18,7 @@ Runtime `StateMachine` 保持 flat FSM。VN 的路线、call/return、system sto
   -> RuntimeEvent / PresentationCommand / AudioCommand / AwaitToken
 ```
 
-状态机只负责 fixed tick 边界上的剧情推进。Director、Renderer2D、AudioGraph 和 FilterGraph 只消费可序列化 command，并用 `AwaitResult` 或 diagnostic 回到 Runtime。
+状态机只负责 fixed tick 边界上的剧情推进。Director、Renderer2D、Kira AudioService 和 FilterGraph 只消费 typed command，并用 `AwaitResult` 或 diagnostic 回到 Runtime。
 
 ## Runtime Types
 
@@ -77,7 +77,7 @@ pub struct VnStepOutput {
 }
 ```
 
-`VnRuntimeState` 和 policy state 作为 typed component 进入完整 Runtime snapshot。NativeVN product provider 把自描述 Runtime save container 封装成唯一 `runtime.world`/`astra.runtime.save_blob.v3` section，不再并列保存容易漂移的 `vn.runtime_state`/`vn.policy_state` 权威副本。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，把 audio/timeline DTO 写成 hash-validated `SerializedEffectEnvelope`。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
+`VnRuntimeState` 和 policy state 作为 typed component 进入完整 Runtime snapshot。NativeVN product provider 把自描述 Runtime save container 封装成唯一 `runtime.world`/`astra.runtime.save_blob.v4` section；Player envelope 不再复制 `VnRuntimeState`。Provider 把 `VnStepOutput.awaits` 映射成 Runtime `AwaitToken`，audio/timeline/presentation 直接进入分类后的 typed live output。Luau query trace保存 typed result，不在 query 热路径 postcard/hash。Luau snapshot 只能保存策略私有的可序列化值，不能保存 function、thread、userdata、native handle 或 coroutine state。
 
 ## Step Action
 
@@ -171,7 +171,7 @@ system_page.return
 
 Timeline 是 Director 的输入，不是剧情状态。`PresentationTimeline`、timeline track 和 Editor metadata 必须绑定 `command_id`、source span 和 rollback scope。`join_policy` 决定 VN 是否进入 `Fence` wait；`cancel` 和 `skip_policy` 只改变 presentation/audio completion path，不改变 route、backlog 或 read-state。
 
-Voice sync 由 `TextWindowState.voice_replay`、AudioGraph voice channel 和 `Fence` 共同完成。Movie end 通过 `AwaitToken` 回到 fixed tick。Renderer 或 Audio provider 不支持某个 effect 时，fallback 只能替换 presentation/audio effect，不能推进或回退 VN cursor。
+Voice sync 由 `TextWindowState.voice_replay`、Kira voice 和 `Fence` 共同完成。Movie end 通过 `AwaitToken` 回到 fixed tick。Renderer 或 AudioService 拒绝 command 时必须终止对应 session，不能生成替代输出、切换 provider、推进或回退 VN cursor。
 
 ## Luau Policy Boundary
 

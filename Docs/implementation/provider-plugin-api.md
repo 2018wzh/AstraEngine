@@ -193,7 +193,7 @@ AstraEMU family plugin 使用普通 extension registry 注册，不拥有私有 
 
 ## Game Runtime Provider
 
-`ProductRuntimeProvider` 是 packaged `Game` target 的玩法 runtime selector。NativeVN、AstraEMU 和后续 AstraRPG 都通过这个 slot 显式绑定；AstraVN 不作为所有玩法的基类。Provider 返回的 step output 必须是可序列化 effect list、AwaitToken、presentation/audio command、diagnostic、trace 和 save section ref，由 host adapter 应用到 `DeterministicActionContext`。
+`ProductRuntimeProvider` 是 packaged `Game` target 的玩法 runtime selector。NativeVN、AstraEMU 和后续 AstraRPG 都通过这个 slot 显式绑定；AstraVN 不作为所有玩法的基类。Provider ABI v3 的 step output 是 typed live DTO 与 control transaction；save/package/report 使用独立 persisted DTO。动态 action bytes invoke、通用 payload 与 effect envelope 已删除。
 
 `NativeVnRuntimeProvider` 包装现有 AstraVN Core、VN package sections 和 VN release checks。`AstraEmuRuntimeProvider` 包装 Manager/runtime bridge，并在内部选择 family `LegacyRuntimeProvider`。`AstraRpgRuntimeProvider` 只保留同级接入边界，当前不声明已有实现。
 

@@ -1,5 +1,16 @@
-use std::{collections::VecDeque, io::Cursor, sync::Arc};
+use std::{
+    collections::VecDeque,
+    io::Cursor,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+        Arc,
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 
+use astra_byte_source::OwnedByteBuffer;
 use na_mpeg2_decoder::{MpegAvEvent, MpegAvPipeline};
 use thiserror::Error;
 use wmv_decoder::{AsfWmaDecoder, AsfWmv2Decoder, YuvFrame};
@@ -54,14 +65,21 @@ pub struct FvpMovieStreamDecoder {
     ended: bool,
 }
 
+pub struct FvpMoviePacketStream {
+    receiver: Option<Receiver<Result<FvpMoviePacket, FvpMovieDecodeError>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+    ended: bool,
+}
+
 enum StreamDecoder {
     Wmv(Box<WmvStreamDecoder>),
     Mpeg(Box<MpegStreamDecoder>),
 }
 
 struct WmvStreamDecoder {
-    video: AsfWmv2Decoder<Cursor<Arc<[u8]>>>,
-    audio: Option<AsfWmaDecoder<Cursor<Arc<[u8]>>>>,
+    video: AsfWmv2Decoder<Cursor<OwnedByteBuffer>>,
+    audio: Option<AsfWmaDecoder<Cursor<OwnedByteBuffer>>>,
     pending_video: Option<FvpMovieFrame>,
     pending_audio: Option<FvpMovieAudioChunk>,
     video_eof: bool,
@@ -70,7 +88,7 @@ struct WmvStreamDecoder {
 
 struct MpegStreamDecoder {
     pipeline: MpegAvPipeline,
-    bytes: Arc<[u8]>,
+    bytes: OwnedByteBuffer,
     offset: usize,
     pending: VecDeque<MpegAvEvent>,
     flushed: bool,
@@ -127,7 +145,7 @@ pub fn decode_fvp_movie(
 ) -> Result<FvpDecodedMovie, FvpMovieDecodeError> {
     let mut decoder = open_fvp_movie_stream(
         extension,
-        Arc::from(bytes),
+        OwnedByteBuffer::from_vec(bytes.to_vec()),
         max_frames,
         max_decoded_bytes,
         max_audio_samples,
@@ -157,7 +175,7 @@ pub fn decode_fvp_movie(
 
 pub fn open_fvp_movie_stream(
     extension: &str,
-    bytes: Arc<[u8]>,
+    bytes: OwnedByteBuffer,
     max_frames: usize,
     max_decoded_bytes: usize,
     max_audio_samples: usize,
@@ -168,9 +186,9 @@ pub fn open_fvp_movie_stream(
     let extension = extension.trim_start_matches('.').to_ascii_lowercase();
     let inner = match extension.as_str() {
         "wmv" | "asf" => {
-            let video = AsfWmv2Decoder::open(Cursor::new(Arc::clone(&bytes)))
+            let video = AsfWmv2Decoder::open(Cursor::new(bytes.clone()))
                 .map_err(|_| FvpMovieDecodeError::Decode)?;
-            let audio = match AsfWmaDecoder::open(Cursor::new(Arc::clone(&bytes))) {
+            let audio = match AsfWmaDecoder::open(Cursor::new(bytes)) {
                 Ok(decoder) => Some(decoder),
                 Err(wmv_decoder::DecoderError::Unsupported(_)) => None,
                 Err(_) => return Err(FvpMovieDecodeError::Decode),
@@ -205,6 +223,100 @@ pub fn open_fvp_movie_stream(
         audio_format: None,
         ended: false,
     })
+}
+
+pub fn open_fvp_movie_packet_stream(
+    extension: &str,
+    bytes: OwnedByteBuffer,
+    max_frames: usize,
+    max_decoded_bytes: usize,
+    max_audio_samples: usize,
+    queue_capacity: usize,
+) -> Result<FvpMoviePacketStream, FvpMovieDecodeError> {
+    if queue_capacity == 0 {
+        return Err(FvpMovieDecodeError::Budget);
+    }
+    let mut decoder = open_fvp_movie_stream(
+        extension,
+        bytes,
+        max_frames,
+        max_decoded_bytes,
+        max_audio_samples,
+    )?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    let (sender, receiver) = mpsc::sync_channel(queue_capacity);
+    let worker = thread::Builder::new()
+        .name("astra-fvp-media-decode".to_owned())
+        .spawn(move || loop {
+            if worker_stop.load(Ordering::Acquire) {
+                return;
+            }
+            let packet = decoder.next_packet();
+            let ended = matches!(packet, Ok(FvpMoviePacket::End)) || packet.is_err();
+            if !send_movie_packet(&sender, &worker_stop, packet) || ended {
+                return;
+            }
+        })
+        .map_err(|_| FvpMovieDecodeError::Decode)?;
+    Ok(FvpMoviePacketStream {
+        receiver: Some(receiver),
+        stop,
+        worker: Some(worker),
+        ended: false,
+    })
+}
+
+fn send_movie_packet(
+    sender: &SyncSender<Result<FvpMoviePacket, FvpMovieDecodeError>>,
+    stop: &AtomicBool,
+    mut packet: Result<FvpMoviePacket, FvpMovieDecodeError>,
+) -> bool {
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return false;
+        }
+        match sender.try_send(packet) {
+            Ok(()) => return true,
+            Err(TrySendError::Full(returned)) => {
+                packet = returned;
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(TrySendError::Disconnected(_)) => return false,
+        }
+    }
+}
+
+impl FvpMoviePacketStream {
+    pub fn try_next(&mut self) -> Result<Option<FvpMoviePacket>, FvpMovieDecodeError> {
+        if self.ended {
+            return Ok(Some(FvpMoviePacket::End));
+        }
+        let result = match self
+            .receiver
+            .as_ref()
+            .ok_or(FvpMovieDecodeError::Decode)?
+            .try_recv()
+        {
+            Ok(result) => result?,
+            Err(TryRecvError::Empty) => return Ok(None),
+            Err(TryRecvError::Disconnected) => return Err(FvpMovieDecodeError::Decode),
+        };
+        if matches!(result, FvpMoviePacket::End) {
+            self.ended = true;
+        }
+        Ok(Some(result))
+    }
+}
+
+impl Drop for FvpMoviePacketStream {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.receiver.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 impl FvpMovieStreamDecoder {

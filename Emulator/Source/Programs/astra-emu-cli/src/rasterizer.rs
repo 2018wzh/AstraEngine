@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use astra_emu_family_api::{
-    LegacyBlendMode, LegacyDrawV1, LegacyPreparedSceneCommitV1, LegacyRenderFrameV1,
-    LegacySceneResourceOperationV1, LegacySceneResourceStateV1, LegacySceneTextureUpdateV1,
+    LegacyBlendMode, LegacyDrawV1, LegacyRenderFrameV1, LegacySceneResourceStateV1,
     LegacyTextureFormat, LegacyVertexV1,
 };
+use astra_media_core::OwnedPixelBuffer;
 use astra_plugin_abi::{
     RuntimeLiveBlendMode, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
     RuntimeLiveTextureFormat,
@@ -15,7 +15,7 @@ use rayon::prelude::*;
 struct Texture {
     width: u32,
     height: u32,
-    rgba8: Vec<u8>,
+    rgba8: OwnedPixelBuffer,
 }
 
 #[derive(Default)]
@@ -104,10 +104,11 @@ impl CpuStageRasterizer {
                     }
                     let rgba8 = rgba8_pixels_owned(width, height, format, pixels)?;
                     let texture = Arc::make_mut(texture);
+                    let retained = texture.rgba8.make_mut_for_update();
                     for row in 0..height as usize {
                         let source = row * width as usize * 4;
                         let target = ((y as usize + row) * texture.width as usize + x as usize) * 4;
-                        texture.rgba8[target..target + width as usize * 4]
+                        retained[target..target + width as usize * 4]
                             .copy_from_slice(&rgba8[source..source + width as usize * 4]);
                     }
                 }
@@ -131,63 +132,6 @@ impl CpuStageRasterizer {
             height: transaction.height,
             texture_updates: Vec::new(),
             draws,
-        })
-    }
-
-    /// Validates and applies one incremental semantic scene transaction. The
-    /// CPU reference renderer retains texture storage across frames just like
-    /// the GPU stage: a partial upload never requires rebuilding a full frame
-    /// DTO or re-uploading unchanged texture bytes.
-    pub fn prepare_scene_commit(
-        &mut self,
-        commit: LegacyPreparedSceneCommitV1,
-    ) -> Result<LegacyRenderFrameV1, String> {
-        let mut resource_state = if commit.reset_resources {
-            LegacySceneResourceStateV1::default()
-        } else {
-            self.scene_resources.clone()
-        };
-        let verified = resource_state
-            .prepare(commit.packet.clone())
-            .map_err(|error| format!("ASTRA_EMU_HEADLESS_SCENE_PREPARE:{}", error.code()))?;
-        if verified.next_resources != commit.next_resources {
-            return Err("ASTRA_EMU_HEADLESS_SCENE_COMMIT_MISMATCH".into());
-        }
-        let mut textures = if commit.reset_resources {
-            BTreeMap::new()
-        } else {
-            self.textures.clone()
-        };
-        for operation in &verified.packet.resources {
-            match operation {
-                LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                    Self::insert_texture_into(
-                        &mut textures,
-                        texture.texture_id,
-                        texture.width,
-                        texture.height,
-                        texture.format,
-                        &texture.pixels,
-                    )?;
-                }
-                LegacySceneResourceOperationV1::UpdateTexture(texture) => {
-                    Self::update_texture_into(&mut textures, texture)?;
-                }
-                LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
-                    textures.remove(texture_id);
-                }
-            }
-        }
-        resource_state.commit(verified.clone());
-        self.scene_resources = resource_state;
-        self.textures = textures;
-        self.width = verified.packet.width;
-        self.height = verified.packet.height;
-        Ok(LegacyRenderFrameV1 {
-            width: verified.packet.width,
-            height: verified.packet.height,
-            texture_updates: Vec::new(),
-            draws: verified.packet.draws,
         })
     }
 
@@ -275,64 +219,9 @@ impl CpuStageRasterizer {
             Arc::new(Texture {
                 width,
                 height,
-                rgba8,
+                rgba8: rgba8.into(),
             }),
         );
-        Ok(())
-    }
-
-    fn update_texture_into(
-        textures: &mut BTreeMap<u32, Arc<Texture>>,
-        texture: &LegacySceneTextureUpdateV1,
-    ) -> Result<(), String> {
-        let previous = textures
-            .get(&texture.texture_id)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_MISSING".to_owned())?;
-        let right = texture
-            .x
-            .checked_add(texture.width)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-        let bottom = texture
-            .y
-            .checked_add(texture.height)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-        if right > previous.width || bottom > previous.height {
-            return Err("ASTRA_EMU_HEADLESS_TEXTURE_REGION".into());
-        }
-        let update = rgba8_pixels(
-            texture.width,
-            texture.height,
-            texture.format,
-            &texture.pixels,
-        )?;
-        let mut next = (**previous).clone();
-        let row_bytes = usize::try_from(texture.width)
-            .ok()
-            .and_then(|value| value.checked_mul(4))
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-        for row in 0..texture.height {
-            let destination = usize::try_from(texture.y + row)
-                .ok()
-                .and_then(|row| {
-                    usize::try_from(previous.width)
-                        .ok()
-                        .and_then(|stride| row.checked_mul(stride))
-                })
-                .and_then(|offset| {
-                    usize::try_from(texture.x)
-                        .ok()
-                        .and_then(|x| offset.checked_add(x))
-                })
-                .and_then(|offset| offset.checked_mul(4))
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-            let source = usize::try_from(row)
-                .ok()
-                .and_then(|row| row.checked_mul(row_bytes))
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXTURE_REGION".to_owned())?;
-            next.rgba8[destination..destination + row_bytes]
-                .copy_from_slice(&update[source..source + row_bytes]);
-        }
-        textures.insert(texture.texture_id, Arc::new(next));
         Ok(())
     }
 
@@ -341,7 +230,7 @@ impl CpuStageRasterizer {
             Arc::new(Texture {
                 width: 1,
                 height: 1,
-                rgba8: vec![255, 255, 255, 255],
+                rgba8: vec![255, 255, 255, 255].into(),
             })
         } else {
             self.textures
@@ -522,18 +411,21 @@ fn rgba8_pixels_owned(
     width: u32,
     height: u32,
     format: LegacyTextureFormat,
-    pixels: Vec<u8>,
-) -> Result<Vec<u8>, String> {
+    pixels: astra_byte_source::OwnedByteBuffer,
+) -> Result<OwnedPixelBuffer, String> {
     let channels = format.bytes_per_pixel();
     if pixels.len() != checked_len(width, height, channels)? {
         return Err("ASTRA_EMU_HEADLESS_TEXTURE_LENGTH".into());
     }
     Ok(match format {
-        LegacyTextureFormat::Rgba8 => pixels,
-        LegacyTextureFormat::LumaAlpha8 => pixels
-            .chunks_exact(2)
-            .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
-            .collect(),
+        LegacyTextureFormat::Rgba8 => OwnedPixelBuffer::from_owned(pixels),
+        LegacyTextureFormat::LumaAlpha8 => OwnedPixelBuffer::from_vec(
+            pixels
+                .as_slice()
+                .chunks_exact(2)
+                .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
+                .collect(),
+        ),
     })
 }
 
@@ -689,10 +581,7 @@ fn encode_unorm(value: f32) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use astra_emu_family_api::{
-        LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneTextureCreateV1,
-        LegacySceneTextureUpdateV1, LegacyTextureUpdateV1, LegacyVertexV1,
-    };
+    use astra_emu_family_api::{LegacyTextureUpdateV1, LegacyVertexV1};
 
     use super::*;
 
@@ -789,7 +678,7 @@ mod tests {
             Arc::new(Texture {
                 width: 1,
                 height: 1,
-                rgba8: vec![0, 0, 0, 255],
+                rgba8: vec![0, 0, 0, 255].into(),
             }),
         );
         rasterizer
@@ -808,7 +697,7 @@ mod tests {
         let texture = Texture {
             width: 1,
             height: 1,
-            rgba8: vec![128, 64, 32, 255],
+            rgba8: vec![128, 64, 32, 255].into(),
         };
         assert_eq!(
             texel(&texture, 0, 0),
@@ -821,74 +710,6 @@ mod tests {
         );
         assert_eq!(result, [0.5, 0.5, 0.5, 1.0]);
         assert_eq!(encode_unorm(result[0]), 128);
-    }
-
-    #[test]
-    fn semantic_scene_commit_retains_and_partially_updates_texture() {
-        let draw = LegacyDrawV1 {
-            texture_id: 42,
-            vertices: [
-                vertex(0.0, 0.0, 0.0, 0.0),
-                vertex(2.0, 0.0, 1.0, 0.0),
-                vertex(0.0, 1.0, 0.0, 1.0),
-                vertex(2.0, 1.0, 1.0, 1.0),
-            ],
-            blend: LegacyBlendMode::Alpha,
-            scissor: None,
-        };
-        let first_pixels = vec![255, 0, 0, 255, 0, 255, 0, 255];
-        let first_packet = LegacyScenePacketV1 {
-            width: 2,
-            height: 1,
-            resources: vec![LegacySceneResourceOperationV1::CreateTexture(
-                LegacySceneTextureCreateV1 {
-                    texture_id: 42,
-                    width: 2,
-                    height: 1,
-                    format: LegacyTextureFormat::Rgba8,
-                    pixels: first_pixels,
-                },
-            )],
-            draws: vec![draw.clone()],
-        };
-        let mut rasterizer = CpuStageRasterizer::default();
-        let first = rasterizer
-            .prepare_scene_commit(
-                LegacySceneResourceStateV1::default()
-                    .prepare(first_packet)
-                    .unwrap(),
-            )
-            .unwrap();
-        assert!(first.texture_updates.is_empty());
-        assert_eq!(
-            rasterizer.textures.get(&42).unwrap().rgba8,
-            vec![255, 0, 0, 255, 0, 255, 0, 255]
-        );
-
-        let patch = vec![0, 0, 255, 255];
-        let update_packet = LegacyScenePacketV1 {
-            width: 2,
-            height: 1,
-            resources: vec![LegacySceneResourceOperationV1::UpdateTexture(
-                LegacySceneTextureUpdateV1 {
-                    texture_id: 42,
-                    x: 1,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                    format: LegacyTextureFormat::Rgba8,
-                    pixels: patch,
-                },
-            )],
-            draws: vec![draw],
-        };
-        let second_commit = rasterizer.scene_resources.prepare(update_packet).unwrap();
-        let second = rasterizer.prepare_scene_commit(second_commit).unwrap();
-        assert!(second.texture_updates.is_empty());
-        assert_eq!(
-            rasterizer.textures.get(&42).unwrap().rgba8,
-            vec![255, 0, 0, 255, 0, 0, 255, 255]
-        );
     }
 
     fn vertex(x: f32, y: f32, u: f32, v: f32) -> LegacyVertexV1 {

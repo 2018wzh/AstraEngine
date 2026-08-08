@@ -1,4 +1,3 @@
-use astra_core::Hash256;
 use astra_media::{
     AudioFramePacket, LateVideoPolicy, MediaPlaybackConfig, MediaPlaybackSession,
     MediaPlaybackState, MediaTrackKind, PlaybackTickRequest, VideoFramePacket,
@@ -13,7 +12,6 @@ fn video(generation: u64, sequence: u64, pts_us: u64) -> VideoFramePacket {
         duration_us: 40_000,
         width: 320,
         height: 180,
-        content_hash: Hash256::from_sha256(&sequence.to_le_bytes()),
     }
 }
 
@@ -27,7 +25,6 @@ fn audio(generation: u64, sequence: u64, pts_us: u64) -> AudioFramePacket {
         sample_rate: 48_000,
         channels: 2,
         frame_count: 960,
-        content_hash: Hash256::from_sha256(&sequence.to_le_bytes()),
     }
 }
 

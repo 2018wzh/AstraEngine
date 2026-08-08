@@ -4,12 +4,13 @@ use abi_stable::{
     std_types::{RResult, RString},
     StableAbi,
 };
+use astra_byte_source::FfiOwnedByteBuffer;
 
 use crate::{
-    FfiByteRange, FfiByteSourceStat, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiHash256,
-    FfiOpenRequest, FfiOwnedBytes, FfiProbeReport, FfiProbeRequest, FfiRangeReadResult,
-    FfiRestoreReport, FfiRuntimeHostCtx, FfiShutdownReport, FfiSnapshotEnvelope, FfiStepInput,
-    FfiStepOutput, FfiVfsListedFile, LegacyProviderError,
+    FfiByteRange, FfiByteSourceStat, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiOpenRequest,
+    FfiProbeReport, FfiProbeRequest, FfiRangeReadResult, FfiRestoreReport, FfiRuntimeHostCtx,
+    FfiShutdownReport, FfiSnapshotEnvelope, FfiStepInput, FfiStepOutput, FfiVfsListedFile,
+    LegacyProviderError,
 };
 
 /// The v7 wire contract makes bulk ownership and its scalar kind explicit.
@@ -139,7 +140,7 @@ pub struct FfiVfsStatCall {
 pub struct FfiVfsRangeCall {
     pub mount_set_id: RString,
     pub uri: RString,
-    pub expected_revision: FfiHash256,
+    pub expected_revision: u64,
     pub range: FfiByteRange,
     pub max_bytes: u64,
 }
@@ -167,7 +168,7 @@ pub type FfiTakeEphemeralText =
         FfiTextLeaseCall,
     ) -> FfiLegacyResult<abi_stable::std_types::ROption<FfiEphemeralText>>;
 pub type FfiReadSessionResource =
-    extern "C" fn(FfiResourceReadCall) -> FfiLegacyResult<FfiOwnedBytes>;
+    extern "C" fn(FfiResourceReadCall) -> FfiLegacyResult<FfiOwnedByteBuffer>;
 pub type FfiShutdown = extern "C" fn(FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport>;
 
 pub type FfiVfsStat = extern "C" fn(RString, FfiVfsStatCall) -> FfiLegacyResult<FfiByteSourceStat>;
@@ -244,7 +245,7 @@ impl RootModule for AstraLegacyFamilyModuleRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FamilyId, LegacyFamilyPluginDescriptor};
+    use crate::{FamilyId, FfiOwnedBytes, LegacyFamilyPluginDescriptor};
 
     #[test]
     fn v7_descriptor_round_trips_through_typed_wire() {
@@ -272,18 +273,6 @@ mod tests {
         let error = LegacyProviderError::from(ffi);
         assert_eq!(error.code(), "TEST_CODE");
         assert_eq!(error.message(), "message");
-    }
-
-    #[test]
-    fn v7_bulk_buffer_preserves_the_owned_allocation_across_clones() {
-        let bytes = vec![1_u8, 2, 3, 4, 5];
-        let allocation = bytes.as_ptr();
-        let bulk = crate::bulk_bytes_from_vec(bytes);
-        assert_eq!(bulk.as_slice().as_ptr(), allocation);
-        let clone = bulk.clone();
-        drop(bulk);
-        assert_eq!(clone.as_slice().as_ptr(), allocation);
-        assert_eq!(clone.as_slice(), &[1, 2, 3, 4, 5]);
     }
 
     #[test]

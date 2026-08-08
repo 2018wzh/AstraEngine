@@ -252,7 +252,7 @@ fn target_validate_and_platform_probe_emit_machine_readable_reports() {
         serde_json::from_slice(&platform_output.stdout).unwrap();
     assert_eq!(
         platform_report["schema"],
-        "astra.platform_capability_report.v2"
+        "astra.platform_capability_report.v3"
     );
     assert_eq!(platform_report["platform"], "windows");
     if cfg!(windows) {
@@ -802,17 +802,18 @@ review: accepted
 id: com.astra.nativevn.engine-test
 platform_profiles:
   web-release-chrome:
-    schema: astra.platform_host_profile.v2
+    schema: astra.platform_host_profile.v3
     id: web-release-chrome
     platform: web
     target: nativevn-minimal-test-game
     package_id: com.astra.nativevn.engine-test
     renderer: { providers: [webgpu], allow_software: false }
     decode: { providers: [webcodecs], allow_software: false }
-    audio: { providers: [webaudio], allow_software: false }
+    audio_mixer: { providers: [kira], allow_software: false }
+    audio_output: { providers: [webaudio], allow_software: false }
     save: { providers: [opfs], allow_software: false }
     package_sources: [{ kind: bundled }]
-    limits: { command_queue_capacity: 16, event_queue_capacity: 32, max_frame_bytes: 1048576, max_audio_frames: 48000, max_package_read_bytes: 1048576 }
+    limits: { command_queue_capacity: 16, event_queue_capacity: 32, max_frame_bytes: 1048576, max_audio_frames: 48000, audio_pcm_cache_bytes: 67108864, audio_chunk_frames: 512, max_package_read_bytes: 1048576 }
     package_cache: { max_entry_bytes: 1048576, max_total_bytes: 4194304 }
 targets:
   - id: nativevn-minimal-test-game

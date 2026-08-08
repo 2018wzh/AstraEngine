@@ -1,4 +1,3 @@
-use astra_core::Hash128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -180,12 +179,6 @@ impl StageModel {
                 self.timelines.retain(|timeline| timeline.id != id);
             }
         }
-    }
-
-    pub fn presentation_hash(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(self).expect("stage model must serialize for hashing"),
-        )
     }
 
     fn upsert_layer(&mut self, layer: LayerState) {
@@ -490,12 +483,6 @@ pub struct PresentationTimeline {
 }
 
 impl PresentationTimeline {
-    pub fn stable_hash(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(self).expect("presentation timeline must serialize for hashing"),
-        )
-    }
-
     fn targets(&self) -> Vec<String> {
         let mut targets = self
             .tracks

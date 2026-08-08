@@ -88,24 +88,21 @@ fn serial_and_parallel_region_preparation_are_identical() {
     let parallel = PresentationCoordinator::default()
         .prepare_batch(&commands, 4)
         .unwrap();
-    assert_eq!(
-        serial.0.stable_hash().unwrap(),
-        parallel.0.stable_hash().unwrap()
-    );
+    assert_eq!(serial.0, parallel.0);
     assert_eq!(serial.1, parallel.1);
 }
 
 #[astra_headless_test::test]
 fn cross_region_layer_conflict_fails_without_partial_commit() {
     let mut coordinator = PresentationCoordinator::default();
-    let before = coordinator.stable_hash().unwrap();
+    let before = coordinator.clone();
     let error = coordinator
         .apply_batch(&[character(1, "foreground"), video(2, "foreground")], 4)
         .unwrap_err();
     assert!(error
         .to_string()
         .contains("ASTRA_VN_PRESENTATION_REGION_WRITE_CONFLICT"));
-    assert_eq!(coordinator.stable_hash().unwrap(), before);
+    assert_eq!(coordinator, before);
 }
 
 #[astra_headless_test::test]
@@ -135,10 +132,7 @@ fn mid_animation_snapshot_and_video_failure_preserve_logical_state() {
     coordinator.tick(250_000_000).unwrap();
     let snapshot = coordinator.snapshot().unwrap();
     let mut restored = PresentationCoordinator::restore(&snapshot).unwrap();
-    assert_eq!(
-        restored.stable_hash().unwrap(),
-        coordinator.stable_hash().unwrap()
-    );
+    assert_eq!(restored, coordinator);
     assert_eq!(
         restored.fail_video("opening").unwrap().as_deref(),
         Some("asset:/opening-fallback.png")

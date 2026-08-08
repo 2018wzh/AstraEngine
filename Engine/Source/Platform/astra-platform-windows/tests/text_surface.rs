@@ -184,7 +184,10 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
 
     let layout = provider().layout(&request()).unwrap();
     assert!(layout.shaped_runs.len() >= 3);
-    assert_eq!(golden["layout_hash"], layout.hash.to_string());
+    assert!(astra_media::text_layout_evidence_hash(&layout)
+        .unwrap()
+        .to_string()
+        .starts_with("sha256:"));
     let mut resources = TextRenderResourceOwner::default();
     let commands = resources
         .update_layout("golden.multiscript", &layout, [238, 242, 255, 255])
@@ -334,7 +337,6 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
         frame: TextureFrame {
             width: 1,
             height: 1,
-            hash: Hash256::from_sha256(&texture_bytes),
             rgba8: texture_bytes.into(),
         },
     };

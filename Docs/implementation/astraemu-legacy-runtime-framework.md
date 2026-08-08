@@ -1,6 +1,6 @@
 # AstraEMU Legacy Runtime Framework
 
-本页把 AstraEMU family contract 落到实现结构。目标不是做公共 VM，而是给 family core 一个统一的 runtime lifecycle：`AstraEmuRuntimeProvider`、Manager 和 `RuntimeWorld` 只看到 session、step、effect、await、snapshot 和 report；opcode、syscall、tag、form、thread model 都留在 family 内部。
+本页把 AstraEMU family contract 落到实现结构。目标不是做公共 VM，而是给 family core 一个统一的 runtime lifecycle：`AstraEmuRuntimeProvider`、Manager 和 `RuntimeWorld` 只看到 session、typed step、control transaction、await、snapshot 和 report；opcode、syscall、tag、form、thread model 都留在 family 内部。
 
 ## Crate Shape
 
@@ -13,7 +13,7 @@ astra-emu-family-api
   LegacyRuntimeProvider
   LegacyRuntimeSessionId
   LegacyStepInput / LegacyStepOutput
-  LegacyEffect / LegacyWaitRequest
+  LegacyLiveOutput / LegacyControlTransaction / LegacyWaitRequest
   LegacySnapshotEnvelope
 
 astra-emu-manager
@@ -42,9 +42,9 @@ astra-emu-family-*
 
 Family ABI v7 把完整 lifecycle 和 host VFS 固定为显式 `StableAbi` wire DTO；VFS range 每次携带 expected revision、offset、length 和 max bytes，单次读取不能超过 16 MiB。v5/v6 插件、fingerprint 和 FVP runtime snapshot 硬拒绝，不退回旧 whole-file callback 或 postcard FFI envelope。大块 scene/encoded/PCM payload 使用 ABI-owned 引用计数 buffer；控制 effect 仍可序列化，但 bulk body 不进入 RuntimeWorld、save、replay、report 或日志。`read_session_resource` 只负责 family virtual VFS 与通用媒体 host 之间的已解析资源交付：family 负责 archive/path 语义，Manager、CLI 与共享 PlatformHost audio service 负责 decode/playback。
 
-Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent。脚本只能提交 deterministic `LegacyEffect`、Blackboard、input 或 tag intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
+Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 typed intent。脚本只能提交 typed Blackboard、input、tag 或 media intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
 
-`TextCapturePipeline` 消费 `LegacyEffect::TextCapture`。默认 report 只存 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才写全文 dump。`TranslationProvider` 由 Plugin Manager 显式绑定，`translate_batch` 必须实现，`translate_stream` 是可选 capability。DeepL-style provider 走 batch fallback；LLM provider 可以通过 Stage 4 的 MCP session 和 provider profile streaming 更新 overlay。翻译 overlay 非权威，不进入 replay hash；术语表和角色上下文可以读取授权的 runtime memory。
+`TextCapturePipeline` 消费 `LegacyLiveOutput.text`。默认 report 只存长度、source ref 和 speaker metadata；用户本地 opt-in 后才写全文 dump。`TranslationProvider` 由 Plugin Manager 显式绑定，`translate_batch` 必须实现，`translate_stream` 是可选 capability。翻译 overlay 非权威，不进入 Runtime state；术语表和角色上下文可以读取授权的 runtime memory。
 
 `EmuFilterPresetBinding` 复用 Media `FilterGraph`。final-frame preset 作用在合成后画面；per-layer preset 绑定 `PresentationCommand` 的 layer id 或 role。family 缺少 layer metadata 时只启用 final-frame，并在 report 里记录 missing-layer diagnostic。
 
@@ -62,7 +62,7 @@ Active -> Faulted
 Active -> Shutdown
 ```
 
-`emu.step` 是主 action。adapter 根据 `LegacyStepOutput` 应用 effect、注册 AwaitToken、写 Blackboard status 和 trace。StateMachine 不展开旧 VM 的 opcode、syscall、tag、form、scene stack 或 script thread；这些细节只进入 bounded `StateMachineTrace` 和 family snapshot section。
+`emu.step` 是主 action。adapter 根据 `LegacyStepOutput` 先原子提交轻量 control transaction，再把 scene、PCM、text 和 video allocation 消费式移动给 host owner，并注册 typed wait、写 Blackboard status 和 trace。StateMachine 不展开旧 VM 的 opcode、syscall、tag、form、scene stack 或 script thread；这些细节只进入 bounded `StateMachineTrace` 和 family snapshot section。
 
 多线程、多 fiber 或多 context legacy VM 必须拆成 family-private child state machine。调度器按固定 `(priority, context_id, sequence)` 推进，遇到 wait、yield、host call、fault、terminal 或预算耗尽时停止该 context。Host 不依赖宿主线程完成顺序，也不读取 family 私有 stack。
 
@@ -74,15 +74,15 @@ Active -> Shutdown
 4. Manager 调用 `probe` 生成 local metadata report，不执行商业脚本。
 5. Provider 调用 family `open`，取得 `LegacyRuntimeSessionId`。
 6. RuntimeWorld 创建 legacy Actor 和 StateMachine，并注册 `emu.step` adapter。
-7. 每个 fixed tick 调用 `step`，adapter 按顺序应用 `LegacyEffect`。
+7. 每个 fixed tick 调用 `step`，adapter 原子提交 control transaction，随后按 sequence 移动 typed live output。
 8. Save/load 调用 `save` 和 `restore`，只写公共 envelope 和 family opaque section。
 9. 关闭 case 时调用 `shutdown`，并输出 final diagnostics。
 
-Session 内可以持有 VM PC、stack、call stack、resource resolver、media state、text state、legacy save cursor 和 trace cursor。Session 外只能看到 stable id、hash、source span、resource ref、diagnostic 和 effect。
+Session 内可以持有 VM PC、stack、call stack、resource resolver、media state、text state、legacy save cursor 和 trace cursor。Session 外只能看到 stable id、revision、generation、source span、resource ref、diagnostic、typed control 和 owned live output。
 
-## Effect Ordering
+## Live Output Ordering
 
-`LegacyStepOutput.effects` 必须按旧引擎观察顺序排列。adapter 只做校验和转写，不重新排序 presentation/audio/text 行为。多个 producer 同 tick 输出时，Runtime 使用 `(tick_index, sequence, effect_id)` 生成 deterministic trace。
+`LegacyStepOutput` 的各 typed lane 使用全局 sequence 保留旧引擎观察顺序。adapter 只做一次边界校验，不重建统一 effect 列表，也不重新排序 scene/audio/text 行为。多个 producer 同 tick 输出时，Runtime 使用 `(tick_index, sequence)` 记录 typed trace。
 
 建议顺序：
 

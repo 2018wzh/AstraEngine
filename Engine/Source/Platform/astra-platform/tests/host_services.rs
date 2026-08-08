@@ -1,9 +1,40 @@
+use std::sync::atomic::AtomicBool;
+
 use astra_platform::{
-    host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputRequest,
-    AudioOutputState, AudioPacket, CapturedFrame, HostCommand, PackageSourceHandle,
-    PackageSourceRequest, PlatformError, PlatformErrorCode, PlatformHostProfile,
-    SaveTransactionHandle, SurfaceHandle, SurfaceRequest, WindowHandle,
+    host_channel, AudioDeviceFormat, AudioOutputHandle, AudioOutputLane, AudioOutputRequest,
+    CapturedFrame, HostCommand, OpenedAudioOutput, PackageSourceHandle, PackageSourceRequest,
+    PlatformError, PlatformErrorCode, PlatformHostProfile, SaveTransactionHandle, SurfaceHandle,
+    SurfaceRequest, WindowHandle,
 };
+
+#[derive(Default)]
+struct TestAudioLane {
+    consumed_samples: u64,
+    underflow_count: u64,
+}
+
+impl AudioOutputLane for TestAudioLane {
+    fn wait_for_capacity(
+        &mut self,
+        _requested_samples: usize,
+        _stop: &AtomicBool,
+    ) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        self.consumed_samples += samples.len() as u64;
+        Ok(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.consumed_samples
+    }
+
+    fn underflow_count(&self) -> u64 {
+        self.underflow_count
+    }
+}
 
 #[tokio::test]
 async fn client_exposes_surface_audio_save_and_package_commands() {
@@ -59,21 +90,6 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
         [1, 2, 3, 255]
     );
 
-    let format = tokio::spawn({
-        let client = client.clone();
-        async move { client.preferred_audio_output_format().await }
-    });
-    match backend.next_command().await.unwrap() {
-        HostCommand::QueryAudioOutputFormat { reply } => reply
-            .send(Ok(AudioOutputFormat {
-                sample_rate: 48_000,
-                channels: 2,
-            }))
-            .unwrap(),
-        other => panic!("unexpected command: {}", other.operation()),
-    }
-    assert_eq!(format.await.unwrap().unwrap().sample_rate, 48_000);
-
     let open_audio = tokio::spawn({
         let client = client.clone();
         async move {
@@ -81,72 +97,35 @@ async fn client_exposes_surface_audio_save_and_package_commands() {
                 .open_audio_output(AudioOutputRequest {
                     sample_rate: 48_000,
                     channels: 2,
+                    chunk_frames: 800,
                     max_buffered_frames: 4_800,
                     start_paused: false,
+                    capture_samples: false,
                 })
                 .await
         }
     });
     match backend.next_command().await.unwrap() {
         HostCommand::OpenAudioOutput { reply, .. } => reply
-            .send(Ok(AudioOutputHandle::from_parts(1, 1).unwrap()))
+            .send(Ok(OpenedAudioOutput {
+                handle: AudioOutputHandle::from_parts(1, 1).unwrap(),
+                format: AudioDeviceFormat {
+                    sample_rate: 48_000,
+                    channels: 2,
+                },
+                lane: Box::<TestAudioLane>::default(),
+                capture: None,
+            }))
             .unwrap(),
         other => panic!("unexpected command: {}", other.operation()),
     }
-    let audio = open_audio.await.unwrap().unwrap();
-    let submit = tokio::spawn({
-        let client = client.clone();
-        async move {
-            let samples = vec![0.25, -0.25, 0.5, -0.5];
-            let pointer = samples.as_ptr() as usize;
-            let returned = client
-                .submit_audio_owned(
-                    audio,
-                    AudioPacket {
-                        sequence: 1,
-                        channels: 2,
-                        samples,
-                    },
-                )
-                .await?;
-            Ok::<_, PlatformError>((pointer, returned))
-        }
-    });
-    match backend.next_command().await.unwrap() {
-        HostCommand::SubmitAudio { packet, reply, .. } => {
-            assert_eq!(packet.frame_count(), 2);
-            reply.send(Ok(packet.samples)).unwrap();
-        }
-        other => panic!("unexpected command: {}", other.operation()),
-    }
-    let (pointer, returned) = submit.await.unwrap().unwrap();
+    let mut audio = open_audio.await.unwrap().unwrap();
+    let samples = vec![0.25, -0.25, 0.5, -0.5];
+    let pointer = samples.as_ptr() as usize;
+    let returned = audio.lane.submit(samples).unwrap();
     assert_eq!(pointer, returned.as_ptr() as usize);
-
-    let query = tokio::spawn({
-        let client = client.clone();
-        async move { client.query_audio(audio).await }
-    });
-    match backend.next_command().await.unwrap() {
-        HostCommand::QueryAudio { output, reply } => {
-            assert_eq!(output, audio);
-            reply
-                .send(Ok(AudioOutputState {
-                    queued_frames: 1,
-                    callback_count: 1,
-                    submitted_samples: 4,
-                    consumed_samples: 2,
-                    underflow_count: 0,
-                    meter: AudioMeter {
-                        sample_count: 2,
-                        peak_dbfs: -1.0,
-                        rms_dbfs: -3.0,
-                    },
-                }))
-                .unwrap();
-        }
-        other => panic!("unexpected command: {}", other.operation()),
-    }
-    assert_eq!(query.await.unwrap().unwrap().queued_frames, 1);
+    assert_eq!(audio.lane.consumed_samples(), 4);
+    assert_eq!(audio.lane.underflow_count(), 0);
 
     let begin_save = tokio::spawn({
         let client = client.clone();
@@ -191,16 +170,15 @@ async fn client_rejects_oversized_or_undeclared_operations_before_dispatch() {
     let mut profile = PlatformHostProfile::web_release("nativevn-web", "com.example.game");
     profile.limits.max_audio_frames = 1;
     let (client, _backend, _events) = host_channel(profile, 2, 2).unwrap();
-    let audio = AudioOutputHandle::from_parts(1, 1).unwrap();
     let error = client
-        .submit_audio(
-            audio,
-            AudioPacket {
-                sequence: 1,
-                channels: 2,
-                samples: vec![0.0; 4],
-            },
-        )
+        .open_audio_output(AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            chunk_frames: 2,
+            max_buffered_frames: 2,
+            start_paused: false,
+            capture_samples: false,
+        })
         .await
         .unwrap_err();
     assert_eq!(error.code, PlatformErrorCode::InvalidState);
@@ -220,8 +198,10 @@ fn audio_drain_timeout_covers_long_form_playback_and_callback_margin() {
     let request = AudioOutputRequest {
         sample_rate: 48_000,
         channels: 2,
+        chunk_frames: 512,
         max_buffered_frames: 4_096,
         start_paused: false,
+        capture_samples: false,
     };
 
     assert_eq!(

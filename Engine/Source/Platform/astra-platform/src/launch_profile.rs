@@ -9,7 +9,6 @@ use crate::{
 };
 
 pub const HEADLESS_HOST_PROFILE_SCHEMA: &str = "astra.headless_host_profile.v3";
-pub const HEADLESS_HOST_PROFILE_V2_SCHEMA: &str = "astra.headless_host_profile.v2";
 pub const HEADLESS_PRESENTATION_RATE_HZ: u32 = 60;
 pub const HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ: u32 = 120;
 pub const HEADLESS_INPUT_POLICY_SCHEMA: &str = "astra.headless_input_policy.v1";
@@ -85,6 +84,7 @@ pub struct HeadlessProviderBindings {
     pub renderer: String,
     pub text: String,
     pub audio_mixer: String,
+    pub audio_output: String,
     pub image_decode: String,
     pub audio_decode: String,
     pub video_decode: String,
@@ -199,7 +199,8 @@ impl HeadlessHostProfile {
             providers: HeadlessProviderBindings {
                 renderer: "cpu_reference".to_string(),
                 text: "cosmic_text_cpu".to_string(),
-                audio_mixer: "audio_graph_cpu".to_string(),
+                audio_mixer: "kira".to_string(),
+                audio_output: "headless".to_string(),
                 image_decode: "image_cpu".to_string(),
                 audio_decode: "symphonia".to_string(),
                 video_decode: "disabled".to_string(),
@@ -371,10 +372,8 @@ impl HostLaunchProfile {
 }
 
 pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(), PlatformError> {
-    if !matches!(
-        profile.schema.as_str(),
-        HEADLESS_HOST_PROFILE_SCHEMA | HEADLESS_HOST_PROFILE_V2_SCHEMA
-    ) || profile.input.schema != HEADLESS_INPUT_POLICY_SCHEMA
+    if profile.schema != HEADLESS_HOST_PROFILE_SCHEMA
+        || profile.input.schema != HEADLESS_INPUT_POLICY_SCHEMA
         || profile.input.protocol_schema != USER_INPUT_SEQUENCE_SCHEMA
     {
         return Err(invalid_headless_profile(
@@ -442,6 +441,7 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
         ("renderer", profile.providers.renderer.as_str()),
         ("text", profile.providers.text.as_str()),
         ("audio_mixer", profile.providers.audio_mixer.as_str()),
+        ("audio_output", profile.providers.audio_output.as_str()),
         ("image_decode", profile.providers.image_decode.as_str()),
         ("audio_decode", profile.providers.audio_decode.as_str()),
         ("video_decode", profile.providers.video_decode.as_str()),
@@ -459,18 +459,6 @@ pub fn validate_headless_host_profile(profile: &HeadlessHostProfile) -> Result<(
                     .with_field("field", field),
             );
         }
-    }
-    if profile.schema == HEADLESS_HOST_PROFILE_V2_SCHEMA && profile.gpu_adapter.is_some() {
-        return Err(invalid_headless_profile(
-            "headless v2 profile cannot declare a v3 GPU adapter policy",
-        ));
-    }
-    if profile.schema == HEADLESS_HOST_PROFILE_V2_SCHEMA
-        && profile.presentation_rate_hz != HEADLESS_PRESENTATION_RATE_HZ
-    {
-        return Err(invalid_headless_profile(
-            "headless v2 profile cannot change the canonical presentation rate",
-        ));
     }
     if profile.presentation_rate_hz == HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ
         && (profile.schema != HEADLESS_HOST_PROFILE_SCHEMA

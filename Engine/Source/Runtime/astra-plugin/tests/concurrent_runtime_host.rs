@@ -5,7 +5,7 @@ use std::{
 
 use astra_plugin::{
     ConcurrentProductRuntimeHost, ProductRuntimeProviderFactory, ProductRuntimeSession,
-    RuntimeHostSchemaRegistry,
+    RuntimeHostLimits,
 };
 use astra_plugin_abi::*;
 
@@ -27,7 +27,6 @@ impl ProductRuntimeProviderFactory for Factory {
             capabilities: vec!["runtime.test".into()],
             package_sections: vec![],
             release_checks: vec![],
-            output_schemas: vec![],
         })
     }
 
@@ -90,7 +89,6 @@ impl ProductRuntimeSession for Session {
             session_id: input.session_id,
             status: "idle".into(),
             live: Default::default(),
-            persisted: vec![],
             diagnostics: vec![],
         })
     }
@@ -165,7 +163,7 @@ async fn different_sessions_execute_provider_steps_concurrently() {
     let host = ConcurrentProductRuntimeHost::new(
         "instance",
         factory,
-        RuntimeHostSchemaRegistry::new(),
+        RuntimeHostLimits::default(),
         Duration::from_secs(2),
     )
     .unwrap();
@@ -192,7 +190,7 @@ async fn provider_failure_poisons_only_the_failing_session() {
     let host = ConcurrentProductRuntimeHost::new(
         "instance",
         factory,
-        RuntimeHostSchemaRegistry::new(),
+        RuntimeHostLimits::default(),
         Duration::from_secs(2),
     )
     .unwrap();
@@ -231,7 +229,7 @@ async fn same_session_mailbox_preserves_fifo_step_order() {
     let host = ConcurrentProductRuntimeHost::new(
         "instance",
         factory,
-        RuntimeHostSchemaRegistry::new(),
+        RuntimeHostLimits::default(),
         Duration::from_secs(2),
     )
     .unwrap();

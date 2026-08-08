@@ -76,7 +76,7 @@ impl ValidateUi for UiBlueprintFrameModel {
             validate_id("blueprint_frame.localization_key", key)?;
             validate_string("blueprint_frame.localization_value", value)?;
         }
-        validate_serialized_size(self)
+        Ok(())
     }
 }
 

@@ -37,9 +37,9 @@ impl RuntimeWorld {
 }
 ```
 
-`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。Player input、Await completion、live provider output 和 recorded provider output 只能通过 non-zero、strictly increasing 的 `OrderedTickIngress` 在同一个 `TickRequest` 中提交。load 后第一步必须使用一次 `RestoreContinuation`，replay 只能使用 `Replay` 并拒绝 live output；live tick 拒绝 recorded output。重复、回退、跳步、非法 delta、seed mismatch、mode mismatch、ingress 乱序、缺少 required module 或任一 ingress 校验失败都返回稳定 blocking diagnostic，并恢复完整 tick 前状态。
+`ValidatedModuleBinding` 只能由显式 registry selection、packaged eligibility、capability、package、target、profile、engine version、rustc/feature/ABI fingerprint 校验生成。上述 identity 由已验证的 `PackageHandle` 固化；重复 slot、token/slot 不一致或任一 identity 不一致必须在修改 world 前失败。`tick` 的首步固定为 `1`，之后每次只能递增 `1`；`seed` 必须等于 session seed，`delta_ns` 必须处于 `1..=1_000_000_000`。`PlayerInput` 与 `AwaitCompletion` 只能通过 non-zero、strictly increasing 的 `OrderedTickIngress` 提交。provider live output 不再伪装成 Runtime ingress；replay 也不携带 recorded provider output。load 后第一步必须使用一次 `RestoreContinuation`，replay 只能使用 `Replay`。重复、回退、跳步、非法 delta、seed mismatch、mode mismatch、ingress 乱序、缺少 required module 或任一 ingress 校验失败都返回稳定 blocking diagnostic，并恢复完整 tick 前状态。
 
-`runtime.world` 当前二进制 schema 为 `3.0.0`，外层产品 section 为 `astra.runtime.save_blob.v3`。v2 及更早布局、旧 replay transcript 和调用方请求的旧 minimum version 直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；不提供隐藏兼容 adapter。
+`runtime.world` 当前二进制 schema 为 `4.0.0`，外层产品 section 为 `astra.runtime.save_blob.v4`。v3 及更早布局、旧 replay transcript 和调用方请求的旧 minimum version直接返回 `ASTRA_RUNTIME_SAVE_WORLD_VERSION_UNSUPPORTED`；不提供兼容 adapter 或迁移工具。
 
 字段级实现蓝图见 [Runtime API Blueprint](../implementation/runtime-api.md)、[Runtime Execution](../implementation/runtime-execution.md) 和 [StateMachine Action Provider](../implementation/state-machine-action-provider.md)。
 
@@ -79,11 +79,11 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 - Guard 只读取 event payload、Actor snapshot、Blackboard、Director state。
 - Transition 使用 `actions: Vec<ActionInvocation>`，同一个 transition 内按顺序执行。
 - 同一 machine 在单个 fixed tick 内连续执行 transition，直到稳定态、terminal state 或出现 blocking diagnostic。循环和 microstep 超限会回滚该 machine 在本 tick 的全部候选变更。
-- Action 只通过 `DeterministicActionContext` 改 Actor/Component、Blackboard、EventQueue、AwaitToken、PresentationCommand、序列化 effect 和 delayed event queue。
-- Runtime action provider 可以被注册和卸载；插件 action 由 host-side adapter 执行，插件不拿 `RuntimeWorld`、Actor 指针或 native handle。
+- Action 只通过 `DeterministicActionContext` 改 Actor/typed Component、Blackboard、EventQueue、AwaitToken、PresentationCommand 和 delayed event queue；实时路径不生成序列化 effect。
+- Runtime action 在 host 内以 typed Rust action 注册。通用动态 action ABI 与 bytes invoke adapter 已删除；动态 gameplay provider 只通过 Provider ABI v3 返回 typed live/control output。
 - `ActionRegistry` 拒绝空 descriptor、重复 action id 和 provider 冲突，不按后注册覆盖前注册。
 - 状态机定义分双轨：引擎系统用 Rust code-first；项目 gameplay/VN 可以用 YAML/Graph 定义并 Cook 成 IR。
-- Save 保存 `StableIdGenerator`、Actor/Component payload、StateMachine、Blackboard、AwaitQueue、完整 EventQueue、DelayedEventQueue、MutationLog 和序列化 effect trace，不保存 ECS entity、native handle 或 Future 内部状态。
+- Save 保存 `StableIdGenerator`、Actor/typed Component、StateMachine、Blackboard、AwaitQueue、完整 EventQueue、DelayedEventQueue 和 MutationLog，不保存实时 effect trace、ECS entity、native handle 或 Future 内部状态。typed component 只在 save 时编码，restore 后首次 typed read 才懒解码。
 
 ### Action ABI v2 与并行执行
 
@@ -93,11 +93,11 @@ StateMachine scheduler 先按稳定 machine id 构建 conflict DAG wave。wave �
 
 每个 `StateMachineDefinition` 首次创建或反序列化后只编译一次 state→transition、terminal-state 与可证明的 event-kind dispatch index。tick event root 每 tick 只计算一次；每个 candidate 用稳定 consumed bitset 标记事件，不复制或 `Vec::remove` 事件队列。cycle fingerprint 组合缓存的 base Actor/Blackboard root、overlay delta metadata、event root 与 consumed ordinal，不重新序列化完整 ActorStore、component bytes 或剩余事件。event-kind dispatch 仍按原始 event sequence 选择 trigger，不能让 kind 排序改变消费顺序。
 
-Runtime 外层 tick 使用 inverse journal：Actor、Blackboard、Event、Await 和 DelayedEvent 只记录本 tick 的增删改，失败时逆向恢复；不再为每台 machine 克隆完整 store。Actor 与 Blackboard fingerprint 缓存在 mutation 边界失效，历史 event/presentation/mutation/effect 使用增量 hash chain。Shipping 的 `TickIntegrityMode::Shipping` 不计算 aggregate state/event/presentation hash，也拒绝 replay recording；Headless、测试与 evidence profile 使用 `Evidence` 并保留完整 hash/replay。
+Runtime 外层 tick 使用 inverse journal：Actor、Blackboard、Event、Await 和 DelayedEvent 只记录本 tick 的增删改，失败时逆向恢复；不再为每台 machine 克隆完整 store。Shipping 的 `TickIntegrityMode::Shipping` 不计算 aggregate state/event/presentation digest，也拒绝 replay recording；只有显式 Evidence observer 在提交后刷新历史 chain 和 checkpoint digest。
 
 ## Replay Transcript
 
-`RuntimeReplayTranscript` 当前 schema 为 `astra.runtime_replay_transcript.v3`，从一个完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 保存 mode 为 `Replay` 的完整 `TickRequest` 和 hash checkpoint。Recorded provider output 携带原始 payload/hash、RuntimeEvent、PresentationCommand、AwaitToken 和 `SerializedEffectEnvelope`；Runtime 校验 descriptor、tick、payload hash 和 effect hash 后再原子应用，不加载或调用 live provider。schema、mode、output 或 checkpoint hash 任一失败时，整个 replay 恢复调用前 world，不能留下已执行的前缀 tick。
+`RuntimeReplayTranscript` 从完整 `RuntimeSnapshot` checkpoint 开始。每个 `ReplayTick` 保存 typed `PlayerInput`/`AwaitCompletion` ingress 和 Evidence checkpoint；不保存 provider output payload、content hash 或 effect envelope。Runtime 校验 tick、ingress sequence 与 checkpoint 后原子执行，Replay 不加载或调用 live provider。schema、mode、ingress 或 checkpoint 任一失败时，整个 replay 恢复调用前 world，不能留下已执行的前缀 tick。
 
 `AwaitReplayPolicy::RecordedResult` 只接受 transcript 或 host 提交的记录结果，不能声明 deterministic timeout。`AwaitReplayPolicy::DeterministicTimeout` 必须声明合法 timeout step，并拒绝外部 completion result。
 
@@ -111,4 +111,4 @@ Unknown event、invalid payload、missing required module、missing action、act
 
 ## Release Gate
 
-`runtime.replay.determinism`、`runtime.await.ordering`、`runtime.save_load`、`runtime.debug_snapshot`、`runtime.delayed_event`、`plugin.ffi_action_provider` 是必需检查。每个检查必须输出 step、hash、source_ref 或 diagnostic code。
+`runtime.replay.determinism`、`runtime.await.ordering`、`runtime.save_load`、`runtime.debug_snapshot`、`runtime.delayed_event`、`plugin.typed_runtime_provider` 是必需检查。Evidence 检查输出 step、digest、source_ref 或 diagnostic code；Shipping 不为这些检查进入实时 hash 路径。

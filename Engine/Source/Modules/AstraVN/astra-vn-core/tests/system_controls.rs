@@ -159,12 +159,12 @@ fn replay_ui_snapshot_exposes_backlog_read_state_and_voice_entries() {
     assert_eq!(replay.voice_replay[0].voice, "voice.narrator.a");
     assert_eq!(replay.read_count, 2);
     assert_eq!(replay.unread_count, 0);
-    let hash = replay.state_hash();
+    let expected_replay = replay.clone();
 
     let save = runtime.save_slot("slot.replay").unwrap();
     let mut loaded = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     loaded.load_slot(save).unwrap();
-    assert_eq!(loaded.replay_ui_state().state_hash(), hash);
+    assert_eq!(loaded.replay_ui_state(), expected_replay);
 }
 
 #[astra_headless_test::test]
@@ -209,13 +209,13 @@ fn system_controls_persist_auto_skip_config_and_unlocks_through_save_load() {
             id: "cg.opening".to_string(),
         })
         .unwrap();
-    let saved_hash = runtime.state_hash();
+    let saved_state = runtime.state().clone();
     let save = runtime.save_slot("slot.system").unwrap();
 
     let mut loaded = VnRuntime::new(compiled, VnRunConfig::classic("zh-Hans")).unwrap();
     loaded.load_slot(save).unwrap();
 
-    assert_eq!(loaded.state_hash(), saved_hash);
+    assert_eq!(loaded.state(), &saved_state);
     assert!(loaded.state().system.auto_enabled);
     assert_eq!(loaded.state().system.skip_mode, SkipMode::Read);
     assert_eq!(loaded.state().locale, "en");

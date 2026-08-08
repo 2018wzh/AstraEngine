@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use astra_core::Hash256;
 use astra_ui_component_host::{dylib_filename, UiComponentProcess, UiComponentProcessConfig};
 use astra_ui_core::{
-    UiFrameRequest, UiInputFrame, UiInsets, UiThemeManifest, UiThemeValue, UiViewport,
+    UiBlueprintFrameModel, UiFrameRequest, UiInputFrame, UiInsets, UiThemeManifest, UiThemeValue,
+    UiValue, UiViewport,
 };
 use astra_ui_plugin_abi::{
     UiComponentManifest, UiComponentRequest, UiComponentResponse, UI_COMPONENT_MANIFEST_SCHEMA,
@@ -209,15 +210,14 @@ fn workspace_root() -> PathBuf {
 }
 
 fn frame_request() -> UiFrameRequest {
-    let mut theme = UiThemeManifest {
+    let theme = Arc::new(UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "fixture.theme".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
+        revision: 1,
+    });
     UiFrameRequest {
         schema: "astra.ui_frame_request.v1".into(),
         session_id: "fixture.ok".into(),
@@ -241,6 +241,15 @@ fn frame_request() -> UiFrameRequest {
         },
         theme,
         model_schema: "fixture.model.v1".into(),
-        model_payload: Vec::new(),
+        model_revision: 1,
+        model: UiBlueprintFrameModel {
+            schema: "astra.ui_blueprint_frame_model.v1".into(),
+            view_id: "fixture.view".into(),
+            model: UiValue::Null,
+            state: UiValue::Null,
+            modals: Vec::new(),
+            focus_request: None,
+            localization: BTreeMap::new(),
+        },
     }
 }

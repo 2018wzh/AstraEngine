@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_core::Hash256;
 use astra_ui_core::{
     UiAccessibilityReport, UiPoint, UiRect, UiSemanticAction, UiSemanticNode, UiSemanticRole,
     UiSemanticSnapshot, ValidateUi,
@@ -8,7 +7,7 @@ use astra_ui_core::{
 
 #[astra_headless_test::test]
 fn accessibility_report_redacts_commercial_text_and_bounds() {
-    let mut snapshot = UiSemanticSnapshot {
+    let snapshot = UiSemanticSnapshot {
         schema: "astra.ui_semantic_snapshot.v1".into(),
         session_id: "session.report".into(),
         generation: 7,
@@ -32,9 +31,8 @@ fn accessibility_report_redacts_commercial_text_and_bounds() {
             actions: BTreeSet::from([UiSemanticAction::Activate]),
             properties: BTreeMap::new(),
         }],
-        hash: Hash256::from_sha256(&[]),
     };
-    snapshot.hash = snapshot.compute_hash().expect("snapshot hash");
+    let snapshot_hash = snapshot.compute_hash().expect("snapshot hash");
     let report = UiAccessibilityReport::from_snapshot("windows.uia", "passed", &snapshot)
         .expect("redacted report");
     report.validate().expect("report validates");
@@ -43,5 +41,5 @@ fn accessibility_report_redacts_commercial_text_and_bounds() {
     assert!(!json.contains("private description"));
     assert!(!json.contains("private value"));
     assert!(!json.contains("123"));
-    assert_eq!(report.semantic_snapshot_hash, snapshot.hash);
+    assert_eq!(report.semantic_snapshot_hash, snapshot_hash);
 }

@@ -7,7 +7,7 @@ Runtime determinism comes from a fixed tick pipeline. Async work can run on Toki
 ```text
 TickInput
   -> collect PlayerInput
-  -> apply hash-validated recorded provider output
+  -> apply typed replay ingress and completion
   -> collect AwaitResult sorted by token_id, sequence
   -> apply scheduled RuntimeEvent
   -> run StateMachine guard
@@ -53,11 +53,11 @@ pub struct Fence {
 }
 ```
 
-`RecordedResult` token 只消费记录的 `AwaitResult`；`DeterministicTimeout` token 只在声明的 fixed step 生成 timeout event，并拒绝 live completion。Replay 从 checkpoint 恢复完整 ID/Event/Await/DelayedEvent 状态，按 tick 应用 player input、recorded provider output 和 await result，不再调用平台或 provider。
+`RecordedResult` token 只消费记录的 `AwaitResult`；`DeterministicTimeout` token 只在声明的 fixed step 生成 timeout event，并拒绝 live completion。Replay 从 checkpoint 恢复完整 ID/Event/Await/DelayedEvent 状态，按 tick 应用 typed player input 和 await result，不再调用平台或 provider。
 
 ## Provider-Free Replay
 
-`ProviderReplayOutput` 保存 provider/session/schema、原始 payload 与 SHA-256、RuntimeEvent、PresentationCommand、AwaitToken 和序列化 effect。Runtime 在修改 world 前完成全部 descriptor、tick 和 hash 校验；任一字段无效时阻断且不提交部分 output。每个 tick 随后比较 state/event/presentation checkpoint，差异直接返回 `ASTRA_RUNTIME_REPLAY_HASH_MISMATCH`。
+Replay transcript 不保存 provider output、原始 payload、content hash 或序列化 effect。Runtime 在修改 world 前完成 tick、typed ingress sequence 与 await policy 校验；任一字段无效时阻断且不提交部分 input。Evidence replay 每个 tick 随后比较 checkpoint，差异直接返回 `ASTRA_RUNTIME_REPLAY_HASH_MISMATCH`。
 
 ## MutationLog
 

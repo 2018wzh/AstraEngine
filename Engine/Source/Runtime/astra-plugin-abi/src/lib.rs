@@ -5,10 +5,16 @@ use abi_stable::{
     std_types::{ROption, RString, RVec},
     StableAbi,
 };
+#[cfg(feature = "ffi")]
+use astra_byte_source::FfiOwnedByteBuffer;
+use astra_byte_source::OwnedByteBuffer;
 use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+mod live_presentation;
+pub use live_presentation::*;
+mod live_vn_state;
+pub use live_vn_state::*;
 
 pub const GAME_RUNTIME_PROVIDER_SLOT: &str = "game_runtime_provider";
 pub const NATIVE_VN_RUNTIME_ID: &str = "native_vn";
@@ -142,7 +148,6 @@ pub struct ProviderPolicy {
     pub schema: String,
     pub profile: String,
     pub renderer: String,
-    pub decode_fallback: String,
     pub runtime_provider: ProductRuntimeDescriptor,
     pub bindings: Vec<ProviderBinding>,
 }
@@ -364,15 +369,6 @@ impl PluginExtensionRegistrySnapshot {
                 "provider policy profile does not match package profile",
             ));
         }
-        if !matches!(
-            policy.decode_fallback.as_str(),
-            "profile_bound" | "forbid" | "required"
-        ) {
-            return Err(diagnostic(
-                "ASTRA_PROVIDER_POLICY_FALLBACK_INVALID",
-                "decode fallback must be an explicit supported policy",
-            ));
-        }
         if !self.conflicts.is_empty() {
             return Err(diagnostic(
                 "ASTRA_PLUGIN_EXTENSION_CONFLICT",
@@ -530,12 +526,6 @@ impl PluginExtensionRegistrySnapshot {
                 "runtime descriptor does not match the bound provider capability",
             ));
         }
-        if policy.runtime_provider.output_schemas.is_empty() {
-            return Err(diagnostic(
-                "ASTRA_RUNTIME_PROVIDER_OUTPUT_SCHEMA_MISSING",
-                "runtime provider descriptor must declare its serialized output schemas",
-            ));
-        }
         Ok(())
     }
 
@@ -594,7 +584,6 @@ pub struct ProductRuntimeDescriptor {
     pub capabilities: Vec<String>,
     pub package_sections: Vec<String>,
     pub release_checks: Vec<String>,
-    pub output_schemas: Vec<RuntimeOutputSchemaDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -715,12 +704,6 @@ pub struct RuntimeProviderInstanceReport {
     pub diagnostics: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RuntimeProviderCall {
-    pub instance_id: ProviderInstanceId,
-    pub payload: Vec<u8>,
-}
-
 /// Opaque provider-owned handle for one opened gameplay runtime session.
 ///
 /// The host must never derive meaning from this value or use it as a pointer.
@@ -730,13 +713,6 @@ pub struct RuntimeProviderCall {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
 pub struct RuntimeProviderSessionHandle(pub u64);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RuntimeProviderSessionCall {
-    pub instance_id: ProviderInstanceId,
-    pub session_handle: RuntimeProviderSessionHandle,
-    pub payload: Vec<u8>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeProviderSessionOpenReport {
@@ -840,7 +816,7 @@ pub enum RuntimeStepMode {
 /// never reused as a package/save/replay envelope.  Providers move the
 /// allocation they already own into these values and the host moves it again
 /// into the selected renderer/audio queue.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct RuntimeLiveOutput {
     pub scenes: Vec<RuntimeLiveSceneTransaction>,
     pub resource_scenes: Vec<RuntimeLiveResourceScene>,
@@ -853,6 +829,10 @@ pub struct RuntimeLiveOutput {
     pub audio_cues: Vec<RuntimeLiveAudioCue>,
     pub text: Vec<RuntimeLiveTextLease>,
     pub text_presentations: Vec<RuntimeLiveTextPresentation>,
+    pub presentations: Vec<RuntimeLivePresentationCommand>,
+    pub timeline: Vec<RuntimeLiveTimelineTask>,
+    pub vn_state: Option<RuntimeLiveVnState>,
+    pub vn_step: Option<RuntimeLiveVnStep>,
     pub video: Vec<RuntimeLiveVideoCommand>,
     pub waits: Vec<RuntimeLiveWait>,
     pub events: Vec<RuntimeLiveEvent>,
@@ -872,11 +852,13 @@ pub struct RuntimeLiveCoverage {
     pub text_events: u64,
     pub capture_bytes: u64,
     pub operation_bytes: u64,
+    pub scene_moved_bytes: u64,
+    pub scene_copied_bytes: u64,
     pub pcm_moved_bytes: u64,
     pub pcm_copied_bytes: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct RuntimeLiveSceneTransaction {
     pub sequence: u64,
     pub width: u32,
@@ -911,7 +893,7 @@ pub struct RuntimeLiveResourceTexture {
     pub decoded_format: RuntimeLiveTextureFormat,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum RuntimeLiveSceneResourceOperation {
     CreateTexture {
         texture_id: u32,
@@ -919,7 +901,7 @@ pub enum RuntimeLiveSceneResourceOperation {
         width: u32,
         height: u32,
         format: RuntimeLiveTextureFormat,
-        pixels: Vec<u8>,
+        pixels: OwnedByteBuffer,
     },
     UpdateTexture {
         texture_id: u32,
@@ -929,7 +911,7 @@ pub enum RuntimeLiveSceneResourceOperation {
         width: u32,
         height: u32,
         format: RuntimeLiveTextureFormat,
-        pixels: Vec<u8>,
+        pixels: OwnedByteBuffer,
     },
     DestroyTexture {
         texture_id: u32,
@@ -1190,22 +1172,20 @@ pub enum RuntimeLiveWaitKind {
     MediaFence { media_id: String },
     PresentationFence { fence_id: String },
     ProviderCompletion { request_id: String },
-    FamilyOpaque { wait_kind: String, payload_len: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeLiveEvent {
     pub sequence: u64,
     pub event: String,
-    pub payload: Vec<u8>,
-    pub due_tick: Option<u64>,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeLiveBlackboardMutation {
     pub sequence: u64,
     pub key: String,
-    pub value: Vec<u8>,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1317,156 +1297,6 @@ impl RuntimeLiveSceneTransaction {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeOutputDomain {
-    Effect,
-    Presentation,
-    Audio,
-    Await,
-    Observation,
-    Trace,
-    DirtySaveSection,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimePersistedCodec {
-    Postcard,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RuntimeOutputSchemaDescriptor {
-    pub domain: RuntimeOutputDomain,
-    pub schema: String,
-    pub version: SchemaVersion,
-    pub codec: RuntimePersistedCodec,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RuntimePersistedOutput {
-    pub domain: RuntimeOutputDomain,
-    pub schema: String,
-    pub version: SchemaVersion,
-    pub codec: RuntimePersistedCodec,
-    bytes: Arc<[u8]>,
-}
-
-impl RuntimePersistedOutput {
-    pub fn postcard<T: Serialize>(
-        domain: RuntimeOutputDomain,
-        schema: impl Into<String>,
-        version: SchemaVersion,
-        value: &T,
-    ) -> Result<Self, RuntimeEnvelopeError> {
-        let payload = postcard::to_allocvec(value).map_err(|err| {
-            RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_ENCODE",
-                format!("encode runtime persisted output: {err}"),
-            )
-        })?;
-        Ok(Self {
-            domain,
-            schema: schema.into(),
-            version,
-            codec: RuntimePersistedCodec::Postcard,
-            bytes: payload.into(),
-        })
-    }
-
-    pub fn postcard_bytes(
-        domain: RuntimeOutputDomain,
-        schema: impl Into<String>,
-        version: SchemaVersion,
-        bytes: Arc<[u8]>,
-    ) -> Self {
-        Self {
-            domain,
-            schema: schema.into(),
-            version,
-            codec: RuntimePersistedCodec::Postcard,
-            bytes,
-        }
-    }
-
-    pub fn bytes(&self) -> &Arc<[u8]> {
-        &self.bytes
-    }
-
-    pub fn decode_postcard<T: for<'de> Deserialize<'de>>(
-        &self,
-        expected_domain: RuntimeOutputDomain,
-        expected_schema: &str,
-        expected_version: SchemaVersion,
-    ) -> Result<T, RuntimeEnvelopeError> {
-        if self.domain != expected_domain {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_DOMAIN",
-                "runtime persisted output domain does not match consumer",
-            ));
-        }
-        if self.schema != expected_schema {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_SCHEMA",
-                "runtime persisted output schema is unknown to consumer",
-            ));
-        }
-        if self.version != expected_version {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_VERSION",
-                "runtime persisted output version does not match consumer",
-            ));
-        }
-        if self.codec != RuntimePersistedCodec::Postcard {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_CODEC",
-                "runtime persisted output codec does not match consumer",
-            ));
-        }
-        postcard::from_bytes(&self.bytes).map_err(|err| {
-            RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_DECODE",
-                format!("decode runtime persisted output: {err}"),
-            )
-        })
-    }
-
-    pub fn validate_binding(
-        &self,
-        expected_domain: RuntimeOutputDomain,
-        expected_schema: &str,
-        expected_version: SchemaVersion,
-    ) -> Result<(), RuntimeEnvelopeError> {
-        if self.domain != expected_domain {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_DOMAIN",
-                "runtime persisted output domain does not match consumer",
-            ));
-        }
-        if self.schema != expected_schema {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_SCHEMA",
-                "runtime persisted output schema is unknown to consumer",
-            ));
-        }
-        if self.version != expected_version {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_VERSION",
-                "runtime persisted output version does not match consumer",
-            ));
-        }
-        if self.codec != RuntimePersistedCodec::Postcard {
-            return Err(RuntimeEnvelopeError::new(
-                "ASTRA_RUNTIME_PERSISTED_CODEC",
-                "runtime persisted output codec does not match consumer",
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeEnvelopeError {
     code: &'static str,
@@ -1494,7 +1324,7 @@ impl std::fmt::Display for RuntimeEnvelopeError {
 
 impl std::error::Error for RuntimeEnvelopeError {}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RuntimeStepOutput {
     pub session_id: GameRuntimeSessionId,
     pub status: String,
@@ -1502,8 +1332,6 @@ pub struct RuntimeStepOutput {
     #[serde(skip)]
     #[schemars(skip)]
     pub live: RuntimeLiveOutput,
-    #[serde(default)]
-    pub persisted: Vec<RuntimePersistedOutput>,
     #[serde(default)]
     pub diagnostics: Vec<String>,
 }
@@ -1608,9 +1436,6 @@ pub struct FfiProviderRegistration {
     pub phase: RString,
     pub packaged: bool,
 }
-
-#[cfg(feature = "ffi")]
-pub type FfiActionInvoke = extern "C" fn(RVec<u8>) -> RVec<u8>;
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
@@ -1820,19 +1645,19 @@ pub struct FfiRuntimeScissor {
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeSceneTextureCreate {
     pub texture_id: u32,
     pub generation: u64,
     pub width: u32,
     pub height: u32,
     pub format: FfiRuntimeTextureFormat,
-    pub pixels: RVec<u8>,
+    pub pixels: FfiOwnedByteBuffer,
 }
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeSceneTextureUpdate {
     pub texture_id: u32,
     pub generation: u64,
@@ -1841,12 +1666,12 @@ pub struct FfiRuntimeSceneTextureUpdate {
     pub width: u32,
     pub height: u32,
     pub format: FfiRuntimeTextureFormat,
-    pub pixels: RVec<u8>,
+    pub pixels: FfiOwnedByteBuffer,
 }
 
 #[repr(u8)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub enum FfiRuntimeSceneResourceOperation {
     Create(FfiRuntimeSceneTextureCreate),
     Update(FfiRuntimeSceneTextureUpdate),
@@ -1865,7 +1690,7 @@ pub struct FfiRuntimeDraw {
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeSceneTransaction {
     pub sequence: u64,
     pub width: u32,
@@ -1907,43 +1732,39 @@ pub struct FfiRuntimeTextLease {
 #[repr(u8)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, Copy, StableAbi)]
-pub enum FfiRuntimeVideoCommandKind {
-    Play,
-    Stop,
-}
-
-#[repr(u8)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, Clone, Copy, StableAbi)]
 pub enum FfiRuntimeVideoMode {
     ModalWithAudio,
     LayerNoAudio,
 }
 
-#[repr(C)]
+#[repr(u8)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
-pub struct FfiRuntimeVideoCommand {
-    pub sequence: u64,
-    pub playback_id: RString,
-    pub resource_uri: RString,
-    pub mode: FfiRuntimeVideoMode,
-    pub stage_width: u32,
-    pub stage_height: u32,
-    pub command: FfiRuntimeVideoCommandKind,
+pub enum FfiRuntimeVideoCommand {
+    Play {
+        sequence: u64,
+        playback_id: RString,
+        resource_uri: RString,
+        mode: FfiRuntimeVideoMode,
+        stage_width: u32,
+        stage_height: u32,
+    },
+    Stop {
+        sequence: u64,
+        playback_id: RString,
+    },
 }
 
 #[repr(u8)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, Copy, StableAbi)]
+#[derive(Debug, Clone, StableAbi)]
 pub enum FfiRuntimeWaitKind {
-    Frame,
-    Time,
-    Input,
-    MediaFence,
-    PresentationFence,
-    ProviderCompletion,
-    FamilyOpaque,
+    Frame { frames: u32 },
+    Time { milliseconds: u32 },
+    Input { keys: RVec<RString> },
+    MediaFence { media_id: RString },
+    PresentationFence { fence_id: RString },
+    ProviderCompletion { request_id: RString },
 }
 
 #[repr(C)]
@@ -1953,10 +1774,6 @@ pub struct FfiRuntimeWait {
     pub sequence: u64,
     pub token_id: RString,
     pub kind: FfiRuntimeWaitKind,
-    pub number: u32,
-    pub name: RString,
-    pub keys: RVec<RString>,
-    pub payload_len: u64,
 }
 
 #[repr(C)]
@@ -1965,8 +1782,7 @@ pub struct FfiRuntimeWait {
 pub struct FfiRuntimeEvent {
     pub sequence: u64,
     pub event: RString,
-    pub payload: RVec<u8>,
-    pub due_tick: ROption<u64>,
+    pub value: RString,
 }
 
 #[repr(C)]
@@ -1975,7 +1791,7 @@ pub struct FfiRuntimeEvent {
 pub struct FfiRuntimeBlackboardMutation {
     pub sequence: u64,
     pub key: RString,
-    pub value: RVec<u8>,
+    pub value: RString,
 }
 
 #[repr(C)]
@@ -2013,23 +1829,6 @@ pub struct FfiRuntimeResourceScene {
 #[repr(u8)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, Copy, StableAbi)]
-pub enum FfiRuntimeAudioCommandKind {
-    LoadResource,
-    CreateStream,
-    SubmitI16,
-    SubmitF32,
-    Play,
-    Stop,
-    Pause,
-    Resume,
-    SetParams,
-    DestroyStream,
-    MasterVolume,
-}
-
-#[repr(u8)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, Clone, Copy, StableAbi)]
 pub enum FfiRuntimeAudioEncoding {
     Unknown,
     Wav,
@@ -2046,23 +1845,69 @@ pub enum FfiRuntimeAudioSampleFormat {
     F32,
 }
 
-#[repr(C)]
+#[repr(u8)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
-pub struct FfiRuntimeAudioCommand {
-    pub sequence: u64,
-    pub kind: FfiRuntimeAudioCommandKind,
-    pub stream_id: u32,
-    pub sample_rate: u32,
-    pub channels: u16,
-    pub encoding: FfiRuntimeAudioEncoding,
-    pub sample_format: FfiRuntimeAudioSampleFormat,
-    pub resource_uri: RString,
-    pub samples: FfiRuntimePcmBuffer,
-    pub volume: f32,
-    pub pan: f32,
-    pub repeat: bool,
-    pub fade_ms: u32,
+pub enum FfiRuntimeAudioCommand {
+    LoadResource {
+        sequence: u64,
+        stream_id: u32,
+        encoding: FfiRuntimeAudioEncoding,
+        resource_uri: RString,
+    },
+    CreateStream {
+        sequence: u64,
+        stream_id: u32,
+        sample_rate: u32,
+        channels: u16,
+        sample_format: FfiRuntimeAudioSampleFormat,
+    },
+    SubmitI16 {
+        sequence: u64,
+        stream_id: u32,
+        samples: RVec<i16>,
+    },
+    SubmitF32 {
+        sequence: u64,
+        stream_id: u32,
+        samples: RVec<f32>,
+    },
+    Play {
+        sequence: u64,
+        stream_id: u32,
+        volume: f32,
+        pan: f32,
+        repeat: bool,
+        fade_in_ms: u32,
+    },
+    Stop {
+        sequence: u64,
+        stream_id: u32,
+        fade_ms: u32,
+    },
+    Pause {
+        sequence: u64,
+        stream_id: u32,
+    },
+    Resume {
+        sequence: u64,
+        stream_id: u32,
+    },
+    SetParams {
+        sequence: u64,
+        stream_id: u32,
+        volume: f32,
+        pan: f32,
+        repeat: bool,
+    },
+    DestroyStream {
+        sequence: u64,
+        stream_id: u32,
+    },
+    MasterVolume {
+        sequence: u64,
+        volume: f32,
+    },
 }
 
 #[repr(u8)]
@@ -2077,11 +1922,11 @@ pub enum FfiRuntimeAudioBus {
 
 #[repr(u8)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, Copy, StableAbi)]
-pub enum FfiRuntimeAudioSyncKind {
+#[derive(Debug, Clone, StableAbi)]
+pub enum FfiRuntimeAudioSync {
     None,
     Text,
-    Fence,
+    Fence { fence_id: RString },
 }
 
 #[repr(C)]
@@ -2094,8 +1939,7 @@ pub struct FfiRuntimeAudioCue {
     pub asset: RString,
     pub looped: bool,
     pub fade_ms: u32,
-    pub sync_kind: FfiRuntimeAudioSyncKind,
-    pub sync_fence: RString,
+    pub sync: FfiRuntimeAudioSync,
 }
 
 #[repr(C)]
@@ -2127,7 +1971,7 @@ pub struct FfiRuntimeTextPresentation {
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeLiveOutput {
     pub scenes: RVec<FfiRuntimeSceneTransaction>,
     pub resource_scenes: RVec<FfiRuntimeResourceScene>,
@@ -2136,6 +1980,10 @@ pub struct FfiRuntimeLiveOutput {
     pub audio_cues: RVec<FfiRuntimeAudioCue>,
     pub text: RVec<FfiRuntimeTextLease>,
     pub text_presentations: RVec<FfiRuntimeTextPresentation>,
+    pub presentations: RVec<FfiRuntimeLivePresentationCommand>,
+    pub timeline: RVec<FfiRuntimeLiveTimelineTask>,
+    pub vn_state: ROption<FfiRuntimeLiveVnState>,
+    pub vn_step: ROption<FfiRuntimeLiveVnStep>,
     pub video: RVec<FfiRuntimeVideoCommand>,
     pub waits: RVec<FfiRuntimeWait>,
     pub events: RVec<FfiRuntimeEvent>,
@@ -2149,6 +1997,8 @@ pub struct FfiRuntimeLiveOutput {
     pub text_events: u64,
     pub capture_bytes: u64,
     pub operation_bytes: u64,
+    pub scene_moved_bytes: u64,
+    pub scene_copied_bytes: u64,
     pub pcm_moved_bytes: u64,
     pub pcm_copied_bytes: u64,
 }
@@ -2164,6 +2014,10 @@ impl FfiRuntimeLiveOutput {
             audio_cues: RVec::new(),
             text: RVec::new(),
             text_presentations: RVec::new(),
+            presentations: RVec::new(),
+            timeline: RVec::new(),
+            vn_state: ROption::RNone,
+            vn_step: ROption::RNone,
             video: RVec::new(),
             waits: RVec::new(),
             events: RVec::new(),
@@ -2177,6 +2031,8 @@ impl FfiRuntimeLiveOutput {
             text_events: 0,
             capture_bytes: 0,
             operation_bytes: 0,
+            scene_moved_bytes: 0,
+            scene_copied_bytes: 0,
             pcm_moved_bytes: 0,
             pcm_copied_bytes: 0,
         }
@@ -2185,26 +2041,12 @@ impl FfiRuntimeLiveOutput {
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
-pub struct FfiRuntimePersistedOutput {
-    pub domain: u8,
-    pub schema: RString,
-    pub version_major: u16,
-    pub version_minor: u16,
-    pub version_patch: u16,
-    pub codec: FfiRuntimeSectionCodec,
-    pub bytes: RVec<u8>,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeStepResult {
     pub ok: bool,
     pub session_id: RString,
     pub status: RString,
     pub live: FfiRuntimeLiveOutput,
-    pub persisted: RVec<FfiRuntimePersistedOutput>,
     pub diagnostics: RVec<RString>,
 }
 
@@ -2380,29 +2222,9 @@ pub const PRODUCT_RUNTIME_PROVIDER_ABI_VERSION: u32 = 3;
 #[repr(C)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
-pub struct FfiActionRegistration {
-    pub abi_version: u32,
-    pub provider_id: RString,
-    pub action_id: RString,
-    pub input_schema: RString,
-    pub output_schema: RString,
-    /// JSON-encoded host `ActionDescriptor` including access declarations,
-    /// execution class, and StableId reservation.
-    pub descriptor_json: RVec<u8>,
-    #[sabi(unsafe_opaque_field)]
-    pub invoke: FfiActionInvoke,
-}
-
-#[cfg(feature = "ffi")]
-pub const ACTION_PLUGIN_ABI_VERSION: u32 = 2;
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, Clone, StableAbi)]
 pub struct FfiPluginRegistration {
     pub providers: RVec<FfiProviderRegistration>,
     pub runtime_providers: RVec<FfiRuntimeProviderRegistration>,
-    pub actions: RVec<FfiActionRegistration>,
     pub callbacks: u32,
 }
 
@@ -2480,7 +2302,6 @@ mod tests {
             session_id: RString::new(),
             status: RString::from("ok"),
             live: FfiRuntimeLiveOutput::empty(),
-            persisted: RVec::new(),
             diagnostics: RVec::new(),
         }
     }
@@ -2554,7 +2375,6 @@ mod tests {
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: vec!["vn.story".to_string()],
             release_checks: vec!["runtime_provider.native_vn".to_string()],
-            output_schemas: Vec::new(),
         };
         let descriptor_json = serde_json::to_vec(&descriptor).unwrap();
         let registration = FfiRuntimeProviderRegistration {
@@ -2583,7 +2403,6 @@ mod tests {
         let plugin = FfiPluginRegistration {
             providers: RVec::new(),
             runtime_providers: RVec::from(vec![registration.clone()]),
-            actions: RVec::new(),
             callbacks: 0,
         };
 

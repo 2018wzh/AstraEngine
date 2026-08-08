@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use astra_core::Hash256;
 use ffmpeg_next as ffmpeg;
 
 use super::{FfmpegAudioOutputFormat, FfmpegDecodedPacket, FfmpegStreamLimits};
@@ -380,8 +379,14 @@ pub(super) fn push_audio_frame(
             "FFmpeg audio sequence overflowed",
         )
     })?;
-    let bytes = pcm.to_vec();
-    let content_hash = Hash256::from_sha256(&bytes);
+    let sample_count = byte_count / std::mem::size_of::<i16>();
+    let mut samples = Vec::<i16>::with_capacity(sample_count);
+    // SAFETY: destination capacity is reserved for the complete packed frame;
+    // byte-wise copy does not require the FFmpeg source pointer to be aligned.
+    unsafe {
+        std::ptr::copy_nonoverlapping(pcm.as_ptr(), samples.as_mut_ptr().cast::<u8>(), byte_count);
+        samples.set_len(sample_count);
+    }
     pending.push_back(FfmpegDecodedPacket::Audio {
         packet: AudioFramePacket {
             generation,
@@ -392,9 +397,8 @@ pub(super) fn push_audio_frame(
             sample_rate: audio.sample_rate,
             channels: audio.channels,
             frame_count,
-            content_hash,
         },
-        pcm_s16le: bytes,
+        samples,
     });
     audio.next_output_pts_us = Some(pts_us.checked_add(duration_us).ok_or_else(|| {
         decode_error(
@@ -495,7 +499,6 @@ pub(super) fn drain_video(
                         "FFmpeg video sequence overflowed",
                     )
                 })?;
-                let content_hash = Hash256::from_sha256(&bgra);
                 pending.push_back(FfmpegDecodedPacket::Video {
                     packet: VideoFramePacket {
                         generation,
@@ -505,9 +508,8 @@ pub(super) fn drain_video(
                         duration_us: frame_duration_us,
                         width: video.width,
                         height: video.height,
-                        content_hash,
                     },
-                    bgra8: bgra,
+                    bgra8: bgra.into(),
                 });
             }
             Err(ffmpeg::Error::Other {

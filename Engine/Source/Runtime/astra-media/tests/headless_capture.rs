@@ -23,7 +23,7 @@ fn headless_capture_hash_is_repeatable_and_descriptor_is_gateable() {
     ];
     let first = a.capture_frame(&commands).unwrap();
     let second = b.capture_frame(&commands).unwrap();
-    assert_eq!(first.hash, second.hash);
+    assert_eq!(first.bytes.as_slice(), second.bytes.as_slice());
     assert_eq!(first.bytes.len(), 64 * 32 * 4);
     let hero_pixel = ((4 * 64 + 4) * 4) as usize;
     assert_eq!(

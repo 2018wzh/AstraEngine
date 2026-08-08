@@ -24,7 +24,7 @@ fn decode_provider_selection_is_profile_bound_not_load_order() {
     let request = DecodeRequest {
         kind: DecodeKind::Image,
         codec: "png".to_string(),
-        bytes: vec![1],
+        bytes: vec![1].into(),
         profile: "desktop-release".to_string(),
     };
     let shipping_platform =
@@ -65,36 +65,36 @@ fn symphonia_decode_provider_decodes_bounded_wav_to_cpu_pcm() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Audio,
             codec: "wav".to_string(),
-            bytes: tiny_wav(),
+            bytes: tiny_wav().into(),
             profile: "desktop-release".to_string(),
         })
         .unwrap();
     assert_eq!(result.provider_id, "astra.decode.symphonia");
     match result.output {
-        DecodeOutput::CpuBuffer {
-            bytes,
-            format,
-            hash,
+        DecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            samples,
         } => {
-            assert!(format.starts_with("pcm_s16le:8000:1"));
-            assert_eq!(bytes.len(), 8);
-            assert_eq!(hash, astra_core::Hash256::from_sha256(&bytes));
+            assert_eq!(sample_rate, 8_000);
+            assert_eq!(channels, 1);
+            assert_eq!(samples.len(), 4);
         }
-        DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU PCM output"),
+        _ => panic!("expected typed PCM output"),
     }
 }
 
 #[astra_headless_test::test]
 fn symphonia_stream_decoder_emits_bounded_chunks_without_whole_file_pcm() {
-    let source = std::sync::Arc::<[u8]>::from(tiny_wav());
+    let source = tiny_wav().into();
     let mut decoder = open_symphonia_audio_stream("wav", source, 8).unwrap();
     assert_eq!(decoder.sample_rate(), 8_000);
     assert_eq!(decoder.channels(), 1);
     let chunk = decoder.next_chunk().unwrap().unwrap();
-    assert_eq!(chunk.pcm_s16le.len(), 8);
+    assert_eq!(chunk.samples.len(), 4);
     assert!(decoder.next_chunk().unwrap().is_none());
 
-    let source = std::sync::Arc::<[u8]>::from(tiny_wav());
+    let source = tiny_wav().into();
     let mut decoder = open_symphonia_audio_stream("wav", source, 7).unwrap();
     assert!(decoder.next_chunk().is_err());
 }
@@ -109,7 +109,7 @@ fn registry_executes_only_the_explicit_provider_and_validates_output_identity() 
     let request = DecodeRequest {
         kind: DecodeKind::Audio,
         codec: "wav".into(),
-        bytes: tiny_wav(),
+        bytes: tiny_wav().into(),
         profile: "desktop-release".into(),
     };
     let binding =
@@ -117,7 +117,7 @@ fn registry_executes_only_the_explicit_provider_and_validates_output_identity() 
             .with_declared_fallback();
     let result = registry.decode(&request, &binding).unwrap();
     assert_eq!(result.provider_id, "astra.decode.symphonia");
-    assert!(matches!(result.output, DecodeOutput::CpuBuffer { .. }));
+    assert!(matches!(result.output, DecodeOutput::AudioPcmI16 { .. }));
 }
 
 #[astra_headless_test::test]
@@ -178,18 +178,17 @@ fn symphonia_decode_provider_decodes_public_mp3_to_cpu_pcm() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Audio,
             codec: "mp3".to_string(),
-            bytes: fixture_bytes("t-rex-roar.mp3"),
+            bytes: fixture_bytes("t-rex-roar.mp3").into(),
             profile: "desktop-release".to_string(),
         })
         .unwrap();
 
     assert_eq!(result.provider_id, "astra.decode.symphonia");
     match result.output {
-        DecodeOutput::CpuBuffer { bytes, format, .. } => {
-            assert!(format.starts_with("pcm_s16le:"));
-            assert!(bytes.len() > 16_000);
+        DecodeOutput::AudioPcmI16 { samples, .. } => {
+            assert!(samples.len() > 8_000);
         }
-        DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU PCM output"),
+        _ => panic!("expected typed PCM output"),
     }
 }
 
@@ -201,18 +200,17 @@ fn windows_wmf_decode_provider_decodes_public_mp3_to_cpu_pcm() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Audio,
             codec: "mp3".to_string(),
-            bytes: fixture_bytes("t-rex-roar.mp3"),
+            bytes: fixture_bytes("t-rex-roar.mp3").into(),
             profile: "desktop-release".to_string(),
         })
         .unwrap();
 
     assert_eq!(result.provider_id, "astra.decode.wmf");
     match result.output {
-        DecodeOutput::CpuBuffer { bytes, format, .. } => {
-            assert!(format.starts_with("pcm_s16le:"));
-            assert!(bytes.len() > 16_000);
+        DecodeOutput::AudioPcmI16 { samples, .. } => {
+            assert!(samples.len() > 8_000);
         }
-        DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU PCM output"),
+        _ => panic!("expected typed PCM output"),
     }
 }
 
@@ -224,23 +222,18 @@ fn windows_wmf_decode_provider_decodes_public_mp4_first_frame_to_bgra() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Video,
             codec: "mp4".to_string(),
-            bytes: fixture_bytes("flower.mp4"),
+            bytes: fixture_bytes("flower.mp4").into(),
             profile: "desktop-release".to_string(),
         })
         .unwrap();
 
     assert_eq!(result.provider_id, "astra.decode.wmf");
     match result.output {
-        DecodeOutput::CpuBuffer {
-            bytes,
-            format,
-            hash,
-        } => {
+        DecodeOutput::CpuBuffer { bytes, format } => {
             assert!(format.starts_with("bgra8:first_frame:"));
             assert!(bytes.len() > 320 * 180 * 4);
-            assert_eq!(hash, astra_core::Hash256::from_sha256(&bytes));
         }
-        DecodeOutput::MediaSurfaceToken(_) => panic!("expected CPU first-frame output"),
+        _ => panic!("expected CPU first-frame output"),
     }
 }
 
@@ -277,10 +270,7 @@ fn windows_wmf_incremental_stream_releases_frames_and_enforces_running_budget() 
     assert_eq!(first.sequence, 1);
     assert_eq!(second.sequence, 2);
     assert!(second.pts_us >= first.pts_us);
-    assert_eq!(
-        first.content_hash,
-        astra_core::Hash256::from_sha256(&first.bgra8)
-    );
+    assert!(!first.bgra8.is_empty());
 
     let mut limited = astra_media::open_windows_video_stream(&bytes, 1, 64 * 1024 * 1024).unwrap();
     assert!(limited.next_frame().unwrap().is_some());
@@ -302,8 +292,8 @@ fn windows_wmf_incremental_audio_releases_ordered_bounded_pcm_chunks() {
     let second = decoder.next_chunk().unwrap().unwrap();
     assert!((8_000..=384_000).contains(&first.sample_rate));
     assert!((1..=8).contains(&first.channels));
-    assert!(!first.pcm_s16le.is_empty());
-    assert_eq!(first.pcm_s16le.len() % (usize::from(first.channels) * 2), 0);
+    assert!(!first.samples.is_empty());
+    assert_eq!(first.samples.len() % usize::from(first.channels), 0);
     assert!(second.pts_us >= first.pts_us);
 
     let mut limited = astra_media::open_windows_audio_stream(&bytes, 1).unwrap();
@@ -324,7 +314,7 @@ fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnost
         .decode(&DecodeRequest {
             kind: DecodeKind::Video,
             codec: "wmv".to_string(),
-            bytes: b"not a video".to_vec(),
+            bytes: b"not a video".to_vec().into(),
             profile: "desktop-release".to_string(),
         })
         .unwrap_err();
@@ -351,7 +341,7 @@ fn webcodecs_decode_provider_returns_browser_surface_token() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Video,
             codec: "mp4".to_string(),
-            bytes: vec![1, 2, 3, 4],
+            bytes: vec![1, 2, 3, 4].into(),
             profile: "web-release".to_string(),
         })
         .unwrap();
@@ -409,7 +399,7 @@ fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Audio,
             codec: "mp3".to_string(),
-            bytes: fixture_bytes("t-rex-roar.mp3"),
+            bytes: fixture_bytes("t-rex-roar.mp3").into(),
             profile: "desktop".to_string(),
         })
         .unwrap_err();
@@ -423,7 +413,7 @@ fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Audio,
             codec: "mp3".to_string(),
-            bytes: fixture_bytes("t-rex-roar.mp3"),
+            bytes: fixture_bytes("t-rex-roar.mp3").into(),
             profile: "desktop".to_string(),
         })
         .unwrap();
@@ -437,7 +427,7 @@ fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Video,
             codec: "mp4".to_string(),
-            bytes: fixture_bytes("flower.mp4"),
+            bytes: fixture_bytes("flower.mp4").into(),
             profile: "desktop".to_string(),
         })
         .unwrap();
@@ -451,7 +441,7 @@ fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
         .decode(&DecodeRequest {
             kind: DecodeKind::Video,
             codec: "mp4".to_string(),
-            bytes: b"not an mp4 container".to_vec(),
+            bytes: b"not an mp4 container".to_vec().into(),
             profile: "desktop".to_string(),
         })
         .unwrap_err();

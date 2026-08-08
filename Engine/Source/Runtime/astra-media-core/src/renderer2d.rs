@@ -1,11 +1,10 @@
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet},
     ops::Deref,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::Arc,
 };
 
 use astra_core::Hash256;
-use rayon::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -54,7 +53,6 @@ pub struct CpuFrame {
     pub height: u32,
     pub format: RenderTargetFormat,
     pub bytes: Vec<u8>,
-    pub hash: Hash256,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -153,12 +151,11 @@ impl Transform2D {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextureFrame {
     pub width: u32,
     pub height: u32,
-    pub rgba8: Arc<[u8]>,
-    pub hash: Hash256,
+    pub rgba8: OwnedPixelBuffer,
 }
 
 /// Process-local texture ownership for live scene submission.
@@ -168,10 +165,14 @@ pub struct TextureFrame {
 /// owner reference, so the capture allocation remains the same allocation
 /// until the final GPU upload consumes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LiveTextureBuffer(Arc<Vec<u8>>);
+pub struct OwnedPixelBuffer(Arc<astra_byte_source::OwnedByteBuffer>);
 
-impl LiveTextureBuffer {
+impl OwnedPixelBuffer {
     pub fn from_vec(rgba8: Vec<u8>) -> Self {
+        Self::from_owned(rgba8.into())
+    }
+
+    pub fn from_owned(rgba8: astra_byte_source::OwnedByteBuffer) -> Self {
         Self(Arc::new(rgba8))
     }
 
@@ -186,9 +187,30 @@ impl LiveTextureBuffer {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    pub fn allocation_ptr(&self) -> *const u8 {
+        self.0.as_ptr()
+    }
+
+    pub fn make_mut_for_update(&mut self) -> &mut Vec<u8> {
+        if Arc::get_mut(&mut self.0).is_none() {
+            self.0 = Arc::new(astra_byte_source::OwnedByteBuffer::from_vec(
+                self.as_slice().to_vec(),
+            ));
+        }
+        Arc::get_mut(&mut self.0)
+            .expect("unique owner was established")
+            .make_mut_vec()
+    }
 }
 
-impl Deref for LiveTextureBuffer {
+impl From<Vec<u8>> for OwnedPixelBuffer {
+    fn from(value: Vec<u8>) -> Self {
+        Self::from_vec(value)
+    }
+}
+
+impl Deref for OwnedPixelBuffer {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -196,25 +218,15 @@ impl Deref for LiveTextureBuffer {
     }
 }
 
-/// Process-local texture ownership for live scene submission.  It intentionally
-/// has no content identity: the producer transfers the allocation and the
-/// renderer validates only dimensions before issuing the GPU upload.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LiveTextureFrame {
-    pub width: u32,
-    pub height: u32,
-    pub rgba8: LiveTextureBuffer,
-}
-
-impl LiveTextureFrame {
+impl TextureFrame {
     pub fn from_vec(width: u32, height: u32, rgba8: Vec<u8>) -> Result<Self, MediaError> {
-        Self::from_buffer(width, height, LiveTextureBuffer::from_vec(rgba8))
+        Self::from_buffer(width, height, OwnedPixelBuffer::from_vec(rgba8))
     }
 
     pub fn from_buffer(
         width: u32,
         height: u32,
-        rgba8: LiveTextureBuffer,
+        rgba8: OwnedPixelBuffer,
     ) -> Result<Self, MediaError> {
         validate_texture_dimensions(width, height, rgba8.len())?;
         Ok(Self {
@@ -223,62 +235,7 @@ impl LiveTextureFrame {
             rgba8,
         })
     }
-}
 
-impl TextureFrame {
-    /// Creates an immutable texture whose identity is derived from these exact
-    /// pixels. In-process producers use this constructor so downstream
-    /// renderers can retain the already-validated payload without hashing it
-    /// again. Deserialized frames intentionally lose this process-local mark.
-    pub fn from_rgba8(width: u32, height: u32, rgba8: Arc<[u8]>) -> Result<Self, MediaError> {
-        validate_texture_dimensions(width, height, rgba8.len())?;
-        let frame = Self {
-            width,
-            height,
-            hash: Hash256::from_sha256(&rgba8),
-            rgba8,
-        };
-        remember_validated_payload(&frame.rgba8, frame.hash)?;
-        Ok(frame)
-    }
-
-    /// Creates an untrusted transport value. The claimed hash is verified at
-    /// the renderer boundary before any retained state changes.
-    pub fn from_untrusted(width: u32, height: u32, rgba8: Arc<[u8]>, hash: Hash256) -> Self {
-        Self {
-            width,
-            height,
-            rgba8,
-            hash,
-        }
-    }
-
-    /// Builds a retained RGBA8 frame from an already authenticated immutable
-    /// source slice.  The caller must have verified that the source bytes have
-    /// the same length and hash and that this conversion preserves them (the
-    /// native scene adapter uses it only for an RGBA8 identity conversion).
-    /// Remembering that proof lets the platform boundary reuse it without a
-    /// second SHA-256 pass.
-    pub fn from_validated_rgba8(
-        width: u32,
-        height: u32,
-        rgba8: Arc<[u8]>,
-        hash: Hash256,
-    ) -> Result<Self, MediaError> {
-        validate_texture_dimensions(width, height, rgba8.len())?;
-        remember_validated_payload(&rgba8, hash)?;
-        Ok(Self {
-            width,
-            height,
-            rgba8,
-            hash,
-        })
-    }
-
-    /// Validate a transport frame and remember the result for the lifetime of
-    /// its immutable payload allocation.  Platform hosts call this at their
-    /// trust boundary; subsequent renderer layers can reuse the same proof
-    /// without hashing the full texture again.
     pub fn validate_integrity(&self) -> Result<(), MediaError> {
         validate_texture(self)
     }
@@ -291,13 +248,12 @@ pub enum GlyphBitmapFormat {
     Rgba8,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlyphBitmap {
     pub width: u32,
     pub height: u32,
     pub format: GlyphBitmapFormat,
-    pub pixels: Arc<[u8]>,
-    pub hash: Hash256,
+    pub pixels: OwnedPixelBuffer,
 }
 
 impl GlyphBitmap {
@@ -305,62 +261,29 @@ impl GlyphBitmap {
         width: u32,
         height: u32,
         format: GlyphBitmapFormat,
-        pixels: Arc<[u8]>,
+        pixels: OwnedPixelBuffer,
     ) -> Result<Self, MediaError> {
         validate_glyph_dimensions(width, height, format, pixels.len())?;
-        let glyph = Self {
+        Ok(Self {
             width,
             height,
             format,
-            hash: Hash256::from_sha256(&pixels),
             pixels,
-        };
-        remember_validated_payload(&glyph.pixels, glyph.hash)?;
-        Ok(glyph)
+        })
     }
 
-    pub fn from_untrusted(
+    pub fn from_vec(
         width: u32,
         height: u32,
         format: GlyphBitmapFormat,
-        pixels: Arc<[u8]>,
-        hash: Hash256,
-    ) -> Self {
-        Self {
-            width,
-            height,
-            format,
-            pixels,
-            hash,
-        }
+        pixels: Vec<u8>,
+    ) -> Result<Self, MediaError> {
+        Self::from_pixels(width, height, format, OwnedPixelBuffer::from_vec(pixels))
     }
 
-    /// Validate a transport glyph and remember the result for the lifetime of
-    /// its immutable payload allocation.
     pub fn validate_integrity(&self) -> Result<(), MediaError> {
         validate_glyph(self)
     }
-}
-
-/// Validate an RGBA8 subresource payload while retaining the proof for later
-/// renderer layers that receive the same `Arc<[u8]>`.  This keeps the
-/// integrity check fail-fast without paying one SHA-256 pass per layer.
-pub fn validate_rgba8_payload(
-    width: u32,
-    height: u32,
-    rgba8: &Arc<[u8]>,
-    hash: Hash256,
-) -> Result<(), MediaError> {
-    validate_texture_dimensions(width, height, rgba8.len())?;
-    if validated_payload_is_cached(rgba8, hash)? {
-        return Ok(());
-    }
-    if Hash256::from_sha256(rgba8) != hash {
-        return Err(MediaError::message(
-            "ASTRA_MEDIA_TEXTURE_HASH: texture payload hash mismatch",
-        ));
-    }
-    remember_validated_payload(rgba8, hash)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -379,8 +302,20 @@ pub enum MeshMaterial2D {
     GlyphMask,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshDraw2D {
+    pub vertex_start: u32,
+    pub vertex_count: u32,
+    pub index_start: u32,
+    pub index_count: u32,
+    pub material: MeshMaterial2D,
+    pub texture_id: Option<String>,
+    pub opacity: f32,
+    pub blend: BlendMode,
+    pub scissor: Option<RectI>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum SceneCommand {
     UploadTexture {
         resource_id: String,
@@ -392,24 +327,7 @@ pub enum SceneCommand {
         y: u32,
         width: u32,
         height: u32,
-        rgba8: Arc<[u8]>,
-        hash: Hash256,
-    },
-    #[serde(skip)]
-    #[schemars(skip)]
-    UploadLiveTexture {
-        resource_id: String,
-        frame: LiveTextureFrame,
-    },
-    #[serde(skip)]
-    #[schemars(skip)]
-    UpdateLiveTextureRegion {
-        resource_id: String,
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-        rgba8: LiveTextureBuffer,
+        rgba8: OwnedPixelBuffer,
     },
     UploadGlyph {
         resource_id: String,
@@ -441,6 +359,11 @@ pub enum SceneCommand {
         texture_id: Option<String>,
         opacity: f32,
         blend: BlendMode,
+    },
+    MeshBatch2D {
+        vertices: Arc<[MeshVertex2D]>,
+        indices: Arc<[u32]>,
+        draws: Arc<[MeshDraw2D]>,
     },
     Clear {
         rgba: [u8; 4],
@@ -542,7 +465,13 @@ pub trait Renderer2D {
     fn capture_frame(&mut self, commands: &[DrawCommand]) -> Result<CpuFrame, MediaError>;
 
     fn capture_hash(&mut self, commands: &[DrawCommand]) -> Result<Hash256, MediaError> {
-        Ok(self.capture_frame(commands)?.hash)
+        let frame = self.capture_frame(commands)?;
+        Ok(frame_hash(
+            frame.width,
+            frame.height,
+            frame.format,
+            &frame.bytes,
+        ))
     }
 }
 
@@ -570,7 +499,6 @@ impl Renderer2DProvider for CpuRendererProvider {
         Ok(HeadlessRenderer {
             request,
             textures: BTreeMap::new(),
-            live_texture_dimensions: BTreeMap::new(),
             glyphs: BTreeMap::new(),
             texture_ids: HashSet::new(),
             glyph_ids: HashSet::new(),
@@ -582,7 +510,6 @@ impl Renderer2DProvider for CpuRendererProvider {
 pub struct HeadlessRenderer {
     request: RendererCreateRequest,
     textures: BTreeMap<String, TextureFrame>,
-    live_texture_dimensions: BTreeMap<String, (u32, u32)>,
     glyphs: BTreeMap<String, GlyphBitmap>,
     texture_ids: HashSet<String>,
     glyph_ids: HashSet<String>,
@@ -659,9 +586,8 @@ impl HeadlessRenderer {
                     width,
                     height,
                     rgba8,
-                    hash,
                 } => {
-                    let dimensions = retained_hashed_texture_dimensions(
+                    let dimensions = retained_texture_dimensions(
                         &self.textures,
                         &resource_overlay,
                         resource_id,
@@ -671,7 +597,7 @@ impl HeadlessRenderer {
                             "ASTRA_MEDIA_RESOURCE_UNKNOWN: texture update references an unknown texture",
                         )
                     })?;
-                    validate_texture_region(dimensions, *x, *y, *width, *height, rgba8, *hash)?;
+                    validate_texture_region(dimensions, *x, *y, *width, *height, rgba8)?;
                     mutations.push(RetainedResourceMutation::UpdateTextureRegion {
                         resource_id,
                         x: *x,
@@ -680,58 +606,6 @@ impl HeadlessRenderer {
                         height: *height,
                         rgba8,
                     });
-                }
-                DrawCommand::UploadLiveTexture { resource_id, frame } => {
-                    validate_texture_dimensions(frame.width, frame.height, frame.rgba8.len())?;
-                    if retained_resource_exists_indexed(
-                        &self.texture_ids,
-                        &self.glyph_ids,
-                        &resource_overlay,
-                        resource_id,
-                    ) {
-                        return Err(MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_DUPLICATE: live texture resource is already uploaded",
-                        ));
-                    }
-                    resource_overlay.insert(
-                        resource_id.as_str(),
-                        PendingResource::LiveTexture(frame.width, frame.height),
-                    );
-                    mutations.push(RetainedResourceMutation::UploadLiveTexture {
-                        resource_id,
-                        width: frame.width,
-                        height: frame.height,
-                    });
-                }
-                DrawCommand::UpdateLiveTextureRegion {
-                    resource_id,
-                    x,
-                    y,
-                    width,
-                    height,
-                    rgba8,
-                } => {
-                    let dimensions = retained_live_texture_dimensions(
-                        &self.live_texture_dimensions,
-                        &resource_overlay,
-                        resource_id,
-                    )
-                    .ok_or_else(|| {
-                        MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: live texture update references an unknown texture",
-                        )
-                    })?;
-                    validate_texture_dimensions(*width, *height, rgba8.len())?;
-                    if x.checked_add(*width)
-                        .is_none_or(|right| right > dimensions.0)
-                        || y.checked_add(*height)
-                            .is_none_or(|bottom| bottom > dimensions.1)
-                    {
-                        return Err(MediaError::message(
-                            "ASTRA_MEDIA_TEXTURE_REGION_BOUNDS: live texture update exceeds texture dimensions",
-                        ));
-                    }
-                    mutations.push(RetainedResourceMutation::UpdateLiveTexture);
                 }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
                     validate_glyph_metadata(glyph)?;
@@ -769,17 +643,13 @@ impl HeadlessRenderer {
                     ..
                 } => {
                     validate_opacity(*opacity)?;
-                    let dimensions = retained_texture_dimensions(
-                        &self.textures,
-                        &self.live_texture_dimensions,
-                        &resource_overlay,
-                        texture_id,
-                    )
-                    .ok_or_else(|| {
-                        MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
-                        )
-                    })?;
+                    let dimensions =
+                        retained_texture_dimensions(&self.textures, &resource_overlay, texture_id)
+                            .ok_or_else(|| {
+                                MediaError::message(
+                                    "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
+                                )
+                            })?;
                     if let Some(source) = source {
                         validate_source_rect_dimensions(dimensions, *source)?;
                     }
@@ -831,7 +701,6 @@ impl HeadlessRenderer {
                         (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id))
                             if retained_texture_dimensions(
                                 &self.textures,
-                                &self.live_texture_dimensions,
                                 &resource_overlay,
                                 id,
                             )
@@ -840,6 +709,61 @@ impl HeadlessRenderer {
                             return Err(MediaError::message(
                                 "ASTRA_MEDIA_MESH_MATERIAL: mesh material and texture mismatch",
                             ))
+                        }
+                    }
+                }
+                DrawCommand::MeshBatch2D {
+                    vertices,
+                    indices,
+                    draws,
+                } => {
+                    if vertices.is_empty() || draws.is_empty() {
+                        return Err(MediaError::message(
+                            "ASTRA_MEDIA_MESH_TOPOLOGY: mesh batch is empty",
+                        ));
+                    }
+                    for draw in draws.iter() {
+                        validate_opacity(draw.opacity)?;
+                        let vertex_start = draw.vertex_start as usize;
+                        let vertex_end = vertex_start
+                            .checked_add(draw.vertex_count as usize)
+                            .ok_or_else(|| MediaError::message("ASTRA_MEDIA_MESH_TOPOLOGY"))?;
+                        let index_start = draw.index_start as usize;
+                        let index_end = index_start
+                            .checked_add(draw.index_count as usize)
+                            .ok_or_else(|| MediaError::message("ASTRA_MEDIA_MESH_TOPOLOGY"))?;
+                        if vertex_end > vertices.len()
+                            || index_end > indices.len()
+                            || draw.index_count == 0
+                            || !draw.index_count.is_multiple_of(3)
+                            || indices[index_start..index_end]
+                                .iter()
+                                .any(|index| *index as usize >= draw.vertex_count as usize)
+                            || vertices[vertex_start..vertex_end].iter().any(|vertex| {
+                                !vertex.position.into_iter().all(f32::is_finite)
+                                    || !vertex.uv.into_iter().all(f32::is_finite)
+                            })
+                        {
+                            return Err(MediaError::message(
+                                "ASTRA_MEDIA_MESH_TOPOLOGY: mesh batch draw is invalid",
+                            ));
+                        }
+                        match (&draw.material, &draw.texture_id) {
+                            (MeshMaterial2D::Solid, None) => {}
+                            (
+                                MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask,
+                                Some(id),
+                            ) if retained_texture_dimensions(
+                                &self.textures,
+                                &resource_overlay,
+                                id,
+                            )
+                            .is_some() => {}
+                            _ => {
+                                return Err(MediaError::message(
+                                    "ASTRA_MEDIA_MESH_MATERIAL: mesh batch material and texture mismatch",
+                                ));
+                            }
                         }
                     }
                 }
@@ -919,15 +843,6 @@ impl HeadlessRenderer {
                     self.texture_ids.insert(resource_id.clone());
                     self.textures.insert(resource_id, frame);
                 }
-                OwnedRetainedResourceMutation::UploadLiveTexture {
-                    resource_id,
-                    width,
-                    height,
-                } => {
-                    self.texture_ids.insert(resource_id.clone());
-                    self.live_texture_dimensions
-                        .insert(resource_id, (width, height));
-                }
                 OwnedRetainedResourceMutation::UploadGlyph { resource_id, glyph } => {
                     self.glyph_ids.insert(resource_id.clone());
                     self.glyphs.insert(resource_id, glyph);
@@ -947,10 +862,8 @@ impl HeadlessRenderer {
                     apply_texture_region(frame, x, y, width, height, &rgba8)
                         .expect("validated texture region must commit");
                 }
-                OwnedRetainedResourceMutation::UpdateLiveTexture => {}
                 OwnedRetainedResourceMutation::Release { resource_id } => {
                     self.textures.remove(&resource_id);
-                    self.live_texture_dimensions.remove(&resource_id);
                     self.glyphs.remove(&resource_id);
                     self.texture_ids.remove(&resource_id);
                     self.glyph_ids.remove(&resource_id);
@@ -971,11 +884,6 @@ enum OwnedRetainedResourceMutation {
         resource_id: String,
         frame: TextureFrame,
     },
-    UploadLiveTexture {
-        resource_id: String,
-        width: u32,
-        height: u32,
-    },
     UploadGlyph {
         resource_id: String,
         glyph: GlyphBitmap,
@@ -986,9 +894,8 @@ enum OwnedRetainedResourceMutation {
         y: u32,
         width: u32,
         height: u32,
-        rgba8: Arc<[u8]>,
+        rgba8: OwnedPixelBuffer,
     },
-    UpdateLiveTexture,
     Release {
         resource_id: String,
     },
@@ -1000,11 +907,6 @@ enum RetainedResourceMutation<'a> {
         resource_id: &'a str,
         frame: &'a TextureFrame,
     },
-    UploadLiveTexture {
-        resource_id: &'a str,
-        width: u32,
-        height: u32,
-    },
     UploadGlyph {
         resource_id: &'a str,
         glyph: &'a GlyphBitmap,
@@ -1015,9 +917,8 @@ enum RetainedResourceMutation<'a> {
         y: u32,
         width: u32,
         height: u32,
-        rgba8: &'a Arc<[u8]>,
+        rgba8: &'a OwnedPixelBuffer,
     },
-    UpdateLiveTexture,
     Release {
         resource_id: &'a str,
     },
@@ -1029,15 +930,6 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
             RetainedResourceMutation::UploadTexture { resource_id, frame } => Self::UploadTexture {
                 resource_id: resource_id.to_owned(),
                 frame: frame.clone(),
-            },
-            RetainedResourceMutation::UploadLiveTexture {
-                resource_id,
-                width,
-                height,
-            } => Self::UploadLiveTexture {
-                resource_id: resource_id.to_owned(),
-                width,
-                height,
             },
             RetainedResourceMutation::UploadGlyph { resource_id, glyph } => Self::UploadGlyph {
                 resource_id: resource_id.to_owned(),
@@ -1056,9 +948,8 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
                 y,
                 width,
                 height,
-                rgba8: Arc::clone(rgba8),
+                rgba8: rgba8.clone(),
             },
-            RetainedResourceMutation::UpdateLiveTexture => Self::UpdateLiveTexture,
             RetainedResourceMutation::Release { resource_id } => Self::Release {
                 resource_id: resource_id.to_owned(),
             },
@@ -1068,7 +959,6 @@ impl From<RetainedResourceMutation<'_>> for OwnedRetainedResourceMutation {
 
 enum PendingResource<'a> {
     Texture(&'a TextureFrame),
-    LiveTexture(u32, u32),
     Glyph(&'a GlyphBitmap),
     Released,
 }
@@ -1080,11 +970,7 @@ fn retained_resource_exists_indexed(
     resource_id: &str,
 ) -> bool {
     match overlay.get(resource_id) {
-        Some(
-            PendingResource::Texture(_)
-            | PendingResource::LiveTexture(_, _)
-            | PendingResource::Glyph(_),
-        ) => true,
+        Some(PendingResource::Texture(_) | PendingResource::Glyph(_)) => true,
         Some(PendingResource::Released) => false,
         None => texture_ids.contains(resource_id) || glyph_ids.contains(resource_id),
     }
@@ -1092,50 +978,15 @@ fn retained_resource_exists_indexed(
 
 fn retained_texture_dimensions(
     textures: &BTreeMap<String, TextureFrame>,
-    live_texture_dimensions: &BTreeMap<String, (u32, u32)>,
     overlay: &BTreeMap<&str, PendingResource<'_>>,
     resource_id: &str,
 ) -> Option<(u32, u32)> {
     match overlay.get(resource_id) {
         Some(PendingResource::Texture(frame)) => Some((frame.width, frame.height)),
-        Some(PendingResource::LiveTexture(width, height)) => Some((*width, *height)),
         Some(PendingResource::Glyph(_) | PendingResource::Released) => None,
         None => textures
             .get(resource_id)
-            .map(|frame| (frame.width, frame.height))
-            .or_else(|| live_texture_dimensions.get(resource_id).copied()),
-    }
-}
-
-fn retained_hashed_texture_dimensions(
-    textures: &BTreeMap<String, TextureFrame>,
-    overlay: &BTreeMap<&str, PendingResource<'_>>,
-    resource_id: &str,
-) -> Option<(u32, u32)> {
-    match overlay.get(resource_id) {
-        Some(PendingResource::Texture(frame)) => Some((frame.width, frame.height)),
-        Some(
-            PendingResource::LiveTexture(_, _)
-            | PendingResource::Glyph(_)
-            | PendingResource::Released,
-        ) => None,
-        None => textures
-            .get(resource_id)
             .map(|frame| (frame.width, frame.height)),
-    }
-}
-
-fn retained_live_texture_dimensions(
-    live_texture_dimensions: &BTreeMap<String, (u32, u32)>,
-    overlay: &BTreeMap<&str, PendingResource<'_>>,
-    resource_id: &str,
-) -> Option<(u32, u32)> {
-    match overlay.get(resource_id) {
-        Some(PendingResource::LiveTexture(width, height)) => Some((*width, *height)),
-        Some(
-            PendingResource::Texture(_) | PendingResource::Glyph(_) | PendingResource::Released,
-        ) => None,
-        None => live_texture_dimensions.get(resource_id).copied(),
     }
 }
 
@@ -1149,11 +1000,7 @@ fn retained_glyph_exists(
             let _ = glyph;
             true
         }
-        Some(
-            PendingResource::Texture(_)
-            | PendingResource::LiveTexture(_, _)
-            | PendingResource::Released,
-        ) => false,
+        Some(PendingResource::Texture(_) | PendingResource::Released) => false,
         None => glyph_ids.contains(resource_id),
     }
 }
@@ -1184,8 +1031,7 @@ fn validate_texture_region(
     y: u32,
     width: u32,
     height: u32,
-    rgba8: &Arc<[u8]>,
-    hash: Hash256,
+    rgba8: &OwnedPixelBuffer,
 ) -> Result<(), MediaError> {
     let expected = (width as usize)
         .checked_mul(height as usize)
@@ -1203,7 +1049,7 @@ fn validate_texture_region(
             "ASTRA_MEDIA_TEXTURE_REGION: update is outside the retained texture",
         ));
     }
-    remember_validated_payload(rgba8, hash)
+    Ok(())
 }
 
 fn apply_texture_region(
@@ -1214,7 +1060,7 @@ fn apply_texture_region(
     height: u32,
     rgba8: &[u8],
 ) -> Result<(), MediaError> {
-    let mut pixels = frame.rgba8.as_ref().to_vec();
+    let pixels = frame.rgba8.make_mut_for_update();
     for row in 0..height as usize {
         let destination = ((y as usize + row) * frame.width as usize + x as usize) * 4;
         let source = row * width as usize * 4;
@@ -1222,12 +1068,15 @@ fn apply_texture_region(
         pixels[destination..destination + byte_len]
             .copy_from_slice(&rgba8[source..source + byte_len]);
     }
-    *frame = TextureFrame::from_rgba8(frame.width, frame.height, Arc::from(pixels))?;
     Ok(())
 }
 
 impl Renderer2D for HeadlessRenderer {
     fn capture_frame(&mut self, commands: &[DrawCommand]) -> Result<CpuFrame, MediaError> {
+        // Validate the complete transaction before touching retained state.
+        // Rasterization then journals only resources mutated by this frame;
+        // stable retained maps are never cloned per frame.
+        let _validated = self.validate_frame(commands)?;
         let width = self.request.width as usize;
         let height = self.request.height as usize;
         let byte_len = width
@@ -1235,9 +1084,8 @@ impl Renderer2D for HeadlessRenderer {
             .and_then(|pixels| pixels.checked_mul(4))
             .ok_or_else(|| MediaError::message("render target is too large"))?;
         let mut bytes = vec![0; byte_len];
-        // Resource mutations are committed only after the whole command stream succeeds.
-        let mut textures = self.textures.clone();
-        let mut glyph_resources = self.glyphs.clone();
+        let mut texture_changes = BTreeMap::<String, Option<TextureFrame>>::new();
+        let mut glyph_changes = BTreeMap::<String, Option<GlyphBitmap>>::new();
         let full_clip = RectI::new(0, 0, self.request.width, self.request.height);
         let mut clips = vec![full_clip];
         let mut transforms = vec![Transform2D::IDENTITY];
@@ -1246,13 +1094,7 @@ impl Renderer2D for HeadlessRenderer {
         for command in commands {
             match command {
                 DrawCommand::UploadTexture { resource_id, frame } => {
-                    validate_texture(frame)?;
-                    if textures.contains_key(resource_id) {
-                        return Err(MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_DUPLICATE: texture resource is already uploaded",
-                        ));
-                    }
-                    textures.insert(resource_id.clone(), frame.clone());
+                    texture_changes.insert(resource_id.clone(), Some(frame.clone()));
                 }
                 DrawCommand::UpdateTextureRegion {
                     resource_id,
@@ -1261,46 +1103,28 @@ impl Renderer2D for HeadlessRenderer {
                     width,
                     height,
                     rgba8,
-                    hash,
                 } => {
-                    let frame = textures.get_mut(resource_id).ok_or_else(|| {
-                        MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: texture update references an unknown texture",
-                        )
-                    })?;
-                    validate_texture_region(
-                        (frame.width, frame.height),
-                        *x,
-                        *y,
-                        *width,
-                        *height,
-                        rgba8,
-                        *hash,
-                    )?;
+                    if !texture_changes.contains_key(resource_id) {
+                        texture_changes
+                            .insert(resource_id.clone(), self.textures.get(resource_id).cloned());
+                    }
+                    let frame = texture_changes
+                        .get_mut(resource_id)
+                        .and_then(Option::as_mut)
+                        .expect("validated texture update target must exist");
                     apply_texture_region(frame, *x, *y, *width, *height, rgba8)?;
                 }
-                DrawCommand::UploadLiveTexture { .. }
-                | DrawCommand::UpdateLiveTextureRegion { .. } => {
-                    return Err(MediaError::message(
-                        "ASTRA_MEDIA_LIVE_SCENE_HEADLESS: live scene resources require a platform renderer",
-                    ));
-                }
                 DrawCommand::UploadGlyph { resource_id, glyph } => {
-                    validate_glyph(glyph)?;
-                    if glyph_resources.contains_key(resource_id) {
-                        return Err(MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_DUPLICATE: glyph resource is already uploaded",
-                        ));
-                    }
-                    glyph_resources.insert(resource_id.clone(), glyph.clone());
+                    glyph_changes.insert(resource_id.clone(), Some(glyph.clone()));
                 }
                 DrawCommand::ReleaseResource { resource_id } => {
-                    let removed = textures.remove(resource_id).is_some()
-                        | glyph_resources.remove(resource_id).is_some();
-                    if !removed {
-                        return Err(MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: released resource is not uploaded",
-                        ));
+                    if capture_texture(&self.textures, &texture_changes, resource_id).is_some() {
+                        texture_changes.insert(resource_id.clone(), None);
+                    } else {
+                        debug_assert!(
+                            capture_glyph(&self.glyphs, &glyph_changes, resource_id).is_some()
+                        );
+                        glyph_changes.insert(resource_id.clone(), None);
                     }
                 }
                 DrawCommand::Sprite {
@@ -1311,11 +1135,12 @@ impl Renderer2D for HeadlessRenderer {
                     blend,
                     ..
                 } => {
-                    let frame = textures.get(texture_id).ok_or_else(|| {
-                        MediaError::message(
-                            "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
-                        )
-                    })?;
+                    let frame = capture_texture(&self.textures, &texture_changes, texture_id)
+                        .ok_or_else(|| {
+                            MediaError::message(
+                                "ASTRA_MEDIA_RESOURCE_UNKNOWN: sprite texture is not uploaded",
+                            )
+                        })?;
                     let cropped;
                     let frame = if let Some(source) = source {
                         cropped = crop_texture(frame, *source)?;
@@ -1344,11 +1169,12 @@ impl Renderer2D for HeadlessRenderer {
                 } => {
                     for instance in glyphs.iter() {
                         let glyph =
-                            glyph_resources.get(&instance.resource_id).ok_or_else(|| {
-                                MediaError::message(
+                            capture_glyph(&self.glyphs, &glyph_changes, &instance.resource_id)
+                                .ok_or_else(|| {
+                                    MediaError::message(
                                     "ASTRA_MEDIA_RESOURCE_UNKNOWN: glyph resource is not uploaded",
                                 )
-                            })?;
+                                })?;
                         draw_glyph(
                             &mut bytes,
                             width,
@@ -1377,11 +1203,15 @@ impl Renderer2D for HeadlessRenderer {
                     let texture = match (material, texture_id) {
                         (MeshMaterial2D::Solid, None) => None,
                         (MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask, Some(id)) => {
-                            Some(textures.get(id).ok_or_else(|| {
-                                MediaError::message(
+                            Some(
+                                capture_texture(&self.textures, &texture_changes, id).ok_or_else(
+                                    || {
+                                        MediaError::message(
                                     "ASTRA_MEDIA_RESOURCE_UNKNOWN: mesh texture is not uploaded",
                                 )
-                            })?)
+                                    },
+                                )?,
+                            )
                         }
                         _ => {
                             return Err(MediaError::message(
@@ -1402,6 +1232,56 @@ impl Renderer2D for HeadlessRenderer {
                         *opacity * opacities.last().copied().unwrap_or(1.0),
                         *blend,
                     )?;
+                }
+                DrawCommand::MeshBatch2D {
+                    vertices,
+                    indices,
+                    draws,
+                } => {
+                    for draw in draws.iter() {
+                        let vertex_start = draw.vertex_start as usize;
+                        let vertex_end = vertex_start + draw.vertex_count as usize;
+                        let index_start = draw.index_start as usize;
+                        let index_end = index_start + draw.index_count as usize;
+                        let texture = match (&draw.material, &draw.texture_id) {
+                            (MeshMaterial2D::Solid, None) => None,
+                            (
+                                MeshMaterial2D::ColorTexture | MeshMaterial2D::GlyphMask,
+                                Some(id),
+                            ) => Some(capture_texture(&self.textures, &texture_changes, id).ok_or_else(|| {
+                                MediaError::message(
+                                    "ASTRA_MEDIA_RESOURCE_UNKNOWN: mesh batch texture is not uploaded",
+                                )
+                            })?),
+                            _ => {
+                                return Err(MediaError::message(
+                                    "ASTRA_MEDIA_MESH_MATERIAL: mesh batch material and texture mismatch",
+                                ));
+                            }
+                        };
+                        let clip = draw.scissor.map_or_else(
+                            || *clips.last().expect("clip stack is initialized"),
+                            |scissor| {
+                                intersection(
+                                    *clips.last().expect("clip stack is initialized"),
+                                    scissor,
+                                )
+                            },
+                        );
+                        draw_mesh(
+                            &mut bytes,
+                            width,
+                            height,
+                            clip,
+                            current_transform(camera, &transforms),
+                            &vertices[vertex_start..vertex_end],
+                            &indices[index_start..index_end],
+                            draw.material,
+                            texture,
+                            draw.opacity * opacities.last().copied().unwrap_or(1.0),
+                            draw.blend,
+                        )?;
+                    }
                 }
                 DrawCommand::Clear { rgba } => {
                     for pixel in bytes.chunks_exact_mut(4) {
@@ -1531,12 +1411,6 @@ impl Renderer2D for HeadlessRenderer {
                         width: self.request.width,
                         height: self.request.height,
                         format: self.request.format,
-                        hash: frame_hash(
-                            self.request.width,
-                            self.request.height,
-                            self.request.format,
-                            &bytes,
-                        ),
                         bytes,
                     };
                     bytes = crate::CpuFilterExecutor.execute(graph, frame)?.0.bytes;
@@ -1548,32 +1422,58 @@ impl Renderer2D for HeadlessRenderer {
                 "ASTRA_MEDIA_SCENE_STACK: scene command stacks are unbalanced",
             ));
         }
-        let hash = frame_hash(
-            self.request.width,
-            self.request.height,
-            self.request.format,
-            &bytes,
-        );
         let frame = CpuFrame {
             width: self.request.width,
             height: self.request.height,
             format: self.request.format,
             bytes,
-            hash,
         };
-        self.textures = textures;
-        self.glyphs = glyph_resources;
-        self.texture_ids = self.textures.keys().cloned().collect();
-        self.glyph_ids = self.glyphs.keys().cloned().collect();
+        commit_capture_changes(&mut self.textures, &mut self.texture_ids, texture_changes);
+        commit_capture_changes(&mut self.glyphs, &mut self.glyph_ids, glyph_changes);
         tracing::trace!(
             target: "astra_media_core::renderer2d",
             event = "renderer2d.frame.committed",
             command_count = commands.len(),
             texture_count = self.textures.len(),
             glyph_count = self.glyphs.len(),
-            frame_hash = %frame.hash,
         );
         Ok(frame)
+    }
+}
+
+fn capture_texture<'a>(
+    retained: &'a BTreeMap<String, TextureFrame>,
+    changes: &'a BTreeMap<String, Option<TextureFrame>>,
+    resource_id: &str,
+) -> Option<&'a TextureFrame> {
+    changes
+        .get(resource_id)
+        .map_or_else(|| retained.get(resource_id), Option::as_ref)
+}
+
+fn capture_glyph<'a>(
+    retained: &'a BTreeMap<String, GlyphBitmap>,
+    changes: &'a BTreeMap<String, Option<GlyphBitmap>>,
+    resource_id: &str,
+) -> Option<&'a GlyphBitmap> {
+    changes
+        .get(resource_id)
+        .map_or_else(|| retained.get(resource_id), Option::as_ref)
+}
+
+fn commit_capture_changes<T>(
+    retained: &mut BTreeMap<String, T>,
+    ids: &mut HashSet<String>,
+    changes: BTreeMap<String, Option<T>>,
+) {
+    for (resource_id, value) in changes {
+        if let Some(value) = value {
+            ids.insert(resource_id.clone());
+            retained.insert(resource_id, value);
+        } else {
+            ids.remove(&resource_id);
+            retained.remove(&resource_id);
+        }
     }
 }
 
@@ -1616,75 +1516,13 @@ fn validate_opacity(opacity: f32) -> Result<(), MediaError> {
     }
 }
 
-enum ResourcePayload<'a> {
-    Texture(&'a TextureFrame),
-    Glyph(&'a GlyphBitmap),
-}
-
-impl ResourcePayload<'_> {
-    fn byte_len(&self) -> usize {
-        match self {
-            Self::Texture(frame) => frame.rgba8.len(),
-            Self::Glyph(glyph) => glyph.pixels.len(),
-        }
-    }
-
-    fn validate(&self) -> Result<(), MediaError> {
-        match self {
-            Self::Texture(frame) => validate_texture(frame),
-            Self::Glyph(glyph) => validate_glyph(glyph),
-        }
-    }
-}
-
 fn validate_resource_payloads(commands: &[DrawCommand]) -> Result<(), MediaError> {
-    const PARALLEL_PAYLOAD_BYTES: usize = 256 * 1024;
-    const MAX_VALIDATION_WORKERS: usize = 4;
-    static VALIDATION_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
-    let mut large = Vec::new();
-    for (index, command) in commands.iter().enumerate() {
-        let payload = match command {
-            DrawCommand::UploadTexture { frame, .. } => ResourcePayload::Texture(frame),
-            DrawCommand::UploadGlyph { glyph, .. } => ResourcePayload::Glyph(glyph),
-            _ => continue,
-        };
-        if payload.byte_len() >= PARALLEL_PAYLOAD_BYTES {
-            large.push((index, payload));
-        } else {
-            payload.validate()?;
+    for command in commands {
+        match command {
+            DrawCommand::UploadTexture { frame, .. } => validate_texture(frame)?,
+            DrawCommand::UploadGlyph { glyph, .. } => validate_glyph(glyph)?,
+            _ => {}
         }
-    }
-    if large.len() <= 1 {
-        return large
-            .into_iter()
-            .try_for_each(|(_, payload)| payload.validate());
-    }
-    let worker_count = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-        .min(MAX_VALIDATION_WORKERS)
-        .min(large.len());
-    if worker_count <= 1 {
-        return large
-            .into_iter()
-            .try_for_each(|(_, payload)| payload.validate());
-    }
-    let pool = VALIDATION_POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(MAX_VALIDATION_WORKERS)
-            .thread_name(|index| format!("astra-resource-validation-{index}"))
-            .build()
-            .expect("bounded resource-validation pool must initialize")
-    });
-    let mut failures = pool.install(|| {
-        large
-            .par_iter()
-            .filter_map(|(index, payload)| payload.validate().err().map(|error| (*index, error)))
-            .collect::<Vec<_>>()
-    });
-    failures.sort_by_key(|(index, _)| *index);
-    if let Some((_, error)) = failures.into_iter().next() {
-        return Err(error);
     }
     Ok(())
 }
@@ -1711,7 +1549,7 @@ fn validate_texture_dimensions(
 }
 
 fn validate_texture(frame: &TextureFrame) -> Result<(), MediaError> {
-    validate_rgba8_payload(frame.width, frame.height, &frame.rgba8, frame.hash)
+    validate_texture_metadata(frame)
 }
 
 fn validate_glyph_metadata(glyph: &GlyphBitmap) -> Result<(), MediaError> {
@@ -1741,57 +1579,7 @@ fn validate_glyph_dimensions(
 }
 
 fn validate_glyph(glyph: &GlyphBitmap) -> Result<(), MediaError> {
-    validate_glyph_metadata(glyph)?;
-    if validated_payload_is_cached(&glyph.pixels, glyph.hash)? {
-        return Ok(());
-    }
-    if Hash256::from_sha256(&glyph.pixels) != glyph.hash {
-        return Err(MediaError::message(
-            "ASTRA_MEDIA_GLYPH_HASH: glyph payload hash mismatch",
-        ));
-    }
-    remember_validated_payload(&glyph.pixels, glyph.hash)
-}
-
-const VALIDATED_PAYLOAD_CACHE_LIMIT: usize = 4096;
-
-struct ValidatedPayloadEntry {
-    bytes: Weak<[u8]>,
-    hash: Hash256,
-}
-
-fn validated_payload_cache() -> &'static Mutex<VecDeque<ValidatedPayloadEntry>> {
-    static CACHE: OnceLock<Mutex<VecDeque<ValidatedPayloadEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(VecDeque::new()))
-}
-
-fn validated_payload_is_cached(bytes: &Arc<[u8]>, hash: Hash256) -> Result<bool, MediaError> {
-    let weak = Arc::downgrade(bytes);
-    let cache = validated_payload_cache().lock().map_err(|_| {
-        MediaError::message("ASTRA_MEDIA_VALIDATION_CACHE_POISONED: payload cache lock failed")
-    })?;
-    Ok(cache
-        .iter()
-        .any(|entry| entry.hash == hash && Weak::ptr_eq(&entry.bytes, &weak)))
-}
-
-fn remember_validated_payload(bytes: &Arc<[u8]>, hash: Hash256) -> Result<(), MediaError> {
-    let weak = Arc::downgrade(bytes);
-    let mut cache = validated_payload_cache().lock().map_err(|_| {
-        MediaError::message("ASTRA_MEDIA_VALIDATION_CACHE_POISONED: payload cache lock failed")
-    })?;
-    cache.retain(|entry| entry.bytes.strong_count() > 0);
-    if cache
-        .iter()
-        .any(|entry| entry.hash == hash && Weak::ptr_eq(&entry.bytes, &weak))
-    {
-        return Ok(());
-    }
-    while cache.len() >= VALIDATED_PAYLOAD_CACHE_LIMIT {
-        cache.pop_front();
-    }
-    cache.push_back(ValidatedPayloadEntry { bytes: weak, hash });
-    Ok(())
+    validate_glyph_metadata(glyph)
 }
 
 fn crop_texture(frame: &TextureFrame, source: RectI) -> Result<TextureFrame, MediaError> {
@@ -1812,12 +1600,7 @@ fn crop_texture(frame: &TextureFrame, source: RectI) -> Result<TextureFrame, Med
         let end = start + source.width as usize * 4;
         rgba8.extend_from_slice(&frame.rgba8[start..end]);
     }
-    Ok(TextureFrame {
-        width: source.width,
-        height: source.height,
-        hash: Hash256::from_sha256(&rgba8),
-        rgba8: rgba8.into(),
-    })
+    TextureFrame::from_vec(source.width, source.height, rgba8)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1832,12 +1615,7 @@ fn draw_solid(
     opacity: f32,
     blend: BlendMode,
 ) -> Result<(), MediaError> {
-    let frame = TextureFrame {
-        width: 1,
-        height: 1,
-        rgba8: rgba.to_vec().into(),
-        hash: Hash256::from_sha256(&rgba),
-    };
+    let frame = TextureFrame::from_vec(1, 1, rgba.to_vec())?;
     draw_texture(
         target,
         target_width,
@@ -1948,12 +1726,7 @@ fn draw_glyph(
             }
         }
     }
-    let frame = TextureFrame {
-        width: glyph.width,
-        height: glyph.height,
-        hash: Hash256::from_sha256(&rgba8),
-        rgba8: rgba8.into(),
-    };
+    let frame = TextureFrame::from_vec(glyph.width, glyph.height, rgba8)?;
     let frame = rotate_texture_clockwise(frame, rotation_quadrants % 4);
     draw_texture(
         target,
@@ -1982,12 +1755,8 @@ fn rotate_texture_clockwise(mut frame: TextureFrame, quadrants: u8) -> TextureFr
                 rotated[target..target + 4].copy_from_slice(&frame.rgba8[source..source + 4]);
             }
         }
-        frame = TextureFrame {
-            width: frame.height,
-            height: frame.width,
-            hash: Hash256::from_sha256(&rotated),
-            rgba8: rotated.into(),
-        };
+        frame = TextureFrame::from_vec(frame.height, frame.width, rotated)
+            .expect("rotating a validated texture preserves its byte dimensions");
     }
     frame
 }
@@ -2324,10 +2093,10 @@ mod tests {
     use super::*;
 
     #[astra_headless_test::test]
-    fn live_texture_buffer_moves_the_pixel_allocation_without_copying() {
+    fn owned_pixel_buffer_moves_the_pixel_allocation_without_copying() {
         let pixels = vec![0x11; 64 * 64 * 4];
         let pointer = pixels.as_ptr();
-        let buffer = LiveTextureBuffer::from_vec(pixels);
+        let buffer = OwnedPixelBuffer::from_vec(pixels);
 
         assert_eq!(buffer.as_slice().as_ptr(), pointer);
         assert_eq!(buffer.len(), 64 * 64 * 4);
@@ -2335,16 +2104,16 @@ mod tests {
     }
 
     #[astra_headless_test::test]
-    fn live_texture_frame_preserves_the_buffer_allocation() {
+    fn texture_frame_preserves_the_buffer_allocation() {
         let pixels = vec![0x22; 8 * 4 * 4];
         let pointer = pixels.as_ptr();
-        let frame = LiveTextureFrame::from_vec(8, 4, pixels).unwrap();
+        let frame = TextureFrame::from_vec(8, 4, pixels).unwrap();
 
         assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
     }
 
     #[astra_headless_test::test]
-    fn retained_validation_tracks_live_texture_metadata_without_pixel_mirror() {
+    fn retained_validation_tracks_owned_texture_without_pixel_mirror() {
         let mut renderer = CpuRendererProvider
             .create(RendererCreateRequest {
                 width: 64,
@@ -2355,12 +2124,12 @@ mod tests {
             .unwrap();
         let pixels = vec![0x33; 16 * 8 * 4];
         let pointer = pixels.as_ptr();
-        let frame = LiveTextureFrame::from_vec(16, 8, pixels).unwrap();
+        let frame = TextureFrame::from_vec(16, 8, pixels).unwrap();
         assert_eq!(frame.rgba8.as_slice().as_ptr(), pointer);
 
         renderer
             .submit_frame(&[
-                SceneCommand::UploadLiveTexture {
+                SceneCommand::UploadTexture {
                     resource_id: "live.main".into(),
                     frame,
                 },
@@ -2377,9 +2146,9 @@ mod tests {
 
         let update = vec![0x44; 4 * 2 * 4];
         let update_pointer = update.as_ptr();
-        let update = LiveTextureBuffer::from_vec(update);
+        let update = OwnedPixelBuffer::from_vec(update);
         renderer
-            .submit_frame(&[SceneCommand::UpdateLiveTextureRegion {
+            .submit_frame(&[SceneCommand::UpdateTextureRegion {
                 resource_id: "live.main".into(),
                 x: 2,
                 y: 3,

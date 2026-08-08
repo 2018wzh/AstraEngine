@@ -18,7 +18,7 @@ astra-vn-core + astra-vn-system
        └─ astra-vn-ui-yakui -> astra-ui-yakui -> yakui-core/widgets
 ```
 
-`astra-ui-core` 只保存可序列化 input、semantic、action、theme、texture 和 mesh DTO。`astra-vn-ui` 保存 VN ViewModel builder、binding resolver、action router 和 Controller host。`astra-ui-yakui` 只做通用 Yakui adapter；`astra-vn-ui-yakui` 实现 Message、Choice、SaveSlot、Backlog、GalleryCard、RouteChart 和 AstraText 等 VN widget。
+`astra-ui-core` 只保存 typed input、semantic、action、theme、texture 和 mesh DTO；live frame 不经过 JSON/postcard，package/Evidence 冷路径才编码对应 persisted DTO。`astra-vn-ui` 保存 VN ViewModel builder、binding resolver、action router 和 Controller host。`astra-ui-yakui` 只做通用 Yakui adapter；`astra-vn-ui-yakui` 实现 Message、Choice、SaveSlot、Backlog、GalleryCard、RouteChart 和 AstraText 等 VN widget。
 
 Yakui、Slint、taffy、wgpu、winit 类型不得从 adapter crate 的 public product contract 泄漏。AstraEMU 使用独立 `astra-emu-manager-ui-slint` adapter；Slint host 持有 winit event loop、surface 和同一套 wgpu 29.0.4 `Device`/`Queue`，family 只输出 renderer-neutral DTO。
 
@@ -42,7 +42,7 @@ pub struct CompiledVnProject {
 
 UI 表达式是受限 typed path，不执行脚本：`$model`、`$item`、`$event`、`$state`。复杂条件由 Rust ViewModel 或 Luau Controller 提前计算。静态可见文案必须使用 localization key；schema 标记的玩家输入、存档命名等动态值可以作为受控文本。
 
-Luau Controller 使用生成的 `.d.luau` 和锁定的官方 `luau-analyze` 全量 typecheck。Controller effect 序列化后才能进入 host。允许 `none/session` state；load、locale/theme/profile generation 变化后按 manifest 重建。
+Luau Controller 使用生成的 `.d.luau` 和锁定的官方 `luau-analyze` 全量 typecheck。Controller effect 以 typed `UiValue` 直接进入 host，不经 JSON/postcard；session state 使用结构化 retained-byte 预算。允许 `none/session` state；load、locale/theme/profile generation 变化后按 manifest 重建。
 
 ## Package 与 target
 
@@ -101,7 +101,7 @@ Dev hot refresh 只允许 Blueprint、Controller 和 Theme。编译失败立即�
 
 ## 可观测性
 
-关键 span 至少包含 provider、target/profile、project hash、view id、session generation、input sequence、semantic hash、render hash、texture bytes、draw/vertex count 和 budget result。不得记录商业文本、玩家输入、clipboard、asset payload、绝对路径或整体 DTO。
+关键 span 至少包含 provider、target/profile、view id、session generation、theme/model revision、input sequence、texture bytes、draw/vertex count 和 budget result。semantic/render digest 只由帧提交后的 Evidence observer 异步生成，不进入 fixed tick 或 presentation budget。不得记录商业文本、玩家输入、clipboard、asset payload、绝对路径或整体 DTO。
 
 ## 验收矩阵
 

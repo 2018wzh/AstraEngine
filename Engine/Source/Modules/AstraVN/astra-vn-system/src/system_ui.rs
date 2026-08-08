@@ -12,18 +12,11 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnSystemUiProfileManifest {
     pub schema: String,
-    pub save_migration: SystemSaveMigrationPolicy,
+    pub save_schema: String,
     pub unlock_sources: Vec<SystemUnlockSourcePolicy>,
     pub localization: SystemLocalizationCoverage,
     pub profiles: BTreeMap<String, SystemUiProfilePolicy>,
     pub declared_system_action_ids: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct SystemSaveMigrationPolicy {
-    pub minimum_supported_schema: String,
-    pub current_schema: String,
-    pub migrator_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -57,12 +50,8 @@ impl VnSystemUiProfileManifest {
             .filter(|command| matches!(command, CompiledCommand::Dialogue { .. }))
             .count();
         Self {
-            schema: "astra.vn.system_ui_profile_manifest.v2".to_string(),
-            save_migration: SystemSaveMigrationPolicy {
-                minimum_supported_schema: "astra.vn.save_slot.v1".to_string(),
-                current_schema: "astra.vn.save_slot.v1".to_string(),
-                migrator_id: "astra.vn.save_slot.identity_migrator.v1".to_string(),
-            },
+            schema: "astra.vn.system_ui_profile_manifest.v3".to_string(),
+            save_schema: "astra.vn.save_slot.v2".to_string(),
             unlock_sources: vec![
                 SystemUnlockSourcePolicy {
                     kind: SystemUnlockKind::Gallery,
@@ -96,23 +85,16 @@ impl VnSystemUiProfileManifest {
             "AstraVN system UI profile validation started"
         );
         let mut diagnostics = Vec::new();
-        if self.schema != "astra.vn.system_ui_profile_manifest.v2" {
+        if self.schema != "astra.vn.system_ui_profile_manifest.v3" {
             diagnostics.push(Diagnostic::blocking(
                 "ASTRA_VN_SYSTEM_UI_PROFILE_SCHEMA",
                 "system UI profile manifest schema is invalid",
             ));
         }
-        if self
-            .save_migration
-            .minimum_supported_schema
-            .trim()
-            .is_empty()
-            || self.save_migration.current_schema.trim().is_empty()
-            || self.save_migration.migrator_id.trim().is_empty()
-        {
+        if self.save_schema != "astra.vn.save_slot.v2" {
             diagnostics.push(Diagnostic::blocking(
-                "ASTRA_VN_SYSTEM_MIGRATION",
-                "system UI profile must declare save migration coverage",
+                "ASTRA_VN_SYSTEM_SAVE_SCHEMA",
+                "system UI profile must bind the current save schema",
             ));
         }
         for kind in [SystemUnlockKind::Gallery, SystemUnlockKind::Replay] {

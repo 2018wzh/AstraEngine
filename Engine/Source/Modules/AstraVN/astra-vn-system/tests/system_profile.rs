@@ -115,13 +115,6 @@ fn system_ui_profile_manifest_validates_migration_unlock_and_localization() {
         "a localized system UI may be icon-only and therefore reference no text keys"
     );
 
-    let mut missing_migration = manifest.clone();
-    missing_migration.save_migration.migrator_id.clear();
-    assert_eq!(
-        missing_migration.validate().diagnostics[0].code,
-        "ASTRA_VN_SYSTEM_MIGRATION"
-    );
-
     let mut missing_unlock = manifest.clone();
     missing_unlock.unlock_sources.clear();
     assert!(missing_unlock

@@ -77,8 +77,7 @@ fn headless_presentation_executor_renders_stage_and_runs_filter_graph() {
     let first = executor.execute(request.clone()).unwrap();
     let second = executor.execute(request).unwrap();
 
-    assert_eq!(first.output_hash, second.output_hash);
-    assert_ne!(first.input_hash, first.output_hash);
+    assert_eq!(first, second);
     assert_eq!(first.renderer_provider, "astra.renderer.headless");
     assert_eq!(first.filter_provider, "astra.media.cpu_filter_executor");
     assert_eq!(first.filter_count, 1);

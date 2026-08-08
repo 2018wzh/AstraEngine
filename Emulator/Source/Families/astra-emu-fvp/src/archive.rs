@@ -9,6 +9,7 @@ use astra_emu_family_core::{
     LegacyPackManifest, LegacyVfsEntry, LegacyVfsSource, LEGACY_PACK_MANIFEST_SCHEMA,
 };
 use encoding_rs::{Encoding, GBK, SHIFT_JIS, UTF_8};
+use sha2::{Digest, Sha256};
 
 use crate::FvpNls;
 
@@ -27,7 +28,7 @@ impl std::fmt::Debug for FvpArchive {
 }
 
 enum ArchiveStorage {
-    Memory(Vec<u8>),
+    Memory(Arc<Vec<u8>>),
     Host {
         reader: Arc<dyn astra_emu_family_api::LegacyVfsReader>,
         mount_set_id: String,
@@ -45,7 +46,6 @@ pub struct FvpArchiveEntry {
     pub name: String,
     pub offset: u64,
     pub size: u64,
-    pub hash: Option<Hash256>,
 }
 
 impl FvpArchive {
@@ -56,16 +56,13 @@ impl FvpArchive {
     ) -> Result<Self, LegacyProviderError> {
         let stat = ByteSourceStat {
             len: bytes.len() as u64,
-            revision: SourceRevision(Hash256::from_sha256(&bytes)),
+            revision: SourceRevision(1),
         };
-        Self::parse_metadata(
-            ArchiveStorage::Memory(bytes.clone()),
-            &bytes,
-            stat,
-            nls,
-            max_entries,
-            true,
-        )
+        let entries = Self::parse_entries(&bytes, stat, nls, max_entries)?;
+        Ok(Self {
+            storage: ArchiveStorage::Memory(Arc::new(bytes)),
+            entries,
+        })
     }
 
     pub fn open_host(
@@ -121,19 +118,16 @@ impl FvpArchive {
                 len: metadata_len as u64,
             },
         )?;
-        Self::parse_metadata(
-            ArchiveStorage::Host {
+        let entries = Self::parse_entries(&metadata, stat, nls, max_entries)?;
+        Ok(Self {
+            storage: ArchiveStorage::Host {
                 reader,
                 mount_set_id,
                 uri,
                 stat,
             },
-            &metadata,
-            stat,
-            nls,
-            max_entries,
-            false,
-        )
+            entries,
+        })
     }
 
     pub fn open_source(
@@ -179,24 +173,19 @@ impl FvpArchive {
                 len: metadata_len as u64,
             },
         )?;
-        Self::parse_metadata(
-            ArchiveStorage::Source { source, stat },
-            &metadata,
-            stat,
-            nls,
-            max_entries,
-            false,
-        )
+        let entries = Self::parse_entries(&metadata, stat, nls, max_entries)?;
+        Ok(Self {
+            storage: ArchiveStorage::Source { source, stat },
+            entries,
+        })
     }
 
-    fn parse_metadata(
-        storage: ArchiveStorage,
+    fn parse_entries(
         bytes: &[u8],
         stat: ByteSourceStat,
         nls: FvpNls,
         max_entries: usize,
-        payloads_available: bool,
-    ) -> Result<Self, LegacyProviderError> {
+    ) -> Result<Vec<FvpArchiveEntry>, LegacyProviderError> {
         if bytes.len() < 8 {
             return Err(error(
                 "ASTRA_FVP_ARCHIVE_HEADER",
@@ -281,21 +270,9 @@ impl FvpArchive {
                     "entry extends beyond the archive",
                 ));
             }
-            let hash = if payloads_available {
-                Some(Hash256::from_sha256(
-                    &bytes[offset as usize..data_end as usize],
-                ))
-            } else {
-                None
-            };
-            entries.push(FvpArchiveEntry {
-                name,
-                offset,
-                size,
-                hash,
-            });
+            entries.push(FvpArchiveEntry { name, offset, size });
         }
-        Ok(Self { storage, entries })
+        Ok(entries)
     }
     pub fn entries(&self) -> &[FvpArchiveEntry] {
         &self.entries
@@ -340,7 +317,7 @@ impl FvpArchive {
         match &self.storage {
             ArchiveStorage::Memory(bytes) => ByteSourceStat {
                 len: bytes.len() as u64,
-                revision: SourceRevision(Hash256::from_sha256(bytes)),
+                revision: SourceRevision(1),
             },
             ArchiveStorage::Host { stat, .. } | ArchiveStorage::Source { stat, .. } => *stat,
         }
@@ -363,15 +340,11 @@ impl FvpArchive {
         folder: &str,
         reader_hash: Hash256,
     ) -> Result<LegacyPackManifest, LegacyProviderError> {
-        let (source_size, source_hash) = match &self.storage {
-            ArchiveStorage::Memory(bytes) => (bytes.len() as u64, Hash256::from_sha256(bytes)),
-            ArchiveStorage::Host { stat, .. } | ArchiveStorage::Source { stat, .. } => {
-                (stat.len, stat.revision.0)
-            }
-        };
+        let (source_size, source_hash) = self.audit_identity()?;
         let mut entries = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
             let bytes = self.read(&entry.name)?;
+            let content_hash = Hash256::from_sha256(&bytes);
             entries.push(LegacyVfsEntry {
                 uri: format!("fvp:/{folder}/{}", entry.name),
                 entry_id: format!("{folder}:{}", entry.name),
@@ -379,8 +352,8 @@ impl FvpArchive {
                 source_offset: entry.offset,
                 stored_size: entry.size,
                 decoded_size: entry.size,
-                source_hash: Hash256::from_sha256(&bytes),
-                content_hash: Some(Hash256::from_sha256(&bytes)),
+                source_hash: content_hash,
+                content_hash: Some(content_hash),
                 method: "raw".into(),
                 media_kind: classify(&bytes).into(),
             });
@@ -411,6 +384,45 @@ impl FvpArchive {
             )
         })?;
         Ok(manifest)
+    }
+
+    fn audit_identity(&self) -> Result<(u64, Hash256), LegacyProviderError> {
+        match &self.storage {
+            ArchiveStorage::Memory(bytes) => {
+                Ok((bytes.len() as u64, Hash256::from_sha256(bytes.as_slice())))
+            }
+            ArchiveStorage::Source { source, stat } => Ok((
+                stat.len,
+                astra_byte_source::audit_source(source.as_ref()).map_err(byte_source_error)?,
+            )),
+            ArchiveStorage::Host {
+                reader,
+                mount_set_id,
+                uri,
+                stat,
+            } => {
+                let mut digest = Sha256::new();
+                let mut offset = 0_u64;
+                while offset < stat.len {
+                    let len = (stat.len - offset).min(astra_byte_source::AUDIT_CHUNK_BYTES as u64);
+                    let bytes = read_host_range(
+                        reader.as_ref(),
+                        mount_set_id,
+                        uri,
+                        *stat,
+                        ByteRange { offset, len },
+                    )?;
+                    digest.update(bytes);
+                    offset = offset.checked_add(len).ok_or_else(|| {
+                        error(
+                            "ASTRA_FVP_ARCHIVE_AUDIT_OVERFLOW",
+                            "archive audit range overflowed",
+                        )
+                    })?;
+                }
+                Ok((stat.len, Hash256::from_bytes(digest.finalize().into())))
+            }
+        }
     }
 }
 
@@ -599,7 +611,7 @@ mod tests {
                 result
                     .map(|archive| {
                         archive.entries().iter().map(|entry| {
-                            (entry.name.clone(), entry.offset, entry.size, entry.hash)
+                            (entry.name.clone(), entry.offset, entry.size)
                         }).collect::<Vec<_>>()
                     })
                     .map_err(|error| error.code().to_owned())

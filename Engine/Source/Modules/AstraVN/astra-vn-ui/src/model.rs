@@ -170,28 +170,57 @@ pub enum VnUiPageModel {
 impl VnUiPageModel {
     pub fn to_ui_value(&self) -> Result<UiValue, UiValidationError> {
         let value = match self {
-            Self::Title { can_continue } => serde_json::json!({ "can_continue": can_continue }),
+            Self::Title { can_continue } => {
+                ui_map([("can_continue", UiValue::Bool(*can_continue))])
+            }
             Self::QuickPanel {
                 auto_enabled,
                 skip_mode,
-            } => serde_json::json!({ "auto_enabled": auto_enabled, "skip_mode": skip_mode }),
-            Self::Config { config } => serde_json::to_value(config).map_err(|error| {
-                UiValidationError::invalid("ASTRA_VN_UI_CONFIG_ENCODE", error.to_string())
-            })?,
-            Self::Save { slots } | Self::Load { slots } => serde_json::json!({ "slots": slots }),
-            Self::Backlog { entries } | Self::VoiceReplay { entries } => {
-                serde_json::json!({ "entries": entries })
-            }
-            Self::Gallery { items } | Self::Replay { items } => {
-                serde_json::json!({ "items": items })
-            }
-            Self::RouteChart { nodes } => serde_json::json!({ "nodes": nodes }),
-            Self::LocalizationPreview { locale, entries } => {
-                serde_json::json!({ "locale": locale, "entries": entries })
-            }
-            Self::TextInput { input } => serde_json::json!({ "input": input }),
+            } => ui_map([
+                ("auto_enabled", UiValue::Bool(*auto_enabled)),
+                (
+                    "skip_mode",
+                    UiValue::String(skip_mode_name(*skip_mode).into()),
+                ),
+            ]),
+            Self::Config { config } => ui_map([("config", config.to_ui_value())]),
+            Self::Save { slots } | Self::Load { slots } => ui_map([(
+                "slots",
+                UiValue::List(slots.iter().map(SaveSlotViewModel::to_ui_value).collect()),
+            )]),
+            Self::Backlog { entries } | Self::VoiceReplay { entries } => ui_map([(
+                "entries",
+                UiValue::List(
+                    entries
+                        .iter()
+                        .map(BacklogEntryViewModel::to_ui_value)
+                        .collect(),
+                ),
+            )]),
+            Self::Gallery { items } | Self::Replay { items } => ui_map([(
+                "items",
+                UiValue::List(items.iter().map(UnlockItemViewModel::to_ui_value).collect()),
+            )]),
+            Self::RouteChart { nodes } => ui_map([(
+                "nodes",
+                UiValue::List(nodes.iter().map(RouteNodeViewModel::to_ui_value).collect()),
+            )]),
+            Self::LocalizationPreview { locale, entries } => ui_map([
+                ("locale", UiValue::String(locale.clone())),
+                (
+                    "entries",
+                    UiValue::List(
+                        entries
+                            .iter()
+                            .map(LocalizationEntryViewModel::to_ui_value)
+                            .collect(),
+                    ),
+                ),
+            ]),
+            Self::TextInput { input } => ui_map([("input", input.to_ui_value())]),
         };
-        model_to_ui_value(&value)
+        value.validate()?;
+        Ok(value)
     }
 }
 
@@ -605,40 +634,198 @@ fn config_bool(
     })
 }
 
-pub fn model_to_ui_value<T: Serialize>(model: &T) -> Result<UiValue, UiValidationError> {
-    let json = serde_json::to_value(model).map_err(|error| {
-        UiValidationError::invalid("ASTRA_VN_UI_MODEL_ENCODE", error.to_string())
-    })?;
-    let value = json_to_ui_value(json)?;
-    value.validate()?;
-    Ok(value)
+impl MessageViewModel {
+    pub fn to_ui_value(&self) -> Result<UiValue, UiValidationError> {
+        let value = ui_map([
+            ("schema", UiValue::String(self.schema.clone())),
+            ("command_id", UiValue::String(self.command_id.clone())),
+            ("text_key", UiValue::String(self.text_key.clone())),
+            ("speaker_key", optional_string(&self.speaker_key)),
+            ("voice_id", optional_string(&self.voice_id)),
+            ("window", optional_string(&self.window)),
+            ("auto_enabled", UiValue::Bool(self.auto_enabled)),
+            (
+                "skip_mode",
+                UiValue::String(skip_mode_name(self.skip_mode).into()),
+            ),
+            (
+                "visible_graphemes",
+                UiValue::Integer(i64::from(self.visible_graphemes)),
+            ),
+            (
+                "text_graphemes",
+                UiValue::Integer(i64::from(self.text_graphemes)),
+            ),
+            ("reveal_complete", UiValue::Bool(self.reveal_complete)),
+        ]);
+        value.validate()?;
+        Ok(value)
+    }
 }
 
-fn json_to_ui_value(value: serde_json::Value) -> Result<UiValue, UiValidationError> {
+impl ChoiceViewModel {
+    pub fn to_ui_value(&self) -> Result<UiValue, UiValidationError> {
+        let value = ui_map([
+            ("schema", UiValue::String(self.schema.clone())),
+            ("choice_id", UiValue::String(self.choice_id.clone())),
+            ("prompt_key", UiValue::String(self.prompt_key.clone())),
+            (
+                "options",
+                UiValue::List(
+                    self.options
+                        .iter()
+                        .map(ChoiceOptionViewModel::to_ui_value)
+                        .collect(),
+                ),
+            ),
+        ]);
+        value.validate()?;
+        Ok(value)
+    }
+}
+
+impl ChoiceOptionViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("option_id", UiValue::String(self.option_id.clone())),
+            ("text_key", UiValue::String(self.text_key.clone())),
+            ("enabled", UiValue::Bool(self.enabled)),
+        ])
+    }
+}
+
+impl SaveSlotViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("slot_id", UiValue::String(self.slot_id.clone())),
+            ("occupied", UiValue::Bool(self.occupied)),
+            ("thumbnail_asset", optional_string(&self.thumbnail_asset)),
+            ("has_thumbnail", UiValue::Bool(self.has_thumbnail)),
+            ("title_key", optional_string(&self.title_key)),
+            ("timestamp_text", optional_string(&self.timestamp_text)),
+            ("playtime_text", optional_string(&self.playtime_text)),
+            ("metadata_text", optional_string(&self.metadata_text)),
+            ("can_write", UiValue::Bool(self.can_write)),
+            ("can_load", UiValue::Bool(self.can_load)),
+            (
+                "migration_status",
+                UiValue::String(self.migration_status.clone()),
+            ),
+        ])
+    }
+}
+
+impl BacklogEntryViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("command_id", UiValue::String(self.command_id.clone())),
+            ("text_key", UiValue::String(self.text_key.clone())),
+            ("speaker_key", optional_string(&self.speaker_key)),
+            ("voice_id", optional_string(&self.voice_id)),
+            ("has_voice", UiValue::Bool(self.has_voice)),
+            ("can_jump", UiValue::Bool(self.can_jump)),
+            ("read", UiValue::Bool(self.read)),
+        ])
+    }
+}
+
+impl UnlockItemViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("item_id", UiValue::String(self.item_id.clone())),
+            ("label_key", UiValue::String(self.label_key.clone())),
+            ("thumbnail_asset", optional_string(&self.thumbnail_asset)),
+            ("has_thumbnail", UiValue::Bool(self.has_thumbnail)),
+            ("unlocked", UiValue::Bool(self.unlocked)),
+        ])
+    }
+}
+
+impl RouteNodeViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("node_id", UiValue::String(self.node_id.clone())),
+            ("label_key", UiValue::String(self.label_key.clone())),
+            ("terminal", UiValue::Bool(self.terminal)),
+            ("reached", UiValue::Bool(self.reached)),
+            ("x_milli", UiValue::Integer(i64::from(self.x_milli))),
+            ("y_milli", UiValue::Integer(i64::from(self.y_milli))),
+        ])
+    }
+}
+
+impl TextInputViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("input_id", UiValue::String(self.input_id.clone())),
+            ("value", UiValue::String(self.value.clone())),
+            ("multiline", UiValue::Bool(self.multiline)),
+            (
+                "max_graphemes",
+                UiValue::Integer(i64::from(self.max_graphemes)),
+            ),
+            (
+                "character_policy",
+                UiValue::String(self.character_policy.clone()),
+            ),
+        ])
+    }
+}
+
+impl ConfigViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("master_volume", UiValue::Integer(self.master_volume)),
+            ("text_speed", UiValue::Integer(self.text_speed)),
+            ("auto_delay_ms", UiValue::Integer(self.auto_delay_ms)),
+            ("high_contrast", UiValue::Bool(self.high_contrast)),
+            ("locale", UiValue::String(self.locale.clone())),
+            (
+                "available_locales",
+                UiValue::List(
+                    self.available_locales
+                        .iter()
+                        .cloned()
+                        .map(UiValue::String)
+                        .collect(),
+                ),
+            ),
+            ("player_name", self.player_name.to_ui_value()),
+        ])
+    }
+}
+
+impl LocalizationEntryViewModel {
+    fn to_ui_value(&self) -> UiValue {
+        ui_map([
+            ("entry_id", UiValue::String(self.entry_id.clone())),
+            ("text_key", UiValue::String(self.text_key.clone())),
+        ])
+    }
+}
+
+fn ui_map<const N: usize>(entries: [(&str, UiValue); N]) -> UiValue {
+    UiValue::Map(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
+}
+
+fn optional_string(value: &Option<String>) -> UiValue {
+    value
+        .as_ref()
+        .cloned()
+        .map(UiValue::String)
+        .unwrap_or(UiValue::Null)
+}
+
+fn skip_mode_name(value: SkipMode) -> &'static str {
     match value {
-        serde_json::Value::Null => Ok(UiValue::Null),
-        serde_json::Value::Bool(value) => Ok(UiValue::Bool(value)),
-        serde_json::Value::Number(value) => value
-            .as_i64()
-            .map(UiValue::Integer)
-            .or_else(|| value.as_f64().map(UiValue::Number))
-            .ok_or_else(|| {
-                UiValidationError::invalid(
-                    "ASTRA_VN_UI_MODEL_NUMBER",
-                    "model number cannot be represented by the UI value contract",
-                )
-            }),
-        serde_json::Value::String(value) => Ok(UiValue::String(value)),
-        serde_json::Value::Array(values) => values
-            .into_iter()
-            .map(json_to_ui_value)
-            .collect::<Result<Vec<_>, _>>()
-            .map(UiValue::List),
-        serde_json::Value::Object(values) => values
-            .into_iter()
-            .map(|(key, value)| Ok((key, json_to_ui_value(value)?)))
-            .collect::<Result<BTreeMap<_, _>, _>>()
-            .map(UiValue::Map),
+        SkipMode::None => "none",
+        SkipMode::Read => "read",
+        SkipMode::All => "all",
     }
 }
 

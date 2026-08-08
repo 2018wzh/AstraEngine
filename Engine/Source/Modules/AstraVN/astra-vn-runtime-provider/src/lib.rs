@@ -3,27 +3,25 @@
 #[cfg(feature = "ffi")]
 use std::sync::OnceLock;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Instant,
 };
 
 #[cfg(feature = "ffi")]
 use abi_stable::std_types::{RString, RVec};
-use astra_core::{Hash128, SchemaVersion};
+use astra_core::SchemaVersion;
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 #[cfg(feature = "ffi")]
 use astra_plugin_abi::{
-    FfiRuntimeAudioBus, FfiRuntimeAudioCommand, FfiRuntimeAudioCommandKind, FfiRuntimeAudioCue,
-    FfiRuntimeAudioEncoding, FfiRuntimeAudioPacket, FfiRuntimeAudioSampleFormat,
-    FfiRuntimeAudioSyncKind, FfiRuntimeBlackboardMutation, FfiRuntimeBlendMode,
-    FfiRuntimeDirtySection, FfiRuntimeEditorMetadataResult, FfiRuntimeEvent,
-    FfiRuntimeInstanceRequest, FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput,
-    FfiRuntimeOpenRequest, FfiRuntimeOpenResult, FfiRuntimePackageSectionsResult,
-    FfiRuntimePcmBuffer, FfiRuntimePersistedOutput, FfiRuntimePrepareRequest,
+    FfiRuntimeAudioBus, FfiRuntimeAudioCommand, FfiRuntimeAudioCue, FfiRuntimeAudioEncoding,
+    FfiRuntimeAudioPacket, FfiRuntimeAudioSampleFormat, FfiRuntimeAudioSync,
+    FfiRuntimeBlackboardMutation, FfiRuntimeBlendMode, FfiRuntimeDirtySection,
+    FfiRuntimeEditorMetadataResult, FfiRuntimeEvent, FfiRuntimeInstanceRequest,
+    FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput, FfiRuntimeOpenRequest, FfiRuntimeOpenResult,
+    FfiRuntimePackageSectionsResult, FfiRuntimePcmBuffer, FfiRuntimePrepareRequest,
     FfiRuntimeProbeRequest, FfiRuntimeProviderRegistration, FfiRuntimeReleaseChecksResult,
     FfiRuntimeReportResult, FfiRuntimeResourceScene, FfiRuntimeResourceTexture,
     FfiRuntimeRestoreRequest, FfiRuntimeRestoreResult, FfiRuntimeSaveRequest, FfiRuntimeSaveResult,
@@ -31,21 +29,20 @@ use astra_plugin_abi::{
     FfiRuntimeScissor, FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeSectionResult,
     FfiRuntimeShutdownRequest, FfiRuntimeShutdownResult, FfiRuntimeStepMode, FfiRuntimeStepRequest,
     FfiRuntimeStepResult, FfiRuntimeTextLease, FfiRuntimeTextPresentation, FfiRuntimeTextRegion,
-    FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand, FfiRuntimeVideoCommandKind,
-    FfiRuntimeVideoMode, FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand, FfiRuntimeVideoMode,
+    FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
     PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata,
     RuntimeExecutorKind, RuntimeLiveAudioBus, RuntimeLiveAudioCue, RuntimeLiveAudioSync,
-    RuntimeLiveCoverage, RuntimeOpenReport, RuntimeOpenRequest, RuntimeOutputDomain,
-    RuntimeOutputSchemaDescriptor, RuntimePackageSectionPlan, RuntimePersistedCodec,
-    RuntimePersistedOutput, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
-    RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeSectionRef, RuntimeShutdownReport, RuntimeStepInput,
-    RuntimeStepMode, RuntimeStepOutput, RuntimeTickIntegrityMode, GAME_RUNTIME_PROVIDER_SLOT,
-    NATIVE_VN_PROVIDER_ID, NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
+    RuntimeLiveCoverage, RuntimeOpenReport, RuntimeOpenRequest, RuntimePackageSectionPlan,
+    RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
+    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeSectionRef,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput,
+    RuntimeTickIntegrityMode, GAME_RUNTIME_PROVIDER_SLOT, NATIVE_VN_PROVIDER_ID,
+    NATIVE_VN_RUNTIME_ID, RUNTIME_EDITOR_METADATA_SCHEMA,
 };
 #[cfg(feature = "ffi")]
 use astra_plugin_abi::{
@@ -59,10 +56,9 @@ use astra_runtime::{
     ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
     ActionTrace, ActorId, BlackboardValue, ComponentId, ComponentRecord,
     DeterministicActionContext, EventPayload, GuardExpr, OrderedTickIngress, PackageHandle,
-    PlayerInput, PresentationCommand as RuntimePresentationCommand, RuntimeAction,
-    RuntimeComponentPayload, RuntimeConfig, RuntimeError, RuntimeEvent, RuntimeSnapshot,
-    RuntimeWorld, SaveBlob, SaveRequest, StateDefinition, StateMachineDefinition, TickIngress,
-    TickInput, TickIntegrityMode, TickRequest, TransitionDefinition,
+    PlayerInput, RuntimeAction, RuntimeComponentPayload, RuntimeConfig, RuntimeError,
+    RuntimeSnapshot, RuntimeWorld, SaveBlob, SaveRequest, StateDefinition, StateMachineDefinition,
+    TickIngress, TickInput, TickIntegrityMode, TickRequest, TransitionDefinition,
 };
 pub use astra_vn_core::*;
 use astra_vn_core::{
@@ -73,8 +69,6 @@ use astra_vn_core::{
 pub use astra_vn_editor::*;
 pub use astra_vn_package::*;
 pub use astra_vn_save::*;
-
-const VN_DISABLED_STATE_HASH: Hash128 = Hash128::from_bytes([0; 16]);
 
 #[derive(Default)]
 pub struct NativeVnRuntimeProvider {
@@ -232,19 +226,6 @@ impl ProductRuntimeSession for NativeVnProviderSession {
     }
 }
 
-fn output_schema(
-    domain: RuntimeOutputDomain,
-    schema: &str,
-    major: u16,
-) -> RuntimeOutputSchemaDescriptor {
-    RuntimeOutputSchemaDescriptor {
-        domain,
-        schema: schema.to_string(),
-        version: SchemaVersion::new(major, 0, 0),
-        codec: RuntimePersistedCodec::Postcard,
-    }
-}
-
 impl ProductRuntimeProvider for NativeVnRuntimeProvider {
     fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
         Ok(NativeVnRuntimeProvider::descriptor())
@@ -331,69 +312,26 @@ impl ProductRuntimeProvider for NativeVnRuntimeProvider {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct NativeVnStepEffect {
-    coverage_reached: std::collections::BTreeSet<String>,
-    state_hash_before_advance: String,
-    state_hash_after_advance: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct NativeVnStepTrace {
-    runtime_state_hash: String,
-    runtime_event_hash: String,
-    runtime_presentation_hash: String,
-}
-
 struct NativeVnSession {
     world: RuntimeWorld,
     owner: ActorId,
-    vn_component: ComponentId,
     compiled: Arc<CoreCompiledStory>,
     runtime_index: Arc<CoreVnRuntimeIndex>,
-    output: Arc<Mutex<Option<VnStepOutput>>>,
-    state_cache: Arc<Mutex<Option<VnStepStateCache>>>,
-    step_complexity: Arc<Mutex<Option<VnStepComplexityMetrics>>>,
+    state: VnRuntimeState,
+    pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
+    control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
+    step_complexity: Option<VnStepComplexityMetrics>,
 }
 
 struct VnStepAction {
-    owner: ActorId,
-    component: ComponentId,
-    compiled: Arc<CoreCompiledStory>,
-    runtime_index: Arc<CoreVnRuntimeIndex>,
-    output: Arc<Mutex<Option<VnStepOutput>>>,
-    state_cache: Arc<Mutex<Option<VnStepStateCache>>>,
-    step_complexity: Arc<Mutex<Option<VnStepComplexityMetrics>>>,
+    pending_control: Arc<Mutex<Option<PreparedVnControl>>>,
+    control_result: Arc<Mutex<Option<astra_runtime::AwaitTokenId>>>,
 }
 
 #[derive(Clone)]
-struct VnStepStateCache {
-    state_hash: Hash128,
-    state: VnRuntimeState,
-}
-
-const VN_RUNTIME_HOT_STATE_SCHEMA: &str = "astra.vn.runtime_hot_state.v3";
-const VN_RUNTIME_HISTORY_CHUNK_SCHEMA: &str = "astra.vn.runtime_history_chunk.v3";
-const VN_HISTORY_CHUNK_CAPACITY: usize = 64;
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct VnRuntimeHotStateV3 {
-    schema: String,
-    state: VnRuntimeState,
-    read_state_bits: Vec<u64>,
-    route_coverage_bits: Vec<u64>,
-    backlog_count: usize,
-    tail_chunk: ComponentId,
-    backlog_root: Hash128,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct VnRuntimeHistoryChunkV3 {
-    schema: String,
-    previous: Option<ComponentId>,
-    previous_root: Hash128,
-    entries: Vec<astra_vn_core::BacklogEntry>,
-    root: Hash128,
+struct PreparedVnControl {
+    events: Vec<(String, String)>,
+    create_wait: Option<astra_runtime::AwaitKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -417,157 +355,8 @@ pub struct VnStepComplexityMetrics {
     pub mutation_journal_entries: usize,
 }
 
-fn empty_backlog_root() -> Hash128 {
-    Hash128::from_blake3(b"astra.vn.backlog.root.v3")
-}
-
-fn backlog_chunk_root(
-    previous_root: Hash128,
-    entries: &[astra_vn_core::BacklogEntry],
-) -> Result<Hash128, CoreVnError> {
-    Ok(Hash128::from_blake3(&postcard::to_allocvec(&(
-        "astra.vn.backlog.chunk.v3",
-        previous_root,
-        entries,
-    ))?))
-}
-
-fn hot_state_from_runtime(
-    state: &VnRuntimeState,
-    index: &CoreVnRuntimeIndex,
-    tail_chunk: ComponentId,
-    backlog_root: Hash128,
-) -> Result<VnRuntimeHotStateV3, CoreVnError> {
-    let mut hot = state.clone();
-    hot.backlog.clear();
-    hot.read_state.clear();
-    hot.voice_replay.clear();
-    hot.route_coverage.clear();
-    Ok(VnRuntimeHotStateV3 {
-        schema: VN_RUNTIME_HOT_STATE_SCHEMA.to_string(),
-        state: hot,
-        read_state_bits: index.encode_read_state(&state.read_state)?,
-        route_coverage_bits: index.encode_route_coverage(&state.route_coverage)?,
-        backlog_count: state.backlog.len(),
-        tail_chunk,
-        backlog_root,
-    })
-}
-
-fn validate_hot_state(hot: &VnRuntimeHotStateV3) -> Result<(), CoreVnError> {
-    if hot.schema != VN_RUNTIME_HOT_STATE_SCHEMA
-        || !hot.state.backlog.is_empty()
-        || !hot.state.read_state.is_empty()
-        || !hot.state.voice_replay.is_empty()
-        || !hot.state.route_coverage.is_empty()
-    {
-        return Err(CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_HOT_STATE_INVALID",
-            "VN hot state contains an invalid schema or duplicated cold history",
-        ));
-    }
-    Ok(())
-}
-
-fn materialize_runtime_state(
-    hot: &VnRuntimeHotStateV3,
-    index: &CoreVnRuntimeIndex,
-    mut read_chunk: impl FnMut(ComponentId) -> Result<VnRuntimeHistoryChunkV3, CoreVnError>,
-) -> Result<VnRuntimeState, CoreVnError> {
-    validate_hot_state(hot)?;
-    let mut chunk_id = Some(hot.tail_chunk);
-    let mut reversed = Vec::new();
-    let mut visited = BTreeSet::new();
-    while let Some(id) = chunk_id {
-        if !visited.insert(id) {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_CYCLE",
-                "VN history chunk chain contains a cycle",
-            ));
-        }
-        let chunk = read_chunk(id)?;
-        if chunk.schema != VN_RUNTIME_HISTORY_CHUNK_SCHEMA
-            || chunk.entries.len() > VN_HISTORY_CHUNK_CAPACITY
-        {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_CHUNK_INVALID",
-                "VN history chunk schema or entry count is invalid",
-            ));
-        }
-        chunk_id = chunk.previous;
-        reversed.push(chunk);
-    }
-    reversed.reverse();
-    let mut root = empty_backlog_root();
-    let mut backlog = Vec::with_capacity(hot.backlog_count);
-    for chunk in reversed {
-        if chunk.previous_root != root {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_ROOT_MISMATCH",
-                "VN history chunk previous root does not match the chain",
-            ));
-        }
-        let expected = backlog_chunk_root(root, &chunk.entries)?;
-        if chunk.root != expected {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_ROOT_MISMATCH",
-                "VN history chunk root does not match its entries",
-            ));
-        }
-        root = expected;
-        backlog.extend(chunk.entries);
-    }
-    if backlog.len() != hot.backlog_count || root != hot.backlog_root {
-        return Err(CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_HISTORY_ROOT_MISMATCH",
-            "VN hot state does not match the materialized history chain",
-        ));
-    }
-    let mut state = hot.state.clone();
-    state.backlog = backlog;
-    state.read_state = index.decode_read_state(&hot.read_state_bits)?;
-    state.route_coverage = index.decode_route_coverage(&hot.route_coverage_bits)?;
-    state.voice_replay = state
-        .backlog
-        .iter()
-        .filter_map(|entry| {
-            entry.voice.as_ref().map(|voice| {
-                (
-                    voice.clone(),
-                    astra_vn_core::VoiceReplayEntry {
-                        voice: voice.clone(),
-                        line_key: entry.key.clone(),
-                        speaker: entry.speaker.clone(),
-                    },
-                )
-            })
-        })
-        .collect();
-    Ok(state)
-}
-
 fn materialize_session_state(session: &NativeVnSession) -> Result<VnRuntimeState, CoreVnError> {
-    if let Some(state) = session
-        .state_cache
-        .lock()
-        .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?
-        .as_ref()
-        .map(|cached| cached.state.clone())
-    {
-        return Ok(state);
-    }
-    let bytes = session
-        .world
-        .read_component_postcard_bytes(session.vn_component)
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
-    let hot: VnRuntimeHotStateV3 = postcard::from_bytes(&bytes)
-        .map_err(|error| CoreVnError::message(format!("decode VN hot runtime state: {error}")))?;
-    materialize_runtime_state(&hot, &session.runtime_index, |component_id| {
-        session
-            .world
-            .read_component(component_id)
-            .map_err(|error| CoreVnError::message(error.to_string()))
-    })
+    Ok(session.state.clone())
 }
 
 fn materialized_save_snapshot(session: &NativeVnSession) -> Result<RuntimeSnapshot, CoreVnError> {
@@ -580,12 +369,11 @@ fn materialized_save_snapshot(session: &NativeVnSession) -> Result<RuntimeSnapsh
             break candidate;
         }
     };
-    let payload = RuntimeComponentPayload::postcard(
+    let payload = RuntimeComponentPayload::typed(
         VN_RUNTIME_STATE_SCHEMA,
         SchemaVersion::new(VN_RUNTIME_STATE_SCHEMA_MAJOR, 0, 0),
-        &state,
-    )
-    .map_err(|error| CoreVnError::message(error.to_string()))?;
+        state,
+    );
     if !snapshot.actors.attach_component(ComponentRecord {
         component_id,
         actor_id: session.owner,
@@ -625,13 +413,6 @@ fn consume_materialized_restore_state(
             "materialized VN restore state could not be removed after validation",
         ));
     }
-    let hot_state = materialize_session_state(session)?;
-    if state != hot_state {
-        return Err(CoreVnError::diagnostic(
-            "ASTRA_NATIVE_VN_RESTORE_STATE_MISMATCH",
-            "materialized VN state does not match the hot/cold Runtime state",
-        ));
-    }
     Ok(state)
 }
 
@@ -640,20 +421,12 @@ fn replace_session_state(
     state: VnRuntimeState,
 ) -> Result<(), CoreVnError> {
     let checkpoint = session.world.snapshot();
-    let cached = session
-        .state_cache
-        .lock()
-        .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?
-        .clone();
+    let cached = session.state.clone();
     match replace_session_state_inner(session, state) {
         Ok(()) => Ok(()),
         Err(error) => {
             session.world.restore_snapshot(checkpoint);
-            *session
-                .state_cache
-                .lock()
-                .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? =
-                cached;
+            session.state = cached;
             Err(error)
         }
     }
@@ -663,91 +436,12 @@ fn replace_session_state_inner(
     session: &mut NativeVnSession,
     state: VnRuntimeState,
 ) -> Result<(), CoreVnError> {
-    let old_hot: VnRuntimeHotStateV3 = session
-        .world
-        .read_component(session.vn_component)
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
-    validate_hot_state(&old_hot)?;
-    let mut chunk_id = Some(old_hot.tail_chunk);
-    let mut old_chunks = Vec::new();
-    let mut visited = BTreeSet::new();
-    while let Some(id) = chunk_id {
-        if !visited.insert(id) {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_CYCLE",
-                "VN history chunk chain contains a cycle",
-            ));
-        }
-        let chunk: VnRuntimeHistoryChunkV3 = session
-            .world
-            .read_component(id)
-            .map_err(|error| CoreVnError::message(error.to_string()))?;
-        chunk_id = chunk.previous;
-        old_chunks.push(id);
-    }
-
-    let mut previous = None;
-    let mut previous_root = empty_backlog_root();
-    let mut tail = None;
-    if state.backlog.is_empty() {
-        let root = backlog_chunk_root(previous_root, &[])?;
-        let chunk = VnRuntimeHistoryChunkV3 {
-            schema: VN_RUNTIME_HISTORY_CHUNK_SCHEMA.to_string(),
-            previous,
-            previous_root,
-            entries: vec![],
-            root,
-        };
-        tail = Some(
-            session
-                .world
-                .attach_component(session.owner, VN_RUNTIME_HISTORY_CHUNK_SCHEMA, &chunk)
-                .map_err(|error| CoreVnError::message(error.to_string()))?,
-        );
-        previous_root = root;
-    } else {
-        for entries in state.backlog.chunks(VN_HISTORY_CHUNK_CAPACITY) {
-            let root = backlog_chunk_root(previous_root, entries)?;
-            let chunk = VnRuntimeHistoryChunkV3 {
-                schema: VN_RUNTIME_HISTORY_CHUNK_SCHEMA.to_string(),
-                previous,
-                previous_root,
-                entries: entries.to_vec(),
-                root,
-            };
-            let id = session
-                .world
-                .attach_component(session.owner, VN_RUNTIME_HISTORY_CHUNK_SCHEMA, &chunk)
-                .map_err(|error| CoreVnError::message(error.to_string()))?;
-            previous = Some(id);
-            tail = Some(id);
-            previous_root = root;
-        }
-    }
-    let hot = hot_state_from_runtime(
-        &state,
-        &session.runtime_index,
-        tail.expect("history installation always creates a tail chunk"),
-        previous_root,
+    CoreVnRuntime::from_shared_state_indexed(
+        Arc::clone(&session.compiled),
+        Arc::clone(&session.runtime_index),
+        state.clone(),
     )?;
-    session
-        .world
-        .replace_component(session.vn_component, &hot)
-        .map_err(|error| CoreVnError::message(error.to_string()))?;
-    for id in old_chunks {
-        if !session.world.detach_component(id) {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_NATIVE_VN_HISTORY_DETACH_FAILED",
-                "VN history chunk disappeared during save-slot replacement",
-            ));
-        }
-    }
-    let state_hash = Hash128::from_blake3(&postcard::to_allocvec(&hot)?);
-    *session
-        .state_cache
-        .lock()
-        .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? =
-        Some(VnStepStateCache { state_hash, state });
+    session.state = state;
     Ok(())
 }
 
@@ -765,42 +459,13 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
     ) -> Result<VnRuntimeStorageMetrics, CoreVnError> {
         let session = self.session(session_id)?;
-        let hot_bytes = session
-            .world
-            .read_component_postcard_bytes(session.vn_component)
-            .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let hot: VnRuntimeHotStateV3 = postcard::from_bytes(&hot_bytes)
-            .map_err(|error| CoreVnError::message(format!("decode VN hot state: {error}")))?;
-        validate_hot_state(&hot)?;
-        let mut chunk_count = 0_usize;
-        let mut chunk_id = Some(hot.tail_chunk);
-        let mut visited = BTreeSet::new();
-        let mut tail_chunk_bytes = 0_usize;
-        while let Some(id) = chunk_id {
-            if !visited.insert(id) {
-                return Err(CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_HISTORY_CYCLE",
-                    "VN history chunk chain contains a cycle",
-                ));
-            }
-            let bytes = session
-                .world
-                .read_component_postcard_bytes(id)
-                .map_err(|error| CoreVnError::message(error.to_string()))?;
-            if chunk_count == 0 {
-                tail_chunk_bytes = bytes.len();
-            }
-            let chunk: VnRuntimeHistoryChunkV3 = postcard::from_bytes(&bytes)
-                .map_err(|error| CoreVnError::message(format!("decode VN history: {error}")))?;
-            chunk_id = chunk.previous;
-            chunk_count += 1;
-        }
+        let backlog_count = materialize_session_state(session)?.backlog.len();
         Ok(VnRuntimeStorageMetrics {
-            schema: "astra.vn.runtime_storage_metrics.v3".to_string(),
-            backlog_count: hot.backlog_count,
-            history_chunk_count: chunk_count,
-            hot_state_bytes: hot_bytes.len(),
-            tail_chunk_bytes,
+            schema: "astra.vn.runtime_storage_metrics.v4".to_string(),
+            backlog_count,
+            history_chunk_count: 0,
+            hot_state_bytes: 0,
+            tail_chunk_bytes: 0,
         })
     }
 
@@ -810,8 +475,6 @@ impl NativeVnRuntimeProvider {
     ) -> Result<VnStepComplexityMetrics, CoreVnError> {
         self.session(session_id)?
             .step_complexity
-            .lock()
-            .map_err(|_| CoreVnError::message("VN step complexity lock is poisoned"))?
             .clone()
             .ok_or_else(|| {
                 CoreVnError::diagnostic(
@@ -830,30 +493,6 @@ impl NativeVnRuntimeProvider {
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: native_vn_package_sections(),
             release_checks: native_vn_release_check_ids(),
-            output_schemas: vec![
-                output_schema(
-                    RuntimeOutputDomain::Effect,
-                    "astra.vn.runtime_step_effect.v2",
-                    2,
-                ),
-                output_schema(
-                    RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v2",
-                    2,
-                ),
-                output_schema(RuntimeOutputDomain::Audio, "astra.vn.audio_command.v2", 2),
-                output_schema(RuntimeOutputDomain::Effect, "astra.vn.timeline_task.v1", 1),
-                output_schema(
-                    RuntimeOutputDomain::Trace,
-                    "astra.vn.runtime_step_trace.v1",
-                    1,
-                ),
-                output_schema(
-                    RuntimeOutputDomain::Trace,
-                    VN_RUNTIME_VIEW_STATE_SCHEMA,
-                    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
-                ),
-            ],
         }
     }
 
@@ -956,48 +595,17 @@ impl NativeVnRuntimeProvider {
             .map_err(|error| CoreVnError::message(error.to_string()))?;
         let owner = world.create_actor("astra.vn.runtime", vec!["gameplay_runtime".to_string()]);
         let initial_state = initial_runtime.state().clone();
-        let empty_previous_root = empty_backlog_root();
-        let empty_root = backlog_chunk_root(empty_previous_root, &[])?;
-        let initial_chunk = VnRuntimeHistoryChunkV3 {
-            schema: VN_RUNTIME_HISTORY_CHUNK_SCHEMA.to_string(),
-            previous: None,
-            previous_root: empty_previous_root,
-            entries: Vec::new(),
-            root: empty_root,
-        };
-        let tail_chunk = world
-            .attach_component(owner, VN_RUNTIME_HISTORY_CHUNK_SCHEMA, &initial_chunk)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let initial_hot =
-            hot_state_from_runtime(&initial_state, &runtime_index, tail_chunk, empty_root)?;
-        let vn_component = world
-            .attach_component(owner, VN_RUNTIME_HOT_STATE_SCHEMA, &initial_hot)
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
         world
             .attach_component(owner, "astra.vn.policy_state.v1", &VnPolicyState::default())
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let output = Arc::new(Mutex::new(None));
-        let initial_state_hash = if integrity_mode == TickIntegrityMode::Evidence {
-            Hash128::from_blake3(&postcard::to_allocvec(&initial_hot)?)
-        } else {
-            VN_DISABLED_STATE_HASH
-        };
-        let state_cache = Arc::new(Mutex::new(Some(VnStepStateCache {
-            state_hash: initial_state_hash,
-            state: initial_state,
-        })));
-        let step_complexity = Arc::new(Mutex::new(None));
+        let pending_control = Arc::new(Mutex::new(None));
+        let control_result = Arc::new(Mutex::new(None));
         world
             .register_action(
                 NATIVE_VN_PROVIDER_ID,
                 VnStepAction {
-                    owner,
-                    component: vn_component,
-                    compiled: Arc::clone(&compiled),
-                    runtime_index: Arc::clone(&runtime_index),
-                    output: Arc::clone(&output),
-                    state_cache: Arc::clone(&state_cache),
-                    step_complexity: Arc::clone(&step_complexity),
+                    pending_control: Arc::clone(&pending_control),
+                    control_result: Arc::clone(&control_result),
                 },
             )
             .map_err(|err| CoreVnError::message(err.to_string()))?;
@@ -1037,12 +645,12 @@ impl NativeVnRuntimeProvider {
             NativeVnSession {
                 world,
                 owner,
-                vn_component,
                 compiled,
                 runtime_index,
-                output,
-                state_cache,
-                step_complexity,
+                state: initial_state,
+                pending_control,
+                control_result,
+                step_complexity: None,
             },
         );
         Ok(RuntimeOpenReport {
@@ -1104,28 +712,59 @@ impl NativeVnRuntimeProvider {
         mode: RuntimeStepMode,
     ) -> Result<RuntimeStepOutput, CoreVnError> {
         let session = self.session_mut(&session_id)?;
-        *session
-            .output
-            .lock()
-            .map_err(|_| CoreVnError::message("VN step output lock is poisoned"))? = None;
         let event_kind = vn_event_kind(&command).to_string();
-        let cached_command_state = session
-            .state_cache
-            .lock()
-            .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?
-            .as_ref()
-            .map(|cached| {
-                (
-                    cached.state.pending_wait.clone(),
-                    cached.state.system.reading_mode,
-                )
-            });
-        let (pending_wait, reading_mode) = if let Some(cached) = cached_command_state {
-            cached
+        let previous_state = session.state.clone();
+        let pending_wait = previous_state.pending_wait.clone();
+        let reading_mode = previous_state.system.reading_mode;
+        let previous_backlog_count = previous_state.backlog.len();
+        let previous_wait = previous_state.pending_wait.clone();
+        let (mut next_state, mut pending_output) = astra_vn_core::reduce_vn_step_indexed_pending(
+            Arc::clone(&session.compiled),
+            Arc::clone(&session.runtime_index),
+            previous_state,
+            command.clone(),
+        )?;
+        if next_state.backlog.len() < previous_backlog_count {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_HISTORY_TRUNCATION",
+                "VN reducer attempted to truncate append-only backlog history",
+            ));
+        }
+        let next_revision = next_state.revision.checked_add(1).ok_or_else(|| {
+            CoreVnError::message("VN state revision exhausted its deterministic range")
+        })?;
+        next_state.revision = next_revision;
+        let create_wait = if next_state.pending_wait != previous_wait {
+            next_state.pending_wait.as_ref().and_then(|wait| {
+                let has_runtime_await_id = wait
+                    .await_id
+                    .as_deref()
+                    .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok());
+                (!has_runtime_await_id)
+                    .then(|| astra_runtime::AwaitKind::Custom(format!("vn.{:?}", wait.kind)))
+            })
         } else {
-            let state = materialize_session_state(session)?;
-            (state.pending_wait, state.system.reading_mode)
+            None
         };
+        if let Some(wait) = next_state.pending_wait.clone() {
+            pending_output.set_wait(wait);
+        }
+        let control = PreparedVnControl {
+            events: pending_output
+                .events()
+                .iter()
+                .map(|event| (event.kind.clone(), event.id.clone()))
+                .collect(),
+            create_wait,
+        };
+        *session
+            .pending_control
+            .lock()
+            .map_err(|_| CoreVnError::message("VN control lock is poisoned"))? = Some(control);
+        *session
+            .control_result
+            .lock()
+            .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))? = None;
         let mut ingress = Vec::new();
         if command_resolves_wait(
             &command,
@@ -1187,56 +826,71 @@ impl NativeVnRuntimeProvider {
                 diagnostic.message.clone(),
             ));
         }
-        let output = session
-            .output
+        if let Some(token_id) = session
+            .control_result
             .lock()
-            .map_err(|_| CoreVnError::message("VN step output lock is poisoned"))?
+            .map_err(|_| CoreVnError::message("VN control result lock is poisoned"))?
             .take()
-            .ok_or_else(|| {
+        {
+            let wait = next_state.pending_wait.as_mut().ok_or_else(|| {
                 CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_STEP_OUTPUT_MISSING",
-                    "astra.vn.step did not produce an output",
+                    "ASTRA_NATIVE_VN_AWAIT_STATE_MISSING",
+                    "Runtime created an await token without VN wait state",
                 )
             })?;
-        let runtime_view_state = {
-            let cache = session
-                .state_cache
-                .lock()
-                .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))?;
-            let cached = cache.as_ref().ok_or_else(|| {
-                CoreVnError::diagnostic(
-                    "ASTRA_NATIVE_VN_VIEW_STATE_MISSING",
-                    "VN step did not retain its validated state for the Player view",
-                )
-            })?;
-            runtime_view_state(&cached.state, cached.state_hash)
-        };
-        let mut media = Vec::with_capacity(output.presentation.len() + output.audio.len());
-        let mut audio_cues = Vec::with_capacity(output.audio.len());
-        let mut audio = output.audio.iter();
-        for (presentation_index, command) in output.presentation.iter().enumerate() {
+            let runtime_await_id = token_id.0.to_string();
+            wait.await_id = Some(runtime_await_id.clone());
+            pending_output.set_wait(wait.clone());
+            pending_output.push_await(runtime_await_id);
+        }
+        if next_state.pending_wait != previous_wait
+            && next_state.pending_wait.as_ref().is_some_and(|wait| {
+                wait.await_id
+                    .as_deref()
+                    .is_none_or(|id| astra_core::StableId::parse(id).is_err())
+            })
+        {
+            return Err(CoreVnError::diagnostic(
+                "ASTRA_NATIVE_VN_AWAIT_ID_MISSING",
+                "VN wait was not bound to a Runtime AwaitToken",
+            ));
+        }
+        let appended_backlog_entries = next_state.backlog.len() - previous_backlog_count;
+        let output = pending_output.finalize(next_revision);
+        let mutation_journal_entries = output.mutations.len();
+        session.state = next_state;
+        session.step_complexity = Some(VnStepComplexityMetrics {
+            schema: "astra.vn.step_complexity_metrics.v3".to_string(),
+            previous_backlog_count,
+            appended_backlog_entries,
+            state_cache_hit: true,
+            materialized_history_entries: 0,
+            history_component_writes: 0,
+            encoded_hot_state_bytes: 0,
+            mutation_journal_entries,
+        });
+        let live_vn_state = runtime_live_vn_state(&session.state);
+        let presentation_count = output.presentation.len();
+        let audio_command_count = output.audio.len();
+        let mut presentations = Vec::with_capacity(presentation_count);
+        let mut audio_cues = Vec::with_capacity(audio_command_count);
+        let mut audio = output.audio.into_iter();
+        for (presentation_index, command) in output.presentation.into_iter().enumerate() {
             let sequence = presentation_index
                 .checked_add(1)
                 .and_then(|index| u64::try_from(index).ok())
                 .ok_or_else(|| CoreVnError::message("VN presentation sequence overflow"))?;
-            media.push(
-                RuntimePersistedOutput::postcard(
-                    RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v2",
-                    SchemaVersion::new(2, 0, 0),
-                    command,
-                )
-                .map_err(|err| CoreVnError::message(err.to_string()))?,
-            );
-            if matches!(command, PresentationCommand::Stage(StageCommand::Audio(_))) {
+            let has_audio = matches!(&command, PresentationCommand::Stage(StageCommand::Audio(_)));
+            if has_audio {
                 let audio_command = audio.next().ok_or_else(|| {
                     CoreVnError::diagnostic(
                         "ASTRA_NATIVE_VN_AUDIO_ORDER_MISSING",
                         "typed audio presentation has no matching audio output",
                     )
                 })?;
-                audio_cues.push(runtime_live_audio_cue(sequence, audio_command));
+                audio_cues.push(runtime_live_audio_cue(sequence, &audio_command));
             }
+            presentations.push(runtime_live_presentation(sequence, command));
         }
         if audio.next().is_some() {
             return Err(CoreVnError::diagnostic(
@@ -1246,51 +900,18 @@ impl NativeVnRuntimeProvider {
         }
         let timeline = output
             .timeline_tasks
-            .iter()
-            .map(|task| {
-                RuntimePersistedOutput::postcard(
-                    RuntimeOutputDomain::Effect,
-                    "astra.vn.timeline_task.v1",
-                    SchemaVersion::new(1, 0, 0),
-                    task,
-                )
+            .into_iter()
+            .map(|task| astra_plugin_abi::RuntimeLiveTimelineTask {
+                command_id: task.command_id,
+                command: runtime_live_timeline(task.command),
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| CoreVnError::message(err.to_string()))?;
-        let effects = vec![RuntimePersistedOutput::postcard(
-            RuntimeOutputDomain::Effect,
-            "astra.vn.runtime_step_effect.v2",
-            SchemaVersion::new(2, 0, 0),
-            &NativeVnStepEffect {
-                coverage_reached: output.coverage.reached,
-                state_hash_before_advance: output.state_hash_before_advance.to_string(),
-                state_hash_after_advance: output.state_hash_after_advance.to_string(),
-            },
-        )
-        .map_err(|err| CoreVnError::message(err.to_string()))?];
-        let trace = vec![
-            RuntimePersistedOutput::postcard(
-                RuntimeOutputDomain::Trace,
-                "astra.vn.runtime_step_trace.v1",
-                SchemaVersion::new(1, 0, 0),
-                &NativeVnStepTrace {
-                    runtime_state_hash: tick.state_hash.to_string(),
-                    runtime_event_hash: tick.event_hash.to_string(),
-                    runtime_presentation_hash: tick.presentation_hash.to_string(),
-                },
-            )
-            .map_err(|err| CoreVnError::message(err.to_string()))?,
-            RuntimePersistedOutput::postcard(
-                RuntimeOutputDomain::Trace,
-                VN_RUNTIME_VIEW_STATE_SCHEMA,
-                SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
-                &runtime_view_state,
-            )
-            .map_err(|err| CoreVnError::message(err.to_string()))?,
-        ];
+            .collect();
+        let vn_step = astra_plugin_abi::RuntimeLiveVnStep {
+            coverage_reached: output.coverage.reached.into_iter().collect(),
+        };
         Ok(RuntimeStepOutput {
             session_id,
-            status: if output.presentation.is_empty() {
+            status: if presentation_count == 0 {
                 "idle".to_string()
             } else {
                 "blocked".to_string()
@@ -1298,19 +919,17 @@ impl NativeVnRuntimeProvider {
             live: astra_plugin_abi::RuntimeLiveOutput {
                 state_revision: fixed_step,
                 coverage: RuntimeLiveCoverage {
-                    presentation_commands: output.presentation.len() as u64,
-                    audio_commands: output.audio.len() as u64,
+                    presentation_commands: presentation_count as u64,
+                    audio_commands: audio_command_count as u64,
                     ..RuntimeLiveCoverage::default()
                 },
                 audio_cues,
+                presentations,
+                timeline,
+                vn_state: Some(live_vn_state),
+                vn_step: Some(vn_step),
                 ..astra_plugin_abi::RuntimeLiveOutput::default()
             },
-            persisted: effects
-                .into_iter()
-                .chain(media)
-                .chain(timeline)
-                .chain(trace)
-                .collect(),
             diagnostics: Vec::new(),
         })
     }
@@ -1346,36 +965,15 @@ impl NativeVnRuntimeProvider {
         Ok(self.session(session_id)?.world.snapshot())
     }
 
-    pub fn runtime_hashes(
-        &self,
-        session_id: &GameRuntimeSessionId,
-    ) -> Result<(Hash128, Hash128, Hash128), CoreVnError> {
-        let world = &self.session(session_id)?.world;
-        if world.tick_integrity_mode() == TickIntegrityMode::Shipping {
-            return Ok((
-                VN_DISABLED_STATE_HASH,
-                VN_DISABLED_STATE_HASH,
-                VN_DISABLED_STATE_HASH,
-            ));
-        }
-        Ok((
-            world.state_hash(),
-            world.event_hash(),
-            world.presentation_hash(),
-        ))
-    }
-
     pub fn save_slot(
         &self,
         session_id: &GameRuntimeSessionId,
         slot: impl Into<String>,
     ) -> Result<VnSaveBlob, CoreVnError> {
         let state = self.state(session_id)?;
-        let state_hash = Hash128::from_blake3(&postcard::to_allocvec(&state)?);
         Ok(VnSaveBlob {
-            schema: "astra.vn.save_slot.v1".to_string(),
+            schema: "astra.vn.save_slot.v2".to_string(),
             slot: slot.into(),
-            state_hash,
             state,
         })
     }
@@ -1385,17 +983,10 @@ impl NativeVnRuntimeProvider {
         session_id: &GameRuntimeSessionId,
         save: VnSaveBlob,
     ) -> Result<(), CoreVnError> {
-        if save.schema != "astra.vn.save_slot.v1" {
+        if save.schema != "astra.vn.save_slot.v2" || save.state.schema != VN_RUNTIME_STATE_SCHEMA {
             return Err(CoreVnError::diagnostic(
                 "ASTRA_VN_SAVE_SCHEMA",
                 "AstraVN save slot schema is invalid",
-            ));
-        }
-        let actual_hash = Hash128::from_blake3(&postcard::to_allocvec(&save.state)?);
-        if actual_hash != save.state_hash {
-            return Err(CoreVnError::diagnostic(
-                "ASTRA_VN_SAVE_STATE_HASH",
-                "AstraVN save slot state hash does not match its payload",
             ));
         }
         let session = self.session_mut(session_id)?;
@@ -1444,21 +1035,8 @@ impl NativeVnRuntimeProvider {
             .world
             .load(SaveBlob(runtime_section.bytes.clone()))
             .map_err(|err| CoreVnError::message(err.to_string()))?;
-        *session
-            .state_cache
-            .lock()
-            .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? = None;
         let state = consume_materialized_restore_state(session)?;
-        let bytes = session
-            .world
-            .read_component_postcard_bytes(session.vn_component)
-            .map_err(|error| CoreVnError::message(error.to_string()))?;
-        let state_hash = Hash128::from_blake3(&bytes);
-        *session
-            .state_cache
-            .lock()
-            .map_err(|_| CoreVnError::message("VN step state cache lock is poisoned"))? =
-            Some(VnStepStateCache { state_hash, state });
+        session.state = state;
         let snapshot = session.world.snapshot();
         Ok(RuntimeRestoreReport {
             session_id: request.session_id,
@@ -1814,140 +1392,6 @@ fn command_event_data(command: &CoreVnPlayerCommand) -> BTreeMap<String, Blackbo
     data
 }
 
-fn command_from_event(event: &RuntimeEvent) -> Result<CoreVnPlayerCommand, RuntimeError> {
-    let data = &event.payload.data;
-    let value = |key: &str| -> Result<String, RuntimeError> {
-        match data.get(key) {
-            Some(BlackboardValue::String(value)) => Ok(value.clone()),
-            _ => Err(command_event_error(
-                "ASTRA_VN_STEP_ARGUMENT_MISSING",
-                format!("event {} is missing typed field {key}", event.payload.kind),
-            )),
-        }
-    };
-    let flag = |key: &str| -> Result<bool, RuntimeError> {
-        match data.get(key) {
-            Some(BlackboardValue::Bool(value)) => Ok(*value),
-            _ => Err(command_event_error(
-                "ASTRA_VN_STEP_FLAG_MISSING",
-                format!("event {} is missing typed flag {key}", event.payload.kind),
-            )),
-        }
-    };
-    match event.payload.kind.as_str() {
-        "vn.launch" => Ok(CoreVnPlayerCommand::Launch {
-            story_id: value("story_id")?,
-            state_id: value("state_id")?,
-        }),
-        "player.advance" => Ok(CoreVnPlayerCommand::Advance),
-        "choice.selected" => Ok(CoreVnPlayerCommand::Choose {
-            option_id: value("option_id")?,
-        }),
-        "system.open" => Ok(CoreVnPlayerCommand::OpenSystem {
-            page: event_page(&value("page")?)?,
-        }),
-        "system.switch" => Ok(CoreVnPlayerCommand::SwitchSystemPage {
-            page: event_page(&value("page")?)?,
-        }),
-        "system.return" => Ok(CoreVnPlayerCommand::ReturnSystem),
-        "voice.replay" => Ok(CoreVnPlayerCommand::ReplayVoice {
-            voice: value("voice")?,
-        }),
-        "system.auto" => Ok(CoreVnPlayerCommand::SetAuto {
-            enabled: flag("enabled")?,
-        }),
-        "system.skip" => Ok(CoreVnPlayerCommand::SetSkip {
-            mode: event_skip_mode(&value("mode")?)?,
-        }),
-        "system.reading_mode" => Ok(CoreVnPlayerCommand::SetReadingMode {
-            mode: event_reading_mode(&value("mode")?)?,
-        }),
-        "system.audio_enabled" => Ok(CoreVnPlayerCommand::SetAudioEnabled {
-            enabled: flag("enabled")?,
-        }),
-        "system.action" => Ok(CoreVnPlayerCommand::InvokeSystemAction {
-            action_id: value("action_id")?,
-        }),
-        "system.config" => Ok(CoreVnPlayerCommand::SetConfig {
-            key: value("key")?,
-            value: value("value")?,
-        }),
-        "system.replay.start" => Ok(CoreVnPlayerCommand::StartReplay {
-            replay_id: value("replay_id")?,
-        }),
-        "system.gallery.preview" => Ok(CoreVnPlayerCommand::PreviewGallery {
-            item_id: value("item_id")?,
-        }),
-        "system.route.jump" => Ok(CoreVnPlayerCommand::JumpRoute {
-            node_id: value("node_id")?,
-        }),
-        "system.backlog.jump" => Ok(CoreVnPlayerCommand::JumpBacklog {
-            command_id: value("command_id")?,
-        }),
-        "system.text.submit" => Ok(CoreVnPlayerCommand::SubmitText {
-            input_id: value("input_id")?,
-            value: value("value")?,
-        }),
-        "system.unlock" => Ok(CoreVnPlayerCommand::Unlock {
-            kind: event_unlock_kind(&value("kind")?)?,
-            id: value("id")?,
-        }),
-        "await.completed" => Ok(CoreVnPlayerCommand::CompleteWait {
-            fence: value("fence")?,
-        }),
-        other => Err(command_event_error(
-            "ASTRA_VN_STEP_EVENT_UNKNOWN",
-            format!("unsupported typed VN event {other}"),
-        )),
-    }
-}
-
-fn command_event_error(code: &str, message: String) -> RuntimeError {
-    RuntimeError::diagnostic(astra_core::Diagnostic::blocking(code, message))
-}
-
-fn event_page(value: &str) -> Result<SystemPageKind, RuntimeError> {
-    let page = SystemPageKind::parse(value);
-    (page != SystemPageKind::Unknown)
-        .then_some(page)
-        .ok_or_else(|| command_event_error("ASTRA_VN_STEP_PAGE_UNKNOWN", value.to_string()))
-}
-
-fn event_skip_mode(value: &str) -> Result<SkipMode, RuntimeError> {
-    match value {
-        "none" => Ok(SkipMode::None),
-        "read" => Ok(SkipMode::Read),
-        "all" => Ok(SkipMode::All),
-        _ => Err(command_event_error(
-            "ASTRA_VN_STEP_SKIP_MODE_UNKNOWN",
-            value.to_string(),
-        )),
-    }
-}
-
-fn event_reading_mode(value: &str) -> Result<ReadingMode, RuntimeError> {
-    match value {
-        "hidden" => Ok(ReadingMode::Hidden),
-        "manual" => Ok(ReadingMode::Manual),
-        "fast_forward" => Ok(ReadingMode::FastForward),
-        _ => Err(command_event_error(
-            "ASTRA_VN_STEP_READING_MODE_UNKNOWN",
-            value.to_string(),
-        )),
-    }
-}
-
-fn event_unlock_kind(value: &str) -> Result<SystemUnlockKind, RuntimeError> {
-    match value {
-        "gallery" => Ok(SystemUnlockKind::Gallery),
-        "replay" => Ok(SystemUnlockKind::Replay),
-        _ => Err(command_event_error(
-            "ASTRA_VN_STEP_UNLOCK_KIND_UNKNOWN",
-            value.to_string(),
-        )),
-    }
-}
-
 fn page_name(page: SystemPageKind) -> &'static str {
     match page {
         SystemPageKind::Title => "title",
@@ -1989,54 +1433,159 @@ fn unlock_kind_name(kind: SystemUnlockKind) -> &'static str {
     }
 }
 
-fn runtime_view_state(
-    state: &VnRuntimeState,
-    authoritative_state_hash: Hash128,
-) -> VnRuntimeViewState {
+fn runtime_live_vn_state(state: &VnRuntimeState) -> astra_plugin_abi::RuntimeLiveVnState {
     let active_page = state.system_stack.last().map(|frame| frame.page);
-    let backlog = if active_page == Some(SystemPageKind::Backlog) {
-        state.backlog.clone()
-    } else {
-        state.backlog.last().cloned().into_iter().collect()
-    };
-    let voice_replay = if active_page == Some(SystemPageKind::VoiceReplay) {
-        state.voice_replay.clone()
-    } else {
-        BTreeMap::new()
-    };
     let expose_route_history =
         active_page == Some(SystemPageKind::RouteChart) || state.cursor.is_none();
-    VnRuntimeViewState {
-        schema: VN_RUNTIME_VIEW_STATE_SCHEMA.to_string(),
-        authoritative_state_hash,
+    astra_plugin_abi::RuntimeLiveVnState {
         backlog_count: state.backlog.len(),
-        state: VnRuntimeState {
-            schema: state.schema.clone(),
-            instance_id: state.instance_id.clone(),
-            profile: state.profile.clone(),
-            locale: state.locale.clone(),
-            cursor: state.cursor.clone(),
-            call_stack: state.call_stack.clone(),
-            system_stack: state.system_stack.clone(),
-            system: state.system.clone(),
-            pending_choice: state.pending_choice.clone(),
-            variables: state.variables.clone(),
-            backlog,
-            read_state: Default::default(),
-            voice_replay,
-            route_coverage: if expose_route_history {
-                state.route_coverage.clone()
-            } else {
-                Default::default()
+        revision: state.revision,
+        instance_id: state.instance_id.clone(),
+        profile: state.profile.clone(),
+        locale: state.locale.clone(),
+        cursor: state.cursor.clone().map(runtime_live_vn_cursor),
+        system_stack: state
+            .system_stack
+            .iter()
+            .cloned()
+            .map(|frame| astra_plugin_abi::RuntimeLiveVnSystemFrame {
+                return_to: runtime_live_vn_cursor(frame.return_to),
+                return_wait: frame.return_wait.map(runtime_live_vn_wait),
+                return_choice: frame.return_choice.map(runtime_live_vn_choice),
+                page: runtime_live_system_page(frame.page),
+            })
+            .collect(),
+        system: astra_plugin_abi::RuntimeLiveVnSystemState {
+            auto_enabled: state.system.auto_enabled,
+            skip_mode: match state.system.skip_mode {
+                SkipMode::None => astra_plugin_abi::RuntimeLiveVnSkipMode::None,
+                SkipMode::Read => astra_plugin_abi::RuntimeLiveVnSkipMode::Read,
+                SkipMode::All => astra_plugin_abi::RuntimeLiveVnSkipMode::All,
             },
-            route_flags: if expose_route_history {
-                state.route_flags.clone()
-            } else {
-                Default::default()
+            config: state
+                .system
+                .config
+                .iter()
+                .map(|(key, value)| astra_plugin_abi::RuntimeLiveVnStringEntry {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+            gallery_unlocks: state.system.gallery_unlocks.iter().cloned().collect(),
+            replay_unlocks: state.system.replay_unlocks.iter().cloned().collect(),
+            reading_mode: match state.system.reading_mode {
+                ReadingMode::Hidden => astra_plugin_abi::RuntimeLiveVnReadingMode::Hidden,
+                ReadingMode::Manual => astra_plugin_abi::RuntimeLiveVnReadingMode::Manual,
+                ReadingMode::FastForward => astra_plugin_abi::RuntimeLiveVnReadingMode::FastForward,
             },
-            wait_sequence: state.wait_sequence,
-            pending_wait: state.pending_wait.clone(),
+            audio_enabled: state.system.audio_enabled,
+            skip_allowed: state.system.skip_allowed,
         },
+        pending_choice: state.pending_choice.clone().map(runtime_live_vn_choice),
+        backlog: state
+            .backlog
+            .iter()
+            .skip(if active_page == Some(SystemPageKind::Backlog) {
+                0
+            } else {
+                state.backlog.len().saturating_sub(1)
+            })
+            .cloned()
+            .map(|entry| astra_plugin_abi::RuntimeLiveVnBacklogEntry {
+                command_id: entry.command_id,
+                key: entry.key,
+                speaker: entry.speaker,
+                voice: entry.voice,
+                story_id: entry.story_id,
+                state_id: entry.state_id,
+                route_position: entry.route_position,
+                read: entry.read,
+                window: entry.layout.window,
+            })
+            .collect(),
+        voice_replay: state
+            .voice_replay
+            .iter()
+            .filter(|_| active_page == Some(SystemPageKind::VoiceReplay))
+            .map(
+                |(id, entry)| astra_plugin_abi::RuntimeLiveVnVoiceReplayEntry {
+                    id: id.clone(),
+                    voice: entry.voice.clone(),
+                    line_key: entry.line_key.clone(),
+                    speaker: entry.speaker.clone(),
+                },
+            )
+            .collect(),
+        route_coverage: state
+            .route_coverage
+            .iter()
+            .filter(|_| expose_route_history)
+            .cloned()
+            .collect(),
+        route_flags: state
+            .route_flags
+            .iter()
+            .filter(|_| expose_route_history)
+            .map(|(id, flag)| astra_plugin_abi::RuntimeLiveVnRouteFlag {
+                id: id.clone(),
+                kind: match flag.kind {
+                    VnRouteFlagKind::Launch => astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Launch,
+                    VnRouteFlagKind::Choice => astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Choice,
+                    VnRouteFlagKind::Jump => astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Jump,
+                    VnRouteFlagKind::Branch => astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Branch,
+                    VnRouteFlagKind::Call => astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Call,
+                    VnRouteFlagKind::Return => astra_plugin_abi::RuntimeLiveVnRouteFlagKind::Return,
+                },
+                source: flag.source.clone(),
+                target: flag.target.clone(),
+                count: flag.count,
+            })
+            .collect(),
+        pending_wait: state.pending_wait.clone().map(runtime_live_vn_wait),
+    }
+}
+
+fn runtime_live_vn_cursor(cursor: VnCommandCursor) -> astra_plugin_abi::RuntimeLiveVnCursor {
+    astra_plugin_abi::RuntimeLiveVnCursor {
+        story_id: cursor.story_id,
+        state_id: cursor.state_id,
+        scene_id: cursor.scene_id,
+        command_id: cursor.command_id,
+        ordinal: cursor.ordinal,
+    }
+}
+
+fn runtime_live_vn_choice(choice: PendingChoice) -> astra_plugin_abi::RuntimeLiveVnPendingChoice {
+    astra_plugin_abi::RuntimeLiveVnPendingChoice {
+        choice_id: choice.choice_id,
+        key: choice.key,
+        options: choice
+            .options
+            .into_iter()
+            .map(runtime_live_choice_option)
+            .collect(),
+        enabled_option_ids: choice.enabled_option_ids.into_iter().collect(),
+    }
+}
+
+fn runtime_live_vn_wait(wait: VnWaitState) -> astra_plugin_abi::RuntimeLiveVnWait {
+    astra_plugin_abi::RuntimeLiveVnWait {
+        kind: match wait.kind {
+            VnWaitKind::Dialogue => astra_plugin_abi::RuntimeLiveVnWaitKind::Dialogue,
+            VnWaitKind::Choice => astra_plugin_abi::RuntimeLiveVnWaitKind::Choice,
+            VnWaitKind::SystemPage => astra_plugin_abi::RuntimeLiveVnWaitKind::SystemPage,
+            VnWaitKind::Fence => astra_plugin_abi::RuntimeLiveVnWaitKind::Fence,
+            VnWaitKind::Timer => astra_plugin_abi::RuntimeLiveVnWaitKind::Timer,
+            VnWaitKind::TimelineComplete => {
+                astra_plugin_abi::RuntimeLiveVnWaitKind::TimelineComplete
+            }
+            VnWaitKind::MovieEnd => astra_plugin_abi::RuntimeLiveVnWaitKind::MovieEnd,
+            VnWaitKind::VoiceEnd => astra_plugin_abi::RuntimeLiveVnWaitKind::VoiceEnd,
+            VnWaitKind::Input => astra_plugin_abi::RuntimeLiveVnWaitKind::Input,
+        },
+        fence: wait.fence,
+        command_id: wait.command_id,
+        await_id: wait.await_id,
     }
 }
 
@@ -2048,14 +1597,10 @@ impl RuntimeAction for VnStepAction {
             "astra.vn.step_output.v1",
             ActionExecutionClass::Serial,
             ActionAccess::new(
-                [ActionResourceKey::ActorStore],
+                [ActionResourceKey::EventQueue],
                 [
-                    ActionResourceKey::ActorStore,
                     ActionResourceKey::AwaitQueue,
                     ActionResourceKey::EventQueue,
-                    ActionResourceKey::Presentation,
-                    ActionResourceKey::MutationLog,
-                    ActionResourceKey::EffectTrace,
                     ActionResourceKey::StableIdSource,
                 ],
             ),
@@ -2068,9 +1613,6 @@ impl RuntimeAction for VnStepAction {
         ctx: &mut DeterministicActionContext<'_>,
         input: &BTreeMap<String, BlackboardValue>,
     ) -> Result<ActionTrace, RuntimeError> {
-        let evidence_mode = ctx.evidence_mode();
-        let profile = tracing::enabled!(tracing::Level::TRACE);
-        let command_started = profile.then(Instant::now);
         let event = ctx.trigger_event().ok_or_else(|| {
             RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
                 "ASTRA_VN_STEP_TRIGGER_MISSING",
@@ -2078,227 +1620,39 @@ impl RuntimeAction for VnStepAction {
             ))
         })?;
         let event_kind = event.payload.kind.clone();
-        let command = command_from_event(event)?;
-        let command_mapping_ns = profile_elapsed_ns(command_started);
-        let state_started = profile.then(Instant::now);
-        let previous_state_bytes = ctx.read_component_postcard_bytes(self.component)?;
-        let previous_hot: VnRuntimeHotStateV3 = postcard::from_bytes(&previous_state_bytes)
-            .map_err(|error| {
-                RuntimeError::message(format!("decode VN hot runtime state: {error}"))
-            })?;
-        validate_hot_state(&previous_hot)
-            .map_err(|error| RuntimeError::message(error.to_string()))?;
-        let cached_state = self
-            .state_cache
+        let control = self
+            .pending_control
             .lock()
-            .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))?
-            .take();
-        let previous_state_hash = if evidence_mode {
-            cached_state.as_ref().map_or_else(
-                || Hash128::from_blake3(&previous_state_bytes),
-                |cached| cached.state_hash,
-            )
-        } else {
-            VN_DISABLED_STATE_HASH
-        };
-        let state_cache_hit = cached_state.is_some();
-        let materialized_history_entries = if state_cache_hit {
-            0
-        } else {
-            previous_hot.backlog_count
-        };
-        let decoded_state = if cached_state.is_none() {
-            Some(
-                materialize_runtime_state(&previous_hot, &self.runtime_index, |component_id| {
-                    ctx.read_component(component_id)
-                        .map_err(|error| CoreVnError::message(error.to_string()))
-                })
-                .map_err(|error| RuntimeError::message(error.to_string()))?,
-            )
-        } else {
-            None
-        };
-        let previous_wait = if let Some(cached) = &cached_state {
-            cached.state.pending_wait.clone()
-        } else {
-            decoded_state
-                .as_ref()
-                .expect("cache miss must materialize the authoritative VN state")
-                .pending_wait
-                .clone()
-        };
-        let state_decode_ns = profile_elapsed_ns(state_started);
-        let reduce_started = profile.then(Instant::now);
-        let (mut state, mut output) = if let Some(cached) = cached_state {
-            astra_vn_core::reduce_vn_step_indexed_prehashed_pending(
-                Arc::clone(&self.compiled),
-                Arc::clone(&self.runtime_index),
-                cached.state,
-                previous_state_hash,
-                command,
-            )
-        } else {
-            let state = decoded_state.expect("cache miss must materialize authoritative VN state");
-            astra_vn_core::reduce_vn_step_indexed_prehashed_pending(
-                Arc::clone(&self.compiled),
-                Arc::clone(&self.runtime_index),
-                state,
-                previous_state_hash,
-                command,
-            )
-        }
-        .map_err(|err| RuntimeError::message(err.to_string()))?;
-        let reduce_ns = profile_elapsed_ns(reduce_started);
-        let await_started = profile.then(Instant::now);
-        if state.pending_wait != previous_wait {
-            if let Some(wait) = state.pending_wait.as_mut() {
-                output.set_wait(wait.clone());
-                let has_runtime_await_id = wait
-                    .await_id
-                    .as_deref()
-                    .is_some_and(|await_id| astra_core::StableId::parse(await_id).is_ok());
-                if !has_runtime_await_id {
-                    wait.await_id.as_ref().ok_or_else(|| {
-                        RuntimeError::message(
-                            "VN reducer created a wait without an authored await identity",
-                        )
-                    })?;
-                    let token = ctx.create_await(astra_runtime::AwaitKind::Custom(format!(
-                        "vn.{:?}",
-                        wait.kind
-                    )));
-                    let runtime_await_id = token.token_id.0.to_string();
-                    wait.await_id = Some(runtime_await_id.clone());
-                    output.set_wait(wait.clone());
-                    output.push_await(token.token_id.0.to_string());
-                    ctx.push_await(token)?;
-                }
-            }
-        }
-        let await_ns = profile_elapsed_ns(await_started);
-        let replace_started = profile.then(Instant::now);
-        if state.backlog.len() < previous_hot.backlog_count {
-            return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
-                "ASTRA_NATIVE_VN_HISTORY_TRUNCATION",
-                "VN reducer attempted to truncate append-only backlog history",
-            )));
-        }
-        let mut tail_id = previous_hot.tail_chunk;
-        let mut tail: VnRuntimeHistoryChunkV3 = ctx.read_component(tail_id)?;
-        if tail.schema != VN_RUNTIME_HISTORY_CHUNK_SCHEMA
-            || tail.entries.len() > VN_HISTORY_CHUNK_CAPACITY
-            || tail.root != previous_hot.backlog_root
-        {
-            return Err(RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
-                "ASTRA_NATIVE_VN_HISTORY_TAIL_INVALID",
-                "VN history tail does not match the authoritative hot state",
-            )));
-        }
-        let mut remaining = &state.backlog[previous_hot.backlog_count..];
-        let appended_backlog_entries = remaining.len();
-        let mut history_component_writes = 0_usize;
-        let mut backlog_root = previous_hot.backlog_root;
-        while !remaining.is_empty() {
-            let available = VN_HISTORY_CHUNK_CAPACITY.saturating_sub(tail.entries.len());
-            if available > 0 {
-                let take = available.min(remaining.len());
-                tail.entries.extend_from_slice(&remaining[..take]);
-                remaining = &remaining[take..];
-                tail.root = backlog_chunk_root(tail.previous_root, &tail.entries)
-                    .map_err(|error| RuntimeError::message(error.to_string()))?;
-                backlog_root = tail.root;
-                if evidence_mode {
-                    ctx.replace_component(tail_id, &tail)?;
-                } else {
-                    ctx.replace_component_owned(tail_id, &tail)?;
-                }
-                history_component_writes = history_component_writes
-                    .checked_add(1)
-                    .ok_or_else(|| RuntimeError::message("VN history write count overflowed"))?;
-            }
-            if !remaining.is_empty() {
-                let take = VN_HISTORY_CHUNK_CAPACITY.min(remaining.len());
-                let entries = remaining[..take].to_vec();
-                remaining = &remaining[take..];
-                let root = backlog_chunk_root(backlog_root, &entries)
-                    .map_err(|error| RuntimeError::message(error.to_string()))?;
-                let next = VnRuntimeHistoryChunkV3 {
-                    schema: VN_RUNTIME_HISTORY_CHUNK_SCHEMA.to_string(),
-                    previous: Some(tail_id),
-                    previous_root: backlog_root,
-                    entries,
-                    root,
-                };
-                tail_id = ctx.attach_component(
-                    self.owner,
-                    VN_RUNTIME_HISTORY_CHUNK_SCHEMA,
-                    BlackboardValue::Null,
-                )?;
-                let encoded = postcard::to_allocvec(&next)
-                    .map_err(|error| RuntimeError::message(error.to_string()))?;
-                let encoded = encoded.into();
-                if evidence_mode {
-                    ctx.replace_component_encoded_postcard(tail_id, encoded)?;
-                } else {
-                    ctx.replace_component_owned_postcard(tail_id, encoded)?;
-                }
-                history_component_writes = history_component_writes
-                    .checked_add(1)
-                    .ok_or_else(|| RuntimeError::message("VN history write count overflowed"))?;
-                tail = next;
-                backlog_root = root;
-            }
-        }
-        let next_hot = hot_state_from_runtime(&state, &self.runtime_index, tail_id, backlog_root)
-            .map_err(|error| RuntimeError::message(error.to_string()))?;
-        // Only the bounded hot state and at most one 64-entry tail chunk are
-        // rewritten during a normal dialogue advance. Full history is already
-        // represented by immutable linked components in the Runtime snapshot.
-        let encoded_state: Arc<[u8]> = postcard::to_allocvec(&next_hot)
-            .map_err(|error| RuntimeError::message(format!("encode VN hot state: {error}")))?
-            .into();
-        let encoded_state_bytes = encoded_state.len();
-        // Evidence binds the state bytes to a digest. Shipping only moves the
-        // owned postcard allocation into the component store.
-        let encoded_state = if evidence_mode {
-            astra_runtime::ValidatedRuntimeComponentEncoding::postcard_blake3(encoded_state)
-        } else {
-            astra_runtime::ValidatedRuntimeComponentEncoding::postcard_owned(encoded_state)
-        };
-        let authoritative_state_hash = encoded_state.state_hash();
-        let output = output.finalize(authoritative_state_hash);
-        let mutation_journal_entries = output.mutations.len();
-        let (_, next_state_hash) =
-            ctx.replace_component_validated_postcard(self.component, encoded_state)?;
-        let replace_component_ns = profile_elapsed_ns(replace_started);
-        let output_started = profile.then(Instant::now);
-        for event in &output.events {
+            .map_err(|_| RuntimeError::message("VN control lock is poisoned"))?
+            .take()
+            .ok_or_else(|| {
+                RuntimeError::diagnostic(astra_core::Diagnostic::blocking(
+                    "ASTRA_NATIVE_VN_CONTROL_MISSING",
+                    "NativeVN provider did not prepare a control transaction",
+                ))
+            })?;
+        for (kind, id) in control.events {
             ctx.emit_event(
                 astra_runtime::EventSource::StateMachine,
                 EventPayload {
-                    kind: event.kind.clone(),
-                    data: [("id".to_string(), BlackboardValue::String(event.id.clone()))]
+                    kind,
+                    data: [("id".to_string(), BlackboardValue::String(id))]
                         .into_iter()
                         .collect(),
                 },
             );
         }
-        if evidence_mode {
-            for command in &output.presentation {
-                ctx.emit_presentation(runtime_presentation(command)?);
-            }
+        if let Some(kind) = control.create_wait {
+            let token = ctx.create_await(kind);
+            let token_id = token.token_id;
+            ctx.push_await(token)?;
+            *self
+                .control_result
+                .lock()
+                .map_err(|_| RuntimeError::message("VN control result lock is poisoned"))? =
+                Some(token_id);
         }
-        if evidence_mode {
-            for command in &output.audio {
-                ctx.emit_serialized_effect("audio", "astra.vn.audio_command.v2", command)?;
-            }
-        }
-        for task in &output.timeline_tasks {
-            ctx.emit_serialized_effect("timeline", "astra.vn.timeline_task.v2", task)?;
-        }
-        let output_emit_ns = profile_elapsed_ns(output_started);
-        let trace_started = profile.then(Instant::now);
-        let mut trace_payload = if evidence_mode {
+        let mut trace_payload = if ctx.evidence_mode() {
             input.clone()
         } else {
             BTreeMap::new()
@@ -2307,186 +1661,11 @@ impl RuntimeAction for VnStepAction {
             "event_kind".to_string(),
             BlackboardValue::String(event_kind),
         );
-        if evidence_mode {
-            trace_payload.insert(
-                "state_hash_before".to_string(),
-                BlackboardValue::String(output.state_hash_before_advance.to_string()),
-            );
-            trace_payload.insert(
-                "state_hash_after".to_string(),
-                BlackboardValue::String(output.state_hash_after_advance.to_string()),
-            );
-        }
-        *self
-            .output
-            .lock()
-            .map_err(|_| RuntimeError::message("VN step output lock is poisoned"))? = Some(output);
-        *self
-            .state_cache
-            .lock()
-            .map_err(|_| RuntimeError::message("VN step state cache lock is poisoned"))? =
-            Some(VnStepStateCache {
-                state_hash: next_state_hash,
-                state,
-            });
-        *self
-            .step_complexity
-            .lock()
-            .map_err(|_| RuntimeError::message("VN step complexity lock is poisoned"))? =
-            Some(VnStepComplexityMetrics {
-                schema: "astra.vn.step_complexity_metrics.v1".to_string(),
-                previous_backlog_count: previous_hot.backlog_count,
-                appended_backlog_entries,
-                state_cache_hit,
-                materialized_history_entries,
-                history_component_writes,
-                encoded_hot_state_bytes: encoded_state_bytes,
-                mutation_journal_entries,
-            });
-        let trace_store_ns = profile_elapsed_ns(trace_started);
-        tracing::trace!(
-            event = "vn.step.performance",
-            command_mapping_ns,
-            state_decode_ns,
-            reduce_ns,
-            await_ns,
-            replace_component_ns,
-            encoded_state_bytes,
-            output_emit_ns,
-            trace_store_ns,
-            "measured NativeVN RuntimeAction phases"
-        );
         Ok(ActionTrace {
             action_id: self.descriptor().id,
             payload: trace_payload,
         })
     }
-}
-
-fn profile_elapsed_ns(started: Option<Instant>) -> u64 {
-    started.map_or(0, |started| {
-        u64::try_from(started.elapsed().as_nanos())
-            .expect("NativeVN performance phase duration must fit in u64 nanoseconds")
-    })
-}
-
-fn runtime_presentation(
-    command: &PresentationCommand,
-) -> Result<RuntimePresentationCommand, RuntimeError> {
-    let converted = match command {
-        PresentationCommand::Dialogue {
-            key,
-            speaker,
-            voice,
-            window,
-        } => RuntimePresentationCommand::Custom {
-            kind: "vn.dialogue".to_string(),
-            data: [
-                ("key".to_string(), BlackboardValue::String(key.clone())),
-                (
-                    "speaker".to_string(),
-                    speaker
-                        .clone()
-                        .map(BlackboardValue::String)
-                        .unwrap_or(BlackboardValue::Null),
-                ),
-                (
-                    "voice".to_string(),
-                    voice
-                        .clone()
-                        .map(BlackboardValue::String)
-                        .unwrap_or(BlackboardValue::Null),
-                ),
-                (
-                    "window".to_string(),
-                    window
-                        .clone()
-                        .map(BlackboardValue::String)
-                        .unwrap_or(BlackboardValue::Null),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        PresentationCommand::Choice { key, options } => RuntimePresentationCommand::Custom {
-            kind: "vn.choice".to_string(),
-            data: [
-                ("key".to_string(), BlackboardValue::String(key.clone())),
-                (
-                    "options".to_string(),
-                    BlackboardValue::List(
-                        options
-                            .iter()
-                            .map(|option| BlackboardValue::String(option.id.clone()))
-                            .collect(),
-                    ),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        PresentationCommand::SystemPage { page } => RuntimePresentationCommand::Custom {
-            kind: "vn.system_page".to_string(),
-            data: [(
-                "page".to_string(),
-                BlackboardValue::String(format!("{page:?}")),
-            )]
-            .into_iter()
-            .collect(),
-        },
-        PresentationCommand::SystemOption { option } => RuntimePresentationCommand::Custom {
-            kind: "vn.system_option.v1".to_string(),
-            data: [
-                ("id".to_string(), BlackboardValue::String(option.id.clone())),
-                (
-                    "key".to_string(),
-                    BlackboardValue::String(option.key.clone()),
-                ),
-                (
-                    "target".to_string(),
-                    BlackboardValue::String(option.target.clone()),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        PresentationCommand::Stage(stage) => RuntimePresentationCommand::Custom {
-            kind: format!("vn.stage.{}.v2", stage.kind()),
-            data: [(
-                "typed_payload".to_string(),
-                BlackboardValue::Bytes(postcard::to_allocvec(stage).map_err(|err| {
-                    RuntimeError::message(format!("encode typed VN stage command: {err}"))
-                })?),
-            )]
-            .into_iter()
-            .collect(),
-        },
-        PresentationCommand::Extension(extension) => RuntimePresentationCommand::Custom {
-            kind: format!("vn.extension.{}", extension.command),
-            data: [
-                (
-                    "provider_id".to_string(),
-                    BlackboardValue::String(extension.provider_id.clone()),
-                ),
-                (
-                    "schema".to_string(),
-                    BlackboardValue::String(extension.schema.clone()),
-                ),
-                (
-                    "typed_payload".to_string(),
-                    BlackboardValue::Bytes(postcard::to_allocvec(extension).map_err(|err| {
-                        RuntimeError::message(format!("encode typed VN extension command: {err}"))
-                    })?),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        PresentationCommand::Marker { id } => {
-            RuntimePresentationCommand::Marker { name: id.clone() }
-        }
-    };
-    Ok(converted)
 }
 
 fn runtime_live_audio_cue(sequence: u64, command: &VnAudioCommand) -> RuntimeLiveAudioCue {
@@ -2507,6 +1686,436 @@ fn runtime_live_audio_cue(sequence: u64, command: &VnAudioCommand) -> RuntimeLiv
             VnAudioSync::Text => RuntimeLiveAudioSync::Text,
             VnAudioSync::Fence(fence) => RuntimeLiveAudioSync::Fence(fence.clone()),
         },
+    }
+}
+
+fn runtime_live_presentation(
+    sequence: u64,
+    command: PresentationCommand,
+) -> astra_plugin_abi::RuntimeLivePresentationCommand {
+    use astra_plugin_abi::RuntimeLivePresentationKind as Live;
+    let command = match command {
+        PresentationCommand::Dialogue {
+            key,
+            speaker,
+            voice,
+            window,
+        } => Live::Dialogue {
+            key,
+            speaker,
+            voice,
+            window,
+        },
+        PresentationCommand::Choice { key, options } => Live::Choice {
+            key,
+            options: options
+                .into_iter()
+                .map(runtime_live_choice_option)
+                .collect(),
+        },
+        PresentationCommand::SystemPage { page } => Live::SystemPage {
+            page: runtime_live_system_page(page),
+        },
+        PresentationCommand::SystemOption { option } => Live::SystemOption {
+            option: runtime_live_choice_option(option),
+        },
+        PresentationCommand::Stage(command) => Live::Stage(runtime_live_stage(command)),
+        PresentationCommand::Extension(command) => {
+            Live::Extension(astra_plugin_abi::RuntimeLiveExtensionCommand {
+                command: command.command,
+                provider_id: command.provider_id,
+                schema: command.schema,
+                fields: command
+                    .fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        (
+                            name,
+                            match value {
+                                ExtensionValue::String(value) => {
+                                    astra_plugin_abi::RuntimeLiveExtensionValue::String(value)
+                                }
+                                ExtensionValue::Integer(value) => {
+                                    astra_plugin_abi::RuntimeLiveExtensionValue::Integer(value)
+                                }
+                                ExtensionValue::Fixed(value) => {
+                                    astra_plugin_abi::RuntimeLiveExtensionValue::Fixed(
+                                        value.millionths,
+                                    )
+                                }
+                                ExtensionValue::Boolean(value) => {
+                                    astra_plugin_abi::RuntimeLiveExtensionValue::Boolean(value)
+                                }
+                                ExtensionValue::Symbol(value) => {
+                                    astra_plugin_abi::RuntimeLiveExtensionValue::Symbol(value)
+                                }
+                                ExtensionValue::AssetUri(value) => {
+                                    astra_plugin_abi::RuntimeLiveExtensionValue::AssetUri(value)
+                                }
+                            },
+                        )
+                    })
+                    .collect(),
+            })
+        }
+        PresentationCommand::Marker { id } => Live::Marker { id },
+    };
+    astra_plugin_abi::RuntimeLivePresentationCommand { sequence, command }
+}
+
+fn runtime_live_choice_option(option: ChoiceOption) -> astra_plugin_abi::RuntimeLiveChoiceOption {
+    astra_plugin_abi::RuntimeLiveChoiceOption {
+        id: option.id,
+        key: option.key,
+        target: option.target,
+        enabled_when: option.enabled_when.map(|condition| {
+            astra_plugin_abi::RuntimeLiveVariableCondition {
+                scope: condition.scope,
+                key: condition.key,
+                operation: match condition.op {
+                    BranchOp::Eq => astra_plugin_abi::RuntimeLiveComparison::Equal,
+                    BranchOp::NotEq => astra_plugin_abi::RuntimeLiveComparison::NotEqual,
+                    BranchOp::Less => astra_plugin_abi::RuntimeLiveComparison::Less,
+                    BranchOp::LessEq => astra_plugin_abi::RuntimeLiveComparison::LessEqual,
+                    BranchOp::Greater => astra_plugin_abi::RuntimeLiveComparison::Greater,
+                    BranchOp::GreaterEq => astra_plugin_abi::RuntimeLiveComparison::GreaterEqual,
+                },
+                value: condition.value,
+            }
+        }),
+    }
+}
+
+fn runtime_live_system_page(page: SystemPageKind) -> astra_plugin_abi::RuntimeLiveSystemPage {
+    use astra_plugin_abi::RuntimeLiveSystemPage as Live;
+    match page {
+        SystemPageKind::Title => Live::Title,
+        SystemPageKind::QuickPanel => Live::QuickPanel,
+        SystemPageKind::Save => Live::Save,
+        SystemPageKind::Load => Live::Load,
+        SystemPageKind::Config => Live::Config,
+        SystemPageKind::Gallery => Live::Gallery,
+        SystemPageKind::Replay => Live::Replay,
+        SystemPageKind::VoiceReplay => Live::VoiceReplay,
+        SystemPageKind::RouteChart => Live::RouteChart,
+        SystemPageKind::Backlog => Live::Backlog,
+        SystemPageKind::LocalizationPreview => Live::LocalizationPreview,
+        SystemPageKind::Custom => Live::Custom,
+        SystemPageKind::Unknown => Live::Unknown,
+    }
+}
+
+fn runtime_live_timeline(command: TimelineCommand) -> astra_plugin_abi::RuntimeLiveTimelineCommand {
+    match command {
+        TimelineCommand::Start(spec) => astra_plugin_abi::RuntimeLiveTimelineCommand::Start(
+            astra_plugin_abi::RuntimeLiveTimelineSpec {
+                id: spec.id,
+                join: match spec.join {
+                    VnTimelineJoinPolicy::FireAndForget => {
+                        astra_plugin_abi::RuntimeLiveTimelineJoin::FireAndForget
+                    }
+                    VnTimelineJoinPolicy::Block => astra_plugin_abi::RuntimeLiveTimelineJoin::Block,
+                    VnTimelineJoinPolicy::ReplaceTarget => {
+                        astra_plugin_abi::RuntimeLiveTimelineJoin::ReplaceTarget
+                    }
+                },
+                tracks: spec
+                    .tracks
+                    .into_iter()
+                    .map(|track| astra_plugin_abi::RuntimeLiveTimelineTrack {
+                        target: track.target,
+                        property: track.property,
+                        keyframes: track
+                            .keyframes
+                            .into_iter()
+                            .map(|keyframe| astra_plugin_abi::RuntimeLiveTimelineKeyframe {
+                                time_ms: keyframe.time_ms,
+                                value_millionths: keyframe.value.millionths,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                fence: spec.fence,
+                fallback: spec.fallback,
+                budget_us: spec.budget_us,
+            },
+        ),
+        TimelineCommand::Cancel { id, reason } => {
+            astra_plugin_abi::RuntimeLiveTimelineCommand::Cancel { id, reason }
+        }
+    }
+}
+
+fn runtime_live_stage(command: StageCommand) -> astra_plugin_abi::RuntimeLiveStageCommand {
+    use astra_plugin_abi::RuntimeLiveStageCommand as Live;
+    match command {
+        StageCommand::Preload { asset } => Live::Preload { asset },
+        StageCommand::Configure {
+            viewport,
+            safe_area,
+        } => Live::Configure {
+            width: viewport.width,
+            height: viewport.height,
+            safe_area_width: safe_area.width,
+            safe_area_height: safe_area.height,
+        },
+        StageCommand::DeclareLayer {
+            id,
+            kind,
+            z,
+            blend,
+            clip,
+            input,
+        } => Live::DeclareLayer {
+            id,
+            kind: match kind {
+                StageLayerKind::Background => {
+                    astra_plugin_abi::RuntimeLiveStageLayerKind::Background
+                }
+                StageLayerKind::Sprite => astra_plugin_abi::RuntimeLiveStageLayerKind::Sprite,
+                StageLayerKind::Video => astra_plugin_abi::RuntimeLiveStageLayerKind::Video,
+                StageLayerKind::Text => astra_plugin_abi::RuntimeLiveStageLayerKind::Text,
+                StageLayerKind::Cg => astra_plugin_abi::RuntimeLiveStageLayerKind::Cg,
+                StageLayerKind::Ui => astra_plugin_abi::RuntimeLiveStageLayerKind::Ui,
+                StageLayerKind::Effect => astra_plugin_abi::RuntimeLiveStageLayerKind::Effect,
+            },
+            z,
+            blend: match blend {
+                StageBlendMode::Normal => astra_plugin_abi::RuntimeLiveStageBlend::Normal,
+                StageBlendMode::Add => astra_plugin_abi::RuntimeLiveStageBlend::Add,
+                StageBlendMode::Multiply => astra_plugin_abi::RuntimeLiveStageBlend::Multiply,
+                StageBlendMode::Screen => astra_plugin_abi::RuntimeLiveStageBlend::Screen,
+            },
+            clip: clip.map(|clip| match clip {
+                StageClipPolicy::Stage => astra_plugin_abi::RuntimeLiveStageClip::Stage,
+                StageClipPolicy::SafeArea => astra_plugin_abi::RuntimeLiveStageClip::SafeArea,
+            }),
+            input,
+        },
+        StageCommand::Background {
+            asset,
+            layer,
+            preset,
+            duration_ms,
+            interrupt,
+        } => Live::Background {
+            asset,
+            layer,
+            preset,
+            duration_ms,
+            interrupt: runtime_live_interrupt(interrupt),
+        },
+        StageCommand::Show {
+            id,
+            asset,
+            pose,
+            layer,
+            placement,
+            fit,
+            opacity,
+            preset,
+            interrupt,
+        } => Live::Show {
+            id,
+            asset,
+            pose,
+            layer,
+            placement: match placement {
+                StagePlacement::Left => astra_plugin_abi::RuntimeLiveStagePlacement::Left,
+                StagePlacement::Center => astra_plugin_abi::RuntimeLiveStagePlacement::Center,
+                StagePlacement::Right => astra_plugin_abi::RuntimeLiveStagePlacement::Right,
+            },
+            fit: match fit {
+                StageFitMode::ContainHeight => astra_plugin_abi::RuntimeLiveStageFit::ContainHeight,
+                StageFitMode::Native => astra_plugin_abi::RuntimeLiveStageFit::Native,
+            },
+            opacity_millionths: opacity.millionths,
+            preset,
+            interrupt: runtime_live_interrupt(interrupt),
+        },
+        StageCommand::Hide {
+            id,
+            preset,
+            duration_ms,
+            interrupt,
+        } => Live::Hide {
+            id,
+            preset,
+            duration_ms,
+            interrupt: runtime_live_interrupt(interrupt),
+        },
+        StageCommand::ClearLayer {
+            layer,
+            duration_ms,
+            interrupt,
+        } => Live::ClearLayer {
+            layer,
+            duration_ms,
+            interrupt: runtime_live_interrupt(interrupt),
+        },
+        StageCommand::SetLayerVisibility { layer, visible } => {
+            Live::SetLayerVisibility { layer, visible }
+        }
+        StageCommand::Backdrop { color } => Live::Backdrop { color },
+        StageCommand::Shade { color, opacity } => Live::Shade {
+            color,
+            opacity_millionths: opacity.millionths,
+        },
+        StageCommand::SetSkipAllowed { allowed } => Live::SetSkipAllowed { allowed },
+        StageCommand::Move {
+            id,
+            x,
+            y,
+            duration_ms,
+            preset,
+            interrupt,
+        } => Live::Move {
+            id,
+            x_millionths: x.millionths,
+            y_millionths: y.millionths,
+            duration_ms,
+            preset,
+            interrupt: runtime_live_interrupt(interrupt),
+        },
+        StageCommand::Camera {
+            target,
+            x,
+            y,
+            zoom,
+            rotation,
+            duration_ms,
+            preset,
+        } => Live::Camera {
+            target,
+            x_millionths: x.millionths,
+            y_millionths: y.millionths,
+            zoom_millionths: zoom.millionths,
+            rotation_millionths: rotation.millionths,
+            duration_ms,
+            preset,
+        },
+        StageCommand::Movie {
+            layer,
+            asset,
+            alpha,
+            loop_mode,
+            end,
+            fence,
+            fallback,
+            interrupt,
+        } => Live::Movie {
+            layer,
+            asset,
+            alpha_millionths: alpha.millionths,
+            loop_mode: match loop_mode {
+                MovieLoopMode::Once => astra_plugin_abi::RuntimeLiveMovieLoop::Once,
+                MovieLoopMode::Loop => astra_plugin_abi::RuntimeLiveMovieLoop::Loop,
+            },
+            end: match end {
+                VnMovieEndBehavior::Continue => astra_plugin_abi::RuntimeLiveMovieEnd::Continue,
+                VnMovieEndBehavior::Wait => astra_plugin_abi::RuntimeLiveMovieEnd::Wait,
+                VnMovieEndBehavior::Hold => astra_plugin_abi::RuntimeLiveMovieEnd::Hold,
+            },
+            fence,
+            fallback,
+            interrupt: runtime_live_interrupt(interrupt),
+        },
+        StageCommand::Audio(cue) => Live::Audio(astra_plugin_abi::RuntimeLiveAudioCueCommand {
+            id: cue.id,
+            bus: match cue.bus {
+                VnAudioBus::Voice => RuntimeLiveAudioBus::Voice,
+                VnAudioBus::Bgm => RuntimeLiveAudioBus::Bgm,
+                VnAudioBus::Se => RuntimeLiveAudioBus::Se,
+                VnAudioBus::Movie => RuntimeLiveAudioBus::Movie,
+            },
+            asset: cue.asset,
+            looped: cue.looped,
+            fade_ms: cue.fade_ms,
+            sync: match cue.sync {
+                VnAudioSync::None => RuntimeLiveAudioSync::None,
+                VnAudioSync::Text => RuntimeLiveAudioSync::Text,
+                VnAudioSync::Fence(fence) => RuntimeLiveAudioSync::Fence(fence),
+            },
+        }),
+        StageCommand::AudioControl(control) => {
+            Live::AudioControl(astra_plugin_abi::RuntimeLiveAudioControl {
+                id: control.id,
+                action: match control.action {
+                    VnAudioControlAction::Pause => {
+                        astra_plugin_abi::RuntimeLiveAudioControlAction::Pause
+                    }
+                    VnAudioControlAction::Resume => {
+                        astra_plugin_abi::RuntimeLiveAudioControlAction::Resume
+                    }
+                    VnAudioControlAction::Stop => {
+                        astra_plugin_abi::RuntimeLiveAudioControlAction::Stop
+                    }
+                    VnAudioControlAction::FadeStop { duration_ms, fence } => {
+                        astra_plugin_abi::RuntimeLiveAudioControlAction::FadeStop {
+                            duration_ms,
+                            fence,
+                        }
+                    }
+                },
+                target: control.target,
+            })
+        }
+        StageCommand::SetAudioBusEnabled { bus, enabled } => Live::SetAudioBusEnabled {
+            bus: match bus {
+                VnAudioBus::Voice => RuntimeLiveAudioBus::Voice,
+                VnAudioBus::Bgm => RuntimeLiveAudioBus::Bgm,
+                VnAudioBus::Se => RuntimeLiveAudioBus::Se,
+                VnAudioBus::Movie => RuntimeLiveAudioBus::Movie,
+            },
+            enabled,
+        },
+        StageCommand::Transition {
+            preset,
+            duration_ms,
+            descriptor_id,
+        } => Live::Transition {
+            preset,
+            duration_ms,
+            descriptor_id,
+        },
+        StageCommand::Shake {
+            target,
+            strength,
+            duration_ms,
+        } => Live::Shake {
+            target,
+            strength_millionths: strength.millionths,
+            duration_ms,
+        },
+        StageCommand::Timeline(command) => Live::Timeline(runtime_live_timeline(command)),
+        StageCommand::Effect {
+            target,
+            lip_sync,
+            filter,
+            fallback,
+            budget_us,
+        } => Live::Effect {
+            target,
+            lip_sync,
+            filter,
+            fallback,
+            budget_us,
+        },
+    }
+}
+
+fn runtime_live_interrupt(
+    interrupt: PresentationInterruptPolicy,
+) -> astra_plugin_abi::RuntimeLiveInterruptPolicy {
+    match interrupt {
+        PresentationInterruptPolicy::Queue => astra_plugin_abi::RuntimeLiveInterruptPolicy::Queue,
+        PresentationInterruptPolicy::ReplaceFromCurrent => {
+            astra_plugin_abi::RuntimeLiveInterruptPolicy::ReplaceFromCurrent
+        }
+        PresentationInterruptPolicy::SnapThenStart => {
+            astra_plugin_abi::RuntimeLiveInterruptPolicy::SnapThenStart
+        }
+        PresentationInterruptPolicy::Reject => astra_plugin_abi::RuntimeLiveInterruptPolicy::Reject,
     }
 }
 
@@ -3247,59 +2856,17 @@ fn ffi_step_output(output: RuntimeStepOutput) -> FfiRuntimeStepResult {
         }
         Err(error) => return ffi_step_error(session_id, error),
     };
-    let persisted = match output
-        .persisted
-        .into_iter()
-        .map(ffi_persisted_output)
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(value) => value,
-        Err(error) => return ffi_step_error(session_id, error),
-    };
     FfiRuntimeStepResult {
         ok: true,
         session_id: output.session_id.0.into(),
         status: output.status.into(),
         live,
-        persisted: RVec::from(persisted),
         diagnostics: RVec::from(
             diagnostics
                 .into_iter()
                 .map(RString::from)
                 .collect::<Vec<_>>(),
         ),
-    }
-}
-
-#[cfg(feature = "ffi")]
-fn ffi_persisted_output(
-    output: RuntimePersistedOutput,
-) -> Result<FfiRuntimePersistedOutput, String> {
-    let codec = match output.codec {
-        RuntimePersistedCodec::Postcard => FfiRuntimeSectionCodec::Postcard,
-    };
-    let bytes = output.bytes().as_ref().to_vec();
-    Ok(FfiRuntimePersistedOutput {
-        domain: runtime_output_domain_id(output.domain),
-        schema: output.schema.into(),
-        version_major: output.version.major,
-        version_minor: output.version.minor,
-        version_patch: output.version.patch,
-        codec,
-        bytes: RVec::from(bytes),
-    })
-}
-
-#[cfg(feature = "ffi")]
-fn runtime_output_domain_id(domain: astra_plugin_abi::RuntimeOutputDomain) -> u8 {
-    match domain {
-        astra_plugin_abi::RuntimeOutputDomain::Effect => 0,
-        astra_plugin_abi::RuntimeOutputDomain::Presentation => 1,
-        astra_plugin_abi::RuntimeOutputDomain::Audio => 2,
-        astra_plugin_abi::RuntimeOutputDomain::Await => 3,
-        astra_plugin_abi::RuntimeOutputDomain::Observation => 4,
-        astra_plugin_abi::RuntimeOutputDomain::Trace => 5,
-        astra_plugin_abi::RuntimeOutputDomain::DirtySaveSection => 6,
     }
 }
 
@@ -3372,12 +2939,12 @@ fn ffi_live_output(
     }
     for cue in value.audio_cues {
         {
-            let (sync_kind, sync_fence) = match cue.sync {
-                RuntimeLiveAudioSync::None => (FfiRuntimeAudioSyncKind::None, RString::new()),
-                RuntimeLiveAudioSync::Text => (FfiRuntimeAudioSyncKind::Text, RString::new()),
-                RuntimeLiveAudioSync::Fence(fence) => {
-                    (FfiRuntimeAudioSyncKind::Fence, fence.into())
-                }
+            let sync = match cue.sync {
+                RuntimeLiveAudioSync::None => FfiRuntimeAudioSync::None,
+                RuntimeLiveAudioSync::Text => FfiRuntimeAudioSync::Text,
+                RuntimeLiveAudioSync::Fence(fence_id) => FfiRuntimeAudioSync::Fence {
+                    fence_id: fence_id.into(),
+                },
             };
             audio_cues.push(FfiRuntimeAudioCue {
                 sequence: cue.sequence,
@@ -3391,8 +2958,7 @@ fn ffi_live_output(
                 asset: cue.asset.into(),
                 looped: cue.looped,
                 fade_ms: cue.fade_ms,
-                sync_kind,
-                sync_fence,
+                sync,
             });
         }
     }
@@ -3425,104 +2991,62 @@ fn ffi_live_output(
         }
     }
     for command in value.video {
-        video.push(FfiRuntimeVideoCommand {
-            sequence: command.sequence,
-            playback_id: match &command.command {
-                RuntimeLiveVideoCommandKind::Play { playback_id, .. }
-                | RuntimeLiveVideoCommandKind::Stop { playback_id } => playback_id.clone().into(),
-            },
-            resource_uri: match &command.command {
-                RuntimeLiveVideoCommandKind::Play { resource_uri, .. } => {
-                    resource_uri.clone().into()
-                }
-                RuntimeLiveVideoCommandKind::Stop { .. } => RString::new(),
-            },
-            mode: match &command.command {
-                RuntimeLiveVideoCommandKind::Play { mode, .. } => match mode {
+        video.push(match command.command {
+            RuntimeLiveVideoCommandKind::Play {
+                playback_id,
+                resource_uri,
+                mode,
+                stage_width,
+                stage_height,
+            } => FfiRuntimeVideoCommand::Play {
+                sequence: command.sequence,
+                playback_id: playback_id.into(),
+                resource_uri: resource_uri.into(),
+                mode: match mode {
                     RuntimeLiveVideoMode::ModalWithAudio => FfiRuntimeVideoMode::ModalWithAudio,
                     RuntimeLiveVideoMode::LayerNoAudio => FfiRuntimeVideoMode::LayerNoAudio,
                 },
-                RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoMode::LayerNoAudio,
+                stage_width,
+                stage_height,
             },
-            stage_width: match &command.command {
-                RuntimeLiveVideoCommandKind::Play { stage_width, .. } => *stage_width,
-                RuntimeLiveVideoCommandKind::Stop { .. } => 0,
-            },
-            stage_height: match &command.command {
-                RuntimeLiveVideoCommandKind::Play { stage_height, .. } => *stage_height,
-                RuntimeLiveVideoCommandKind::Stop { .. } => 0,
-            },
-            command: match command.command {
-                RuntimeLiveVideoCommandKind::Play { .. } => FfiRuntimeVideoCommandKind::Play,
-                RuntimeLiveVideoCommandKind::Stop { .. } => FfiRuntimeVideoCommandKind::Stop,
+            RuntimeLiveVideoCommandKind::Stop { playback_id } => FfiRuntimeVideoCommand::Stop {
+                sequence: command.sequence,
+                playback_id: playback_id.into(),
             },
         })
     }
     for wait in value.waits {
-        {
-            let (kind, number, name, keys, payload_len) = match wait.kind {
-                RuntimeLiveWaitKind::Frame { frames } => (
-                    FfiRuntimeWaitKind::Frame,
-                    frames,
-                    String::new(),
-                    Vec::new(),
-                    0,
-                ),
-                RuntimeLiveWaitKind::Time { milliseconds } => (
-                    FfiRuntimeWaitKind::Time,
-                    milliseconds,
-                    String::new(),
-                    Vec::new(),
-                    0,
-                ),
-                RuntimeLiveWaitKind::Input { keys } => {
-                    (FfiRuntimeWaitKind::Input, 0, String::new(), keys, 0)
-                }
-                RuntimeLiveWaitKind::MediaFence { media_id } => {
-                    (FfiRuntimeWaitKind::MediaFence, 0, media_id, Vec::new(), 0)
-                }
-                RuntimeLiveWaitKind::PresentationFence { fence_id } => (
-                    FfiRuntimeWaitKind::PresentationFence,
-                    0,
-                    fence_id,
-                    Vec::new(),
-                    0,
-                ),
-                RuntimeLiveWaitKind::ProviderCompletion { request_id } => (
-                    FfiRuntimeWaitKind::ProviderCompletion,
-                    0,
-                    request_id,
-                    Vec::new(),
-                    0,
-                ),
-                RuntimeLiveWaitKind::FamilyOpaque {
-                    wait_kind,
-                    payload_len,
-                } => (
-                    FfiRuntimeWaitKind::FamilyOpaque,
-                    0,
-                    wait_kind,
-                    Vec::new(),
-                    payload_len,
-                ),
-            };
-            waits.push(FfiRuntimeWait {
-                sequence: wait.sequence,
-                token_id: wait.token_id.into(),
-                kind,
-                number,
-                name: name.into(),
+        let kind = match wait.kind {
+            RuntimeLiveWaitKind::Frame { frames } => FfiRuntimeWaitKind::Frame { frames },
+            RuntimeLiveWaitKind::Time { milliseconds } => FfiRuntimeWaitKind::Time { milliseconds },
+            RuntimeLiveWaitKind::Input { keys } => FfiRuntimeWaitKind::Input {
                 keys: RVec::from(keys.into_iter().map(RString::from).collect::<Vec<_>>()),
-                payload_len,
-            });
-        }
+            },
+            RuntimeLiveWaitKind::MediaFence { media_id } => FfiRuntimeWaitKind::MediaFence {
+                media_id: media_id.into(),
+            },
+            RuntimeLiveWaitKind::PresentationFence { fence_id } => {
+                FfiRuntimeWaitKind::PresentationFence {
+                    fence_id: fence_id.into(),
+                }
+            }
+            RuntimeLiveWaitKind::ProviderCompletion { request_id } => {
+                FfiRuntimeWaitKind::ProviderCompletion {
+                    request_id: request_id.into(),
+                }
+            }
+        };
+        waits.push(FfiRuntimeWait {
+            sequence: wait.sequence,
+            token_id: wait.token_id.into(),
+            kind,
+        });
     }
     for event in value.events {
         events.push(FfiRuntimeEvent {
             sequence: event.sequence,
             event: event.event.into(),
-            payload: RVec::from(event.payload),
-            due_tick: event.due_tick.into(),
+            value: event.value.into(),
         })
     }
     for RuntimeLiveBlackboardMutation {
@@ -3534,7 +3058,7 @@ fn ffi_live_output(
         blackboard.push(FfiRuntimeBlackboardMutation {
             sequence,
             key: key.into(),
-            value: RVec::from(value),
+            value: value.into(),
         })
     }
     for RuntimeLiveDirtySection {
@@ -3556,6 +3080,20 @@ fn ffi_live_output(
             audio_cues: RVec::from(audio_cues),
             text: RVec::from(text),
             text_presentations: RVec::from(text_presentations),
+            presentations: value
+                .presentations
+                .into_iter()
+                .map(|command| command.into_ffi())
+                .collect::<Vec<_>>()
+                .into(),
+            timeline: value
+                .timeline
+                .into_iter()
+                .map(|task| task.into_ffi())
+                .collect::<Vec<_>>()
+                .into(),
+            vn_state: value.vn_state.map(|state| state.into_ffi()).into(),
+            vn_step: value.vn_step.map(|step| step.into_ffi()).into(),
             video: RVec::from(video),
             waits: RVec::from(waits),
             events: RVec::from(events),
@@ -3569,6 +3107,8 @@ fn ffi_live_output(
             text_events: value.coverage.text_events,
             capture_bytes: value.coverage.capture_bytes,
             operation_bytes: value.coverage.operation_bytes,
+            scene_moved_bytes: value.coverage.scene_moved_bytes,
+            scene_copied_bytes: value.coverage.scene_copied_bytes,
             pcm_moved_bytes: value.coverage.pcm_moved_bytes,
             pcm_copied_bytes: value.coverage.pcm_copied_bytes,
         },
@@ -3602,7 +3142,7 @@ fn ffi_live_scene(
                         width,
                         height,
                         format: ffi_texture_format(format),
-                        pixels: RVec::from(pixels),
+                        pixels: pixels.into_ffi(),
                     }),
                     RuntimeLiveSceneResourceOperation::UpdateTexture {
                         texture_id,
@@ -3621,7 +3161,7 @@ fn ffi_live_scene(
                         width,
                         height,
                         format: ffi_texture_format(format),
-                        pixels: RVec::from(pixels),
+                        pixels: pixels.into_ffi(),
                     }),
                     RuntimeLiveSceneResourceOperation::DestroyTexture {
                         texture_id,
@@ -3720,259 +3260,119 @@ fn ffi_live_text_region(region: astra_plugin_abi::RuntimeLiveTextRegion) -> FfiR
 
 #[cfg(feature = "ffi")]
 fn ffi_live_audio_command(command: RuntimeLiveAudioCommand) -> FfiRuntimeAudioCommand {
-    let sequence = match &command {
-        RuntimeLiveAudioCommand::LoadResource { sequence, .. }
-        | RuntimeLiveAudioCommand::CreateStream { sequence, .. }
-        | RuntimeLiveAudioCommand::SubmitI16 { sequence, .. }
-        | RuntimeLiveAudioCommand::SubmitF32 { sequence, .. }
-        | RuntimeLiveAudioCommand::Play { sequence, .. }
-        | RuntimeLiveAudioCommand::Stop { sequence, .. }
-        | RuntimeLiveAudioCommand::Pause { sequence, .. }
-        | RuntimeLiveAudioCommand::Resume { sequence, .. }
-        | RuntimeLiveAudioCommand::SetParams { sequence, .. }
-        | RuntimeLiveAudioCommand::DestroyStream { sequence, .. }
-        | RuntimeLiveAudioCommand::MasterVolume { sequence, .. } => *sequence,
-    };
-    let (
-        kind,
-        stream_id,
-        sample_rate,
-        channels,
-        encoding,
-        sample_format,
-        resource_uri,
-        samples,
-        volume,
-        pan,
-        repeat,
-        fade_ms,
-    ) = match command {
+    match command {
         RuntimeLiveAudioCommand::LoadResource {
-            sequence: _,
+            sequence,
             stream_id,
             encoding,
             resource_uri,
-        } => (
-            FfiRuntimeAudioCommandKind::LoadResource,
+        } => FfiRuntimeAudioCommand::LoadResource {
+            sequence,
             stream_id,
-            0,
-            0,
-            match encoding {
+            encoding: match encoding {
                 RuntimeLiveAudioEncoding::Unknown => FfiRuntimeAudioEncoding::Unknown,
                 RuntimeLiveAudioEncoding::Wav => FfiRuntimeAudioEncoding::Wav,
                 RuntimeLiveAudioEncoding::Ogg => FfiRuntimeAudioEncoding::Ogg,
                 RuntimeLiveAudioEncoding::Mp3 => FfiRuntimeAudioEncoding::Mp3,
                 RuntimeLiveAudioEncoding::Flac => FfiRuntimeAudioEncoding::Flac,
             },
-            FfiRuntimeAudioSampleFormat::I16,
-            resource_uri,
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
+            resource_uri: resource_uri.into(),
+        },
         RuntimeLiveAudioCommand::CreateStream {
-            sequence: _,
+            sequence,
             stream_id,
             sample_rate,
             channels,
             sample_format,
-        } => (
-            FfiRuntimeAudioCommandKind::CreateStream,
+        } => FfiRuntimeAudioCommand::CreateStream {
+            sequence,
             stream_id,
             sample_rate,
             channels,
-            FfiRuntimeAudioEncoding::Unknown,
-            match sample_format {
+            sample_format: match sample_format {
                 RuntimeLiveAudioSampleFormat::I16 => FfiRuntimeAudioSampleFormat::I16,
                 RuntimeLiveAudioSampleFormat::F32 => FfiRuntimeAudioSampleFormat::F32,
             },
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
+        },
         RuntimeLiveAudioCommand::SubmitI16 {
-            sequence: _,
+            sequence,
             stream_id,
             samples,
-        } => (
-            FfiRuntimeAudioCommandKind::SubmitI16,
+        } => FfiRuntimeAudioCommand::SubmitI16 {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::from(samples)),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
+            samples: samples.into(),
+        },
         RuntimeLiveAudioCommand::SubmitF32 {
-            sequence: _,
+            sequence,
             stream_id,
             samples,
-        } => (
-            FfiRuntimeAudioCommandKind::SubmitF32,
+        } => FfiRuntimeAudioCommand::SubmitF32 {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::F32,
-            String::new(),
-            FfiRuntimePcmBuffer::F32(RVec::from(samples)),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
+            samples: samples.into(),
+        },
         RuntimeLiveAudioCommand::Play {
-            sequence: _,
+            sequence,
             stream_id,
             volume,
             pan,
             repeat,
             fade_in_ms,
-        } => (
-            FfiRuntimeAudioCommandKind::Play,
+        } => FfiRuntimeAudioCommand::Play {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
             volume,
             pan,
             repeat,
             fade_in_ms,
-        ),
+        },
         RuntimeLiveAudioCommand::Stop {
-            sequence: _,
+            sequence,
             stream_id,
             fade_ms,
-        } => (
-            FfiRuntimeAudioCommandKind::Stop,
+        } => FfiRuntimeAudioCommand::Stop {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            0.0,
-            0.0,
-            false,
             fade_ms,
-        ),
+        },
         RuntimeLiveAudioCommand::Pause {
-            sequence: _,
+            sequence,
             stream_id,
-        } => (
-            FfiRuntimeAudioCommandKind::Pause,
+        } => FfiRuntimeAudioCommand::Pause {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
+        },
         RuntimeLiveAudioCommand::Resume {
-            sequence: _,
+            sequence,
             stream_id,
-        } => (
-            FfiRuntimeAudioCommandKind::Resume,
+        } => FfiRuntimeAudioCommand::Resume {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
+        },
         RuntimeLiveAudioCommand::SetParams {
-            sequence: _,
+            sequence,
             stream_id,
             volume,
             pan,
             repeat,
-        } => (
-            FfiRuntimeAudioCommandKind::SetParams,
+        } => FfiRuntimeAudioCommand::SetParams {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
             volume,
             pan,
             repeat,
-            0,
-        ),
+        },
         RuntimeLiveAudioCommand::DestroyStream {
-            sequence: _,
+            sequence,
             stream_id,
-        } => (
-            FfiRuntimeAudioCommandKind::DestroyStream,
+        } => FfiRuntimeAudioCommand::DestroyStream {
+            sequence,
             stream_id,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            0.0,
-            0.0,
-            false,
-            0,
-        ),
-        RuntimeLiveAudioCommand::MasterVolume {
-            sequence: _,
-            volume,
-        } => (
-            FfiRuntimeAudioCommandKind::MasterVolume,
-            0,
-            0,
-            0,
-            FfiRuntimeAudioEncoding::Unknown,
-            FfiRuntimeAudioSampleFormat::I16,
-            String::new(),
-            FfiRuntimePcmBuffer::I16(RVec::new()),
-            volume,
-            0.0,
-            false,
-            0,
-        ),
-    };
-    FfiRuntimeAudioCommand {
-        sequence,
-        kind,
-        stream_id,
-        sample_rate,
-        channels,
-        encoding,
-        sample_format,
-        resource_uri: resource_uri.into(),
-        samples,
-        volume,
-        pan,
-        repeat,
-        fade_ms,
+        },
+        RuntimeLiveAudioCommand::MasterVolume { sequence, volume } => {
+            FfiRuntimeAudioCommand::MasterVolume { sequence, volume }
+        }
     }
 }
 
@@ -4074,124 +3474,6 @@ fn ffi_step_error(session_id: String, message: String) -> FfiRuntimeStepResult {
         session_id: session_id.into(),
         status: "error".into(),
         live: FfiRuntimeLiveOutput::empty(),
-        persisted: RVec::new(),
         diagnostics: RVec::from(vec![RString::from(message)]),
-    }
-}
-
-#[cfg(test)]
-mod runtime_view_tests {
-    use super::*;
-    use std::collections::{BTreeMap, BTreeSet};
-
-    fn cursor(command_id: &str) -> VnCommandCursor {
-        VnCommandCursor {
-            story_id: "story".into(),
-            state_id: "state".into(),
-            scene_id: "scene".into(),
-            command_id: command_id.into(),
-            ordinal: 0,
-        }
-    }
-
-    fn backlog_entry(command_id: &str) -> BacklogEntry {
-        BacklogEntry {
-            command_id: command_id.into(),
-            key: format!("key.{command_id}"),
-            speaker: None,
-            voice: None,
-            story_id: "story".into(),
-            state_id: "state".into(),
-            route_position: 0,
-            read: true,
-            layout: BacklogLayoutMetadata { window: None },
-        }
-    }
-
-    fn state() -> VnRuntimeState {
-        VnRuntimeState {
-            schema: VN_RUNTIME_STATE_SCHEMA.into(),
-            instance_id: "instance".into(),
-            profile: "classic".into(),
-            locale: "ja-JP".into(),
-            cursor: Some(cursor("current")),
-            call_stack: Vec::new(),
-            system_stack: Vec::new(),
-            system: VnSystemState::default(),
-            pending_choice: None,
-            variables: BTreeMap::new(),
-            backlog: vec![backlog_entry("first"), backlog_entry("last")],
-            read_state: BTreeSet::from(["read.command".into()]),
-            voice_replay: BTreeMap::from([(
-                "voice".into(),
-                VoiceReplayEntry {
-                    voice: "voice".into(),
-                    line_key: "line".into(),
-                    speaker: None,
-                },
-            )]),
-            route_coverage: BTreeSet::from(["route".into()]),
-            route_flags: BTreeMap::from([(
-                "route".into(),
-                VnRouteFlag::new(VnRouteFlagKind::Launch, "source", "target"),
-            )]),
-            wait_sequence: 0,
-            pending_wait: None,
-        }
-    }
-
-    fn open_page(state: &mut VnRuntimeState, page: SystemPageKind) {
-        state.system_stack.push(VnSystemFrame {
-            return_to: cursor("return"),
-            return_wait: None,
-            return_choice: None,
-            page,
-        });
-    }
-
-    #[astra_headless_test::test]
-    fn ordinary_runtime_view_is_bounded_but_preserves_authoritative_count() {
-        let state = state();
-        let hash = Hash128::from_bytes([7; 16]);
-        let view = runtime_view_state(&state, hash);
-
-        assert_eq!(view.authoritative_state_hash, hash);
-        assert_eq!(view.backlog_count, 2);
-        assert_eq!(view.state.backlog, vec![backlog_entry("last")]);
-        assert!(view.state.read_state.is_empty());
-        assert!(view.state.voice_replay.is_empty());
-        assert!(view.state.route_coverage.is_empty());
-        assert!(view.state.route_flags.is_empty());
-    }
-
-    #[astra_headless_test::test]
-    fn system_pages_expose_only_the_history_the_page_owns() {
-        let mut backlog = state();
-        open_page(&mut backlog, SystemPageKind::Backlog);
-        let backlog_view = runtime_view_state(&backlog, Hash128::from_bytes([1; 16]));
-        assert_eq!(backlog_view.state.backlog, backlog.backlog);
-        assert!(backlog_view.state.voice_replay.is_empty());
-
-        let mut voice = state();
-        open_page(&mut voice, SystemPageKind::VoiceReplay);
-        let voice_view = runtime_view_state(&voice, Hash128::from_bytes([2; 16]));
-        assert_eq!(voice_view.state.voice_replay, voice.voice_replay);
-        assert_eq!(voice_view.state.backlog.len(), 1);
-
-        let mut route = state();
-        open_page(&mut route, SystemPageKind::RouteChart);
-        let route_view = runtime_view_state(&route, Hash128::from_bytes([3; 16]));
-        assert_eq!(route_view.state.route_coverage, route.route_coverage);
-        assert_eq!(route_view.state.route_flags, route.route_flags);
-        assert!(route_view.state.voice_replay.is_empty());
-    }
-
-    #[astra_headless_test::test]
-    fn terminal_runtime_view_exposes_route_completion_evidence() {
-        let mut state = state();
-        state.cursor = None;
-        let view = runtime_view_state(&state, Hash128::from_bytes([4; 16]));
-        assert_eq!(view.state.route_coverage, state.route_coverage);
-        assert_eq!(view.state.route_flags, state.route_flags);
     }
 }

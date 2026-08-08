@@ -11,6 +11,7 @@ platform-test-driver = []
 [dependencies]
 tracing.workspace = true
 astra-core = { path = "../../Runtime/astra-core" }
+astra-byte-source = { path = "../../Runtime/astra-byte-source" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-ui-core = { path = "../../Runtime/astra-ui-core" }
 schemars.workspace = true

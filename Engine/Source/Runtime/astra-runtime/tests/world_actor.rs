@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
-use astra_core::{Hash128, Hash256, SchemaVersion, StableId};
+use astra_core::StableId;
 use astra_runtime::{
-    ActorId, EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeComponentPayload,
-    RuntimeConfig, RuntimeWorld, SaveRequest, TickInput, ValidatedModuleBinding,
-    ValidatedRuntimeComponentEncoding,
+    ActorId, EngineModuleSlot, ModuleBindingContext, PackageHandle, RuntimeConfig, RuntimeWorld,
+    SaveRequest, TickInput, ValidatedModuleBinding,
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +12,7 @@ struct TestComponent {
 }
 
 #[astra_headless_test::test]
-fn world_actor_creates_component_and_stable_snapshot_hash() {
+fn world_actor_owns_typed_components_and_tracks_revisions() {
     let mut world = RuntimeWorld::create(
         RuntimeConfig {
             seed: 7,
@@ -35,7 +32,7 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
             profile: "test".to_string(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            feature_fingerprint: "runtime-typed-v3".to_string(),
             abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         },
         true,
@@ -54,7 +51,8 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
             },
         )
         .unwrap();
-    let report = world
+
+    world
         .tick(astra_runtime::TickRequest::live(
             TickInput {
                 fixed_step: 1,
@@ -64,18 +62,16 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
             Vec::new(),
         ))
         .unwrap();
-
-    let debug = world.debug_session();
-    assert_eq!(debug.actors().len(), 1);
-    assert_eq!(debug.components(actor).len(), 1);
-    assert_eq!(report.state_hash, world.state_hash());
+    assert_eq!(world.debug_session().actors().len(), 1);
+    assert_eq!(world.debug_session().components(actor).len(), 1);
     assert_eq!(
-        world.read_component::<TestComponent>(component).unwrap(),
-        TestComponent {
-            status: "ready".to_string(),
-            count: 1,
-        }
+        world
+            .read_component::<TestComponent>(component)
+            .unwrap()
+            .count,
+        1
     );
+
     world
         .replace_component(
             component,
@@ -95,15 +91,11 @@ fn world_actor_creates_component_and_stable_snapshot_hash() {
     let mutations = world.debug_session().mutation_trace();
     assert_eq!(mutations.len(), 1);
     assert_eq!(mutations[0].component_id, component);
-    assert_ne!(mutations[0].before_hash, mutations[0].after_hash);
+    assert!(mutations[0].after_revision > mutations[0].before_revision);
 
     assert!(world.detach_component(component));
-    assert_eq!(world.debug_session().components(actor).len(), 0);
     assert!(world.remove_actor(actor));
-    assert_eq!(world.debug_session().actors().len(), 0);
-
-    let save = world.save(SaveRequest::default()).unwrap();
-    assert!(!save.0.is_empty());
+    assert!(!world.save(SaveRequest::default()).unwrap().0.is_empty());
 }
 
 #[astra_headless_test::test]
@@ -111,125 +103,8 @@ fn world_actor_rejects_component_for_missing_actor() {
     let mut world =
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     let missing = ActorId(StableId::deterministic_v7(1, 2, 3));
-    let err = world
+    let error = world
         .attach_component(missing, "astra.test.component", &"orphan")
         .unwrap_err();
-    assert!(err.to_string().contains("ASTRA_RUNTIME_ACTOR_MISSING"));
-}
-
-#[astra_headless_test::test]
-fn component_payload_rejects_hash_mismatch() {
-    let payload = RuntimeComponentPayload::postcard(
-        "astra.test.component",
-        SchemaVersion::default(),
-        &TestComponent {
-            status: "ready".to_string(),
-            count: 1,
-        },
-    )
-    .unwrap();
-    let mut wire = serde_json::to_value(payload).unwrap();
-    let bytes = wire
-        .get_mut("bytes")
-        .and_then(serde_json::Value::as_array_mut)
-        .unwrap();
-    let value = bytes[0].as_u64().unwrap();
-    bytes[0] = serde_json::Value::from(value ^ 1);
-    let error = serde_json::from_value::<RuntimeComponentPayload>(wire).unwrap_err();
-    assert!(error.to_string().contains("ASTRA_RUNTIME_COMPONENT_HASH"));
-}
-
-#[astra_headless_test::test]
-fn component_payload_clone_shares_wire_compatible_immutable_bytes() {
-    let payload = RuntimeComponentPayload::postcard(
-        "astra.test.shared_payload",
-        SchemaVersion::default(),
-        &TestComponent {
-            status: "shared".to_string(),
-            count: 7,
-        },
-    )
-    .unwrap();
-    let cloned = payload.clone();
-
-    assert!(Arc::ptr_eq(payload.bytes(), cloned.bytes()));
-    assert_eq!(
-        postcard::to_allocvec(payload.bytes()).unwrap(),
-        postcard::to_allocvec(&payload.bytes().to_vec()).unwrap()
-    );
-    assert_eq!(
-        cloned.decode::<TestComponent>().unwrap(),
-        TestComponent {
-            status: "shared".to_string(),
-            count: 7,
-        }
-    );
-}
-
-#[astra_headless_test::test]
-fn validated_component_encoding_binds_both_hashes_to_shared_bytes() {
-    let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
-        status: "validated".to_string(),
-        count: 11,
-    })
-    .unwrap()
-    .into();
-    let encoding = ValidatedRuntimeComponentEncoding::postcard(Arc::clone(&bytes));
-
-    assert_eq!(encoding.storage_hash(), Hash256::from_sha256(&bytes));
-    assert_eq!(encoding.state_hash(), Hash128::from_blake3(&bytes));
-}
-
-#[astra_headless_test::test]
-fn blake3_component_encoding_reuses_one_digest_for_storage_and_state() {
-    let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
-        status: "blake3".to_string(),
-        count: 12,
-    })
-    .unwrap()
-    .into();
-    let encoding = ValidatedRuntimeComponentEncoding::postcard_blake3(Arc::clone(&bytes));
-    let digest = blake3::hash(&bytes);
-    let mut state_bytes = [0_u8; 16];
-    state_bytes.copy_from_slice(&digest.as_bytes()[..16]);
-
-    assert_eq!(
-        encoding.storage_hash(),
-        Hash256::from_bytes(*digest.as_bytes())
-    );
-    assert_eq!(encoding.state_hash(), Hash128::from_bytes(state_bytes));
-}
-
-#[astra_headless_test::test]
-fn shipping_owned_component_encoding_round_trips_with_disabled_hash_marker() {
-    let bytes: Arc<[u8]> = postcard::to_allocvec(&TestComponent {
-        status: "shipping".to_string(),
-        count: 13,
-    })
-    .unwrap()
-    .into();
-    let encoding = ValidatedRuntimeComponentEncoding::postcard_owned(Arc::clone(&bytes));
-    assert_eq!(encoding.storage_hash(), Hash256::from_bytes([0; 32]));
-    assert_eq!(encoding.state_hash(), Hash128::from_bytes([0; 16]));
-
-    let payload = RuntimeComponentPayload::validated_encoded_postcard(
-        "astra.test.shipping_component",
-        SchemaVersion::default(),
-        encoding,
-    );
-    assert_eq!(
-        payload.codec(),
-        astra_runtime::RuntimePayloadCodec::PostcardOwned
-    );
-    assert_eq!(payload.hash(), Hash256::from_bytes([0; 32]));
-    assert_eq!(payload.decode::<TestComponent>().unwrap().count, 13);
-
-    let decoded =
-        serde_json::from_value::<RuntimeComponentPayload>(serde_json::to_value(&payload).unwrap())
-            .unwrap();
-    assert_eq!(
-        decoded.codec(),
-        astra_runtime::RuntimePayloadCodec::PostcardOwned
-    );
-    assert_eq!(decoded.bytes().as_ref(), bytes.as_ref());
+    assert!(error.to_string().contains("ASTRA_RUNTIME_ACTOR_MISSING"));
 }

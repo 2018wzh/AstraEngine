@@ -133,7 +133,6 @@ impl BoundTextPresenter {
                 width: *width,
                 height: *height,
                 rgba8: rgba8.clone().into(),
-                hash: Hash256::from_sha256(rgba8),
             },
             destination: RectI::new(0, 0, *width, *height),
             opacity: 1.0,

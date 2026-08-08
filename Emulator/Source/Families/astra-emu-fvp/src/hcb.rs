@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use astra_core::Hash256;
+use astra_byte_source::OwnedByteBuffer;
 use encoding_rs::{Encoding, GBK, SHIFT_JIS, UTF_8};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,6 @@ pub struct FvpSyscallDescriptor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FvpHcbHeader {
-    pub content_hash: Hash256,
     pub sys_desc_offset: u32,
     pub entry_point: u32,
     pub non_volatile_global_count: u16,
@@ -44,7 +43,6 @@ pub struct FvpHcbHeader {
     pub game_mode: u8,
     pub width: u32,
     pub height: u32,
-    pub title_hash: Hash256,
     pub title_byte_len: u32,
     pub syscalls: Vec<FvpSyscallDescriptor>,
     pub custom_syscall_count: u16,
@@ -53,12 +51,13 @@ pub struct FvpHcbHeader {
 #[derive(Debug, Clone)]
 pub struct FvpHcbScript {
     pub header: FvpHcbHeader,
-    bytes: Vec<u8>,
+    bytes: OwnedByteBuffer,
     nls: FvpNls,
 }
 
 impl FvpHcbScript {
-    pub fn parse(bytes: Vec<u8>, nls: FvpNls) -> Result<Self, FvpFormatError> {
+    pub fn parse(bytes: impl Into<OwnedByteBuffer>, nls: FvpNls) -> Result<Self, FvpFormatError> {
+        let bytes = bytes.into();
         if bytes.len() < 4 {
             return Err(FvpFormatError::new(
                 "FVP_HCB_HEADER",
@@ -73,7 +72,7 @@ impl FvpHcbScript {
                 "system descriptor offset is outside the file",
             ));
         }
-        let mut cursor = Cursor::new(&bytes, offset);
+        let mut cursor = Cursor::new(bytes.as_slice(), offset);
         let entry_point = cursor.u32()?;
         if entry_point < 4 || entry_point >= sys_desc_offset {
             return Err(FvpFormatError::new(
@@ -90,7 +89,7 @@ impl FvpHcbScript {
         let title_len = cursor.u8()? as usize;
         let title_bytes = cursor.bytes(title_len)?;
         validate_c_string(title_bytes, "title")?;
-        let title = decode_c_string(title_bytes, nls)?;
+        decode_c_string(title_bytes, nls)?;
         let syscall_count = cursor.u16()? as usize;
         if syscall_count > MAX_SYSCALLS {
             return Err(FvpFormatError::new(
@@ -132,7 +131,6 @@ impl FvpHcbScript {
         let custom_syscall_count = cursor.u16()?;
         Ok(Self {
             header: FvpHcbHeader {
-                content_hash: Hash256::from_sha256(&bytes),
                 sys_desc_offset,
                 entry_point,
                 non_volatile_global_count,
@@ -140,7 +138,6 @@ impl FvpHcbScript {
                 game_mode,
                 width,
                 height,
-                title_hash: Hash256::from_sha256(title.as_bytes()),
                 title_byte_len: title_bytes.len() as u32,
                 syscalls,
                 custom_syscall_count,
@@ -154,7 +151,7 @@ impl FvpHcbScript {
         &self.bytes[4..self.header.sys_desc_offset as usize]
     }
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.as_slice()
     }
     pub fn nls(&self) -> FvpNls {
         self.nls

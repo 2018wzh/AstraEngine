@@ -59,7 +59,7 @@ mod windows {
     use std::{
         collections::BTreeMap,
         sync::{
-            atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+            atomic::{AtomicBool, Ordering},
             mpsc as std_mpsc, Arc,
         },
         thread,
@@ -67,16 +67,15 @@ mod windows {
     };
 
     use crate::accessibility::WindowsAccessibilityBridge;
-    use astra_core::Hash256;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel_with_command_wake, AudioDeviceFormat, AudioMeter, AudioOutputHandle,
-        AudioOutputRequest, AudioOutputStatus, AudioPacket, AudioWakeRegistration, CapturedFrame,
-        DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
-        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
-        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
-        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
-        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
+        host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
+        AudioWakeRegistration, CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle,
+        HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput, PackageSourceHandle,
+        PackageSourceRequest, PlatformBackendChannels, PlatformCommandWakeRegistration,
+        PlatformDecodeRequest, PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind,
+        PlatformHostProfile, PlatformHostSession, PointerButton, SaveTransactionHandle,
+        SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -614,69 +613,6 @@ mod windows {
                     HostCommand::OpenAudioOutput { request, reply } => {
                         self.start_audio_output_open(request, reply);
                     }
-                    HostCommand::QueryAudioOutputFormat { reply } => {
-                        let result = preferred_audio_output_format();
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudioDeviceFormat { reply } => {
-                        let _ = reply.send(default_audio_device_format());
-                    }
-                    HostCommand::SubmitAudio {
-                        output,
-                        packet,
-                        reply,
-                    } => {
-                        let result = self
-                            .audio_outputs
-                            .get_mut(output)
-                            .and_then(|resource| resource.submit(packet));
-                        if result
-                            .as_ref()
-                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
-                        {
-                            let _ = self.audio_outputs.remove(output);
-                            self.emit(PlatformEventKind::DeviceLost {
-                                provider: "windows.wasapi".to_string(),
-                            });
-                        }
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudio { output, reply } => {
-                        let result = self.audio_outputs.get(output).map(AudioResource::state);
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::DrainAudio { output, reply } => {
-                        let result = self
-                            .audio_outputs
-                            .get_mut(output)
-                            .and_then(AudioResource::drain);
-                        if result
-                            .as_ref()
-                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
-                        {
-                            let _ = self.audio_outputs.remove(output);
-                            self.emit(PlatformEventKind::DeviceLost {
-                                provider: "windows.wasapi".to_string(),
-                            });
-                        }
-                        let _ = reply.send(result);
-                    }
-                    HostCommand::QueryAudioOutput { output, reply } => {
-                        let result = self
-                            .audio_outputs
-                            .get(output)
-                            .and_then(AudioResource::status);
-                        if result
-                            .as_ref()
-                            .is_err_and(|error| error.code == PlatformErrorCode::DeviceLost)
-                        {
-                            let _ = self.audio_outputs.remove(output);
-                            self.emit(PlatformEventKind::DeviceLost {
-                                provider: "windows.wasapi".to_string(),
-                            });
-                        }
-                        let _ = reply.send(result);
-                    }
                     HostCommand::PauseAudio { output, reply } => {
                         let result = self
                             .audio_outputs
@@ -704,15 +640,7 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::CloseAudio { output, reply } => {
-                        let drain = self
-                            .audio_outputs
-                            .get_mut(output)
-                            .and_then(AudioResource::drain);
-                        let remove = self.audio_outputs.remove(output).map(|_| ());
-                        let result = match (drain, remove) {
-                            (Err(error), _) => Err(error),
-                            (Ok(_), result) => result,
-                        };
+                        let result = self.audio_outputs.remove(output).map(|_| ());
                         let _ = reply.send(result);
                     }
                     HostCommand::OpenDecode { kind, reply } => {
@@ -858,6 +786,14 @@ mod windows {
                             event_loop.exit();
                         }
                     }
+                    #[cfg(not(feature = "platform-test-driver"))]
+                    #[allow(unreachable_patterns)]
+                    command => {
+                        let _ = command.reply_error(host_error(
+                            operation,
+                            "platform test command is unavailable in this host build",
+                        ));
+                    }
                 }
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!(
@@ -956,7 +892,7 @@ mod windows {
         fn start_audio_output_open(
             &mut self,
             request: AudioOutputRequest,
-            reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
+            reply: oneshot::Sender<Result<OpenedAudioOutput, PlatformError>>,
         ) {
             let completion_tx = self.audio_completion_tx.clone();
             let event_loop_proxy = self.event_loop_proxy.clone();
@@ -981,9 +917,15 @@ mod windows {
         fn process_audio_completions(&mut self) {
             while let Ok(completion) = self.audio_completion_rx.try_recv() {
                 self.pending_audio_opens = self.pending_audio_opens.saturating_sub(1);
-                let result = completion
-                    .result
-                    .and_then(|resource| self.audio_outputs.insert(resource));
+                let result = completion.result.and_then(|(resource, lane, format)| {
+                    let handle = self.audio_outputs.insert(resource)?;
+                    Ok(OpenedAudioOutput {
+                        handle,
+                        format,
+                        lane: Box::new(lane),
+                        capture: None,
+                    })
+                });
                 let _ = completion.reply.send(result);
             }
         }
@@ -1139,8 +1081,15 @@ mod windows {
     }
 
     struct AudioCompletion {
-        reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
-        result: Result<AudioResource, PlatformError>,
+        reply: oneshot::Sender<Result<OpenedAudioOutput, PlatformError>>,
+        result: Result<
+            (
+                AudioResource,
+                astra_platform_common::NativeAudioProducer,
+                AudioDeviceFormat,
+            ),
+            PlatformError,
+        >,
     }
 
     enum PackageSourceResource {
@@ -1349,74 +1298,23 @@ mod windows {
 
     struct AudioResource {
         stream: cpal::Stream,
-        producer: astra_platform_common::NativeAudioProducer,
-        queue_telemetry: astra_platform_common::AudioQueueTelemetryReader,
-        meter: Arc<CallbackMeter>,
+        #[cfg(feature = "platform-test-driver")]
         stream_error: Arc<AtomicBool>,
-        channels: u16,
-        sample_rate: u32,
-        next_sequence: u64,
-        submitted_samples: u64,
         paused: bool,
-        audio_wake: AudioWakeRegistration,
-    }
-
-    fn preferred_audio_output_format() -> Result<astra_platform::AudioOutputFormat, PlatformError> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or_else(|| {
-                host_error(
-                    "audio.format",
-                    "WASAPI default output device is unavailable",
-                )
-            })?;
-        const PRODUCT_SAMPLE_RATE: u32 = 48_000;
-        const PRODUCT_CHANNELS: u16 = 2;
-        let product_format_supported = device
-            .supported_output_configs()
-            .map_err(|_| host_error("audio.format", "WASAPI output format enumeration failed"))?
-            .any(|range| {
-                range.channels() == PRODUCT_CHANNELS
-                    && range.min_sample_rate() <= PRODUCT_SAMPLE_RATE
-                    && range.max_sample_rate() >= PRODUCT_SAMPLE_RATE
-                    && sample_format_rank(range.sample_format()).is_some()
-            });
-        if product_format_supported {
-            tracing::info!(
-                event = "platform.windows.audio.format.selected",
-                sample_rate = PRODUCT_SAMPLE_RATE,
-                channels = PRODUCT_CHANNELS,
-                selection = "product_canonical",
-                "selected a WASAPI format compatible with the product mixer"
-            );
-            return Ok(astra_platform::AudioOutputFormat {
-                sample_rate: PRODUCT_SAMPLE_RATE,
-                channels: PRODUCT_CHANNELS,
-            });
-        }
-        let supported = device.default_output_config().map_err(|_| {
-            host_error(
-                "audio.format",
-                "WASAPI default output config is unavailable",
-            )
-        })?;
-        tracing::warn!(
-            event = "platform.windows.audio.format.canonical_unavailable",
-            sample_rate = supported.sample_rate(),
-            channels = supported.channels(),
-            "WASAPI device does not expose the canonical product mixer format"
-        );
-        Ok(astra_platform::AudioOutputFormat {
-            sample_rate: supported.sample_rate(),
-            channels: supported.channels(),
-        })
     }
 
     impl AudioResource {
         fn new(
             request: AudioOutputRequest,
             audio_wake: AudioWakeRegistration,
-        ) -> Result<Self, PlatformError> {
+        ) -> Result<
+            (
+                Self,
+                astra_platform_common::NativeAudioProducer,
+                AudioDeviceFormat,
+            ),
+            PlatformError,
+        > {
             if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
             {
                 return Err(PlatformError::new(
@@ -1448,8 +1346,8 @@ mod windows {
                     )
                 })?;
             let config: cpal::StreamConfig = supported.clone().into();
-            let capacity = request
-                .max_buffered_frames
+            let chunk_samples = request
+                .chunk_frames
                 .checked_mul(usize::from(request.channels))
                 .ok_or_else(|| {
                     PlatformError::new(
@@ -1458,13 +1356,16 @@ mod windows {
                         "audio output queue capacity overflows",
                     )
                 })?;
-            let (producer, consumer, queue_telemetry) =
-                astra_platform_common::NativeAudioQueue::create(capacity)?;
-            let meter = Arc::new(CallbackMeter::default());
+            let chunk_capacity = request.max_buffered_frames.div_ceil(request.chunk_frames);
+            let (producer, consumer, _queue_telemetry) =
+                astra_platform_common::NativeAudioQueue::create(
+                    chunk_capacity,
+                    chunk_samples,
+                    audio_wake.clone(),
+                )?;
             let stream_error = Arc::new(AtomicBool::new(false));
             let stream = match supported.sample_format() {
                 cpal::SampleFormat::F32 => {
-                    let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
                     let wake = audio_wake.clone();
                     let error_wake = audio_wake.clone();
@@ -1472,7 +1373,7 @@ mod windows {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [f32], _| {
-                            let _ = fill_f32(output, &mut consumer, &meter);
+                            let _ = fill_f32(output, &mut consumer);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1483,7 +1384,6 @@ mod windows {
                     )
                 }
                 cpal::SampleFormat::I16 => {
-                    let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
                     let wake = audio_wake.clone();
                     let error_wake = audio_wake.clone();
@@ -1491,7 +1391,7 @@ mod windows {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [i16], _| {
-                            let _ = fill_i16(output, &mut consumer, &meter);
+                            let _ = fill_i16(output, &mut consumer);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1502,7 +1402,6 @@ mod windows {
                     )
                 }
                 cpal::SampleFormat::U16 => {
-                    let meter = Arc::clone(&meter);
                     let error = Arc::clone(&stream_error);
                     let wake = audio_wake.clone();
                     let error_wake = audio_wake.clone();
@@ -1510,7 +1409,7 @@ mod windows {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [u16], _| {
-                            let _ = fill_u16(output, &mut consumer, &meter);
+                            let _ = fill_u16(output, &mut consumer);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1533,59 +1432,19 @@ mod windows {
                     host_error("audio.open", "WASAPI output stream could not start")
                 })?;
             }
-            Ok(Self {
-                stream,
+            Ok((
+                Self {
+                    stream,
+                    #[cfg(feature = "platform-test-driver")]
+                    stream_error,
+                    paused: request.start_paused,
+                },
                 producer,
-                queue_telemetry,
-                meter,
-                stream_error,
-                channels: request.channels,
-                sample_rate: request.sample_rate,
-                next_sequence: 1,
-                submitted_samples: 0,
-                paused: request.start_paused,
-                audio_wake,
-            })
-        }
-
-        fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
-            if self.stream_error.load(Ordering::Acquire) {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.submit",
-                    "WASAPI output stream reported a device error",
-                ));
-            }
-            if packet.sequence != self.next_sequence
-                || packet.channels != self.channels
-                || packet.samples.is_empty()
-                || !packet
-                    .samples
-                    .len()
-                    .is_multiple_of(usize::from(packet.channels))
-                || packet.samples.iter().any(|sample| !sample.is_finite())
-            {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::InvalidState,
-                    "audio.submit",
-                    "audio packet sequence or channel count is invalid",
-                ));
-            }
-            let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
-                PlatformError::new(
-                    PlatformErrorCode::InvalidState,
-                    "audio.submit",
-                    "audio packet sequence overflowed",
-                )
-            })?;
-            let submitted_samples = self
-                .submitted_samples
-                .checked_add(packet.samples.len() as u64)
-                .ok_or_else(|| host_error("audio.submit", "audio sample counter overflowed"))?;
-            self.producer.push_samples(&packet.samples)?;
-            self.next_sequence = next_sequence;
-            self.submitted_samples = submitted_samples;
-            Ok(packet.samples)
+                AudioDeviceFormat {
+                    sample_rate: request.sample_rate,
+                    channels: request.channels,
+                },
+            ))
         }
 
         fn pause(&mut self) -> Result<(), PlatformError> {
@@ -1622,187 +1481,6 @@ mod windows {
         fn inject_device_loss(&mut self) {
             self.stream_error.store(true, Ordering::Release);
         }
-
-        fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
-            if self.paused {
-                self.resume()?;
-            }
-            let request = AudioOutputRequest {
-                sample_rate: self.sample_rate,
-                channels: self.channels,
-                max_buffered_frames: 1,
-                start_paused: false,
-            };
-            let deadline = Instant::now() + request.drain_timeout(self.submitted_samples);
-            let mut observed_wake = 0;
-            loop {
-                if self.stream_error.load(Ordering::Acquire) {
-                    return Err(PlatformError::new(
-                        PlatformErrorCode::DeviceLost,
-                        "audio.drain",
-                        "WASAPI output stream reported a device error",
-                    ));
-                }
-                if self.queue_telemetry.snapshot().sample_count >= self.submitted_samples {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    return Err(host_error("audio.drain", "WASAPI output drain timed out"));
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                observed_wake = self
-                    .audio_wake
-                    .wait_timeout(observed_wake, remaining)
-                    .ok_or_else(|| host_error("audio.drain", "WASAPI output drain timed out"))?;
-            }
-            Ok(self.meter.snapshot())
-        }
-
-        fn state(&self) -> astra_platform::AudioOutputState {
-            let telemetry = self.queue_telemetry.snapshot();
-            let queued_samples = self
-                .submitted_samples
-                .saturating_sub(telemetry.sample_count);
-            astra_platform::AudioOutputState {
-                queued_frames: usize::try_from(queued_samples / u64::from(self.channels))
-                    .unwrap_or(usize::MAX),
-                callback_count: self.meter.callback_count.load(Ordering::Acquire),
-                submitted_samples: self.submitted_samples,
-                consumed_samples: telemetry.sample_count,
-                underflow_count: telemetry.underflow_count,
-                meter: self.meter.snapshot(),
-            }
-        }
-
-        fn status(&self) -> Result<AudioOutputStatus, PlatformError> {
-            if self.stream_error.load(Ordering::Acquire) {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.query",
-                    "WASAPI output stream reported a device error",
-                ));
-            }
-            let consumed_samples = self.queue_telemetry.snapshot();
-            let channels = u64::from(self.channels);
-            if consumed_samples.sample_count > self.submitted_samples
-                || !self.submitted_samples.is_multiple_of(channels)
-            {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::IntegrityMismatch,
-                    "audio.query",
-                    "WASAPI queue telemetry is inconsistent with submitted audio",
-                ));
-            }
-            let submitted_frames = self.submitted_samples / channels;
-            let played_frames = consumed_samples.sample_count / channels;
-            Ok(AudioOutputStatus {
-                submitted_frames,
-                played_frames,
-                buffered_frames: submitted_frames - played_frames,
-                underflow_count: consumed_samples.underflow_count,
-                meter: self.meter.snapshot(),
-            })
-        }
-    }
-
-    fn default_audio_device_format() -> Result<AudioDeviceFormat, PlatformError> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or_else(|| {
-                host_error(
-                    "audio.query_device_format",
-                    "WASAPI default output device is unavailable",
-                )
-            })?;
-        let config = device.default_output_config().map_err(|_| {
-            host_error(
-                "audio.query_device_format",
-                "WASAPI default output format is unavailable",
-            )
-        })?;
-        if sample_format_rank(config.sample_format()).is_none()
-            || config.sample_rate() == 0
-            || config.channels() == 0
-        {
-            return Err(host_error(
-                "audio.query_device_format",
-                "WASAPI default output format is unsupported",
-            ));
-        }
-        Ok(AudioDeviceFormat {
-            sample_rate: config.sample_rate(),
-            channels: config.channels(),
-        })
-    }
-
-    #[derive(Default)]
-    struct CallbackMeter {
-        callback_count: AtomicU64,
-        sample_count: AtomicU64,
-        peak_bits: AtomicU32,
-        sum_squares_bits: AtomicU64,
-    }
-
-    impl CallbackMeter {
-        fn begin_callback(&self) {
-            self.callback_count.fetch_add(1, Ordering::Release);
-        }
-
-        fn record(&self, sample: f32) {
-            let magnitude = sample.abs();
-            let magnitude_bits = magnitude.to_bits();
-            let mut peak_bits = self.peak_bits.load(Ordering::Relaxed);
-            while magnitude_bits > peak_bits {
-                match self.peak_bits.compare_exchange_weak(
-                    peak_bits,
-                    magnitude_bits,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(actual) => peak_bits = actual,
-                }
-            }
-            let contribution = f64::from(sample) * f64::from(sample);
-            let mut sum_bits = self.sum_squares_bits.load(Ordering::Relaxed);
-            loop {
-                let next = f64::from_bits(sum_bits) + contribution;
-                match self.sum_squares_bits.compare_exchange_weak(
-                    sum_bits,
-                    next.to_bits(),
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(actual) => sum_bits = actual,
-                }
-            }
-            self.sample_count.fetch_add(1, Ordering::Release);
-        }
-
-        fn snapshot(&self) -> AudioMeter {
-            let sample_count = self.sample_count.load(Ordering::Acquire);
-            let rms = if sample_count == 0 {
-                0.0
-            } else {
-                (f64::from_bits(self.sum_squares_bits.load(Ordering::Acquire))
-                    / sample_count as f64)
-                    .sqrt() as f32
-            };
-            AudioMeter {
-                sample_count,
-                peak_dbfs: amplitude_dbfs(f32::from_bits(self.peak_bits.load(Ordering::Acquire))),
-                rms_dbfs: amplitude_dbfs(rms),
-            }
-        }
-    }
-
-    fn amplitude_dbfs(value: f32) -> f32 {
-        if value <= 0.0 {
-            -120.0
-        } else {
-            20.0 * value.log10()
-        }
     }
 
     fn sample_format_rank(format: cpal::SampleFormat) -> Option<u8> {
@@ -1817,13 +1495,8 @@ mod windows {
     fn fill_f32(
         output: &mut [f32],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
     ) -> bool {
-        meter.begin_callback();
         let filled = consumer.pop_samples(output);
-        for sample in &output[..filled] {
-            meter.record(*sample);
-        }
         output[filled..].fill(0.0);
         if filled != output.len() {
             consumer.record_underflow();
@@ -1834,9 +1507,7 @@ mod windows {
     fn fill_i16(
         output: &mut [i16],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
     ) -> bool {
-        meter.begin_callback();
         let mut scratch = [0.0_f32; 1024];
         let mut written = 0;
         while written < output.len() {
@@ -1846,7 +1517,6 @@ mod windows {
                 .iter_mut()
                 .zip(&scratch[..filled])
             {
-                meter.record(*sample);
                 *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
             }
             written += filled;
@@ -1864,9 +1534,7 @@ mod windows {
     fn fill_u16(
         output: &mut [u16],
         consumer: &mut astra_platform_common::NativeAudioConsumer,
-        meter: &CallbackMeter,
     ) -> bool {
-        meter.begin_callback();
         let mut scratch = [0.0_f32; 1024];
         let mut written = 0;
         while written < output.len() {
@@ -1876,7 +1544,6 @@ mod windows {
                 .iter_mut()
                 .zip(&scratch[..filled])
             {
-                meter.record(*sample);
                 *target = ((sample.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
             }
             written += filled;
@@ -1915,7 +1582,8 @@ mod windows {
     }
 
     struct WindowsVideoStreamState {
-        cursor: astra_media::DecodedVideoStreamCursor,
+        max_frames: u64,
+        max_decoded_byte_count: u64,
         decoder: astra_media::WindowsVideoStreamDecoder,
         pending: Option<astra_media::DecodedVideoFrame>,
         frame_count: u64,
@@ -2085,14 +1753,26 @@ mod windows {
                         })
                         .map_err(media_decode_error)?;
                     match result.output {
-                        MediaDecodeOutput::CpuBuffer {
-                            bytes,
-                            format,
-                            hash,
-                        } => DecodeOutput::CpuBuffer {
-                            format,
-                            bytes,
-                            hash: hash.to_string(),
+                        MediaDecodeOutput::CpuBuffer { bytes, format } => {
+                            DecodeOutput::CpuBuffer { format, bytes }
+                        }
+                        MediaDecodeOutput::AudioPcmI16 {
+                            sample_rate,
+                            channels,
+                            samples,
+                        } => DecodeOutput::AudioPcmI16 {
+                            sample_rate,
+                            channels,
+                            samples,
+                        },
+                        MediaDecodeOutput::AudioPcmF32 {
+                            sample_rate,
+                            channels,
+                            samples,
+                        } => DecodeOutput::AudioPcmF32 {
+                            sample_rate,
+                            channels,
+                            samples,
                         },
                         MediaDecodeOutput::MediaSurfaceToken(_) => {
                             return Err(host_error(
@@ -2131,6 +1811,7 @@ mod windows {
                                 512 * 1024 * 1024,
                             )
                             .map_err(media_decode_error)?;
+                            let duration_us = decoder.duration_us();
                             let pending = decoder
                                 .next_frame()
                                 .map_err(media_decode_error)?
@@ -2140,30 +1821,19 @@ mod windows {
                                         "video stream produced no frames",
                                     )
                                 })?;
-                            let cursor = astra_media::DecodedVideoStreamCursor {
-                                schema: astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA.into(),
-                                source_hash: Hash256::from_sha256(&request.bytes),
-                                width: pending.width,
-                                height: pending.height,
+                            self.video_stream = Some(WindowsVideoStreamState {
                                 max_frames: 60 * 60 * 4,
                                 max_decoded_byte_count: 512 * 1024 * 1024,
-                            };
-                            let bytes = cursor.encode().map_err(media_decode_error)?;
-                            self.video_stream = Some(WindowsVideoStreamState {
-                                cursor,
                                 decoder,
                                 pending: Some(pending),
                                 frame_count: 0,
                                 decoded_byte_count: 0,
                                 end_emitted: false,
                             });
-                            DecodeOutput::CpuBuffer {
-                                format: format!(
-                                    "postcard:{}",
-                                    astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA
-                                ),
-                                hash: Hash256::from_sha256(&bytes).to_string(),
-                                bytes,
+                            DecodeOutput::VideoStreamStart {
+                                duration_us: Some(duration_us),
+                                frame_count: None,
+                                decoded_byte_count: None,
                             }
                         }
                         DecodeKind::Audio => {
@@ -2181,14 +1851,11 @@ mod windows {
                                         "audio stream produced no samples",
                                     )
                                 })?;
-                            let format =
-                                format!("pcm_s16le:{}:{}", chunk.sample_rate, chunk.channels);
-                            let hash = Hash256::from_sha256(&chunk.pcm_s16le).to_string();
                             self.audio_stream = Some(decoder);
-                            DecodeOutput::CpuBuffer {
-                                format,
-                                bytes: chunk.pcm_s16le,
-                                hash,
+                            DecodeOutput::AudioPcmI16 {
+                                sample_rate: chunk.sample_rate,
+                                channels: chunk.channels,
+                                samples: chunk.samples,
                             }
                         }
                         DecodeKind::Image => unreachable!(),
@@ -2244,8 +1911,8 @@ mod windows {
                 .decoded_byte_count
                 .checked_add(frame.bgra8.len() as u64)
                 .ok_or_else(|| host_error("decode.stream.next", "decoded byte count overflowed"))?;
-            if state.frame_count > state.cursor.max_frames
-                || state.decoded_byte_count > state.cursor.max_decoded_byte_count
+            if state.frame_count > state.max_frames
+                || state.decoded_byte_count > state.max_decoded_byte_count
             {
                 return Err(host_error(
                     "decode.stream.next",
@@ -2257,7 +1924,6 @@ mod windows {
             // pixel Vec directly through the PlatformHost response; encoding
             // the whole frame as postcard here caused a second full-payload
             // allocation on every streaming frame.
-            let format = frame.cpu_buffer_format();
             let bytes = frame.bgra8;
             tracing::trace!(
                 event = "platform.windows.decode.video_frame.moved",
@@ -2268,10 +1934,13 @@ mod windows {
                 transfer = "owned_cpu_buffer",
                 "WMF streaming frame moved through PlatformHost"
             );
-            return Ok(DecodeOutput::CpuBuffer {
-                format,
-                hash: frame.content_hash.to_string(),
-                bytes,
+            return Ok(DecodeOutput::VideoFrame {
+                sequence: frame.sequence,
+                pts_us: frame.pts_us,
+                duration_us: frame.duration_us,
+                width: frame.width,
+                height: frame.height,
+                bgra8: bytes,
             });
         }
         if state.end_emitted {
@@ -2281,22 +1950,9 @@ mod windows {
             ));
         }
         state.end_emitted = true;
-        let end = astra_media::DecodedVideoStreamCursorEnd {
-            schema: astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA.into(),
-            source_hash: state.cursor.source_hash,
+        Ok(DecodeOutput::VideoStreamEnd {
             frame_count: state.frame_count,
             decoded_byte_count: state.decoded_byte_count,
-        };
-        end.validate_against(&state.cursor)
-            .map_err(media_decode_error)?;
-        let bytes = end.encode(&state.cursor).map_err(media_decode_error)?;
-        Ok(DecodeOutput::CpuBuffer {
-            format: format!(
-                "postcard:{}",
-                astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA
-            ),
-            hash: Hash256::from_sha256(&bytes).to_string(),
-            bytes,
         })
     }
 
@@ -2315,10 +1971,10 @@ mod windows {
                     astra_platform::DECODE_STREAM_EOS_DIAGNOSTIC,
                 )
             })?;
-        Ok(DecodeOutput::CpuBuffer {
-            format: format!("pcm_s16le:{}:{}", chunk.sample_rate, chunk.channels),
-            hash: Hash256::from_sha256(&chunk.pcm_s16le).to_string(),
-            bytes: chunk.pcm_s16le,
+        Ok(DecodeOutput::AudioPcmI16 {
+            sample_rate: chunk.sample_rate,
+            channels: chunk.channels,
+            samples: chunk.samples,
         })
     }
 

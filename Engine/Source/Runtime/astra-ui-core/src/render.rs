@@ -1,6 +1,5 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -38,7 +37,6 @@ pub struct UiTextureUpload {
     pub height: u32,
     pub format: UiTextureFormat,
     pub pixels: Arc<[u8]>,
-    pub content_hash: Hash256,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -123,12 +121,6 @@ impl ValidateUi for UiRenderFrame {
                 return Err(UiValidationError::invalid(
                     "ASTRA_UI_TEXTURE_LENGTH",
                     "texture byte length does not match dimensions and format",
-                ));
-            }
-            if Hash256::from_sha256(&upload.pixels) != upload.content_hash {
-                return Err(UiValidationError::invalid(
-                    "ASTRA_UI_TEXTURE_HASH",
-                    "texture content hash mismatch",
                 ));
             }
             if upload.format == UiTextureFormat::Rgba8SrgbPremultiplied
@@ -246,7 +238,7 @@ impl ValidateUi for UiRenderFrame {
                 "frame mesh budget exceeded",
             ));
         }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }
 
@@ -280,7 +272,6 @@ mod tests {
                     width: 1,
                     height: 1,
                     format: UiTextureFormat::R8Unorm,
-                    content_hash: Hash256::from_sha256(&pixels),
                     pixels,
                 }],
                 releases: vec![UiTextureRelease {

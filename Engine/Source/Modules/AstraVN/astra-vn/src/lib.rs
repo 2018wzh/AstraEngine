@@ -6,11 +6,10 @@
 //! packaging could start. Keep this in-process product surface deliberately
 //! small; feature crates remain the owner of their public APIs.
 
-pub use astra_vn_core::{VnPlayerCommand, VnRunConfig, VnRuntime, VnRuntimeViewState, VnWaitKind};
+pub use astra_vn_core::{VnPlayerCommand, VnRunConfig, VnRuntime, VnWaitKind};
 pub use astra_vn_presentation::{StageModel, VnPresentationProviderManifest};
 pub use astra_vn_script::{
     compile_astra_project, format_astra_source, AstraSource, CompileAstraProjectOptions,
-    FormatOptions, SystemStoryValidationStatus, VN_RUNTIME_VIEW_STATE_SCHEMA,
-    VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
+    FormatOptions, SystemStoryValidationStatus,
 };
 pub use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};

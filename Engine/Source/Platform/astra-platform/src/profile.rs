@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{PlatformError, PlatformErrorCode, PlatformId};
 
-pub const PLATFORM_HOST_PROFILE_SCHEMA_V1: &str = "astra.platform_host_profile.v1";
-pub const PLATFORM_HOST_PROFILE_SCHEMA: &str = "astra.platform_host_profile.v2";
+pub const PLATFORM_HOST_PROFILE_SCHEMA: &str = "astra.platform_host_profile.v3";
 pub const DEFAULT_MAX_PACKAGE_CACHE_ENTRY_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 pub const DEFAULT_MAX_PACKAGE_CACHE_TOTAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
@@ -40,6 +39,8 @@ pub struct HostLimits {
     pub event_queue_capacity: usize,
     pub max_frame_bytes: usize,
     pub max_audio_frames: usize,
+    pub audio_pcm_cache_bytes: usize,
+    pub audio_chunk_frames: usize,
     pub max_package_read_bytes: usize,
 }
 
@@ -50,6 +51,8 @@ impl Default for HostLimits {
             event_queue_capacity: 1024,
             max_frame_bytes: 64 * 1024 * 1024,
             max_audio_frames: 48_000 * 4,
+            audio_pcm_cache_bytes: 256 * 1024 * 1024,
+            audio_chunk_frames: 512,
             max_package_read_bytes: 8 * 1024 * 1024,
         }
     }
@@ -79,26 +82,12 @@ pub struct PlatformHostProfile {
     pub package_id: String,
     pub renderer: ProviderPolicy,
     pub decode: ProviderPolicy,
-    pub audio: ProviderPolicy,
+    pub audio_mixer: ProviderPolicy,
+    pub audio_output: ProviderPolicy,
     pub save: ProviderPolicy,
     pub package_sources: Vec<PackageSourcePolicy>,
     pub limits: HostLimits,
     pub package_cache: PackageCachePolicy,
-}
-
-#[derive(Debug, Deserialize)]
-struct PlatformHostProfileV1 {
-    schema: String,
-    id: String,
-    platform: PlatformId,
-    target: String,
-    package_id: String,
-    renderer: ProviderPolicy,
-    decode: ProviderPolicy,
-    audio: ProviderPolicy,
-    save: ProviderPolicy,
-    package_sources: Vec<PackageSourcePolicy>,
-    limits: HostLimits,
 }
 
 impl PlatformHostProfile {
@@ -111,7 +100,8 @@ impl PlatformHostProfile {
             package_id: package_id.into(),
             renderer: ProviderPolicy::required("wgpu_metal"),
             decode: ProviderPolicy::required("avfoundation"),
-            audio: ProviderPolicy::required("coreaudio"),
+            audio_mixer: ProviderPolicy::required("kira"),
+            audio_output: ProviderPolicy::required("coreaudio"),
             save: ProviderPolicy::required("application_support"),
             package_sources: vec![
                 PackageSourcePolicy::Bundled,
@@ -134,7 +124,8 @@ impl PlatformHostProfile {
             package_id: package_id.into(),
             renderer: ProviderPolicy::required("wgpu_vulkan"),
             decode: ProviderPolicy::required("gstreamer"),
-            audio: ProviderPolicy::required("alsa"),
+            audio_mixer: ProviderPolicy::required("kira"),
+            audio_output: ProviderPolicy::required("alsa"),
             save: ProviderPolicy::required("xdg_data"),
             package_sources: vec![
                 PackageSourcePolicy::Bundled,
@@ -154,7 +145,8 @@ impl PlatformHostProfile {
             package_id: package_id.into(),
             renderer: ProviderPolicy::required("wgpu_hardware"),
             decode: ProviderPolicy::required("wmf"),
-            audio: ProviderPolicy::required("wasapi"),
+            audio_mixer: ProviderPolicy::required("kira"),
+            audio_output: ProviderPolicy::required("wasapi"),
             save: ProviderPolicy::required("saved_games"),
             package_sources: vec![
                 PackageSourcePolicy::Bundled,
@@ -174,7 +166,8 @@ impl PlatformHostProfile {
             package_id: package_id.into(),
             renderer: ProviderPolicy::required("webgpu"),
             decode: ProviderPolicy::required("webcodecs"),
-            audio: ProviderPolicy::required("webaudio"),
+            audio_mixer: ProviderPolicy::required("kira"),
+            audio_output: ProviderPolicy::required("webaudio"),
             save: ProviderPolicy::required("opfs"),
             package_sources: vec![
                 PackageSourcePolicy::Bundled,
@@ -194,7 +187,8 @@ impl PlatformHostProfile {
             package_id: package_id.into(),
             renderer: ProviderPolicy::required("wgpu_vulkan"),
             decode: ProviderPolicy::required("mediacodec"),
-            audio: ProviderPolicy {
+            audio_mixer: ProviderPolicy::required("kira"),
+            audio_output: ProviderPolicy {
                 providers: vec!["oboe_aaudio".to_string(), "oboe_opensl_es".to_string()],
                 allow_software: false,
             },
@@ -228,38 +222,13 @@ pub fn migrate_host_profile_json(
         .get("schema")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| invalid_profile_migration("profile schema is missing"))?;
-    match schema {
-        PLATFORM_HOST_PROFILE_SCHEMA => serde_json::from_value(value).map_err(|_| {
-            invalid_profile_migration("v2 platform host profile could not be decoded")
-        }),
-        PLATFORM_HOST_PROFILE_SCHEMA_V1 => {
-            let profile: PlatformHostProfileV1 = serde_json::from_value(value).map_err(|_| {
-                invalid_profile_migration("v1 platform host profile could not be decoded")
-            })?;
-            if profile.schema != PLATFORM_HOST_PROFILE_SCHEMA_V1 {
-                return Err(invalid_profile_migration(
-                    "v1 platform host profile schema is invalid",
-                ));
-            }
-            Ok(PlatformHostProfile {
-                schema: PLATFORM_HOST_PROFILE_SCHEMA.to_string(),
-                id: profile.id,
-                platform: profile.platform,
-                target: profile.target,
-                package_id: profile.package_id,
-                renderer: profile.renderer,
-                decode: profile.decode,
-                audio: profile.audio,
-                save: profile.save,
-                package_sources: profile.package_sources,
-                limits: profile.limits,
-                package_cache: PackageCachePolicy::default(),
-            })
-        }
-        _ => Err(invalid_profile_migration(
+    if schema != PLATFORM_HOST_PROFILE_SCHEMA {
+        return Err(invalid_profile_migration(
             "platform host profile schema is unsupported",
-        )),
+        ));
     }
+    serde_json::from_value(value)
+        .map_err(|_| invalid_profile_migration("v3 platform host profile could not be decoded"))
 }
 
 pub fn validate_host_profile(profile: &PlatformHostProfile) -> Result<(), PlatformError> {
@@ -287,7 +256,8 @@ pub fn validate_host_profile(profile: &PlatformHostProfile) -> Result<(), Platfo
     for (field, policy) in [
         ("renderer", &profile.renderer),
         ("decode", &profile.decode),
-        ("audio", &profile.audio),
+        ("audio_mixer", &profile.audio_mixer),
+        ("audio_output", &profile.audio_output),
         ("save", &profile.save),
     ] {
         if policy.providers.is_empty() {
@@ -364,6 +334,8 @@ pub fn validate_host_profile(profile: &PlatformHostProfile) -> Result<(), Platfo
         || profile.limits.event_queue_capacity == 0
         || profile.limits.max_frame_bytes == 0
         || profile.limits.max_audio_frames == 0
+        || profile.limits.audio_pcm_cache_bytes == 0
+        || profile.limits.audio_chunk_frames == 0
         || profile.limits.max_package_read_bytes == 0
     {
         return Err(PlatformError::new(
@@ -395,12 +367,13 @@ fn invalid_profile_migration(message: &'static str) -> PlatformError {
 
 fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(), PlatformError> {
     let expected = match profile.platform {
-        PlatformId::Windows => ["wgpu_hardware", "wmf", "wasapi", "saved_games"],
-        PlatformId::Linux => ["wgpu_vulkan", "gstreamer", "alsa", "xdg_data"],
-        PlatformId::Web => ["webgpu", "webcodecs", "webaudio", "opfs"],
+        PlatformId::Windows => ["wgpu_hardware", "wmf", "kira", "wasapi", "saved_games"],
+        PlatformId::Linux => ["wgpu_vulkan", "gstreamer", "kira", "alsa", "xdg_data"],
+        PlatformId::Web => ["webgpu", "webcodecs", "kira", "webaudio", "opfs"],
         PlatformId::Macos => [
             "wgpu_metal",
             "avfoundation",
+            "kira",
             "coreaudio",
             "application_support",
         ],
@@ -408,9 +381,10 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
             for (field, policy, expected) in [
                 ("renderer", &profile.renderer, &["wgpu_vulkan"][..]),
                 ("decode", &profile.decode, &["mediacodec"][..]),
+                ("audio_mixer", &profile.audio_mixer, &["kira"][..]),
                 (
-                    "audio",
-                    &profile.audio,
+                    "audio_output",
+                    &profile.audio_output,
                     &["oboe_aaudio", "oboe_opensl_es"][..],
                 ),
                 ("save", &profile.save, &["android_app_storage"][..]),
@@ -438,19 +412,13 @@ fn validate_release_provider_policy(profile: &PlatformHostProfile) -> Result<(),
     for ((field, policy), required) in [
         ("renderer", &profile.renderer),
         ("decode", &profile.decode),
-        ("audio", &profile.audio),
+        ("audio_mixer", &profile.audio_mixer),
+        ("audio_output", &profile.audio_output),
         ("save", &profile.save),
     ]
     .into_iter()
     .zip(expected)
     {
-        let declared_windows_ffmpeg_fallback = profile.platform == PlatformId::Windows
-            && field == "decode"
-            && policy.allow_software
-            && policy.providers.as_slice() == ["wmf", "ffmpeg"];
-        if declared_windows_ffmpeg_fallback {
-            continue;
-        }
         if policy.allow_software || policy.providers.as_slice() != [required] {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidProfile,

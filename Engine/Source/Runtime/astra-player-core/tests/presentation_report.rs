@@ -30,7 +30,6 @@ fn commands() -> Vec<SceneCommand> {
                 width: 2,
                 height: 2,
                 format: GlyphBitmapFormat::Alpha8,
-                hash: Hash256::from_sha256(&pixels),
                 pixels: pixels.into(),
             },
         },

@@ -223,7 +223,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
     )
     .unwrap();
     let layout = provider.layout(&request()).unwrap();
-    assert_eq!(golden["layout_hash"], layout.hash.to_string());
+    let layout_evidence_hash = astra_media::text_layout_evidence_hash(&layout).unwrap();
     let mut resources = TextRenderResourceOwner::default();
     let commands = resources
         .update_layout("player.multiscript", &layout, [238, 242, 255, 255])
@@ -315,7 +315,7 @@ async fn player_command_path_presents_packaged_layout_and_records_live_gpu_ident
             presentation_path: "glyph_atlas".into(),
             font_provider_hash,
         },
-        layout.hash,
+        layout_evidence_hash,
         &present,
         &capture,
         BACKGROUND,

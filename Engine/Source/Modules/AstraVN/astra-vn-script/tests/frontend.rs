@@ -1,4 +1,3 @@
-use astra_core::Hash256;
 use astra_ui_core::{UiThemeManifest, UiThemeValue};
 use astra_vn_script::{
     compile_astra_project, format_astra_source, parse_astra_source, CompileAstraProjectOptions,
@@ -309,7 +308,7 @@ state z12 #@id director.z.0126
 fn theme_from_source(source: &str) -> UiThemeManifest {
     let value: serde_json::Value = serde_json::from_str(source).expect("theme JSON");
     let object = value.as_object().expect("theme object");
-    let mut theme = UiThemeManifest {
+    UiThemeManifest {
         schema: object["schema"].as_str().unwrap().to_string(),
         id: object["id"].as_str().unwrap().to_string(),
         parent: object
@@ -324,23 +323,19 @@ fn theme_from_source(source: &str) -> UiThemeManifest {
                 .unwrap_or_else(|| serde_json::json!({})),
         )
         .expect("high contrast tokens"),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
-    theme
+        revision: 1,
+    }
 }
 
 fn test_theme() -> UiThemeManifest {
-    let mut theme = UiThemeManifest {
+    UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "theme.classic".into(),
         parent: None,
         tokens: BTreeMap::from([("surface".into(), UiThemeValue::Color([0, 0, 0, 255]))]),
         high_contrast_tokens: BTreeMap::new(),
-        content_hash: Hash256::from_sha256(&[]),
-    };
-    theme.content_hash = theme.compute_hash().expect("theme hash");
-    theme
+        revision: 1,
+    }
 }
 
 fn test_controller_source() -> &'static str {

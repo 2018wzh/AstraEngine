@@ -532,7 +532,7 @@ fn product_package_with_request(
 }
 
 fn test_compile_options() -> CompileAstraProjectOptions {
-    let mut theme = astra_ui_core::UiThemeManifest {
+    let theme = astra_ui_core::UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "astra.vn.theme.classic".into(),
         parent: None,
@@ -543,9 +543,8 @@ fn test_compile_options() -> CompileAstraProjectOptions {
         .into_iter()
         .collect(),
         high_contrast_tokens: Default::default(),
-        content_hash: Hash256::from_sha256(&[]),
+        revision: 1,
     };
-    theme.content_hash = theme.compute_hash().unwrap();
     test_controller_options(CompileAstraProjectOptions::default().with_ui_theme(theme))
 }
 
@@ -752,7 +751,7 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    feature_fingerprint: "runtime-typed-v3".to_string(),
                     abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
@@ -763,7 +762,6 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
         schema: PROVIDER_POLICY_SCHEMA.to_string(),
         profile: request.profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        decode_fallback: "profile_bound".to_string(),
         runtime_provider: NativeVnRuntimeProvider::descriptor(),
         bindings: bindings.clone(),
     })
@@ -780,7 +778,7 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
                 packaged: true,
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
                 rustc_fingerprint: "rustc-stable".to_string(),
-                feature_fingerprint: "runtime-envelope-v3".to_string(),
+                feature_fingerprint: "runtime-typed-v3".to_string(),
                 abi_fingerprint: "astra-plugin-abi-v3".to_string(),
             })
             .collect(),
@@ -849,10 +847,7 @@ fn packaged_native_vn_source_shapes_localized_text_into_retained_scene_commands(
             )
         }));
     }
-    assert_ne!(
-        Hash256::from_sha256(&serde_json::to_vec(scene_commands(&first)).unwrap()),
-        Hash256::from_sha256(&serde_json::to_vec(scene_commands(&second)).unwrap())
-    );
+    assert_ne!(scene_commands(&first), scene_commands(&second));
     let shutdown = source.release_resources().unwrap();
     assert!(scene_commands(&shutdown)
         .iter()
@@ -1143,8 +1138,10 @@ state start #@id state.start
 fn package_open_blocks_runtime_descriptor_drift_before_provider_creation() {
     let bytes = product_package_with_request(STORY, |request| {
         let mut policy: ProviderPolicy = serde_json::from_slice(&request.provider_policy).unwrap();
-        policy.runtime_provider.output_schemas[0].schema =
-            "astra.vn.runtime_step_effect.drift".to_string();
+        policy
+            .runtime_provider
+            .capabilities
+            .push("runtime.native_vn.drift".to_string());
         request.provider_policy = serde_json::to_vec(&policy).unwrap();
     });
     let package = PackageReader::open(&bytes).unwrap();
@@ -1243,9 +1240,6 @@ fn native_vn_source_exposes_route_evidence_from_runtime_outputs() {
     assert_eq!(evidence.schema, "astra.player_vn_step_evidence.v2");
     assert_eq!(evidence.fixed_step, 1);
     assert!(evidence.coverage_reached.contains("state.start"));
-    assert!(evidence.runtime_state_hash.starts_with("hash128:"));
-    assert!(evidence.runtime_event_hash.starts_with("hash128:"));
-    assert!(evidence.runtime_presentation_hash.starts_with("hash128:"));
     assert_eq!(evidence.current_state_id.as_deref(), Some("state.start"));
     assert_eq!(
         evidence.pending_wait_command_id.as_deref(),
@@ -1279,11 +1273,7 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
     let saved = source.save("slot.01").unwrap();
 
     advance(&mut source);
-    let uninterrupted = source
-        .last_step_evidence()
-        .unwrap()
-        .vn_state_hash_after
-        .clone();
+    let uninterrupted = source.last_step_evidence().unwrap().clone();
 
     source.restore(&saved).unwrap();
     assert_eq!(
@@ -1294,10 +1284,14 @@ fn native_vn_source_save_restore_resumes_the_same_runtime_state() {
         1
     );
     advance(&mut source);
+    let resumed = source.last_step_evidence().unwrap();
+    assert_eq!(resumed.current_state_id, uninterrupted.current_state_id);
     assert_eq!(
-        source.last_step_evidence().unwrap().vn_state_hash_after,
-        uninterrupted
+        resumed.pending_wait_command_id,
+        uninterrupted.pending_wait_command_id
     );
+    assert_eq!(resumed.pending_choice_ids, uninterrupted.pending_choice_ids);
+    assert_eq!(resumed.terminal_route_ids, uninterrupted.terminal_route_ids);
 }
 
 #[astra_headless_test::test]
@@ -1306,8 +1300,7 @@ fn native_vn_source_rejects_tampered_save_before_restore() {
     source.launch().unwrap();
     prepare_test_save_metadata(&mut source, "slot.01");
     let mut saved = source.save("slot.01").unwrap();
-    let last = saved.len() - 1;
-    saved[last] ^= 0x5a;
+    saved.truncate(saved.len() - 1);
 
     let error = source.restore(&saved).unwrap_err();
 
@@ -1401,8 +1394,6 @@ state start #@id state.start
     wait fence:voice.end #@id wait.voice
     text key:line.after #@id line.after
 "#;
-    // The step-effect state hashes are only bound to the runtime state in
-    // Evidence mode; Shipping deliberately uses disabled zero markers.
     let bytes = product_package_for(story);
     let package = PackageReader::open(&bytes).unwrap();
     let mut source = NativeVnHostCommandSource::from_package_with_execution(
@@ -1418,13 +1409,13 @@ state start #@id state.start
     let before = source
         .last_step_evidence()
         .unwrap()
-        .vn_state_hash_after
+        .pending_wait_command_id
         .clone();
 
     source.complete_wait("voice.end").unwrap();
 
     assert_ne!(
-        source.last_step_evidence().unwrap().vn_state_hash_after,
+        source.last_step_evidence().unwrap().pending_wait_command_id,
         before
     );
     advance(&mut source);
@@ -1516,7 +1507,7 @@ state start #@id state.start
     let preloads = source.take_audio_preload_requests();
     assert_eq!(preloads.len(), 1);
     assert_eq!(preloads[0].asset_id, "asset:/voice/hero/0001");
-    assert_eq!(preloads[0].encoded_hash, encoded_hash);
+    assert_eq!(preloads[0].encoded_length, encoded.len() as u64);
     let audio = source.take_audio_requests();
 
     assert_eq!(audio.len(), 1);
@@ -1526,37 +1517,12 @@ state start #@id state.start
     assert_eq!(audio.asset_id, "asset:/voice/hero/0001");
     assert_eq!(audio.codec, "mp3");
     assert_eq!(audio.encoded_bytes.as_ref(), encoded.as_slice());
-    assert_eq!(audio.encoded_hash, encoded_hash);
+    assert_eq!(audio.encoded_length, encoded.len() as u64);
     assert_eq!(audio.attributes.get("asset"), Some(&audio.asset_id));
     let decode = source.prepare_audio_decode(audio).unwrap();
     assert!(matches!(
         decode.decode.commands.as_slice(),
-        [PlayerHostCommand::Decode { codec, bytes, .. }] if codec == "mp3" && bytes == &encoded
-    ));
-    let playback = source
-        .prepare_audio_playback(&astra_player_core::PlayerDecodedAudio {
-            sample_rate: 48_000,
-            channels: 2,
-            samples: vec![0.0; 10_000],
-        })
-        .unwrap();
-    assert_eq!(playback.expected_sample_count, 10_000);
-    assert_eq!(playback.submits.len(), 2);
-    assert!(matches!(
-        playback.drain.commands.as_slice(),
-        [PlayerHostCommand::DrainAudio { .. }]
-    ));
-    let (output, open) = source
-        .prepare_persistent_audio_open(48_000, 2, 8_192)
-        .unwrap();
-    assert!(matches!(
-        open.commands.as_slice(),
-        [PlayerHostCommand::OpenAudio { output: opened, max_buffered_frames: 8_192, .. }] if *opened == output
-    ));
-    let query = source.prepare_persistent_audio_query(output).unwrap();
-    assert!(matches!(
-        query.commands.as_slice(),
-        [PlayerHostCommand::QueryAudio { output: queried, .. }] if *queried == output
+        [PlayerHostCommand::Decode { codec, bytes, .. }] if codec == "mp3" && bytes.as_slice() == encoded
     ));
 }
 

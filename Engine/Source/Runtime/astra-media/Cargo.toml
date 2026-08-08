@@ -9,6 +9,7 @@ default = []
 ffmpeg-vcpkg = ["dep:ffmpeg-next", "dep:tempfile"]
 
 [dependencies]
+astra-byte-source = { path = "../astra-byte-source" }
 astra-core = { path = "../astra-core" }
 astra-worker-budget = { path = "../astra-worker-budget" }
 astra-asset = { path = "../astra-asset" }
@@ -36,6 +37,7 @@ windows = { workspace = true, features = [
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_System_Memory",
 ] }
 

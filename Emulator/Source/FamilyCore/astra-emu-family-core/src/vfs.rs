@@ -3,6 +3,7 @@ use std::{
     io::Read,
 };
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,16 +33,15 @@ pub struct LegacyVfsStat {
     pub entry_id: Option<String>,
     pub kind: LegacyVfsNodeKind,
     pub size: u64,
-    pub content_hash: Option<Hash256>,
     pub archive_role: Option<String>,
     pub method: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct LegacyVfsReadResult {
     pub uri: String,
     pub offset: u64,
-    pub bytes: Vec<u8>,
+    pub bytes: OwnedByteBuffer,
     pub eof: bool,
     pub cache_hit: bool,
 }

@@ -9,11 +9,11 @@ use android_activity::AndroidApp;
 use astra_core::Hash256;
 use astra_platform::{
     host_channel_with_command_wake, AudioOutputHandle, CapturedFrame, DecodeSessionHandle,
-    HostCommand, HostLaunchProfile, InputState, MemoryPressureLevel, PackageCachePolicy,
-    PackageSourceHandle, PackageSourcePolicy, PackageSourceRequest, PlatformBackendChannels,
-    PlatformCommandWakeRegistration, PlatformError, PlatformErrorCode, PlatformEvent,
-    PlatformEventKind, PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle,
-    TouchPhase, WindowHandle,
+    HostCommand, HostLaunchProfile, InputState, MemoryPressureLevel, OpenedAudioOutput,
+    PackageCachePolicy, PackageSourceHandle, PackageSourcePolicy, PackageSourceRequest,
+    PlatformBackendChannels, PlatformCommandWakeRegistration, PlatformError, PlatformErrorCode,
+    PlatformEvent, PlatformEventKind, PlatformHostSession, PointerButton, SaveTransactionHandle,
+    SurfaceHandle, TouchPhase, WindowHandle,
 };
 use astra_platform_common::{
     AtomicSaveStore, CachedPackageSource, ResourceTable, SaveTransaction, VerifiedPackageCache,
@@ -468,43 +468,16 @@ impl AndroidHostApp {
             }
             HostCommand::OpenAudioOutput { request, reply } => {
                 let result = AndroidAudioResource::new(request, self.backend.audio_wake())
-                    .and_then(|resource| self.audio_outputs.insert(resource));
-                let _ = reply.send(result);
-            }
-            HostCommand::QueryAudioOutputFormat { reply }
-            | HostCommand::QueryAudioDeviceFormat { reply } => {
-                let _ = reply.send(crate::audio::preferred_output_format());
-            }
-            HostCommand::SubmitAudio {
-                output,
-                packet,
-                reply,
-            } => {
-                let result = self
-                    .audio_outputs
-                    .get_mut(output)
-                    .and_then(|audio| audio.submit(packet));
-                let _ = reply.send(result);
-            }
-            HostCommand::QueryAudio { output, reply } => {
-                let result = self
-                    .audio_outputs
-                    .get(output)
-                    .and_then(|audio| audio.state());
-                let _ = reply.send(result);
-            }
-            HostCommand::QueryAudioOutput { output, reply } => {
-                let result = self
-                    .audio_outputs
-                    .get(output)
-                    .and_then(|audio| audio.status());
-                let _ = reply.send(result);
-            }
-            HostCommand::DrainAudio { output, reply } => {
-                let result = self
-                    .audio_outputs
-                    .get(output)
-                    .and_then(|audio| audio.drain());
+                    .and_then(|(resource, lane, format)| {
+                        self.audio_outputs
+                            .insert(resource)
+                            .map(|handle| OpenedAudioOutput {
+                                handle,
+                                format,
+                                lane: Box::new(lane),
+                                capture: None,
+                            })
+                    });
                 let _ = reply.send(result);
             }
             HostCommand::PauseAudio { output, reply } => {
@@ -537,10 +510,10 @@ impl AndroidHostApp {
                 )));
             }
             HostCommand::CloseAudio { output, reply } => {
-                let result = self.audio_outputs.remove(output).and_then(|mut audio| {
-                    audio.drain()?;
-                    audio.stop()
-                });
+                let result = self
+                    .audio_outputs
+                    .remove(output)
+                    .and_then(|mut audio| audio.stop());
                 let _ = reply.send(result);
             }
             HostCommand::OpenDecode { kind, reply } => {

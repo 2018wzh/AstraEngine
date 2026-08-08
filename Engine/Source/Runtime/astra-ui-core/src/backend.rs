@@ -1,11 +1,12 @@
 use astra_core::{Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::{
-    UiActionEnvelope, UiInputDisposition, UiInputFrame, UiRenderFrame, UiSemanticSnapshot,
-    UiThemeManifest, UiValidationError, UiViewport, ValidateUi, MAX_NODES_PER_VIEW,
-    MAX_TEXTURE_BYTES,
+    UiActionEnvelope, UiBlueprintFrameModel, UiInputDisposition, UiInputFrame, UiRenderFrame,
+    UiSemanticSnapshot, UiThemeManifest, UiValidationError, UiViewport, ValidateUi,
+    MAX_NODES_PER_VIEW, MAX_TEXTURE_BYTES,
 };
 
 #[derive(
@@ -73,9 +74,10 @@ pub struct UiFrameRequest {
     pub viewport: UiViewport,
     pub fixed_time_ns: u64,
     pub input: UiInputFrame,
-    pub theme: UiThemeManifest,
+    pub theme: Arc<UiThemeManifest>,
     pub model_schema: String,
-    pub model_payload: Vec<u8>,
+    pub model_revision: u64,
+    pub model: UiBlueprintFrameModel,
 }
 
 impl ValidateUi for UiFrameRequest {
@@ -90,8 +92,8 @@ impl ValidateUi for UiFrameRequest {
         crate::validate_id("frame.model_schema", &self.model_schema)?;
         self.viewport.validate()?;
         self.input.validate()?;
-        self.theme.validate()?;
-        crate::validate_serialized_size(self)
+        self.model.validate()?;
+        Ok(())
     }
 }
 
@@ -202,7 +204,7 @@ impl ValidateUi for UiFrameOutput {
                 "performance duration counter exceeds the bounded sample range",
             ));
         }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }
 

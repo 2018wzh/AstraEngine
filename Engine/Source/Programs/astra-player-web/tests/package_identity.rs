@@ -79,9 +79,9 @@ fn web_player_rejects_profile_mismatch_and_corrupt_package() {
 fn platform_profiles(target: &str, package_id: &str) -> SectionPayload {
     SectionPayload::raw(
         "platform.profiles",
-        "astra.platform_profiles.v1",
+        "astra.platform_profiles.v3",
         serde_json::to_vec(&serde_json::json!({
-            "schema": "astra.platform_profiles.v1",
+            "schema": "astra.platform_profiles.v3",
             "profiles": [PlatformHostProfile::web_release(target, package_id)]
         }))
         .unwrap(),

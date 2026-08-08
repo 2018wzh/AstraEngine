@@ -1,9 +1,9 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput,
-    DecodeSessionHandle, PackageSourceHandle, PackageSourceRequest, PlatformDecodeRequest,
-    PlatformError, PlatformErrorCode, PlatformHostClient, SaveTransactionHandle, SurfaceHandle,
+    DecodeKind, DecodeOutput, DecodeSessionHandle, PackageSourceHandle, PackageSourceRequest,
+    PlatformDecodeRequest, PlatformError, PlatformErrorCode, PlatformHostClient,
+    SaveTransactionHandle, SurfaceHandle,
 };
 
 use crate::{
@@ -15,7 +15,6 @@ pub struct PlatformCommandSink {
     client: PlatformHostClient,
     packages: BTreeMap<PlayerHostResourceId, PackageSourceHandle>,
     saves: BTreeMap<PlayerHostResourceId, SaveTransactionHandle>,
-    audio: BTreeMap<PlayerHostResourceId, AudioOutputHandle>,
     decoders: BTreeMap<PlayerHostResourceId, DecodeSessionHandle>,
     surfaces: BTreeMap<PlayerHostResourceId, SurfaceHandle>,
 }
@@ -26,7 +25,6 @@ impl PlatformCommandSink {
             client,
             packages: BTreeMap::new(),
             saves: BTreeMap::new(),
-            audio: BTreeMap::new(),
             decoders: BTreeMap::new(),
             surfaces: BTreeMap::new(),
         }
@@ -40,11 +38,12 @@ impl PlatformCommandSink {
         insert_unique(&mut self.surfaces, logical, surface, "surface.bind")
     }
 
+    pub fn client(&self) -> &PlatformHostClient {
+        &self.client
+    }
+
     pub fn has_live_resources(&self) -> bool {
-        !(self.packages.is_empty()
-            && self.saves.is_empty()
-            && self.audio.is_empty()
-            && self.decoders.is_empty())
+        !(self.packages.is_empty() && self.saves.is_empty() && self.decoders.is_empty())
     }
 }
 
@@ -135,88 +134,6 @@ impl PlatformCommandSink {
                 self.client.delete_save(slot.clone()).await?;
                 Ok(PlayerHostCommandResult::Unit)
             }
-            PlayerHostCommand::OpenAudio {
-                output,
-                sample_rate,
-                channels,
-                max_buffered_frames,
-                ..
-            } => {
-                let handle = self
-                    .client
-                    .open_audio_output(AudioOutputRequest {
-                        sample_rate: *sample_rate,
-                        channels: *channels,
-                        max_buffered_frames: *max_buffered_frames as usize,
-                        start_paused: false,
-                    })
-                    .await?;
-                insert_unique(&mut self.audio, *output, handle, "audio.open")?;
-                Ok(PlayerHostCommandResult::AudioOpened { output: *output })
-            }
-            PlayerHostCommand::QueryAudioFormat { .. } => {
-                let format = self.client.preferred_audio_output_format().await?;
-                Ok(PlayerHostCommandResult::AudioFormat {
-                    sample_rate: format.sample_rate,
-                    channels: format.channels,
-                })
-            }
-            PlayerHostCommand::SubmitAudio {
-                output,
-                packet_sequence,
-                channels,
-                samples,
-                ..
-            } => {
-                let handle = lookup(&self.audio, output, "audio.submit")?;
-                self.client
-                    .submit_audio(
-                        handle,
-                        AudioPacket {
-                            sequence: *packet_sequence,
-                            channels: *channels,
-                            samples: samples.clone(),
-                        },
-                    )
-                    .await?;
-                Ok(PlayerHostCommandResult::Unit)
-            }
-            PlayerHostCommand::QueryAudio { output, .. } => {
-                let handle = lookup(&self.audio, output, "audio.query")?;
-                let state = self.client.query_audio(handle).await?;
-                Ok(PlayerHostCommandResult::AudioState {
-                    output: *output,
-                    queued_frames: u64::try_from(state.queued_frames).map_err(|_| {
-                        astra_platform::PlatformError::new(
-                            astra_platform::PlatformErrorCode::IntegrityMismatch,
-                            "audio.query",
-                            "queued frame count exceeds the player contract",
-                        )
-                    })?,
-                    callback_count: state.callback_count,
-                    submitted_samples: state.submitted_samples,
-                    consumed_samples: state.consumed_samples,
-                    underflow_count: state.underflow_count,
-                    peak_dbfs_bits: state.meter.peak_dbfs.to_bits(),
-                    rms_dbfs_bits: state.meter.rms_dbfs.to_bits(),
-                })
-            }
-            PlayerHostCommand::DrainAudio { output, .. } => {
-                let handle = lookup(&self.audio, output, "audio.drain")?;
-                let meter = self.client.drain_audio(handle).await?;
-                Ok(PlayerHostCommandResult::AudioDrained {
-                    output: *output,
-                    sample_count: meter.sample_count,
-                    peak_dbfs_bits: meter.peak_dbfs.to_bits(),
-                    rms_dbfs_bits: meter.rms_dbfs.to_bits(),
-                })
-            }
-            PlayerHostCommand::CloseAudio { output, .. } => {
-                let handle = lookup(&self.audio, output, "audio.close")?;
-                self.client.close_audio(handle).await?;
-                self.audio.remove(output);
-                Ok(PlayerHostCommandResult::AudioClosed { output: *output })
-            }
             PlayerHostCommand::OpenDecode { session, kind, .. } => {
                 let handle = self.client.open_decode(decode_kind(*kind)).await?;
                 insert_unique(&mut self.decoders, *session, handle, "decode.open")?;
@@ -258,16 +175,17 @@ impl PlatformCommandSink {
                     )
                     .await?
                 {
-                    DecodeOutput::CpuBuffer {
-                        format,
-                        bytes,
-                        hash,
-                    } => Ok(PlayerHostCommandResult::Decoded {
-                        session: *session,
-                        format,
-                        hash,
-                        bytes,
-                    }),
+                    output @ (DecodeOutput::CpuBuffer { .. }
+                    | DecodeOutput::AudioPcmI16 { .. }
+                    | DecodeOutput::AudioPcmF32 { .. }
+                    | DecodeOutput::VideoStreamStart { .. }
+                    | DecodeOutput::VideoFrame { .. }
+                    | DecodeOutput::VideoStreamEnd { .. }) => {
+                        Ok(PlayerHostCommandResult::Decoded {
+                            session: *session,
+                            output,
+                        })
+                    }
                     DecodeOutput::MediaFrame(_) => Err(PlatformError::new(
                         PlatformErrorCode::InvalidState,
                         "decode.submit",

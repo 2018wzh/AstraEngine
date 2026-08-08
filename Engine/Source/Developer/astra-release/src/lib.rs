@@ -18,13 +18,12 @@ use astra_player_core::{
     PlayerAutomationReport, PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
     PLAYER_PRESENTATION_REPORT_SCHEMA,
 };
-use astra_plugin::{ProductRuntimeHost, RuntimeHostSchemaRegistry};
+use astra_plugin::{ProductRuntimeHost, RuntimeHostLimits};
 use astra_plugin_abi::{
-    PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeOutputDomain,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeStepInput, RuntimeStepMode,
+    PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeRestoreRequest,
+    RuntimeSaveRequest, RuntimeStepInput, RuntimeStepMode,
 };
 use astra_target::{validate_manifest, TargetKind, TargetManifest, TargetValidationStatus};
-use astra_vn_core::VnRuntimeViewState;
 use astra_vn_package::{
     decode_compiled_project, load_player_locale_config, load_presentation_provider_manifest,
     VnAdvancedPresentationManifest, VnCommercialBaselineManifest, VnExtensionManifest,
@@ -32,9 +31,7 @@ use astra_vn_package::{
 };
 use astra_vn_policy::{VnPolicyBundleManifest, VnPolicyBundleSourceCache};
 use astra_vn_runtime_provider::NativeVnRuntimeProvider;
-use astra_vn_script::{
-    SystemStoryValidationStatus, VN_RUNTIME_VIEW_STATE_SCHEMA, VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR,
-};
+use astra_vn_script::SystemStoryValidationStatus;
 use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -551,7 +548,7 @@ fn engine_test_profile_isolation_check(
 
 fn headless_shipping_isolation_check(package: &PackageReader) -> ReleaseCheckRecord {
     const FORBIDDEN: [&str; 10] = [
-        "astra.headless_host_profile.v2",
+        "astra.headless_host_profile.v3",
         "astra.headless_protocol.v1",
         "astra.headless_checkpoint_config.v2",
         "astra.headless_tolerance_approval.v2",
@@ -1786,7 +1783,7 @@ fn native_vn_behavioral_evidence(
         .iter()
         .map(|entry| entry.id.clone())
         .collect::<Vec<_>>();
-    let schemas = RuntimeHostSchemaRegistry::from_descriptor(selection.descriptor());
+    let limits = RuntimeHostLimits::from_descriptor(selection.descriptor());
     let mut host = ProductRuntimeHost::bound_in_process(
         format!(
             "astra-release.native-vn.{}",
@@ -1797,7 +1794,7 @@ fn native_vn_behavioral_evidence(
         ),
         selection,
         NativeVnRuntimeProvider::default(),
-        schemas,
+        limits,
     )
     .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_BINDING", err.to_string()))?;
 
@@ -1853,49 +1850,49 @@ fn native_vn_behavioral_evidence(
                 ..RuntimeStepInput::default()
             })
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", err.to_string()))?;
-        let state = output
-            .persisted
-            .iter()
-            .find(|persisted| persisted.schema == VN_RUNTIME_VIEW_STATE_SCHEMA)
-            .ok_or_else(|| {
-                (
-                    "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE",
-                    "runtime provider emitted no bounded persisted runtime view state".to_string(),
-                )
-            })?
-            .decode_postcard::<VnRuntimeViewState>(
-                RuntimeOutputDomain::Trace,
-                VN_RUNTIME_VIEW_STATE_SCHEMA,
-                astra_core::SchemaVersion::new(VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR, 0, 0),
+        let state = output.live.vn_state.as_ref().ok_or_else(|| {
+            (
+                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE",
+                "runtime provider emitted no typed runtime view state".to_string(),
             )
-            .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE", err.to_string()))?;
-        let state_hash = state.authoritative_state_hash;
-        let event_bytes = postcard::to_allocvec(
-            &output
-                .persisted
-                .iter()
-                .filter(|persisted| {
-                    matches!(
-                        persisted.domain,
-                        RuntimeOutputDomain::Effect | RuntimeOutputDomain::Trace
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
+        })?;
+        let event_bytes = postcard::to_allocvec(&(
+            output.live.state_revision,
+            output
+                .live
+                .vn_step
+                .as_ref()
+                .map(|step| step.coverage_reached.as_slice()),
+            state.cursor.as_ref().map(|cursor| cursor.state_id.as_str()),
+        ))
         .map_err(|err| {
             (
                 "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_EVENT_HASH",
                 err.to_string(),
             )
         })?;
-        let presentation_bytes = postcard::to_allocvec(
-            &output
-                .persisted
-                .iter()
-                .filter(|persisted| persisted.domain == RuntimeOutputDomain::Presentation)
-                .collect::<Vec<_>>(),
-        )
-        .map_err(|err| {
+        let presentation_summary = output
+            .live
+            .presentations
+            .iter()
+            .map(|presentation| {
+                let kind = match &presentation.command {
+                    astra_plugin_abi::RuntimeLivePresentationKind::Dialogue { .. } => "dialogue",
+                    astra_plugin_abi::RuntimeLivePresentationKind::Choice { .. } => "choice",
+                    astra_plugin_abi::RuntimeLivePresentationKind::SystemPage { .. } => {
+                        "system_page"
+                    }
+                    astra_plugin_abi::RuntimeLivePresentationKind::SystemOption { .. } => {
+                        "system_option"
+                    }
+                    astra_plugin_abi::RuntimeLivePresentationKind::Stage(_) => "stage",
+                    astra_plugin_abi::RuntimeLivePresentationKind::Extension(_) => "extension",
+                    astra_plugin_abi::RuntimeLivePresentationKind::Marker { .. } => "marker",
+                };
+                (presentation.sequence, kind)
+            })
+            .collect::<Vec<_>>();
+        let presentation_bytes = postcard::to_allocvec(&presentation_summary).map_err(|err| {
             (
                 "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PRESENTATION_HASH",
                 err.to_string(),
@@ -1909,6 +1906,16 @@ fn native_vn_behavioral_evidence(
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", err.to_string()))?;
         let save_section_count = save.sections.len();
         let expected_sections = save.sections.clone();
+        let state_identity = expected_sections
+            .iter()
+            .map(|section| (&section.section_id, section.hash))
+            .collect::<Vec<_>>();
+        let state_bytes = postcard::to_allocvec(&state_identity).map_err(|err| {
+            (
+                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STATE_HASH",
+                err.to_string(),
+            )
+        })?;
         host.restore(RuntimeRestoreRequest {
             session_id: open.session_id.clone(),
             sections: save.sections,
@@ -1931,7 +1938,10 @@ fn native_vn_behavioral_evidence(
         host.destroy()
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_DESTROY", err.to_string()))?;
         Ok(vec![
-            evidence("behavior_state_hash", state_hash),
+            evidence(
+                "behavior_state_hash",
+                astra_core::Hash128::from_blake3(&state_bytes),
+            ),
             evidence(
                 "behavior_event_hash",
                 astra_core::Hash128::from_blake3(&event_bytes),
@@ -3786,7 +3796,7 @@ fn vn_system_ui_profile_check(package: &PackageReader, profile: &str) -> Release
                 "localization_locale_count",
                 profile_manifest.localization.locales.len(),
             ),
-            evidence("save_migrator", profile_manifest.save_migration.migrator_id),
+            evidence("save_schema", profile_manifest.save_schema),
         ],
     }
 }
@@ -4733,7 +4743,8 @@ fn platform_report_check(
     for (domain, selection) in [
         ("renderer", &report.renderer),
         ("decode", &report.decode),
-        ("audio", &report.audio),
+        ("audio_mixer", &report.audio_mixer),
+        ("audio_output", &report.audio_output),
         ("save", &report.save),
     ] {
         evidence_values.push(evidence(
@@ -4809,7 +4820,7 @@ fn platform_profile_binding_check(
     };
     if !matches!(
         value.get("schema").and_then(serde_json::Value::as_str),
-        Some("astra.platform_profiles.v1" | "astra.platform_profiles.v2")
+        Some("astra.platform_profiles.v3")
     ) {
         return blocked(
             "ASTRA_PLATFORM_PROFILE_SECTION_INVALID",

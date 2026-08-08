@@ -90,6 +90,7 @@ async fn browser_host_webaudio_fails_fast_without_user_activation() {
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 1,
+            chunk_frames: 512,
             max_buffered_frames: 9_600,
             start_paused: false,
         })

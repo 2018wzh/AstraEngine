@@ -29,7 +29,8 @@ state prologue #@id state.prologue
     assert_eq!(output.presentation.len(), 1);
 
     let stage = StageModel::new(1280, 720);
-    assert_eq!(stage.presentation_hash().to_hex().len(), 32);
+    assert_eq!(stage.viewport_width, 1280);
+    assert_eq!(stage.viewport_height, 720);
     let system_manifest = SystemStoryManifest::from_compiled(&compiled).unwrap();
     assert_eq!(system_manifest.schema, "astra.vn.system_story_manifest.v2");
 }

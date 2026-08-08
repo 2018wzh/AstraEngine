@@ -111,7 +111,7 @@ impl FvpRuntimeProvider {
         }
         let script =
             FvpHcbScript::parse(image.script_bytes.clone(), image.nls).map_err(format_error)?;
-        if image.case_fingerprint != script.header.content_hash {
+        if image.case_fingerprint != Hash256::from_sha256(script.bytes()) {
             return Err(invalid(
                 "ASTRA_FVP_CASE_FINGERPRINT",
                 "case fingerprint does not match the HCB bytes",
@@ -483,6 +483,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             hosted_log_dropped_count = delta.log_dropped_count,
             capture_bytes = delta.copy_telemetry.capture_bytes,
             operation_bytes = delta.copy_telemetry.operation_bytes,
+            scene_moved_bytes = delta.copy_telemetry.scene_moved_bytes,
+            scene_copied_bytes = delta.copy_telemetry.scene_copied_bytes,
             pcm_moved_bytes = delta.copy_telemetry.pcm_moved_bytes,
             pcm_copied_bytes = delta.copy_telemetry.pcm_copied_bytes
         );
@@ -498,6 +500,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let mut coverage = LegacyCoverageDelta {
             capture_bytes: delta.copy_telemetry.capture_bytes,
             operation_bytes: delta.copy_telemetry.operation_bytes,
+            scene_moved_bytes: delta.copy_telemetry.scene_moved_bytes,
+            scene_copied_bytes: delta.copy_telemetry.scene_copied_bytes,
             pcm_moved_bytes: delta.copy_telemetry.pcm_moved_bytes,
             pcm_copied_bytes: delta.copy_telemetry.pcm_copied_bytes,
             ..LegacyCoverageDelta::default()
@@ -910,7 +914,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         session_id: &LegacyRuntimeSessionId,
         resource_uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
+    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
         ctx.validate()?;
         if max_bytes == 0 || max_bytes > MAX_FILE_BYTES as u64 {
             return Err(invalid(
@@ -940,7 +944,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 "session resource exceeds the requested byte limit",
             ));
         }
-        Ok(bytes)
+        Ok(bytes.into())
     }
 
     fn begin_session_resource_read(
@@ -982,7 +986,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                     "session resource exceeds the requested byte limit",
                 ));
             }
-            Ok(bytes)
+            Ok(bytes.into())
         })
     }
 }

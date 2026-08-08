@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use astra_core::{Diagnostic, DiagnosticSeverity, Hash256};
+use astra_core::{Diagnostic, DiagnosticSeverity};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{frame_hash, CpuFrame, MediaError};
+use crate::{CpuFrame, MediaError};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct FilterGraph {
@@ -152,8 +152,6 @@ impl FilterValidator {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FilterExecutionReport {
     pub schema: String,
-    pub input_hash: Hash256,
-    pub output_hash: Hash256,
     pub executed_nodes: Vec<FilterExecutionNode>,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -177,7 +175,6 @@ impl CpuFilterExecutor {
         tracing::trace!(
             event = "media.filter.execute.start",
             node_count = graph.nodes.len(),
-            input_hash = %frame.hash,
             "CPU filter execution started"
         );
         let validation = FilterValidator.validate(graph);
@@ -186,7 +183,6 @@ impl CpuFilterExecutor {
         }
 
         validate_frame(&frame)?;
-        let input_hash = frame.hash;
         let mut executed_nodes = Vec::with_capacity(graph.nodes.len());
         for node in &graph.nodes {
             match node.kind.as_str() {
@@ -228,19 +224,14 @@ impl CpuFilterExecutor {
             }
         }
 
-        frame.hash = frame_hash(frame.width, frame.height, frame.format, &frame.bytes);
         let report = FilterExecutionReport {
             schema: "astra.filter_execution_report.v1".to_string(),
-            input_hash,
-            output_hash: frame.hash,
             executed_nodes,
             diagnostics: validation.diagnostics,
         };
         tracing::info!(
             event = "media.filter.execute.complete",
             node_count = report.executed_nodes.len(),
-            input_hash = %report.input_hash,
-            output_hash = %report.output_hash,
             "CPU filter execution completed"
         );
         Ok((frame, report))
@@ -361,13 +352,9 @@ fn validate_frame(frame: &CpuFrame) -> Result<(), MediaError> {
         .and_then(|pixels| pixels.checked_mul(4))
         .and_then(|bytes| usize::try_from(bytes).ok())
         .ok_or_else(|| MediaError::message("ASTRA_FILTER_FRAME_SIZE: frame size overflows"))?;
-    if frame.width == 0
-        || frame.height == 0
-        || frame.bytes.len() != expected
-        || frame_hash(frame.width, frame.height, frame.format, &frame.bytes) != frame.hash
-    {
+    if frame.width == 0 || frame.height == 0 || frame.bytes.len() != expected {
         return Err(MediaError::message(
-            "ASTRA_FILTER_FRAME_INVALID: input frame dimensions, bytes, or hash are invalid",
+            "ASTRA_FILTER_FRAME_INVALID: input frame dimensions or bytes are invalid",
         ));
     }
     Ok(())

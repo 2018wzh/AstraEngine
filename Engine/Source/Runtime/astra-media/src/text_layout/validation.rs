@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use astra_core::{Diagnostic, Hash256};
+use astra_core::Hash256;
 use cosmic_text::{fontdb, FontFeatures};
 
 use crate::MediaError;
@@ -366,74 +366,114 @@ pub(super) fn cosmic_features(features: &[OpenTypeFeature]) -> Result<FontFeatur
     Ok(result)
 }
 
-pub(super) fn request_cache_key(
-    request: &TextLayoutRequest,
-    fonts: &[PackagedFont],
-) -> Result<Hash256, MediaError> {
-    let identities = fonts
-        .iter()
-        .map(PackagedFontIdentity::from)
-        .collect::<Vec<_>>();
-    let bytes = serde_json::to_vec(&(TEXT_LAYOUT_SCHEMA, request, identities))
-        .map_err(|error| MediaError::message(error.to_string()))?;
-    Ok(Hash256::from_sha256(&bytes))
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct TextLayoutCacheKey {
+    font_generation: u64,
+    key: String,
+    runs: Vec<TextRunCacheKey>,
+    constraint: LayoutConstraintCacheKey,
+    font_families: Vec<String>,
+    features: Vec<(String, u32)>,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn result_hash(
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct TextRunCacheKey {
+    text: String,
+    language: String,
+    script: Option<String>,
+    direction: u8,
+    ruby: Vec<(usize, usize, String)>,
+    voice: Option<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct LayoutConstraintCacheKey {
+    max_width_bits: u32,
+    max_height_bits: Option<u32>,
+    max_lines: Option<u32>,
+    font_size_bits: u32,
+    line_height_bits: u32,
+    wrap: u8,
+    overflow: u8,
+}
+
+pub(super) fn request_cache_key(
     request: &TextLayoutRequest,
-    context: &FontBindingContext,
-    fonts: &[PackagedFont],
-    width: f32,
-    height: f32,
-    lines: &[LayoutLine],
-    shaped_runs: &[ShapedGlyphRun],
-    resources: &[GlyphResource],
-    ruby_boxes: &[RubyLayoutBox],
-    voice_refs: &[VoiceReplayRefRecord],
-    clip: Option<LayoutClip>,
-    clipped: bool,
-    ellipsized: bool,
-    diagnostics: &[Diagnostic],
-) -> Result<Hash256, MediaError> {
-    let identities = fonts
-        .iter()
-        .map(PackagedFontIdentity::from)
-        .collect::<Vec<_>>();
-    let resource_identities = resources
-        .iter()
-        .map(|resource| {
-            (
-                &resource.resource_id,
-                &resource.font_asset_id,
-                resource.font_hash,
-                resource.glyph_id,
-                resource.bitmap.width,
-                resource.bitmap.height,
-                &resource.bitmap.format,
-                resource.bitmap.hash,
-            )
-        })
-        .collect::<Vec<_>>();
-    let bytes = serde_json::to_vec(&(
-        TEXT_LAYOUT_SCHEMA,
-        request,
-        context,
-        identities,
-        width,
-        height,
-        lines,
-        shaped_runs,
-        resource_identities,
-        ruby_boxes,
-        voice_refs,
-        clip,
-        clipped,
-        ellipsized,
-        diagnostics,
-    ))
-    .map_err(|error| MediaError::message(error.to_string()))?;
-    Ok(Hash256::from_sha256(&bytes))
+    font_generation: u64,
+) -> TextLayoutCacheKey {
+    TextLayoutCacheKey {
+        font_generation,
+        key: request.key.clone(),
+        runs: request
+            .runs
+            .iter()
+            .map(|run| TextRunCacheKey {
+                text: run.text.clone(),
+                language: run.language.clone(),
+                script: run.script.clone(),
+                direction: direction_key(run.direction),
+                ruby: run
+                    .ruby
+                    .iter()
+                    .map(|ruby| {
+                        (
+                            ruby.base_range.start,
+                            ruby.base_range.end,
+                            ruby.text.clone(),
+                        )
+                    })
+                    .collect(),
+                voice: run
+                    .voice
+                    .as_ref()
+                    .map(|voice| (voice.asset.clone(), voice.cue.clone())),
+            })
+            .collect(),
+        constraint: LayoutConstraintCacheKey {
+            max_width_bits: request.constraint.max_width.to_bits(),
+            max_height_bits: request.constraint.max_height.map(f32::to_bits),
+            max_lines: request.constraint.max_lines,
+            font_size_bits: request.constraint.font_size.to_bits(),
+            line_height_bits: request.constraint.line_height.to_bits(),
+            wrap: wrap_key(request.constraint.wrap),
+            overflow: overflow_key(request.constraint.overflow),
+        },
+        font_families: request.font_families.clone(),
+        features: request
+            .features
+            .iter()
+            .map(|feature| (feature.tag.clone(), feature.value))
+            .collect(),
+    }
+}
+
+const fn direction_key(direction: TextDirection) -> u8 {
+    match direction {
+        TextDirection::Auto => 0,
+        TextDirection::LeftToRight => 1,
+        TextDirection::RightToLeft => 2,
+        TextDirection::VerticalRightToLeft => 3,
+        TextDirection::VerticalLeftToRight => 4,
+    }
+}
+
+const fn wrap_key(wrap: WrapPolicy) -> u8 {
+    match wrap {
+        WrapPolicy::None => 0,
+        WrapPolicy::Glyph => 1,
+        WrapPolicy::Word => 2,
+        WrapPolicy::WordOrGlyph => 3,
+    }
+}
+
+const fn overflow_key(overflow: OverflowPolicy) -> u8 {
+    match overflow {
+        OverflowPolicy::Visible => 0,
+        OverflowPolicy::Clip => 1,
+        OverflowPolicy::EllipsisStart => 2,
+        OverflowPolicy::EllipsisMiddle => 3,
+        OverflowPolicy::EllipsisEnd => 4,
+    }
 }
 
 pub(super) fn source_line_offsets(text: &str) -> Vec<usize> {

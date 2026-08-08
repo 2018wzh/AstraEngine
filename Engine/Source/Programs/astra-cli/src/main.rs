@@ -12,7 +12,7 @@ use astra_cook::{
 };
 use astra_core::Hash256;
 use astra_media::{
-    CpuRendererProvider, FontPackageEntry, FontPackageManifest, RenderTargetFormat,
+    frame_hash, CpuRendererProvider, FontPackageEntry, FontPackageManifest, RenderTargetFormat,
     Renderer2DProvider, RendererCreateRequest, UnicodeRange, FONT_PACKAGE_MANIFEST_SCHEMA,
 };
 use astra_observability::{
@@ -28,7 +28,9 @@ use astra_platform::{
     migrate_host_profile_json, validate_host_profile, PlatformCapabilityReport,
     PlatformHostConformanceReport, PlatformHostProfile, PlatformId,
 };
-use astra_player_core::{PlayerAutomationReport, PlayerHostCommand, PlayerHostResourceId};
+use astra_player_core::{
+    evidence_scene_command_hash, PlayerAutomationReport, PlayerHostCommand, PlayerHostResourceId,
+};
 use astra_player_vn::NativeVnHostCommandSource;
 use astra_release::{
     HeadlessFormalEvidence, PackageValidateRequest, ReleaseReport, ReleaseValidator,
@@ -866,6 +868,7 @@ fn render_ui_snapshot(
         };
         for command in batch.commands {
             let PlayerHostCommand::PresentScene {
+                sequence,
                 clear_rgba,
                 commands,
                 semantics,
@@ -879,7 +882,7 @@ fn render_ui_snapshot(
             scene.extend(commands.iter().cloned());
             let frame = renderer.capture_frame(&scene)?;
             if let Some(semantics) = semantics {
-                selected = Some((frame, commands, semantics));
+                selected = Some((frame, commands, semantics, sequence));
                 break;
             }
         }
@@ -893,7 +896,7 @@ fn render_ui_snapshot(
             );
         }
     }
-    let (mut frame, mut commands, mut semantics) = selected
+    let (mut frame, mut commands, mut semantics, mut sequence) = selected
         .ok_or("ASTRA_UI_PREVIEW_PRESENT_SCENE: launch did not produce a semantic Scene2D frame")?;
     for tick in 1..=30_u64 {
         let batch = source.dispatch_ui_event(astra_ui_core::UiInputEventKind::FixedTime {
@@ -901,6 +904,7 @@ fn render_ui_snapshot(
         })?;
         for command in batch.commands {
             let PlayerHostCommand::PresentScene {
+                sequence: next_sequence,
                 clear_rgba,
                 commands: next_commands,
                 semantics: next_semantics,
@@ -914,12 +918,14 @@ fn render_ui_snapshot(
             scene.extend(next_commands.iter().cloned());
             frame = renderer.capture_frame(&scene)?;
             commands = next_commands;
+            sequence = next_sequence;
             if let Some(next_semantics) = next_semantics {
                 semantics = next_semantics;
             }
         }
     }
-    let scene_hash = Hash256::from_sha256(&postcard::to_allocvec(&commands)?);
+    let scene_hash = evidence_scene_command_hash(sequence, width, height, &commands);
+    let rendered_hash = frame_hash(frame.width, frame.height, frame.format, &frame.bytes);
     Ok(UiSnapshotOutput {
         rgba8: frame.bytes,
         semantics: semantics.clone(),
@@ -932,8 +938,8 @@ fn render_ui_snapshot(
             width,
             height,
             scale_factor,
-            frame_hash: frame.hash.to_string(),
-            semantic_hash: semantics.hash.to_string(),
+            frame_hash: rendered_hash.to_string(),
+            semantic_hash: format!("generation:{}", semantics.generation),
             scene_hash: scene_hash.to_string(),
             performance: source.ui_performance_report(),
         },
@@ -994,13 +1000,12 @@ fn scene_command_kind(command: &astra_media::SceneCommand) -> &'static str {
     match command {
         SceneCommand::UploadTexture { .. } => "upload_texture",
         SceneCommand::UpdateTextureRegion { .. } => "update_texture_region",
-        SceneCommand::UploadLiveTexture { .. } => "upload_live_texture",
-        SceneCommand::UpdateLiveTextureRegion { .. } => "update_live_texture_region",
         SceneCommand::UploadGlyph { .. } => "upload_glyph",
         SceneCommand::ReleaseResource { .. } => "release_resource",
         SceneCommand::Sprite { .. } => "sprite",
         SceneCommand::GlyphRun { .. } => "glyph_run",
         SceneCommand::Mesh2D { .. } => "mesh2d",
+        SceneCommand::MeshBatch2D { .. } => "mesh_batch2d",
         SceneCommand::Clear { .. } => "clear",
         SceneCommand::Rect { .. } => "rect",
         SceneCommand::Texture { .. } => "texture",
@@ -1817,7 +1822,7 @@ fn cook_project_into(
         fs::write(out.join(profile_path), &profile_bytes)?;
         artifacts.push(CookedArtifactRef {
             section_id: "platform.profiles".to_string(),
-            schema: "astra.platform_profiles.v2".to_string(),
+            schema: "astra.platform_profiles.v3".to_string(),
             path: profile_path.to_string(),
             hash: Hash256::from_sha256(&profile_bytes).to_string(),
             codec: SectionCodec::Raw,
@@ -1951,7 +1956,7 @@ fn cook_platform_profiles(
         return Err("platform_profiles must contain at least one selected profile".into());
     }
     Ok(Some(CookedPlatformProfiles {
-        schema: "astra.platform_profiles.v2".to_string(),
+        schema: "astra.platform_profiles.v3".to_string(),
         profiles: selected,
     }))
 }
@@ -2043,15 +2048,14 @@ fn cook_nativevn_sections(
                 .into())
             }
         };
-        let mut theme = astra_ui_core::UiThemeManifest {
+        let theme = astra_ui_core::UiThemeManifest {
             schema: source.schema,
             id: source.id,
             parent: source.parent,
             tokens: source.tokens,
             high_contrast_tokens: source.high_contrast_tokens,
-            content_hash: astra_core::Hash256::from_sha256(&[]),
+            revision: 1,
         };
-        theme.content_hash = theme.compute_hash()?;
         compile_options = compile_options.with_ui_theme(theme);
     }
     let controller_paths = nativevn_controller_paths(project, project_dir)?;
@@ -3067,7 +3071,7 @@ fn production_package_request(
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    feature_fingerprint: "runtime-typed-v3".to_string(),
                     abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
@@ -3078,7 +3082,6 @@ fn production_package_request(
         schema: astra_plugin_abi::PROVIDER_POLICY_SCHEMA.to_string(),
         profile: profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        decode_fallback: "profile_bound".to_string(),
         runtime_provider: astra_vn_runtime_provider::NativeVnRuntimeProvider::descriptor(),
         bindings: bindings.clone(),
     })?;
@@ -3096,7 +3099,7 @@ fn production_package_request(
                         packaged: true,
                         engine_version: env!("CARGO_PKG_VERSION").to_string(),
                         rustc_fingerprint: "rustc-stable".to_string(),
-                        feature_fingerprint: "runtime-envelope-v3".to_string(),
+                        feature_fingerprint: "runtime-typed-v3".to_string(),
                         abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                     },
                 )

@@ -3,8 +3,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
-use astra_core::Hash256;
+use astra_byte_source::{
+    ByteRange, ByteSourceStat, OwnedByteBuffer, RangeReadResult, SourceRevision,
+};
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsReader};
 use astra_emu_manager_core::{
     CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError, VfsResourceInfo,
@@ -14,7 +15,7 @@ use crate::android_platform::{self, AndroidDocumentEntry};
 
 const MAX_ENTRIES: usize = 100_000;
 const MAX_INDEX_BYTES: usize = 32 * 1024 * 1024;
-const MAX_MOUNT_HASH_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MAX_MOUNT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct AndroidVfsRegistry {
@@ -43,14 +44,13 @@ impl AndroidVfsRegistry {
                 .checked_add(entry.byte_size)
                 .ok_or_else(|| "ASTRA_EMU_ANDROID_VFS_BOUNDS".to_owned())
         })?;
-        if total_bytes > MAX_MOUNT_HASH_BYTES {
+        if total_bytes > MAX_MOUNT_BYTES {
             return Err("ASTRA_EMU_ANDROID_VFS_BOUNDS".into());
         }
         let mut files = BTreeMap::new();
         for entry in entries {
-            let mut revision_material = entry.document_uri.as_bytes().to_vec();
-            revision_material.extend_from_slice(&entry.modified_ms.to_le_bytes());
-            revision_material.extend_from_slice(&entry.byte_size.to_le_bytes());
+            let revision =
+                u64::try_from(entry.modified_ms).map_err(|_| "ASTRA_EMU_ANDROID_VFS_METADATA")?;
             let key = entry.relative_path.to_ascii_lowercase();
             if files
                 .insert(
@@ -59,7 +59,7 @@ impl AndroidVfsRegistry {
                         document_uri: entry.document_uri,
                         byte_size: entry.byte_size,
                         modified_ms: entry.modified_ms,
-                        revision: SourceRevision(Hash256::from_sha256(&revision_material)),
+                        revision: SourceRevision(revision),
                     },
                 )
                 .is_some()
@@ -181,7 +181,7 @@ impl LegacyVfsReader for AndroidVfsRegistry {
         if let Some(bytes) = mount.overlays.get(&uri.to_ascii_lowercase()) {
             return Ok(ByteSourceStat {
                 len: bytes.len() as u64,
-                revision: SourceRevision(Hash256::from_sha256(bytes)),
+                revision: SourceRevision(1),
             });
         }
         let bound = mount
@@ -222,7 +222,20 @@ impl LegacyVfsReader for AndroidVfsRegistry {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_MOUNT_MISSING", "VFS mount is not active")
         })?;
         let bytes = if let Some(bytes) = mount.overlays.get(&uri.to_ascii_lowercase()) {
-            bytes[range.offset as usize..(range.offset + range.len) as usize].to_vec()
+            let start = usize::try_from(range.offset).map_err(|_| {
+                LegacyProviderError::invalid("ASTRA_EMU_VFS_BOUNDS", "VFS range is invalid")
+            })?;
+            let end = usize::try_from(range.offset + range.len).map_err(|_| {
+                LegacyProviderError::invalid("ASTRA_EMU_VFS_BOUNDS", "VFS range is invalid")
+            })?;
+            OwnedByteBuffer::from_owner(
+                OverlayRange {
+                    bytes: Arc::clone(bytes),
+                    start,
+                    end,
+                },
+                OverlayRange::as_slice,
+            )
         } else {
             let bound = mount
                 .files
@@ -248,12 +261,25 @@ impl LegacyVfsReader for AndroidVfsRegistry {
                     "SAF document range read failed",
                 )
             })?
+            .into()
         };
         Ok(RangeReadResult {
             range,
             revision: stat.revision,
             bytes,
         })
+    }
+}
+
+struct OverlayRange {
+    bytes: Arc<[u8]>,
+    start: usize,
+    end: usize,
+}
+
+impl OverlayRange {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[self.start..self.end]
     }
 }
 

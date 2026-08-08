@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
-use astra_core::{Diagnostic, Hash128};
+use astra_core::Diagnostic;
 use astra_policy::{create_sandboxed_lua, PolicyExecutionBudget};
 use mlua::Lua;
 
@@ -444,9 +444,7 @@ fn record_policy_query(
         api: api.to_string(),
         target,
         args,
-        result_hash: Hash128::from_blake3(
-            &postcard::to_allocvec(result).expect("policy query result must serialize"),
-        ),
+        result: result.clone(),
         replay_event: "vn.policy.query".to_string(),
     });
 }

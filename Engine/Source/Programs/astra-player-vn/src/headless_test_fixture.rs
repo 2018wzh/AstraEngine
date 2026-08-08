@@ -186,7 +186,7 @@ pub fn product_package(story: &str) -> Vec<u8> {
 }
 
 fn test_compile_options() -> CompileAstraProjectOptions {
-    let mut theme = astra_ui_core::UiThemeManifest {
+    let theme = astra_ui_core::UiThemeManifest {
         schema: "astra.ui_theme_manifest.v1".into(),
         id: "astra.vn.theme.classic".into(),
         parent: None,
@@ -197,9 +197,8 @@ fn test_compile_options() -> CompileAstraProjectOptions {
         .into_iter()
         .collect(),
         high_contrast_tokens: Default::default(),
-        content_hash: Hash256::from_sha256(&[]),
+        revision: 1,
     };
-    theme.content_hash = theme.compute_hash().unwrap();
     let source = test_controller_source();
     let mut options = CompileAstraProjectOptions::default().with_ui_theme(theme);
     for id in ["test.message", "test.choice", "test.system"] {
@@ -250,7 +249,7 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    feature_fingerprint: "runtime-typed-v3".to_string(),
                     abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
@@ -261,7 +260,6 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
         schema: PROVIDER_POLICY_SCHEMA.to_string(),
         profile: request.profile.clone(),
         renderer: "astra.renderer.wgpu".to_string(),
-        decode_fallback: "profile_bound".to_string(),
         runtime_provider: NativeVnRuntimeProvider::descriptor(),
         bindings: bindings.clone(),
     })
@@ -278,7 +276,7 @@ fn bind_product_provider_authority(request: &mut PackageBuildRequest) {
                 packaged: true,
                 engine_version: env!("CARGO_PKG_VERSION").to_string(),
                 rustc_fingerprint: "rustc-stable".to_string(),
-                feature_fingerprint: "runtime-envelope-v3".to_string(),
+                feature_fingerprint: "runtime-typed-v3".to_string(),
                 abi_fingerprint: "astra-plugin-abi-v3".to_string(),
             })
             .collect(),

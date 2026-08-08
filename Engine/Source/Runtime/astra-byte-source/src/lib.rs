@@ -4,7 +4,7 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::UNIX_EPOCH,
 };
 
@@ -13,6 +13,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+
+mod owned_buffer;
+
+#[cfg(feature = "ffi")]
+pub use owned_buffer::FfiOwnedByteBuffer;
+pub use owned_buffer::OwnedByteBuffer;
 
 pub const DEFAULT_MAX_RANGE_BYTES: u64 = 16 * 1024 * 1024;
 pub const AUDIT_CHUNK_BYTES: usize = 1024 * 1024;
@@ -38,7 +44,7 @@ pub enum ByteSourceError {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
-pub struct SourceRevision(pub Hash256);
+pub struct SourceRevision(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ByteSourceStat {
@@ -70,11 +76,11 @@ impl ByteRange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RangeReadResult {
     pub range: ByteRange,
     pub revision: SourceRevision,
-    pub bytes: Vec<u8>,
+    pub bytes: OwnedByteBuffer,
 }
 
 pub trait BoundedByteSource: Send + Sync {
@@ -121,12 +127,15 @@ impl FileByteSource {
                 ByteSourceError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
             })?
             .as_nanos();
-        let mut material = Vec::with_capacity(24);
-        material.extend_from_slice(&metadata.len().to_le_bytes());
-        material.extend_from_slice(&modified_ns.to_le_bytes());
+        let modified_ns = u64::try_from(modified_ns).map_err(|_| {
+            ByteSourceError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "source modification timestamp exceeds u64 nanoseconds",
+            ))
+        })?;
         Ok(ByteSourceStat {
             len: metadata.len(),
-            revision: SourceRevision(Hash256::from_sha256(&material)),
+            revision: SourceRevision(modified_ns),
         })
     }
 }
@@ -164,21 +173,23 @@ impl BoundedByteSource for FileByteSource {
         Ok(RangeReadResult {
             range,
             revision: before.revision,
-            bytes,
+            bytes: bytes.into(),
         })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct MemoryByteSource {
-    bytes: Vec<u8>,
+    bytes: Arc<Vec<u8>>,
     revision: SourceRevision,
 }
 
 impl MemoryByteSource {
     pub fn new(bytes: Vec<u8>) -> Self {
-        let revision = SourceRevision(Hash256::from_sha256(&bytes));
-        Self { bytes, revision }
+        Self {
+            bytes: Arc::new(bytes),
+            revision: SourceRevision(1),
+        }
     }
 }
 
@@ -204,12 +215,31 @@ impl BoundedByteSource for MemoryByteSource {
         let start = usize::try_from(range.offset).map_err(|_| ByteSourceError::RangeBounds)?;
         let end =
             usize::try_from(range.offset + range.len).map_err(|_| ByteSourceError::RangeBounds)?;
-        let bytes = self.bytes[start..end].to_vec();
+        let bytes = OwnedByteBuffer::from_owner(
+            MemoryRange {
+                bytes: Arc::clone(&self.bytes),
+                start,
+                end,
+            },
+            MemoryRange::as_slice,
+        );
         Ok(RangeReadResult {
             range,
             revision: stat.revision,
             bytes,
         })
+    }
+}
+
+struct MemoryRange {
+    bytes: Arc<Vec<u8>>,
+    start: usize,
+    end: usize,
+}
+
+impl MemoryRange {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[self.start..self.end]
     }
 }
 
@@ -282,7 +312,7 @@ pub fn audit_source(source: &dyn BoundedByteSource) -> Result<Hash256, ByteSourc
             ByteRange { offset, len },
             DEFAULT_MAX_RANGE_BYTES,
         )?;
-        digest.update(&result.bytes);
+        digest.update(result.bytes.as_slice());
         offset = offset
             .checked_add(len)
             .ok_or(ByteSourceError::RangeOverflow)?;
@@ -318,7 +348,7 @@ mod tests {
                 DEFAULT_MAX_RANGE_BYTES,
             )
             .unwrap();
-        assert_eq!(result.bytes, b"tail");
+        assert_eq!(result.bytes.as_slice(), b"tail");
     }
 
     #[astra_headless_test::test]
@@ -330,11 +360,7 @@ mod tests {
             Err(ByteSourceError::RangeLimit)
         ));
         assert!(matches!(
-            source.read_range(
-                SourceRevision(Hash256::from_sha256(b"wrong")),
-                ByteRange { offset: 0, len: 1 },
-                16,
-            ),
+            source.read_range(SourceRevision(2), ByteRange { offset: 0, len: 1 }, 16,),
             Err(ByteSourceError::RevisionMismatch)
         ));
     }

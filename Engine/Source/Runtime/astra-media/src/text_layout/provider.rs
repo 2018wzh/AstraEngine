@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Condvar, Mutex, MutexGuard,
     },
 };
@@ -18,6 +18,7 @@ use super::{
     layout_engine::layout_uncached,
     validation::{
         load_database, request_cache_key, validate_config, validate_context, validate_family_chain,
+        TextLayoutCacheKey,
     },
 };
 
@@ -28,12 +29,13 @@ pub struct CosmicTextLayoutProvider {
     worker_cursor: AtomicUsize,
     active_workers: AtomicUsize,
     peak_active_workers: AtomicUsize,
+    next_layout_revision: AtomicU64,
 }
 
 struct ProviderState {
     catalog: FontState,
     workers: Vec<Arc<Mutex<FontState>>>,
-    in_flight: BTreeMap<Hash256, Arc<LayoutFlight>>,
+    in_flight: BTreeMap<TextLayoutCacheKey, Arc<LayoutFlight>>,
 }
 
 struct LayoutFlight {
@@ -65,7 +67,7 @@ pub(super) struct FontState {
     pub(super) faces: BTreeMap<String, LoadedFace>,
     pub(super) font_systems: BTreeMap<String, FontSystem>,
     pub(super) swash_cache: SwashCache,
-    layout_cache: BTreeMap<Hash256, CacheEntry>,
+    layout_cache: BTreeMap<TextLayoutCacheKey, CacheEntry>,
     access_sequence: u64,
     generation: u64,
     hits: u64,
@@ -200,6 +202,7 @@ impl CosmicTextLayoutProvider {
             worker_cursor: AtomicUsize::new(0),
             active_workers: AtomicUsize::new(0),
             peak_active_workers: AtomicUsize::new(0),
+            next_layout_revision: AtomicU64::new(1),
         })
     }
 
@@ -393,7 +396,7 @@ impl CosmicTextLayoutProvider {
             {
                 let mut state = self.lock_state()?;
                 validate_family_chain(request, &state.catalog)?;
-                let cache_key = request_cache_key(request, &state.catalog.fonts)?;
+                let cache_key = request_cache_key(request, state.catalog.generation);
                 state.catalog.access_sequence = state
                     .catalog
                     .access_sequence
@@ -419,7 +422,7 @@ impl CosmicTextLayoutProvider {
                     tracing::trace!(
                         target: "astra_media::text",
                         event = "text.layout.cache_hit",
-                        layout_hash = %result.hash,
+                        layout_revision = result.revision,
                         cache_entries = state.catalog.layout_cache.len(),
                     );
                     return Ok(result);
@@ -430,7 +433,9 @@ impl CosmicTextLayoutProvider {
                 } else {
                     state.catalog.misses += 1;
                     let flight = Arc::new(LayoutFlight::new());
-                    state.in_flight.insert(cache_key, Arc::clone(&flight));
+                    state
+                        .in_flight
+                        .insert(cache_key.clone(), Arc::clone(&flight));
                     let worker_index =
                         self.worker_cursor.fetch_add(1, Ordering::Relaxed) % state.workers.len();
                     let worker = Arc::clone(&state.workers[worker_index]);
@@ -449,11 +454,21 @@ impl CosmicTextLayoutProvider {
         let _active_guard = ActiveWorkerGuard {
             active: &self.active_workers,
         };
+        let layout_revision = self
+            .next_layout_revision
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| {
+                MediaError::message("ASTRA_TEXT_LAYOUT_REVISION: layout revision overflowed")
+            })?;
         let layout_result = catch_unwind(AssertUnwindSafe(|| {
             let mut worker = worker.lock().map_err(|_| {
                 MediaError::message("ASTRA_TEXT_WORKER_POISONED: font worker lock was poisoned")
             })?;
-            layout_uncached(request, &mut worker, &self.context, &self.config).map(Arc::new)
+            let mut layout = layout_uncached(request, &mut worker, &self.config)?;
+            layout.revision = layout_revision;
+            Ok(Arc::new(layout))
         }))
         .unwrap_or_else(|_| {
             Err(MediaError::message(
@@ -490,7 +505,7 @@ impl CosmicTextLayoutProvider {
         tracing::debug!(
             target: "astra_media::text",
             event = "text.layout.completed",
-            layout_hash = %result.hash,
+            layout_revision = result.revision,
             line_count = result.lines.len(),
             glyph_count = result.shaped_runs.iter().map(|run| run.glyphs.len()).sum::<usize>(),
             resource_count = result.glyph_resources.len(),
@@ -515,13 +530,6 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
         })
     }
 
-    fn request_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError> {
-        super::validation::validate_request(request, &self.config)?;
-        let state = self.lock_state()?;
-        validate_family_chain(request, &state.catalog)?;
-        request_cache_key(request, &state.catalog.fonts)
-    }
-
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError> {
         Ok(self.layout_shared(request)?.as_ref().clone())
     }
@@ -530,10 +538,6 @@ impl TextLayoutProvider for CosmicTextLayoutProvider {
         Ok(TextLayoutMeasurement::from(
             self.layout_shared(request)?.as_ref(),
         ))
-    }
-
-    fn layout_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError> {
-        Ok(self.layout(request)?.hash)
     }
 }
 
@@ -564,7 +568,7 @@ fn font_worker_from_catalog(catalog: &FontState) -> FontState {
 
 fn insert_cache_entry(
     catalog: &mut FontState,
-    cache_key: Hash256,
+    cache_key: TextLayoutCacheKey,
     result: Arc<TextLayoutResult>,
     max_cache_entries: usize,
 ) -> Result<(), MediaError> {
@@ -572,8 +576,10 @@ fn insert_cache_entry(
         let oldest = catalog
             .layout_cache
             .iter()
-            .min_by_key(|(key, value)| (value.last_access, **key))
-            .map(|(key, _)| *key)
+            .min_by(|(left_key, left), (right_key, right)| {
+                (left.last_access, *left_key).cmp(&(right.last_access, *right_key))
+            })
+            .map(|(key, _)| key.clone())
             .ok_or_else(|| {
                 MediaError::message("ASTRA_TEXT_CACHE_STATE: cache eviction had no candidate")
             })?;

@@ -26,7 +26,7 @@ pub enum HostLaunchProfile {
 }
 ```
 
-`PlatformHostProfile` 与 `astra.platform_host_profile.v2` 保持发布 schema，不增加 `headless` platform variant。`HeadlessHostProfile` 使用 `astra.headless_host_profile.v2`，声明 provider binding、`all/checkpoints` render policy、输入协议、双帧预算、产物策略、`max_decode_output_bytes`、`max_video_frames`、package/build identity 和测试权限。v2 是硬切换，不读取 v1。native factory 只接受 `HostLaunchProfile::Platform`；Headless factory 只接受 `HostLaunchProfile::Headless`。类型不匹配必须在 `host.start` 阻断。
+`PlatformHostProfile` 与 `astra.platform_host_profile.v3` 保持发布 schema，不增加 `headless` platform variant。v3 将 `audio_mixer` 与 `audio_output` 分开绑定，旧 v1/v2 不再读取。`HeadlessHostProfile` 使用 `astra.headless_host_profile.v3`，声明 provider binding、`all/checkpoints` render policy、输入协议、双帧预算、GPU identity、120 Hz presentation cadence、产物策略、`max_decode_output_bytes`、`max_video_frames`、package/build identity 和测试权限；旧 v1/v2 直接拒绝。native factory 只接受 `HostLaunchProfile::Platform`；Headless factory 只接受 `HostLaunchProfile::Headless`。类型不匹配必须在 `host.start` 阻断。
 
 `checkpoints` 是默认策略：每一帧都完成 canonical scene 校验、资源生命周期提交和 submitted stream hash；仅首帧、具名 checkpoint 所在帧与 surface 销毁前的最终帧执行 raster/readback。多个 checkpoint 命中同一 sequence 时只 materialize 一次，并把全部 id 写进 `checkpoint_ids`。任何未 rasterize 的中间帧仍可因非法引用、栈不平衡、未知 filter 或预算超限立即阻断。
 

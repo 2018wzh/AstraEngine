@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::{BufReader, BufWriter, Cursor, Read},
+    io::{BufReader, BufWriter, Read},
     path::{Path, PathBuf},
 };
 
@@ -201,53 +201,6 @@ impl ArtifactRecorder {
         self.commit_manifest()
     }
 
-    pub(crate) fn record_audio(
-        &mut self,
-        sequence: u64,
-        samples: &[f32],
-    ) -> Result<(), PlatformError> {
-        self.validate_audio_timeline_samples(samples.len(), Some(samples))?;
-        let frames = (samples.len() / 2) as u64;
-        let next_audio_frames = self
-            .audio_frames
-            .checked_add(frames)
-            .ok_or_else(|| limit("artifact.audio", "audio frame counter overflowed"))?;
-        let duration_ns = audio_duration_ns(frames)?;
-        if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
-            self.commit_audio_analysis(next_audio_frames, samples);
-            return Ok(());
-        }
-        let next_artifact_count = self
-            .audio_artifact_count
-            .checked_add(1)
-            .ok_or_else(|| limit("artifact.audio", "audio artifact counter overflowed"))?;
-        let bytes = wav_bytes(samples)?;
-        let next_total_bytes = self.validate_reserve(bytes.len() as u64)?;
-        // `sequence` belongs to an individual audio output and may restart after a
-        // snapshot restore recreates platform handles. Artifact identity is session-wide,
-        // so use a recorder-owned monotonic ordinal and retain the source sequence only
-        // as diagnostic context in the file name.
-        let relative = format!(
-            "audio/output-{:010}-source-{sequence:010}.wav",
-            next_artifact_count
-        );
-        atomic_write(&self.root.join(&relative), &bytes)?;
-        self.audio_artifact_count = next_artifact_count;
-        self.total_bytes = next_total_bytes;
-        self.commit_audio_analysis(next_audio_frames, samples);
-        self.manifest.artifacts.push(ArtifactEntry::Audio {
-            relative_path: relative,
-            sha256: astra_core::Hash256::from_sha256(&bytes).to_string(),
-            byte_size: bytes.len() as u64,
-            sample_rate: 48_000,
-            channels: 2,
-            frame_count: frames,
-            duration_ns,
-            checkpoint: None,
-        });
-        self.commit_manifest()
-    }
-
     pub(crate) fn begin_audio_stream(&mut self) -> Result<AudioArtifactStream, PlatformError> {
         if self.policy.retention == HeadlessArtifactRetention::ManifestOnly {
             return Err(integrity(
@@ -357,6 +310,12 @@ impl ArtifactRecorder {
             sample_count,
             byte_size,
         } = stream;
+        if sample_count == 0 {
+            self.open_audio_bytes = self.open_audio_bytes.saturating_sub(byte_size);
+            drop(writer);
+            fs::remove_file(&partial_path).map_err(|_| io_error("artifact.wav.remove_empty"))?;
+            return Ok(());
+        }
         writer
             .finalize()
             .map_err(|_| io_error("artifact.wav.finalize"))?;
@@ -554,32 +513,6 @@ fn audio_duration_ns(frames: u64) -> Result<u64, PlatformError> {
         .checked_mul(1_000_000_000)
         .and_then(|value| value.checked_div(48_000))
         .ok_or_else(|| limit("artifact.audio", "audio duration overflowed"))
-}
-
-fn wav_bytes(samples: &[f32]) -> Result<Vec<u8>, PlatformError> {
-    let mut cursor = Cursor::new(Vec::new());
-    let spec = hound::WavSpec {
-        channels: 2,
-        sample_rate: 48_000,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    {
-        let mut writer =
-            hound::WavWriter::new(&mut cursor, spec).map_err(|_| io_error("artifact.wav.open"))?;
-        for sample in samples {
-            if !sample.is_finite() {
-                return Err(integrity("artifact.wav", "audio sample is not finite"));
-            }
-            writer
-                .write_sample(pcm_i16(*sample))
-                .map_err(|_| io_error("artifact.wav.write"))?;
-        }
-        writer
-            .finalize()
-            .map_err(|_| io_error("artifact.wav.finalize"))?;
-    }
-    Ok(cursor.into_inner())
 }
 
 fn pcm_i16(sample: f32) -> i16 {

@@ -57,7 +57,7 @@ pub struct PlatformHostSession {
 }
 ```
 
-`HostLaunchProfile::Platform` 只接受 `astra.platform_host_profile.v2`，`HostLaunchProfile::Headless` 接受测试专用 `astra.headless_host_profile.v3`；v2 仅能由普通功能测试显式迁移，性能门禁拒绝迁移结果。`PlatformId` 不增加 Headless variant。native factory 收到 Headless profile 时在 `host.start` 返回 `InvalidProfile`；Headless factory也必须反向阻断 native profile。Release、Cook 和 shipping Player 继续只接收 `PlatformHostProfile`。
+`HostLaunchProfile::Platform` 只接受 `astra.platform_host_profile.v3`，`HostLaunchProfile::Headless` 接受测试专用 `astra.headless_host_profile.v3`。旧 platform profile 直接拒绝，不提供迁移。`PlatformId` 不增加 Headless variant。native factory 收到 Headless profile 时在 `host.start` 返回 `InvalidProfile`；Headless factory也必须反向阻断 native profile。Release、Cook 和 shipping Player 继续只接收 `PlatformHostProfile`。
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
@@ -95,7 +95,7 @@ Headless 的 `HttpsRange` source 只接受 allowlist 中不含 credential/fragme
 
 ## Platform Profiles
 
-`project.yaml.platform_profiles` 以 `astra.platform_host_profile.v2` 表达 `PlatformHostProfile`。Cook 校验 profile key、target、package、provider policy、package source policy 与 verified package cache 限额，并写入 `platform.profiles` / `astra.platform_profiles.v2` package section。Player 只对既有 v1 section 执行显式迁移；未知 schema blocking，且不接受 CLI 覆盖发布策略。
+`project.yaml.platform_profiles` 以 `astra.platform_host_profile.v3` 表达 `PlatformHostProfile`，并分别绑定 `audio_mixer` 与 `audio_output`。Cook 校验 profile key、target、package、provider policy、package source policy 与 verified package cache 限额，并写入 `platform.profiles` / `astra.platform_profiles.v3` package section。Player 只接受 v3；旧 schema 和 CLI 覆盖发布策略均会阻断。
 
 Windows release 要求 `wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。Web release 只支持 Chrome，固定要求 `webgpu`、`webcodecs`、`webaudio`、`opfs`，不配置 fallback。
 

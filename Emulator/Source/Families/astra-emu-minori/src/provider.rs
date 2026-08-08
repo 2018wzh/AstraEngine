@@ -731,7 +731,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         session_id: &LegacyRuntimeSessionId,
         resource_uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
+    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
         ctx.validate()?;
         let session = self
             .sessions
@@ -1434,7 +1434,7 @@ mod tests {
                 .ok_or_else(|| invalid("TEST_VFS_NOT_FOUND", "fixture entry is missing"))?;
             Ok(ByteSourceStat {
                 len: script.len() as u64,
-                revision: SourceRevision(Hash256::from_sha256(script)),
+                revision: SourceRevision(1),
             })
         }
 
@@ -1461,7 +1461,7 @@ mod tests {
             Ok(RangeReadResult {
                 range,
                 revision: stat.revision,
-                bytes,
+                bytes: bytes.into(),
             })
         }
     }

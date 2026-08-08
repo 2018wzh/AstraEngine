@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_core::{
     LegacyCoreError, LegacyMountedVfs, LegacyVfsNode, LegacyVfsNodeKind, LegacyVfsStat,
 };
@@ -11,16 +12,16 @@ use encoding_rs::{Encoding, SHIFT_JIS, UTF_16BE, UTF_16LE, UTF_8};
 const MAX_VIEWER_PAGE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_PREVIEW_BYTES: u64 = 64 * 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ViewerPage {
     pub uri: String,
     pub offset: u64,
-    pub bytes: Vec<u8>,
+    pub bytes: OwnedByteBuffer,
     pub eof: bool,
     pub cache_hit: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ViewerPreview {
     Text {
         encoding: String,
@@ -265,7 +266,11 @@ mod tests {
             ("test:/sys/icon.png", b"not-an-image", "image"),
         ])));
         assert_eq!(
-            viewer.page("test:/scr/route.sc", 1, 3).unwrap().bytes,
+            viewer
+                .page("test:/scr/route.sc", 1, 3)
+                .unwrap()
+                .bytes
+                .as_slice(),
             b"ell"
         );
         assert_eq!(viewer.search("test:/", "route", 1).unwrap().len(), 1);

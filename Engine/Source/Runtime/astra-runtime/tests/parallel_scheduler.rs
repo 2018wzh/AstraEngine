@@ -85,7 +85,10 @@ fn install_machine(
         .unwrap();
 }
 
-fn run_world(worker_count: usize, barrier: Option<Arc<Barrier>>) -> astra_runtime::TickReport {
+fn run_world(
+    worker_count: usize,
+    barrier: Option<Arc<Barrier>>,
+) -> (astra_runtime::TickReport, astra_core::Hash128) {
     let mut world = RuntimeWorld::create(RuntimeConfig::default(), Default::default()).unwrap();
     world.set_machine_worker_count(worker_count).unwrap();
     world
@@ -129,22 +132,21 @@ fn run_world(worker_count: usize, barrier: Option<Arc<Barrier>>) -> astra_runtim
         world.snapshot().blackboard.get("parallel.b"),
         Some(&BlackboardValue::I64(1))
     );
-    report
+    let state_hash = world.state_hash();
+    (report, state_hash)
 }
 
 #[astra_headless_test::test]
 fn independent_machine_actions_execute_in_the_same_parallel_wave() {
-    let report = run_world(2, Some(Arc::new(Barrier::new(2))));
+    let (report, _) = run_world(2, Some(Arc::new(Barrier::new(2))));
     assert!(report.diagnostics.is_empty());
 }
 
 #[astra_headless_test::test]
-fn worker_counts_preserve_authoritative_hashes() {
-    let baseline = run_world(1, None);
+fn worker_counts_preserve_authoritative_state() {
+    let (_, baseline) = run_world(1, None);
     for worker_count in [2, 4, 8] {
-        let report = run_world(worker_count, None);
-        assert_eq!(report.state_hash, baseline.state_hash);
-        assert_eq!(report.event_hash, baseline.event_hash);
-        assert_eq!(report.presentation_hash, baseline.presentation_hash);
+        let (_, state_hash) = run_world(worker_count, None);
+        assert_eq!(state_hash, baseline);
     }
 }

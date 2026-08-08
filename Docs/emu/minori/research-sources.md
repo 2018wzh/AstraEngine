@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | [image](https://docs.rs/image/latest/image/) | workspace lockfile `0.25.10` | MIT OR Apache-2.0 | PNG/JPEG/BMP 和 RGBA buffer；ANI/SQZ 只负责专有 container 解包 |
 | [cosmic-text](https://docs.rs/crate/cosmic-text/latest) | workspace lockfile `0.18.2` | MIT OR Apache-2.0 | 日文 shaping、fallback、度量和换行；Minori 不实现私有字体排版器 |
-| [Symphonia](https://docs.rs/symphonia/latest/symphonia/) | workspace lockfile `0.6.0` | MPL-2.0 | 音频 demux/decode；混音继续使用 Astra AudioGraph 与 `ProductionAudioMixer` |
+| [Symphonia](https://docs.rs/symphonia/latest/symphonia/) | workspace lockfile `0.6.0` | MPL-2.0 | 音频 demux/decode；解码后的 owned PCM 进入统一 Kira `AudioServiceSession`，不保留 Minori 私有 mixer |
 | `flate2` | workspace lockfile `1.1.9` | MIT OR Apache-2.0 | PAZ/SQZ zlib；所有输出都受 descriptor 与 host budget 限制 |
 | `blowfish` / `rc4` | workspace lockfile `0.10.0` / `0.2.0` | MIT OR Apache-2.0 | 旧 PAZ 兼容；不作为新数据的安全加密方案 |
 

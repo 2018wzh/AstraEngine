@@ -465,7 +465,7 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
         session: &LegacyRuntimeSessionId,
         resource_uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, LegacyProviderError> {
+    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
         self.validate_session(ctx, session)?;
         let bytes = match (self.module.read_session_resource())(FfiResourceReadCall {
             instance_id: self.instance_id.clone().into(),
@@ -477,13 +477,13 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
             RResult::ROk(bytes) => bytes,
             RResult::RErr(error) => return Err(error.into()),
         };
-        if bytes.bytes.len() as u64 > max_bytes {
+        if bytes.len() as u64 > max_bytes {
             return Err(LegacyProviderError::invalid(
                 "ASTRA_EMU_FFI_RESOURCE_BOUNDS",
                 "family resource exceeds the requested byte bound",
             ));
         }
-        Ok(bytes.into_bytes())
+        Ok(bytes.into_owned())
     }
 
     fn begin_session_resource_read(
@@ -509,13 +509,13 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
                 RResult::ROk(bytes) => bytes,
                 RResult::RErr(error) => return Err(error.into()),
             };
-            if bytes.bytes.len() as u64 > max_bytes {
+            if bytes.len() as u64 > max_bytes {
                 return Err(LegacyProviderError::invalid(
                     "ASTRA_EMU_FFI_RESOURCE_BOUNDS",
                     "family resource exceeds the requested byte bound",
                 ));
             }
-            Ok(bytes.into_bytes())
+            Ok(bytes.into_owned())
         })
     }
 }
@@ -604,7 +604,7 @@ extern "C" fn ffi_read_vfs_range(
         reader.read_file_range(
             call.mount_set_id.as_str(),
             call.uri.as_str(),
-            astra_byte_source::SourceRevision(call.expected_revision.into()),
+            astra_byte_source::SourceRevision(call.expected_revision),
             call.range.into(),
             call.max_bytes,
         )
@@ -1119,7 +1119,7 @@ mod tests {
             };
             Ok(astra_byte_source::ByteSourceStat {
                 len: bytes.len() as u64,
-                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(bytes)),
+                revision: astra_byte_source::SourceRevision(1),
             })
         }
 
@@ -1150,7 +1150,7 @@ mod tests {
             Ok(astra_byte_source::RangeReadResult {
                 range,
                 revision: stat.revision,
-                bytes,
+                bytes: bytes.into(),
             })
         }
 

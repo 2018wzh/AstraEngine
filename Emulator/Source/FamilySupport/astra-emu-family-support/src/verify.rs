@@ -139,7 +139,7 @@ fn reread(
         return Ok(None);
     }
     let read = vfs.read_range(uri, offset, expected.len() as u64)?;
-    if read.offset != offset || read.bytes != expected {
+    if read.offset != offset || read.bytes.as_slice() != expected {
         return Err(invalid(
             "ASTRA_EMU_VFS_VERIFY_REREAD",
             "random verification reread differs from the streamed bytes",

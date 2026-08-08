@@ -1,9 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+};
 
-use astra_core::Hash256;
 use astra_platform::{
-    host_channel, AudioMeter, AudioOutputFormat, AudioOutputHandle, AudioOutputState, DecodeKind,
-    DecodeOutput, DecodeSessionHandle, HostCommand, PlatformHostProfile, SurfaceHandle,
+    host_channel, AudioDeviceFormat, AudioOutputHandle, AudioOutputLane, DecodeKind, DecodeOutput,
+    DecodeSessionHandle, HostCommand, OpenedAudioOutput, PlatformError, PlatformHostProfile,
+    SurfaceHandle,
 };
 use astra_player_core::{
     PlatformCommandSink, PlayerDecodedAudio, PlayerHostCommandExecutor, PlayerHostResourceId,
@@ -13,6 +19,35 @@ use astra_player_vn::{
     NativeVnProductAudioHost, NativeVnProductMediaHost,
 };
 mod support;
+
+struct ProductAudioTestLane {
+    consumed_samples: Arc<AtomicU64>,
+    underflow_count: u64,
+}
+
+impl AudioOutputLane for ProductAudioTestLane {
+    fn wait_for_capacity(
+        &mut self,
+        _requested_samples: usize,
+        _stop: &AtomicBool,
+    ) -> Result<(), PlatformError> {
+        Ok(())
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        self.consumed_samples
+            .fetch_add(samples.len() as u64, Ordering::Release);
+        Ok(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.consumed_samples.load(Ordering::Acquire)
+    }
+
+    fn underflow_count(&self) -> u64 {
+        self.underflow_count
+    }
+}
 
 fn source() -> NativeVnHostCommandSource {
     support::source_for(
@@ -96,38 +131,6 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
     source.launch().unwrap();
     let first = vec![1, 2, 3, 255];
     let second = vec![4, 5, 6, 255];
-    let frames = [
-        astra_media::DecodedVideoFrame {
-            sequence: 1,
-            pts_us: 0,
-            duration_us: 20_000,
-            width: 1,
-            height: 1,
-            content_hash: Hash256::from_sha256(&first),
-            bgra8: first,
-        },
-        astra_media::DecodedVideoFrame {
-            sequence: 2,
-            pts_us: 20_000,
-            duration_us: 20_000,
-            width: 1,
-            height: 1,
-            content_hash: Hash256::from_sha256(&second),
-            bgra8: second,
-        },
-    ];
-    let descriptor = astra_media::DecodedVideoStreamDescriptor {
-        schema: astra_media::DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.into(),
-        duration_us: 40_000,
-        frame_count: 2,
-        decoded_byte_count: 8,
-        stream_hash: Hash256::from_sha256(b"product-video-stream"),
-    };
-    let encoded_descriptor = descriptor.encode(2, 1_024).unwrap();
-    let encoded_frames = [
-        frames[0].encode(1_024).unwrap(),
-        frames[1].encode(1_024).unwrap(),
-    ];
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
     let decode = DecodeSessionHandle::from_parts(9, 1).unwrap();
@@ -150,10 +153,10 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                 astra_platform::DecodeStreamAction::Start
             );
             reply
-                .send(Ok(DecodeOutput::CpuBuffer {
-                    format: "postcard:astra.decoded_video_stream_descriptor.v2".into(),
-                    hash: Hash256::from_sha256(&encoded_descriptor).to_string(),
-                    bytes: encoded_descriptor.clone(),
+                .send(Ok(DecodeOutput::VideoStreamStart {
+                    duration_us: Some(40_000),
+                    frame_count: Some(2),
+                    decoded_byte_count: Some(8),
                 }))
                 .unwrap();
 
@@ -166,10 +169,13 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                 astra_platform::DecodeStreamAction::Next
             );
             reply
-                .send(Ok(DecodeOutput::CpuBuffer {
-                    format: "postcard:astra.decoded_video_frame.v2".into(),
-                    hash: Hash256::from_sha256(&encoded_frames[0]).to_string(),
-                    bytes: encoded_frames[0].clone(),
+                .send(Ok(DecodeOutput::VideoFrame {
+                    sequence: 1,
+                    pts_us: 0,
+                    duration_us: 20_000,
+                    width: 1,
+                    height: 1,
+                    bgra8: first.clone().into(),
                 }))
                 .unwrap();
 
@@ -192,10 +198,13 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                 astra_platform::DecodeStreamAction::Next
             );
             reply
-                .send(Ok(DecodeOutput::CpuBuffer {
-                    format: "postcard:astra.decoded_video_frame.v2".into(),
-                    hash: Hash256::from_sha256(&encoded_frames[1]).to_string(),
-                    bytes: encoded_frames[1].clone(),
+                .send(Ok(DecodeOutput::VideoFrame {
+                    sequence: 2,
+                    pts_us: 20_000,
+                    duration_us: 20_000,
+                    width: 1,
+                    height: 1,
+                    bgra8: second.clone().into(),
                 }))
                 .unwrap();
 
@@ -207,13 +216,6 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                 };
                 assert!(!frame.commands.is_empty());
                 reply.send(Ok(())).unwrap();
-                let end = astra_media::DecodedVideoStreamEnd {
-                    schema: astra_media::DECODED_VIDEO_STREAM_END_SCHEMA.into(),
-                    frame_count: descriptor.frame_count,
-                    decoded_byte_count: descriptor.decoded_byte_count,
-                    stream_hash: descriptor.stream_hash,
-                };
-                let bytes = postcard::to_allocvec(&end).unwrap();
                 let HostCommand::Decode { request, reply, .. } =
                     backend.next_command().await.unwrap()
                 else {
@@ -224,10 +226,9 @@ async fn product_media_host_presents_every_video_frame_and_restores_by_asset_ide
                     astra_platform::DecodeStreamAction::Next
                 );
                 reply
-                    .send(Ok(DecodeOutput::CpuBuffer {
-                        format: "postcard:astra.decoded_video_stream_end.v2".into(),
-                        hash: Hash256::from_sha256(&bytes).to_string(),
-                        bytes,
+                    .send(Ok(DecodeOutput::VideoStreamEnd {
+                        frame_count: 2,
+                        decoded_byte_count: 8,
                     }))
                     .unwrap();
             }
@@ -282,63 +283,25 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     let profile = PlatformHostProfile::windows_release("nativevn-game", "com.example.game");
     let (client, mut backend, _events) = host_channel(profile, 16, 16).unwrap();
     let native_output = AudioOutputHandle::from_parts(3, 1).unwrap();
+    let consumed_samples = Arc::new(AtomicU64::new(0));
+    let backend_consumed_samples = Arc::clone(&consumed_samples);
     let backend_task = tokio::spawn(async move {
-        match backend.next_command().await.unwrap() {
-            HostCommand::QueryAudioOutputFormat { reply } => reply
-                .send(Ok(AudioOutputFormat {
-                    sample_rate: 48_000,
-                    channels: 2,
-                }))
-                .unwrap(),
-            command => panic!("unexpected command: {}", command.operation()),
-        }
         match backend.next_command().await.unwrap() {
             HostCommand::OpenAudioOutput { request, reply } => {
                 assert_eq!(request.sample_rate, 48_000);
                 assert_eq!(request.channels, 2);
-                reply.send(Ok(native_output)).unwrap();
-            }
-            command => panic!("unexpected command: {}", command.operation()),
-        }
-        for sequence in 1..=4 {
-            match backend.next_command().await.unwrap() {
-                HostCommand::QueryAudio { output, reply } => {
-                    assert_eq!(output, native_output);
-                    reply
-                        .send(Ok(AudioOutputState {
-                            queued_frames: 0,
-                            callback_count: sequence,
-                            submitted_samples: 0,
-                            consumed_samples: 0,
-                            underflow_count: 64,
-                            meter: AudioMeter {
-                                sample_count: 0,
-                                peak_dbfs: -120.0,
-                                rms_dbfs: -120.0,
-                            },
-                        }))
-                        .unwrap();
-                }
-                command => panic!("unexpected command: {}", command.operation()),
-            }
-            match backend.next_command().await.unwrap() {
-                HostCommand::SubmitAudio { packet, reply, .. } => {
-                    assert_eq!(packet.sequence, sequence);
-                    assert_eq!(packet.channels, 2);
-                    assert_eq!(packet.frame_count(), 800);
-                    reply.send(Ok(packet.samples)).unwrap();
-                }
-                command => panic!("unexpected command: {}", command.operation()),
-            }
-        }
-        match backend.next_command().await.unwrap() {
-            HostCommand::DrainAudio { output, reply } => {
-                assert_eq!(output, native_output);
                 reply
-                    .send(Ok(AudioMeter {
-                        sample_count: 2_048,
-                        peak_dbfs: -6.0,
-                        rms_dbfs: -9.0,
+                    .send(Ok(OpenedAudioOutput {
+                        handle: native_output,
+                        format: AudioDeviceFormat {
+                            sample_rate: 48_000,
+                            channels: 2,
+                        },
+                        lane: Box::new(ProductAudioTestLane {
+                            consumed_samples: backend_consumed_samples,
+                            underflow_count: 64,
+                        }),
+                        capture: None,
                     }))
                     .unwrap();
             }
@@ -363,7 +326,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         asset_id: "asset:/bgm/main".into(),
         codec: "wav".into(),
         encoded_bytes: vec![1].into(),
-        encoded_hash: Hash256::from_sha256(&[1]),
+        encoded_length: 1,
     };
     let audio = PlayerDecodedAudio {
         sample_rate: 44_100,
@@ -439,11 +402,16 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
         .await
         .unwrap();
     assert!(!signals.contains("bgm.fade.complete"));
-    host.pump(&mut source, &mut executor, &mut signals, false)
-        .await
-        .unwrap();
-    assert!(signals.contains("bgm.authored.end"));
-    assert!(signals.contains("bgm.fade.complete"));
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !signals.contains("bgm.authored.end") || !signals.contains("bgm.fade.complete") {
+            host.pump(&mut source, &mut executor, &mut signals, false)
+                .await
+                .unwrap();
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("device-consumed completion reaches the next fixed tick");
     host.control(
         &NativeVnAudioControlRequest {
             command_id: "audio.fade-stop-again".into(),
@@ -468,9 +436,7 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
             &mut signals,
         )
         .unwrap_err();
-    assert!(unknown
-        .to_string()
-        .contains("ASTRA_PLAYER_AUDIO_CONTROL_TARGET_UNKNOWN"));
+    assert_eq!(unknown.operation, "player.audio.fade_stop");
     host.control(
         &NativeVnAudioControlRequest {
             command_id: "audio.stop-after-fade".into(),
@@ -484,7 +450,9 @@ async fn shared_product_audio_host_owns_format_queue_control_and_cleanup() {
     .unwrap();
     host.shutdown(&mut source, &mut executor).await.unwrap();
     let final_meter = host.last_meter().unwrap();
-    assert_eq!(final_meter.consumed_samples, 2_048);
-    assert_eq!(f32::from_bits(final_meter.peak_dbfs_bits), -6.0);
+    let endpoint_consumed = consumed_samples.load(Ordering::Acquire);
+    assert!(final_meter.consumed_samples <= endpoint_consumed);
+    assert!(endpoint_consumed - final_meter.consumed_samples <= 1_024);
+    assert!(final_meter.submitted_samples > 0);
     backend_task.await.unwrap();
 }

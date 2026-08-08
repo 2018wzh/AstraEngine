@@ -1,12 +1,12 @@
 use std::fs;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use astra_headless_protocol::ArtifactManifest;
 use astra_media_core::{BlendMode, RectI, SceneCommand, TextureFrame};
 #[cfg(feature = "ffmpeg-vcpkg")]
 use astra_platform::DecodeOutput;
 use astra_platform::{
-    AudioOutputRequest, AudioPacket, DecodeKind, HeadlessArtifactRetention, HeadlessHostProfile,
+    AudioOutputRequest, DecodeKind, HeadlessArtifactRetention, HeadlessHostProfile,
     HeadlessReadbackPolicy, HeadlessRenderPolicy, PackageSourcePolicy, PackageSourceRequest,
     PlatformDecodeRequest, PlatformErrorCode, PlatformHostFactory, RgbaFrame, SceneFrame,
     SurfaceRequest, WindowRequest,
@@ -411,7 +411,7 @@ async fn gpu_sparse_frames_defer_retained_resource_mutations_until_materializati
         )
         .await
         .unwrap();
-    let pixels: Arc<[u8]> = [255, 0, 0, 255].repeat(4).into();
+    let pixels = [255, 0, 0, 255].repeat(4);
     client
         .present_scene(
             surface,
@@ -422,12 +422,7 @@ async fn gpu_sparse_frames_defer_retained_resource_mutations_until_materializati
                 clear_rgba: [0, 0, 0, 255],
                 commands: vec![SceneCommand::UploadTexture {
                     resource_id: "retained.texture".into(),
-                    frame: TextureFrame {
-                        width: 2,
-                        height: 2,
-                        hash: astra_core::Hash256::from_sha256(&pixels),
-                        rgba8: pixels,
-                    },
+                    frame: TextureFrame::from_vec(2, 2, pixels).unwrap(),
                 }],
                 semantics: None,
             },
@@ -777,22 +772,16 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
                 coded_height: None,
                 keyframe: true,
                 stream_action: astra_platform::DecodeStreamAction::OneShot,
-                bytes: encoded_image,
+                bytes: encoded_image.into(),
             },
         )
         .await
         .unwrap();
-    let astra_platform::DecodeOutput::CpuBuffer {
-        format,
-        bytes,
-        hash: output_hash,
-    } = decoded_image
-    else {
+    let astra_platform::DecodeOutput::CpuBuffer { format, bytes } = decoded_image else {
         panic!("headless image decode returned a native media frame");
     };
     assert_eq!(format, "rgba8");
-    assert_eq!(bytes, [255, 0, 0, 255, 0, 255, 0, 255]);
-    assert_eq!(output_hash, hash(&bytes));
+    assert_eq!(bytes.as_slice(), [255, 0, 0, 255, 0, 255, 0, 255]);
     client.close_decode(image).await.unwrap();
 
     let video = client.open_decode(DecodeKind::Video).await.unwrap();
@@ -810,20 +799,23 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
                 coded_height: Some(2),
                 keyframe: true,
                 stream_action: astra_platform::DecodeStreamAction::OneShot,
-                bytes: vec![1, 2, 3],
+                bytes: vec![1, 2, 3].into(),
             },
         )
         .await
         .unwrap_err();
-    assert_eq!(video_error.code, PlatformErrorCode::ProviderUnavailable);
+    assert_eq!(video_error.code, PlatformErrorCode::InvalidState);
+    assert_eq!(video_error.operation, "decode.video");
     client.close_decode(video).await.unwrap();
 
-    let audio = client
+    let mut audio = client
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 2,
+            chunk_frames: 800,
             max_buffered_frames: 800,
             start_paused: false,
+            capture_samples: true,
         })
         .await
         .unwrap();
@@ -833,58 +825,31 @@ async fn executes_render_audio_save_package_and_zero_leak_shutdown() {
             [value, value]
         })
         .collect();
-    client
-        .submit_audio(
-            audio,
-            AudioPacket {
-                sequence: 1,
-                channels: 2,
-                samples,
-            },
-        )
-        .await
-        .unwrap();
-    client.pause_audio(audio).await.unwrap();
-    assert_eq!(client.query_audio(audio).await.unwrap().consumed_samples, 0);
-    client.resume_audio(audio).await.unwrap();
-    let state = client.query_audio(audio).await.unwrap();
-    assert_eq!(state.callback_count, 1);
-    assert_eq!(state.queued_frames, 0);
-    assert!(client
-        .drain_audio(audio)
-        .await
-        .unwrap()
-        .peak_dbfs
-        .is_finite());
-    client.close_audio(audio).await.unwrap();
+    audio.lane.submit(samples).unwrap();
+    assert_eq!(audio.lane.consumed_samples(), 1_600);
+    client.pause_audio(audio.handle).await.unwrap();
+    client.resume_audio(audio.handle).await.unwrap();
+    client.close_audio(audio.handle).await.unwrap();
     assert_eq!(
-        client.close_audio(audio).await.unwrap_err().code,
+        client.close_audio(audio.handle).await.unwrap_err().code,
         PlatformErrorCode::StaleHandle
     );
 
     // Recreated outputs restart their packet sequence after restore. Artifact paths must
     // remain unique for the whole host session instead of reusing the packet sequence.
-    let restored_audio = client
+    let mut restored_audio = client
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 2,
+            chunk_frames: 800,
             max_buffered_frames: 800,
             start_paused: false,
+            capture_samples: true,
         })
         .await
         .unwrap();
-    client
-        .submit_audio(
-            restored_audio,
-            AudioPacket {
-                sequence: 1,
-                channels: 2,
-                samples: vec![0.125; 1_600],
-            },
-        )
-        .await
-        .unwrap();
-    client.close_audio(restored_audio).await.unwrap();
+    restored_audio.lane.submit(vec![0.125; 1_600]).unwrap();
+    client.close_audio(restored_audio.handle).await.unwrap();
     client.shutdown().await.unwrap();
 
     assert!(temp
@@ -1067,36 +1032,26 @@ async fn initially_paused_audio_does_not_consume_before_priming_resume() {
         .await
         .unwrap();
     let client = session.client;
-    let output = client
+    let mut output = client
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 2,
+            chunk_frames: 480,
             max_buffered_frames: 480,
             start_paused: true,
+            capture_samples: true,
         })
         .await
         .unwrap();
-    client
-        .submit_audio(
-            output,
-            AudioPacket {
-                sequence: 1,
-                channels: 2,
-                samples: vec![0.125; 960],
-            },
-        )
-        .await
+    assert_eq!(output.lane.consumed_samples(), 0);
+    client.resume_audio(output.handle).await.unwrap();
+    output
+        .lane
+        .wait_for_capacity(960, &AtomicBool::new(false))
         .unwrap();
-    assert_eq!(
-        client.query_audio(output).await.unwrap().consumed_samples,
-        0
-    );
-    client.resume_audio(output).await.unwrap();
-    assert_eq!(
-        client.query_audio(output).await.unwrap().consumed_samples,
-        960
-    );
-    client.close_audio(output).await.unwrap();
+    output.lane.submit(vec![0.125; 960]).unwrap();
+    assert_eq!(output.lane.consumed_samples(), 960);
+    client.close_audio(output.handle).await.unwrap();
     client.shutdown().await.unwrap();
 }
 
@@ -1146,30 +1101,21 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
         .start(limited.into())
         .await
         .unwrap();
-    let audio = session
+    let mut audio = session
         .client
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 2,
+            chunk_frames: 800,
             max_buffered_frames: 800,
             start_paused: false,
+            capture_samples: true,
         })
         .await
         .unwrap();
-    let error = session
-        .client
-        .submit_audio(
-            audio,
-            AudioPacket {
-                sequence: 1,
-                channels: 2,
-                samples: vec![0.0; 1_600],
-            },
-        )
-        .await
-        .unwrap_err();
+    let error = audio.lane.submit(vec![0.0; 1_600]).unwrap_err();
     assert_eq!(error.code, PlatformErrorCode::QueueOverflow);
-    session.client.abort_audio(audio).await.unwrap();
+    session.client.abort_audio(audio.handle).await.unwrap();
     session.client.shutdown().await.unwrap();
 
     let mut close_limited = HeadlessHostProfile::reference(
@@ -1183,56 +1129,37 @@ async fn rejects_legacy_profile_shape_and_audio_limit_before_commit() {
         .start(close_limited.into())
         .await
         .unwrap();
-    let first = session
+    let mut first = session
         .client
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 2,
+            chunk_frames: 800,
             max_buffered_frames: 800,
             start_paused: false,
+            capture_samples: true,
         })
         .await
         .unwrap();
-    let second = session
+    let mut second = session
         .client
         .open_audio_output(AudioOutputRequest {
             sample_rate: 48_000,
             channels: 2,
+            chunk_frames: 800,
             max_buffered_frames: 800,
             start_paused: false,
+            capture_samples: true,
         })
         .await
         .unwrap();
-    session
-        .client
-        .submit_audio(
-            first,
-            AudioPacket {
-                sequence: 1,
-                channels: 2,
-                samples: vec![0.0; 1_600],
-            },
-        )
-        .await
-        .unwrap();
+    first.lane.submit(vec![0.0; 1_600]).unwrap();
     assert_eq!(
-        session
-            .client
-            .submit_audio(
-                second,
-                AudioPacket {
-                    sequence: 1,
-                    channels: 2,
-                    samples: vec![0.0; 1_600],
-                },
-            )
-            .await
-            .unwrap_err()
-            .code,
+        second.lane.submit(vec![0.0; 1_600]).unwrap_err().code,
         PlatformErrorCode::QueueOverflow
     );
-    session.client.close_audio(first).await.unwrap();
-    session.client.abort_audio(second).await.unwrap();
+    session.client.close_audio(first.handle).await.unwrap();
+    session.client.abort_audio(second.handle).await.unwrap();
     session.client.shutdown().await.unwrap();
 }
 

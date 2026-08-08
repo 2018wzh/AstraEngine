@@ -97,30 +97,44 @@ impl VnUiSessionState {
         if effects.len() > MAX_EFFECTS_PER_CALL {
             return Err(VnUiControllerError::EffectLimit);
         }
-        let mut next = self.values.clone();
+        let mut updates = BTreeMap::new();
         for effect in effects {
             if let VnUiControllerEffect::SetSessionState { key, value } = effect {
                 value
                     .validate()
                     .map_err(|_| VnUiControllerError::InvalidValue)?;
-                next.insert(key.clone(), value.clone());
+                updates.insert(key.clone(), value.clone());
             }
         }
-        UiValue::Map(next.clone())
-            .validate()
-            .map_err(|_| VnUiControllerError::InvalidValue)?;
-        let bytes = postcard::to_allocvec(&next).map_err(|_| VnUiControllerError::InvalidValue)?;
-        if bytes.len() > MAX_SESSION_STATE_BYTES {
+        UiValue::validate_map_entries(&updates).map_err(|_| VnUiControllerError::InvalidValue)?;
+        let current_bytes = UiValue::map_retained_bytes(&self.values);
+        let removed_bytes = updates.iter().fold(0usize, |bytes, (key, _)| {
+            self.values.get(key).map_or(bytes, |value| {
+                bytes
+                    .saturating_add(std::mem::size_of::<(String, UiValue)>())
+                    .saturating_add(key.len())
+                    .saturating_add(value.retained_bytes())
+            })
+        });
+        let added_bytes = UiValue::map_retained_bytes(&updates);
+        let added_entries = updates
+            .keys()
+            .filter(|key| !self.values.contains_key(*key))
+            .count();
+        let state_bytes = current_bytes
+            .saturating_sub(removed_bytes)
+            .saturating_add(added_bytes);
+        if state_bytes > MAX_SESSION_STATE_BYTES {
             return Err(VnUiControllerError::StateLimit);
         }
         tracing::trace!(
             event = "vn.ui.controller.session_state.apply",
             effect_count = effects.len(),
-            state_entry_count = next.len(),
-            state_bytes = bytes.len(),
+            state_entry_count = self.values.len() + added_entries,
+            state_bytes,
             "applied AstraVN UI controller session state"
         );
-        self.values = next;
+        self.values.extend(updates);
         Ok(())
     }
 }

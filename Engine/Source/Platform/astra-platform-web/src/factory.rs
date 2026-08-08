@@ -44,9 +44,9 @@ mod browser {
 
     use astra_platform::{
         host_channel, AudioOutputHandle, CapturedFrame, DecodeSessionHandle, HostCommand,
-        HostLaunchProfile, PackageSourceHandle, PlatformBackendChannels, PlatformError,
-        PlatformErrorCode, PlatformEventKind, PlatformHostProfile, PlatformHostSession,
-        SaveTransactionHandle, SurfaceHandle, WindowHandle,
+        HostLaunchProfile, OpenedAudioOutput, PackageSourceHandle, PlatformBackendChannels,
+        PlatformError, PlatformErrorCode, PlatformEventKind, PlatformHostProfile,
+        PlatformHostSession, SaveTransactionHandle, SurfaceHandle, WindowHandle,
     };
     use astra_platform_common::ResourceTable;
     use astra_ui_core::{UiSemanticRole, UiSemanticSnapshot, ValidateUi};
@@ -59,8 +59,8 @@ mod browser {
     };
 
     use crate::services::{
-        commit_save, delete_save, list_saves, preferred_audio_output_format, read_save,
-        PackageBytes, SaveTransaction, WebAudioOutput, WebDecodeSession,
+        commit_save, delete_save, list_saves, read_save, PackageBytes, SaveTransaction,
+        WebAudioOutput, WebDecodeSession,
     };
 
     pub async fn start(
@@ -235,45 +235,16 @@ mod browser {
                     let _ = reply.send(windows.remove(window).map(|_| ()));
                 }
                 HostCommand::OpenAudioOutput { request, reply } => {
-                    let result = WebAudioOutput::open(request)
+                    let result = WebAudioOutput::open(request, backend.audio_wake())
                         .await
-                        .and_then(|output| audio.insert(output));
-                    let _ = reply.send(result);
-                }
-                HostCommand::QueryAudioOutputFormat { reply } => {
-                    let _ = reply.send(preferred_audio_output_format().await);
-                }
-                HostCommand::QueryAudioDeviceFormat { reply } => {
-                    let _ = reply.send(Err(PlatformError::new(
-                        PlatformErrorCode::PlatformNotImplemented,
-                        "audio.query_device_format",
-                        "WebAudio format is selected during user-activated output creation",
-                    )));
-                }
-                HostCommand::SubmitAudio {
-                    output,
-                    packet,
-                    reply,
-                } => {
-                    let result = audio.get_mut(output).and_then(|audio| audio.submit(packet));
-                    let _ = reply.send(result);
-                }
-                HostCommand::QueryAudio { output, reply } => {
-                    let result = match audio.get_mut(output) {
-                        Ok(audio) => audio.state().await,
-                        Err(error) => Err(error),
-                    };
-                    let _ = reply.send(result);
-                }
-                HostCommand::DrainAudio { output, reply } => {
-                    let result = match audio.get_mut(output) {
-                        Ok(audio) => audio.drain().await,
-                        Err(error) => Err(error),
-                    };
-                    let _ = reply.send(result);
-                }
-                HostCommand::QueryAudioOutput { output, reply } => {
-                    let result = audio.get(output).map(|audio| audio.status());
+                        .and_then(|(output, lane, format)| {
+                            audio.insert(output).map(|handle| OpenedAudioOutput {
+                                handle,
+                                format,
+                                lane: Box::new(lane),
+                                capture: None,
+                            })
+                        });
                     let _ = reply.send(result);
                 }
                 HostCommand::PauseAudio { output, reply } => {

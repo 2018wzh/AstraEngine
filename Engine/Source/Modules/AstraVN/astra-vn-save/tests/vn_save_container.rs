@@ -45,7 +45,6 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
         RuntimeWorld::create(RuntimeConfig::default(), PackageHandle::default()).unwrap();
     world.create_actor("vn-host", vec!["nativevn".to_string()]);
     let runtime_hash = world.state_hash();
-    let vn_hash = vn.state_hash();
     let mut policy = LuauPolicy::new().unwrap();
     let mut policy_state = VnPolicyState::default();
     assert!(policy
@@ -81,7 +80,6 @@ fn vn_state_roundtrips_inside_runtime_save_container() {
     assert_eq!(loaded.state_hash(), runtime_hash);
 
     let loaded_vn = read_runtime_save_vn_state(&save).unwrap();
-    assert_eq!(loaded_vn.state_hash, vn_hash);
     assert_eq!(loaded_vn.state.backlog.len(), 2);
     assert!(loaded_vn.state.voice_replay.contains_key("voice.hero.0002"));
     assert!(loaded_vn

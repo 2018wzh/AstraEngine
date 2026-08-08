@@ -32,8 +32,6 @@ pub struct VnPresentationExecutionReport {
     pub schema: String,
     pub renderer_provider: String,
     pub filter_provider: String,
-    pub input_hash: Hash256,
-    pub output_hash: Hash256,
     pub draw_count: usize,
     pub filter_count: usize,
     pub diagnostics: Vec<Diagnostic>,
@@ -63,23 +61,19 @@ impl VnHeadlessPresentationExecutor {
         let input_frame = renderer
             .capture_frame(&draw_commands)
             .map_err(media_error_to_vn_error)?;
-        let input_hash = input_frame.hash;
-
-        let (output_hash, filter_count, diagnostics) = if let Some(filters) = request.filters {
+        let (filter_count, diagnostics) = if let Some(filters) = request.filters {
             let (_, filter_report) = CpuFilterExecutor
                 .execute(&filters, input_frame)
                 .map_err(media_error_to_vn_error)?;
             filter_result(filter_report)
         } else {
-            (input_hash, 0, Vec::new())
+            (0, Vec::new())
         };
 
         Ok(VnPresentationExecutionReport {
             schema: "astra.vn.presentation_execution_report.v1".to_string(),
             renderer_provider: renderer_descriptor.provider_id,
             filter_provider: "astra.media.cpu_filter_executor".to_string(),
-            input_hash,
-            output_hash,
             draw_count: draw_commands.len(),
             filter_count,
             diagnostics,
@@ -87,12 +81,8 @@ impl VnHeadlessPresentationExecutor {
     }
 }
 
-fn filter_result(report: FilterExecutionReport) -> (Hash256, usize, Vec<Diagnostic>) {
-    (
-        report.output_hash,
-        report.executed_nodes.len(),
-        report.diagnostics,
-    )
+fn filter_result(report: FilterExecutionReport) -> (usize, Vec<Diagnostic>) {
+    (report.executed_nodes.len(), report.diagnostics)
 }
 
 fn validate_stage(stage: &StageModel) -> Result<(), VnError> {
@@ -192,7 +182,6 @@ fn layer_draw_commands(
         width: asset.width,
         height: asset.height,
         rgba8: asset.bytes.clone().into(),
-        hash: asset.hash,
     };
     let destination = RectI::new(x as i32, y as i32, width, height);
     let resource_id = format!("layer:{}", layer.id);

@@ -463,7 +463,10 @@ impl ProductSession for NativeVnHeadlessSession {
         Ok(CanonicalAudioSnapshot {
             sample_rate: astra_media::CANONICAL_SAMPLE_RATE,
             channels: astra_media::CANONICAL_CHANNELS,
-            samples: self.media.submitted_audio_timeline(),
+            samples: self
+                .media
+                .submitted_audio_timeline()
+                .map_err(|error| ProductHostError::Output(error.to_string()))?,
         })
     }
 
@@ -1042,18 +1045,18 @@ impl NativeVnHeadlessSession {
             .product_observation_evidence()
             .map_err(|error| binding("product.observe", error))?;
         self.observations = vec![
-            Observation {
-                key: "runtime.state_hash".into(),
-                value_hash: evidence.runtime_state_hash.clone(),
-            },
-            Observation {
-                key: "runtime.event_hash".into(),
-                value_hash: evidence.runtime_event_hash.clone(),
-            },
-            Observation {
-                key: "runtime.presentation_hash".into(),
-                value_hash: evidence.runtime_presentation_hash.clone(),
-            },
+            hashed_observation(
+                "runtime.state_hash",
+                &(
+                    &evidence.current_state_id,
+                    &evidence.pending_wait_command_id,
+                    &evidence.pending_wait_await_id,
+                    &evidence.pending_choice_ids,
+                    &evidence.terminal_route_ids,
+                ),
+            )?,
+            hashed_observation("runtime.event_hash", &evidence.coverage_reached)?,
+            hashed_observation("runtime.presentation_hash", &evidence.presentation_count)?,
             hashed_observation("vn.current_state", &evidence.current_state_id)?,
             hashed_observation("vn.pending_wait_command", &evidence.pending_wait_command_id)?,
             hashed_observation("vn.pending_wait_await_id", &evidence.pending_wait_await_id)?,

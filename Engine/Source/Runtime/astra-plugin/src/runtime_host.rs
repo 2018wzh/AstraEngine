@@ -11,16 +11,15 @@ use std::{
 use crate::concurrent_runtime_host::{
     FfiRuntimeProviderFactory, ProductRuntimeProviderFactory, ProductRuntimeSession,
 };
-use astra_core::SchemaVersion;
 #[cfg(feature = "dynamic-abi")]
 use astra_plugin_abi::FfiRuntimeProviderRegistration;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
-    RuntimeOpenRequest, RuntimeOutputDomain, RuntimePersistedOutput, RuntimePrepareReport,
-    RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport,
-    RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
-    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
-    RuntimeStepOutput, ValidatedRuntimeProviderSelection,
+    RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
+    RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionPayload,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput,
+    ValidatedRuntimeProviderSelection,
 };
 
 pub trait ProductRuntimeProvider: Send {
@@ -70,33 +69,27 @@ impl SessionState {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuntimeHostSchemaRegistry {
-    schemas: BTreeMap<RuntimeOutputDomain, BTreeSet<(String, SchemaVersion)>>,
+pub struct RuntimeHostLimits {
     max_outputs: usize,
     max_output_bytes: usize,
 }
 
-impl Default for RuntimeHostSchemaRegistry {
+impl Default for RuntimeHostLimits {
     fn default() -> Self {
         Self {
-            schemas: BTreeMap::new(),
             max_outputs: 256,
             max_output_bytes: 8 * 1024 * 1024,
         }
     }
 }
 
-impl RuntimeHostSchemaRegistry {
+impl RuntimeHostLimits {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn from_descriptor(descriptor: &ProductRuntimeDescriptor) -> Self {
-        let mut registry = Self::new();
-        for output in &descriptor.output_schemas {
-            registry = registry.allow_version(output.domain, &output.schema, output.version);
-        }
-        registry
+    pub fn from_descriptor(_descriptor: &ProductRuntimeDescriptor) -> Self {
+        Self::new()
     }
 
     pub fn with_bounds(mut self, max_outputs: usize, max_output_bytes: usize) -> Self {
@@ -105,75 +98,28 @@ impl RuntimeHostSchemaRegistry {
         self
     }
 
-    pub fn allow(mut self, domain: RuntimeOutputDomain, schema: impl Into<String>) -> Self {
-        self.schemas
-            .entry(domain)
-            .or_default()
-            .insert((schema.into(), SchemaVersion::new(1, 0, 0)));
-        self
-    }
-
-    pub fn allow_version(
-        mut self,
-        domain: RuntimeOutputDomain,
-        schema: impl Into<String>,
-        version: SchemaVersion,
-    ) -> Self {
-        self.schemas
-            .entry(domain)
-            .or_default()
-            .insert((schema.into(), version));
-        self
-    }
-
-    pub(crate) fn validate(
-        &self,
-        domain: RuntimeOutputDomain,
-        persisted: &RuntimePersistedOutput,
-    ) -> Result<(), RuntimeHostError> {
-        let allowed = self.schemas.get(&domain);
-        let Some((schema, version)) =
-            allowed.and_then(|schemas| schemas.get(&(persisted.schema.clone(), persisted.version)))
-        else {
-            return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_HOST_PERSISTED_SCHEMA",
-                format!(
-                    "unknown {:?} persisted output schema {}",
-                    domain, persisted.schema
-                ),
-            ));
-        };
-        persisted
-            .validate_binding(domain, schema, *version)
-            .map_err(|err| RuntimeHostError::new(err.code(), err.to_string()))?;
-        Ok(())
-    }
-
     pub(crate) fn validate_output_bounds(
         &self,
         output: &RuntimeStepOutput,
     ) -> Result<(), RuntimeHostError> {
-        if output.persisted.len() > self.max_outputs {
+        let live_count = output.live.scenes.len()
+            + output.live.resource_scenes.len()
+            + output.live.audio.len()
+            + output.live.audio_commands.len()
+            + output.live.audio_cues.len()
+            + output.live.text.len()
+            + output.live.text_presentations.len()
+            + output.live.presentations.len()
+            + output.live.timeline.len()
+            + output.live.video.len()
+            + output.live.waits.len()
+            + output.live.events.len()
+            + output.live.blackboard.len()
+            + output.live.dirty_sections.len();
+        if live_count > self.max_outputs {
             return Err(RuntimeHostError::new(
                 "ASTRA_RUNTIME_HOST_OUTPUT_COUNT",
-                "runtime provider output count exceeds the configured bound",
-            ));
-        }
-        let bytes = output
-            .persisted
-            .iter()
-            .try_fold(0usize, |total, persisted| {
-                total.checked_add(persisted.bytes().len()).ok_or_else(|| {
-                    RuntimeHostError::new(
-                        "ASTRA_RUNTIME_HOST_OUTPUT_BYTES",
-                        "runtime provider output byte count overflowed",
-                    )
-                })
-            })?;
-        if bytes > self.max_output_bytes {
-            return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_HOST_OUTPUT_BYTES",
-                "runtime provider output bytes exceed the configured bound",
+                "runtime provider live output count exceeds the configured bound",
             ));
         }
         Ok(())
@@ -241,7 +187,7 @@ enum HostState {
 pub struct ProductRuntimeHost {
     instance_id: ProviderInstanceId,
     provider: Box<dyn ProductRuntimeProvider>,
-    schemas: RuntimeHostSchemaRegistry,
+    limits: RuntimeHostLimits,
     sessions: BTreeMap<String, SessionState>,
     state: HostState,
     runtime_binding: Option<ValidatedRuntimeProviderSelection>,
@@ -252,7 +198,7 @@ impl ProductRuntimeHost {
         instance_id: impl Into<String>,
         selection: &ValidatedRuntimeProviderSelection,
         provider: P,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
     ) -> Result<Self, RuntimeHostError> {
         let descriptor = provider.descriptor().map_err(|message| {
             RuntimeHostError::new("ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_UNAVAILABLE", message)
@@ -260,7 +206,7 @@ impl ProductRuntimeHost {
         selection
             .validate_linked_descriptor(&descriptor)
             .map_err(|diagnostic| RuntimeHostError::new(diagnostic.code, diagnostic.message))?;
-        let mut host = Self::create(instance_id, Box::new(provider), schemas)?;
+        let mut host = Self::create(instance_id, Box::new(provider), limits)?;
         host.runtime_binding = Some(selection.clone());
         Ok(host)
     }
@@ -268,9 +214,9 @@ impl ProductRuntimeHost {
     pub fn reference_in_process<P: ProductRuntimeProvider + 'static>(
         instance_id: impl Into<String>,
         provider: P,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
     ) -> Result<Self, RuntimeHostError> {
-        Self::create(instance_id, Box::new(provider), schemas)
+        Self::create(instance_id, Box::new(provider), limits)
     }
 
     #[cfg(feature = "dynamic-abi")]
@@ -278,13 +224,13 @@ impl ProductRuntimeHost {
         instance_id: impl Into<String>,
         selection: &ValidatedRuntimeProviderSelection,
         registration: FfiRuntimeProviderRegistration,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
     ) -> Result<Self, RuntimeHostError> {
         Self::bound_in_process(
             instance_id,
             selection,
             FfiProductRuntimeProvider::new(registration)?,
-            schemas,
+            limits,
         )
     }
 
@@ -292,19 +238,19 @@ impl ProductRuntimeHost {
     pub fn reference_ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
     ) -> Result<Self, RuntimeHostError> {
         Self::create(
             instance_id,
             Box::new(FfiProductRuntimeProvider::new(registration)?),
-            schemas,
+            limits,
         )
     }
 
     fn create(
         instance_id: impl Into<String>,
         mut provider: Box<dyn ProductRuntimeProvider>,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
     ) -> Result<Self, RuntimeHostError> {
         let instance_id = ProviderInstanceId(instance_id.into());
         if instance_id.0.trim().is_empty() {
@@ -346,7 +292,7 @@ impl ProductRuntimeHost {
         Ok(Self {
             instance_id,
             provider,
-            schemas,
+            limits,
             sessions: BTreeMap::new(),
             state: HostState::Created,
             runtime_binding: None,
@@ -585,7 +531,7 @@ impl ProductRuntimeHost {
                 "save report session does not match the requested session",
             ));
         }
-        if let Err(error) = self.schemas.validate_sections(&report.sections) {
+        if let Err(error) = self.limits.validate_sections(&report.sections) {
             self.poison_session(&session_id);
             return Err(error);
         }
@@ -598,7 +544,7 @@ impl ProductRuntimeHost {
     ) -> Result<RuntimeRestoreReport, RuntimeHostError> {
         self.require_session(&request.session_id, "restore")?;
         let session_id = request.session_id.clone();
-        self.schemas.validate_sections(&request.sections)?;
+        self.limits.validate_sections(&request.sections)?;
         let report = call_provider("ASTRA_RUNTIME_HOST_RESTORE", "restore", || {
             self.provider.restore(request)
         })
@@ -728,11 +674,7 @@ impl ProductRuntimeHost {
     }
 
     fn validate_output(&self, output: &RuntimeStepOutput) -> Result<(), RuntimeHostError> {
-        self.schemas.validate_output_bounds(output)?;
-        for persisted in &output.persisted {
-            self.schemas.validate(persisted.domain, persisted)?;
-        }
-        Ok(())
+        self.limits.validate_output_bounds(output)
     }
 
     fn require_state(&self, expected: HostState, operation: &str) -> Result<(), RuntimeHostError> {
@@ -813,11 +755,11 @@ impl AsyncProductRuntimeHost {
         instance_id: impl Into<String>,
         selection: &ValidatedRuntimeProviderSelection,
         provider: P,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::from_host(
-            ProductRuntimeHost::bound_in_process(instance_id, selection, provider, schemas)?,
+            ProductRuntimeHost::bound_in_process(instance_id, selection, provider, limits)?,
             timeout,
         )
     }
@@ -825,11 +767,11 @@ impl AsyncProductRuntimeHost {
     pub fn reference_in_process<P: ProductRuntimeProvider + 'static>(
         instance_id: impl Into<String>,
         provider: P,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::from_host(
-            ProductRuntimeHost::reference_in_process(instance_id, provider, schemas)?,
+            ProductRuntimeHost::reference_in_process(instance_id, provider, limits)?,
             timeout,
         )
     }
@@ -837,10 +779,10 @@ impl AsyncProductRuntimeHost {
     pub fn reference_local_serialized<P: ProductRuntimeProvider + 'static>(
         instance_id: impl Into<String>,
         provider: P,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
-        Self::reference_in_process(instance_id, provider, schemas, timeout)
+        Self::reference_in_process(instance_id, provider, limits, timeout)
     }
 
     #[cfg(feature = "dynamic-abi")]
@@ -848,11 +790,11 @@ impl AsyncProductRuntimeHost {
         instance_id: impl Into<String>,
         selection: &ValidatedRuntimeProviderSelection,
         registration: FfiRuntimeProviderRegistration,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::from_host(
-            ProductRuntimeHost::bound_ffi(instance_id, selection, registration, schemas)?,
+            ProductRuntimeHost::bound_ffi(instance_id, selection, registration, limits)?,
             timeout,
         )
     }
@@ -861,11 +803,11 @@ impl AsyncProductRuntimeHost {
     pub fn reference_ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::from_host(
-            ProductRuntimeHost::reference_ffi(instance_id, registration, schemas)?,
+            ProductRuntimeHost::reference_ffi(instance_id, registration, limits)?,
             timeout,
         )
     }

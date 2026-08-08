@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 
-use astra_core::Hash256;
-
 use super::{
     playback_error, AudioFramePacket, MediaPlaybackConfig, MediaPlaybackSession, MediaTrackKind,
     PlaybackTickOutput, PlaybackTickRequest, VideoFramePacket,
@@ -12,11 +10,11 @@ use crate::MediaError;
 pub enum DecodedMediaPacket {
     Audio {
         packet: AudioFramePacket,
-        pcm_s16le: Vec<u8>,
+        samples: Vec<i16>,
     },
     Video {
         packet: VideoFramePacket,
-        bgra8: Vec<u8>,
+        bgra8: astra_byte_source::OwnedByteBuffer,
     },
 }
 
@@ -24,7 +22,7 @@ pub enum DecodedMediaPacket {
 pub enum QueuedMediaOutput {
     Audio {
         packet: AudioFramePacket,
-        pcm_s16le: Vec<u8>,
+        samples: Vec<i16>,
     },
     VideoBuffered {
         resource_id: String,
@@ -34,7 +32,7 @@ pub enum QueuedMediaOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresentedVideoFrame {
     pub packet: VideoFramePacket,
-    pub bgra8: Vec<u8>,
+    pub bgra8: astra_byte_source::OwnedByteBuffer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +69,7 @@ pub struct MediaPlaybackPipeline {
     scheduler: MediaPlaybackSession,
     limits: MediaPipelineLimits,
     live_audio_resources: BTreeMap<String, usize>,
-    video_payloads: BTreeMap<String, Vec<u8>>,
+    video_payloads: BTreeMap<String, astra_byte_source::OwnedByteBuffer>,
     live_audio_bytes: usize,
     live_video_bytes: usize,
 }
@@ -115,8 +113,8 @@ impl MediaPlaybackPipeline {
         decoded: DecodedMediaPacket,
     ) -> Result<QueuedMediaOutput, MediaError> {
         match decoded {
-            DecodedMediaPacket::Audio { packet, pcm_s16le } => {
-                validate_audio_payload(&packet, &pcm_s16le)?;
+            DecodedMediaPacket::Audio { packet, samples } => {
+                validate_audio_payload(&packet, &samples)?;
                 if self.live_audio_resources.contains_key(&packet.resource_id)
                     || self.video_payloads.contains_key(&packet.resource_id)
                 {
@@ -127,7 +125,7 @@ impl MediaPlaybackPipeline {
                 }
                 let live_audio_bytes = self
                     .live_audio_bytes
-                    .checked_add(pcm_s16le.len())
+                    .checked_add(samples.len().saturating_mul(std::mem::size_of::<i16>()))
                     .filter(|bytes| *bytes <= self.limits.max_live_audio_bytes)
                     .ok_or_else(|| {
                         playback_error(
@@ -136,10 +134,12 @@ impl MediaPlaybackPipeline {
                         )
                     })?;
                 self.scheduler.queue_audio(packet.clone())?;
-                self.live_audio_resources
-                    .insert(packet.resource_id.clone(), pcm_s16le.len());
+                self.live_audio_resources.insert(
+                    packet.resource_id.clone(),
+                    samples.len().saturating_mul(std::mem::size_of::<i16>()),
+                );
                 self.live_audio_bytes = live_audio_bytes;
-                Ok(QueuedMediaOutput::Audio { packet, pcm_s16le })
+                Ok(QueuedMediaOutput::Audio { packet, samples })
             }
             DecodedMediaPacket::Video { packet, bgra8 } => {
                 validate_video_payload(&packet, &bgra8)?;
@@ -274,7 +274,7 @@ impl MediaPlaybackPipeline {
                     let bytes = self
                         .video_payloads
                         .get(&packet.resource_id)
-                        .map(Vec::len)
+                        .map(|bytes| bytes.len())
                         .ok_or_else(|| {
                             playback_error(
                                 "ASTRA_MEDIA_RESOURCE_MISSING",
@@ -294,7 +294,7 @@ impl MediaPlaybackPipeline {
             .map(|packet| {
                 self.video_payloads
                     .get(&packet.resource_id)
-                    .map(Vec::len)
+                    .map(|bytes| bytes.len())
                     .ok_or_else(|| {
                         playback_error(
                             "ASTRA_MEDIA_RESOURCE_MISSING",
@@ -355,15 +355,14 @@ impl MediaPlaybackPipeline {
     }
 }
 
-fn validate_audio_payload(packet: &AudioFramePacket, bytes: &[u8]) -> Result<(), MediaError> {
+fn validate_audio_payload(packet: &AudioFramePacket, samples: &[i16]) -> Result<(), MediaError> {
     let expected = usize::try_from(packet.frame_count)
         .ok()
-        .and_then(|frames| frames.checked_mul(usize::from(packet.channels)))
-        .and_then(|samples| samples.checked_mul(2));
-    if expected != Some(bytes.len()) || Hash256::from_sha256(bytes) != packet.content_hash {
+        .and_then(|frames| frames.checked_mul(usize::from(packet.channels)));
+    if expected != Some(samples.len()) {
         return Err(playback_error(
             "ASTRA_MEDIA_AUDIO_PAYLOAD",
-            "decoded PCM size or content hash does not match its packet",
+            "decoded PCM size does not match its packet",
         ));
     }
     Ok(())
@@ -378,10 +377,10 @@ fn validate_video_payload(packet: &VideoFramePacket, bytes: &[u8]) -> Result<(),
                 .ok()
                 .and_then(|height| row.checked_mul(height))
         });
-    if expected != Some(bytes.len()) || Hash256::from_sha256(bytes) != packet.content_hash {
+    if expected != Some(bytes.len()) {
         return Err(playback_error(
             "ASTRA_MEDIA_VIDEO_PAYLOAD",
-            "decoded BGRA size or content hash does not match its packet",
+            "decoded BGRA size does not match its packet",
         ));
     }
     Ok(())

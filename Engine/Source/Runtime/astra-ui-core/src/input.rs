@@ -281,7 +281,7 @@ impl ValidateUi for UiInputFrame {
             }
             previous = Some(event.sequence);
         }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }
 

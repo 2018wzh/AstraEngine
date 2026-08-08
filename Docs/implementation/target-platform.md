@@ -10,9 +10,9 @@ Target 描述“构建和发布哪个产品入口”，Platform 描述该入口�
 
 ## Platform Profiles
 
-`project.yaml.platform_profiles` 是强类型 `PlatformHostProfile` v2 map。map key 必须等于 profile id；profile 的 target、package id、platform 与 verified package cache 限额必须和选定 Target 一致。Cook 后写入 `platform.profiles` / `astra.platform_profiles.v2`。Player 从 package 读取发布策略，只显式迁移 v1，不接受 CLI 覆盖 provider 或 fallback。
+`project.yaml.platform_profiles` 是强类型 `PlatformHostProfile` v3 map。map key 必须等于 profile id；profile 的 target、package id、platform、`audio_mixer`、`audio_output` 与 verified package cache 限额必须和选定 Target 一致。Cook 后写入 `platform.profiles` / `astra.platform_profiles.v3`。Player 从 package 读取发布策略，旧 v1/v2 直接拒绝，不接受 CLI 覆盖 provider 或 fallback。
 
-Migration 11 不把 Headless 加入 `PlatformId`、Target `platforms` 或 `platform_profiles`。`HostLaunchProfile` 只在 host 启动边界区分 `Platform(PlatformHostProfile)` 与 `Headless(HeadlessHostProfile)`；发布 profile 和 package section 继续只接受六个平台。`astra.headless_host_profile.v2` 属于测试配置，不能进入 Cook、Package、Bundle 或 Player；shipping graph checker会阻断 test-only crate 的 normal dependency。
+Migration 11 不把 Headless 加入 `PlatformId`、Target `platforms` 或 `platform_profiles`。`HostLaunchProfile` 只在 host 启动边界区分 `Platform(PlatformHostProfile)` 与 `Headless(HeadlessHostProfile)`；发布 profile 和 package section 继续只接受六个平台。`astra.headless_host_profile.v3` 属于测试配置，不能进入 Cook、Package、Bundle 或 Player；旧 v1/v2 直接拒绝，shipping graph checker会阻断 test-only crate 的 normal dependency。
 
 Windows release provider：`wgpu_hardware`、`wmf`、`wasapi`、`saved_games`。
 

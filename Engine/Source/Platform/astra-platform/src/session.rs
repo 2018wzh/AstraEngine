@@ -128,9 +128,12 @@ impl ScenePresentReceipt {
 pub struct AudioOutputRequest {
     pub sample_rate: u32,
     pub channels: u16,
+    pub chunk_frames: usize,
     pub max_buffered_frames: usize,
     /// Starts the device paused until its bounded producer has been primed.
     pub start_paused: bool,
+    /// Headless Evidence-only endpoint observation. Native outputs reject it.
+    pub capture_samples: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +143,72 @@ pub struct AudioDeviceFormat {
 }
 
 pub type AudioOutputFormat = AudioDeviceFormat;
+
+/// Process-local producer lane owned by the selected audio mixer. Implementations are bounded and
+/// callback-driven; they must move whole chunks and never route refill through `HostCommand`.
+pub trait AudioOutputLane: Send + 'static {
+    fn wait_for_capacity(
+        &mut self,
+        requested_samples: usize,
+        stop: &AtomicBool,
+    ) -> Result<(), PlatformError>;
+
+    /// Moves a filled chunk to the endpoint and returns one exhausted allocation for reuse.
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError>;
+
+    fn consumed_samples(&self) -> u64;
+
+    fn underflow_count(&self) -> u64;
+}
+
+pub struct OpenedAudioOutput {
+    pub handle: AudioOutputHandle,
+    pub format: AudioDeviceFormat,
+    pub lane: Box<dyn AudioOutputLane>,
+    pub capture: Option<AudioCaptureReader>,
+}
+
+#[derive(Clone, Default)]
+pub struct AudioCaptureReader {
+    samples: Arc<Mutex<Vec<f32>>>,
+}
+
+impl AudioCaptureReader {
+    pub fn take_samples(&self) -> Result<Vec<f32>, PlatformError> {
+        let mut samples = self.samples.lock().map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.capture",
+                "audio endpoint capture lock is poisoned",
+            )
+        })?;
+        Ok(std::mem::take(&mut *samples))
+    }
+
+    pub fn append(&self, samples: &[f32]) -> Result<(), PlatformError> {
+        self.samples
+            .lock()
+            .map_err(|_| {
+                PlatformError::new(
+                    PlatformErrorCode::IntegrityMismatch,
+                    "audio.capture",
+                    "audio endpoint capture lock is poisoned",
+                )
+            })?
+            .extend_from_slice(samples);
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for OpenedAudioOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpenedAudioOutput")
+            .field("handle", &self.handle)
+            .field("format", &self.format)
+            .finish_non_exhaustive()
+    }
+}
 
 impl AudioOutputRequest {
     /// Returns a drain deadline that covers the submitted playback duration plus
@@ -154,13 +223,6 @@ impl AudioOutputRequest {
         let timeout_ms = playback_ms.saturating_add(CALLBACK_MARGIN_MS);
         Duration::from_millis(u64::try_from(timeout_ms).unwrap_or(u64::MAX))
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AudioPacket {
-    pub sequence: u64,
-    pub channels: u16,
-    pub samples: Vec<f32>,
 }
 
 #[derive(Clone, Default)]
@@ -211,39 +273,11 @@ impl AudioWakeRegistration {
     }
 }
 
-impl AudioPacket {
-    pub fn frame_count(&self) -> usize {
-        self.samples
-            .len()
-            .checked_div(usize::from(self.channels))
-            .unwrap_or(0)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioMeter {
     pub sample_count: u64,
     pub peak_dbfs: f32,
     pub rms_dbfs: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AudioOutputState {
-    pub queued_frames: usize,
-    pub callback_count: u64,
-    pub submitted_samples: u64,
-    pub consumed_samples: u64,
-    pub underflow_count: u64,
-    pub meter: AudioMeter,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AudioOutputStatus {
-    pub submitted_frames: u64,
-    pub played_frames: u64,
-    pub buffered_frames: u64,
-    pub underflow_count: u64,
-    pub meter: AudioMeter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,15 +311,41 @@ pub struct PlatformDecodeRequest {
     pub coded_height: Option<u32>,
     pub keyframe: bool,
     pub stream_action: DecodeStreamAction,
-    pub bytes: Vec<u8>,
+    pub bytes: astra_byte_source::OwnedByteBuffer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DecodeOutput {
     CpuBuffer {
         format: String,
-        bytes: Vec<u8>,
-        hash: String,
+        bytes: astra_byte_source::OwnedByteBuffer,
+    },
+    AudioPcmI16 {
+        sample_rate: u32,
+        channels: u16,
+        samples: Vec<i16>,
+    },
+    AudioPcmF32 {
+        sample_rate: u32,
+        channels: u16,
+        samples: Vec<f32>,
+    },
+    VideoStreamStart {
+        duration_us: Option<u64>,
+        frame_count: Option<u64>,
+        decoded_byte_count: Option<u64>,
+    },
+    VideoFrame {
+        sequence: u64,
+        pts_us: u64,
+        duration_us: u64,
+        width: u32,
+        height: u32,
+        bgra8: astra_byte_source::OwnedByteBuffer,
+    },
+    VideoStreamEnd {
+        frame_count: u64,
+        decoded_byte_count: u64,
     },
     MediaFrame(MediaFrameHandle),
 }
@@ -343,30 +403,7 @@ pub enum HostCommand {
     },
     OpenAudioOutput {
         request: AudioOutputRequest,
-        reply: oneshot::Sender<Result<AudioOutputHandle, PlatformError>>,
-    },
-    QueryAudioOutputFormat {
-        reply: oneshot::Sender<Result<AudioOutputFormat, PlatformError>>,
-    },
-    QueryAudioDeviceFormat {
-        reply: oneshot::Sender<Result<AudioDeviceFormat, PlatformError>>,
-    },
-    SubmitAudio {
-        output: AudioOutputHandle,
-        packet: AudioPacket,
-        reply: oneshot::Sender<Result<Vec<f32>, PlatformError>>,
-    },
-    QueryAudio {
-        output: AudioOutputHandle,
-        reply: oneshot::Sender<Result<AudioOutputState, PlatformError>>,
-    },
-    DrainAudio {
-        output: AudioOutputHandle,
-        reply: oneshot::Sender<Result<AudioMeter, PlatformError>>,
-    },
-    QueryAudioOutput {
-        output: AudioOutputHandle,
-        reply: oneshot::Sender<Result<AudioOutputStatus, PlatformError>>,
+        reply: oneshot::Sender<Result<OpenedAudioOutput, PlatformError>>,
     },
     PauseAudio {
         output: AudioOutputHandle,
@@ -462,12 +499,6 @@ impl HostCommand {
             Self::DestroySurface { .. } => "surface.destroy",
             Self::DestroyWindow { .. } => "window.destroy",
             Self::OpenAudioOutput { .. } => "audio.open",
-            Self::QueryAudioOutputFormat { .. } => "audio.format",
-            Self::QueryAudioDeviceFormat { .. } => "audio.query_device_format",
-            Self::SubmitAudio { .. } => "audio.submit",
-            Self::QueryAudio { .. } => "audio.query",
-            Self::DrainAudio { .. } => "audio.drain",
-            Self::QueryAudioOutput { .. } => "audio.query",
             Self::PauseAudio { .. } => "audio.pause",
             Self::ResumeAudio { .. } => "audio.resume",
             Self::AbortAudio { .. } => "audio.abort",
@@ -540,12 +571,6 @@ impl HostCommand {
             Self::DestroySurface { reply, .. } => send_error!(reply),
             Self::DestroyWindow { reply, .. } => send_error!(reply),
             Self::OpenAudioOutput { reply, .. } => send_error!(reply),
-            Self::QueryAudioOutputFormat { reply } => send_error!(reply),
-            Self::QueryAudioDeviceFormat { reply } => send_error!(reply),
-            Self::SubmitAudio { reply, .. } => send_error!(reply),
-            Self::QueryAudio { reply, .. } => send_error!(reply),
-            Self::DrainAudio { reply, .. } => send_error!(reply),
-            Self::QueryAudioOutput { reply, .. } => send_error!(reply),
             Self::PauseAudio { reply, .. } => send_error!(reply),
             Self::ResumeAudio { reply, .. } => send_error!(reply),
             Self::AbortAudio { reply, .. } => send_error!(reply),
@@ -775,23 +800,6 @@ impl PlatformHostClient {
         self.audio_wake.clone()
     }
 
-    pub async fn query_audio_device_format(&self) -> Result<AudioDeviceFormat, PlatformError> {
-        self.ensure_running("audio.query_device_format")?;
-        let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::QueryAudioDeviceFormat { reply })?;
-        let format = response
-            .await
-            .map_err(|_| queue_closed("audio.query_device_format"))??;
-        if format.sample_rate == 0 || format.channels == 0 {
-            return Err(PlatformError::new(
-                PlatformErrorCode::IntegrityMismatch,
-                "audio.query_device_format",
-                "audio provider returned an invalid device format",
-            ));
-        }
-        Ok(format)
-    }
-
     pub async fn create_window(
         &self,
         request: WindowRequest,
@@ -935,9 +943,11 @@ impl PlatformHostClient {
     pub async fn open_audio_output(
         &self,
         request: AudioOutputRequest,
-    ) -> Result<AudioOutputHandle, PlatformError> {
+    ) -> Result<OpenedAudioOutput, PlatformError> {
         if request.sample_rate == 0
             || request.channels == 0
+            || request.chunk_frames == 0
+            || request.chunk_frames > request.max_buffered_frames
             || request.max_buffered_frames == 0
             || request.max_buffered_frames > self.profile.limits().max_audio_frames
         {
@@ -951,125 +961,6 @@ impl PlatformHostClient {
         let (reply, response) = oneshot::channel();
         self.try_send(HostCommand::OpenAudioOutput { request, reply })?;
         response.await.map_err(|_| queue_closed("audio.open"))?
-    }
-
-    pub async fn preferred_audio_output_format(&self) -> Result<AudioOutputFormat, PlatformError> {
-        self.ensure_running("audio.format")?;
-        let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::QueryAudioOutputFormat { reply })?;
-        let format = response.await.map_err(|_| queue_closed("audio.format"))??;
-        if !(8_000..=384_000).contains(&format.sample_rate) || !(1..=8).contains(&format.channels) {
-            return Err(PlatformError::new(
-                PlatformErrorCode::IntegrityMismatch,
-                "audio.format",
-                "audio provider returned an invalid preferred output format",
-            ));
-        }
-        Ok(format)
-    }
-
-    pub async fn submit_audio(
-        &self,
-        output: AudioOutputHandle,
-        packet: AudioPacket,
-    ) -> Result<(), PlatformError> {
-        self.submit_audio_owned(output, packet).await.map(|_| ())
-    }
-
-    /// Submits an owned packet and returns its allocation after the host has
-    /// copied the samples into the native lock-free device queue. Callers on a
-    /// streaming producer can refill the returned `Vec` without steady-state
-    /// allocation or an additional payload clone.
-    pub async fn submit_audio_owned(
-        &self,
-        output: AudioOutputHandle,
-        packet: AudioPacket,
-    ) -> Result<Vec<f32>, PlatformError> {
-        if packet.sequence == 0
-            || packet.channels == 0
-            || packet.samples.is_empty()
-            || !packet
-                .samples
-                .len()
-                .is_multiple_of(usize::from(packet.channels))
-            || packet.frame_count() > self.profile.limits().max_audio_frames
-            || packet.samples.iter().any(|sample| !sample.is_finite())
-        {
-            return Err(PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "audio.submit",
-                "audio packet is invalid or exceeds profile limits",
-            ));
-        }
-        self.ensure_running("audio.submit")?;
-        let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::SubmitAudio {
-            output,
-            packet,
-            reply,
-        })?;
-        response.await.map_err(|_| queue_closed("audio.submit"))?
-    }
-
-    pub async fn drain_audio(
-        &self,
-        output: AudioOutputHandle,
-    ) -> Result<AudioMeter, PlatformError> {
-        self.ensure_running("audio.drain")?;
-        let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::DrainAudio { output, reply })?;
-        let meter = response.await.map_err(|_| queue_closed("audio.drain"))??;
-        if !meter.peak_dbfs.is_finite() || !meter.rms_dbfs.is_finite() {
-            return Err(PlatformError::new(
-                PlatformErrorCode::IntegrityMismatch,
-                "audio.drain",
-                "audio meter contains non-finite values",
-            ));
-        }
-        Ok(meter)
-    }
-
-    pub async fn query_audio(
-        &self,
-        output: AudioOutputHandle,
-    ) -> Result<AudioOutputState, PlatformError> {
-        self.ensure_running("audio.query")?;
-        let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::QueryAudio { output, reply })?;
-        let state = response.await.map_err(|_| queue_closed("audio.query"))??;
-        if state.consumed_samples > state.submitted_samples
-            || !state.meter.peak_dbfs.is_finite()
-            || !state.meter.rms_dbfs.is_finite()
-        {
-            return Err(PlatformError::new(
-                PlatformErrorCode::IntegrityMismatch,
-                "audio.query",
-                "audio output state is internally inconsistent",
-            ));
-        }
-        Ok(state)
-    }
-
-    pub async fn query_audio_output(
-        &self,
-        output: AudioOutputHandle,
-    ) -> Result<AudioOutputStatus, PlatformError> {
-        self.ensure_running("audio.query")?;
-        let (reply, response) = oneshot::channel();
-        self.try_send(HostCommand::QueryAudioOutput { output, reply })?;
-        let status = response.await.map_err(|_| queue_closed("audio.query"))??;
-        if status.played_frames > status.submitted_frames
-            || status.buffered_frames != status.submitted_frames - status.played_frames
-            || !status.meter.peak_dbfs.is_finite()
-            || !status.meter.rms_dbfs.is_finite()
-        {
-            return Err(PlatformError::new(
-                PlatformErrorCode::IntegrityMismatch,
-                "audio.query",
-                "audio output status is internally inconsistent",
-            ));
-        }
-        Ok(status)
     }
 
     pub async fn pause_audio(&self, output: AudioOutputHandle) -> Result<(), PlatformError> {
@@ -1793,50 +1684,7 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
-                        "texture dimensions or content hash are invalid",
-                    ));
-                }
-                astra_media_core::validate_rgba8_payload(
-                    texture.width,
-                    texture.height,
-                    &texture.rgba8,
-                    texture.hash,
-                )
-                .map_err(|_| {
-                    PlatformError::new(
-                        PlatformErrorCode::IntegrityMismatch,
-                        "surface.present_scene",
-                        "texture dimensions or content hash are invalid",
-                    )
-                })?;
-                resource_bytes =
-                    resource_bytes
-                        .checked_add(texture.rgba8.len())
-                        .ok_or_else(|| {
-                            PlatformError::new(
-                                PlatformErrorCode::InvalidState,
-                                "surface.present_scene",
-                                "scene resource byte count overflowed",
-                            )
-                        })?;
-            }
-            SceneCommand::UploadLiveTexture { frame: texture, .. } => {
-                let expected = usize::try_from(texture.width)
-                    .ok()
-                    .and_then(|width| {
-                        usize::try_from(texture.height)
-                            .ok()
-                            .and_then(|height| width.checked_mul(height))
-                    })
-                    .and_then(|pixels| pixels.checked_mul(4));
-                if texture.width == 0
-                    || texture.height == 0
-                    || expected != Some(texture.rgba8.len())
-                {
-                    return Err(PlatformError::new(
-                        PlatformErrorCode::IntegrityMismatch,
-                        "surface.present_scene",
-                        "live texture dimensions or byte length are invalid",
+                        "texture dimensions or byte length are invalid",
                     ));
                 }
                 resource_bytes =
@@ -1850,7 +1698,7 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                             )
                         })?;
             }
-            SceneCommand::UpdateLiveTextureRegion {
+            SceneCommand::UpdateTextureRegion {
                 width,
                 height,
                 rgba8,
@@ -1868,7 +1716,7 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
-                        "live texture region dimensions or byte length are invalid",
+                        "texture region dimensions or byte length are invalid",
                     ));
                 }
                 resource_bytes = resource_bytes.checked_add(rgba8.len()).ok_or_else(|| {
@@ -1896,14 +1744,14 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
-                        "glyph bitmap dimensions or content hash are invalid",
+                        "glyph bitmap dimensions or byte length are invalid",
                     ));
                 }
                 glyph.validate_integrity().map_err(|_| {
                     PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
-                        "glyph bitmap dimensions or content hash are invalid",
+                        "glyph bitmap dimensions or byte length are invalid",
                     )
                 })?;
                 resource_bytes =
@@ -1964,6 +1812,56 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                         PlatformErrorCode::InvalidState,
                         "surface.present_scene",
                         "indexed mesh geometry, material, color, or opacity is invalid",
+                    ));
+                }
+            }
+            SceneCommand::MeshBatch2D {
+                vertices,
+                indices,
+                draws,
+            } => {
+                let vertices_valid = !vertices.is_empty()
+                    && vertices.len() <= 250_000
+                    && vertices.iter().all(|vertex| {
+                        vertex.position.iter().all(|value| value.is_finite())
+                            && vertex.uv.iter().all(|value| value.is_finite())
+                            && vertex.premultiplied_rgba[0] <= vertex.premultiplied_rgba[3]
+                            && vertex.premultiplied_rgba[1] <= vertex.premultiplied_rgba[3]
+                            && vertex.premultiplied_rgba[2] <= vertex.premultiplied_rgba[3]
+                    });
+                let draws_valid = !draws.is_empty()
+                    && indices.len() <= 750_000
+                    && draws.iter().all(|draw| {
+                        let vertex_start = draw.vertex_start as usize;
+                        let vertex_end = vertex_start.saturating_add(draw.vertex_count as usize);
+                        let index_start = draw.index_start as usize;
+                        let index_end = index_start.saturating_add(draw.index_count as usize);
+                        let binding_valid = matches!(
+                            (&draw.material, &draw.texture_id),
+                            (astra_media_core::MeshMaterial2D::Solid, None)
+                                | (
+                                    astra_media_core::MeshMaterial2D::ColorTexture
+                                        | astra_media_core::MeshMaterial2D::GlyphMask,
+                                    Some(_)
+                                )
+                        );
+                        draw.vertex_count > 0
+                            && draw.index_count > 0
+                            && draw.index_count.is_multiple_of(3)
+                            && vertex_end <= vertices.len()
+                            && index_end <= indices.len()
+                            && draw.opacity.is_finite()
+                            && (0.0..=1.0).contains(&draw.opacity)
+                            && binding_valid
+                            && indices[index_start..index_end]
+                                .iter()
+                                .all(|index| (*index as usize) < draw.vertex_count as usize)
+                    });
+                if !vertices_valid || !draws_valid {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "surface.present_scene",
+                        "mesh batch geometry, material, or draw range is invalid",
                     ));
                 }
             }
@@ -2052,22 +1950,9 @@ fn validate_scene_frame(frame: &SceneFrame, max_bytes: usize) -> Result<(), Plat
                     return Err(PlatformError::new(
                         PlatformErrorCode::IntegrityMismatch,
                         "surface.present_scene",
-                        "inline media frame geometry, opacity, or content hash is invalid",
+                        "inline media frame geometry, opacity, or byte length is invalid",
                     ));
                 }
-                astra_media_core::validate_rgba8_payload(
-                    texture.width,
-                    texture.height,
-                    &texture.rgba8,
-                    texture.hash,
-                )
-                .map_err(|_| {
-                    PlatformError::new(
-                        PlatformErrorCode::IntegrityMismatch,
-                        "surface.present_scene",
-                        "inline media frame geometry, opacity, or content hash is invalid",
-                    )
-                })?;
                 resource_bytes =
                     resource_bytes
                         .checked_add(texture.rgba8.len())

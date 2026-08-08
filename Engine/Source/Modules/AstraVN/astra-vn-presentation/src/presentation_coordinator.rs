@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use astra_core::{Diagnostic, Hash128};
+use astra_core::Diagnostic;
 use astra_worker_budget::WorkerBudgetBroker;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -261,10 +261,6 @@ pub struct PresentationCoordinator {
 impl PresentationCoordinator {
     pub fn state(&self) -> &PresentationCoordinatorState {
         &self.state
-    }
-
-    pub fn stable_hash(&self) -> Result<Hash128, VnError> {
-        Ok(Hash128::from_blake3(&postcard::to_allocvec(&self.state)?))
     }
 
     pub fn prepare_batch(

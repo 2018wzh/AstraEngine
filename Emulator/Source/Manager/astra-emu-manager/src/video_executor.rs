@@ -8,10 +8,11 @@ use std::{
     thread,
 };
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
 use astra_emu_fvp::{
-    fvp_movie_compatibility, open_fvp_movie_stream, FvpMovieAudioChunk, FvpMovieCompatibility,
-    FvpMovieFrame, FvpMoviePacket, FvpMovieStreamDecoder,
+    fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
+    FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
 };
 use astra_media::PlayerDecodedAudio;
 use astra_platform::{
@@ -62,7 +63,7 @@ struct ActiveMovie {
 }
 
 enum MovieDecoder {
-    Native(FvpMovieStreamDecoder),
+    Native(FvpMoviePacketStream),
     Platform(Box<PlatformMovieDecoder>),
     #[cfg(test)]
     Buffered(VecDeque<FvpMoviePacket>),
@@ -115,7 +116,11 @@ enum PlatformDecodePoll<T> {
 }
 
 impl PlatformAudioStreamDecoder {
-    fn open(client: PlatformHostClient, codec: &str, bytes: Vec<u8>) -> Result<Self, String> {
+    fn open(
+        client: PlatformHostClient,
+        codec: &str,
+        bytes: OwnedByteBuffer,
+    ) -> Result<Self, String> {
         let session = pollster::block_on(client.open_decode(DecodeKind::Audio))
             .map_err(|error| error.to_string())?;
         let output = pollster::block_on(client.decode(
@@ -184,11 +189,20 @@ impl PlatformAudioStreamDecoder {
     }
 
     fn parse_chunk(output: DecodeOutput) -> Result<FvpMovieAudioChunk, String> {
-        let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
-            return Err("ASTRA_EMU_VIDEO_AUDIO_PLATFORM_OUTPUT_KIND".to_owned());
+        let parsed = match output {
+            DecodeOutput::AudioPcmI16 {
+                sample_rate,
+                channels,
+                samples,
+            } => PlayerDecodedAudio::from_i16(sample_rate, channels, samples, MAX_AUDIO_SAMPLES),
+            DecodeOutput::AudioPcmF32 {
+                sample_rate,
+                channels,
+                samples,
+            } => PlayerDecodedAudio::from_f32(sample_rate, channels, samples, MAX_AUDIO_SAMPLES),
+            _ => return Err("ASTRA_EMU_VIDEO_AUDIO_PLATFORM_OUTPUT_KIND".to_owned()),
         };
-        let parsed = PlayerDecodedAudio::parse(&format, &bytes, bytes.len() / 2)
-            .map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_OUTPUT_INVALID".to_owned())?;
+        let parsed = parsed.map_err(|_| "ASTRA_EMU_VIDEO_AUDIO_OUTPUT_INVALID".to_owned())?;
         Ok(FvpMovieAudioChunk {
             pts_ms: 0,
             sample_rate: parsed.sample_rate,
@@ -295,7 +309,7 @@ fn platform_audio_worker(
                 coded_height: None,
                 keyframe: false,
                 stream_action: DecodeStreamAction::Next,
-                bytes: Vec::new(),
+                bytes: Vec::new().into(),
             },
         )) {
             Ok(output) => output,
@@ -369,7 +383,11 @@ fn send_platform_audio_result(
 }
 
 impl PlatformVideoStreamDecoder {
-    fn open(client: PlatformHostClient, codec: &str, bytes: Vec<u8>) -> Result<Self, String> {
+    fn open(
+        client: PlatformHostClient,
+        codec: &str,
+        bytes: OwnedByteBuffer,
+    ) -> Result<Self, String> {
         let session = pollster::block_on(client.open_decode(DecodeKind::Video))
             .map_err(|error| error.to_string())?;
         let start = pollster::block_on(client.decode(
@@ -395,35 +413,18 @@ impl PlatformVideoStreamDecoder {
                 return Err(error.to_string());
             }
         };
-        let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
+        let DecodeOutput::VideoStreamStart { .. } = output else {
             let _ = pollster::block_on(client.close_decode(session));
             return Err("ASTRA_EMU_VIDEO_PLATFORM_DESCRIPTOR_KIND".into());
-        };
-        if format
-            != format!(
-                "postcard:{}",
-                astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA
-            )
-        {
-            let _ = pollster::block_on(client.close_decode(session));
-            return Err("ASTRA_EMU_VIDEO_PLATFORM_DESCRIPTOR_FORMAT".into());
-        }
-        let cursor = match astra_media::DecodedVideoStreamCursor::decode(&bytes) {
-            Ok(cursor) => cursor,
-            Err(error) => {
-                let _ = pollster::block_on(client.close_decode(session));
-                return Err(error.to_string());
-            }
         };
         let stop = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::sync_channel(VIDEO_RING_FRAMES);
         let worker_stop = Arc::clone(&stop);
         let worker_client = client.clone();
-        let worker_cursor = cursor.clone();
         let worker = match thread::Builder::new()
             .name("astra-rfvp-platform-video".to_string())
             .spawn(move || {
-                platform_video_worker(worker_client, session, worker_cursor, worker_stop, tx);
+                platform_video_worker(worker_client, session, worker_stop, tx);
             }) {
             Ok(worker) => worker,
             Err(_) => {
@@ -498,7 +499,6 @@ impl Drop for PlatformVideoStreamDecoder {
 fn platform_video_worker(
     client: PlatformHostClient,
     session: astra_platform::DecodeSessionHandle,
-    cursor: astra_media::DecodedVideoStreamCursor,
     stop: Arc<AtomicBool>,
     tx: SyncSender<Result<PlatformVideoOutput, String>>,
 ) {
@@ -520,7 +520,7 @@ fn platform_video_worker(
                 coded_height: None,
                 keyframe: false,
                 stream_action: DecodeStreamAction::Next,
-                bytes: Vec::new(),
+                bytes: Vec::new().into(),
             },
         )) {
             Ok(output) => output,
@@ -529,7 +529,7 @@ fn platform_video_worker(
                 return;
             }
         };
-        let parsed = parse_platform_video_output(output, &cursor);
+        let parsed = parse_platform_video_output(output);
         let is_end = matches!(parsed, Ok(PlatformVideoOutput::End));
         send_platform_video_result(&tx, &stop, parsed);
         if is_end {
@@ -560,48 +560,34 @@ fn send_platform_video_result(
     let _ = tx.send(result);
 }
 
-fn parse_platform_video_output(
-    output: DecodeOutput,
-    cursor: &astra_media::DecodedVideoStreamCursor,
-) -> Result<PlatformVideoOutput, String> {
-    let DecodeOutput::CpuBuffer {
-        format,
-        bytes,
-        hash,
-    } = output
-    else {
-        return Err("ASTRA_EMU_VIDEO_PLATFORM_FRAME_KIND".to_owned());
-    };
-    let frame = if format == format!("postcard:{}", astra_media::DECODED_VIDEO_FRAME_SCHEMA) {
-        astra_media::DecodedVideoFrame::decode(&bytes, MAX_DECODED_BYTES as u64)
-            .map_err(|error| error.to_string())?
-    } else if astra_media::is_decoded_video_cpu_buffer_format(&format) {
-        astra_media::DecodedVideoFrame::from_cpu_buffer(
-            &format,
-            bytes,
-            &hash,
-            MAX_DECODED_BYTES as u64,
-        )
-        .map_err(|error| error.to_string())?
-    } else if format
-        == format!(
-            "postcard:{}",
-            astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA
-        )
-    {
-        let end: astra_media::DecodedVideoStreamCursorEnd = postcard::from_bytes(&bytes)
-            .map_err(|error| format!("ASTRA_EMU_VIDEO_PLATFORM_END_DECODE:{error}"))?;
-        end.validate_against(cursor)
-            .map_err(|error| error.to_string())?;
-        return Ok(PlatformVideoOutput::End);
-    } else {
-        return Err("ASTRA_EMU_VIDEO_PLATFORM_FRAME_FORMAT".to_owned());
+fn parse_platform_video_output(output: DecodeOutput) -> Result<PlatformVideoOutput, String> {
+    let frame = match output {
+        DecodeOutput::VideoFrame {
+            sequence,
+            pts_us,
+            duration_us,
+            width,
+            height,
+            bgra8,
+        } => astra_media::DecodedVideoFrame {
+            sequence,
+            pts_us,
+            duration_us,
+            width,
+            height,
+            bgra8,
+        },
+        DecodeOutput::VideoStreamEnd { .. } => return Ok(PlatformVideoOutput::End),
+        _ => return Err("ASTRA_EMU_VIDEO_PLATFORM_FRAME_KIND".to_owned()),
     };
     {
         let mut rgba8 = frame.bgra8;
-        for pixel in rgba8.chunks_exact_mut(4) {
+        for pixel in rgba8.make_mut_vec().chunks_exact_mut(4) {
             pixel.swap(0, 2);
         }
+        let rgba8 = rgba8
+            .try_into_vec()
+            .map_err(|_| "ASTRA_EMU_VIDEO_PLATFORM_FRAME_OWNER_SHARED".to_owned())?;
         Ok(PlatformVideoOutput::Frame(FvpMovieFrame {
             pts_ms: frame.pts_us / 1_000,
             width: frame.width,
@@ -630,10 +616,7 @@ impl MovieDecoder {
 
     fn next_packet(&mut self) -> Result<Option<FvpMoviePacket>, String> {
         match self {
-            Self::Native(decoder) => decoder
-                .next_packet()
-                .map(Some)
-                .map_err(|error| error.to_string()),
+            Self::Native(decoder) => decoder.try_next().map_err(|error| error.to_string()),
             Self::Platform(decoder) => {
                 if decoder.next_video.is_none() && !decoder.video_eof {
                     match decoder
@@ -700,7 +683,7 @@ impl HostVideoExecutor {
     pub(crate) fn execute(
         &mut self,
         command: LegacyVideoCommandV1,
-        resolved_resource: Option<Vec<u8>>,
+        resolved_resource: Option<OwnedByteBuffer>,
         audio: &mut HostAudioExecutor,
     ) -> Result<(), String> {
         command.validate().map_err(|error| error.to_string())?;
@@ -732,7 +715,7 @@ impl HostVideoExecutor {
         mode: LegacyVideoMode,
         stage_width: u32,
         stage_height: u32,
-        bytes: Vec<u8>,
+        bytes: OwnedByteBuffer,
         audio: &mut HostAudioExecutor,
     ) -> Result<(), String> {
         if self.active.is_some() {
@@ -752,12 +735,13 @@ impl HostVideoExecutor {
         let (decoder, duration_ns) = match compatibility {
             FvpMovieCompatibility::Native => (
                 MovieDecoder::Native(
-                    open_fvp_movie_stream(
+                    open_fvp_movie_packet_stream(
                         extension,
-                        Arc::from(bytes),
+                        bytes,
                         MAX_FRAMES,
                         MAX_DECODED_BYTES,
                         MAX_AUDIO_SAMPLES,
+                        VIDEO_RING_FRAMES,
                     )
                     .map_err(|error| error.to_string())?,
                 ),
@@ -1044,31 +1028,15 @@ mod tests {
     fn raw_platform_video_frame_moves_payload_into_rgba_without_postcard() {
         let bgra = vec![1, 2, 3, 255];
         let payload_ptr = bgra.as_ptr();
-        let frame = astra_media::DecodedVideoFrame {
+        let output = DecodeOutput::VideoFrame {
             sequence: 1,
             pts_us: 0,
             duration_us: 10_000,
             width: 1,
             height: 1,
-            content_hash: astra_core::Hash256::from_sha256(&bgra),
-            bgra8: bgra,
+            bgra8: bgra.into(),
         };
-        let cursor = astra_media::DecodedVideoStreamCursor {
-            schema: astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA.into(),
-            source_hash: astra_core::Hash256::from_sha256(b"source"),
-            width: 1,
-            height: 1,
-            max_frames: 4,
-            max_decoded_byte_count: 64,
-        };
-        let output = DecodeOutput::CpuBuffer {
-            format: frame.cpu_buffer_format(),
-            hash: frame.content_hash.to_string(),
-            bytes: frame.bgra8,
-        };
-        let PlatformVideoOutput::Frame(frame) =
-            parse_platform_video_output(output, &cursor).unwrap()
-        else {
+        let PlatformVideoOutput::Frame(frame) = parse_platform_video_output(output).unwrap() else {
             panic!("raw platform frame was not returned");
         };
         assert_eq!(frame.rgba8.as_ptr(), payload_ptr);

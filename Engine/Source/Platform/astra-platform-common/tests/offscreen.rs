@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use astra_core::Hash256;
 use astra_media_core::{
     FilterGraph, FilterNode, FilterParam, FilterTarget, SceneCommand, TextureFrame,
 };
@@ -107,7 +106,6 @@ async fn integrated_gpu_timestamp_profile_has_zero_stable_atlas_upload() {
             frame: TextureFrame {
                 width: 8,
                 height: 8,
-                hash: Hash256::from_sha256(&pixels),
                 rgba8: pixels.into(),
             },
         },

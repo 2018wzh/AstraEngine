@@ -1,11 +1,8 @@
-use astra_core::{Hash128, Hash256};
+use astra_core::Hash128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    AwaitToken, PresentationCommand, RuntimeEvent, RuntimeSnapshot, SerializedEffectEnvelope,
-    TickIngress, TickIntegrityMode, TickMode, TickReport, TickRequest,
-};
+use crate::{RuntimeSnapshot, TickIntegrityMode, TickMode, TickReport, TickRequest};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeReplayTranscript {
@@ -40,6 +37,7 @@ impl RuntimeReplayRecorder {
         &mut self,
         mut request: TickRequest,
         report: &TickReport,
+        checkpoint: ReplayHashCheckpoint,
     ) -> Result<(), crate::RuntimeError> {
         if report.integrity_mode != TickIntegrityMode::Evidence {
             return Err(crate::RuntimeError::diagnostic(
@@ -58,14 +56,9 @@ impl RuntimeReplayRecorder {
             ));
         }
         request.mode = TickMode::Replay;
-        for ingress in &mut request.ingress {
-            if let TickIngress::LiveProviderOutput(output) = &ingress.payload {
-                ingress.payload = TickIngress::RecordedProviderOutput(output.clone());
-            }
-        }
         self.ticks.push(ReplayTick {
             request,
-            expected: ReplayHashCheckpoint::from(report),
+            expected: checkpoint,
         });
         Ok(())
     }
@@ -85,38 +78,10 @@ pub struct ReplayTick {
     pub expected: ReplayHashCheckpoint,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ProviderReplayOutput {
-    pub provider_id: String,
-    pub session_id: String,
-    pub schema: String,
-    pub payload_hash: Hash256,
-    pub payload: Vec<u8>,
-    #[serde(default)]
-    pub events: Vec<RuntimeEvent>,
-    #[serde(default)]
-    pub presentation: Vec<PresentationCommand>,
-    #[serde(default)]
-    pub awaits: Vec<AwaitToken>,
-    #[serde(default)]
-    pub effects: Vec<SerializedEffectEnvelope>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReplayHashCheckpoint {
     pub step: u64,
     pub state_hash: Hash128,
     pub event_hash: Hash128,
     pub presentation_hash: Hash128,
-}
-
-impl From<&TickReport> for ReplayHashCheckpoint {
-    fn from(report: &TickReport) -> Self {
-        Self {
-            step: report.step,
-            state_hash: report.state_hash,
-            event_hash: report.event_hash,
-            presentation_hash: report.presentation_hash,
-        }
-    }
 }

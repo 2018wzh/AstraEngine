@@ -8,8 +8,8 @@ use std::{
 
 use crate::{CancellationToken, GrantedSourceEntry, GrantedSourceReader, SourceScanError};
 use astra_byte_source::{
-    AccessedResourceLedger, ByteRange, ByteSourceStat, RangeReadResult, SourceRevision,
-    DEFAULT_MAX_RANGE_BYTES,
+    AccessedResourceLedger, ByteRange, ByteSourceStat, OwnedByteBuffer, RangeReadResult,
+    SourceRevision, DEFAULT_MAX_RANGE_BYTES,
 };
 use astra_core::Hash256;
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
@@ -308,7 +308,7 @@ impl DesktopVfsRegistry {
             );
             manifest.update(id);
             manifest.update(stat.len.to_le_bytes());
-            manifest.update(stat.revision.0.as_bytes());
+            manifest.update(stat.revision.0.to_le_bytes());
             manifest.update(content_hash.as_bytes());
         }
         Ok(VfsAuditSummary {
@@ -379,7 +379,7 @@ impl LegacyVfsReader for DesktopVfsRegistry {
         if let Some(bytes) = mount.overlays.get(&uri.to_ascii_lowercase()) {
             return Ok(ByteSourceStat {
                 len: bytes.len() as u64,
-                revision: SourceRevision(Hash256::from_sha256(bytes)),
+                revision: SourceRevision(1),
             });
         }
         let root = mount.root.clone();
@@ -471,7 +471,14 @@ impl LegacyVfsReader for DesktopVfsRegistry {
             let end = usize::try_from(end).map_err(|_| {
                 LegacyProviderError::invalid("ASTRA_EMU_VFS_RANGE_BOUNDS", "VFS range is invalid")
             })?;
-            let bytes = overlay[start..end].to_vec();
+            let bytes = OwnedByteBuffer::from_owner(
+                OverlayRange {
+                    bytes: Arc::clone(overlay),
+                    start,
+                    end,
+                },
+                OverlayRange::as_slice,
+            );
             let result = RangeReadResult {
                 range,
                 revision: expected_revision,
@@ -520,7 +527,7 @@ impl LegacyVfsReader for DesktopVfsRegistry {
         let result = RangeReadResult {
             range,
             revision: stat.revision,
-            bytes,
+            bytes: bytes.into(),
         };
         self.record_access(mount_set_id, &uri.to_ascii_lowercase(), &result)?;
         Ok(result)
@@ -594,7 +601,7 @@ impl LegacyVfsReader for DesktopVfsRegistry {
                     uri.clone(),
                     ByteSourceStat {
                         len: bytes.len() as u64,
-                        revision: SourceRevision(Hash256::from_sha256(bytes)),
+                        revision: SourceRevision(1),
                     },
                 );
             }
@@ -617,10 +624,25 @@ fn revision_from_metadata(metadata: &fs::Metadata) -> Result<SourceRevision, std
         .modified()?
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    let mut material = Vec::with_capacity(24);
-    material.extend_from_slice(&metadata.len().to_le_bytes());
-    material.extend_from_slice(&modified.as_nanos().to_le_bytes());
-    Ok(SourceRevision(Hash256::from_sha256(&material)))
+    let modified_ns = u64::try_from(modified.as_nanos()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "source modification timestamp exceeds u64 nanoseconds",
+        )
+    })?;
+    Ok(SourceRevision(modified_ns))
+}
+
+struct OverlayRange {
+    bytes: Arc<[u8]>,
+    start: usize,
+    end: usize,
+}
+
+impl OverlayRange {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[self.start..self.end]
+    }
 }
 
 pub struct DesktopGrantedSource {
@@ -799,7 +821,7 @@ mod tests {
                 512 * 1024 * 1024,
             )
             .unwrap();
-        assert_eq!(result.bytes, b"metadata");
+        assert_eq!(result.bytes.as_slice(), b"metadata");
     }
 
     #[test]
@@ -814,8 +836,9 @@ mod tests {
         assert_eq!(
             registry
                 .read_file("mount.test", "script.bin", 1024)
-                .unwrap(),
-            b"before"
+                .unwrap()
+                .as_slice(),
+            b"before".as_slice()
         );
         fs::write(path, b"mutate").unwrap();
         let error = registry
@@ -843,8 +866,9 @@ mod tests {
         assert_eq!(
             registry
                 .read_file("mount.test", "script.bin", 1024)
-                .unwrap(),
-            b"patched"
+                .unwrap()
+                .as_slice(),
+            b"patched".as_slice()
         );
         registry.unbind("mount.test");
         assert!(registry

@@ -1,4 +1,3 @@
-use astra_core::Hash256;
 use astra_media_core::{
     BlendMode, CpuRendererProvider, DrawCommand, GlyphBitmap, GlyphBitmapFormat, MeshMaterial2D,
     MeshVertex2D, RectI, RenderTargetFormat, Renderer2DProvider, RendererCreateRequest,
@@ -51,7 +50,6 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
     let texture = TextureFrame {
         width: 2,
         height: 1,
-        hash: Hash256::from_sha256(&texture_bytes),
         rgba8: texture_bytes.into(),
     };
     let commands = vec![
@@ -76,7 +74,6 @@ fn cpu_reference_compositor_executes_texture_glyph_clip_transform_and_blend() {
                 height: 2,
                 format: GlyphBitmapFormat::Alpha8,
                 pixels: vec![255, 0, 0, 255].into(),
-                hash: Hash256::from_sha256(&[255, 0, 0, 255]),
             },
             x: 0,
             y: 2,
@@ -111,7 +108,6 @@ fn scene_resources_are_uploaded_reused_cropped_and_released_explicitly() {
     let frame = TextureFrame {
         width: 2,
         height: 1,
-        hash: Hash256::from_sha256(&rgba8),
         rgba8: rgba8.into(),
     };
     let rendered = renderer
@@ -159,20 +155,19 @@ fn retained_texture_region_updates_are_in_place_and_transactional() {
             profile: "texture-region".into(),
         })
         .unwrap();
-    let initial: std::sync::Arc<[u8]> = vec![255, 0, 0, 255, 0, 255, 0, 255].into();
+    let initial = vec![255, 0, 0, 255, 0, 255, 0, 255];
     renderer
         .capture_frame(&[DrawCommand::UploadTexture {
             resource_id: "atlas".into(),
             frame: TextureFrame {
                 width: 2,
                 height: 1,
-                hash: Hash256::from_sha256(&initial),
-                rgba8: initial,
+                rgba8: initial.into(),
             },
         }])
         .unwrap();
 
-    let invalid: std::sync::Arc<[u8]> = vec![1, 2, 3, 4].into();
+    let invalid = vec![1, 2, 3, 4];
     let error = renderer
         .capture_frame(&[
             DrawCommand::UpdateTextureRegion {
@@ -181,15 +176,14 @@ fn retained_texture_region_updates_are_in_place_and_transactional() {
                 y: 0,
                 width: 1,
                 height: 1,
-                hash: Hash256::from_sha256(&invalid),
-                rgba8: invalid,
+                rgba8: invalid.into(),
             },
             DrawCommand::PopClip,
         ])
         .unwrap_err();
     assert!(error.to_string().contains("ASTRA_MEDIA_CLIP_STACK"));
 
-    let blue: std::sync::Arc<[u8]> = vec![0, 0, 255, 255].into();
+    let blue = vec![0, 0, 255, 255];
     let rendered = renderer
         .capture_frame(&[
             DrawCommand::UpdateTextureRegion {
@@ -198,8 +192,7 @@ fn retained_texture_region_updates_are_in_place_and_transactional() {
                 y: 0,
                 width: 1,
                 height: 1,
-                hash: Hash256::from_sha256(&blue),
-                rgba8: blue,
+                rgba8: blue.into(),
             },
             DrawCommand::Sprite {
                 id: "retained".into(),
@@ -215,7 +208,7 @@ fn retained_texture_region_updates_are_in_place_and_transactional() {
 }
 
 #[astra_headless_test::test]
-fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
+fn compositor_blocks_invalid_texture_dimensions_and_unbalanced_state() {
     let mut renderer = CpuRendererProvider
         .create(RendererCreateRequest {
             width: 2,
@@ -227,8 +220,7 @@ fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
     let corrupt = TextureFrame {
         width: 1,
         height: 1,
-        rgba8: vec![1, 2, 3, 4].into(),
-        hash: Hash256::from_sha256(b"wrong"),
+        rgba8: vec![1, 2, 3].into(),
     };
     assert!(renderer
         .capture_frame(&[DrawCommand::Texture {
@@ -240,7 +232,7 @@ fn compositor_blocks_corrupt_texture_and_unbalanced_state() {
         }])
         .unwrap_err()
         .to_string()
-        .contains("ASTRA_MEDIA_TEXTURE_HASH"));
+        .contains("ASTRA_MEDIA_TEXTURE_SIZE"));
     assert!(renderer
         .capture_frame(&[DrawCommand::PopClip])
         .unwrap_err()
@@ -263,7 +255,6 @@ fn resource_updates_are_transactional_and_color_glyphs_preserve_rgba() {
         width: 1,
         height: 1,
         format: GlyphBitmapFormat::Rgba8,
-        hash: Hash256::from_sha256(&color),
         pixels: color.into(),
     };
     let failure = renderer

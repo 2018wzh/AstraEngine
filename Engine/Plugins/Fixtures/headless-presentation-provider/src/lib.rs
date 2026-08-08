@@ -3,16 +3,10 @@ use abi_stable::{
     std_types::{RString, RVec},
 };
 use astra_plugin_abi::{
-    AstraPluginModule, AstraPluginModuleRef, FfiActionRegistration, FfiPluginRegistration,
-    FfiPluginShutdown, FfiProviderRegistration, ACTION_PLUGIN_ABI_VERSION,
+    AstraPluginModule, AstraPluginModuleRef, FfiPluginRegistration, FfiPluginShutdown,
+    FfiProviderRegistration,
 };
-use astra_runtime::{
-    ActionAccess, ActionCallRequest, ActionCallResult, ActionDescriptor, ActionEffect,
-    ActionExecutionClass, ActionResourceKey, ActionTrace, BlackboardValue, EventPayload,
-    EventSource, PresentationCommand,
-};
-use std::collections::BTreeMap;
-use tracing::{debug, warn};
+use tracing::debug;
 
 extern "C" fn descriptor_yaml() -> RString {
     r#"
@@ -20,86 +14,20 @@ id: astra.fixture.headless_presentation
 version: 0.1.0
 engine_version: 0.1.0
 rustc_fingerprint: rustc-stable
-feature_fingerprint: runtime-envelope-v3
+feature_fingerprint: runtime-typed-v3
 abi_fingerprint: astra-plugin-abi-v3
 abi_style: abi_stable_rust
 capabilities:
   - presentation.headless
-  - action.fixture
 permissions:
   - runtime.presentation
-  - runtime.action
 packaged: true
 "#
     .into()
 }
 
-extern "C" fn run_fixture_action(request: RVec<u8>) -> RVec<u8> {
-    let request: Vec<u8> = request.into_iter().collect();
-    let result = match postcard::from_bytes::<ActionCallRequest>(&request) {
-        Ok(request) => {
-            debug!(
-                step = request.step,
-                action_id = %request.action_id,
-                "fixture.action.run"
-            );
-            let mut payload = BTreeMap::new();
-            payload.insert("fixture.action".to_string(), BlackboardValue::from("ran"));
-            ActionCallResult::Ok {
-                trace: ActionTrace {
-                    action_id: request.action_id,
-                    payload: payload.clone(),
-                },
-                effects: vec![
-                    ActionEffect::SetBlackboard {
-                        key: "fixture.action".to_string(),
-                        value: BlackboardValue::from("ran"),
-                    },
-                    ActionEffect::EmitEvent {
-                        source: EventSource::StateMachine,
-                        payload: EventPayload::new("fixture.action.done"),
-                    },
-                    ActionEffect::Presentation {
-                        command: PresentationCommand::Marker {
-                            name: "ffi_action".to_string(),
-                        },
-                    },
-                ],
-            }
-        }
-        Err(err) => {
-            warn!(
-                diagnostic_code = "ASTRA_FIXTURE_ACTION_DECODE",
-                "fixture.action.decode_failed"
-            );
-            ActionCallResult::Err {
-                code: "ASTRA_FIXTURE_ACTION_DECODE".to_string(),
-                message: err.to_string(),
-            }
-        }
-    };
-    let encoded = postcard::to_allocvec(&result).expect("fixture action result must encode");
-    RVec::from(encoded)
-}
-
 extern "C" fn register() -> FfiPluginRegistration {
     debug!("fixture.register");
-    let action_descriptor = ActionDescriptor::declared(
-        "astra.fixture.action.set_flag",
-        "astra.fixture.action.set_flag.request.v1",
-        "astra.action_trace.v1",
-        ActionExecutionClass::ParallelTransactional,
-        ActionAccess::new(
-            [],
-            [
-                ActionResourceKey::Blackboard,
-                ActionResourceKey::EventQueue,
-                ActionResourceKey::Presentation,
-                ActionResourceKey::StableIdSource,
-            ],
-        ),
-        1,
-    );
     FfiPluginRegistration {
         providers: RVec::from(vec![FfiProviderRegistration {
             slot: "presentation".into(),
@@ -109,15 +37,6 @@ extern "C" fn register() -> FfiPluginRegistration {
             packaged: true,
         }]),
         runtime_providers: RVec::new(),
-        actions: RVec::from(vec![FfiActionRegistration {
-            abi_version: ACTION_PLUGIN_ABI_VERSION,
-            provider_id: "astra.fixture.action_provider".into(),
-            action_id: "astra.fixture.action.set_flag".into(),
-            input_schema: "astra.fixture.action.set_flag.request.v1".into(),
-            output_schema: "astra.action_trace.v1".into(),
-            descriptor_json: RVec::from(serde_json::to_vec(&action_descriptor).unwrap()),
-            invoke: run_fixture_action,
-        }]),
         callbacks: 0,
     }
 }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{PlatformError, PlatformHostProfile, PlatformId, SdkStatus};
 
-pub const PLATFORM_CAPABILITY_REPORT_SCHEMA: &str = "astra.platform_capability_report.v2";
+pub const PLATFORM_CAPABILITY_REPORT_SCHEMA: &str = "astra.platform_capability_report.v3";
 pub const PLATFORM_HOST_CONFORMANCE_REPORT_SCHEMA: &str =
     "astra.platform_host_conformance_report.v1";
 
@@ -63,7 +63,8 @@ pub struct PlatformCapabilityReport {
     pub sdk_status: SdkStatus,
     pub renderer: CapabilitySelection,
     pub decode: CapabilitySelection,
-    pub audio: CapabilitySelection,
+    pub audio_mixer: CapabilitySelection,
+    pub audio_output: CapabilitySelection,
     pub save: CapabilitySelection,
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
@@ -89,7 +90,8 @@ impl PlatformCapabilityReport {
             sdk_status: SdkStatus::Present,
             renderer: CapabilitySelection::resolve(&profile.renderer.providers, &available),
             decode: CapabilitySelection::resolve(&profile.decode.providers, &available),
-            audio: CapabilitySelection::resolve(&profile.audio.providers, &available),
+            audio_mixer: CapabilitySelection::resolve(&profile.audio_mixer.providers, &available),
+            audio_output: CapabilitySelection::resolve(&profile.audio_output.providers, &available),
             save: CapabilitySelection::resolve(&profile.save.providers, &available),
             diagnostics: Vec::new(),
         })
@@ -117,7 +119,8 @@ impl PlatformCapabilityReport {
             sdk_status,
             renderer: empty(),
             decode: empty(),
-            audio: empty(),
+            audio_mixer: empty(),
+            audio_output: empty(),
             save: empty(),
             diagnostics: vec![Diagnostic::blocking(
                 "ASTRA_PLATFORM_NOT_IMPLEMENTED",
@@ -197,7 +200,7 @@ pub fn validate_capability_report(
     if report.schema != PLATFORM_CAPABILITY_REPORT_SCHEMA {
         diagnostics.push(Diagnostic::blocking(
             "ASTRA_PLATFORM_SCHEMA",
-            "platform capability report schema must be v2",
+            "platform capability report schema must be v3",
         ));
     }
     if report.sdk_status != SdkStatus::Present {
@@ -217,7 +220,8 @@ pub fn validate_capability_report(
     for (domain, selection) in [
         ("renderer", &report.renderer),
         ("decode", &report.decode),
-        ("audio", &report.audio),
+        ("audio_mixer", &report.audio_mixer),
+        ("audio_output", &report.audio_output),
         ("save", &report.save),
     ] {
         let valid = selection.selected.as_ref().is_some_and(|selected| {

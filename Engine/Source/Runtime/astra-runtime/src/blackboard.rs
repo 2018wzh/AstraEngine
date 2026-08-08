@@ -1,6 +1,6 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::collections::BTreeMap;
 
-use astra_core::{Hash128, StableId};
+use astra_core::StableId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -47,9 +47,6 @@ pub struct Blackboard {
     #[serde(skip)]
     #[schemars(skip)]
     transaction: Option<BTreeMap<String, Option<BlackboardValue>>>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    fingerprint: Mutex<Option<Hash128>>,
 }
 
 impl Clone for Blackboard {
@@ -57,12 +54,6 @@ impl Clone for Blackboard {
         Self {
             values: self.values.clone(),
             transaction: self.transaction.clone(),
-            fingerprint: Mutex::new(
-                *self
-                    .fingerprint
-                    .lock()
-                    .expect("blackboard fingerprint cache lock must not be poisoned"),
-            ),
         }
     }
 }
@@ -102,10 +93,6 @@ impl Blackboard {
                 }
             }
         }
-        *self
-            .fingerprint
-            .get_mut()
-            .expect("blackboard fingerprint cache lock must not be poisoned") = None;
     }
 
     fn record_before(&mut self, key: &str) {
@@ -125,10 +112,6 @@ impl Blackboard {
     pub fn set(&mut self, key: impl Into<String>, value: BlackboardValue) {
         let key = key.into();
         self.record_before(&key);
-        *self
-            .fingerprint
-            .get_mut()
-            .expect("blackboard fingerprint cache lock must not be poisoned") = None;
         self.values.insert(key, value);
     }
 
@@ -145,7 +128,6 @@ pub(crate) trait BlackboardAccess {
     fn set(&mut self, key: String, value: BlackboardValue);
     fn get(&self, key: &str) -> Option<&BlackboardValue>;
     fn values(&self) -> BTreeMap<String, BlackboardValue>;
-    fn deterministic_fingerprint(&self) -> Hash128;
 }
 
 impl BlackboardAccess for Blackboard {
@@ -159,25 +141,6 @@ impl BlackboardAccess for Blackboard {
 
     fn values(&self) -> BTreeMap<String, BlackboardValue> {
         self.values.clone()
-    }
-
-    fn deterministic_fingerprint(&self) -> Hash128 {
-        if let Some(fingerprint) = *self
-            .fingerprint
-            .lock()
-            .expect("blackboard fingerprint cache lock must not be poisoned")
-        {
-            return fingerprint;
-        }
-        let fingerprint = Hash128::from_blake3(
-            &postcard::to_allocvec(&self.values)
-                .expect("blackboard must serialize for deterministic fingerprinting"),
-        );
-        *self
-            .fingerprint
-            .lock()
-            .expect("blackboard fingerprint cache lock must not be poisoned") = Some(fingerprint);
-        fingerprint
     }
 }
 
@@ -226,15 +189,5 @@ impl BlackboardAccess for BlackboardOverlay<'_> {
         let mut values = self.base.values.clone();
         values.extend(self.updates.clone());
         values
-    }
-
-    fn deterministic_fingerprint(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(&(
-                BlackboardAccess::deterministic_fingerprint(self.base),
-                &self.updates,
-            ))
-            .expect("blackboard overlay must serialize for deterministic fingerprinting"),
-        )
     }
 }

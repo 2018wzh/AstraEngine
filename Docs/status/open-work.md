@@ -18,7 +18,7 @@
 - `.astra` frontend 已统一到 `compile_astra_project`/`CompiledVnProject` 与独立 UI Typed AST；旧公开 compile API、旧 package root 和 target v1 reader 已删除，旧项目必须手工修订并重新 Cook。
 - AstraVN presentation model、standard command library 和 system UI profile 的剩余 migration/localization/replay UI 深化。
 - YAML 产品 scenario runner 已删除。平台无关 Runtime/Player/full-flow 测试统一使用 `HeadlessTestContext` 与序列化物理输入；旧 `--headless` 只返回稳定迁移 diagnostic。
-- `astra-media` 已实现 headless capture、cosmic-text layout contract、AudioGraph meter、FilterGraph validator、DecodeProvider policy、public media fixture integrity、Windows WMF MP3/MP4 decode 和 wasm-only WebCodecs token provider。wgpu/FFmpeg 仍通过 explicit feature gate 接入。
+- `astra-media` 已实现 headless capture、cosmic-text layout contract、FilterGraph validator、唯一 DecodeProvider binding、public media fixture integrity、Windows WMF MP3/MP4 decode 和 wasm-only WebCodecs token provider；音频统一由 `astra-audio-kira` 与 typed `AudioOutputLane` 执行。wgpu/FFmpeg 仍通过 explicit feature gate 接入。
 - Linux/macOS desktop host completion 已移到 Stage 6：补 windowed smoke、platform decode、audio、save store、IME/gamepad 和 release gate evidence。
 - Qt/QML Editor shell、PIE bridge、Plugin Manager 和 extension diagnostics。
 

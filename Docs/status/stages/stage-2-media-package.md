@@ -173,26 +173,26 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Linked Test IDs:** `T-S2-MEDIA-02`
 
-## S2-MEDIA-03 AudioGraph 与 platform output
+## S2-MEDIA-03 Kira AudioService 与 platform output
 
 **ID:** `S2-MEDIA-03`
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** AudioGraph 覆盖 bus、voice、BGM、SE、fade、loop、latency 和 platform output lifecycle。
+**Goal:** Kira 0.12.2 AudioService 覆盖 bus、voice、BGM、SE、fade、loop、seek、completion 和 platform output lifecycle；Astra decoder 与平台 endpoint 分别保持独立 owner。
 
 **Depends On:** `S1-RUNTIME-03`
 
-**Target Paths:** `Engine/Source/Runtime/astra-media/src/audio_graph.rs`、`Engine/Source/Runtime/astra-media/tests/audio_graph.rs`
+**Target Paths:** `Engine/Source/Runtime/astra-audio-kira/`、`Engine/Source/Platform/astra-platform-common/src/audio.rs`
 
 **Steps:**
 
-1. 定义 `astra.audio_graph.v2`、AudioCommand、bus、显式 voice id、状态、position、fade 和 fence。
-2. 分离 deterministic graph state 与 platform callback meter；graph hash 不得作为 audio meter。
-3. 把 audio wait/fade/loop 完成事件接入 AwaitToken。
-4. 编写 bus mix、fade completion、loop marker 和 headless meter hash 测试。
+1. 定义 typed `AudioServiceCommand`、`AudioTimelineStateV1`、bus、显式 voice id、sample cursor、fade、loop 和 fence。
+2. 使用 Kira 自定义 Backend/Renderer，把预分配 chunk 直接移动到 `AudioOutputLane`；callback 只消费 chunk+offset。
+3. 由设备消费 sample 数形成 completion，并在下一 fixed tick 回注 typed event。
+4. 覆盖 owned PCM pointer、drop-once、fade/loop/seek、format cache、device loss、Headless WAV 与 endpoint telemetry。
 
-**Current Evidence:** `cargo test -p astra-media --test audio_graph` 覆盖 play/pause/resume/seek/stop、loop、fade completion/conflict、invalid command rollback、fixed delta 和 deterministic continuation；`cargo test -p astra-media --test playback` 覆盖 audio-master A/V clock、timestamped bounded queue、play/pause/seek/EOS/cancel、显式 drop policy、invalid drift rollback 和 snapshot continuation；`cargo test -p astra-platform-windows --test host_services --test media_session --features ffmpeg-vcpkg,platform-test-driver` 覆盖 bounded WASAPI queue、callback-level underflow、非静音 meter、真实 decoder timestamp packet→scheduler→WGPU/WASAPI、device-loss recovery 和失败清理。`cargo test -p astra-core --test performance` 覆盖 budget/sample/identity/report 的 tamper 与 blocking。DSP/ducking、GPU FilterGraph、正式 reference threshold pass 和 Player/package same-run 仍未闭合。
+**Current Evidence:** 旧 `AudioGraph`/`ProductionAudioMixer` 与 Windows 私有 media session 已删除，当前主路径为 `astra-audio-kira` + typed `AudioOutputLane`。本轮架构收束后的测试与同 revision 性能证据尚未执行，因此保持 `IN_PROGRESS`。
 
 **Linked Test IDs:** `T-S2-MEDIA-03`
 
@@ -225,7 +225,7 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** 建立 image/audio/video DecodeProvider slot，平台解码优先，桌面 FFmpeg fallback 通过 policy 开关。
+**Goal:** 建立 image/audio/video DecodeProvider slot，由 profile 显式绑定唯一 provider；桌面 FFmpeg 只能作为独立 provider 选择，不能作为失败 fallback。
 
 **Depends On:** `S1-PLUGIN-01`
 
@@ -234,11 +234,11 @@ Stage 2 把 Stage 1 的 Runtime 输出接到资产、Cook、Package、Media prov
 **Steps:**
 
 1. 定义 DecodeRequest、DecodeResult、MediaSurfaceToken 和 provider capability。
-2. 实现显式 `DecodeBindingContext`：provider/target/profile 精确匹配，fallback/reference provider 只在 binding 明确允许时启用；注册顺序不参与选择。
+2. 实现显式 `DecodeBindingContext`：provider/target/profile 精确匹配；reference provider 只用于 non-packaged 测试，注册顺序不参与选择。
 3. public API 只返回 CPU buffer 或 MediaSurfaceToken，不暴露 native handle。
-4. 编写 unsupported codec、fallback disabled 和 fallback selected 测试。
+4. 编写 unsupported codec、缺失 provider、重复 binding 和 reference provider 越界测试。
 
-**Current Evidence:** `cargo test -p astra-media --features ffmpeg-vcpkg` 证明 exact binding、output identity/hash、Symphonia、WMF one-shot、FFmpeg native probe、真实 timestamped packet、目标设备 resample、PCM/BGRA hash、live byte budget、单 packet backpressure、EOS drain、seek generation、取消和 scheduler payload ownership；CC0 fixture manifest 固定原始与派生 A/V fixture 的 provenance、sha256、byte size 和 metadata。`cargo test -p astra-platform-windows --test host_services --test media_session --features ffmpeg-vcpkg,platform-test-driver` 从显式 `[wmf, ffmpeg]` profile 创建真实 window/surface/WASAPI output，执行 FFmpeg→audio-master scheduler→WASAPI/wgpu，同一 session 断言视觉 capture、非静音 audio meter、pause/resume、seek、late-frame policy、可注入 device-loss recovery、shutdown release 和 measured performance report。`cargo test -p astra-release --test release_report release_gate_accepts_only_measured_performance_from_the_same_clean_product_run` 证明 budget/report/capability/conformance/Player/package identity 必须连续且 dirty run 会阻断。普通 debug/reference 环境若不满足阈值会诚实输出 blocked；正式 reference pass 和真实 Player 产出的 report 尚不存在，因此完整 release fallback 和 Windows Player E3 保持开放。
+**Current Evidence:** 默认 feature 下的 `cargo test -p astra-media --test decode_provider` 已覆盖 exact binding、Symphonia、WMF typed output、真实 timestamped packet、owned PCM/BGRA、live byte budget、backpressure、EOS、seek、取消和 scheduler ownership；`ffmpeg-vcpkg` 的 feature compile/runtime 仍需在具备本机 FFmpeg 的环境复核。Platform profile 已拒绝多 provider decode fallback。正式 reference pass、真实 Player report 与 Windows E3 尚不存在，因此本项保持开放。
 
 **Linked Test IDs:** `T-S2-MEDIA-05`
 

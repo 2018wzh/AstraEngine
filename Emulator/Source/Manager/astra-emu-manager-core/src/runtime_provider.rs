@@ -11,9 +11,9 @@ use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
     LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction,
     LegacyDiagnostic, LegacyEphemeralText, LegacyEvent, LegacyInputEdge, LegacyLiveOutput,
-    LegacyOpenRequest, LegacyPayload, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
+    LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
     LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode, LegacyResourceRead,
-    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
+    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
     LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacySnapshotEnvelope,
     LegacyStepBudget, LegacyStepInput, LegacyTextPresentationLeaseV1, LegacyTextureFormat,
     LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
@@ -45,16 +45,6 @@ use astra_runtime::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-fn move_live_pixels(payload: LegacyPayload) -> Result<Vec<u8>, String> {
-    match payload {
-        LegacyPayload::Native(bytes) => Ok(bytes),
-        LegacyPayload::Foreign(_) => Err(
-            "ASTRA_EMU_LIVE_FOREIGN_PIXEL_OWNER: live scene would require an application copy"
-                .into(),
-        ),
-    }
-}
 
 fn live_texture_format(format: LegacyTextureFormat) -> RuntimeLiveTextureFormat {
     match format {
@@ -94,7 +84,7 @@ fn move_live_scene(
                 width,
                 height,
                 format: live_texture_format(format),
-                pixels: move_live_pixels(pixels)?,
+                pixels,
             }),
             LegacySceneResourceOperationV7::UpdateTexture {
                 texture_id,
@@ -113,7 +103,7 @@ fn move_live_scene(
                 width,
                 height,
                 format: live_texture_format(format),
-                pixels: move_live_pixels(pixels)?,
+                pixels,
             }),
             LegacySceneResourceOperationV7::DestroyTexture {
                 texture_id,
@@ -436,16 +426,6 @@ fn move_live_video(
     Ok(RuntimeLiveVideoCommand { sequence, command })
 }
 
-fn move_live_payload(payload: LegacyPayload) -> Result<Vec<u8>, String> {
-    match payload {
-        LegacyPayload::Native(bytes) => Ok(bytes),
-        LegacyPayload::Foreign(_) => Err(
-            "ASTRA_EMU_LIVE_FOREIGN_PAYLOAD_OWNER: live event payload requires an application copy"
-                .into(),
-        ),
-    }
-}
-
 fn move_live_wait(sequence: u64, wait: LegacyWaitRequest) -> RuntimeLiveWait {
     let (token_id, kind) = match wait {
         LegacyWaitRequest::Frame { token_id, frames } => {
@@ -471,17 +451,6 @@ fn move_live_wait(sequence: u64, wait: LegacyWaitRequest) -> RuntimeLiveWait {
         } => (
             token_id,
             RuntimeLiveWaitKind::ProviderCompletion { request_id },
-        ),
-        LegacyWaitRequest::FamilyOpaque {
-            token_id,
-            wait_kind,
-            payload_len,
-        } => (
-            token_id,
-            RuntimeLiveWaitKind::FamilyOpaque {
-                wait_kind,
-                payload_len,
-            },
         ),
     };
     RuntimeLiveWait {
@@ -545,15 +514,12 @@ fn move_control_output(
     wait_sequence_start: u64,
 ) -> Result<RuntimeLiveOutput, String> {
     let mut output = RuntimeLiveOutput::default();
-    output
-        .events
-        .reserve(control.events.len() + control.scheduled_events.len());
+    output.events.reserve(control.events.len());
     for event in control.events {
         output.events.push(RuntimeLiveEvent {
             sequence: event.sequence,
             event: event.event,
-            payload: move_live_payload(event.payload)?,
-            due_tick: None,
+            value: event.value,
         });
     }
     output.blackboard.reserve(control.blackboard.len());
@@ -561,15 +527,7 @@ fn move_control_output(
         output.blackboard.push(RuntimeLiveBlackboardMutation {
             sequence: mutation.sequence,
             key: mutation.key,
-            value: move_live_payload(mutation.value)?,
-        });
-    }
-    for event in control.scheduled_events {
-        output.events.push(RuntimeLiveEvent {
-            sequence: event.sequence,
-            event: event.event,
-            payload: move_live_payload(event.payload)?,
-            due_tick: Some(event.due_tick),
+            value: mutation.value,
         });
     }
     output.dirty_sections.reserve(control.dirty_sections.len());
@@ -655,14 +613,6 @@ pub struct EmuCaseProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct EmuRuntimeState {
-    family_id: String,
-    status: String,
-    family_state_revision: u64,
-    fixed_step: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct EmuFamilySaveV1 {
     family: LegacySnapshotEnvelope,
     await_tokens: BTreeMap<String, AwaitTokenId>,
@@ -671,8 +621,8 @@ struct EmuFamilySaveV1 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QueuedPatchEffect {
-    RuntimeEvent { event: String, payload: Vec<u8> },
-    SetBlackboard { key: String, value: Vec<u8> },
+    RuntimeEvent { event: String, value: String },
+    SetBlackboard { key: String, value: String },
 }
 
 struct EmuSession {
@@ -686,7 +636,6 @@ struct EmuSession {
 }
 
 struct PendingControlStep {
-    status: LegacyRuntimeStatus,
     state_revision: u64,
     control: LegacyControlTransaction,
     live_effect_count: usize,
@@ -694,7 +643,6 @@ struct PendingControlStep {
 
 struct ApplyLegacyControlAction {
     pending: Arc<Mutex<Option<PendingControlStep>>>,
-    state_component: astra_runtime::ComponentId,
     await_tokens: Arc<Mutex<BTreeMap<String, AwaitTokenId>>>,
 }
 
@@ -713,7 +661,6 @@ impl RuntimeAction for ApplyLegacyControlAction {
                     ActionResourceKey::EventQueue,
                     ActionResourceKey::Presentation,
                     ActionResourceKey::MutationLog,
-                    ActionResourceKey::EffectTrace,
                     ActionResourceKey::StableIdSource,
                 ],
             ),
@@ -736,45 +683,21 @@ impl RuntimeAction for ApplyLegacyControlAction {
                 "family provider did not publish a control transaction",
             ))
         })?;
-        let mut state = ctx.read_component::<EmuRuntimeState>(self.state_component)?;
-        state.family_state_revision = pending.state_revision;
-        state.fixed_step = ctx.step();
-        state.status = format!("{:?}", pending.status).to_ascii_lowercase();
-        ctx.replace_component(self.state_component, &state)?;
-
         for event in &pending.control.events {
             ctx.emit_event(
                 astra_runtime::EventSource::StateMachine,
                 EventPayload {
                     kind: event.event.clone(),
-                    data: [(
-                        "payload".into(),
-                        BlackboardValue::Bytes(event.payload.as_bytes().to_vec()),
-                    )]
-                    .into_iter()
-                    .collect(),
+                    data: [("value".into(), BlackboardValue::String(event.value.clone()))]
+                        .into_iter()
+                        .collect(),
                 },
             );
         }
         for mutation in &pending.control.blackboard {
             ctx.set_blackboard(
                 mutation.key.clone(),
-                BlackboardValue::Bytes(mutation.value.as_bytes().to_vec()),
-            );
-        }
-        for event in &pending.control.scheduled_events {
-            ctx.schedule_event(
-                event.due_tick,
-                astra_runtime::EventSource::StateMachine,
-                EventPayload {
-                    kind: event.event.clone(),
-                    data: [(
-                        "payload".into(),
-                        BlackboardValue::Bytes(event.payload.as_bytes().to_vec()),
-                    )]
-                    .into_iter()
-                    .collect(),
-                },
+                BlackboardValue::String(mutation.value.clone()),
             );
         }
         for dirty in &pending.control.dirty_sections {
@@ -1018,7 +941,6 @@ impl AstraEmuRuntimeProvider {
                 "emu.family_binding".into(),
                 "emu.payload_redaction".into(),
             ],
-            output_schemas: Vec::new(),
         }
     }
 
@@ -1044,7 +966,7 @@ impl AstraEmuRuntimeProvider {
         session_id: &GameRuntimeSessionId,
         resource_uri: &str,
         max_bytes: u64,
-    ) -> Result<Vec<u8>, String> {
+    ) -> Result<astra_byte_source::OwnedByteBuffer, String> {
         let session = self
             .sessions
             .get(&session_id.0)
@@ -1305,18 +1227,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 "astra.emu.runtime",
                 vec!["gameplay_runtime".into(), "legacy_runtime".into()],
             );
-            let state_component = world
-                .attach_component(
-                    owner,
-                    "astra.emu.runtime_state.v2",
-                    &EmuRuntimeState {
-                        family_id: profile.family_id,
-                        status: "active".into(),
-                        family_state_revision: 0,
-                        fixed_step: 0,
-                    },
-                )
-                .map_err(|error| error.to_string())?;
             let pending_control = Arc::new(Mutex::new(None));
             let await_tokens = Arc::new(Mutex::new(BTreeMap::new()));
             world
@@ -1324,7 +1234,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                     PROVIDER_ID,
                     ApplyLegacyControlAction {
                         pending: pending_control.clone(),
-                        state_component,
                         await_tokens: await_tokens.clone(),
                     },
                 )
@@ -1474,11 +1383,11 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 .map_or(0, |sequence| sequence.saturating_add(1));
             for effect in std::mem::take(&mut session.pending_patch_effects) {
                 match effect {
-                    QueuedPatchEffect::RuntimeEvent { event, payload } => {
+                    QueuedPatchEffect::RuntimeEvent { event, value } => {
                         family_output.control.events.push(LegacyEvent {
                             sequence: next_sequence,
                             event,
-                            payload: payload.into(),
+                            value,
                         })
                     }
                     QueuedPatchEffect::SetBlackboard { key, value } => family_output
@@ -1487,7 +1396,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                         .push(LegacyBlackboardMutation {
                             sequence: next_sequence,
                             key,
-                            value: value.into(),
+                            value,
                         }),
                 }
                 next_sequence = next_sequence.saturating_add(1);
@@ -1509,7 +1418,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             .pending_control
             .lock()
             .map_err(|_| "ASTRA_EMU_CONTROL_LOCK_POISONED")? = Some(PendingControlStep {
-            status: family_output.status,
             state_revision: family_output.state_revision,
             control: control_transaction,
             live_effect_count: live.len(),
@@ -1609,6 +1517,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             text_events: coverage.text_events,
             capture_bytes: coverage.capture_bytes,
             operation_bytes: coverage.operation_bytes,
+            scene_moved_bytes: coverage.scene_moved_bytes,
+            scene_copied_bytes: coverage.scene_copied_bytes,
             pcm_moved_bytes: coverage.pcm_moved_bytes,
             pcm_copied_bytes: coverage.pcm_copied_bytes,
         };
@@ -1621,7 +1531,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             session_id: input.session_id,
             status,
             live,
-            persisted: Vec::new(),
             diagnostics: vec![],
         })
     }
@@ -1860,7 +1769,6 @@ fn wait_kind(wait: &LegacyWaitRequest) -> String {
         LegacyWaitRequest::MediaFence { .. } => "fvp.media",
         LegacyWaitRequest::PresentationFence { .. } => "fvp.presentation",
         LegacyWaitRequest::ProviderCompletion { .. } => "fvp.provider",
-        LegacyWaitRequest::FamilyOpaque { .. } => "fvp.opaque",
     }
     .into()
 }
@@ -1871,8 +1779,7 @@ fn wait_token_id(wait: &LegacyWaitRequest) -> String {
         | LegacyWaitRequest::Input { token_id, .. }
         | LegacyWaitRequest::MediaFence { token_id, .. }
         | LegacyWaitRequest::PresentationFence { token_id, .. }
-        | LegacyWaitRequest::ProviderCompletion { token_id, .. }
-        | LegacyWaitRequest::FamilyOpaque { token_id, .. } => token_id.clone(),
+        | LegacyWaitRequest::ProviderCompletion { token_id, .. } => token_id.clone(),
     }
 }
 fn parse_package_hash(value: &str) -> Result<Hash256, String> {
@@ -1920,7 +1827,7 @@ mod tests {
             let bytes = self.file(mount_set_id, uri)?;
             Ok(astra_byte_source::ByteSourceStat {
                 len: bytes.len() as u64,
-                revision: astra_byte_source::SourceRevision(Hash256::from_sha256(bytes)),
+                revision: astra_byte_source::SourceRevision(1),
             })
         }
 
@@ -1947,7 +1854,7 @@ mod tests {
             Ok(astra_byte_source::RangeReadResult {
                 range,
                 revision: stat.revision,
-                bytes,
+                bytes: bytes.into(),
             })
         }
 
@@ -1993,7 +1900,7 @@ mod tests {
                     width: 1,
                     height: 1,
                     format: LegacyTextureFormat::Rgba8,
-                    pixels: LegacyPayload::Native(pixels),
+                    pixels: pixels.into(),
                 }],
                 draws: Vec::new(),
                 reset_resources: false,
@@ -2004,7 +1911,7 @@ mod tests {
             events: vec![LegacyEvent {
                 sequence: 1,
                 event: "test.event".into(),
-                payload: LegacyPayload::default(),
+                value: String::new(),
             }],
             ..LegacyControlTransaction::default()
         };
@@ -2016,7 +1923,7 @@ mod tests {
         else {
             panic!("typed texture create is required");
         };
-        assert_eq!(pixels.as_bytes().as_ptr(), allocation);
+        assert_eq!(pixels.as_ptr(), allocation);
     }
 
     #[test]
@@ -2091,7 +1998,7 @@ mod tests {
                 &open.session_id,
                 QueuedPatchEffect::RuntimeEvent {
                     event: "patch.synthetic".into(),
-                    payload: vec![1, 2, 3],
+                    value: "typed-value".into(),
                 },
             )
             .unwrap();
@@ -2112,12 +2019,11 @@ mod tests {
             })
             .unwrap();
         assert_eq!(output.status, "active");
-        assert!(output.persisted.is_empty());
         let live = output.live;
         assert!(live
             .events
             .iter()
-            .any(|event| { event.event == "patch.synthetic" && event.payload.len() == 3 }));
+            .any(|event| event.event == "patch.synthetic" && event.value == "typed-value"));
         let mut output_observations = vec![(
             live.state_revision,
             live.events
@@ -2142,7 +2048,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(second.status, "active");
-        assert!(second.persisted.is_empty());
         let live = second.live;
         output_observations.push((
             live.state_revision,

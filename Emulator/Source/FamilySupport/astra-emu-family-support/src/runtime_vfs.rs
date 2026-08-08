@@ -4,7 +4,6 @@ use std::{
 };
 
 use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
-use astra_core::Hash256;
 use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
 use astra_emu_family_core::{LegacyMountedVfs, LegacyVfsNodeKind};
 
@@ -27,8 +26,8 @@ pub struct RuntimeVfsAccessMetrics {
 
 #[derive(Default)]
 struct RuntimeVfsAccessState {
-    resources: BTreeSet<Hash256>,
-    ranges: BTreeSet<(Hash256, u64, u64)>,
+    resources: BTreeSet<u32>,
+    ranges: BTreeSet<(u32, u64, u64)>,
     read_count: u64,
     bytes_read: u64,
     max_range_bytes: u64,
@@ -92,7 +91,8 @@ impl LegacyMountedVfsReaderAdapter {
     fn stat_and_revision(
         &self,
         uri: &str,
-    ) -> Result<(ByteSourceStat, astra_emu_family_core::LegacyVfsStat), LegacyProviderError> {
+    ) -> Result<(ByteSourceStat, astra_emu_family_core::LegacyVfsStat, u32), LegacyProviderError>
+    {
         let stat = self.vfs.stat(uri).map_err(core_error)?;
         if stat.kind != LegacyVfsNodeKind::File {
             return Err(invalid(
@@ -100,33 +100,33 @@ impl LegacyMountedVfsReaderAdapter {
                 "runtime VFS request requires a file URI",
             ));
         }
-        let entry = self
+        let resource_id = self
             .vfs
             .manifest()
             .entries
             .iter()
-            .find(|entry| entry.uri == uri)
+            .position(|entry| entry.uri == uri)
             .ok_or_else(|| {
                 invalid(
                     "ASTRA_EMU_VFS_RUNTIME_MANIFEST_ENTRY",
                     "runtime VFS file is absent from the validated manifest",
                 )
+            })
+            .and_then(|index| {
+                u32::try_from(index).map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_VFS_RUNTIME_RESOURCE_ID",
+                        "runtime VFS manifest resource index overflowed",
+                    )
+                })
             })?;
-        let material = format!(
-            "{}\0{}\0{}\0{}\0{}\0{}",
-            self.vfs.manifest().reader_hash,
-            self.vfs.manifest().mount_profile_hash,
-            entry.source_hash,
-            entry.entry_id,
-            entry.decoded_size,
-            entry.method
-        );
         Ok((
             ByteSourceStat {
                 len: stat.size,
-                revision: SourceRevision(Hash256::from_sha256(material.as_bytes())),
+                revision: SourceRevision(1),
             },
             stat,
+            resource_id,
         ))
     }
 }
@@ -150,7 +150,7 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
         max_bytes: u64,
     ) -> Result<RangeReadResult, LegacyProviderError> {
         self.validate_mount(mount_set_id)?;
-        let (before, _) = self.stat_and_revision(uri)?;
+        let (before, _, resource_id) = self.stat_and_revision(uri)?;
         range.validate(before.len, max_bytes).map_err(|_| {
             invalid(
                 "ASTRA_EMU_VFS_RUNTIME_RANGE",
@@ -173,22 +173,21 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
                 "mounted VFS returned an invalid range length",
             ));
         }
-        let (after, _) = self.stat_and_revision(uri)?;
-        if after != before {
+        let (after, _, after_resource_id) = self.stat_and_revision(uri)?;
+        if after != before || after_resource_id != resource_id {
             return Err(invalid(
                 "ASTRA_EMU_VFS_RUNTIME_MUTATED",
                 "mounted VFS entry identity changed during the read",
             ));
         }
-        let uri_hash = Hash256::from_sha256(uri.as_bytes());
         let mut access = self.access.lock().map_err(|_| {
             invalid(
                 "ASTRA_EMU_VFS_RUNTIME_METRICS_POISONED",
                 "runtime VFS access metrics are poisoned",
             )
         })?;
-        access.resources.insert(uri_hash);
-        access.ranges.insert((uri_hash, range.offset, range.len));
+        access.resources.insert(resource_id);
+        access.ranges.insert((resource_id, range.offset, range.len));
         access.read_count = access.read_count.checked_add(1).ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_VFS_RUNTIME_METRICS_OVERFLOW",
@@ -292,7 +291,7 @@ mod tests {
                 4,
             )
             .unwrap();
-        assert_eq!(read.bytes, b"end");
+        assert_eq!(read.bytes.as_slice(), b"end");
         assert_eq!(
             reader.access_metrics().unwrap(),
             RuntimeVfsAccessMetrics {

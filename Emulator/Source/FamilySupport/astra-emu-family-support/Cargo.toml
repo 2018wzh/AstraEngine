@@ -13,6 +13,7 @@ astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-sourc
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
+astra-audio-kira = { path = "../../../../Engine/Source/Runtime/astra-audio-kira" }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
 blowfish.workspace = true
 crc32fast = "1.5"

@@ -15,6 +15,7 @@ astra-byte-source = { path = "../../Runtime/astra-byte-source" }
 astra-asset = { path = "../../Runtime/astra-asset" }
 astra-media-core = { path = "../../Runtime/astra-media-core" }
 astra-media = { path = "../../Runtime/astra-media" }
+astra-audio-kira = { path = "../../Runtime/astra-audio-kira" }
 astra-package = { path = "../../Runtime/astra-package" }
 astra-plugin = { path = "../../Runtime/astra-plugin", default-features = false }
 astra-plugin-abi = { path = "../../Runtime/astra-plugin-abi", default-features = false }

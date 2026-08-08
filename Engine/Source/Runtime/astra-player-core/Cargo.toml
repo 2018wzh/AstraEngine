@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 tracing.workspace = true
 astra-core = { path = "../astra-core" }
+astra-byte-source = { path = "../astra-byte-source" }
 astra-media-core = { path = "../astra-media-core" }
 astra-media = { path = "../astra-media" }
 astra-ui-core = { path = "../astra-ui-core" }

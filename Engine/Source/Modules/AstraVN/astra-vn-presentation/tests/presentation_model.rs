@@ -43,8 +43,8 @@ fn presentation_tracks_video_audio_and_timeline_lifecycle() {
         stage.timeline_tasks[0].status,
         TimelineTaskStatus::Completed
     );
-    assert_eq!(stage.presentation_hash().to_hex().len(), 32);
-    assert_eq!(timeline.stable_hash().to_hex().len(), 32);
+    assert_eq!(stage.viewport_width, 1280);
+    assert_eq!(timeline.tracks.len(), 1);
 }
 
 #[astra_headless_test::test]

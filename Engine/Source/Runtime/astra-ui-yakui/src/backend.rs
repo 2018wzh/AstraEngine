@@ -47,6 +47,7 @@ pub struct AstraYakuiBackend<R> {
     renderer: R,
     live_session: Option<String>,
     live_generation: u64,
+    validated_theme: Option<(String, u64)>,
     last_semantics: Option<UiSemanticSnapshot>,
     shutdown: bool,
 }
@@ -94,6 +95,7 @@ impl<R: YakuiViewRenderer> AstraYakuiBackend<R> {
             renderer,
             live_session: None,
             live_generation: 0,
+            validated_theme: None,
             last_semantics: None,
             shutdown: false,
         })
@@ -126,6 +128,11 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
         self.ensure_live()?;
         let request_validation_started = Instant::now();
         request.validate()?;
+        let theme_identity = (request.theme.id.clone(), request.theme.revision);
+        if self.validated_theme.as_ref() != Some(&theme_identity) {
+            request.theme.validate()?;
+            self.validated_theme = Some(theme_identity);
+        }
         let request_validation_ns = request_validation_started
             .elapsed()
             .as_nanos()
@@ -311,7 +318,7 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             .sum();
         let mut actions = view.actions;
         for action in &mut actions {
-            action.semantic_snapshot_hash = semantics.hash;
+            action.semantic_generation = semantics.generation;
         }
         let mut output = UiFrameOutput {
             schema: "astra.ui_frame_output.v1".to_string(),
@@ -350,7 +357,7 @@ impl<R: YakuiViewRenderer> UiBackend for AstraYakuiBackend<R> {
             generation = request.generation,
             input_count = request.input.events.len(),
             action_count = output.actions.len(),
-            semantic_hash = %output.semantics.hash,
+            semantic_generation = output.semantics.generation,
             draw_calls = output.performance.draw_calls,
             vertices = output.performance.vertices,
             texture_update_bytes = output.performance.texture_update_bytes,

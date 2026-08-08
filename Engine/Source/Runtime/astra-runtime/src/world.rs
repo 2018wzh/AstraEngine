@@ -1,7 +1,7 @@
-use std::{cell::RefCell, collections::BTreeMap, sync::Arc, time::Instant};
+use std::{cell::RefCell, collections::BTreeMap, time::Instant};
 
 use astra_core::{
-    Diagnostic, Hash128, Hash256, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
+    Diagnostic, Hash128, SchemaId, SchemaMigrationRegistry, SchemaVersion, StableId,
     StableIdGenerator,
 };
 use schemars::JsonSchema;
@@ -15,10 +15,9 @@ use crate::{
     AwaitToken, Blackboard, BlackboardValue, ComponentId, ComponentRecord, ComponentSnapshot,
     CreateAwaitAction, DelayedEventId, DelayedEventQueue, EmitEventAction, EventId, EventPayload,
     EventQueue, EventSource, PresentationAction, PresentationCommand, PresentationRecord,
-    ProviderReplayOutput, RuntimeAction, RuntimeComponentPayload, RuntimeEffectRecord,
-    RuntimeEvent, RuntimeMutationRecord, RuntimeReplayTranscript, SaveBlob, SaveRequest,
-    ScheduledEvent, SetBlackboardAction, StateMachineDefinition, StateMachineSnapshot,
-    StateMachineStore,
+    RuntimeAction, RuntimeComponentPayload, RuntimeEvent, RuntimeMutationRecord,
+    RuntimeReplayTranscript, SaveBlob, SaveRequest, ScheduledEvent, SetBlackboardAction,
+    StateMachineDefinition, StateMachineSnapshot, StateMachineStore,
 };
 
 #[derive(Debug, Error)]
@@ -210,7 +209,7 @@ impl Default for PackageHandle {
             profile: "test".to_string(),
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            feature_fingerprint: "runtime-typed-v3".to_string(),
             abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         }
     }
@@ -251,8 +250,6 @@ pub struct OrderedTickIngress {
 pub enum TickIngress {
     PlayerInput(PlayerInput),
     AwaitCompletion(AwaitResult),
-    LiveProviderOutput(ProviderReplayOutput),
-    RecordedProviderOutput(ProviderReplayOutput),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -293,9 +290,6 @@ impl TickRequest {
 pub struct TickReport {
     pub step: u64,
     pub integrity_mode: TickIntegrityMode,
-    pub state_hash: Hash128,
-    pub event_hash: Hash128,
-    pub presentation_hash: Hash128,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -321,7 +315,6 @@ pub struct RuntimeSnapshot {
     pub events: EventQueue,
     pub presentation: Vec<PresentationRecord>,
     pub mutations: Vec<RuntimeMutationRecord>,
-    pub effects: Vec<RuntimeEffectRecord>,
     pub mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     pub integrity_mode: TickIntegrityMode,
     pub step: u64,
@@ -357,7 +350,6 @@ struct RuntimeHistoryDigests {
     events: HistoryChain,
     presentation: HistoryChain,
     mutations: HistoryChain,
-    effects: HistoryChain,
 }
 
 impl Default for RuntimeHistoryDigests {
@@ -368,7 +360,6 @@ impl Default for RuntimeHistoryDigests {
             events: HistoryChain::empty("astra.runtime.events.chain.v2"),
             presentation: HistoryChain::empty("astra.runtime.presentation.chain.v2"),
             mutations: HistoryChain::empty("astra.runtime.mutations.chain.v2"),
-            effects: HistoryChain::empty("astra.runtime.effects.chain.v2"),
         }
     }
 }
@@ -407,11 +398,6 @@ impl RuntimeHistoryDigests {
             "astra.runtime.mutations.chain.v2",
             &world.mutations,
         );
-        Self::refresh(
-            &mut self.effects,
-            "astra.runtime.effects.chain.v2",
-            &world.effects,
-        );
     }
 }
 
@@ -431,7 +417,6 @@ struct RuntimeStateDigestV3<'a> {
     event_history: Hash128,
     presentation_history: Hash128,
     mutation_history: Hash128,
-    effect_history: Hash128,
     mounted_modules: &'a BTreeMap<String, ModuleBindingSnapshot>,
     integrity_mode: TickIntegrityMode,
     step: u64,
@@ -442,7 +427,6 @@ struct RuntimeTransactionCheckpoint {
     machines: crate::state_machine::StateMachineTransactionCheckpoint,
     presentation_len: usize,
     mutations_len: usize,
-    effects_len: usize,
     step: u64,
     required_tick_mode: TickMode,
 }
@@ -460,7 +444,6 @@ pub struct RuntimeWorld {
     actions: ActionRegistry,
     presentation: Vec<PresentationRecord>,
     mutations: Vec<RuntimeMutationRecord>,
-    effects: Vec<RuntimeEffectRecord>,
     diagnostics: Vec<Diagnostic>,
     mounted_modules: BTreeMap<String, ModuleBindingSnapshot>,
     step: u64,
@@ -511,7 +494,6 @@ impl RuntimeWorld {
             actions,
             presentation: Vec::new(),
             mutations: Vec::new(),
-            effects: Vec::new(),
             diagnostics: Vec::new(),
             mounted_modules: BTreeMap::new(),
             step: 0,
@@ -528,6 +510,21 @@ impl RuntimeWorld {
 
     pub fn begin_replay_recording(&self) -> Result<crate::RuntimeReplayRecorder, RuntimeError> {
         crate::RuntimeReplayRecorder::start(self.snapshot())
+    }
+
+    pub fn capture_evidence_checkpoint(&self) -> Result<crate::ReplayHashCheckpoint, RuntimeError> {
+        if self.integrity_mode != TickIntegrityMode::Evidence {
+            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_EVIDENCE_DISABLED",
+                "runtime evidence checkpoint requires evidence integrity mode",
+            )));
+        }
+        Ok(crate::ReplayHashCheckpoint {
+            step: self.step,
+            state_hash: self.state_hash(),
+            event_hash: self.event_hash(),
+            presentation_hash: self.presentation_hash(),
+        })
     }
 
     pub fn set_machine_worker_count(&mut self, worker_count: usize) -> Result<(), RuntimeError> {
@@ -636,16 +633,19 @@ impl RuntimeWorld {
         actor_id
     }
 
-    pub fn attach_component<T: Serialize>(
+    pub fn attach_component<T>(
         &mut self,
         actor_id: ActorId,
         schema: impl Into<SchemaId>,
         data: &T,
-    ) -> Result<ComponentId, RuntimeError> {
+    ) -> Result<ComponentId, RuntimeError>
+    where
+        T: Serialize + Clone + std::fmt::Debug + Send + Sync + 'static,
+    {
         let component_id = ComponentId(self.next_id());
         let schema = schema.into();
         let payload =
-            RuntimeComponentPayload::postcard(schema.clone(), SchemaVersion::default(), data)?;
+            RuntimeComponentPayload::typed(schema.clone(), SchemaVersion::default(), data.clone());
         let attached = self.actors.attach_component(ComponentRecord {
             component_id,
             actor_id,
@@ -673,10 +673,10 @@ impl RuntimeWorld {
         }
     }
 
-    pub fn read_component<T: DeserializeOwned>(
-        &self,
-        component_id: ComponentId,
-    ) -> Result<T, RuntimeError> {
+    pub fn read_component<T>(&self, component_id: ComponentId) -> Result<T, RuntimeError>
+    where
+        T: Serialize + DeserializeOwned + Clone + std::fmt::Debug + Send + Sync + 'static,
+    {
         let component = self.actors.component(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
@@ -686,61 +686,42 @@ impl RuntimeWorld {
         component.payload.decode()
     }
 
-    pub fn read_component_postcard_payload(
-        &self,
-        component_id: ComponentId,
-    ) -> Result<(Hash256, Arc<[u8]>), RuntimeError> {
-        let component = self.actors.component(component_id).ok_or_else(|| {
-            RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_MISSING",
-                "runtime component does not exist",
-            ))
-        })?;
-        Ok((
-            component.payload.hash(),
-            component.payload.validated_postcard_bytes()?,
-        ))
-    }
-
-    pub fn read_component_postcard_bytes(
-        &self,
-        component_id: ComponentId,
-    ) -> Result<Arc<[u8]>, RuntimeError> {
-        let component = self.actors.component(component_id).ok_or_else(|| {
-            RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_COMPONENT_MISSING",
-                "runtime component does not exist",
-            ))
-        })?;
-        component.payload.validated_postcard_bytes()
-    }
-
-    pub fn replace_component<T: Serialize>(
+    pub fn replace_component<T>(
         &mut self,
         component_id: ComponentId,
         data: &T,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), RuntimeError>
+    where
+        T: Serialize + Clone + std::fmt::Debug + Send + Sync + 'static,
+    {
         let component = self.actors.component_mut(component_id).ok_or_else(|| {
             RuntimeError::diagnostic(Diagnostic::blocking(
                 "ASTRA_RUNTIME_COMPONENT_MISSING",
                 "runtime component does not exist",
             ))
         })?;
-        let before_hash = component.payload.hash;
+        let before_revision = component.payload.revision;
         let schema = component.payload.schema.clone();
-        let payload = RuntimeComponentPayload::postcard(
+        let payload = RuntimeComponentPayload::typed(
             component.payload.schema.clone(),
             component.payload.version,
-            data,
-        )?;
-        let after_hash = payload.hash;
+            data.clone(),
+        );
+        let after_revision = before_revision.checked_add(1).ok_or_else(|| {
+            RuntimeError::diagnostic(Diagnostic::blocking(
+                "ASTRA_RUNTIME_COMPONENT_REVISION_OVERFLOW",
+                "runtime component revision overflowed",
+            ))
+        })?;
+        let mut payload = payload;
+        payload.revision = after_revision;
         component.payload = payload;
         self.mutations.push(RuntimeMutationRecord {
             step: self.step,
             component_id,
             schema,
-            before_hash,
-            after_hash,
+            before_revision,
+            after_revision,
             source: "runtime.api".to_string(),
         });
         Ok(())
@@ -872,74 +853,6 @@ impl RuntimeWorld {
         self.awaits.insert(token).map_err(RuntimeError::diagnostic)
     }
 
-    fn apply_provider_output(
-        &mut self,
-        step: u64,
-        output: ProviderReplayOutput,
-    ) -> Result<(), RuntimeError> {
-        if output.provider_id.trim().is_empty()
-            || output.session_id.trim().is_empty()
-            || output.schema.trim().is_empty()
-        {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_PROVIDER_OUTPUT_DESCRIPTOR",
-                "recorded provider output requires provider, session and schema ids",
-            )));
-        }
-        if Hash256::from_sha256(&output.payload) != output.payload_hash {
-            return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                "ASTRA_RUNTIME_PROVIDER_OUTPUT_HASH",
-                "recorded provider output payload hash does not match its bytes",
-            )));
-        }
-        if let Some(event) = output.events.iter().find(|event| event.step != step) {
-            return Err(RuntimeError::diagnostic(
-                Diagnostic::blocking(
-                    "ASTRA_RUNTIME_PROVIDER_OUTPUT_EVENT_STEP",
-                    "recorded provider output event must target the transcript tick",
-                )
-                .with_field("provider_id", &output.provider_id)
-                .with_field("event_step", event.step)
-                .with_field("transcript_step", step),
-            ));
-        }
-        if let Some(effect) = output.effects.iter().find(|effect| {
-            effect.domain.trim().is_empty()
-                || effect.schema.trim().is_empty()
-                || !effect.validate_hash()
-        }) {
-            return Err(RuntimeError::diagnostic(
-                Diagnostic::blocking(
-                    "ASTRA_RUNTIME_PROVIDER_OUTPUT_EFFECT",
-                    "recorded provider effect descriptor or payload hash is invalid",
-                )
-                .with_field("provider_id", &output.provider_id)
-                .with_field("effect_schema", &effect.schema),
-            ));
-        }
-
-        for token in output.awaits {
-            self.awaits
-                .insert(token)
-                .map_err(RuntimeError::diagnostic)?;
-        }
-        for event in output.events {
-            self.enqueue_event(event);
-        }
-        for command in output.presentation {
-            self.emit_presentation(command);
-        }
-        for envelope in output.effects {
-            let sequence = self.effects.len() as u64;
-            self.effects.push(RuntimeEffectRecord {
-                step,
-                sequence,
-                envelope,
-            });
-        }
-        Ok(())
-    }
-
     fn apply_input(&mut self, input: PlayerInput) -> Result<(), RuntimeError> {
         let mut payload = input.payload;
         if payload.kind.is_empty() {
@@ -962,12 +875,6 @@ impl RuntimeWorld {
                 match ingress.payload {
                     TickIngress::PlayerInput(input) => self.apply_input(input)?,
                     TickIngress::AwaitCompletion(result) => self.submit_await_result(result),
-                    TickIngress::LiveProviderOutput(output) => {
-                        self.apply_provider_output(request.timing.fixed_step, output)?
-                    }
-                    TickIngress::RecordedProviderOutput(output) => {
-                        self.apply_provider_output(request.timing.fixed_step, output)?
-                    }
                 }
             }
             let report = self.tick_validated(request.timing)?;
@@ -1021,22 +928,6 @@ impl RuntimeWorld {
                 return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                     "ASTRA_RUNTIME_TICK_INGRESS_ORDER_INVALID",
                     "tick ingress sequence must be non-zero and strictly increasing",
-                )));
-            }
-            if matches!(ingress.payload, TickIngress::RecordedProviderOutput(_))
-                && request.mode != TickMode::Replay
-            {
-                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_RUNTIME_LIVE_RECORDED_OUTPUT_FORBIDDEN",
-                    "live tick cannot consume recorded provider output",
-                )));
-            }
-            if matches!(ingress.payload, TickIngress::LiveProviderOutput(_))
-                && request.mode == TickMode::Replay
-            {
-                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_RUNTIME_REPLAY_LIVE_OUTPUT_FORBIDDEN",
-                    "replay tick cannot consume live provider output",
                 )));
             }
             previous_sequence = ingress.sequence;
@@ -1182,63 +1073,17 @@ impl RuntimeWorld {
             self.emit_presentation(command);
         }
         self.mutations.extend(output.mutations);
-        for envelope in output.effects {
-            let sequence = self.effects.len() as u64;
-            self.effects.push(RuntimeEffectRecord {
-                step: input.fixed_step,
-                sequence,
-                envelope,
-            });
-        }
-        let (
-            state_hash,
-            event_hash,
-            presentation_hash,
-            state_hash_ns,
-            event_hash_ns,
-            presentation_hash_ns,
-        ) = if self.integrity_mode == TickIntegrityMode::Evidence {
-            let state_hash_started = Instant::now();
-            let state_hash = self.state_hash();
-            let state_hash_ns = state_hash_started.elapsed().as_nanos() as u64;
-            let event_hash_started = Instant::now();
-            let event_hash = self.event_hash();
-            let event_hash_ns = event_hash_started.elapsed().as_nanos() as u64;
-            let presentation_hash_started = Instant::now();
-            let presentation_hash = self.presentation_hash();
-            let presentation_hash_ns = presentation_hash_started.elapsed().as_nanos() as u64;
-            (
-                state_hash,
-                event_hash,
-                presentation_hash,
-                state_hash_ns,
-                event_hash_ns,
-                presentation_hash_ns,
-            )
-        } else {
-            let disabled = INTEGRITY_DISABLED_HASH;
-            (disabled, disabled, disabled, 0, 0, 0)
-        };
         let report = TickReport {
             step: input.fixed_step,
             integrity_mode: self.integrity_mode,
-            state_hash,
-            event_hash,
-            presentation_hash,
             diagnostics: self.diagnostics.clone(),
         };
         trace!(
             event = "runtime.tick.performance",
             step = report.step,
-            state_hash = %report.state_hash,
-            event_hash = %report.event_hash,
-            presentation_hash = %report.presentation_hash,
             diagnostic_count = report.diagnostics.len(),
             output_diagnostic_count,
             machine_ns,
-            state_hash_ns,
-            event_hash_ns,
-            presentation_hash_ns,
             "measured RuntimeWorld tick phases"
         );
         Ok(report)
@@ -1290,7 +1135,6 @@ impl RuntimeWorld {
         self.events = snapshot.events;
         self.presentation = snapshot.presentation;
         self.mutations = snapshot.mutations;
-        self.effects = snapshot.effects;
         self.mounted_modules = snapshot.mounted_modules;
         self.integrity_mode = snapshot.integrity_mode;
         self.step = snapshot.step;
@@ -1327,7 +1171,7 @@ impl RuntimeWorld {
             self.required_tick_mode = TickMode::Replay;
             for entry in replay.ticks {
                 let report = self.tick(entry.request)?;
-                let actual = crate::ReplayHashCheckpoint::from(&report);
+                let actual = self.capture_evidence_checkpoint()?;
                 if actual != entry.expected {
                     return Err(RuntimeError::diagnostic(
                         Diagnostic::blocking(
@@ -1336,7 +1180,7 @@ impl RuntimeWorld {
                         )
                         .with_field("step", report.step.to_string())
                         .with_field("expected_state_hash", entry.expected.state_hash.to_string())
-                        .with_field("actual_state_hash", report.state_hash.to_string()),
+                        .with_field("actual_state_hash", actual.state_hash.to_string()),
                     ));
                 }
             }
@@ -1380,7 +1224,6 @@ impl RuntimeWorld {
             events: self.events.clone(),
             presentation: self.presentation.clone(),
             mutations: self.mutations.clone(),
-            effects: self.effects.clone(),
             mounted_modules: self.mounted_modules.clone(),
             integrity_mode: self.integrity_mode,
             step: self.step,
@@ -1408,7 +1251,6 @@ impl RuntimeWorld {
             event_history: history.events.hash,
             presentation_history: history.presentation.hash,
             mutation_history: history.mutations.hash,
-            effect_history: history.effects.hash,
             mounted_modules: &self.mounted_modules,
             integrity_mode: self.integrity_mode,
             step: self.step,
@@ -1429,9 +1271,8 @@ impl RuntimeWorld {
         history.refresh_from_world(self);
         Hash128::from_blake3(
             &postcard::to_allocvec(&(
-                "astra.runtime.presentation_effect_digest.v2",
+                "astra.runtime.presentation_digest.v3",
                 history.presentation.hash,
-                history.effects.hash,
             ))
             .expect("runtime presentation digest must serialize for presentation hash"),
         )
@@ -1466,7 +1307,6 @@ impl RuntimeWorld {
             machines: self.machines.transaction_checkpoint(),
             presentation_len: self.presentation.len(),
             mutations_len: self.mutations.len(),
-            effects_len: self.effects.len(),
             step: self.step,
             required_tick_mode: self.required_tick_mode,
         })
@@ -1483,7 +1323,6 @@ impl RuntimeWorld {
         self.events.rollback_transaction();
         self.presentation.truncate(checkpoint.presentation_len);
         self.mutations.truncate(checkpoint.mutations_len);
-        self.effects.truncate(checkpoint.effects_len);
         self.step = checkpoint.step;
         self.required_tick_mode = checkpoint.required_tick_mode;
         *self.history_digests.get_mut() = RuntimeHistoryDigests::default();
@@ -1547,9 +1386,5 @@ impl RuntimeDebugSession<'_> {
 
     pub fn mutation_trace(&self) -> Vec<RuntimeMutationRecord> {
         self.world.mutations.clone()
-    }
-
-    pub fn effect_trace(&self) -> Vec<RuntimeEffectRecord> {
-        self.world.effects.clone()
     }
 }

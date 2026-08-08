@@ -1,53 +1,44 @@
 use astra_core::Hash256;
 use astra_platform::{
-    AudioMeter, AudioOutputFormat, AudioOutputRequest, AudioOutputState, AudioOutputStatus,
-    AudioPacket, DecodeKind, DecodeOutput, PackageCachePolicy, PackageSourcePolicy,
-    PackageSourceRequest, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+    AudioDeviceFormat, AudioOutputRequest, AudioWakeRegistration, DecodeKind, DecodeOutput,
+    PackageCachePolicy, PackageSourcePolicy, PackageSourceRequest, PlatformDecodeRequest,
+    PlatformError, PlatformErrorCode,
 };
+use astra_platform_common::{NativeAudioProducer, NativeAudioQueue};
 use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Response, Url};
-
-type MeterWaiter = tokio::sync::oneshot::Sender<AudioMeter>;
-
-pub(crate) async fn preferred_audio_output_format() -> Result<AudioOutputFormat, PlatformError> {
-    let context = web_sys::AudioContext::new().map_err(|_| audio_error("audio.format"))?;
-    let sample_rate = context.sample_rate() as u32;
-    let channels = context.destination().max_channel_count().clamp(1, 2) as u16;
-    JsFuture::from(context.close().map_err(|_| audio_error("audio.format"))?)
-        .await
-        .map_err(|_| audio_error("audio.format"))?;
-    Ok(AudioOutputFormat {
-        sample_rate,
-        channels,
-    })
-}
 
 pub(crate) struct WebAudioOutput {
     context: web_sys::AudioContext,
     node: web_sys::AudioWorkletNode,
     port: web_sys::MessagePort,
     _on_message: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::MessageEvent)>,
-    request: AudioOutputRequest,
-    next_sequence: u64,
-    pending: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u64, usize>>>,
-    pending_meter: std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<u64, MeterWaiter>>>,
-    pending_drains: std::rc::Rc<std::cell::RefCell<Vec<(u64, u64, MeterWaiter)>>>,
-    next_waiter: u64,
-    queued_frames: std::rc::Rc<std::cell::Cell<usize>>,
-    meter: std::rc::Rc<std::cell::RefCell<AudioMeter>>,
-    underflow_count: std::rc::Rc<std::cell::Cell<u64>>,
-    callback_count: std::rc::Rc<std::cell::Cell<u64>>,
-    submitted_samples: u64,
 }
 
 impl WebAudioOutput {
-    pub async fn open(request: AudioOutputRequest) -> Result<Self, PlatformError> {
-        let context = web_sys::AudioContext::new().map_err(|_| audio_error("audio.open"))?;
-        if context.sample_rate() as u32 != request.sample_rate
-            || context.destination().max_channel_count() < u32::from(request.channels)
+    pub async fn open(
+        request: AudioOutputRequest,
+        audio_wake: AudioWakeRegistration,
+    ) -> Result<(Self, NativeAudioProducer, AudioDeviceFormat), PlatformError> {
+        if request.sample_rate == 0
+            || request.channels == 0
+            || request.chunk_frames == 0
+            || request.max_buffered_frames == 0
         {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "audio.open",
+                "WebAudio requires a non-zero format and bounded chunk queue",
+            ));
+        }
+        let context = web_sys::AudioContext::new().map_err(|_| audio_error("audio.open"))?;
+        let format = AudioDeviceFormat {
+            sample_rate: context.sample_rate() as u32,
+            channels: context.destination().max_channel_count().clamp(1, 2) as u16,
+        };
+        if format.sample_rate != request.sample_rate || format.channels < request.channels {
             let _ = JsFuture::from(context.close().map_err(|_| audio_error("audio.open"))?).await;
             return Err(PlatformError::new(
                 PlatformErrorCode::IntegrityMismatch,
@@ -60,25 +51,18 @@ impl WebAudioOutput {
                 Ok(promise) => JsFuture::from(promise).await.is_ok(),
                 Err(_) => false,
             };
-            if !resumed {
+            if !resumed || context.state() != web_sys::AudioContextState::Running {
                 if let Ok(promise) = context.close() {
                     let _ = JsFuture::from(promise).await;
                 }
                 return Err(PlatformError::new(
                     PlatformErrorCode::PermissionDenied,
                     "audio.open",
-                    "WebAudio user activation handshake failed",
+                    "WebAudio requires a completed user activation handshake",
                 ));
             }
         }
-        if context.state() != web_sys::AudioContextState::Running {
-            let _ = JsFuture::from(context.close().map_err(|_| audio_error("audio.open"))?).await;
-            return Err(PlatformError::new(
-                PlatformErrorCode::PermissionDenied,
-                "audio.open",
-                "WebAudio requires a completed user activation handshake",
-            ));
-        }
+
         let create = Function::new_with_args(
             "context, channels, capacity",
             "return (async () => { await context.audioWorklet.addModule('astra-audio-worklet.js'); const node = new AudioWorkletNode(context, 'astra-audio-output', {numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [channels], processorOptions: {channels, capacityFrames: capacity}}); node.connect(context.destination); return node; })();",
@@ -118,106 +102,77 @@ impl WebAudioOutput {
                 return Err(audio_error("audio.open"));
             }
         };
-        let pending = std::rc::Rc::new(std::cell::RefCell::new(std::collections::BTreeMap::<
-            u64,
-            usize,
-        >::new()));
-        let pending_meter =
-            std::rc::Rc::new(std::cell::RefCell::new(std::collections::BTreeMap::<
-                u64,
-                MeterWaiter,
-            >::new()));
-        let pending_drains =
-            std::rc::Rc::new(std::cell::RefCell::new(
-                Vec::<(u64, u64, MeterWaiter)>::new(),
-            ));
-        let queued_frames = std::rc::Rc::new(std::cell::Cell::new(0usize));
-        let meter = std::rc::Rc::new(std::cell::RefCell::new(AudioMeter {
-            sample_count: 0,
-            peak_dbfs: -120.0,
-            rms_dbfs: -120.0,
-        }));
-        let underflow_count = std::rc::Rc::new(std::cell::Cell::new(0));
-        let callback_count = std::rc::Rc::new(std::cell::Cell::new(0));
-        let on_message = {
-            let pending = pending.clone();
-            let pending_meter = pending_meter.clone();
-            let pending_drains = pending_drains.clone();
-            let queued_frames = queued_frames.clone();
-            let meter = meter.clone();
-            let underflow_count = underflow_count.clone();
-            let callback_count = callback_count.clone();
+
+        let chunk_samples = request
+            .chunk_frames
+            .checked_mul(usize::from(request.channels))
+            .ok_or_else(|| audio_error("audio.open"))?;
+        let chunk_capacity = request.max_buffered_frames.div_ceil(request.chunk_frames);
+        let (producer, mut consumer, _telemetry) =
+            NativeAudioQueue::create(chunk_capacity, chunk_samples, audio_wake.clone())?;
+        let mut scratch = vec![0.0_f32; chunk_samples];
+        let refill_port = port.clone();
+        let refill_wake = audio_wake;
+        let mut sequence = 0_u64;
+        let on_message =
             wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
                 let data = event.data();
                 let message_type = Reflect::get(&data, &JsValue::from_str("type"))
                     .ok()
                     .and_then(|value| value.as_string());
-                match message_type.as_deref() {
-                    Some("consumed") => {
-                        if let Some(sequence) = Reflect::get(&data, &JsValue::from_str("sequence"))
-                            .ok()
-                            .and_then(|value| value.as_f64())
-                            .map(|value| value as u64)
-                        {
-                            if let Some(frames) = pending.borrow_mut().remove(&sequence) {
-                                queued_frames.set(queued_frames.get().saturating_sub(frames));
-                            }
-                        }
-                        if let Some(value) = Reflect::get(&data, &JsValue::from_str("queuedFrames"))
-                            .ok()
-                            .and_then(|value| value.as_f64())
-                        {
-                            queued_frames.set(value.max(0.0) as usize);
-                        }
-                        let mut current = meter.borrow().clone();
-                        update_meter_from_message(
-                            &data,
-                            &mut current,
-                            &underflow_count,
-                            &callback_count,
-                        );
-                        *meter.borrow_mut() = current.clone();
-                        resolve_drain_waiters(&pending_drains, queued_frames.get(), &current);
-                    }
-                    Some("meter") => {
-                        let mut current = meter.borrow().clone();
-                        update_meter_from_message(
-                            &data,
-                            &mut current,
-                            &underflow_count,
-                            &callback_count,
-                        );
-                        if let Some(value) = Reflect::get(&data, &JsValue::from_str("queuedFrames"))
-                            .ok()
-                            .and_then(|value| value.as_f64())
-                        {
-                            queued_frames.set(value.max(0.0) as usize);
-                        }
-                        *meter.borrow_mut() = current.clone();
-                        if let Some(request_id) =
-                            Reflect::get(&data, &JsValue::from_str("requestId"))
-                                .ok()
-                                .and_then(|value| value.as_f64())
-                                .map(|value| value as u64)
-                        {
-                            if let Some(waiter) = pending_meter.borrow_mut().remove(&request_id) {
-                                let _ = waiter.send(current.clone());
-                            }
-                        }
-                        resolve_drain_waiters(&pending_drains, queued_frames.get(), &current);
-                    }
-                    _ => {}
+                if message_type.as_deref() != Some("refill") {
+                    return;
                 }
+                let filled = consumer.pop_samples(&mut scratch);
+                if filled == 0 {
+                    consumer.record_underflow();
+                    let message = js_sys::Object::new();
+                    if Reflect::set(
+                        &message,
+                        &JsValue::from_str("type"),
+                        &JsValue::from_str("empty"),
+                    )
+                    .is_ok()
+                    {
+                        let _ = refill_port.post_message(&message);
+                    }
+                    refill_wake.notify();
+                    return;
+                }
+                let message = js_sys::Object::new();
+                if Reflect::set(
+                    &message,
+                    &JsValue::from_str("type"),
+                    &JsValue::from_str("packet"),
+                )
+                .is_err()
+                    || Reflect::set(
+                        &message,
+                        &JsValue::from_str("sequence"),
+                        &JsValue::from_f64(sequence as f64),
+                    )
+                    .is_err()
+                {
+                    return;
+                }
+                let samples = js_sys::Float32Array::from(&scratch[..filled]);
+                if Reflect::set(&message, &JsValue::from_str("samples"), samples.as_ref()).is_ok()
+                    && refill_port.post_message(&message).is_ok()
+                {
+                    sequence = sequence.saturating_add(1);
+                }
+                refill_wake.notify();
             })
-                as Box<dyn FnMut(web_sys::MessageEvent)>)
-        };
+                as Box<dyn FnMut(web_sys::MessageEvent)>);
         port.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+
         if request.start_paused {
             let suspended = match context.suspend() {
                 Ok(promise) => JsFuture::from(promise).await.is_ok(),
                 Err(_) => false,
             };
             if !suspended || context.state() != web_sys::AudioContextState::Suspended {
+                port.set_onmessage(None);
                 let _ = node.disconnect();
                 if let Ok(promise) = context.close() {
                     let _ = JsFuture::from(promise).await;
@@ -225,83 +180,20 @@ impl WebAudioOutput {
                 return Err(audio_error("audio.open"));
             }
         }
-        Ok(Self {
-            context,
-            node,
-            port,
-            _on_message: on_message,
-            request,
-            next_sequence: 0,
-            pending,
-            pending_meter,
-            pending_drains,
-            next_waiter: 0,
-            queued_frames,
-            meter,
-            underflow_count,
-            callback_count,
-            submitted_samples: 0,
-        })
-    }
 
-    pub fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
-        if packet.sequence != self.next_sequence || packet.channels != self.request.channels {
-            return Err(PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "audio.submit",
-                "audio packet sequence or channel count is invalid",
-            ));
-        }
-        let frames = packet.frame_count();
-        if self.queued_frames.get().saturating_add(frames) > self.request.max_buffered_frames {
-            return Err(PlatformError::new(
-                PlatformErrorCode::QueueOverflow,
-                "audio.submit",
-                "WebAudio bounded queue is full",
-            ));
-        }
-        let message = js_sys::Object::new();
-        Reflect::set(
-            &message,
-            &JsValue::from_str("type"),
-            &JsValue::from_str("packet"),
-        )
-        .map_err(|_| audio_error("audio.submit"))?;
-        Reflect::set(
-            &message,
-            &JsValue::from_str("sequence"),
-            &JsValue::from_f64(packet.sequence as f64),
-        )
-        .map_err(|_| audio_error("audio.submit"))?;
-        let samples = js_sys::Float32Array::from(packet.samples.as_slice());
-        Reflect::set(&message, &JsValue::from_str("samples"), samples.as_ref())
-            .map_err(|_| audio_error("audio.submit"))?;
-        self.pending.borrow_mut().insert(packet.sequence, frames);
-        self.queued_frames
-            .set(self.queued_frames.get().saturating_add(frames));
-        if self.port.post_message(&message).is_err() {
-            self.pending.borrow_mut().remove(&packet.sequence);
-            self.queued_frames
-                .set(self.queued_frames.get().saturating_sub(frames));
-            return Err(audio_error("audio.submit"));
-        }
-        self.submitted_samples = self
-            .submitted_samples
-            .saturating_add(packet.samples.len() as u64);
-        self.next_sequence += 1;
-        Ok(packet.samples)
-    }
-
-    pub fn status(&self) -> AudioOutputStatus {
-        let submitted_frames = self.submitted_samples / u64::from(self.request.channels);
-        let buffered_frames = self.queued_frames.get() as u64;
-        AudioOutputStatus {
-            submitted_frames,
-            played_frames: submitted_frames.saturating_sub(buffered_frames),
-            buffered_frames,
-            underflow_count: self.underflow_count.get(),
-            meter: self.meter.borrow().clone(),
-        }
+        Ok((
+            Self {
+                context,
+                node,
+                port,
+                _on_message: on_message,
+            },
+            producer,
+            AudioDeviceFormat {
+                sample_rate: request.sample_rate,
+                channels: request.channels,
+            },
+        ))
     }
 
     pub async fn pause(&self) -> Result<(), PlatformError> {
@@ -340,104 +232,6 @@ impl WebAudioOutput {
         Ok(())
     }
 
-    pub async fn drain(&mut self) -> Result<AudioMeter, PlatformError> {
-        let target = self.submitted_samples;
-        let timeout = self.request.drain_timeout(target);
-        let waiter_id = self.next_waiter;
-        self.next_waiter = self
-            .next_waiter
-            .checked_add(1)
-            .ok_or_else(|| audio_error("audio.drain"))?;
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.pending_drains
-            .borrow_mut()
-            .push((waiter_id, target, sender));
-        if self.send_meter_request(None).is_err() {
-            self.remove_drain_waiter(waiter_id);
-            return Err(audio_error("audio.drain"));
-        }
-        match tokio::time::timeout(timeout, receiver).await {
-            Ok(Ok(meter)) => Ok(meter),
-            Ok(Err(_)) | Err(_) => {
-                self.remove_drain_waiter(waiter_id);
-                Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.drain",
-                    "AudioWorklet did not drain before the deadline",
-                ))
-            }
-        }
-    }
-
-    pub async fn state(&mut self) -> Result<AudioOutputState, PlatformError> {
-        let meter = self
-            .request_meter(std::time::Duration::from_secs(2))
-            .await?;
-        Ok(AudioOutputState {
-            queued_frames: self.queued_frames.get(),
-            callback_count: self.callback_count.get(),
-            submitted_samples: self.submitted_samples,
-            consumed_samples: meter.sample_count.min(self.submitted_samples),
-            underflow_count: self.underflow_count.get(),
-            meter,
-        })
-    }
-
-    async fn request_meter(
-        &mut self,
-        timeout: std::time::Duration,
-    ) -> Result<AudioMeter, PlatformError> {
-        let request_id = self.next_waiter;
-        self.next_waiter = self
-            .next_waiter
-            .checked_add(1)
-            .ok_or_else(|| audio_error("audio.query"))?;
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.pending_meter.borrow_mut().insert(request_id, sender);
-        if self.send_meter_request(Some(request_id)).is_err() {
-            self.pending_meter.borrow_mut().remove(&request_id);
-            return Err(audio_error("audio.query"));
-        }
-        match tokio::time::timeout(timeout, receiver).await {
-            Ok(Ok(meter)) => Ok(meter),
-            Ok(Err(_)) | Err(_) => {
-                self.pending_meter.borrow_mut().remove(&request_id);
-                Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.query",
-                    "AudioWorklet meter request did not complete",
-                ))
-            }
-        }
-    }
-
-    fn send_meter_request(&self, request_id: Option<u64>) -> Result<(), PlatformError> {
-        let message = js_sys::Object::new();
-        Reflect::set(
-            &message,
-            &JsValue::from_str("type"),
-            &JsValue::from_str("meter"),
-        )
-        .map_err(|_| audio_error("audio.meter"))?;
-        if let Some(request_id) = request_id {
-            Reflect::set(
-                &message,
-                &JsValue::from_str("requestId"),
-                &JsValue::from_f64(request_id as f64),
-            )
-            .map_err(|_| audio_error("audio.meter"))?;
-        }
-        self.port
-            .post_message(&message)
-            .map_err(|_| audio_error("audio.meter"))
-    }
-
-    fn remove_drain_waiter(&self, waiter_id: u64) {
-        self.pending_drains
-            .borrow_mut()
-            .retain(|(id, _, _)| *id != waiter_id);
-    }
-
     pub async fn close(self) -> Result<(), PlatformError> {
         self.port.set_onmessage(None);
         self.node
@@ -452,64 +246,6 @@ impl WebAudioOutput {
         .map(|_| ())
         .map_err(|_| audio_error("audio.close"))
     }
-}
-
-fn update_meter_from_message(
-    data: &JsValue,
-    meter: &mut AudioMeter,
-    underflow_count: &std::rc::Rc<std::cell::Cell<u64>>,
-    callback_count: &std::rc::Rc<std::cell::Cell<u64>>,
-) {
-    if let Some(value) = Reflect::get(data, &JsValue::from_str("sampleCount"))
-        .ok()
-        .and_then(|value| value.as_f64())
-    {
-        meter.sample_count = value.max(0.0) as u64;
-    }
-    if let Some(value) = Reflect::get(data, &JsValue::from_str("peak"))
-        .ok()
-        .and_then(|value| value.as_f64())
-    {
-        meter.peak_dbfs = linear_to_db(value as f32);
-    }
-    if let Some(value) = Reflect::get(data, &JsValue::from_str("rms"))
-        .ok()
-        .and_then(|value| value.as_f64())
-    {
-        meter.rms_dbfs = linear_to_db(value as f32);
-    }
-    if let Some(value) = Reflect::get(data, &JsValue::from_str("underflowCount"))
-        .ok()
-        .and_then(|value| value.as_f64())
-    {
-        underflow_count.set(value.max(0.0) as u64);
-    }
-    if let Some(value) = Reflect::get(data, &JsValue::from_str("callbackCount"))
-        .ok()
-        .and_then(|value| value.as_f64())
-    {
-        callback_count.set(value.max(0.0) as u64);
-    }
-}
-
-fn resolve_drain_waiters(
-    pending: &std::rc::Rc<std::cell::RefCell<Vec<(u64, u64, MeterWaiter)>>>,
-    queued_frames: usize,
-    meter: &AudioMeter,
-) {
-    if queued_frames != 0 {
-        return;
-    }
-    let waiters = std::mem::take(&mut *pending.borrow_mut());
-    let mut remaining = Vec::new();
-    for (waiter_id, target, sender) in waiters {
-        if meter.sample_count >= target {
-            let _ = sender.send(meter.clone());
-        } else {
-            remaining.push((waiter_id, target, sender));
-        }
-    }
-    *pending.borrow_mut() = remaining;
 }
 
 pub(crate) struct WebDecodeSession {
@@ -561,7 +297,7 @@ impl WebDecodeSession {
         });
         let function = Function::new_with_args(
             "configuration, description, data",
-            "return (async () => { const c = JSON.parse(configuration); const descriptionBytes = new Uint8Array(description); const config = {codec: c.codec}; if (descriptionBytes.length) config.description = descriptionBytes; let resolveOutput, rejectOutput; const output = new Promise((resolve, reject) => { resolveOutput = resolve; rejectOutput = reject; }); let decoder; if (c.kind === 'video') { config.codedWidth = c.codedWidth; config.codedHeight = c.codedHeight; decoder = new VideoDecoder({ output: async frame => { try { const bytes = new Uint8Array(frame.allocationSize({format: 'RGBA'})); await frame.copyTo(bytes, {format: 'RGBA'}); resolveOutput({format: `rgba8:${frame.displayWidth}x${frame.displayHeight}`, bytes}); } catch (error) { rejectOutput(error); } finally { frame.close(); } }, error: rejectOutput }); decoder.configure(config); decoder.decode(new EncodedVideoChunk({type: c.keyframe ? 'key' : 'delta', timestamp: 0, data: new Uint8Array(data)})); } else { config.sampleRate = c.sampleRate; config.numberOfChannels = c.numberOfChannels; decoder = new AudioDecoder({ output: async audio => { try { const planes = []; let total = 0; for (let planeIndex = 0; planeIndex < audio.numberOfChannels; planeIndex++) { const size = audio.allocationSize({planeIndex, format: 'f32-planar'}); const plane = new Uint8Array(size); await audio.copyTo(plane, {planeIndex, format: 'f32-planar'}); planes.push(plane); total += size; } const bytes = new Uint8Array(total); let offset = 0; for (const plane of planes) { bytes.set(plane, offset); offset += plane.length; } resolveOutput({format: `f32-planar:${audio.sampleRate}:${audio.numberOfChannels}`, bytes}); } catch (error) { rejectOutput(error); } finally { audio.close(); } }, error: rejectOutput }); decoder.configure(config); decoder.decode(new EncodedAudioChunk({type: 'key', timestamp: 0, data: new Uint8Array(data)})); } try { await decoder.flush(); return await output; } finally { decoder.close(); } })();",
+            "return (async () => { const c = JSON.parse(configuration); const descriptionBytes = new Uint8Array(description); const config = {codec: c.codec}; if (descriptionBytes.length) config.description = descriptionBytes; let resolveOutput, rejectOutput; const output = new Promise((resolve, reject) => { resolveOutput = resolve; rejectOutput = reject; }); let decoder; if (c.kind === 'video') { config.codedWidth = c.codedWidth; config.codedHeight = c.codedHeight; decoder = new VideoDecoder({ output: async frame => { try { const bytes = new Uint8Array(frame.allocationSize({format: 'RGBA'})); await frame.copyTo(bytes, {format: 'RGBA'}); resolveOutput({format: `rgba8:${frame.displayWidth}x${frame.displayHeight}`, bytes}); } catch (error) { rejectOutput(error); } finally { frame.close(); } }, error: rejectOutput }); decoder.configure(config); decoder.decode(new EncodedVideoChunk({type: c.keyframe ? 'key' : 'delta', timestamp: 0, data: new Uint8Array(data)})); } else { config.sampleRate = c.sampleRate; config.numberOfChannels = c.numberOfChannels; decoder = new AudioDecoder({ output: async audio => { try { const channels = audio.numberOfChannels; const frames = audio.numberOfFrames; const planes = []; for (let channel = 0; channel < channels; channel++) { const plane = new Float32Array(frames); await audio.copyTo(plane, {planeIndex: channel, format: 'f32-planar'}); planes.push(plane); } const samples = new Float32Array(frames * channels); for (let frame = 0; frame < frames; frame++) for (let channel = 0; channel < channels; channel++) samples[frame * channels + channel] = planes[channel][frame]; resolveOutput({format: `f32-interleaved:${audio.sampleRate}:${channels}`, bytes: new Uint8Array(samples.buffer)}); } catch (error) { rejectOutput(error); } finally { audio.close(); } }, error: rejectOutput }); decoder.configure(config); decoder.decode(new EncodedAudioChunk({type: 'key', timestamp: 0, data: new Uint8Array(data)})); } try { await decoder.flush(); return await output; } finally { decoder.close(); } })();",
         );
         let description = Uint8Array::from(request.description.as_slice());
         let bytes = Uint8Array::from(request.bytes.as_slice());
@@ -581,11 +317,37 @@ impl WebDecodeSession {
         )
         .to_vec();
         self.next_sequence += 1;
-        Ok(DecodeOutput::CpuBuffer {
-            format,
-            hash: Hash256::from_sha256(&bytes).to_string(),
-            bytes,
-        })
+        if request.kind == DecodeKind::Audio {
+            let mut parts = format.split(':');
+            if parts.next() != Some("f32-interleaved") {
+                return Err(decode_error());
+            }
+            let sample_rate = parts
+                .next()
+                .and_then(|value| value.parse::<u32>().ok())
+                .ok_or_else(decode_error)?;
+            let channels = parts
+                .next()
+                .and_then(|value| value.parse::<u16>().ok())
+                .ok_or_else(decode_error)?;
+            if parts.next().is_some() || !bytes.len().is_multiple_of(4) {
+                return Err(decode_error());
+            }
+            let samples = bytes
+                .chunks_exact(4)
+                .map(|sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]))
+                .collect();
+            Ok(DecodeOutput::AudioPcmF32 {
+                sample_rate,
+                channels,
+                samples,
+            })
+        } else {
+            Ok(DecodeOutput::CpuBuffer {
+                format,
+                bytes: bytes.into(),
+            })
+        }
     }
 }
 

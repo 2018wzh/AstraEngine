@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use astra_core::Hash256;
 use ffmpeg_next as ffmpeg;
 use tempfile::Builder;
 
@@ -96,7 +95,7 @@ fn decode_audio(
         sample_rate,
     )
     .map_err(|error| ffmpeg_error("ASTRA_FFMPEG_RESAMPLE", "create audio resampler", error))?;
-    let mut pcm = Vec::new();
+    let mut pcm = Vec::<i16>::new();
 
     for (packet_stream, packet) in input.packets() {
         if packet_stream.index() != stream_index {
@@ -141,10 +140,10 @@ fn decode_audio(
         provider_id,
         kind: DecodeKind::Audio,
         codec: request.codec.clone(),
-        output: DecodeOutput::CpuBuffer {
-            hash: Hash256::from_sha256(&pcm),
-            bytes: pcm,
-            format: format!("pcm_s16le:{sample_rate}:{channels}"),
+        output: DecodeOutput::AudioPcmI16 {
+            samples: pcm,
+            sample_rate,
+            channels,
         },
         diagnostics: Vec::new(),
     })
@@ -154,7 +153,7 @@ fn drain_audio_frames(
     decoder: &mut ffmpeg::decoder::Audio,
     resampler: &mut ffmpeg::software::resampling::Context,
     channels: u16,
-    pcm: &mut Vec<u8>,
+    pcm: &mut Vec<i16>,
     eos: bool,
 ) -> Result<(), MediaError> {
     loop {
@@ -186,7 +185,7 @@ fn drain_audio_frames(
 fn append_audio_frame(
     frame: &ffmpeg::frame::Audio,
     channels: u16,
-    pcm: &mut Vec<u8>,
+    pcm: &mut Vec<i16>,
 ) -> Result<(), MediaError> {
     if frame.samples() == 0 {
         return Ok(());
@@ -214,9 +213,11 @@ fn append_audio_frame(
             "resampled audio frame is truncated",
         ));
     }
+    let sample_count = byte_count / std::mem::size_of::<i16>();
     if pcm
         .len()
-        .checked_add(byte_count)
+        .checked_add(sample_count)
+        .and_then(|total| total.checked_mul(std::mem::size_of::<i16>()))
         .is_none_or(|total| total > MAX_DECODED_AUDIO_BYTES)
     {
         return Err(decode_error(
@@ -224,7 +225,17 @@ fn append_audio_frame(
             "decoded audio exceeds the bounded CPU buffer budget",
         ));
     }
-    pcm.extend_from_slice(&data[..byte_count]);
+    pcm.reserve(sample_count);
+    // SAFETY: destination capacity was reserved for `sample_count` i16 values;
+    // copying as bytes does not require the FFmpeg source pointer to be aligned.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            data.as_ptr(),
+            pcm.as_mut_ptr().add(pcm.len()).cast::<u8>(),
+            byte_count,
+        );
+        pcm.set_len(pcm.len() + sample_count);
+    }
     Ok(())
 }
 
@@ -302,8 +313,7 @@ fn decode_video(
         kind: DecodeKind::Video,
         codec: request.codec.clone(),
         output: DecodeOutput::CpuBuffer {
-            hash: Hash256::from_sha256(&bgra),
-            bytes: bgra,
+            bytes: bgra.into(),
             format: format!("bgra8:first_frame:{width}x{height}"),
         },
         diagnostics: Vec::new(),

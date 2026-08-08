@@ -1,8 +1,7 @@
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProductRuntimeDescriptor, ProviderBinding,
-    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy, RuntimeOutputDomain,
-    RuntimeOutputSchemaDescriptor, RuntimePersistedCodec, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
-    PROVIDER_POLICY_SCHEMA,
+    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy,
+    PLUGIN_EXTENSION_REGISTRY_SCHEMA, PROVIDER_POLICY_SCHEMA,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -141,7 +140,7 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
                     required_capability: capability.to_string(),
                     engine_version: env!("CARGO_PKG_VERSION").to_string(),
                     rustc_fingerprint: "rustc-stable".to_string(),
-                    feature_fingerprint: "runtime-envelope-v3".to_string(),
+                    feature_fingerprint: "runtime-typed-v3".to_string(),
                     abi_fingerprint: "astra-plugin-abi-v3".to_string(),
                 },
             )
@@ -158,7 +157,7 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
             packaged: true,
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             rustc_fingerprint: "rustc-stable".to_string(),
-            feature_fingerprint: "runtime-envelope-v3".to_string(),
+            feature_fingerprint: "runtime-typed-v3".to_string(),
             abi_fingerprint: "astra-plugin-abi-v3".to_string(),
         })
         .collect();
@@ -166,7 +165,6 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
         schema: PROVIDER_POLICY_SCHEMA.to_string(),
         profile: profile.to_string(),
         renderer: "astra.fixture.headless_presentation".to_string(),
-        decode_fallback: "profile_bound".to_string(),
         runtime_provider: ProductRuntimeDescriptor {
             runtime_id: "native_vn".to_string(),
             product_kind: "visual_novel".to_string(),
@@ -197,48 +195,6 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
             ]
             .into_iter()
             .map(str::to_string)
-            .collect(),
-            output_schemas: [
-                (
-                    RuntimeOutputDomain::Effect,
-                    "astra.vn.runtime_step_effect.v2",
-                    2,
-                ),
-                (
-                    RuntimeOutputDomain::Presentation,
-                    "astra.vn.presentation_command.v2",
-                    2,
-                ),
-                (RuntimeOutputDomain::Audio, "astra.vn.audio_command.v2", 2),
-                (RuntimeOutputDomain::Await, "astra.runtime.await_id.v1", 1),
-                (
-                    RuntimeOutputDomain::Observation,
-                    "astra.product.observation.v1",
-                    1,
-                ),
-                (
-                    RuntimeOutputDomain::Trace,
-                    "astra.vn.runtime_step_trace.v1",
-                    1,
-                ),
-                (
-                    RuntimeOutputDomain::Trace,
-                    "astra.vn.runtime_view_state.v1",
-                    1,
-                ),
-                (
-                    RuntimeOutputDomain::DirtySaveSection,
-                    "astra.runtime.dirty_save_section.v1",
-                    1,
-                ),
-            ]
-            .into_iter()
-            .map(|(domain, schema, major)| RuntimeOutputSchemaDescriptor {
-                domain,
-                schema: schema.to_string(),
-                version: astra_core::SchemaVersion::new(major, 0, 0),
-                codec: RuntimePersistedCodec::Postcard,
-            })
             .collect(),
         },
         bindings: bindings.clone(),

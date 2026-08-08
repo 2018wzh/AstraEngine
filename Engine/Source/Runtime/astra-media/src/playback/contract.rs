@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +63,6 @@ pub struct VideoFramePacket {
     pub duration_us: u64,
     pub width: u32,
     pub height: u32,
-    pub content_hash: Hash256,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -77,7 +75,6 @@ pub struct AudioFramePacket {
     pub sample_rate: u32,
     pub channels: u16,
     pub frame_count: u32,
-    pub content_hash: Hash256,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

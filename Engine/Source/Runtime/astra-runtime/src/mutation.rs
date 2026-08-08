@@ -1,4 +1,4 @@
-use astra_core::{Hash256, SchemaId};
+use astra_core::SchemaId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ pub struct RuntimeMutationRecord {
     pub step: u64,
     pub component_id: ComponentId,
     pub schema: SchemaId,
-    pub before_hash: Hash256,
-    pub after_hash: Hash256,
+    pub before_revision: u64,
+    pub after_revision: u64,
     pub source: String,
 }

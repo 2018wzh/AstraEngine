@@ -22,7 +22,7 @@ pub fn validate_selected_audio_backend(
     selected: AndroidAudioBackend,
 ) -> Result<(), PlatformError> {
     let position = profile
-        .audio
+        .audio_output
         .providers
         .iter()
         .position(|provider| provider == selected.provider_id())

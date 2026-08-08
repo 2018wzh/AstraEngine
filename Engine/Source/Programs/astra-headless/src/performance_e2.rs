@@ -113,8 +113,10 @@ pub fn prepare_profile(
     adapter_identity_hash: Option<String>,
 ) -> Result<(), String> {
     let mut profile: HeadlessHostProfile = read_json(input, "PROFILE")?;
-    if profile.schema == astra_platform::HEADLESS_HOST_PROFILE_V2_SCHEMA {
-        profile.schema = astra_platform::HEADLESS_HOST_PROFILE_SCHEMA.into();
+    if profile.schema != astra_platform::HEADLESS_HOST_PROFILE_SCHEMA {
+        return Err(
+            "ASTRA_HEADLESS_PERFORMANCE_PROFILE_SCHEMA: only headless v3 is accepted".into(),
+        );
     }
     profile.providers.renderer = "wgpu_offscreen".into();
     profile.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
@@ -989,14 +991,12 @@ pub(crate) fn scene2d_workload() -> (SceneFrame, SceneFrame) {
     let texture = TextureFrame {
         width: 512,
         height: 512,
-        hash: Hash256::from_sha256(&texture_bytes),
         rgba8: texture_bytes.into(),
     };
     let glyph = GlyphBitmap {
         width: 64,
         height: 64,
         format: GlyphBitmapFormat::Alpha8,
-        hash: Hash256::from_sha256(&glyph_bytes),
         pixels: glyph_bytes.into(),
     };
     let mut frame = SceneFrame {
@@ -1300,16 +1300,27 @@ mod tests {
     #[astra_headless_test::test]
     fn prepared_performance_profile_requires_timestamped_hardware_gpu() {
         let hash = Hash256::from_sha256(b"fixture").to_string();
-        let mut profile = HeadlessHostProfile::reference(
+        let profile = HeadlessHostProfile::reference(
             "windows-x64",
             "performance.fixture",
             hash.clone(),
             hash,
         );
-        profile.schema = astra_platform::HEADLESS_HOST_PROFILE_V2_SCHEMA.into();
         let temp = tempfile::tempdir().unwrap();
         let input = temp.path().join("input.json");
         let output = temp.path().join("output.json");
+        let mut legacy_profile = profile.clone();
+        legacy_profile.schema = "astra.headless_host_profile.v2".into();
+        write_json(&input, &legacy_profile).unwrap();
+        let error = prepare_profile(
+            &input,
+            &output,
+            PerformanceGpuBackend::Dx12,
+            PerformanceGpuDeviceType::Integrated,
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("ASTRA_HEADLESS_PERFORMANCE_PROFILE_SCHEMA"));
         write_json(&input, &profile).unwrap();
         prepare_profile(
             &input,

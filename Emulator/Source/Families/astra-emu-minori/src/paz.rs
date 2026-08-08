@@ -7,6 +7,7 @@ use std::{
     time::SystemTime,
 };
 
+use astra_byte_source::OwnedByteBuffer;
 use astra_core::Hash256;
 use astra_emu_family_core::{
     validate_decrypt_output, validate_decrypt_request, validate_legacy_vfs_directory_uri,
@@ -716,7 +717,6 @@ impl LegacyMountedVfs for MinoriMountedVfs {
                 entry_id: None,
                 kind: LegacyVfsNodeKind::Directory,
                 size: 0,
-                content_hash: None,
                 archive_role: None,
                 method: None,
             });
@@ -727,7 +727,6 @@ impl LegacyMountedVfs for MinoriMountedVfs {
             entry_id: Some(entry.descriptor.entry_id.clone()),
             kind: LegacyVfsNodeKind::File,
             size: entry.descriptor.unpacked_size,
-            content_hash: None,
             archive_role: Some(entry.descriptor.archive_role.clone()),
             method: Some(entry_method(&entry.descriptor).into()),
         })
@@ -756,10 +755,18 @@ impl LegacyMountedVfs for MinoriMountedVfs {
             ));
         }
         let (decoded, cache_hit) = self.decoded_entry(entry)?;
+        let bytes = OwnedByteBuffer::from_owner(
+            DecodedRange {
+                bytes: decoded,
+                start: offset as usize,
+                end: end as usize,
+            },
+            DecodedRange::as_slice,
+        );
         Ok(LegacyVfsReadResult {
             uri: uri.into(),
             offset,
-            bytes: decoded[offset as usize..end as usize].to_vec(),
+            bytes,
             eof: end == entry.descriptor.unpacked_size,
             cache_hit,
         })
@@ -769,6 +776,18 @@ impl LegacyMountedVfs for MinoriMountedVfs {
         Ok(Box::new(Cursor::new(
             self.decoded_entry(self.entry(uri)?)?.0,
         )))
+    }
+}
+
+struct DecodedRange {
+    bytes: Vec<u8>,
+    start: usize,
+    end: usize,
+}
+
+impl DecodedRange {
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[self.start..self.end]
     }
 }
 
@@ -1756,7 +1775,7 @@ mod tests {
             .iter()
             .all(|node| node.kind == LegacyVfsNodeKind::Directory));
         let read = vfs.read_range("minori:/scr/scr.bin", 3, 4).unwrap();
-        assert_eq!(read.bytes, b"ture");
+        assert_eq!(read.bytes.as_slice(), b"ture");
         assert!(!read.cache_hit);
     }
 
@@ -1798,7 +1817,7 @@ mod tests {
             }
             let vfs = mount_fixture(temp.path(), version);
             let read = vfs.read_range("minori:/voice/voice.bin", 1, 6).unwrap();
-            assert_eq!(read.bytes, b"ixture");
+            assert_eq!(read.bytes.as_slice(), b"ixture");
         }
     }
 }

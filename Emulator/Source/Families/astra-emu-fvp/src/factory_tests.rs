@@ -45,7 +45,8 @@ fn fvp_factory_mounts_nested_entries_with_bounded_ranges_and_streams() {
         mounted
             .read_range("fvp:/graph/bg/scene", 5, 5)
             .unwrap()
-            .bytes,
+            .bytes
+            .as_slice(),
         b"image"
     );
     let mut stream = mounted.open_stream("fvp:/graph/movie/op").unwrap();

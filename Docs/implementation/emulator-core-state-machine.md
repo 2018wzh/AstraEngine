@@ -10,8 +10,8 @@ AstraEmuRuntimeProvider
   -> family-private scheduler
   -> context state machines
   -> basic-block/action mapper
-  -> LegacyEffect list
-  -> DeterministicActionContext host adapter
+  -> LegacyLiveOutput + LegacyControlTransaction
+  -> control transaction + direct host ownership move
 ```
 
 `AstraEmuRuntimeProvider` 是 gameplay runtime provider。`LegacyRuntimeProvider` 是 family facade。family 内部可以把 opcode、tag、syscall、form、thread、fiber 或 coroutine 映射成私有 scheduler/context/basic-block/action 状态机，但这些状态不变成 EngineCore public StateMachine schema。
@@ -25,9 +25,9 @@ Family VM 至少拆成四层：
 | scheduler | legacy thread/context/fiber 顺序、预算、wait queue、input edge | `StateMachineTrace`、diagnostic、snapshot cursor |
 | context | PC、call stack、local/global variables、script resource id、current label | opaque family snapshot section hash |
 | basic block | 连续可执行 opcode/tag/syscall，直到遇到 wait、branch、host call、fault 或预算结束 | ordered action trace |
-| action bridge | 文本、选择、图像、音频、movie、timer、input、save/load、config、patch hook | `LegacyEffect`、`AwaitToken`、presentation/audio command、TextCaptureEvent |
+| action bridge | 文本、选择、图像、音频、movie、timer、input、save/load、config、patch hook | typed scene/PCM/text/video/wait 与 `LegacyControlTransaction` |
 
-Legacy VM 的 mutation 先进入 family-private candidate state。只有当 `step` 返回可序列化 `LegacyEffect` 后，host adapter 才在 fixed tick 边界提交到 `DeterministicActionContext`。Replay 读取录制的 await/provider result，不重新请求 platform provider 或 translation provider。
+Legacy VM 的 mutation 先进入 family-private candidate state。`step` 返回 typed control 与 owned live output 后，host adapter 在 fixed tick 边界原子提交 control；成功后直接移动 scene/PCM allocation，失败则整体 drop-once。Replay 读取已验证的 typed transcript，不重新请求 family、platform 或 translation provider。
 
 ## Multi-context Scheduler
 

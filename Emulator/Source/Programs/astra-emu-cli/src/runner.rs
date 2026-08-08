@@ -15,16 +15,18 @@ use astra_core::{
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7,
-    LegacyPreparedSceneCommitV1, LegacyProbeRequest, LegacyRenderFrameV1, LegacyResourceRead,
-    LegacyRuntimeHostCtx, LegacySceneResourceOperationV1, LegacyTextPresentationV1,
+    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
+    LegacyRenderFrameV1, LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextPresentationV1,
     LegacyTextRegionV1, LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1,
     LegacyVideoMode,
 };
 use astra_emu_family_support::{
-    verify_vfs, LegacyAudioPlaybackService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
+    verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
 };
-use astra_emu_fvp::{decode_fvp_movie, fvp_movie_compatibility, FvpMovieCompatibility};
+use astra_emu_fvp::{
+    fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
+    FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
+};
 use astra_emu_manager_core::{
     AstraEmuRuntimeProvider, CancellationToken, CaseRecord, DesktopGrantedSource,
     DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits, SourceGrant,
@@ -36,25 +38,22 @@ use astra_headless_protocol::{
     TouchPhase, HEADLESS_RUN_REPORT_SCHEMA as STANDARD_HEADLESS_RUN_REPORT_SCHEMA,
 };
 use astra_media::{
-    open_symphonia_audio_stream, DecodeBindingContext, DecodeOutput as MediaDecodeOutput,
-    DecodeProviderRegistry, DecodeRequest, DecodedVideoFrame, DecodedVideoStream,
-    ImageDecodeProvider, MediaError, PlayerDecodedAudio, SymphoniaAudioStreamDecoder,
-    DECODED_VIDEO_STREAM_SCHEMA,
+    DecodeBindingContext, DecodeOutput as MediaDecodeOutput, DecodeProviderRegistry, DecodeRequest,
+    DecodedVideoFrame, ImageDecodeProvider, PlayerDecodedAudio,
 };
 use astra_media_core::{
-    BlendMode, LiveTextureBuffer, LiveTextureFrame, MeshMaterial2D, MeshVertex2D, RectI,
-    SceneCommand, TextureFrame,
+    BlendMode, MeshDraw2D, MeshMaterial2D, MeshVertex2D, OwnedPixelBuffer, RectI, SceneCommand,
+    TextureFrame,
 };
 use astra_observability::{
     sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceSummary,
     PerfettoTraceWriter,
 };
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioPacket, DecodeKind, DecodeOutput, GpuAdapterPolicy,
-    GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
-    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
-    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
-    SurfaceHandle, SurfaceRequest, WindowRequest,
+    DecodeKind, DecodeOutput, GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy,
+    HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy,
+    HeadlessRenderPolicy, PlatformDecodeRequest, PlatformHostClient, PlatformHostFactory,
+    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowRequest,
 };
 #[cfg(windows)]
 use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
@@ -250,15 +249,13 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
         RuntimeLiveWaitKind::Input { keys } => PendingWait::Input(keys),
         RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::Media(media_id),
         RuntimeLiveWaitKind::PresentationFence { .. } => PendingWait::Presentation,
-        RuntimeLiveWaitKind::ProviderCompletion { .. }
-        | RuntimeLiveWaitKind::FamilyOpaque { .. } => PendingWait::Unsupported,
+        RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::Unsupported,
     };
     (token_id, condition)
 }
 
 pub const HEADLESS_RUN_REPORT_SCHEMA: &str = "astra.emu.headless_run_report.v3";
 const FIXED_DELTA_NS: u64 = 16_666_667;
-const MAX_STREAM_DECODED_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_MOVIE_FRAMES: usize = 18_000;
 const MAX_MOVIE_DECODED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_MOVIE_AUDIO_SAMPLES: usize = 64 * 1024 * 1024;
@@ -963,11 +960,9 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             resume: None,
             frame_sample_interval: 1,
             perfetto_trace: launch.perfetto_trace.clone(),
-            perfetto_rfvp_core: launch.family_id.as_str() == "fvp",
             capture_performance_samples: false,
             presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
-            background_audio: true,
             audio_pump: AudioPumpPolicy::Realtime {
                 target_latency_ms: 180,
                 refill_low_water_ms: 120,
@@ -1182,10 +1177,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let scene_cleanup = driver.drain_pending_scene_presents().await;
     let perfetto_cleanup = driver.finish_perfetto().map(|_| ());
     let media_cleanup = driver.close_active_media().await;
-    let audio_cleanup = std::mem::take(&mut driver.audio)
-        .shutdown(&host.client)
-        .await
-        .map(|_| ());
+    let audio_cleanup = driver.audio.shutdown(&host.client).await.map(|_| ());
     drop(driver);
     let runtime_cleanup = runtime.shutdown(open.session_id.clone()).map(|_| ());
     let surface_cleanup = host
@@ -2826,11 +2818,22 @@ struct ActiveVideo {
     stream: ActiveVideoStream,
     audio_stream_id: Option<u32>,
     audio_stream: Option<PlatformAudioCursor>,
+    native_audio_started: bool,
 }
 
 enum ActiveVideoStream {
-    Buffered(DecodedVideoStream),
+    Native(FvpNativeVideoCursor),
     Platform(PlatformVideoCursor),
+}
+
+struct FvpNativeVideoCursor {
+    packets: FvpMoviePacketStream,
+    pending: Option<FvpMovieFrame>,
+    current: Option<DecodedVideoFrame>,
+    audio: Vec<FvpMovieAudioChunk>,
+    inferred_frame_step_us: u64,
+    duration_us: Option<u64>,
+    ended: bool,
 }
 
 enum PlatformVideoEvent {
@@ -2845,7 +2848,7 @@ enum PlatformAudioEvent {
 
 /// Lazily decoded PlatformHost audio for native movie playback. The decoder
 /// owns the encoded source session and only transfers bounded PCM chunks to the
-/// shared `LegacyAudioPlaybackService`; no historical sample buffer is rebuilt.
+/// shared `FamilyAudioService`; no historical sample buffer is rebuilt.
 struct PlatformAudioCursor {
     client: PlatformHostClient,
     session: astra_platform::DecodeSessionHandle,
@@ -2857,7 +2860,11 @@ struct PlatformAudioCursor {
 }
 
 impl PlatformAudioCursor {
-    async fn open(client: PlatformHostClient, codec: &str, bytes: Vec<u8>) -> Result<Self, String> {
+    async fn open(
+        client: PlatformHostClient,
+        codec: &str,
+        bytes: astra_byte_source::OwnedByteBuffer,
+    ) -> Result<Self, String> {
         let session = client
             .open_decode(DecodeKind::Audio)
             .await
@@ -2990,7 +2997,7 @@ async fn platform_audio_cursor_worker(
                     coded_height: None,
                     keyframe: false,
                     stream_action: astra_platform::DecodeStreamAction::Next,
-                    bytes: Vec::new(),
+                    bytes: Vec::new().into(),
                 },
             )
             .await
@@ -3034,11 +3041,20 @@ fn parse_platform_audio_event(
     output: DecodeOutput,
     expected: Option<(u32, u16)>,
 ) -> Result<PlatformAudioEvent, String> {
-    let DecodeOutput::CpuBuffer { format, bytes, .. } = output else {
-        return Err("ASTRA_EMU_NATIVE_AUDIO_OUTPUT_KIND".to_owned());
+    let audio = match output {
+        DecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            samples,
+        } => PlayerDecodedAudio::from_i16(sample_rate, channels, samples, MAX_MOVIE_AUDIO_SAMPLES),
+        DecodeOutput::AudioPcmF32 {
+            sample_rate,
+            channels,
+            samples,
+        } => PlayerDecodedAudio::from_f32(sample_rate, channels, samples, MAX_MOVIE_AUDIO_SAMPLES),
+        _ => return Err("ASTRA_EMU_NATIVE_AUDIO_OUTPUT_KIND".to_owned()),
     };
-    let audio = PlayerDecodedAudio::parse(&format, &bytes, MAX_MOVIE_AUDIO_SAMPLES)
-        .map_err(|error| error.to_string())?;
+    let audio = audio.map_err(|error| error.to_string())?;
     if expected.is_some_and(|(sample_rate, channels)| {
         audio.sample_rate != sample_rate || audio.channels != channels
     }) {
@@ -3060,7 +3076,11 @@ struct PlatformVideoCursor {
 }
 
 impl PlatformVideoCursor {
-    async fn open(client: PlatformHostClient, codec: &str, bytes: Vec<u8>) -> Result<Self, String> {
+    async fn open(
+        client: PlatformHostClient,
+        codec: &str,
+        bytes: astra_byte_source::OwnedByteBuffer,
+    ) -> Result<Self, String> {
         let session = client
             .open_decode(DecodeKind::Video)
             .await
@@ -3090,21 +3110,12 @@ impl PlatformVideoCursor {
                 return Err(error.to_string());
             }
         };
-        let cursor = match output {
-            DecodeOutput::CpuBuffer { format, bytes, .. }
-                if format
-                    == format!(
-                        "postcard:{}",
-                        astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA
-                    ) =>
-            {
-                astra_media::DecodedVideoStreamCursor::decode(&bytes)
-                    .map_err(|error| error.to_string())
-            }
+        let stream_duration_us = match output {
+            DecodeOutput::VideoStreamStart { duration_us, .. } => Ok(duration_us),
             _ => Err("ASTRA_EMU_NATIVE_VIDEO_CURSOR_KIND".to_owned()),
         };
-        let cursor = match cursor {
-            Ok(cursor) => cursor,
+        let stream_duration_us = match stream_duration_us {
+            Ok(duration_us) => duration_us,
             Err(error) => {
                 let _ = client.close_decode(session).await;
                 return Err(error);
@@ -3124,12 +3135,12 @@ impl PlatformVideoCursor {
                     coded_height: None,
                     keyframe: false,
                     stream_action: astra_platform::DecodeStreamAction::Next,
-                    bytes: Vec::new(),
+                    bytes: Vec::new().into(),
                 },
             )
             .await;
         let first = match first {
-            Ok(output) => match parse_platform_video_event(output, &cursor) {
+            Ok(output) => match parse_platform_video_event(output) {
                 Ok(PlatformVideoEvent::Frame(frame)) => frame,
                 Ok(PlatformVideoEvent::End { .. }) => {
                     let _ = client.close_decode(session).await;
@@ -3147,20 +3158,12 @@ impl PlatformVideoCursor {
         };
         let (sender, receiver) = tokio_mpsc::channel(16);
         let worker_client = client.clone();
-        let worker_cursor = cursor.clone();
         let first_frame_end_us = first
             .pts_us
             .checked_add(first.duration_us)
             .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_DURATION_BOUNDS".to_owned())?;
         let worker = tokio::spawn(async move {
-            platform_video_cursor_worker(
-                worker_client,
-                session,
-                worker_cursor,
-                first_frame_end_us,
-                sender,
-            )
-            .await;
+            platform_video_cursor_worker(worker_client, session, first_frame_end_us, sender).await;
         });
         let mut queue = VecDeque::new();
         queue.push_back(first);
@@ -3172,7 +3175,7 @@ impl PlatformVideoCursor {
             queue,
             current: None,
             ended: false,
-            duration_us: None,
+            duration_us: stream_duration_us,
             closed: false,
         })
     }
@@ -3247,7 +3250,6 @@ impl Drop for PlatformVideoCursor {
 async fn platform_video_cursor_worker(
     client: PlatformHostClient,
     session: astra_platform::DecodeSessionHandle,
-    cursor: astra_media::DecodedVideoStreamCursor,
     mut last_frame_end_us: u64,
     sender: tokio_mpsc::Sender<Result<PlatformVideoEvent, String>>,
 ) {
@@ -3267,7 +3269,7 @@ async fn platform_video_cursor_worker(
                     coded_height: None,
                     keyframe: false,
                     stream_action: astra_platform::DecodeStreamAction::Next,
-                    bytes: Vec::new(),
+                    bytes: Vec::new().into(),
                 },
             )
             .await
@@ -3278,7 +3280,7 @@ async fn platform_video_cursor_worker(
                 return;
             }
         };
-        match parse_platform_video_event(output, &cursor) {
+        match parse_platform_video_event(output) {
             Ok(PlatformVideoEvent::Frame(frame)) => {
                 last_frame_end_us = match frame.pts_us.checked_add(frame.duration_us) {
                     Some(end) if end > frame.pts_us => end,
@@ -3322,83 +3324,156 @@ async fn platform_video_cursor_worker(
     }
 }
 
-fn parse_platform_video_event(
-    output: DecodeOutput,
-    cursor: &astra_media::DecodedVideoStreamCursor,
-) -> Result<PlatformVideoEvent, String> {
-    let DecodeOutput::CpuBuffer {
-        format,
-        bytes,
-        hash,
-    } = output
-    else {
-        return Err("ASTRA_EMU_NATIVE_VIDEO_OUTPUT_KIND".to_owned());
-    };
-    if format == format!("postcard:{}", astra_media::DECODED_VIDEO_FRAME_SCHEMA) {
-        let frame = astra_media::DecodedVideoFrame::decode(&bytes, MAX_MOVIE_DECODED_BYTES as u64)
-            .map_err(|error| error.to_string())?;
-        if frame.width != cursor.width || frame.height != cursor.height {
-            return Err("ASTRA_EMU_NATIVE_VIDEO_DIMENSIONS_DRIFT".to_owned());
+fn parse_platform_video_event(output: DecodeOutput) -> Result<PlatformVideoEvent, String> {
+    match output {
+        DecodeOutput::VideoFrame {
+            sequence,
+            pts_us,
+            duration_us,
+            width,
+            height,
+            bgra8,
+        } => Ok(PlatformVideoEvent::Frame(DecodedVideoFrame {
+            sequence,
+            pts_us,
+            duration_us,
+            width,
+            height,
+            bgra8,
+        })),
+        DecodeOutput::VideoStreamEnd { .. } => Ok(PlatformVideoEvent::End { duration_us: 0 }),
+        _ => Err("ASTRA_EMU_NATIVE_VIDEO_OUTPUT_KIND".to_owned()),
+    }
+}
+
+impl FvpNativeVideoCursor {
+    fn open(extension: &str, bytes: astra_byte_source::OwnedByteBuffer) -> Result<Self, String> {
+        Ok(Self {
+            packets: open_fvp_movie_packet_stream(
+                extension,
+                bytes,
+                MAX_MOVIE_FRAMES,
+                MAX_MOVIE_DECODED_BYTES,
+                MAX_MOVIE_AUDIO_SAMPLES,
+                16,
+            )
+            .map_err(|error| error.to_string())?,
+            pending: None,
+            current: None,
+            audio: Vec::new(),
+            inferred_frame_step_us: 34_000,
+            duration_us: None,
+            ended: false,
+        })
+    }
+
+    fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
+        let previous_sequence = self.current.as_ref().map(|frame| frame.sequence);
+        while let Some(packet) = self.packets.try_next().map_err(|error| error.to_string())? {
+            match packet {
+                FvpMoviePacket::Video(next) => {
+                    let Some(previous) = self.pending.replace(next) else {
+                        continue;
+                    };
+                    let next_pts_us = self
+                        .pending
+                        .as_ref()
+                        .expect("pending frame was replaced")
+                        .pts_ms
+                        .checked_mul(1_000)
+                        .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
+                    let pts_us = previous
+                        .pts_ms
+                        .checked_mul(1_000)
+                        .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
+                    let duration_us = next_pts_us
+                        .checked_sub(pts_us)
+                        .filter(|duration| *duration > 0)
+                        .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_ORDER".to_owned())?;
+                    self.inferred_frame_step_us = duration_us;
+                    if pts_us <= elapsed_us {
+                        self.current = Some(native_video_frame(previous, duration_us)?);
+                    }
+                    if next_pts_us > elapsed_us {
+                        break;
+                    }
+                }
+                FvpMoviePacket::Audio(chunk) => self.audio.push(chunk),
+                FvpMoviePacket::End => {
+                    if let Some(last) = self.pending.take() {
+                        let pts_us = last
+                            .pts_ms
+                            .checked_mul(1_000)
+                            .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
+                        if pts_us <= elapsed_us || self.current.is_none() {
+                            self.current =
+                                Some(native_video_frame(last, self.inferred_frame_step_us)?);
+                        }
+                        self.duration_us =
+                            Some(pts_us.checked_add(self.inferred_frame_step_us).ok_or_else(
+                                || "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned(),
+                            )?);
+                    }
+                    self.ended = true;
+                    break;
+                }
+            }
         }
-        return Ok(PlatformVideoEvent::Frame(frame));
+        Ok(previous_sequence != self.current.as_ref().map(|frame| frame.sequence))
     }
-    if astra_media::is_decoded_video_cpu_buffer_format(&format) {
-        let frame = astra_media::DecodedVideoFrame::from_cpu_buffer(
-            &format,
-            bytes,
-            &hash,
-            MAX_MOVIE_DECODED_BYTES as u64,
-        )
-        .map_err(|error| error.to_string())?;
-        if frame.width != cursor.width || frame.height != cursor.height {
-            return Err("ASTRA_EMU_NATIVE_VIDEO_DIMENSIONS_DRIFT".to_owned());
-        }
-        return Ok(PlatformVideoEvent::Frame(frame));
+
+    fn drain_audio(&mut self) -> Vec<FvpMovieAudioChunk> {
+        std::mem::take(&mut self.audio)
     }
-    if format
-        == format!(
-            "postcard:{}",
-            astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA
-        )
-    {
-        let end: astra_media::DecodedVideoStreamCursorEnd = postcard::from_bytes(&bytes)
-            .map_err(|error| format!("ASTRA_EMU_NATIVE_VIDEO_END_DECODE:{error}"))?;
-        end.validate_against(cursor)
-            .map_err(|error| error.to_string())?;
-        return Ok(PlatformVideoEvent::End { duration_us: 0 });
+}
+
+fn native_video_frame(frame: FvpMovieFrame, duration_us: u64) -> Result<DecodedVideoFrame, String> {
+    let pts_us = frame
+        .pts_ms
+        .checked_mul(1_000)
+        .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
+    let mut bgra8 = frame.rgba8;
+    for pixel in bgra8.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
     }
-    Err("ASTRA_EMU_NATIVE_VIDEO_OUTPUT_FORMAT".to_owned())
+    Ok(DecodedVideoFrame {
+        sequence: frame.pts_ms.saturating_add(1),
+        pts_us,
+        duration_us,
+        width: frame.width,
+        height: frame.height,
+        bgra8: bgra8.into(),
+    })
 }
 
 impl ActiveVideoStream {
     async fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
         match self {
-            Self::Buffered(_) => Ok(true),
+            Self::Native(cursor) => cursor.advance(elapsed_us),
             Self::Platform(cursor) => cursor.advance(elapsed_us).await,
         }
     }
 
     fn frame_for_elapsed(&self, elapsed_us: u64) -> Option<&DecodedVideoFrame> {
         match self {
-            Self::Buffered(stream) => stream
-                .frames
-                .iter()
-                .rev()
-                .find(|frame| frame.pts_us <= elapsed_us),
+            Self::Native(cursor) => cursor
+                .current
+                .as_ref()
+                .filter(|frame| frame.pts_us <= elapsed_us),
             Self::Platform(cursor) => cursor.current_frame(),
         }
     }
 
     fn duration_us(&self) -> Option<u64> {
         match self {
-            Self::Buffered(stream) => Some(stream.duration_us),
+            Self::Native(cursor) => cursor.duration_us,
             Self::Platform(cursor) => cursor.duration_us(),
         }
     }
 
     async fn close(&mut self) -> Result<(), String> {
         match self {
-            Self::Buffered(_) => Ok(()),
+            Self::Native(_) => Ok(()),
             Self::Platform(cursor) => cursor.close().await,
         }
     }
@@ -3409,9 +3484,7 @@ impl ActiveVideoStream {
 /// subresource updates; it never rasterizes a framebuffer on the CPU.
 #[derive(Default)]
 struct GpuSceneAdapter {
-    resources: astra_emu_family_api::LegacySceneResourceStateV1,
     textures: BTreeMap<u32, GpuSceneTexture>,
-    generation: u64,
     width: u32,
     height: u32,
     draws: Vec<LegacyDrawV1>,
@@ -3462,167 +3535,6 @@ impl GpuScenePrepareMetrics {
 }
 
 impl GpuSceneAdapter {
-    #[cfg_attr(not(test), allow(dead_code))]
-    fn prepare(
-        &mut self,
-        commit: LegacyPreparedSceneCommitV1,
-    ) -> Result<(SceneFrame, GpuScenePrepareMetrics), String> {
-        let LegacyPreparedSceneCommitV1 {
-            packet,
-            next_resources,
-            reset_resources,
-        } = commit;
-        let prior_resources = if reset_resources {
-            astra_emu_family_api::LegacySceneResourceStateV1::default()
-        } else {
-            self.resources.clone()
-        };
-        let verified = prior_resources
-            .validate(&packet)
-            .map_err(|error| format!("ASTRA_EMU_NATIVE_GPU_SCENE_PREPARE:{}", error.code()))?;
-        if verified != next_resources {
-            return Err("ASTRA_EMU_NATIVE_GPU_SCENE_COMMIT_MISMATCH".into());
-        }
-
-        let mut textures = if reset_resources {
-            BTreeMap::new()
-        } else {
-            self.textures.clone()
-        };
-        let mut generation = self.generation;
-        let mut metrics = GpuScenePrepareMetrics {
-            resource_operations: packet.resources.len() as u64,
-            draw_count: packet.draws.len() as u64,
-            ..GpuScenePrepareMetrics::default()
-        };
-        let mut commands = Vec::with_capacity(
-            packet.resources.len().saturating_mul(2)
-                + packet.draws.len().saturating_mul(3)
-                + self.textures.len(),
-        );
-        if reset_resources {
-            for texture in self.textures.values() {
-                commands.push(SceneCommand::ReleaseResource {
-                    resource_id: texture.resource_id.clone(),
-                });
-            }
-        }
-        for operation in packet.resources {
-            match operation {
-                LegacySceneResourceOperationV1::CreateTexture(texture) => {
-                    metrics.create_bytes = metrics
-                        .create_bytes
-                        .checked_add(texture.pixels.len() as u64)
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-                    generation = generation.checked_add(1).ok_or_else(|| {
-                        "ASTRA_EMU_NATIVE_GPU_RESOURCE_GENERATION_OVERFLOW".to_owned()
-                    })?;
-                    let rgba8: Arc<[u8]> = Arc::from(gpu_rgba8_owned(
-                        texture.width,
-                        texture.height,
-                        texture.format,
-                        texture.pixels,
-                    )?);
-                    let resource_id = gpu_resource_id(texture.texture_id, generation);
-                    commands.push(SceneCommand::UploadTexture {
-                        resource_id: resource_id.clone(),
-                        frame: TextureFrame::from_rgba8(
-                            texture.width,
-                            texture.height,
-                            Arc::clone(&rgba8),
-                        )
-                        .map_err(|error| error.to_string())?,
-                    });
-                    textures.insert(
-                        texture.texture_id,
-                        GpuSceneTexture {
-                            width: texture.width,
-                            height: texture.height,
-                            format: texture.format,
-                            revision: 0,
-                            resource_id,
-                        },
-                    );
-                }
-                LegacySceneResourceOperationV1::UpdateTexture(update) => {
-                    metrics.update_bytes = metrics
-                        .update_bytes
-                        .checked_add(update.pixels.len() as u64)
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-                    let old = textures
-                        .get(&update.texture_id)
-                        .cloned()
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_TEXTURE_MISSING".to_owned())?;
-                    if old.format != update.format
-                        || update
-                            .x
-                            .checked_add(update.width)
-                            .is_none_or(|right| right > old.width)
-                        || update
-                            .y
-                            .checked_add(update.height)
-                            .is_none_or(|bottom| bottom > old.height)
-                    {
-                        return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_REGION".into());
-                    }
-                    let rgba8: Arc<[u8]> = Arc::from(gpu_rgba8_owned(
-                        update.width,
-                        update.height,
-                        update.format,
-                        update.pixels,
-                    )?);
-                    commands.push(SceneCommand::UpdateTextureRegion {
-                        resource_id: old.resource_id.clone(),
-                        x: update.x,
-                        y: update.y,
-                        width: update.width,
-                        height: update.height,
-                        hash: Hash256::from_sha256(&rgba8),
-                        rgba8,
-                    });
-                    textures.insert(
-                        update.texture_id,
-                        GpuSceneTexture {
-                            width: old.width,
-                            height: old.height,
-                            format: old.format,
-                            revision: old.revision,
-                            resource_id: old.resource_id,
-                        },
-                    );
-                }
-                LegacySceneResourceOperationV1::DestroyTexture { texture_id } => {
-                    let texture = textures
-                        .remove(&texture_id)
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_TEXTURE_MISSING".to_owned())?;
-                    commands.push(SceneCommand::ReleaseResource {
-                        resource_id: texture.resource_id,
-                    });
-                }
-            }
-        }
-        commands.extend(gpu_draw_commands(&textures, &packet.draws)?);
-        self.resources = verified;
-        self.textures = textures;
-        self.generation = generation;
-        self.width = packet.width;
-        self.height = packet.height;
-        self.draws = packet.draws;
-        metrics.live_textures = self.textures.len() as u64;
-        metrics.generation = self.generation;
-        Ok((
-            SceneFrame {
-                sequence: 0,
-                width: self.width,
-                height: self.height,
-                clear_rgba: [0, 0, 0, 255],
-                commands,
-                semantics: None,
-            },
-            metrics,
-        ))
-    }
-
     fn prepare_live(
         &mut self,
         transaction: RuntimeLiveSceneTransaction,
@@ -3631,17 +3543,14 @@ impl GpuSceneAdapter {
         if transaction.sequence <= self.last_live_sequence {
             return Err("ASTRA_EMU_NATIVE_GPU_LIVE_SEQUENCE_REWIND".into());
         }
-        let mut textures = if transaction.reset_resources {
-            BTreeMap::new()
-        } else {
-            self.textures.clone()
-        };
+        let reset_resources = transaction.reset_resources;
+        let mut mutations: BTreeMap<u32, Option<GpuSceneTexture>> = BTreeMap::new();
         let mut commands = Vec::with_capacity(
             transaction.resources.len().saturating_mul(2)
                 + transaction.draws.len().saturating_mul(3)
-                + textures.len(),
+                + self.textures.len(),
         );
-        if transaction.reset_resources {
+        if reset_resources {
             for texture in self.textures.values() {
                 commands.push(SceneCommand::ReleaseResource {
                     resource_id: texture.resource_id.clone(),
@@ -3663,7 +3572,9 @@ impl GpuSceneAdapter {
                     format,
                     pixels,
                 } => {
-                    if textures.contains_key(&texture_id) {
+                    if resolve_gpu_texture(&self.textures, &mutations, reset_resources, texture_id)
+                        .is_some()
+                    {
                         return Err("ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_EXISTS".into());
                     }
                     metrics.create_bytes = metrics
@@ -3671,25 +3582,23 @@ impl GpuSceneAdapter {
                         .checked_add(pixels.len() as u64)
                         .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
                     let format = runtime_live_texture_format(format);
-                    let rgba8 = LiveTextureBuffer::from_vec(gpu_rgba8_owned(
-                        width, height, format, pixels,
-                    )?);
+                    let rgba8 = gpu_rgba8_owned(width, height, format, pixels)?;
                     let resource_id = gpu_resource_id(texture_id, generation);
-                    let frame = LiveTextureFrame::from_buffer(width, height, rgba8)
+                    let frame = TextureFrame::from_buffer(width, height, rgba8)
                         .map_err(|error| error.to_string())?;
-                    commands.push(SceneCommand::UploadLiveTexture {
+                    commands.push(SceneCommand::UploadTexture {
                         resource_id: resource_id.clone(),
                         frame,
                     });
-                    textures.insert(
+                    mutations.insert(
                         texture_id,
-                        GpuSceneTexture {
+                        Some(GpuSceneTexture {
                             width,
                             height,
                             format,
                             revision: generation,
                             resource_id,
-                        },
+                        }),
                     );
                 }
                 RuntimeLiveSceneResourceOperation::UpdateTexture {
@@ -3706,22 +3615,25 @@ impl GpuSceneAdapter {
                         .update_bytes
                         .checked_add(pixels.len() as u64)
                         .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-                    let old = textures
-                        .get(&texture_id)
-                        .cloned()
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_MISSING".to_owned())?;
+                    let old = resolve_gpu_texture(
+                        &self.textures,
+                        &mutations,
+                        reset_resources,
+                        texture_id,
+                    )
+                    .cloned()
+                    .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_MISSING".to_owned())?;
                     let format = runtime_live_texture_format(format);
                     if old.format != format
+                        || generation <= old.revision
                         || x.checked_add(width).is_none_or(|right| right > old.width)
                         || y.checked_add(height)
                             .is_none_or(|bottom| bottom > old.height)
                     {
                         return Err("ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_REGION".into());
                     }
-                    let rgba8 = LiveTextureBuffer::from_vec(gpu_rgba8_owned(
-                        width, height, format, pixels,
-                    )?);
-                    commands.push(SceneCommand::UpdateLiveTextureRegion {
+                    let rgba8 = gpu_rgba8_owned(width, height, format, pixels)?;
+                    commands.push(SceneCommand::UpdateTextureRegion {
                         resource_id: old.resource_id.clone(),
                         x,
                         y,
@@ -3729,24 +3641,33 @@ impl GpuSceneAdapter {
                         height,
                         rgba8,
                     });
-                    textures.insert(
+                    mutations.insert(
                         texture_id,
-                        GpuSceneTexture {
+                        Some(GpuSceneTexture {
                             width: old.width,
                             height: old.height,
                             format: old.format,
                             revision: generation,
                             resource_id: old.resource_id,
-                        },
+                        }),
                     );
                 }
                 RuntimeLiveSceneResourceOperation::DestroyTexture {
                     texture_id,
-                    generation: _,
+                    generation,
                 } => {
-                    let texture = textures
-                        .remove(&texture_id)
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_MISSING".to_owned())?;
+                    let texture = resolve_gpu_texture(
+                        &self.textures,
+                        &mutations,
+                        reset_resources,
+                        texture_id,
+                    )
+                    .cloned()
+                    .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_MISSING".to_owned())?;
+                    if generation <= texture.revision {
+                        return Err("ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_GENERATION".into());
+                    }
+                    mutations.insert(texture_id, None);
                     commands.push(SceneCommand::ReleaseResource {
                         resource_id: texture.resource_id,
                     });
@@ -3758,21 +3679,23 @@ impl GpuSceneAdapter {
             .into_iter()
             .map(legacy_draw_from_live)
             .collect::<Result<Vec<_>, String>>()?;
-        commands.extend(gpu_draw_commands(&textures, &draws)?);
-        self.resources.textures = textures
-            .iter()
-            .map(|(texture_id, texture)| {
-                (
-                    *texture_id,
-                    astra_emu_family_api::LegacySceneTextureDescriptorV1 {
-                        width: texture.width,
-                        height: texture.height,
-                        format: texture.format,
-                    },
-                )
-            })
-            .collect();
-        self.textures = textures;
+        commands.extend(gpu_draw_commands(&draws, |texture_id| {
+            resolve_gpu_texture(&self.textures, &mutations, reset_resources, texture_id)
+                .map(|texture| texture.resource_id.clone())
+        })?);
+        if reset_resources {
+            self.textures.clear();
+        }
+        for (texture_id, mutation) in mutations {
+            match mutation {
+                Some(texture) => {
+                    self.textures.insert(texture_id, texture);
+                }
+                None => {
+                    self.textures.remove(&texture_id);
+                }
+            }
+        }
         self.width = transaction.width;
         self.height = transaction.height;
         self.draws = draws;
@@ -3804,7 +3727,11 @@ impl GpuSceneAdapter {
             width: self.width,
             height: self.height,
             clear_rgba: [0, 0, 0, 255],
-            commands: gpu_draw_commands(&self.textures, &self.draws)?,
+            commands: gpu_draw_commands(&self.draws, |texture_id| {
+                self.textures
+                    .get(&texture_id)
+                    .map(|texture| texture.resource_id.clone())
+            })?,
             semantics: None,
         })
     }
@@ -3840,45 +3767,65 @@ fn is_scene_resource_command(command: &SceneCommand) -> bool {
     )
 }
 
+fn resolve_gpu_texture<'a>(
+    textures: &'a BTreeMap<u32, GpuSceneTexture>,
+    mutations: &'a BTreeMap<u32, Option<GpuSceneTexture>>,
+    reset_resources: bool,
+    texture_id: u32,
+) -> Option<&'a GpuSceneTexture> {
+    mutations
+        .get(&texture_id)
+        .map(Option::as_ref)
+        .unwrap_or_else(|| {
+            (!reset_resources)
+                .then(|| textures.get(&texture_id))
+                .flatten()
+        })
+}
+
 fn gpu_draw_commands(
-    textures: &BTreeMap<u32, GpuSceneTexture>,
     draws: &[LegacyDrawV1],
+    resolve_texture: impl Fn(u32) -> Option<String>,
 ) -> Result<Vec<SceneCommand>, String> {
-    let mut commands = Vec::with_capacity(draws.len().saturating_mul(3));
-    for (draw_index, draw) in draws.iter().enumerate() {
-        if let Some(scissor) = draw.scissor {
-            if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
-                return Err("ASTRA_EMU_NATIVE_GPU_SCISSOR_INVALID".into());
-            }
-            commands.push(SceneCommand::PushClip {
-                rect: RectI::new(
+    if draws.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut vertices = Vec::with_capacity(draws.len().saturating_mul(4));
+    let mut indices = Vec::with_capacity(draws.len().saturating_mul(6));
+    let mut mesh_draws = Vec::with_capacity(draws.len());
+    for draw in draws {
+        let scissor = draw
+            .scissor
+            .map(|scissor| {
+                if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
+                    return Err("ASTRA_EMU_NATIVE_GPU_SCISSOR_INVALID".to_owned());
+                }
+                Ok(RectI::new(
                     scissor.x,
                     scissor.y,
                     scissor.width as u32,
                     scissor.height as u32,
-                ),
-            });
-        }
+                ))
+            })
+            .transpose()?;
         let (material, texture_id) = if draw.texture_id == u32::MAX {
             (MeshMaterial2D::Solid, None)
         } else {
-            let texture = textures
-                .get(&draw.texture_id)
+            let resource_id = resolve_texture(draw.texture_id)
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_TEXTURE_MISSING".to_owned())?;
-            (
-                MeshMaterial2D::ColorTexture,
-                Some(texture.resource_id.clone()),
-            )
+            (MeshMaterial2D::ColorTexture, Some(resource_id))
         };
-        let vertices = draw
-            .vertices
-            .map(gpu_vertex)
-            .into_iter()
-            .collect::<Vec<_>>();
-        commands.push(SceneCommand::Mesh2D {
-            id: format!("rfvp-draw-{draw_index}"),
-            vertices: Arc::from(vertices),
-            indices: Arc::from(vec![0, 1, 2, 2, 1, 3]),
+        let vertex_start = u32::try_from(vertices.len())
+            .map_err(|_| "ASTRA_EMU_NATIVE_GPU_VERTEX_BOUNDS".to_owned())?;
+        let index_start = u32::try_from(indices.len())
+            .map_err(|_| "ASTRA_EMU_NATIVE_GPU_INDEX_BOUNDS".to_owned())?;
+        vertices.extend(draw.vertices.map(gpu_vertex));
+        indices.extend_from_slice(&[0, 1, 2, 2, 1, 3]);
+        mesh_draws.push(MeshDraw2D {
+            vertex_start,
+            vertex_count: 4,
+            index_start,
+            index_count: 6,
             material,
             texture_id,
             opacity: 1.0,
@@ -3889,12 +3836,14 @@ fn gpu_draw_commands(
                 astra_emu_family_api::LegacyBlendMode::Multiply => BlendMode::Multiply,
                 astra_emu_family_api::LegacyBlendMode::Screen => BlendMode::Screen,
             },
+            scissor,
         });
-        if draw.scissor.is_some() {
-            commands.push(SceneCommand::PopClip);
-        }
     }
-    Ok(commands)
+    Ok(vec![SceneCommand::MeshBatch2D {
+        vertices: vertices.into(),
+        indices: indices.into(),
+        draws: mesh_draws.into(),
+    }])
 }
 
 fn gpu_resource_id(texture_id: u32, generation: u64) -> String {
@@ -3908,7 +3857,7 @@ fn runtime_live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextur
     }
 }
 
-fn rgba8_to_luma_alpha8(rgba8: Vec<u8>) -> Vec<u8> {
+fn rgba8_to_luma_alpha8(rgba8: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(rgba8.len() / 2);
     for pixel in rgba8.chunks_exact(4) {
         let luma = ((u16::from(pixel[0]) * 77
@@ -3965,8 +3914,8 @@ fn gpu_rgba8_owned(
     width: u32,
     height: u32,
     format: LegacyTextureFormat,
-    pixels: Vec<u8>,
-) -> Result<Vec<u8>, String> {
+    pixels: astra_byte_source::OwnedByteBuffer,
+) -> Result<OwnedPixelBuffer, String> {
     let channels = match format {
         LegacyTextureFormat::Rgba8 => 4usize,
         LegacyTextureFormat::LumaAlpha8 => 2usize,
@@ -3984,11 +3933,14 @@ fn gpu_rgba8_owned(
         return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_LENGTH".into());
     }
     Ok(match format {
-        LegacyTextureFormat::Rgba8 => pixels,
-        LegacyTextureFormat::LumaAlpha8 => pixels
-            .chunks_exact(2)
-            .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
-            .collect(),
+        LegacyTextureFormat::Rgba8 => OwnedPixelBuffer::from_owned(pixels),
+        LegacyTextureFormat::LumaAlpha8 => OwnedPixelBuffer::from_vec(
+            pixels
+                .as_slice()
+                .chunks_exact(2)
+                .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
+                .collect(),
+        ),
     })
 }
 
@@ -4053,12 +4005,10 @@ struct RuntimeDriver<'a> {
     media_timings_ns: Vec<u64>,
     present_timings_ns: Vec<u64>,
     perfetto: Option<NativePerfettoCapture>,
-    perfetto_rfvp_core: bool,
     capture_performance_samples: bool,
     performance_memory_after_warmup: Option<astra_observability::ProcessMemorySample>,
     scene_full_resync_count: u64,
     last_step_resource_activity: bool,
-    live_path_guards: LivePathGuardCounters,
 }
 
 enum PendingAudioCommand {
@@ -4091,11 +4041,9 @@ struct RuntimeDriverConfig<'a> {
     resume: Option<HeadlessDriverResumeV1>,
     frame_sample_interval: u64,
     perfetto_trace: Option<PathBuf>,
-    perfetto_rfvp_core: bool,
     capture_performance_samples: bool,
     presentation: PresentationPath,
     presentation_substeps: u8,
-    background_audio: bool,
     audio_pump: AudioPumpPolicy,
 }
 
@@ -4116,23 +4064,6 @@ enum AudioPumpPolicy {
         target_latency_ms: u32,
         refill_low_water_ms: u32,
     },
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct LivePathGuardCounters {
-    intermediate_pcm_copy_bytes: u64,
-}
-
-impl LivePathGuardCounters {
-    fn validate_zero(self) -> Result<(), String> {
-        if self.intermediate_pcm_copy_bytes != 0 {
-            return Err(format!(
-                "ASTRA_EMU_LIVE_PATH_GUARD:intermediate_pcm_copy_bytes={}",
-                self.intermediate_pcm_copy_bytes,
-            ));
-        }
-        Ok(())
-    }
 }
 
 struct NativePerfettoCapture {
@@ -4633,11 +4564,9 @@ async fn execute_sequence(
             resume: config.resume_driver,
             frame_sample_interval: config.frame_sample_interval,
             perfetto_trace: config.perfetto_trace,
-            perfetto_rfvp_core: false,
             capture_performance_samples: config.capture_performance_samples,
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
-            background_audio: false,
             audio_pump: AudioPumpPolicy::FixedTick,
         },
     )?;
@@ -4907,13 +4836,6 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn finish_perfetto(&mut self) -> Result<Option<PerfettoTraceSummary>, String> {
-        self.live_path_guards.validate_zero()?;
-        if let Some(perfetto) = self.perfetto.as_mut() {
-            perfetto.counter(
-                "intermediate_pcm_copy_bytes",
-                self.live_path_guards.intermediate_pcm_copy_bytes,
-            )?;
-        }
         self.perfetto
             .take()
             .map(NativePerfettoCapture::finish)
@@ -4970,14 +4892,10 @@ impl<'a> RuntimeDriver<'a> {
             pending_scene_presents: VecDeque::new(),
             state_revision: 0,
             terminal: false,
-            audio: if config.background_audio {
-                AudioExecutor::Worker(LegacyAudioPlaybackService::start_with_client(
-                    platform.clone(),
-                    false,
-                )?)
-            } else {
-                AudioExecutor::Deterministic(HeadlessAudioExecutor::default())
-            },
+            audio: AudioExecutor::new(FamilyAudioService::start_with_client(
+                platform.clone(),
+                false,
+            )?),
             pending_audio_commands: VecDeque::new(),
             video: None,
             pending_video_restore: None,
@@ -5002,12 +4920,10 @@ impl<'a> RuntimeDriver<'a> {
                 .perfetto_trace
                 .map(NativePerfettoCapture::new)
                 .transpose()?,
-            perfetto_rfvp_core: config.perfetto_rfvp_core,
             capture_performance_samples: config.capture_performance_samples,
             performance_memory_after_warmup: None,
             scene_full_resync_count: 0,
             last_step_resource_activity: false,
-            live_path_guards: LivePathGuardCounters::default(),
         };
         if let Some(resume) = config.resume {
             driver.fixed_step = resume.fixed_step;
@@ -5437,40 +5353,27 @@ impl<'a> RuntimeDriver<'a> {
             event = "astra.emu.native_provider_step_timing",
             fixed_step = next_step,
             duration_ns = runtime_duration_ns,
-            persisted_output_count = output.persisted.len(),
             "measured provider/runtime output boundary"
         );
         self.runtime_timings_ns.push(runtime_duration_ns);
-        if self.perfetto_rfvp_core {
-            // This is the measured dynamic hosted-provider call, including its
-            // ABI boundary. Fine-grained VM phases are emitted only when the
-            // hosted observer supplies them; this outer slice is never used as
-            // a substitute for those phase timings.
-            self.record_perfetto_phase("rfvp.vm", 6, runtime_started)?;
-        }
-        self.record_perfetto_phase("runtime.family_ffi", 6, runtime_started)?;
+        // The host can measure only the complete provider call here. VM and
+        // Family FFI phases require timestamps from their actual owners; do
+        // not duplicate this duration under narrower names.
+        self.record_perfetto_phase("runtime.provider_step", 6, runtime_started)?;
         let world_transaction_started = Instant::now();
-        if !output.persisted.is_empty() {
-            return Err("ASTRA_EMU_LIVE_PERSISTED_OUTPUT_REJECTED".into());
-        }
         let live = output.live;
         self.state_revision = live.state_revision;
         let coverage = live.coverage;
-        if coverage.pcm_copied_bytes != 0 {
-            return Err("ASTRA_EMU_LIVE_PCM_COPY_REJECTED".into());
-        }
-        self.live_path_guards.intermediate_pcm_copy_bytes = self
-            .live_path_guards
-            .intermediate_pcm_copy_bytes
-            .saturating_add(coverage.pcm_copied_bytes);
         self.next_step_mode = RuntimeStepMode::Live;
         self.fixed_step = next_step;
         // Complete the owner-side transaction slice before emitting counters
         // observed at its end. Writing those counters first would make the
         // later complete event carry an earlier start timestamp.
-        self.record_perfetto_phase("runtime.world_transaction", 1, world_transaction_started)?;
+        self.record_perfetto_phase("runtime.live_output_accept", 1, world_transaction_started)?;
         self.record_perfetto_counter("rfvp.capture_bytes", coverage.capture_bytes)?;
         self.record_perfetto_counter("rfvp.operation_bytes", coverage.operation_bytes)?;
+        self.record_perfetto_counter("rfvp.scene_moved_bytes", coverage.scene_moved_bytes)?;
+        self.record_perfetto_counter("rfvp.scene_copied_bytes", coverage.scene_copied_bytes)?;
         self.record_perfetto_counter("rfvp.pcm_moved_bytes", coverage.pcm_moved_bytes)?;
         self.record_perfetto_counter("rfvp.pcm_copied_bytes", coverage.pcm_copied_bytes)?;
         let mut rendered = false;
@@ -5481,20 +5384,13 @@ impl<'a> RuntimeDriver<'a> {
         for transaction in live.scenes {
             let scene_started = Instant::now();
             self.queue_scene_commit_live(transaction)?;
-            self.record_perfetto_phase("scene.validation", 7, scene_started)?;
-            self.record_perfetto_phase("scene.resource_mutation", 7, scene_started)?;
-            self.record_perfetto_phase("gpu.upload", 7, scene_started)?;
+            self.record_perfetto_phase("scene.transaction_enqueue", 7, scene_started)?;
             rendered = true;
         }
         for scene in live.resource_scenes {
-            let capture_started = Instant::now();
+            let scene_started = Instant::now();
             self.queue_resource_scene_live(scene)?;
-            self.record_perfetto_phase("rfvp.capture", 7, capture_started)?;
-            self.record_perfetto_phase("vfs.range_read", 7, capture_started)?;
-            self.record_perfetto_phase("media.worker", 9, capture_started)?;
-            self.record_perfetto_phase("scene.format_conversion", 7, capture_started)?;
-            self.record_perfetto_phase("scene.resource_mutation", 7, capture_started)?;
-            self.record_perfetto_phase("gpu.upload", 7, capture_started)?;
+            self.record_perfetto_phase("scene.transaction_enqueue", 7, scene_started)?;
             rendered = true;
         }
         for packet in live.audio {
@@ -5570,7 +5466,7 @@ impl<'a> RuntimeDriver<'a> {
             self.state_trace.extend_from_slice(event.event.as_bytes());
             self.state_trace.push(b':');
             self.state_trace
-                .extend_from_slice(&(event.payload.len() as u64).to_le_bytes());
+                .extend_from_slice(&(event.value.len() as u64).to_le_bytes());
             self.state_trace.push(b'\n');
         }
         for mutation in live.blackboard {
@@ -5635,9 +5531,6 @@ impl<'a> RuntimeDriver<'a> {
             None
         };
         self.record_perfetto_phase("audio.refill", 8, audio_refill_started)?;
-        if audio_telemetry.is_some() {
-            self.record_perfetto_phase("audio.callback", 8, audio_refill_started)?;
-        }
         let video_started = Instant::now();
         let video_changed = self.advance_video().await?;
         self.media_timings_ns.push(elapsed_ns(media_started)?);
@@ -5887,7 +5780,7 @@ impl<'a> RuntimeDriver<'a> {
             }
             let pixels = match format {
                 LegacyTextureFormat::Rgba8 => bytes,
-                LegacyTextureFormat::LumaAlpha8 => rgba8_to_luma_alpha8(bytes),
+                LegacyTextureFormat::LumaAlpha8 => rgba8_to_luma_alpha8(&bytes).into(),
             };
             if let Some(retained) = retained {
                 resources.push(RuntimeLiveSceneResourceOperation::UpdateTexture {
@@ -6073,77 +5966,10 @@ impl<'a> RuntimeDriver<'a> {
             .rsplit_once('.')
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_EXTENSION_MISSING".to_owned())?;
-        let elapsed_ns = self
-            .fixed_step
-            .saturating_sub(started_step)
-            .saturating_mul(self.delta_ns);
         let (stream, audio_stream_id, audio_stream) = match fvp_movie_compatibility(&extension) {
             FvpMovieCompatibility::Native => {
-                let movie = decode_fvp_movie(
-                    &extension,
-                    &bytes,
-                    MAX_MOVIE_FRAMES,
-                    MAX_MOVIE_DECODED_BYTES,
-                    MAX_MOVIE_AUDIO_SAMPLES,
-                )
-                .map_err(|error| error.to_string())?;
-                let audio_stream_id = if self.audio_enabled
-                    && matches!(mode, LegacyVideoMode::ModalWithAudio)
-                {
-                    match movie.audio {
-                        Some(audio) => {
-                            let stream_id = MOVIE_AUDIO_STREAM_BASE
-                                .checked_add(self.movie_audio_sequence)
-                                .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
-                            self.movie_audio_sequence = self
-                                .movie_audio_sequence
-                                .checked_add(1)
-                                .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
-                            self.audio
-                                .play_buffered_movie(
-                                    stream_id,
-                                    audio.sample_rate,
-                                    audio.channels,
-                                    audio.samples,
-                                    elapsed_ns,
-                                    self.platform,
-                                )
-                                .await?;
-                            Some(stream_id)
-                        }
-                        None => None,
-                    }
-                } else {
-                    None
-                };
-                (
-                    ActiveVideoStream::Buffered(decoded_native_video_stream(
-                        movie.frames,
-                        movie.duration_ms,
-                    )?),
-                    audio_stream_id,
-                    None,
-                )
-            }
-            FvpMovieCompatibility::PlatformProviderRequired => {
-                if self.gpu_scene.is_some() {
-                    tracing::info!(
-                        event = "astra_emu_native_video_platform_stream_open",
-                        codec = extension.as_str(),
-                        "using PlatformHost incremental video decode"
-                    );
-                    let wants_audio =
-                        self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio);
-                    let (video_bytes, audio_bytes) = if wants_audio {
-                        let audio_bytes = bytes;
-                        (audio_bytes.clone(), Some(audio_bytes))
-                    } else {
-                        (bytes, None)
-                    };
-                    let video_stream =
-                        PlatformVideoCursor::open(self.platform.clone(), &extension, video_bytes)
-                            .await?;
-                    let (audio_stream_id, audio_stream) = if wants_audio {
+                let audio_stream_id =
+                    if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
                         let stream_id = MOVIE_AUDIO_STREAM_BASE
                             .checked_add(self.movie_audio_sequence)
                             .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
@@ -6151,65 +5977,90 @@ impl<'a> RuntimeDriver<'a> {
                             .movie_audio_sequence
                             .checked_add(1)
                             .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
-                        // Video and audio are separate PlatformHost decode sessions;
-                        // the second session receives the one necessary encoded
-                        // source hand-off, while decoded payloads stay chunked.
-                        let mut audio_stream = PlatformAudioCursor::open(
-                            self.platform.clone(),
-                            &extension,
-                            audio_bytes.ok_or_else(|| {
-                                "ASTRA_EMU_NATIVE_AUDIO_SOURCE_MISSING".to_owned()
-                            })?,
-                        )
+                        Some(stream_id)
+                    } else {
+                        None
+                    };
+                (
+                    ActiveVideoStream::Native(FvpNativeVideoCursor::open(&extension, bytes)?),
+                    audio_stream_id,
+                    None,
+                )
+            }
+            FvpMovieCompatibility::PlatformProviderRequired => {
+                tracing::info!(
+                    event = "astra_emu_native_video_platform_stream_open",
+                    codec = extension.as_str(),
+                    "using PlatformHost incremental video decode"
+                );
+                let wants_audio =
+                    self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio);
+                let (video_bytes, audio_bytes) = if wants_audio {
+                    let audio_bytes = bytes;
+                    (audio_bytes.clone(), Some(audio_bytes))
+                } else {
+                    (bytes, None)
+                };
+                let video_stream =
+                    PlatformVideoCursor::open(self.platform.clone(), &extension, video_bytes)
                         .await?;
-                        let chunks = match audio_stream.drain_ready() {
-                            Ok(chunks) => chunks,
-                            Err(error) => {
-                                let _ = audio_stream.close().await;
-                                return Err(error);
-                            }
-                        };
-                        let mut chunks = chunks.into_iter();
-                        let first = match chunks.next() {
-                            Some(first) => first,
-                            None => {
-                                let _ = audio_stream.close().await;
-                                return Err("ASTRA_EMU_NATIVE_AUDIO_FIRST_CHUNK_MISSING".to_owned());
-                            }
-                        };
-                        if let Err(error) = self.audio.begin_platform_movie(stream_id, first) {
+                let (audio_stream_id, audio_stream) = if wants_audio {
+                    let stream_id = MOVIE_AUDIO_STREAM_BASE
+                        .checked_add(self.movie_audio_sequence)
+                        .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
+                    self.movie_audio_sequence = self
+                        .movie_audio_sequence
+                        .checked_add(1)
+                        .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
+                    // Video and audio are separate PlatformHost decode sessions;
+                    // the second session receives the same shared encoded owner,
+                    // while decoded payloads stay chunked.
+                    let mut audio_stream = PlatformAudioCursor::open(
+                        self.platform.clone(),
+                        &extension,
+                        audio_bytes
+                            .ok_or_else(|| "ASTRA_EMU_NATIVE_AUDIO_SOURCE_MISSING".to_owned())?,
+                    )
+                    .await?;
+                    let chunks = match audio_stream.drain_ready() {
+                        Ok(chunks) => chunks,
+                        Err(error) => {
                             let _ = audio_stream.close().await;
                             return Err(error);
                         }
-                        for chunk in chunks {
-                            if let Err(error) = self.audio.append_platform_movie(
-                                stream_id,
-                                chunk.sample_rate,
-                                chunk.channels,
-                                chunk.samples,
-                            ) {
-                                let _ = audio_stream.close().await;
-                                return Err(error);
-                            }
-                        }
-                        (Some(stream_id), Some(audio_stream))
-                    } else {
-                        (None, None)
                     };
-                    (
-                        ActiveVideoStream::Platform(video_stream),
-                        audio_stream_id,
-                        audio_stream,
-                    )
+                    let mut chunks = chunks.into_iter();
+                    let first = match chunks.next() {
+                        Some(first) => first,
+                        None => {
+                            let _ = audio_stream.close().await;
+                            return Err("ASTRA_EMU_NATIVE_AUDIO_FIRST_CHUNK_MISSING".to_owned());
+                        }
+                    };
+                    if let Err(error) = self.audio.begin_platform_movie(stream_id, first) {
+                        let _ = audio_stream.close().await;
+                        return Err(error);
+                    }
+                    for chunk in chunks {
+                        if let Err(error) = self.audio.append_platform_movie(
+                            stream_id,
+                            chunk.sample_rate,
+                            chunk.channels,
+                            chunk.samples,
+                        ) {
+                            let _ = audio_stream.close().await;
+                            return Err(error);
+                        }
+                    }
+                    (Some(stream_id), Some(audio_stream))
                 } else {
-                    (
-                        ActiveVideoStream::Buffered(
-                            self.decode_platform_video(&extension, bytes).await?,
-                        ),
-                        None,
-                        None,
-                    )
-                }
+                    (None, None)
+                };
+                (
+                    ActiveVideoStream::Platform(video_stream),
+                    audio_stream_id,
+                    audio_stream,
+                )
             }
             FvpMovieCompatibility::Unsupported => {
                 return Err("ASTRA_EMU_HEADLESS_VIDEO_CODEC_UNSUPPORTED".into());
@@ -6219,7 +6070,7 @@ impl<'a> RuntimeDriver<'a> {
             event = "astra_emu_headless_video_opened",
             codec = extension,
             decoded_frame_count = match &stream {
-                ActiveVideoStream::Buffered(stream) => stream.frames.len() as u64,
+                ActiveVideoStream::Native(_) => 0,
                 ActiveVideoStream::Platform(_) => 1,
             },
             duration_us = stream.duration_us(),
@@ -6236,146 +6087,9 @@ impl<'a> RuntimeDriver<'a> {
             stream,
             audio_stream_id,
             audio_stream,
+            native_audio_started: false,
         });
         Ok(())
-    }
-
-    async fn decode_platform_video(
-        &self,
-        extension: &str,
-        bytes: Vec<u8>,
-    ) -> Result<DecodedVideoStream, String> {
-        let decode = self
-            .platform
-            .open_decode(DecodeKind::Video)
-            .await
-            .map_err(|e| e.to_string())?;
-        let start = self
-            .platform
-            .decode(
-                decode,
-                PlatformDecodeRequest {
-                    sequence: 1,
-                    kind: DecodeKind::Video,
-                    codec: extension.to_owned(),
-                    description: Vec::new(),
-                    sample_rate: None,
-                    channels: None,
-                    coded_width: None,
-                    coded_height: None,
-                    keyframe: true,
-                    stream_action: astra_platform::DecodeStreamAction::Start,
-                    bytes,
-                },
-            )
-            .await;
-        let cursor = match start {
-            Ok(DecodeOutput::CpuBuffer { format, bytes, .. })
-                if format
-                    == format!(
-                        "postcard:{}",
-                        astra_media::DECODED_VIDEO_STREAM_CURSOR_SCHEMA
-                    ) =>
-            {
-                astra_media::DecodedVideoStreamCursor::decode(&bytes)
-                    .map_err(|error| error.to_string())?
-            }
-            Ok(_) => return Err("ASTRA_EMU_HEADLESS_VIDEO_DESCRIPTOR_KIND".into()),
-            Err(error) => {
-                let _ = self.platform.close_decode(decode).await;
-                return Err(error.to_string());
-            }
-        };
-        let mut frames = Vec::with_capacity(
-            usize::try_from(cursor.max_frames)
-                .map_err(|_| "ASTRA_EMU_HEADLESS_VIDEO_FRAME_COUNT".to_owned())?,
-        );
-        let mut sequence = 2_u64;
-        loop {
-            let output = self
-                .platform
-                .decode(
-                    decode,
-                    PlatformDecodeRequest {
-                        sequence,
-                        kind: DecodeKind::Video,
-                        codec: String::new(),
-                        description: Vec::new(),
-                        sample_rate: None,
-                        channels: None,
-                        coded_width: None,
-                        coded_height: None,
-                        keyframe: false,
-                        stream_action: astra_platform::DecodeStreamAction::Next,
-                        bytes: Vec::new(),
-                    },
-                )
-                .await
-                .map_err(|error| error.to_string())?;
-            let DecodeOutput::CpuBuffer {
-                format,
-                bytes,
-                hash,
-            } = output
-            else {
-                return Err("ASTRA_EMU_HEADLESS_VIDEO_FRAME_KIND".into());
-            };
-            if format == format!("postcard:{}", astra_media::DECODED_VIDEO_FRAME_SCHEMA) {
-                frames.push(
-                    astra_media::DecodedVideoFrame::decode(&bytes, MAX_MOVIE_DECODED_BYTES as u64)
-                        .map_err(|error| error.to_string())?,
-                );
-                sequence = sequence
-                    .checked_add(1)
-                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_SEQUENCE".to_owned())?;
-                continue;
-            }
-            if astra_media::is_decoded_video_cpu_buffer_format(&format) {
-                frames.push(
-                    astra_media::DecodedVideoFrame::from_cpu_buffer(
-                        &format,
-                        bytes,
-                        &hash,
-                        MAX_MOVIE_DECODED_BYTES as u64,
-                    )
-                    .map_err(|error| error.to_string())?,
-                );
-                sequence = sequence
-                    .checked_add(1)
-                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_SEQUENCE".to_owned())?;
-                continue;
-            }
-            if format
-                == format!(
-                    "postcard:{}",
-                    astra_media::DECODED_VIDEO_STREAM_CURSOR_END_SCHEMA
-                )
-            {
-                let end: astra_media::DecodedVideoStreamCursorEnd = postcard::from_bytes(&bytes)
-                    .map_err(|error| format!("ASTRA_EMU_HEADLESS_VIDEO_END_DECODE:{error}"))?;
-                end.validate_against(&cursor)
-                    .map_err(|error| error.to_string())?;
-                break;
-            }
-            return Err("ASTRA_EMU_HEADLESS_VIDEO_STREAM_OUTPUT_FORMAT".into());
-        }
-        self.platform
-            .close_decode(decode)
-            .await
-            .map_err(|error| error.to_string())?;
-        let duration_us = frames
-            .last()
-            .and_then(|frame| frame.pts_us.checked_add(frame.duration_us))
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_DURATION_MISSING".to_owned())?;
-        let stream = DecodedVideoStream {
-            schema: DECODED_VIDEO_STREAM_SCHEMA.into(),
-            duration_us,
-            frames,
-        };
-        stream
-            .validate(MAX_MOVIE_FRAMES as u64, MAX_MOVIE_DECODED_BYTES as u64)
-            .map_err(|error| error.to_string())?;
-        Ok(stream)
     }
 
     async fn advance_video(&mut self) -> Result<bool, String> {
@@ -6432,6 +6146,47 @@ impl<'a> RuntimeDriver<'a> {
             let changed = video.stream.advance(elapsed_us).await?;
             (changed, video.stream.duration_us())
         };
+        let (native_audio, native_stream_id, native_audio_started) = {
+            let video = self
+                .video
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
+            let chunks = match &mut video.stream {
+                ActiveVideoStream::Native(cursor) => cursor.drain_audio(),
+                ActiveVideoStream::Platform(_) => Vec::new(),
+            };
+            (chunks, video.audio_stream_id, video.native_audio_started)
+        };
+        if !native_audio.is_empty() {
+            let stream_id = native_stream_id
+                .ok_or_else(|| "ASTRA_EMU_NATIVE_AUDIO_STREAM_ID_MISSING".to_owned())?;
+            let mut chunks = native_audio.into_iter();
+            if !native_audio_started {
+                let first = chunks
+                    .next()
+                    .ok_or_else(|| "ASTRA_EMU_NATIVE_AUDIO_FIRST_CHUNK_MISSING".to_owned())?;
+                self.audio.begin_platform_movie(
+                    stream_id,
+                    PlayerDecodedAudio {
+                        sample_rate: first.sample_rate,
+                        channels: first.channels,
+                        samples: first.samples,
+                    },
+                )?;
+                self.video
+                    .as_mut()
+                    .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?
+                    .native_audio_started = true;
+            }
+            for chunk in chunks {
+                self.audio.append_platform_movie(
+                    stream_id,
+                    chunk.sample_rate,
+                    chunk.channels,
+                    chunk.samples,
+                )?;
+            }
+        }
         if duration_us.is_some_and(|duration| elapsed_us >= duration) {
             let mut completed = self
                 .video
@@ -6442,7 +6197,10 @@ impl<'a> RuntimeDriver<'a> {
                 elapsed_us,
                 "completed bounded Headless video stream"
             );
-            if let Some(stream_id) = completed.audio_stream_id {
+            if let Some(stream_id) = completed
+                .audio_stream_id
+                .filter(|_| completed.audio_stream.is_some() || completed.native_audio_started)
+            {
                 if let Some(audio_stream) = completed.audio_stream.as_mut() {
                     audio_stream.close().await?;
                 }
@@ -6502,95 +6260,6 @@ impl<'a> RuntimeDriver<'a> {
     }
 }
 
-fn decoded_native_video_stream(
-    frames: Vec<astra_emu_fvp::FvpMovieFrame>,
-    duration_ms: u64,
-) -> Result<DecodedVideoStream, String> {
-    let duration_us = duration_ms
-        .checked_mul(1_000)
-        .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_TIMELINE_BOUNDS".to_owned())?;
-    let mut decoded = Vec::with_capacity(frames.len());
-    let mut frames = frames.into_iter().enumerate().peekable();
-    while let Some((index, frame)) = frames.next() {
-        let pts_us = frame
-            .pts_ms
-            .checked_mul(1_000)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_TIMELINE_BOUNDS".to_owned())?;
-        let next_pts_us = match frames.peek() {
-            Some((_, next)) => next
-                .pts_ms
-                .checked_mul(1_000)
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_TIMELINE_BOUNDS".to_owned())?,
-            None => duration_us,
-        };
-        let frame_duration_us = next_pts_us
-            .checked_sub(pts_us)
-            .filter(|duration| *duration > 0)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_TIMELINE_ORDER".to_owned())?;
-        let mut bgra8 = frame.rgba8;
-        for pixel in bgra8.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-        }
-        decoded.push(DecodedVideoFrame {
-            sequence: index as u64 + 1,
-            pts_us,
-            duration_us: frame_duration_us,
-            width: frame.width,
-            height: frame.height,
-            content_hash: Hash256::from_sha256(&bgra8),
-            bgra8,
-        });
-    }
-    let stream = DecodedVideoStream {
-        schema: DECODED_VIDEO_STREAM_SCHEMA.into(),
-        duration_us,
-        frames: decoded,
-    };
-    stream
-        .validate(MAX_MOVIE_FRAMES as u64, MAX_MOVIE_DECODED_BYTES as u64)
-        .map_err(|error| error.to_string())?;
-    Ok(stream)
-}
-
-#[derive(Default)]
-struct AudioStream {
-    sample_rate: u32,
-    channels: u16,
-    samples: Vec<f32>,
-    cursor: usize,
-    decoder: Option<SymphoniaAudioStreamDecoder>,
-    stream_source: Option<(String, Arc<[u8]>)>,
-    end_of_stream: bool,
-    fully_buffered: bool,
-    integer_pcm: bool,
-    playing: bool,
-    paused: bool,
-    awaiting_priming: bool,
-    repeat: bool,
-    volume: f32,
-    pan: f32,
-    output: Option<AudioOutputHandle>,
-    packet_sequence: u64,
-}
-
-struct HeadlessAudioExecutor {
-    streams: BTreeMap<u32, AudioStream>,
-    master_volume: f32,
-    meter_trace: Vec<u8>,
-    observed_underflows: BTreeMap<u32, u64>,
-}
-
-enum AudioExecutor {
-    Deterministic(HeadlessAudioExecutor),
-    Worker(LegacyAudioPlaybackService),
-}
-
-impl Default for AudioExecutor {
-    fn default() -> Self {
-        Self::Deterministic(HeadlessAudioExecutor::default())
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 struct AudioPumpTelemetry {
     active_streams: u64,
@@ -6602,81 +6271,46 @@ struct AudioPumpTelemetry {
     decoder_refills: u64,
 }
 
+struct AudioExecutor {
+    service: Option<FamilyAudioService>,
+}
+
 impl AudioExecutor {
+    fn new(service: FamilyAudioService) -> Self {
+        Self {
+            service: Some(service),
+        }
+    }
+
+    fn service(&self) -> Result<&FamilyAudioService, String> {
+        self.service
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_SESSION_CLOSED".to_owned())
+    }
+
     fn uses_resource_worker(&self) -> bool {
-        matches!(self, Self::Worker(_))
+        true
     }
 
     fn underflow_count(&self) -> Result<u64, String> {
-        match self {
-            Self::Deterministic(executor) => executor.underflow_count(),
-            Self::Worker(service) => Ok(service.telemetry().underflow_count),
-        }
+        Ok(self.service()?.telemetry().underflow_count)
     }
 
-    async fn reset_for_restore(&mut self, platform: &PlatformHostClient) -> Result<(), String> {
-        match self {
-            Self::Deterministic(executor) => executor.reset_for_restore(platform).await,
-            Self::Worker(service) => service.reset(),
-        }
+    async fn reset_for_restore(&mut self, _platform: &PlatformHostClient) -> Result<(), String> {
+        self.service()?.reset()
     }
 
     async fn execute(
         &mut self,
         command: LegacyAudioCommandV1,
-        resource: Option<Vec<u8>>,
-        platform: &PlatformHostClient,
+        resource: Option<astra_byte_source::OwnedByteBuffer>,
+        _platform: &PlatformHostClient,
     ) -> Result<(), String> {
-        match self {
-            Self::Deterministic(executor) => executor.execute(command, resource, platform).await,
-            Self::Worker(service) => service.execute(command, resource),
-        }
+        self.service()?.execute(command, resource)
     }
 
     async fn execute_live_pcm(&mut self, packet: LegacyAudioPacketV7) -> Result<(), String> {
-        match self {
-            Self::Deterministic(executor) => executor.execute_live_pcm(packet).await,
-            Self::Worker(service) => service.execute_live_pcm(packet),
-        }
-    }
-
-    async fn play_buffered_movie(
-        &mut self,
-        stream_id: u32,
-        sample_rate: u32,
-        channels: u16,
-        mut samples: Vec<f32>,
-        elapsed_ns: u64,
-        platform: &PlatformHostClient,
-    ) -> Result<(), String> {
-        match self {
-            Self::Deterministic(executor) => {
-                executor
-                    .play_buffered_movie(
-                        stream_id,
-                        sample_rate,
-                        channels,
-                        samples,
-                        elapsed_ns,
-                        platform,
-                    )
-                    .await
-            }
-            Self::Worker(service) => {
-                let elapsed_frames =
-                    elapsed_ns.saturating_mul(u64::from(sample_rate)) / 1_000_000_000;
-                let elapsed_samples = usize::try_from(elapsed_frames)
-                    .ok()
-                    .and_then(|frames| frames.checked_mul(usize::from(channels)))
-                    .ok_or_else(|| "ASTRA_EMU_AUDIO_MOVIE_TIMELINE".to_owned())?;
-                if elapsed_samples >= samples.len() {
-                    samples.clear();
-                } else if elapsed_samples != 0 {
-                    samples.drain(..elapsed_samples);
-                }
-                service.begin_movie_stream(stream_id, sample_rate, channels, samples)
-            }
-        }
+        self.service()?.execute_live_pcm(packet)
     }
 
     fn begin_platform_movie(
@@ -6684,15 +6318,12 @@ impl AudioExecutor {
         stream_id: u32,
         chunk: PlayerDecodedAudio,
     ) -> Result<(), String> {
-        match self {
-            Self::Worker(service) => service.begin_movie_stream(
-                stream_id,
-                chunk.sample_rate,
-                chunk.channels,
-                chunk.samples,
-            ),
-            Self::Deterministic(_) => Err("ASTRA_EMU_NATIVE_AUDIO_PLATFORM_REQUIRES_WORKER".into()),
-        }
+        self.service()?.begin_movie_stream(
+            stream_id,
+            chunk.sample_rate,
+            chunk.channels,
+            chunk.samples,
+        )
     }
 
     fn append_platform_movie(
@@ -6702,980 +6333,48 @@ impl AudioExecutor {
         channels: u16,
         samples: Vec<f32>,
     ) -> Result<(), String> {
-        match self {
-            Self::Worker(service) => {
-                service.append_movie_stream(stream_id, sample_rate, channels, samples)
-            }
-            Self::Deterministic(_) => Err("ASTRA_EMU_NATIVE_AUDIO_PLATFORM_REQUIRES_WORKER".into()),
-        }
+        self.service()?
+            .append_movie_stream(stream_id, sample_rate, channels, samples)
     }
 
     async fn close_movie_stream(
         &mut self,
         stream_id: u32,
-        platform: &PlatformHostClient,
+        _platform: &PlatformHostClient,
     ) -> Result<(), String> {
-        match self {
-            Self::Deterministic(executor) => executor.close_movie_stream(stream_id, platform).await,
-            Self::Worker(service) => service.stop_movie_pcm(stream_id),
-        }
+        self.service()?.stop_movie_pcm(stream_id)
     }
 
     async fn pump(
         &mut self,
-        platform: &PlatformHostClient,
-        policy: AudioPumpPolicy,
+        _platform: &PlatformHostClient,
+        _policy: AudioPumpPolicy,
     ) -> Result<AudioPumpTelemetry, String> {
-        match self {
-            Self::Deterministic(executor) => executor.pump(platform, policy).await,
-            Self::Worker(service) => {
-                service.pump()?;
-                let telemetry = service.telemetry();
-                Ok(AudioPumpTelemetry {
-                    active_streams: telemetry.active_streams,
-                    packets_submitted: telemetry.packet_count,
-                    submitted_frames: telemetry.submitted_frames,
-                    consumed_frames: telemetry.consumed_frames,
-                    queued_frames: telemetry.queued_frames,
-                    underflow_count: telemetry.underflow_count,
-                    decoder_refills: telemetry.decoder_refills,
-                })
-            }
-        }
+        let service = self.service()?;
+        service.pump()?;
+        let telemetry = service.telemetry();
+        Ok(AudioPumpTelemetry {
+            active_streams: telemetry.active_streams,
+            packets_submitted: telemetry.packet_count,
+            submitted_frames: telemetry.submitted_frames,
+            consumed_frames: telemetry.consumed_frames,
+            queued_frames: telemetry.queued_frames,
+            underflow_count: telemetry.underflow_count,
+            decoder_refills: telemetry.decoder_refills,
+        })
     }
 
     #[cfg(target_os = "windows")]
     fn set_suspended(&self, suspended: bool) -> Result<(), String> {
-        match self {
-            Self::Deterministic(_) => Ok(()),
-            Self::Worker(service) => service.set_suspended(suspended),
-        }
+        self.service()?.set_suspended(suspended)
     }
 
-    async fn shutdown(self, platform: &PlatformHostClient) -> Result<Vec<u8>, String> {
-        match self {
-            Self::Deterministic(executor) => executor.shutdown(platform).await,
-            Self::Worker(service) => service.shutdown(),
-        }
-    }
-}
-
-impl Default for HeadlessAudioExecutor {
-    fn default() -> Self {
-        Self {
-            streams: BTreeMap::new(),
-            master_volume: 1.0,
-            meter_trace: Vec::new(),
-            observed_underflows: BTreeMap::new(),
-        }
-    }
-}
-
-impl HeadlessAudioExecutor {
-    fn underflow_count(&self) -> Result<u64, String> {
-        self.observed_underflows
-            .values()
-            .try_fold(0_u64, |total, count| {
-                total
-                    .checked_add(*count)
-                    .ok_or_else(|| "ASTRA_EMU_AUDIO_UNDERFLOW_COUNTER_OVERFLOW".to_owned())
-            })
-    }
-
-    async fn reset_for_restore(&mut self, platform: &PlatformHostClient) -> Result<(), String> {
-        let ids = self
-            .streams
-            .iter()
-            .filter(|(_, stream)| stream.output.is_some())
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>();
-        for id in ids {
-            self.close_stream(id, platform).await?;
-        }
-        self.streams.clear();
-        Ok(())
-    }
-
-    async fn execute(
-        &mut self,
-        command: LegacyAudioCommandV1,
-        resolved_resource: Option<Vec<u8>>,
-        platform: &PlatformHostClient,
-    ) -> Result<(), String> {
-        command.validate().map_err(|error| error.to_string())?;
-        let (operation, stream_id) = audio_command_identity(&command);
-        tracing::debug!(
-            event = "astra_emu_headless_audio_command",
-            operation,
-            stream_id
-        );
-        match command {
-            LegacyAudioCommandV1::LoadResource {
-                stream_id,
-                encoding,
-                resource_uri,
-            } => {
-                let encoded = resolved_resource
-                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_RESOURCE_MISSING".to_owned())?;
-                let codec = resolve_audio_codec(encoding, &resource_uri, &encoded)?;
-                let resource_hash = Hash256::from_sha256(&encoded);
-                let source = Arc::<[u8]>::from(encoded);
-                let decoder = open_symphonia_audio_stream(
-                    &codec,
-                    Arc::clone(&source),
-                    MAX_STREAM_DECODED_AUDIO_BYTES,
-                )
-                .map_err(|error| redacted_stream_media_error(error, &codec, resource_hash))?;
-                let sample_rate = decoder.sample_rate();
-                let channels = decoder.channels();
-                self.replace_stream(
-                    stream_id,
-                    AudioStream {
-                        sample_rate,
-                        channels,
-                        decoder: Some(decoder),
-                        stream_source: Some((codec, source)),
-                        integer_pcm: true,
-                        volume: 1.0,
-                        ..AudioStream::default()
-                    },
-                    platform,
-                )
-                .await?;
-            }
-            LegacyAudioCommandV1::CreateStream {
-                stream_id,
-                sample_rate,
-                channels,
-                sample_format,
-            } => {
-                self.replace_stream(
-                    stream_id,
-                    AudioStream {
-                        sample_rate,
-                        channels,
-                        integer_pcm: sample_format == LegacyAudioSampleFormat::I16,
-                        volume: 1.0,
-                        ..AudioStream::default()
-                    },
-                    platform,
-                )
-                .await?;
-            }
-            LegacyAudioCommandV1::SubmitI16 { stream_id, samples } => {
-                let stream = stream_mut(&mut self.streams, stream_id)
-                    .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_SUBMIT_STREAM_MISSING".to_owned())?;
-                if !stream.integer_pcm {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
-                }
-                stream.samples.extend(
-                    samples
-                        .into_iter()
-                        .map(|sample| f32::from(sample) / 32768.0),
-                );
-            }
-            LegacyAudioCommandV1::SubmitF32 { stream_id, samples } => {
-                if samples.iter().any(|sample| !sample.is_finite()) {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_SAMPLE_INVALID".into());
-                }
-                let stream = stream_mut(&mut self.streams, stream_id)
-                    .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_SUBMIT_STREAM_MISSING".to_owned())?;
-                if stream.integer_pcm {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
-                }
-                stream.samples.extend(samples);
-            }
-            LegacyAudioCommandV1::Play {
-                stream_id,
-                volume,
-                pan,
-                repeat,
-                ..
-            } => {
-                let output_format = platform
-                    .query_audio_device_format()
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let stream = stream_mut(&mut self.streams, stream_id)
-                    .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_PLAY_STREAM_MISSING".to_owned())?;
-                if (stream.samples.is_empty() && stream.decoder.is_none())
-                    || stream.output.is_some()
-                {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_PLAY_STATE".into());
-                }
-                prepare_audio_stream_for_output(
-                    stream,
-                    output_format.sample_rate,
-                    output_format.channels,
-                )?;
-                stream.output = Some(
-                    platform
-                        .open_audio_output(AudioOutputRequest {
-                            sample_rate: output_format.sample_rate,
-                            channels: output_format.channels,
-                            max_buffered_frames: (output_format.sample_rate as usize * 4).max(1),
-                            start_paused: true,
-                        })
-                        .await
-                        .map_err(|e| e.to_string())?,
-                );
-                stream.cursor = 0;
-                // `AudioOutputHandle` owns its own strictly increasing packet
-                // sequence. A stopped stream may later receive a fresh output
-                // handle, so its producer sequence must restart at one rather
-                // than inheriting the retired handle's sequence.
-                stream.packet_sequence = 0;
-                stream.playing = true;
-                stream.paused = false;
-                stream.awaiting_priming = true;
-                stream.repeat = repeat;
-                stream.volume = volume;
-                stream.pan = pan;
-            }
-            LegacyAudioCommandV1::Stop { stream_id, .. } => {
-                if self
-                    .streams
-                    .get(&stream_id)
-                    .is_some_and(|stream| stream.output.is_some())
-                {
-                    self.close_stream(stream_id, platform).await?;
-                } else if let Some(stream) = self.streams.get_mut(&stream_id) {
-                    stream.playing = false;
-                }
-            }
-            LegacyAudioCommandV1::Pause { stream_id } => {
-                if let Some(stream) = self.streams.get_mut(&stream_id) {
-                    if let Some(output) = stream.output {
-                        platform
-                            .pause_audio(output)
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        stream.paused = true;
-                    }
-                }
-            }
-            LegacyAudioCommandV1::Resume { stream_id } => {
-                if let Some(stream) = self.streams.get_mut(&stream_id) {
-                    if let Some(output) = stream.output {
-                        if !stream.awaiting_priming {
-                            platform
-                                .resume_audio(output)
-                                .await
-                                .map_err(|e| e.to_string())?;
-                        }
-                        stream.paused = false;
-                    }
-                }
-            }
-            LegacyAudioCommandV1::SetParams {
-                stream_id,
-                volume,
-                pan,
-                repeat,
-            } => {
-                if let Some(stream) = self
-                    .streams
-                    .get_mut(&stream_id)
-                    .filter(|stream| stream.output.is_some())
-                {
-                    stream.volume = volume;
-                    stream.pan = pan;
-                    stream.repeat = repeat;
-                }
-            }
-            LegacyAudioCommandV1::DestroyStream { stream_id } => {
-                if self
-                    .streams
-                    .get(&stream_id)
-                    .is_some_and(|stream| stream.output.is_some())
-                {
-                    self.close_stream(stream_id, platform).await?;
-                }
-                self.streams.remove(&stream_id);
-            }
-            LegacyAudioCommandV1::MasterVolume { volume } => self.master_volume = volume,
-        }
-        Ok(())
-    }
-
-    async fn execute_live_pcm(&mut self, packet: LegacyAudioPacketV7) -> Result<(), String> {
-        packet.validate().map_err(|error| error.to_string())?;
-        let stream = stream_mut(&mut self.streams, packet.stream_id)
-            .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_SUBMIT_STREAM_MISSING".to_owned())?;
-        match packet.pcm {
-            LegacyPcmBufferV7::I16(samples) => {
-                if !stream.integer_pcm {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
-                }
-                stream.samples.extend(
-                    samples
-                        .into_iter()
-                        .map(|sample| f32::from(sample) / 32768.0),
-                );
-            }
-            LegacyPcmBufferV7::F32(samples) => {
-                if stream.integer_pcm || samples.iter().any(|sample| !sample.is_finite()) {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
-                }
-                stream.samples.extend(samples);
-            }
-        }
-        Ok(())
-    }
-
-    async fn play_buffered_movie(
-        &mut self,
-        stream_id: u32,
-        sample_rate: u32,
-        channels: u16,
-        samples: Vec<f32>,
-        elapsed_ns: u64,
-        platform: &PlatformHostClient,
-    ) -> Result<(), String> {
-        if self.streams.contains_key(&stream_id) {
-            return Err("ASTRA_EMU_HEADLESS_MOVIE_AUDIO_STREAM_DUPLICATE".into());
-        }
-        let output_format = platform
-            .query_audio_device_format()
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut stream = AudioStream {
-            sample_rate,
-            channels,
-            samples,
-            integer_pcm: false,
-            volume: 1.0,
-            ..AudioStream::default()
-        };
-        prepare_audio_stream_for_output(
-            &mut stream,
-            output_format.sample_rate,
-            output_format.channels,
-        )?;
-        let elapsed_frames =
-            elapsed_ns.saturating_mul(u64::from(stream.sample_rate)) / 1_000_000_000;
-        let elapsed_samples = usize::try_from(elapsed_frames)
-            .ok()
-            .and_then(|frames| frames.checked_mul(usize::from(stream.channels)))
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_TIMELINE".to_owned())?;
-        stream.cursor = elapsed_samples.min(stream.samples.len());
-        stream.packet_sequence = 0;
-        stream.playing = stream.cursor < stream.samples.len();
-        stream.output = Some(
-            platform
-                .open_audio_output(AudioOutputRequest {
-                    sample_rate: output_format.sample_rate,
-                    channels: output_format.channels,
-                    max_buffered_frames: (output_format.sample_rate as usize * 4).max(1),
-                    start_paused: true,
-                })
-                .await
-                .map_err(|error| error.to_string())?,
-        );
-        stream.awaiting_priming = true;
-        self.streams.insert(stream_id, stream);
-        Ok(())
-    }
-
-    async fn close_movie_stream(
-        &mut self,
-        stream_id: u32,
-        platform: &PlatformHostClient,
-    ) -> Result<(), String> {
-        if self
-            .streams
-            .get(&stream_id)
-            .is_some_and(|stream| stream.output.is_some())
-        {
-            self.close_stream(stream_id, platform).await?;
-        }
-        self.streams
-            .remove(&stream_id)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_STREAM_MISSING".to_owned())?;
-        Ok(())
-    }
-
-    async fn pump(
-        &mut self,
-        platform: &PlatformHostClient,
-        policy: AudioPumpPolicy,
-    ) -> Result<AudioPumpTelemetry, String> {
-        // The deterministic executor is deliberately stepped at every fixed
-        // tick.  Native playback is owned by `LegacyAudioPlaybackService` and
-        // is woken by PlatformHost low-water events; it never uses this path.
-        let realtime_poll_due = true;
-        let mut telemetry = AudioPumpTelemetry::default();
-        for (stream_id, stream) in self
-            .streams
-            .iter_mut()
-            .filter(|(_, stream)| stream.playing && !stream.paused)
-        {
-            telemetry.active_streams = telemetry
-                .active_streams
-                .checked_add(1)
-                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
-            if !realtime_poll_due && !stream.awaiting_priming {
-                continue;
-            }
-            let output = stream
-                .output
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_OUTPUT_MISSING".to_owned())?;
-            // A native output's pre-submit state is sufficient both to compute
-            // the bounded target deficit and to observe prior callback
-            // underflows. Do not immediately issue a second synchronous query
-            // after each submit: that serializes the fixed Runtime tick behind
-            // the platform event loop and, in practice, couples audio queue
-            // maintenance to unrelated GPU present work. Headless intentionally
-            // keeps its post-submit query because it advances the deterministic
-            // simulated device callback.
-            let realtime_state = match policy {
-                AudioPumpPolicy::FixedTick => None,
-                AudioPumpPolicy::Realtime { .. } => Some(
-                    platform
-                        .query_audio(output)
-                        .await
-                        .map_err(|e| e.to_string())?,
-                ),
-            };
-            let queued_frames = realtime_state.as_ref().map(|state| state.queued_frames);
-            let frames = match policy {
-                AudioPumpPolicy::FixedTick => usize::try_from(
-                    u64::from(stream.sample_rate).saturating_mul(FIXED_DELTA_NS) / 1_000_000_000,
-                )
-                .map_err(|_| "ASTRA_EMU_HEADLESS_AUDIO_TICK_BOUNDS".to_owned())?
-                .max(1),
-                AudioPumpPolicy::Realtime {
-                    target_latency_ms,
-                    refill_low_water_ms,
-                    ..
-                } => {
-                    let target = usize::try_from(
-                        u64::from(stream.sample_rate).saturating_mul(u64::from(target_latency_ms))
-                            / 1_000,
-                    )
-                    .map_err(|_| "ASTRA_EMU_NATIVE_AUDIO_TARGET_BOUNDS".to_owned())?
-                    .max(1);
-                    let refill_low_water = usize::try_from(
-                        u64::from(stream.sample_rate)
-                            .saturating_mul(u64::from(refill_low_water_ms))
-                            / 1_000,
-                    )
-                    .map_err(|_| "ASTRA_EMU_NATIVE_AUDIO_TARGET_BOUNDS".to_owned())?
-                    .max(1);
-                    if refill_low_water >= target {
-                        return Err("ASTRA_EMU_NATIVE_AUDIO_WATERMARK_INVALID".into());
-                    }
-                    let queued = queued_frames.unwrap_or(0);
-                    if queued > refill_low_water {
-                        0
-                    } else {
-                        target.saturating_sub(queued)
-                    }
-                }
-            };
-            if frames == 0 {
-                continue;
-            }
-            let sample_count = frames.saturating_mul(usize::from(stream.channels));
-            let mut samples = Vec::with_capacity(sample_count);
-            while samples.len() < sample_count && stream.playing {
-                if stream.cursor >= stream.samples.len() {
-                    if stream.fully_buffered {
-                        if stream.repeat {
-                            stream.cursor = 0;
-                            continue;
-                        }
-                        stream.playing = false;
-                        break;
-                    }
-                    stream.samples.clear();
-                    stream.cursor = 0;
-                    if !stream.end_of_stream {
-                        if let Some(decoder) = stream.decoder.as_mut() {
-                            match decoder.next_chunk().map_err(redacted_audio_stream_error)? {
-                                Some(chunk) => {
-                                    if chunk.sample_rate != stream.sample_rate
-                                        || chunk.channels != stream.channels
-                                        || !chunk
-                                            .pcm_s16le
-                                            .len()
-                                            .is_multiple_of(2 * usize::from(stream.channels))
-                                    {
-                                        return Err(
-                                            "ASTRA_EMU_HEADLESS_AUDIO_STREAM_FORMAT_CHANGE".into(),
-                                        );
-                                    }
-                                    stream.samples.extend(chunk.pcm_s16le.chunks_exact(2).map(
-                                        |pair| {
-                                            f32::from(i16::from_le_bytes([pair[0], pair[1]]))
-                                                / 32768.0
-                                        },
-                                    ));
-                                    telemetry.decoder_refills =
-                                        telemetry.decoder_refills.checked_add(1).ok_or_else(
-                                            || "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned(),
-                                        )?;
-                                    continue;
-                                }
-                                None => stream.end_of_stream = true,
-                            }
-                        }
-                    }
-                    if stream.end_of_stream && stream.repeat {
-                        let (codec, source) = stream.stream_source.as_ref().ok_or_else(|| {
-                            "ASTRA_EMU_HEADLESS_AUDIO_REPEAT_SOURCE_MISSING".to_owned()
-                        })?;
-                        stream.decoder = Some(
-                            open_symphonia_audio_stream(
-                                codec,
-                                Arc::clone(source),
-                                MAX_STREAM_DECODED_AUDIO_BYTES,
-                            )
-                            .map_err(redacted_audio_stream_error)?,
-                        );
-                        stream.end_of_stream = false;
-                        continue;
-                    }
-                    if stream.end_of_stream {
-                        stream.playing = false;
-                        break;
-                    }
-                }
-                let available =
-                    (stream.samples.len() - stream.cursor).min(sample_count - samples.len());
-                samples
-                    .extend_from_slice(&stream.samples[stream.cursor..stream.cursor + available]);
-                stream.cursor += available;
-            }
-            if samples.is_empty() {
-                continue;
-            }
-            apply_gain_pan(
-                &mut samples,
-                stream.channels,
-                stream.volume * self.master_volume,
-                stream.pan,
-            )?;
-            stream.packet_sequence = stream
-                .packet_sequence
-                .checked_add(1)
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_SEQUENCE_OVERFLOW".to_owned())?;
-            platform
-                .submit_audio(
-                    output,
-                    AudioPacket {
-                        sequence: stream.packet_sequence,
-                        channels: stream.channels,
-                        samples,
-                    },
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-            telemetry.packets_submitted = telemetry
-                .packets_submitted
-                .checked_add(1)
-                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
-            if stream.awaiting_priming {
-                platform
-                    .resume_audio(output)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                stream.awaiting_priming = false;
-            }
-            let state = match realtime_state {
-                Some(state) => state,
-                None => {
-                    // Headless advances its deterministic device callback only
-                    // through `query_audio`. `query_audio_output` is an
-                    // observational snapshot and deliberately does not consume
-                    // queued samples. Using it here lets one fixed-step packet
-                    // accumulate every frame until the bounded platform queue
-                    // overflows.
-                    platform
-                        .query_audio(output)
-                        .await
-                        .map_err(|e| e.to_string())?
-                }
-            };
-            let previous_underflows = self
-                .observed_underflows
-                .insert(*stream_id, state.underflow_count)
-                .unwrap_or(0);
-            if state.underflow_count > previous_underflows {
-                tracing::warn!(
-                    event = "astra_emu_audio_underflow",
-                    stream_id = *stream_id,
-                    previous_underflows,
-                    underflow_count = state.underflow_count,
-                    queued_frames = state.queued_frames,
-                    "platform audio callback underflowed"
-                );
-            }
-            let channels = u64::from(stream.channels);
-            telemetry.submitted_frames = telemetry
-                .submitted_frames
-                .checked_add(state.submitted_samples / channels)
-                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
-            telemetry.consumed_frames = telemetry
-                .consumed_frames
-                .checked_add(state.consumed_samples / channels)
-                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
-            telemetry.queued_frames = telemetry
-                .queued_frames
-                .checked_add(state.queued_frames as u64)
-                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
-            telemetry.underflow_count = telemetry
-                .underflow_count
-                .checked_add(state.underflow_count)
-                .ok_or_else(|| "ASTRA_EMU_AUDIO_TELEMETRY_OVERFLOW".to_owned())?;
-            self.meter_trace.extend_from_slice(
-                format!(
-                    "{}:{}:{}:{}\n",
-                    state.submitted_samples / u64::from(stream.channels),
-                    state.consumed_samples / u64::from(stream.channels),
-                    state.meter.sample_count,
-                    state.meter.peak_dbfs.to_bits()
-                )
-                .as_bytes(),
-            );
-        }
-        Ok(telemetry)
-    }
-
-    async fn close_stream(
-        &mut self,
-        stream_id: u32,
-        platform: &PlatformHostClient,
-    ) -> Result<(), String> {
-        let stream = stream_mut(&mut self.streams, stream_id)?;
-        let output = stream
-            .output
+    async fn shutdown(&mut self, _platform: &PlatformHostClient) -> Result<Vec<u8>, String> {
+        self.service
             .take()
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_OUTPUT_MISSING".to_owned())?;
-        let meter = platform
-            .drain_audio(output)
-            .await
-            .map_err(|e| e.to_string())?;
-        self.meter_trace.extend_from_slice(
-            format!(
-                "{}:{}:{}\n",
-                meter.sample_count,
-                meter.peak_dbfs.to_bits(),
-                meter.rms_dbfs.to_bits()
-            )
-            .as_bytes(),
-        );
-        platform
-            .close_audio(output)
-            .await
-            .map_err(|e| e.to_string())?;
-        stream.playing = false;
-        Ok(())
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_SESSION_CLOSED".to_owned())?
+            .shutdown()
     }
-
-    async fn replace_stream(
-        &mut self,
-        stream_id: u32,
-        replacement: AudioStream,
-        platform: &PlatformHostClient,
-    ) -> Result<(), String> {
-        let previous_active = self
-            .streams
-            .get(&stream_id)
-            .is_some_and(|stream| stream.output.is_some());
-        if previous_active {
-            self.close_stream(stream_id, platform).await?;
-        }
-        let replaced = self.streams.insert(stream_id, replacement).is_some();
-        if replaced {
-            tracing::debug!(
-                event = "astra_emu_headless_audio_stream_reloaded",
-                stream_id,
-                previous_active
-            );
-        }
-        Ok(())
-    }
-
-    async fn shutdown(mut self, platform: &PlatformHostClient) -> Result<Vec<u8>, String> {
-        let ids = self
-            .streams
-            .iter()
-            .filter(|(_, stream)| stream.output.is_some())
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>();
-        for id in ids {
-            self.close_stream(id, platform).await?;
-        }
-        Ok(self.meter_trace)
-    }
-}
-
-fn redacted_stream_media_error(error: MediaError, codec: &str, resource_hash: Hash256) -> String {
-    format!(
-        "ASTRA_EMU_HEADLESS_AUDIO_STREAM_OPEN: codec={} resource_hash={} {}",
-        codec,
-        resource_hash,
-        redacted_audio_stream_error(error)
-    )
-}
-
-fn redacted_audio_stream_error(error: MediaError) -> String {
-    match error {
-        MediaError::Diagnostics(diagnostics) => format!(
-            "diagnostic_codes={}",
-            diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        MediaError::Message(_) => "diagnostic_codes=ASTRA_MEDIA_PROVIDER_MESSAGE".into(),
-    }
-}
-
-fn resolve_audio_codec(
-    declared: LegacyAudioEncoding,
-    resource_uri: &str,
-    encoded: &[u8],
-) -> Result<String, String> {
-    let declared = match declared {
-        LegacyAudioEncoding::Unknown => None,
-        LegacyAudioEncoding::Wav => Some("wav"),
-        LegacyAudioEncoding::Ogg => Some("ogg"),
-        LegacyAudioEncoding::Mp3 => Some("mp3"),
-        LegacyAudioEncoding::Flac => Some("flac"),
-    };
-    let extension = resource_uri
-        .rsplit_once('.')
-        .map(|(_, extension)| extension.to_ascii_lowercase())
-        .filter(|extension| matches!(extension.as_str(), "wav" | "ogg" | "mp3" | "flac"));
-    let detected = detect_audio_codec(encoded);
-
-    let selected = declared
-        .map(str::to_owned)
-        .or(extension)
-        .or_else(|| detected.map(str::to_owned))
-        .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_CODEC_UNIDENTIFIED".to_owned())?;
-    if detected.is_some_and(|detected| detected != selected) {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_CODEC_IDENTITY_MISMATCH".into());
-    }
-    Ok(selected)
-}
-
-fn detect_audio_codec(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"OggS") {
-        Some("ogg")
-    } else if bytes.starts_with(b"fLaC") {
-        Some("flac")
-    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WAVE" {
-        Some("wav")
-    } else if bytes.starts_with(b"ID3")
-        || bytes
-            .get(..2)
-            .is_some_and(|header| header[0] == 0xff && header[1] & 0xe0 == 0xe0)
-    {
-        Some("mp3")
-    } else {
-        None
-    }
-}
-
-fn audio_command_identity(command: &LegacyAudioCommandV1) -> (&'static str, u32) {
-    match command {
-        LegacyAudioCommandV1::LoadResource { stream_id, .. } => ("load_resource", *stream_id),
-        LegacyAudioCommandV1::CreateStream { stream_id, .. } => ("create_stream", *stream_id),
-        LegacyAudioCommandV1::SubmitI16 { stream_id, .. } => ("submit_i16", *stream_id),
-        LegacyAudioCommandV1::SubmitF32 { stream_id, .. } => ("submit_f32", *stream_id),
-        LegacyAudioCommandV1::Play { stream_id, .. } => ("play", *stream_id),
-        LegacyAudioCommandV1::Stop { stream_id, .. } => ("stop", *stream_id),
-        LegacyAudioCommandV1::Pause { stream_id } => ("pause", *stream_id),
-        LegacyAudioCommandV1::Resume { stream_id } => ("resume", *stream_id),
-        LegacyAudioCommandV1::SetParams { stream_id, .. } => ("set_params", *stream_id),
-        LegacyAudioCommandV1::DestroyStream { stream_id } => ("destroy_stream", *stream_id),
-        LegacyAudioCommandV1::MasterVolume { .. } => ("master_volume", 0),
-    }
-}
-
-fn stream_mut(
-    streams: &mut BTreeMap<u32, AudioStream>,
-    id: u32,
-) -> Result<&mut AudioStream, String> {
-    streams
-        .get_mut(&id)
-        .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_STREAM_MISSING".to_owned())
-}
-
-fn prepare_audio_stream_for_output(
-    stream: &mut AudioStream,
-    output_sample_rate: u32,
-    output_channels: u16,
-) -> Result<(), String> {
-    if output_sample_rate == 0 || output_channels == 0 || output_channels > 2 {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_OUTPUT_FORMAT".into());
-    }
-    while let Some(decoder) = stream.decoder.as_mut() {
-        match decoder.next_chunk().map_err(redacted_audio_stream_error)? {
-            Some(chunk) => {
-                if chunk.sample_rate != stream.sample_rate
-                    || chunk.channels != stream.channels
-                    || !chunk
-                        .pcm_s16le
-                        .len()
-                        .is_multiple_of(2 * usize::from(stream.channels))
-                {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_STREAM_FORMAT_CHANGE".into());
-                }
-                let next_samples = chunk.pcm_s16le.len() / 2;
-                let total_samples = stream
-                    .samples
-                    .len()
-                    .checked_add(next_samples)
-                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_DECODE_BOUNDS".to_owned())?;
-                let decoded_bytes = total_samples
-                    .checked_mul(std::mem::size_of::<f32>())
-                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_DECODE_BOUNDS".to_owned())?;
-                if decoded_bytes as u64 > MAX_STREAM_DECODED_AUDIO_BYTES {
-                    return Err("ASTRA_EMU_HEADLESS_AUDIO_DECODE_BUDGET".into());
-                }
-                stream.samples.extend(
-                    chunk
-                        .pcm_s16le
-                        .chunks_exact(2)
-                        .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0),
-                );
-            }
-            None => {
-                stream.decoder = None;
-                stream.end_of_stream = true;
-            }
-        }
-    }
-
-    if stream.samples.is_empty()
-        || stream.sample_rate == 0
-        || stream.channels == 0
-        || stream.channels > 2
-        || !stream
-            .samples
-            .len()
-            .is_multiple_of(usize::from(stream.channels))
-    {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_SOURCE_FORMAT".into());
-    }
-    stream.samples = resample_audio_linear(
-        &stream.samples,
-        stream.sample_rate,
-        stream.channels,
-        output_sample_rate,
-        output_channels,
-        stream.integer_pcm,
-    )?;
-    stream.sample_rate = output_sample_rate;
-    stream.channels = output_channels;
-    stream.cursor = 0;
-    stream.end_of_stream = true;
-    stream.fully_buffered = true;
-    Ok(())
-}
-
-fn resample_audio_linear(
-    samples: &[f32],
-    source_sample_rate: u32,
-    source_channels: u16,
-    output_sample_rate: u32,
-    output_channels: u16,
-    integer_pcm: bool,
-) -> Result<Vec<f32>, String> {
-    if source_sample_rate == 0
-        || output_sample_rate == 0
-        || !(1..=2).contains(&source_channels)
-        || !(1..=2).contains(&output_channels)
-        || samples.is_empty()
-        || !samples.len().is_multiple_of(usize::from(source_channels))
-        || samples.iter().any(|sample| !sample.is_finite())
-    {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_FORMAT".into());
-    }
-    let source_frames = samples.len() / usize::from(source_channels);
-    let step_fp = (u64::from(source_sample_rate) << 16) / u64::from(output_sample_rate);
-    if step_fp == 0 {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_RATIO".into());
-    }
-    let estimated_frames = u64::try_from(source_frames)
-        .ok()
-        .and_then(|frames| frames.checked_mul(u64::from(output_sample_rate)))
-        .and_then(|scaled| scaled.checked_add(u64::from(source_sample_rate) - 1))
-        .map(|scaled| scaled / u64::from(source_sample_rate))
-        .and_then(|frames| usize::try_from(frames).ok())
-        .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_BOUNDS".to_owned())?;
-    let output_samples = estimated_frames
-        .checked_mul(usize::from(output_channels))
-        .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_BOUNDS".to_owned())?;
-    if output_samples
-        .checked_mul(std::mem::size_of::<f32>())
-        .is_none_or(|bytes| bytes as u64 > MAX_STREAM_DECODED_AUDIO_BYTES)
-    {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_BUDGET".into());
-    }
-    let mut output = Vec::with_capacity(output_samples);
-    let total_fp = (source_frames as u64) << 16;
-    let mut phase_fp = 0_u64;
-    while phase_fp < total_fp {
-        let frame = (phase_fp >> 16) as usize;
-        let next = (frame + 1).min(source_frames - 1);
-        let fraction = (phase_fp & 0xffff) as u32;
-        let read = |source_channel: usize| {
-            let channel = source_channel.min(usize::from(source_channels) - 1);
-            let a = samples[frame * usize::from(source_channels) + channel];
-            let b = samples[next * usize::from(source_channels) + channel];
-            if integer_pcm {
-                let a = (a * 32768.0).round().clamp(-32768.0, 32767.0) as i32;
-                let b = (b * 32768.0).round().clamp(-32768.0, 32767.0) as i32;
-                let mixed = (a * (65_536 - fraction as i32) + b * fraction as i32) >> 16;
-                mixed as f32 / 32768.0
-            } else {
-                a + (b - a) * (fraction as f32 / 65_536.0)
-            }
-        };
-        match (source_channels, output_channels) {
-            (1, 1) => output.push(read(0)),
-            (1, 2) => {
-                let mono = read(0);
-                output.extend_from_slice(&[mono, mono]);
-            }
-            (2, 1) => output.push((read(0) + read(1)) * 0.5),
-            (2, 2) => output.extend_from_slice(&[read(0), read(1)]),
-            _ => unreachable!("audio channel bounds checked above"),
-        }
-        phase_fp = phase_fp
-            .checked_add(step_fp)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_BOUNDS".to_owned())?;
-    }
-    if output.is_empty() {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_RESAMPLE_EMPTY".into());
-    }
-    Ok(output)
-}
-
-fn apply_gain_pan(samples: &mut [f32], channels: u16, gain: f32, pan: f32) -> Result<(), String> {
-    if !gain.is_finite()
-        || !pan.is_finite()
-        || !(0.0..=4.0).contains(&gain)
-        || !(-1.0..=1.0).contains(&pan)
-    {
-        return Err("ASTRA_EMU_HEADLESS_AUDIO_PARAMS".into());
-    }
-    for frame in samples.chunks_exact_mut(usize::from(channels)) {
-        for sample in frame.iter_mut() {
-            *sample = (*sample * gain).clamp(-1.0, 1.0);
-        }
-        if channels >= 2 {
-            frame[0] *= (1.0 - pan.max(0.0)).sqrt();
-            frame[1] *= (1.0 + pan.min(0.0)).sqrt();
-        }
-    }
-    Ok(())
 }
 
 fn pressed_input_keys(edges: &[LegacyInputEdge]) -> BTreeSet<String> {
@@ -7744,10 +6443,7 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod native_tests {
     use super::*;
-    use astra_emu_family_api::{
-        FamilyId, LegacyScenePacketV1, LegacySceneResourceOperationV1, LegacySceneResourceStateV1,
-        LegacySceneTextureCreateV1, LegacySceneTextureDescriptorV1, LegacySceneTextureUpdateV1,
-    };
+    use astra_emu_family_api::FamilyId;
 
     #[test]
     fn coalesced_gpu_scene_retains_resource_generations_without_full_resync() {
@@ -7798,77 +6494,6 @@ mod native_tests {
             SceneCommand::Clear {
                 rgba: [7, 8, 9, 255]
             }
-        ));
-    }
-
-    #[test]
-    fn gpu_scene_region_update_preserves_resource_id_and_generation() {
-        let mut adapter = GpuSceneAdapter::default();
-        let descriptor = LegacySceneTextureDescriptorV1 {
-            width: 2,
-            height: 1,
-            format: LegacyTextureFormat::Rgba8,
-        };
-        let resources = LegacySceneResourceStateV1 {
-            textures: [(7, descriptor)].into_iter().collect(),
-        };
-        let initial = vec![255, 0, 0, 255, 0, 255, 0, 255];
-        let (created, created_metrics) = adapter
-            .prepare(LegacyPreparedSceneCommitV1 {
-                packet: LegacyScenePacketV1 {
-                    width: 2,
-                    height: 1,
-                    resources: vec![LegacySceneResourceOperationV1::CreateTexture(
-                        LegacySceneTextureCreateV1 {
-                            texture_id: 7,
-                            width: 2,
-                            height: 1,
-                            format: LegacyTextureFormat::Rgba8,
-                            pixels: initial,
-                        },
-                    )],
-                    draws: vec![],
-                },
-                next_resources: resources.clone(),
-                reset_resources: false,
-            })
-            .unwrap();
-        let resource_id = match &created.commands[0] {
-            SceneCommand::UploadTexture { resource_id, .. } => resource_id.clone(),
-            other => panic!("unexpected create command: {other:?}"),
-        };
-
-        let patch = vec![0, 0, 255, 255];
-        let (updated, updated_metrics) = adapter
-            .prepare(LegacyPreparedSceneCommitV1 {
-                packet: LegacyScenePacketV1 {
-                    width: 2,
-                    height: 1,
-                    resources: vec![LegacySceneResourceOperationV1::UpdateTexture(
-                        LegacySceneTextureUpdateV1 {
-                            texture_id: 7,
-                            x: 0,
-                            y: 0,
-                            width: 1,
-                            height: 1,
-                            format: LegacyTextureFormat::Rgba8,
-                            pixels: patch,
-                        },
-                    )],
-                    draws: vec![],
-                },
-                next_resources: resources,
-                reset_resources: false,
-            })
-            .unwrap();
-
-        assert_eq!(created_metrics.generation, 1);
-        assert_eq!(updated_metrics.generation, 1);
-        assert_eq!(updated.commands.len(), 1);
-        assert!(matches!(
-            &updated.commands[0],
-            SceneCommand::UpdateTextureRegion { resource_id: updated_id, width: 1, height: 1, .. }
-                if updated_id == &resource_id
         ));
     }
 
@@ -8052,34 +6677,6 @@ mod native_tests {
             validate_resume_input_ticks(&[message], 42).unwrap_err(),
             "ASTRA_EMU_HEADLESS_RESUME_INPUT_TICK"
         );
-    }
-
-    #[test]
-    fn native_movie_frames_are_bounded_and_converted_to_bgra() {
-        let stream = decoded_native_video_stream(
-            vec![
-                astra_emu_fvp::FvpMovieFrame {
-                    pts_ms: 0,
-                    width: 1,
-                    height: 1,
-                    rgba8: vec![1, 2, 3, 4],
-                },
-                astra_emu_fvp::FvpMovieFrame {
-                    pts_ms: 17,
-                    width: 1,
-                    height: 1,
-                    rgba8: vec![5, 6, 7, 8],
-                },
-            ],
-            34,
-        )
-        .unwrap();
-
-        assert_eq!(stream.duration_us, 34_000);
-        assert_eq!(stream.frames[0].bgra8, vec![3, 2, 1, 4]);
-        assert_eq!(stream.frames[1].bgra8, vec![7, 6, 5, 8]);
-        assert_eq!(stream.frames[0].duration_us, 17_000);
-        assert_eq!(stream.frames[1].duration_us, 17_000);
     }
 
     #[test]
@@ -8319,48 +6916,6 @@ mod native_tests {
             metrics,
         };
         validate_fvp_performance_budget(&budget, &profile, profile_hash).unwrap();
-    }
-
-    #[test]
-    fn extensionless_audio_uses_bounded_signature_detection() {
-        assert_eq!(
-            resolve_audio_codec(LegacyAudioEncoding::Unknown, "bgm/002", b"OggSdata").unwrap(),
-            "ogg"
-        );
-        assert_eq!(
-            resolve_audio_codec(
-                LegacyAudioEncoding::Unknown,
-                "se/003",
-                b"RIFF\x04\0\0\0WAVEdata",
-            )
-            .unwrap(),
-            "wav"
-        );
-    }
-
-    #[test]
-    fn audio_codec_identity_mismatch_is_blocking() {
-        assert_eq!(
-            resolve_audio_codec(LegacyAudioEncoding::Wav, "bgm/002", b"OggSdata").unwrap_err(),
-            "ASTRA_EMU_HEADLESS_AUDIO_CODEC_IDENTITY_MISMATCH"
-        );
-        assert_eq!(
-            resolve_audio_codec(LegacyAudioEncoding::Unknown, "bgm/002", b"opaque").unwrap_err(),
-            "ASTRA_EMU_HEADLESS_AUDIO_CODEC_UNIDENTIFIED"
-        );
-    }
-
-    #[test]
-    fn audio_resampler_matches_fixed_point_linear_mono_to_stereo_contract() {
-        let high = 32767.0 / 32768.0;
-        let converted = resample_audio_linear(&[0.0, high], 24_000, 1, 48_000, 2, true).unwrap();
-
-        assert_eq!(converted.len(), 8);
-        assert!(converted.chunks_exact(2).all(|frame| frame[0] == frame[1]));
-        assert_eq!(converted[0], 0.0);
-        assert_eq!(converted[2], 16383.0 / 32768.0);
-        assert_eq!(converted[4], high);
-        assert_eq!(converted[6], high);
     }
 
     #[test]

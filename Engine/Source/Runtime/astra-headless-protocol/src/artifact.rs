@@ -197,7 +197,9 @@ impl ArtifactManifest {
                     {
                         return Err(ProtocolError::invalid(
                             "artifact_manifest.audio",
-                            "audio artifact metadata is invalid",
+                            format!(
+                                "audio artifact metadata is invalid: byte_size={byte_size}, sample_rate={sample_rate}, channels={channels}, frame_count={frame_count}, duration_ns={duration_ns}"
+                            ),
                         ));
                     }
                     (relative_path, sha256, checkpoint.as_ref())

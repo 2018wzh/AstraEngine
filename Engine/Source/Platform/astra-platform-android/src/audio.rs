@@ -1,17 +1,15 @@
 #![cfg(target_os = "android")]
 
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc,
 };
 
 use astra_platform::{
-    AudioDeviceFormat, AudioFocusState, AudioMeter, AudioOutputRequest, AudioOutputState,
-    AudioOutputStatus, AudioPacket, AudioWakeRegistration, PlatformError, PlatformErrorCode,
+    AudioDeviceFormat, AudioFocusState, AudioOutputRequest, AudioWakeRegistration, PlatformError,
+    PlatformErrorCode,
 };
-use astra_platform_common::{
-    AudioQueueTelemetryReader, NativeAudioConsumer, NativeAudioProducer, NativeAudioQueue,
-};
+use astra_platform_common::{NativeAudioConsumer, NativeAudioProducer, NativeAudioQueue};
 use oboe::{
     AudioApi, AudioOutputCallback, AudioOutputStream, AudioStream, AudioStreamAsync,
     AudioStreamBase, AudioStreamBuilder, AudioStreamSafe, ContentType, DataCallbackResult, Mono,
@@ -20,18 +18,9 @@ use oboe::{
 
 pub(crate) struct AndroidAudioResource {
     stream: AndroidAudioStream,
-    producer: NativeAudioProducer,
-    telemetry: AudioQueueTelemetryReader,
-    meter: Arc<CallbackMeter>,
     disconnected: Arc<AtomicBool>,
     gain_bits: Arc<AtomicU32>,
-    channels: u16,
-    sample_rate: u32,
-    max_buffered_frames: usize,
-    next_sequence: u64,
-    submitted_samples: u64,
     paused: bool,
-    audio_wake: AudioWakeRegistration,
 }
 
 enum AndroidAudioStream {
@@ -74,7 +63,6 @@ impl AndroidAudioStream {
 
 struct CallbackState {
     consumer: NativeAudioConsumer,
-    meter: Arc<CallbackMeter>,
     disconnected: Arc<AtomicBool>,
     gain_bits: Arc<AtomicU32>,
     audio_wake: AudioWakeRegistration,
@@ -91,12 +79,10 @@ impl AudioOutputCallback for MonoCallback {
         _stream: &mut dyn oboe::AudioOutputStreamSafe,
         output: &mut [f32],
     ) -> DataCallbackResult {
-        self.0.meter.begin_callback();
         let filled = self.0.consumer.pop_samples(output);
         let gain = f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
         for sample in &mut output[..filled] {
             *sample *= gain;
-            self.0.meter.record(*sample);
         }
         output[filled..].fill(0.0);
         if filled != output.len() {
@@ -124,7 +110,6 @@ impl AudioOutputCallback for StereoCallback {
         _stream: &mut dyn oboe::AudioOutputStreamSafe,
         output: &mut [(f32, f32)],
     ) -> DataCallbackResult {
-        self.0.meter.begin_callback();
         let gain = f32::from_bits(self.0.gain_bits.load(Ordering::Relaxed));
         let mut scratch = [0.0_f32; 2048];
         let mut written_frames = 0;
@@ -142,8 +127,6 @@ impl AudioOutputCallback for StereoCallback {
             {
                 target.0 = frame[0] * gain;
                 target.1 = frame[1] * gain;
-                self.0.meter.record(target.0);
-                self.0.meter.record(target.1);
             }
             written_frames += complete_frames;
             if filled != requested_samples {
@@ -172,9 +155,10 @@ impl AndroidAudioResource {
     pub(crate) fn new(
         request: AudioOutputRequest,
         audio_wake: AudioWakeRegistration,
-    ) -> Result<Self, PlatformError> {
+    ) -> Result<(Self, NativeAudioProducer, AudioDeviceFormat), PlatformError> {
         if request.sample_rate == 0
             || !matches!(request.channels, 1 | 2)
+            || request.chunk_frames == 0
             || request.max_buffered_frames == 0
         {
             return Err(audio_error(
@@ -182,17 +166,17 @@ impl AndroidAudioResource {
                 "AAudio requires a non-zero rate, mono/stereo channels, and bounded queue",
             ));
         }
-        let capacity = request
-            .max_buffered_frames
+        let chunk_samples = request
+            .chunk_frames
             .checked_mul(usize::from(request.channels))
             .ok_or_else(|| audio_error("audio.open", "audio queue capacity overflows"))?;
-        let (producer, consumer, telemetry) = NativeAudioQueue::create(capacity)?;
-        let meter = Arc::new(CallbackMeter::default());
+        let chunk_capacity = request.max_buffered_frames.div_ceil(request.chunk_frames);
+        let (producer, consumer, _telemetry) =
+            NativeAudioQueue::create(chunk_capacity, chunk_samples, audio_wake.clone())?;
         let disconnected = Arc::new(AtomicBool::new(false));
         let gain_bits = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
         let callback_state = CallbackState {
             consumer,
-            meter: Arc::clone(&meter),
             disconnected: Arc::clone(&disconnected),
             gain_bits: Arc::clone(&gain_bits),
             audio_wake: audio_wake.clone(),
@@ -243,118 +227,19 @@ impl AndroidAudioResource {
         }
         let mut resource = Self {
             stream,
-            producer,
-            telemetry,
-            meter,
             disconnected,
             gain_bits,
-            channels: request.channels,
-            sample_rate: request.sample_rate,
-            max_buffered_frames: request.max_buffered_frames,
-            next_sequence: 1,
-            submitted_samples: 0,
             paused: false,
-            audio_wake,
         };
         resource.stream.request_start()?;
-        Ok(resource)
-    }
-
-    pub(crate) fn submit(&mut self, packet: AudioPacket) -> Result<Vec<f32>, PlatformError> {
-        self.ensure_connected("audio.submit")?;
-        if self.paused || packet.sequence != self.next_sequence || packet.channels != self.channels
-        {
-            return Err(audio_error(
-                "audio.submit",
-                "audio packet sequence, channels, or lifecycle is invalid",
-            ));
-        }
-        if packet.samples.is_empty()
-            || !packet
-                .samples
-                .len()
-                .is_multiple_of(usize::from(self.channels))
-        {
-            return Err(audio_error(
-                "audio.submit",
-                "audio packet is empty or not frame aligned",
-            ));
-        }
-        self.producer.push_samples(&packet.samples)?;
-        self.submitted_samples = self
-            .submitted_samples
-            .checked_add(packet.samples.len() as u64)
-            .ok_or_else(|| audio_error("audio.submit", "submitted sample counter overflows"))?;
-        self.next_sequence = self
-            .next_sequence
-            .checked_add(1)
-            .ok_or_else(|| audio_error("audio.submit", "audio sequence counter overflows"))?;
-        Ok(packet.samples)
-    }
-
-    pub(crate) fn state(&self) -> Result<AudioOutputState, PlatformError> {
-        self.ensure_connected("audio.query")?;
-        let telemetry = self.telemetry.snapshot();
-        let queued_samples = self
-            .submitted_samples
-            .saturating_sub(telemetry.sample_count);
-        Ok(AudioOutputState {
-            queued_frames: usize::try_from(queued_samples / u64::from(self.channels))
-                .unwrap_or(usize::MAX)
-                .min(self.max_buffered_frames),
-            callback_count: self.meter.callback_count.load(Ordering::Acquire),
-            submitted_samples: self.submitted_samples,
-            consumed_samples: telemetry.sample_count,
-            underflow_count: telemetry.underflow_count,
-            meter: self.meter.snapshot(),
-        })
-    }
-
-    pub(crate) fn status(&self) -> Result<AudioOutputStatus, PlatformError> {
-        let state = self.state()?;
-        Ok(AudioOutputStatus {
-            submitted_frames: state.submitted_samples / u64::from(self.channels),
-            played_frames: state.consumed_samples / u64::from(self.channels),
-            buffered_frames: state.queued_frames as u64,
-            underflow_count: state.underflow_count,
-            meter: state.meter,
-        })
-    }
-
-    pub(crate) fn drain(&self) -> Result<AudioMeter, PlatformError> {
-        let timeout = AudioOutputRequest {
-            sample_rate: self.sample_rate,
-            channels: self.channels,
-            max_buffered_frames: self.max_buffered_frames,
-            start_paused: false,
-        }
-        .drain_timeout(self.submitted_samples);
-        let deadline = std::time::Instant::now() + timeout;
-        let mut observed_wake = 0;
-        loop {
-            let state = self.state()?;
-            if state.consumed_samples >= state.submitted_samples {
-                return Ok(state.meter);
-            }
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::DeviceLost,
-                    "audio.drain",
-                    "AAudio output drain timed out",
-                ));
-            }
-            observed_wake = self
-                .audio_wake
-                .wait_timeout(observed_wake, remaining)
-                .ok_or_else(|| {
-                    PlatformError::new(
-                        PlatformErrorCode::DeviceLost,
-                        "audio.drain",
-                        "AAudio output drain timed out",
-                    )
-                })?;
-        }
+        Ok((
+            resource,
+            producer,
+            AudioDeviceFormat {
+                sample_rate: request.sample_rate,
+                channels: request.channels,
+            },
+        ))
     }
 
     pub(crate) fn pause(&mut self) -> Result<(), PlatformError> {
@@ -408,115 +293,6 @@ impl AndroidAudioResource {
     }
 }
 
-#[derive(Default)]
-struct CallbackMeter {
-    callback_count: AtomicU64,
-    sample_count: AtomicU64,
-    peak_bits: AtomicU32,
-    sum_squares_bits: AtomicU64,
-}
-
-impl CallbackMeter {
-    fn begin_callback(&self) {
-        self.callback_count.fetch_add(1, Ordering::Release);
-    }
-
-    fn record(&self, sample: f32) {
-        let magnitude_bits = sample.abs().to_bits();
-        let mut peak = self.peak_bits.load(Ordering::Relaxed);
-        while magnitude_bits > peak {
-            match self.peak_bits.compare_exchange_weak(
-                peak,
-                magnitude_bits,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => peak = actual,
-            }
-        }
-        let contribution = f64::from(sample) * f64::from(sample);
-        let mut sum = self.sum_squares_bits.load(Ordering::Relaxed);
-        loop {
-            let next = f64::from_bits(sum) + contribution;
-            match self.sum_squares_bits.compare_exchange_weak(
-                sum,
-                next.to_bits(),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => sum = actual,
-            }
-        }
-        self.sample_count.fetch_add(1, Ordering::Release);
-    }
-
-    fn snapshot(&self) -> AudioMeter {
-        let samples = self.sample_count.load(Ordering::Acquire);
-        let rms = if samples == 0 {
-            0.0
-        } else {
-            (f64::from_bits(self.sum_squares_bits.load(Ordering::Acquire)) / samples as f64).sqrt()
-                as f32
-        };
-        AudioMeter {
-            sample_count: samples,
-            peak_dbfs: amplitude_dbfs(f32::from_bits(self.peak_bits.load(Ordering::Acquire))),
-            rms_dbfs: amplitude_dbfs(rms),
-        }
-    }
-}
-
-fn amplitude_dbfs(value: f32) -> f32 {
-    if value <= 0.0 {
-        -120.0
-    } else {
-        20.0 * value.log10()
-    }
-}
-
 fn audio_error(operation: &'static str, message: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::InvalidState, operation, message)
-}
-
-pub(crate) fn preferred_output_format() -> Result<AudioDeviceFormat, PlatformError> {
-    let (_producer, consumer, _telemetry) = NativeAudioQueue::create(2)?;
-    let callback = StereoCallback(CallbackState {
-        consumer,
-        meter: Arc::new(CallbackMeter::default()),
-        disconnected: Arc::new(AtomicBool::new(false)),
-        gain_bits: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
-    });
-    let stream = AudioStreamBuilder::default()
-        .set_output()
-        .set_stereo()
-        .set_f32()
-        .set_audio_api(AudioApi::AAudio)
-        .set_sharing_mode(SharingMode::Shared)
-        .set_performance_mode(PerformanceMode::LowLatency)
-        .set_usage(Usage::Game)
-        .set_content_type(ContentType::Music)
-        .set_callback(callback)
-        .open_stream()
-        .map_err(|_| audio_error("audio.format", "AAudio format probe stream could not open"))?;
-    if stream.get_audio_api() != AudioApi::AAudio {
-        return Err(PlatformError::new(
-            PlatformErrorCode::ProviderUnavailable,
-            "audio.format",
-            "Oboe format probe selected a non-AAudio backend",
-        ));
-    }
-    let sample_rate = u32::try_from(stream.get_sample_rate())
-        .ok()
-        .filter(|value| *value > 0)
-        .ok_or_else(|| audio_error("audio.format", "AAudio reported an invalid sample rate"))?;
-    let channels = u16::try_from(stream.get_channel_count() as i32)
-        .ok()
-        .filter(|value| matches!(*value, 1 | 2))
-        .ok_or_else(|| audio_error("audio.format", "AAudio reported an invalid channel count"))?;
-    Ok(AudioDeviceFormat {
-        sample_rate,
-        channels,
-    })
 }

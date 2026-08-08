@@ -94,15 +94,13 @@ extern "C" fn frame(payload: RVec<u8>) -> FfiUiComponentResult {
                 actions: BTreeSet::new(),
                 properties: BTreeMap::new(),
             };
-            let mut semantics = UiSemanticSnapshot {
+            let semantics = UiSemanticSnapshot {
                 schema: "astra.ui_semantic_snapshot.v1".into(),
                 session_id: request.session_id.clone(),
                 generation: request.generation,
                 root_id: root.id.clone(),
                 nodes: vec![root],
-                hash: Hash256::from_sha256(&[]),
             };
-            semantics.hash = semantics.compute_hash().expect("fixture semantic hash");
             UiComponentResponse::Frame {
                 render: Box::new(UiRenderFrame {
                     schema: "astra.ui_render_frame.v1".into(),

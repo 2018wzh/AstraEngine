@@ -35,7 +35,7 @@ struct AssetDescriptor {
 #[derive(Debug, Clone)]
 enum CachedAsset {
     Image(TextureFrame),
-    Media(Arc<[u8]>),
+    Media(astra_byte_source::OwnedByteBuffer),
 }
 
 impl CachedAsset {
@@ -171,8 +171,8 @@ impl AssetCache {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedMediaAsset {
     pub codec: String,
-    pub bytes: Arc<[u8]>,
-    pub hash: Hash256,
+    pub bytes: astra_byte_source::OwnedByteBuffer,
+    pub byte_length: u64,
 }
 
 #[derive(Debug)]
@@ -557,8 +557,10 @@ impl PackageAssetStore {
                 ));
             }
             None => {
-                let bytes: Arc<[u8]> = self.read_asset(asset_id, descriptor)?.into();
-                self.cache_insert(asset_id, CachedAsset::Media(Arc::clone(&bytes)))?;
+                let bytes = astra_byte_source::OwnedByteBuffer::from_vec(
+                    self.read_asset(asset_id, descriptor)?,
+                );
+                self.cache_insert(asset_id, CachedAsset::Media(bytes.clone()))?;
                 bytes
             }
         };
@@ -579,7 +581,7 @@ impl PackageAssetStore {
         Ok(LoadedMediaAsset {
             codec: codec.into(),
             bytes,
-            hash: descriptor.hash,
+            byte_length: descriptor.decoded_length,
         })
     }
 
@@ -605,8 +607,7 @@ impl PackageAssetStore {
             })?
             .into_rgba8();
         let (width, height) = decoded.dimensions();
-        let rgba8: Arc<[u8]> = decoded.into_raw().into();
-        TextureFrame::from_rgba8(width, height, rgba8).map_err(|error| {
+        TextureFrame::from_vec(width, height, decoded.into_raw()).map_err(|error| {
             NativeVnHostError::Asset(format!("ASTRA_PLAYER_ASSET_TEXTURE: {error}"))
         })
     }
@@ -720,7 +721,7 @@ mod tests {
     use super::*;
 
     fn media(bytes: &[u8]) -> CachedAsset {
-        CachedAsset::Media(Arc::from(bytes))
+        CachedAsset::Media(bytes.to_vec().into())
     }
 
     #[astra_headless_test::test]

@@ -15,10 +15,10 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use astra_core::Hash256;
-use astra_media::{DecodeProvider, DecodedVideoFrame, DecodedVideoStream};
+use astra_media::{DecodeProvider, DecodedVideoFrame};
 use astra_platform::{
-    DecodeKind, DecodeOutput, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+    DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformError,
+    PlatformErrorCode,
 };
 use ndk::media::{
     image_reader::{AcquireResult, Image, ImageFormat, ImageReader},
@@ -154,6 +154,7 @@ pub(crate) struct DecodeResource {
     next_sequence: u64,
     temp_root: PathBuf,
     max_output_bytes: usize,
+    video_stream: Option<AndroidVideoStream>,
 }
 
 impl DecodeResource {
@@ -174,6 +175,7 @@ impl DecodeResource {
             next_sequence: 1,
             temp_root,
             max_output_bytes,
+            video_stream: None,
         })
     }
 
@@ -183,7 +185,6 @@ impl DecodeResource {
     ) -> Result<DecodeOutput, PlatformError> {
         if request.sequence != self.next_sequence
             || request.kind != self.kind
-            || request.bytes.is_empty()
             || !request.description.is_empty()
             || request.sample_rate.is_some()
             || request.channels.is_some()
@@ -196,10 +197,55 @@ impl DecodeResource {
                 "decode request sequence, kind, payload, or metadata is invalid",
             ));
         }
-        let output = match request.kind {
-            DecodeKind::Image => decode_image(request)?,
-            DecodeKind::Audio | DecodeKind::Video => {
-                decode_media_codec(&self.temp_root, request, self.max_output_bytes)?
+        let output = match request.stream_action {
+            DecodeStreamAction::OneShot => {
+                if request.bytes.is_empty() || self.video_stream.is_some() {
+                    return Err(media_codec_error("decode.submit.one_shot"));
+                }
+                match request.kind {
+                    DecodeKind::Image => decode_image(request)?,
+                    DecodeKind::Audio => {
+                        decode_audio_media_codec(&self.temp_root, request, self.max_output_bytes)?
+                    }
+                    DecodeKind::Video => {
+                        return Err(media_codec_error("decode.video.stream_required"));
+                    }
+                }
+            }
+            DecodeStreamAction::Start => {
+                if request.kind != DecodeKind::Video
+                    || request.bytes.is_empty()
+                    || self.video_stream.is_some()
+                {
+                    return Err(media_codec_error("decode.video.stream.start"));
+                }
+                let stream = AndroidVideoStream::open(
+                    &self.temp_root,
+                    &request.codec,
+                    request.bytes.as_slice(),
+                    self.max_output_bytes,
+                )?;
+                let output = DecodeOutput::VideoStreamStart {
+                    duration_us: Some(stream.duration_us),
+                    frame_count: None,
+                    decoded_byte_count: None,
+                };
+                self.video_stream = Some(stream);
+                output
+            }
+            DecodeStreamAction::Next => {
+                if request.kind != DecodeKind::Video || !request.bytes.is_empty() {
+                    return Err(media_codec_error("decode.video.stream.next"));
+                }
+                let result = self
+                    .video_stream
+                    .as_mut()
+                    .ok_or_else(|| media_codec_error("decode.video.stream.missing"))?
+                    .next_output();
+                if result.is_err() {
+                    self.video_stream.take();
+                }
+                result?
             }
         };
         self.next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
@@ -237,15 +283,15 @@ fn decode_image(request: PlatformDecodeRequest) -> Result<DecodeOutput, Platform
             )
         })?;
     match output.output {
-        astra_media::DecodeOutput::CpuBuffer {
-            bytes,
-            format,
-            hash,
-        } => Ok(DecodeOutput::CpuBuffer {
-            format,
-            bytes,
-            hash: hash.to_string(),
-        }),
+        astra_media::DecodeOutput::CpuBuffer { bytes, format } => {
+            Ok(DecodeOutput::CpuBuffer { format, bytes })
+        }
+        astra_media::DecodeOutput::AudioPcmI16 { .. }
+        | astra_media::DecodeOutput::AudioPcmF32 { .. } => Err(decode_error(
+            PlatformErrorCode::InvalidState,
+            "decode.image",
+            "verified image decoder returned audio PCM",
+        )),
         astra_media::DecodeOutput::MediaSurfaceToken(_) => Err(decode_error(
             PlatformErrorCode::InvalidState,
             "decode.image",
@@ -254,24 +300,18 @@ fn decode_image(request: PlatformDecodeRequest) -> Result<DecodeOutput, Platform
     }
 }
 
-fn decode_media_codec(
+fn decode_audio_media_codec(
     temp_root: &Path,
     request: PlatformDecodeRequest,
     max_output_bytes: usize,
 ) -> Result<DecodeOutput, PlatformError> {
+    if request.kind != DecodeKind::Audio {
+        return Err(media_codec_error("decode.mediacodec.audio_kind"));
+    }
     let input = TempInput::create(temp_root, &request.bytes)?;
     let mut extractor = Extractor::new(&input.file)?;
     let (track_index, mut track_format, mime) = extractor.select_track(request.kind)?;
     validate_codec_name(&request.codec, &mime, request.kind)?;
-    let duration_us = track_format
-        .i64("durationUs")
-        .and_then(|value| u64::try_from(value).ok());
-    let width = track_format
-        .i32("width")
-        .and_then(|value| u32::try_from(value).ok());
-    let height = track_format
-        .i32("height")
-        .and_then(|value| u32::try_from(value).ok());
     let sample_rate = track_format
         .i32("sample-rate")
         .and_then(|value| u32::try_from(value).ok());
@@ -294,24 +334,116 @@ fn decode_media_codec(
         .set_async_notify_callback(Some(callback))
         .map_err(|_| media_codec_error("decode.mediacodec.callback"))?;
 
-    let mut image_reader = None;
-    let mut image_rx = None;
-    let output_window = if request.kind == DecodeKind::Video {
-        let width = width
+    codec
+        .configure(&track_format, None, MediaCodecDirection::Decoder)
+        .map_err(|_| media_codec_error("decode.mediacodec.configure"))?;
+    codec
+        .start()
+        .map_err(|_| media_codec_error("decode.mediacodec.start"))?;
+    let decode_result = drive_audio_codec(
+        &codec,
+        &mut extractor,
+        callback_rx,
+        overflow,
+        max_output_bytes,
+    );
+    let stop_result = codec.stop();
+    let _ = codec.set_async_notify_callback(None);
+    stop_result.map_err(|_| media_codec_error("decode.mediacodec.stop"))?;
+    let decoded = decode_result?;
+    let sample_rate = decoded
+        .sample_rate
+        .or(sample_rate)
+        .ok_or_else(|| media_codec_error("decode.mediacodec.audio_format"))?;
+    let channels = decoded
+        .channels
+        .or(channels)
+        .ok_or_else(|| media_codec_error("decode.mediacodec.audio_format"))?;
+    if decoded.samples.is_empty() || decoded.samples.len() % usize::from(channels) != 0 {
+        return Err(media_codec_error("decode.mediacodec.audio_alignment"));
+    }
+    Ok(DecodeOutput::AudioPcmI16 {
+        sample_rate,
+        channels,
+        samples: decoded.samples,
+    })
+}
+
+struct AndroidVideoStream {
+    _input: TempInput,
+    extractor: Extractor,
+    codec: MediaCodec,
+    events: Receiver<CodecEvent>,
+    overflow: Arc<AtomicBool>,
+    image_reader: ImageReader,
+    pending_pts: std::collections::VecDeque<u64>,
+    pending_frame: Option<DecodedVideoFrame>,
+    ready_frame: Option<DecodedVideoFrame>,
+    input_eos: bool,
+    output_eos: bool,
+    end_emitted: bool,
+    duration_us: u64,
+    frame_count: u64,
+    decoded_byte_count: u64,
+    max_decoded_byte_count: u64,
+    started: Instant,
+    progress_deadline: Instant,
+}
+
+impl AndroidVideoStream {
+    fn open(
+        temp_root: &Path,
+        codec_name: &str,
+        encoded: &[u8],
+        max_output_bytes: usize,
+    ) -> Result<Self, PlatformError> {
+        let input = TempInput::create(temp_root, encoded)?;
+        let mut extractor = Extractor::new(&input.file)?;
+        let (track_index, mut format, mime) = extractor.select_track(DecodeKind::Video)?;
+        validate_codec_name(codec_name, &mime, DecodeKind::Video)?;
+        let duration_us = format
+            .i64("durationUs")
+            .and_then(|value| u64::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| media_codec_error("decode.mediacodec.video_duration"))?;
+        let width = format
+            .i32("width")
+            .and_then(|value| u32::try_from(value).ok())
             .filter(|value| *value > 0)
             .ok_or_else(|| media_codec_error("decode.mediacodec.video_dimensions"))?;
-        let height = height
+        let height = format
+            .i32("height")
+            .and_then(|value| u32::try_from(value).ok())
             .filter(|value| *value > 0)
             .ok_or_else(|| media_codec_error("decode.mediacodec.video_dimensions"))?;
-        let frame_bytes = usize::try_from(u64::from(width) * u64::from(height) * 4)
-            .map_err(|_| media_codec_error("decode.mediacodec.video_dimensions"))?;
-        if frame_bytes > max_output_bytes {
+        let frame_bytes = u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(decode_budget_error)?;
+        let max_decoded_byte_count =
+            u64::try_from(max_output_bytes).map_err(|_| decode_budget_error())?;
+        if frame_bytes > max_decoded_byte_count {
             return Err(decode_budget_error());
         }
-        track_format.set_i32("color-format", 0x7f42_0888);
-        let (image_tx, receiver) = mpsc::sync_channel(CALLBACK_QUEUE_CAPACITY);
+        extractor.select(track_index)?;
+        format.set_i32("color-format", 0x7f42_0888);
+
+        let (event_tx, events) = mpsc::sync_channel(CALLBACK_QUEUE_CAPACITY);
+        let overflow = Arc::new(AtomicBool::new(false));
+        let callback = codec_callback(event_tx.clone(), Arc::clone(&overflow));
+        let mut codec = MediaCodec::from_decoder_type(&mime).ok_or_else(|| {
+            decode_error(
+                PlatformErrorCode::ProviderUnavailable,
+                "decode.mediacodec.open",
+                "MediaCodec decoder is unavailable for the selected video MIME type",
+            )
+        })?;
+        codec
+            .set_async_notify_callback(Some(callback))
+            .map_err(|_| media_codec_error("decode.mediacodec.callback"))?;
+
         let image_overflow = Arc::clone(&overflow);
-        let mut reader = ImageReader::new(
+        let mut image_reader = ImageReader::new(
             i32::try_from(width)
                 .map_err(|_| media_codec_error("decode.mediacodec.video_dimensions"))?,
             i32::try_from(height)
@@ -320,90 +452,217 @@ fn decode_media_codec(
             4,
         )
         .map_err(|_| media_codec_error("decode.mediacodec.image_reader"))?;
-        reader
+        image_reader
             .set_image_listener(Box::new(move |_| {
-                if image_tx.try_send(()).is_err() {
+                if event_tx.try_send(CodecEvent::Image).is_err() {
                     image_overflow.store(true, Ordering::Release);
                 }
             }))
             .map_err(|_| media_codec_error("decode.mediacodec.image_listener"))?;
-        let window = reader
+        let window = image_reader
             .window()
             .map_err(|_| media_codec_error("decode.mediacodec.image_surface"))?;
-        image_rx = Some(receiver);
-        image_reader = Some(reader);
-        Some(window)
-    } else {
-        None
-    };
+        codec
+            .configure(&format, Some(&window), MediaCodecDirection::Decoder)
+            .map_err(|_| media_codec_error("decode.mediacodec.configure"))?;
+        codec
+            .start()
+            .map_err(|_| media_codec_error("decode.mediacodec.start"))?;
+        let started = Instant::now();
+        Ok(Self {
+            _input: input,
+            extractor,
+            codec,
+            events,
+            overflow,
+            image_reader,
+            pending_pts: std::collections::VecDeque::new(),
+            pending_frame: None,
+            ready_frame: None,
+            input_eos: false,
+            output_eos: false,
+            end_emitted: false,
+            duration_us,
+            frame_count: 0,
+            decoded_byte_count: 0,
+            max_decoded_byte_count,
+            started,
+            progress_deadline: started + CALLBACK_IDLE_TIMEOUT,
+        })
+    }
 
-    codec
-        .configure(
-            &track_format,
-            output_window.as_ref(),
-            MediaCodecDirection::Decoder,
-        )
-        .map_err(|_| media_codec_error("decode.mediacodec.configure"))?;
-    codec
-        .start()
-        .map_err(|_| media_codec_error("decode.mediacodec.start"))?;
-    let decode_result = drive_codec(
-        &codec,
-        &mut extractor,
-        callback_rx,
-        overflow,
-        image_reader.as_ref(),
-        image_rx.as_ref(),
-        request.kind,
-        max_output_bytes,
-    );
-    let stop_result = codec.stop();
-    let _ = codec.set_async_notify_callback(None);
-    stop_result.map_err(|_| media_codec_error("decode.mediacodec.stop"))?;
-    let decoded = decode_result?;
-    match decoded {
-        RawDecoded::Audio {
-            bytes,
-            sample_rate: output_sample_rate,
-            channels: output_channels,
-        } => {
-            let sample_rate = output_sample_rate
-                .or(sample_rate)
-                .ok_or_else(|| media_codec_error("decode.mediacodec.audio_format"))?;
-            let channels = output_channels
-                .or(channels)
-                .ok_or_else(|| media_codec_error("decode.mediacodec.audio_format"))?;
-            if bytes.is_empty() || bytes.len() % (usize::from(channels) * 2) != 0 {
-                return Err(media_codec_error("decode.mediacodec.audio_alignment"));
+    fn next_output(&mut self) -> Result<DecodeOutput, PlatformError> {
+        if self.end_emitted {
+            return Err(media_codec_error("decode.video.stream.ended"));
+        }
+        loop {
+            if let Some(mut frame) = self.ready_frame.take() {
+                self.frame_count = self
+                    .frame_count
+                    .checked_add(1)
+                    .ok_or_else(decode_budget_error)?;
+                if self.frame_count > MAX_VIDEO_FRAMES {
+                    return Err(decode_budget_error());
+                }
+                frame.sequence = self.frame_count;
+                self.decoded_byte_count = self
+                    .decoded_byte_count
+                    .checked_add(frame.bgra8.len() as u64)
+                    .ok_or_else(decode_budget_error)?;
+                if self.decoded_byte_count > self.max_decoded_byte_count {
+                    return Err(decode_budget_error());
+                }
+                return Ok(DecodeOutput::VideoFrame {
+                    sequence: frame.sequence,
+                    pts_us: frame.pts_us,
+                    duration_us: frame.duration_us,
+                    width: frame.width,
+                    height: frame.height,
+                    bgra8: frame.bgra8,
+                });
             }
-            let hash = Hash256::from_sha256(&bytes).to_string();
-            Ok(DecodeOutput::CpuBuffer {
-                format: format!("pcm_s16le:{sample_rate}:{channels}"),
-                bytes,
-                hash,
-            })
+            if self.output_eos && self.pending_pts.is_empty() {
+                if let Some(mut frame) = self.pending_frame.take() {
+                    frame.duration_us = self
+                        .duration_us
+                        .checked_sub(frame.pts_us)
+                        .filter(|duration| *duration > 0)
+                        .ok_or_else(|| media_codec_error("decode.mediacodec.video_duration"))?;
+                    self.ready_frame = Some(frame);
+                    continue;
+                }
+                self.end_emitted = true;
+                return Ok(DecodeOutput::VideoStreamEnd {
+                    frame_count: self.frame_count,
+                    decoded_byte_count: self.decoded_byte_count,
+                });
+            }
+            if self.overflow.load(Ordering::Acquire) {
+                return Err(decode_error(
+                    PlatformErrorCode::QueueOverflow,
+                    "decode.mediacodec.callback",
+                    "MediaCodec callback queue overflowed",
+                ));
+            }
+            let now = Instant::now();
+            let total_deadline = self.started + DECODE_TOTAL_TIMEOUT;
+            let remaining = self
+                .progress_deadline
+                .min(total_deadline)
+                .saturating_duration_since(now);
+            if remaining.is_zero() {
+                return Err(media_codec_error("decode.mediacodec.timeout"));
+            }
+            let event = self
+                .events
+                .recv_timeout(remaining)
+                .map_err(|error| match error {
+                    mpsc::RecvTimeoutError::Timeout => {
+                        media_codec_error("decode.mediacodec.timeout")
+                    }
+                    mpsc::RecvTimeoutError::Disconnected => {
+                        media_codec_error("decode.mediacodec.callback_disconnected")
+                    }
+                })?;
+            self.progress_deadline = Instant::now() + CALLBACK_IDLE_TIMEOUT;
+            self.handle_event(event)?;
         }
-        RawDecoded::Video(mut frames) => {
-            finalize_video_frames(&mut frames, duration_us)?;
-            let total_duration = frames
-                .last()
-                .and_then(|frame| frame.pts_us.checked_add(frame.duration_us))
-                .ok_or_else(|| media_codec_error("decode.mediacodec.video_duration"))?;
-            let stream = DecodedVideoStream {
-                schema: astra_media::DECODED_VIDEO_STREAM_SCHEMA.to_string(),
-                duration_us: total_duration,
-                frames,
-            };
-            let bytes = stream
-                .encode(MAX_VIDEO_FRAMES, max_output_bytes as u64)
-                .map_err(|_| decode_budget_error())?;
-            let hash = Hash256::from_sha256(&bytes).to_string();
-            Ok(DecodeOutput::CpuBuffer {
-                format: format!("postcard:{}", astra_media::DECODED_VIDEO_STREAM_SCHEMA),
-                bytes,
-                hash,
-            })
+    }
+
+    fn handle_event(&mut self, event: CodecEvent) -> Result<(), PlatformError> {
+        match event {
+            CodecEvent::Input(index) if !self.input_eos => {
+                let buffer = self
+                    .codec
+                    .input_buffer(index)
+                    .ok_or_else(|| media_codec_error("decode.mediacodec.input_buffer"))?;
+                if let Some((size, pts_us, flags)) = self.extractor.read_sample(buffer)? {
+                    self.codec
+                        .queue_input_buffer_by_index(index, 0, size, pts_us, flags)
+                        .map_err(|_| media_codec_error("decode.mediacodec.queue_input"))?;
+                    self.extractor.advance()?;
+                } else {
+                    self.codec
+                        .queue_input_buffer_by_index(
+                            index,
+                            0,
+                            0,
+                            0,
+                            ndk_sys::AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM,
+                        )
+                        .map_err(|_| media_codec_error("decode.mediacodec.queue_eos"))?;
+                    self.input_eos = true;
+                }
+            }
+            CodecEvent::Input(_) | CodecEvent::FormatChanged { .. } => {}
+            CodecEvent::Output(index, info) => {
+                let size = usize::try_from(info.size())
+                    .map_err(|_| media_codec_error("decode.mediacodec.output_size"))?;
+                if size > 0 {
+                    let pts_us = u64::try_from(info.presentation_time_us())
+                        .map_err(|_| media_codec_error("decode.mediacodec.output_pts"))?;
+                    self.pending_pts.push_back(pts_us);
+                    self.codec
+                        .release_output_buffer_by_index(index, true)
+                        .map_err(|_| media_codec_error("decode.mediacodec.render_output"))?;
+                } else {
+                    self.codec
+                        .release_output_buffer_by_index(index, false)
+                        .map_err(|_| media_codec_error("decode.mediacodec.release_output"))?;
+                }
+                self.output_eos =
+                    info.flags() & ndk_sys::AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM != 0;
+            }
+            CodecEvent::Image => self.acquire_image()?,
+            CodecEvent::Error => {
+                return Err(media_codec_error("decode.mediacodec.callback_error"));
+            }
         }
+        Ok(())
+    }
+
+    fn acquire_image(&mut self) -> Result<(), PlatformError> {
+        let image = match self
+            .image_reader
+            .acquire_next_image()
+            .map_err(|_| media_codec_error("decode.mediacodec.acquire_image"))?
+        {
+            AcquireResult::Image(image) => image,
+            AcquireResult::NoBufferAvailable => return Ok(()),
+            AcquireResult::MaxImagesAcquired => {
+                return Err(media_codec_error("decode.mediacodec.max_images"));
+            }
+        };
+        let pts_us = self
+            .pending_pts
+            .pop_front()
+            .ok_or_else(|| media_codec_error("decode.mediacodec.image_without_pts"))?;
+        let (width, height, bgra8) = yuv420_to_bgra(&image)?;
+        let frame = DecodedVideoFrame {
+            sequence: 0,
+            pts_us,
+            duration_us: 0,
+            width,
+            height,
+            bgra8: bgra8.into(),
+        };
+        if let Some(mut previous) = self.pending_frame.replace(frame) {
+            previous.duration_us = pts_us
+                .checked_sub(previous.pts_us)
+                .filter(|duration| *duration > 0)
+                .ok_or_else(|| media_codec_error("decode.mediacodec.video_pts"))?;
+            if self.ready_frame.replace(previous).is_some() {
+                return Err(media_codec_error("decode.mediacodec.frame_backlog"));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AndroidVideoStream {
+    fn drop(&mut self) {
+        let _ = self.codec.stop();
+        let _ = self.codec.set_async_notify_callback(None);
     }
 }
 
@@ -414,6 +673,7 @@ enum CodecEvent {
         sample_rate: Option<u32>,
         channels: Option<u16>,
     },
+    Image,
     Error,
 }
 
@@ -463,56 +723,34 @@ fn codec_callback(tx: SyncSender<CodecEvent>, overflow: Arc<AtomicBool>) -> Asyn
     }
 }
 
-enum RawDecoded {
-    Audio {
-        bytes: Vec<u8>,
-        sample_rate: Option<u32>,
-        channels: Option<u16>,
-    },
-    Video(Vec<DecodedVideoFrame>),
+struct RawDecodedAudio {
+    samples: Vec<i16>,
+    sample_rate: Option<u32>,
+    channels: Option<u16>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn drive_codec(
+fn drive_audio_codec(
     codec: &MediaCodec,
     extractor: &mut Extractor,
     events: Receiver<CodecEvent>,
     overflow: Arc<AtomicBool>,
-    image_reader: Option<&ImageReader>,
-    image_events: Option<&Receiver<()>>,
-    kind: DecodeKind,
     max_output_bytes: usize,
-) -> Result<RawDecoded, PlatformError> {
+) -> Result<RawDecodedAudio, PlatformError> {
     let started = Instant::now();
     let total_deadline = started + DECODE_TOTAL_TIMEOUT;
     let mut progress_deadline = started + CALLBACK_IDLE_TIMEOUT;
     let mut input_eos = false;
     let mut output_eos = false;
-    let mut audio = Vec::new();
+    let mut audio = Vec::<i16>::new();
     let mut output_sample_rate = None;
     let mut output_channels = None;
-    let mut video = Vec::new();
-    let mut pending_video_pts = std::collections::VecDeque::new();
-    while !output_eos || !pending_video_pts.is_empty() {
+    while !output_eos {
         if overflow.load(Ordering::Acquire) {
             return Err(decode_error(
                 PlatformErrorCode::QueueOverflow,
                 "decode.mediacodec.callback",
                 "MediaCodec callback queue overflowed",
             ));
-        }
-        let drained_images = drain_images(
-            image_reader,
-            image_events,
-            &mut pending_video_pts,
-            &mut video,
-            max_output_bytes,
-        )?;
-        if drained_images != 0 {
-            progress_deadline = Instant::now() + CALLBACK_IDLE_TIMEOUT;
-        }
-        if output_eos && pending_video_pts.is_empty() {
-            break;
         }
         let now = Instant::now();
         let remaining = progress_deadline
@@ -558,29 +796,30 @@ fn drive_codec(
                 let offset = usize::try_from(info.offset())
                     .map_err(|_| media_codec_error("decode.mediacodec.output_offset"))?;
                 if size > 0 {
-                    if kind == DecodeKind::Audio {
-                        let buffer = codec
-                            .output_buffer(index)
-                            .ok_or_else(|| media_codec_error("decode.mediacodec.output_buffer"))?;
-                        let end = offset.checked_add(size).ok_or_else(decode_budget_error)?;
-                        let bytes = buffer
-                            .get(offset..end)
-                            .ok_or_else(|| media_codec_error("decode.mediacodec.output_bounds"))?;
-                        if audio.len().saturating_add(bytes.len()) > max_output_bytes {
-                            return Err(decode_budget_error());
-                        }
-                        audio.extend_from_slice(bytes);
-                        codec
-                            .release_output_buffer_by_index(index, false)
-                            .map_err(|_| media_codec_error("decode.mediacodec.release_output"))?;
-                    } else {
-                        let pts = u64::try_from(info.presentation_time_us())
-                            .map_err(|_| media_codec_error("decode.mediacodec.output_pts"))?;
-                        pending_video_pts.push_back(pts);
-                        codec
-                            .release_output_buffer_by_index(index, true)
-                            .map_err(|_| media_codec_error("decode.mediacodec.render_output"))?;
+                    let buffer = codec
+                        .output_buffer(index)
+                        .ok_or_else(|| media_codec_error("decode.mediacodec.output_buffer"))?;
+                    let end = offset.checked_add(size).ok_or_else(decode_budget_error)?;
+                    let bytes = buffer
+                        .get(offset..end)
+                        .ok_or_else(|| media_codec_error("decode.mediacodec.output_bounds"))?;
+                    if !bytes.len().is_multiple_of(std::mem::size_of::<i16>())
+                        || audio
+                            .len()
+                            .saturating_add(bytes.len() / std::mem::size_of::<i16>())
+                            .saturating_mul(std::mem::size_of::<i16>())
+                            > max_output_bytes
+                    {
+                        return Err(decode_budget_error());
                     }
+                    audio.extend(
+                        bytes
+                            .chunks_exact(2)
+                            .map(|sample| i16::from_le_bytes([sample[0], sample[1]])),
+                    );
+                    codec
+                        .release_output_buffer_by_index(index, false)
+                        .map_err(|_| media_codec_error("decode.mediacodec.release_output"))?;
                 } else {
                     codec
                         .release_output_buffer_by_index(index, false)
@@ -596,6 +835,9 @@ fn drive_codec(
                 output_channels = channels.or(output_channels);
                 progress_deadline = Instant::now() + CALLBACK_IDLE_TIMEOUT;
             }
+            Ok(CodecEvent::Image) => {
+                return Err(media_codec_error("decode.mediacodec.audio_image"));
+            }
             Ok(CodecEvent::Error) => {
                 return Err(media_codec_error("decode.mediacodec.callback_error"))
             }
@@ -608,65 +850,11 @@ fn drive_codec(
     if !input_eos || !output_eos {
         return Err(media_codec_error("decode.mediacodec.eos"));
     }
-    match kind {
-        DecodeKind::Audio => Ok(RawDecoded::Audio {
-            bytes: audio,
-            sample_rate: output_sample_rate,
-            channels: output_channels,
-        }),
-        DecodeKind::Video => Ok(RawDecoded::Video(video)),
-        DecodeKind::Image => unreachable!("image decoding is handled separately"),
-    }
-}
-
-fn drain_images(
-    reader: Option<&ImageReader>,
-    events: Option<&Receiver<()>>,
-    pending_pts: &mut std::collections::VecDeque<u64>,
-    frames: &mut Vec<DecodedVideoFrame>,
-    max_output_bytes: usize,
-) -> Result<usize, PlatformError> {
-    let (Some(reader), Some(events)) = (reader, events) else {
-        return Ok(0);
-    };
-    let initial_frame_count = frames.len();
-    while events.try_recv().is_ok() {
-        match reader
-            .acquire_next_image()
-            .map_err(|_| media_codec_error("decode.mediacodec.acquire_image"))?
-        {
-            AcquireResult::Image(image) => {
-                let pts_us = pending_pts
-                    .pop_front()
-                    .ok_or_else(|| media_codec_error("decode.mediacodec.image_without_pts"))?;
-                let (width, height, bgra8) = yuv420_to_bgra(&image)?;
-                let prior_bytes = frames
-                    .iter()
-                    .try_fold(0usize, |total, frame| total.checked_add(frame.bgra8.len()))
-                    .ok_or_else(decode_budget_error)?;
-                if prior_bytes.saturating_add(bgra8.len()) > max_output_bytes
-                    || frames.len() as u64 >= MAX_VIDEO_FRAMES
-                {
-                    return Err(decode_budget_error());
-                }
-                let content_hash = Hash256::from_sha256(&bgra8);
-                frames.push(DecodedVideoFrame {
-                    sequence: frames.len() as u64 + 1,
-                    pts_us,
-                    duration_us: 0,
-                    width,
-                    height,
-                    bgra8,
-                    content_hash,
-                });
-            }
-            AcquireResult::NoBufferAvailable => break,
-            AcquireResult::MaxImagesAcquired => {
-                return Err(media_codec_error("decode.mediacodec.max_images"));
-            }
-        }
-    }
-    Ok(frames.len() - initial_frame_count)
+    Ok(RawDecodedAudio {
+        samples: audio,
+        sample_rate: output_sample_rate,
+        channels: output_channels,
+    })
 }
 
 fn yuv420_to_bgra(image: &Image) -> Result<(u32, u32, Vec<u8>), PlatformError> {
@@ -762,33 +950,6 @@ fn plane_value(plane: &Plane<'_>, x: usize, y: usize) -> Result<u8, PlatformErro
         .get(offset)
         .copied()
         .ok_or_else(|| media_codec_error("decode.mediacodec.plane_bounds"))
-}
-
-fn finalize_video_frames(
-    frames: &mut [DecodedVideoFrame],
-    declared_duration: Option<u64>,
-) -> Result<(), PlatformError> {
-    if frames.is_empty() {
-        return Err(media_codec_error("decode.mediacodec.video_empty"));
-    }
-    for index in 0..frames.len().saturating_sub(1) {
-        frames[index].duration_us = frames[index + 1]
-            .pts_us
-            .checked_sub(frames[index].pts_us)
-            .filter(|duration| *duration > 0)
-            .ok_or_else(|| media_codec_error("decode.mediacodec.video_pts"))?;
-    }
-    let last = frames.len() - 1;
-    let fallback = frames
-        .get(last.saturating_sub(1))
-        .map(|frame| frame.duration_us)
-        .filter(|duration| *duration > 0)
-        .unwrap_or(1);
-    frames[last].duration_us = declared_duration
-        .and_then(|duration| duration.checked_sub(frames[last].pts_us))
-        .filter(|duration| *duration > 0)
-        .unwrap_or(fallback);
-    Ok(())
 }
 
 struct Extractor {

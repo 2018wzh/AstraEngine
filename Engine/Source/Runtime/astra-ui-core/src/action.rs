@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +18,42 @@ pub enum UiValue {
 }
 
 impl UiValue {
+    pub fn validate_map_entries(
+        values: &BTreeMap<String, UiValue>,
+    ) -> Result<(), UiValidationError> {
+        for (key, value) in values {
+            validate_id("action.value.key", key)?;
+            value.validate_depth(1)?;
+        }
+        Ok(())
+    }
+
+    pub fn map_retained_bytes(values: &BTreeMap<String, UiValue>) -> usize {
+        values.iter().fold(
+            values
+                .len()
+                .saturating_mul(std::mem::size_of::<(String, UiValue)>()),
+            |bytes, (key, value)| {
+                bytes
+                    .saturating_add(key.len())
+                    .saturating_add(value.retained_bytes())
+            },
+        )
+    }
+
+    /// Returns the retained heap payload used by this value without encoding it.
+    pub fn retained_bytes(&self) -> usize {
+        match self {
+            Self::Null | Self::Bool(_) | Self::Integer(_) | Self::Number(_) => 0,
+            Self::String(value) => value.len(),
+            Self::List(values) => values.iter().fold(
+                values.len().saturating_mul(std::mem::size_of::<UiValue>()),
+                |bytes, value| bytes.saturating_add(value.retained_bytes()),
+            ),
+            Self::Map(values) => Self::map_retained_bytes(values),
+        }
+    }
+
     fn validate_depth(&self, depth: usize) -> Result<(), UiValidationError> {
         if depth > 16 {
             return Err(UiValidationError::invalid(
@@ -38,22 +73,27 @@ impl UiValue {
                 }
                 Ok(())
             }
-            Self::Map(values) => {
-                for (key, value) in values {
-                    validate_id("action.value.key", key)?;
-                    value.validate_depth(depth + 1)?;
-                }
-                Ok(())
-            }
+            Self::Map(values) => Self::validate_map_entries_at_depth(values, depth + 1),
             Self::Null | Self::Bool(_) | Self::Integer(_) | Self::Number(_) => Ok(()),
         }
+    }
+
+    fn validate_map_entries_at_depth(
+        values: &BTreeMap<String, UiValue>,
+        depth: usize,
+    ) -> Result<(), UiValidationError> {
+        for (key, value) in values {
+            validate_id("action.value.key", key)?;
+            value.validate_depth(depth)?;
+        }
+        Ok(())
     }
 }
 
 impl ValidateUi for UiValue {
     fn validate(&self) -> Result<(), UiValidationError> {
         self.validate_depth(0)?;
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }
 
@@ -64,7 +104,7 @@ pub struct UiActionEnvelope {
     pub semantic_target_id: String,
     pub action_id: String,
     pub arguments: BTreeMap<String, UiValue>,
-    pub semantic_snapshot_hash: Hash256,
+    pub semantic_generation: u64,
 }
 
 impl ValidateUi for UiActionEnvelope {
@@ -77,10 +117,16 @@ impl ValidateUi for UiActionEnvelope {
         }
         validate_id("action.semantic_target_id", &self.semantic_target_id)?;
         validate_id("action.action_id", &self.action_id)?;
+        if self.semantic_generation == 0 {
+            return Err(UiValidationError::invalid(
+                "ASTRA_UI_ACTION_SEMANTIC_GENERATION",
+                "action semantic generation must be non-zero",
+            ));
+        }
         for (key, value) in &self.arguments {
             validate_id("action.argument", key)?;
             value.validate_depth(0)?;
         }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }

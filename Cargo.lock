@@ -647,9 +647,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-audio-kira"
+version = "0.1.0"
+dependencies = [
+ "astra-headless-test",
+ "astra-platform",
+ "kira",
+ "rtrb",
+ "schemars",
+ "serde",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "astra-byte-source"
 version = "0.1.0"
 dependencies = [
+ "abi_stable",
  "astra-core",
  "astra-headless-test",
  "schemars",
@@ -763,6 +778,7 @@ dependencies = [
 name = "astra-emu-cli"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "astra-emu-family-api",
  "astra-emu-family-core",
@@ -852,6 +868,7 @@ dependencies = [
 name = "astra-emu-family-core"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "proptest",
  "schemars",
@@ -880,6 +897,7 @@ dependencies = [
 name = "astra-emu-family-support"
 version = "0.1.0"
 dependencies = [
+ "astra-audio-kira",
  "astra-byte-source",
  "astra-core",
  "astra-emu-family-api",
@@ -1215,6 +1233,7 @@ name = "astra-media"
 version = "0.1.0"
 dependencies = [
  "astra-asset",
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "astra-media-core",
@@ -1244,6 +1263,7 @@ dependencies = [
 name = "astra-media-core"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "rayon",
@@ -1304,6 +1324,7 @@ dependencies = [
 name = "astra-platform"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "astra-media-core",
  "astra-ui-core",
@@ -1562,6 +1583,7 @@ dependencies = [
 name = "astra-player-core"
 version = "0.1.0"
 dependencies = [
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "astra-media",
@@ -1582,6 +1604,7 @@ name = "astra-player-vn"
 version = "0.1.0"
 dependencies = [
  "astra-asset",
+ "astra-audio-kira",
  "astra-byte-source",
  "astra-core",
  "astra-headless-test",
@@ -1648,7 +1671,6 @@ dependencies = [
  "astra-runtime",
  "astra-worker-budget",
  "libloading 0.8.9",
- "postcard",
  "schemars",
  "semver",
  "serde",
@@ -1664,6 +1686,7 @@ name = "astra-plugin-abi"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
+ "astra-byte-source",
  "astra-core",
  "astra-headless-test",
  "postcard",
@@ -2074,10 +2097,8 @@ dependencies = [
  "astra-vn-core",
  "astra-vn-script",
  "astra-vn-system",
- "postcard",
  "schemars",
  "serde",
- "serde_json",
  "thiserror 1.0.69",
  "tracing",
  "unicode-segmentation",
@@ -2221,6 +2242,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "atomic-arena"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73e8ed45f88ed32e6827a96b62d8fd4086d72defc754c5c6bd08470c1aaf648e"
 
 [[package]]
 name = "atomic-polyfill"
@@ -4548,6 +4575,9 @@ name = "glam"
 version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f22fb22f065b308be0d8724e3706c7fa3fc2a6c7d6899df4cad7860e7a75436"
+dependencies = [
+ "mint",
+]
 
 [[package]]
 name = "glib"
@@ -4949,9 +4979,6 @@ version = "0.1.0"
 dependencies = [
  "abi_stable",
  "astra-plugin-abi",
- "astra-runtime",
- "postcard",
- "serde_json",
  "tracing",
 ]
 
@@ -6063,6 +6090,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "kira"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40962061330cfa2fb59d040be05955247a91573a87353bfbe8a4c4be2c62e90a"
+dependencies = [
+ "atomic-arena",
+ "glam 0.33.2",
+ "mint",
+ "pastey 0.2.3",
+ "rtrb",
+ "send_wrapper",
+ "triple_buffer",
+]
+
+[[package]]
 name = "kstring"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6554,6 +6596,12 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
+
+[[package]]
+name = "mint"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
 name = "mio"
@@ -8695,7 +8743,7 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=1dea7b3e59069b958b118cb1e4192f62acd9a5cc#1dea7b3e59069b958b118cb1e4192f62acd9a5cc"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=ee6bd6a8ae7470a073216d2d110e1042fad7cc25#ee6bd6a8ae7470a073216d2d110e1042fad7cc25"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -9146,6 +9194,12 @@ dependencies = [
  "serde",
  "serde_core",
 ]
+
+[[package]]
+name = "send_wrapper"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
 
 [[package]]
 name = "serde"
@@ -10778,6 +10832,15 @@ checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
 dependencies = [
  "num-integer",
  "strength_reduce",
+]
+
+[[package]]
+name = "triple_buffer"
+version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e875ab7068a75b74f419da453927e05527c36f0001b3c7aad3ce443640683487"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]

@@ -1,35 +1,32 @@
-#[cfg(feature = "ffmpeg-vcpkg")]
-use std::io::{Read, Seek, SeekFrom};
 use std::{
     collections::VecDeque,
     fmt::Debug,
     io::Write,
     path::{Component, Path, PathBuf},
-    sync::Arc,
-    time::Instant,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 
 use crate::artifact::{ArtifactRecorder, AudioArtifactStream};
 use astra_headless_protocol::RendererExecutionIdentity;
+#[cfg(feature = "ffmpeg-vcpkg")]
+use astra_media::FfmpegDecodedPacket;
 use astra_media::{
     DecodeKind as MediaDecodeKind, DecodeOutput as MediaDecodeOutput, DecodeProvider,
     DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
-};
-#[cfg(feature = "ffmpeg-vcpkg")]
-use astra_media::{
-    DecodedVideoFrame, DecodedVideoStream, DecodedVideoStreamDescriptor, DecodedVideoStreamEnd,
-    FfmpegDecodedPacket, DECODED_VIDEO_FRAME_SCHEMA, DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA,
-    DECODED_VIDEO_STREAM_END_SCHEMA, DECODED_VIDEO_STREAM_SCHEMA,
 };
 use astra_media_core::{
     CpuRendererProvider, HeadlessRenderer, MediaError, RenderTargetFormat, Renderer2DProvider,
     RendererCreateRequest, SceneCommand,
 };
 use astra_platform::{
-    host_channel, AudioDeviceFormat, AudioMeter, AudioOutputHandle, AudioOutputState,
-    AudioOutputStatus, CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle,
-    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, HostCommand,
-    HostLaunchProfile, PackageSourceHandle, PackageSourceRequest, PlatformError, PlatformErrorCode,
+    host_channel, AudioDeviceFormat, AudioOutputHandle, AudioOutputLane, AudioWakeRegistration,
+    CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle, HeadlessHostProfile,
+    HeadlessReadbackPolicy, HeadlessRenderPolicy, HostCommand, HostLaunchProfile,
+    OpenedAudioOutput, PackageSourceHandle, PackageSourceRequest, PlatformError, PlatformErrorCode,
     PlatformHostFactory, PlatformHostSession, RgbaFrame, SaveTransactionHandle, SurfaceHandle,
     WindowHandle,
 };
@@ -248,7 +245,7 @@ fn validate_provider_bindings(
         (
             "audio_mixer",
             profile.providers.audio_mixer.as_str(),
-            "audio_graph_cpu",
+            "kira",
         ),
         (
             "image_decode",
@@ -345,44 +342,121 @@ struct PendingScene {
     scene_pending_ns: u64,
 }
 struct AudioState {
+    paused: Arc<AtomicBool>,
+    wake: AudioWakeRegistration,
+    artifact_stream: Arc<Mutex<Option<AudioArtifactStream>>>,
+}
+
+struct HeadlessAudioLane {
+    sample_rate: u32,
     channels: u16,
-    max_frames: usize,
-    last_sequence: u64,
-    artifact_stream: Option<AudioArtifactStream>,
+    chunk_samples: usize,
+    started: Instant,
     submitted_samples: u64,
-    square_sum: f64,
-    peak: f32,
-    queued: Vec<f32>,
-    paused: bool,
-    consumed: u64,
-    callback_count: u64,
-    underflow_count: u64,
+    consumed_samples: Arc<AtomicU64>,
+    paused: Arc<AtomicBool>,
+    wake: AudioWakeRegistration,
+    observed_wake: u64,
+    artifact_stream: Arc<Mutex<Option<AudioArtifactStream>>>,
+    artifacts: Arc<Mutex<ArtifactRecorder>>,
+    capture: Option<astra_platform::AudioCaptureReader>,
+}
+
+impl AudioOutputLane for HeadlessAudioLane {
+    fn wait_for_capacity(
+        &mut self,
+        requested_samples: usize,
+        stop: &AtomicBool,
+    ) -> Result<(), PlatformError> {
+        if requested_samples != self.chunk_samples {
+            return Err(invalid(
+                "audio.lane.wait",
+                "mixer chunk size does not match the Headless output lane",
+            ));
+        }
+        while self.paused.load(Ordering::Acquire) && !stop.load(Ordering::Acquire) {
+            if let Some(sequence) = self
+                .wake
+                .wait_timeout(self.observed_wake, Duration::from_millis(20))
+            {
+                self.observed_wake = sequence;
+            }
+        }
+        Ok(())
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        if samples.len() != self.chunk_samples || samples.iter().any(|sample| !sample.is_finite()) {
+            return Err(invalid(
+                "audio.lane.submit",
+                "Headless audio chunk has an invalid size or non-finite sample",
+            ));
+        }
+        let next_samples = self
+            .submitted_samples
+            .checked_add(samples.len() as u64)
+            .ok_or_else(|| invalid("audio.lane.submit", "sample count overflowed"))?;
+        let next_frames = next_samples / u64::from(self.channels);
+        let deadline_ns = u128::from(next_frames)
+            .checked_mul(1_000_000_000)
+            .ok_or_else(|| invalid("audio.lane.submit", "audio deadline overflowed"))?
+            / u128::from(self.sample_rate);
+        let deadline = self
+            .started
+            .checked_add(Duration::from_nanos(u64::try_from(deadline_ns).map_err(
+                |_| invalid("audio.lane.submit", "audio deadline overflowed"),
+            )?))
+            .ok_or_else(|| invalid("audio.lane.submit", "audio deadline overflowed"))?;
+        let now = Instant::now();
+        if deadline > now {
+            std::thread::sleep(deadline.duration_since(now));
+        }
+        {
+            let mut stream = self
+                .artifact_stream
+                .lock()
+                .map_err(|_| invalid("audio.lane.submit", "audio stream lock is poisoned"))?;
+            if let Some(stream) = stream.as_mut() {
+                self.artifacts
+                    .lock()
+                    .map_err(|_| {
+                        invalid("audio.lane.submit", "artifact recorder lock is poisoned")
+                    })?
+                    .append_audio_stream(stream, &samples)?;
+            }
+        }
+        if let Some(capture) = &self.capture {
+            capture.append(&samples)?;
+        }
+        self.submitted_samples = next_samples;
+        self.consumed_samples.store(next_samples, Ordering::Release);
+        Ok(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.consumed_samples.load(Ordering::Acquire)
+    }
+
+    fn underflow_count(&self) -> u64 {
+        0
+    }
 }
 struct DecodeState {
     kind: DecodeKind,
     last_sequence: u64,
     #[cfg(feature = "ffmpeg-vcpkg")]
-    video_spool: Option<HeadlessVideoSpool>,
+    video_stream: Option<HeadlessVideoStream>,
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-struct HeadlessVideoFrameIndex {
-    offset: u64,
-    byte_len: u64,
-    sequence: u64,
-    pts_us: u64,
+struct HeadlessVideoStream {
+    decoder: astra_media::FfmpegPlaybackDecoder,
     duration_us: u64,
-    width: u32,
-    height: u32,
-    content_hash: astra_core::Hash256,
-}
-
-#[cfg(feature = "ffmpeg-vcpkg")]
-struct HeadlessVideoSpool {
-    file: tempfile::NamedTempFile,
-    frames: Vec<HeadlessVideoFrameIndex>,
-    cursor: usize,
-    descriptor: DecodedVideoStreamDescriptor,
+    max_frames: u64,
+    max_decoded_byte_count: u64,
+    frame_count: u64,
+    decoded_byte_count: u64,
+    end_emitted: bool,
 }
 enum PackageState {
     File(FilePackageSource),
@@ -407,7 +481,7 @@ struct HostState {
     save_store: AtomicSaveStore,
     package_root: PathBuf,
     user_authorized_package: Option<PathBuf>,
-    artifacts: ArtifactRecorder,
+    artifacts: Arc<Mutex<ArtifactRecorder>>,
     https_root_certificates: Vec<Vec<u8>>,
     performance_observer: Option<Arc<dyn HeadlessPerformanceObserver>>,
 }
@@ -419,11 +493,11 @@ impl HostState {
         backend: astra_platform::PlatformBackendChannels,
     ) -> Result<Self, PlatformError> {
         let save_store = AtomicSaveStore::new(&factory.run_root, &profile.package_id)?;
-        let artifacts = ArtifactRecorder::new(
+        let artifacts = Arc::new(Mutex::new(ArtifactRecorder::new(
             factory.run_root.clone(),
             &profile,
             factory.input_sequence_hash,
-        )?;
+        )?));
         Ok(Self {
             profile,
             backend,
@@ -505,14 +579,17 @@ impl HostState {
                 invalid("surface.capture", "surface has no pending GPU checkpoint")
             })?;
             let captured = renderer.capture_checkpoint()?;
-            self.artifacts.record_rasterized_frame(
-                state.materialized_sequence.ok_or_else(|| {
-                    invalid("surface.capture", "surface has no materialized sequence")
-                })?,
-                captured.width,
-                captured.height,
-                &captured.rgba8,
-            )?;
+            self.artifacts
+                .lock()
+                .map_err(|_| invalid("artifact.frame", "artifact recorder lock is poisoned"))?
+                .record_rasterized_frame(
+                    state.materialized_sequence.ok_or_else(|| {
+                        invalid("surface.capture", "surface has no materialized sequence")
+                    })?,
+                    captured.width,
+                    captured.height,
+                    &captured.rgba8,
+                )?;
             state.frame = Some(Arc::clone(&captured.rgba8));
             return Ok(captured);
         }
@@ -665,12 +742,15 @@ impl HostState {
             ));
         }
         if capture {
-            self.artifacts.record_rasterized_frame(
-                pending.sequence,
-                captured.width,
-                captured.height,
-                &captured.rgba8,
-            )?;
+            self.artifacts
+                .lock()
+                .map_err(|_| invalid("artifact.frame", "artifact recorder lock is poisoned"))?
+                .record_rasterized_frame(
+                    pending.sequence,
+                    captured.width,
+                    captured.height,
+                    &captured.rgba8,
+                )?;
         }
         let state = self.surfaces.get_mut(surface)?;
         state.frame = capture.then(|| Arc::clone(&captured.rgba8));
@@ -723,6 +803,10 @@ impl HostState {
                     if let Some(renderer) = &gpu_renderer {
                         let identity = renderer.identity();
                         self.artifacts
+                            .lock()
+                            .map_err(|_| {
+                                invalid("artifact.renderer", "artifact recorder lock is poisoned")
+                            })?
                             .set_renderer_identity(RendererExecutionIdentity {
                                 provider: identity.provider.clone(),
                                 backend: identity.backend.clone(),
@@ -785,14 +869,18 @@ impl HostState {
                         &frame.rgba8,
                     ))
                     .map_err(|_| invalid("surface.present_rgba", "frame serialization failed"))?;
-                    self.artifacts
-                        .record_submission(frame.sequence, &canonical)?;
-                    self.artifacts.record_rasterized_frame(
-                        frame.sequence,
-                        frame.width,
-                        frame.height,
-                        &frame.rgba8,
-                    )?;
+                    {
+                        let mut artifacts = self.artifacts.lock().map_err(|_| {
+                            invalid("artifact.frame", "artifact recorder lock is poisoned")
+                        })?;
+                        artifacts.record_submission(frame.sequence, &canonical)?;
+                        artifacts.record_rasterized_frame(
+                            frame.sequence,
+                            frame.width,
+                            frame.height,
+                            &frame.rgba8,
+                        )?;
+                    }
                     present_rgba(self.surfaces.get_mut(surface)?, frame)
                 })();
                 let _ = reply.send(result);
@@ -831,17 +919,14 @@ impl HostState {
                             "scene validation duration overflowed",
                         )?;
                         let scene_digest_started = Instant::now();
-                        let canonical = scene_submission_digest(
+                        let canonical = scene_submission_identity(
                             frame.sequence,
                             frame.width,
                             frame.height,
                             frame.clear_rgba,
-                            &commands,
+                            commands.len(),
                             &frame.semantics,
-                        )
-                        .map_err(|_| {
-                            invalid("surface.present_scene", "scene serialization failed")
-                        })?;
+                        )?;
                         let scene_digest_ns = elapsed_ns(
                             scene_digest_started,
                             "surface.present_scene",
@@ -854,8 +939,7 @@ impl HostState {
                                 matches!(
                                     command,
                                     SceneCommand::UploadTexture { .. }
-                                        | SceneCommand::UploadLiveTexture { .. }
-                                        | SceneCommand::UpdateLiveTextureRegion { .. }
+                                        | SceneCommand::UpdateTextureRegion { .. }
                                         | SceneCommand::UploadGlyph { .. }
                                         | SceneCommand::ReleaseResource { .. }
                                 )
@@ -909,7 +993,12 @@ impl HostState {
                     // The canonical submission stream advances only after the full
                     // scene has validated. Invalid skipped frames therefore cannot
                     // alter either retained resources or submitted evidence.
-                    self.artifacts.record_submission(sequence, &canonical)?;
+                    self.artifacts
+                        .lock()
+                        .map_err(|_| {
+                            invalid("artifact.scene", "artifact recorder lock is poisoned")
+                        })?
+                        .record_submission(sequence, &canonical)?;
                     {
                         let s = self.surfaces.get_mut(surface)?;
                         s.renderer.commit_frame(journal);
@@ -978,10 +1067,14 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::OpenAudioOutput { request, reply } => {
-                let result = if request.sample_rate != 48_000 || request.channels != 2 {
+                let result = if request.sample_rate != 48_000
+                    || request.channels != 2
+                    || request.chunk_frames == 0
+                    || request.chunk_frames > request.max_buffered_frames
+                {
                     Err(invalid(
                         "audio.open",
-                        "headless audio requires 48kHz stereo",
+                        "headless audio requires 48kHz stereo and a bounded non-zero chunk",
                     ))
                 } else {
                     (|| {
@@ -991,134 +1084,98 @@ impl HostState {
                         ) {
                             None
                         } else {
-                            Some(self.artifacts.begin_audio_stream()?)
+                            Some(
+                                self.artifacts
+                                    .lock()
+                                    .map_err(|_| {
+                                        invalid("audio.open", "artifact recorder lock is poisoned")
+                                    })?
+                                    .begin_audio_stream()?,
+                            )
                         };
-                        self.audio.insert(AudioState {
-                            channels: request.channels,
-                            max_frames: request.max_buffered_frames,
-                            last_sequence: 0,
-                            artifact_stream,
-                            submitted_samples: 0,
-                            square_sum: 0.0,
-                            peak: 0.0,
-                            queued: Vec::new(),
-                            paused: request.start_paused,
-                            consumed: 0,
-                            callback_count: 0,
-                            underflow_count: 0,
+                        let paused = Arc::new(AtomicBool::new(request.start_paused));
+                        let wake = AudioWakeRegistration::default();
+                        let artifact_stream = Arc::new(Mutex::new(artifact_stream));
+                        let consumed_samples = Arc::new(AtomicU64::new(0));
+                        let capture = request
+                            .capture_samples
+                            .then(astra_platform::AudioCaptureReader::default);
+                        let handle = self.audio.insert(AudioState {
+                            paused: Arc::clone(&paused),
+                            wake: wake.clone(),
+                            artifact_stream: Arc::clone(&artifact_stream),
+                        })?;
+                        let chunk_samples = request
+                            .chunk_frames
+                            .checked_mul(usize::from(request.channels))
+                            .ok_or_else(|| {
+                                invalid("audio.open", "audio chunk sample count overflowed")
+                            })?;
+                        Ok(OpenedAudioOutput {
+                            handle,
+                            format: AudioDeviceFormat {
+                                sample_rate: request.sample_rate,
+                                channels: request.channels,
+                            },
+                            capture: capture.clone(),
+                            lane: Box::new(HeadlessAudioLane {
+                                sample_rate: request.sample_rate,
+                                channels: request.channels,
+                                chunk_samples,
+                                started: Instant::now(),
+                                submitted_samples: 0,
+                                consumed_samples,
+                                paused,
+                                wake,
+                                observed_wake: 0,
+                                artifact_stream,
+                                artifacts: Arc::clone(&self.artifacts),
+                                capture,
+                            }),
                         })
                     })()
                 };
                 let _ = reply.send(result);
             }
-            HostCommand::QueryAudioOutputFormat { reply }
-            | HostCommand::QueryAudioDeviceFormat { reply } => {
-                let _ = reply.send(Ok(AudioDeviceFormat {
-                    sample_rate: 48_000,
-                    channels: 2,
-                }));
-            }
-            HostCommand::SubmitAudio {
-                output,
-                mut packet,
-                reply,
-            } => {
-                let result = (|| {
-                    let audio = self.audio.get(output)?;
-                    let submitted_samples = audio
-                        .submitted_samples
-                        .checked_add(packet.samples.len() as u64)
-                        .ok_or_else(|| invalid("audio.submit", "sample count overflowed"))?;
-                    let a = self.audio.get_mut(output)?;
-                    ensure_sequence(a.last_sequence, packet.sequence, "audio.submit")?;
-                    if packet.channels != a.channels
-                        || packet.samples.iter().any(|s| !s.is_finite())
-                    {
-                        return Err(invalid(
-                            "audio.submit",
-                            "audio packet format or sample is invalid",
-                        ));
-                    }
-                    if let Some(stream) = a.artifact_stream.as_mut() {
-                        self.artifacts
-                            .append_audio_stream(stream, &packet.samples)?;
-                    } else {
-                        self.artifacts
-                            .record_audio(packet.sequence, &packet.samples)?;
-                    }
-                    if packet.frame_count() > a.max_frames
-                        || a.queued.len().saturating_add(packet.samples.len())
-                            > a.max_frames.saturating_mul(usize::from(a.channels))
-                    {
-                        return Err(PlatformError::new(
-                            PlatformErrorCode::QueueOverflow,
-                            "audio.submit",
-                            format!(
-                                "audio buffer limit exceeded: queued_samples={}, packet_samples={}, max_samples={}",
-                                a.queued.len(),
-                                packet.samples.len(),
-                                a.max_frames.saturating_mul(usize::from(a.channels))
-                            ),
-                        ));
-                    }
-                    for sample in &packet.samples {
-                        let value = f64::from(*sample);
-                        a.square_sum += value * value;
-                        a.peak = a.peak.max(sample.abs());
-                    }
-                    a.submitted_samples = submitted_samples;
-                    a.queued.append(&mut packet.samples);
-                    a.last_sequence = packet.sequence;
-                    Ok(packet.samples)
-                })();
-                let _ = reply.send(result);
-            }
-            HostCommand::QueryAudio { output, reply } => {
-                let result = self.audio.get_mut(output).map(|audio| {
-                    consume_audio_callback(audio);
-                    audio_state(audio)
-                });
-                let _ = reply.send(result);
-            }
-            HostCommand::DrainAudio { output, reply } => {
-                let result = self.audio.get_mut(output).map(|a| {
-                    a.consumed = a.submitted_samples;
-                    a.queued.clear();
-                    aggregate_audio_meter(a)
-                });
-                let _ = reply.send(result);
-            }
-            HostCommand::QueryAudioOutput { output, reply } => {
-                let result = self.audio.get(output).map(audio_status);
-                let _ = reply.send(result);
-            }
             HostCommand::PauseAudio { output, reply } => {
-                let result = self.audio.get_mut(output).and_then(|a| {
-                    if a.paused {
+                let result = self.audio.get(output).and_then(|audio| {
+                    if audio.paused.swap(true, Ordering::AcqRel) {
                         Err(invalid("audio.pause", "audio output is already paused"))
                     } else {
-                        a.paused = true;
+                        audio.wake.notify();
                         Ok(())
                     }
                 });
                 let _ = reply.send(result);
             }
             HostCommand::ResumeAudio { output, reply } => {
-                let result = self.audio.get_mut(output).and_then(|a| {
-                    if !a.paused {
+                let result = self.audio.get(output).and_then(|audio| {
+                    if !audio.paused.swap(false, Ordering::AcqRel) {
                         Err(invalid("audio.resume", "audio output is not paused"))
                     } else {
-                        a.paused = false;
+                        audio.wake.notify();
                         Ok(())
                     }
                 });
                 let _ = reply.send(result);
             }
             HostCommand::AbortAudio { output, reply } => {
-                let result = self.audio.remove(output).map(|mut state| {
-                    if let Some(stream) = state.artifact_stream.take() {
-                        self.artifacts.abort_audio_stream(stream);
+                let result = self.audio.remove(output).and_then(|state| {
+                    state.wake.notify();
+                    let stream = state
+                        .artifact_stream
+                        .lock()
+                        .map_err(|_| invalid("audio.abort", "audio stream lock is poisoned"))?
+                        .take();
+                    if let Some(stream) = stream {
+                        self.artifacts
+                            .lock()
+                            .map_err(|_| {
+                                invalid("audio.abort", "artifact recorder lock is poisoned")
+                            })?
+                            .abort_audio_stream(stream);
                     }
+                    Ok(())
                 });
                 let _ = reply.send(result);
             }
@@ -1131,12 +1188,20 @@ impl HostState {
             }
             HostCommand::CloseAudio { output, reply } => {
                 let result = (|| {
-                    // Handle lifetime is independent from artifact persistence. Once close
-                    // begins, remove the platform resource even if bounded artifact commit
-                    // fails, so cleanup reports the owning error instead of a secondary leak.
-                    let mut state = self.audio.remove(output)?;
-                    if let Some(stream) = state.artifact_stream.take() {
-                        self.artifacts.finish_audio_stream(stream)?;
+                    let state = self.audio.remove(output)?;
+                    state.wake.notify();
+                    let stream = state
+                        .artifact_stream
+                        .lock()
+                        .map_err(|_| invalid("audio.close", "audio stream lock is poisoned"))?
+                        .take();
+                    if let Some(stream) = stream {
+                        self.artifacts
+                            .lock()
+                            .map_err(|_| {
+                                invalid("audio.close", "artifact recorder lock is poisoned")
+                            })?
+                            .finish_audio_stream(stream)?;
                     }
                     Ok(())
                 })();
@@ -1147,7 +1212,7 @@ impl HostState {
                     kind,
                     last_sequence: 0,
                     #[cfg(feature = "ffmpeg-vcpkg")]
-                    video_spool: None,
+                    video_stream: None,
                 });
                 let _ = reply.send(result);
             }
@@ -1170,14 +1235,14 @@ impl HostState {
             HostCommand::CloseDecode { session, reply } => {
                 let result = self.decoders.remove(session).map(|state| {
                     #[cfg(feature = "ffmpeg-vcpkg")]
-                    let had_video_spool = state.video_spool.is_some();
+                    let had_video_stream = state.video_stream.is_some();
                     #[cfg(not(feature = "ffmpeg-vcpkg"))]
-                    let had_video_spool = false;
+                    let had_video_stream = false;
                     tracing::info!(
                         event = "platform.headless.decode.session.closed",
                         kind = ?state.kind,
-                        had_video_spool,
-                        "closed Headless decode session and released private resources"
+                        had_video_stream,
+                        "closed Headless decode session and released decoder resources"
                     );
                 });
                 let _ = reply.send(result);
@@ -1249,9 +1314,15 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::Shutdown { reply } => {
-                let result = self
-                    .ensure_empty()
-                    .and_then(|_| self.artifacts.finish().map(|_| ()));
+                let result = self.ensure_empty().and_then(|_| {
+                    self.artifacts
+                        .lock()
+                        .map_err(|_| {
+                            invalid("artifact.finish", "artifact recorder lock is poisoned")
+                        })?
+                        .finish()
+                        .map(|_| ())
+                });
                 let _ = reply.send(result);
             }
         }
@@ -1367,81 +1438,6 @@ fn ensure_increasing(last: u64, next: u64, operation: &'static str) -> Result<()
     }
     Ok(())
 }
-fn ensure_sequence(last: u64, next: u64, operation: &'static str) -> Result<(), PlatformError> {
-    if next
-        != last
-            .checked_add(1)
-            .ok_or_else(|| invalid(operation, "sequence overflow"))?
-    {
-        return Err(invalid(
-            operation,
-            "sequence is duplicated, skipped, or reversed",
-        ));
-    }
-    Ok(())
-}
-fn amplitude_db(value: f32) -> f32 {
-    if value <= 0.0 {
-        -120.0
-    } else {
-        (20.0 * value.log10()).max(-120.0)
-    }
-}
-fn audio_state(a: &AudioState) -> AudioOutputState {
-    let frames = a.queued.len() / usize::from(a.channels);
-    AudioOutputState {
-        queued_frames: frames,
-        callback_count: a.callback_count,
-        submitted_samples: a.submitted_samples,
-        consumed_samples: a.consumed,
-        underflow_count: a.underflow_count,
-        meter: aggregate_audio_meter(a),
-    }
-}
-fn audio_status(a: &AudioState) -> AudioOutputStatus {
-    let frames = a.submitted_samples / u64::from(a.channels);
-    let played = a.consumed / u64::from(a.channels);
-    AudioOutputStatus {
-        submitted_frames: frames,
-        played_frames: played,
-        buffered_frames: (a.queued.len() / usize::from(a.channels)) as u64,
-        underflow_count: a.underflow_count,
-        meter: aggregate_audio_meter(a),
-    }
-}
-
-fn aggregate_audio_meter(audio: &AudioState) -> AudioMeter {
-    if audio.submitted_samples == 0 {
-        return AudioMeter {
-            sample_count: 0,
-            peak_dbfs: -120.0,
-            rms_dbfs: -120.0,
-        };
-    }
-    let rms = (audio.square_sum / audio.submitted_samples as f64).sqrt() as f32;
-    AudioMeter {
-        sample_count: audio.submitted_samples,
-        peak_dbfs: amplitude_db(audio.peak),
-        rms_dbfs: amplitude_db(rms),
-    }
-}
-
-fn consume_audio_callback(audio: &mut AudioState) {
-    if audio.paused {
-        return;
-    }
-    audio.callback_count = audio.callback_count.saturating_add(1);
-    if audio.queued.is_empty() {
-        if audio.submitted_samples > 0 {
-            audio.underflow_count = audio.underflow_count.saturating_add(1);
-        }
-        return;
-    }
-    let samples = (800_usize * usize::from(audio.channels)).min(audio.queued.len());
-    audio.queued.drain(..samples);
-    audio.consumed = audio.consumed.saturating_add(samples as u64);
-}
-
 fn decode_session(
     state: &mut DecodeState,
     request: astra_platform::PlatformDecodeRequest,
@@ -1472,19 +1468,13 @@ fn decode_session(
                 ));
             }
             #[cfg(feature = "ffmpeg-vcpkg")]
-            if state.video_spool.is_some() {
+            if state.video_stream.is_some() {
                 return Err(invalid(
                     "decode.submit",
                     "one-shot decode is invalid while a video stream is active",
                 ));
             }
-            decode(
-                state.kind,
-                request,
-                video_binding,
-                max_video_frames,
-                max_decode_output_bytes,
-            )
+            decode(state.kind, request)
         }
         astra_platform::DecodeStreamAction::Start => {
             if state.kind != DecodeKind::Video || request.bytes.is_empty() {
@@ -1495,29 +1485,25 @@ fn decode_session(
             }
             #[cfg(feature = "ffmpeg-vcpkg")]
             {
-                if state.video_spool.is_some() {
+                if state.video_stream.is_some() {
                     return Err(invalid(
                         "decode.video.stream.start",
                         "video stream is already active",
                     ));
                 }
-                let spool = build_video_spool(
+                let stream = open_headless_video_stream(
                     &request.codec,
                     &request.bytes,
                     video_binding,
                     max_video_frames,
                     max_decode_output_bytes,
                 )?;
-                let bytes = spool
-                    .descriptor
-                    .encode(max_video_frames, max_decode_output_bytes)
-                    .map_err(media_error)?;
-                let output = DecodeOutput::CpuBuffer {
-                    format: format!("postcard:{DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA}"),
-                    hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
-                    bytes,
+                let output = DecodeOutput::VideoStreamStart {
+                    duration_us: Some(stream.duration_us),
+                    frame_count: None,
+                    decoded_byte_count: None,
                 };
-                state.video_spool = Some(spool);
+                state.video_stream = Some(stream);
                 Ok(output)
             }
             #[cfg(not(feature = "ffmpeg-vcpkg"))]
@@ -1539,7 +1525,7 @@ fn decode_session(
             }
             #[cfg(feature = "ffmpeg-vcpkg")]
             {
-                next_video_spool_output(state, max_decode_output_bytes)
+                next_headless_video_output(state)
             }
             #[cfg(not(feature = "ffmpeg-vcpkg"))]
             {
@@ -1559,9 +1545,6 @@ fn decode_session(
 fn decode(
     kind: DecodeKind,
     request: astra_platform::PlatformDecodeRequest,
-    video_binding: &str,
-    max_video_frames: u64,
-    max_decode_output_bytes: u64,
 ) -> Result<DecodeOutput, PlatformError> {
     if kind != request.kind {
         return Err(invalid(
@@ -1580,26 +1563,39 @@ fn decode(
         bytes: request.bytes,
         profile: "headless".into(),
     };
+    if kind == DecodeKind::Video {
+        return Err(invalid(
+            "decode.video",
+            "video decode requires the typed incremental stream path",
+        ));
+    }
     let result = match kind {
         DecodeKind::Image => ImageDecodeProvider.decode(&request),
         DecodeKind::Audio => SymphoniaAudioDecodeProvider.decode(&request),
-        DecodeKind::Video => Ok(decode_video(
-            &request,
-            video_binding,
-            max_video_frames,
-            max_decode_output_bytes,
-        )?),
+        DecodeKind::Video => unreachable!(),
     }
     .map_err(media_error)?;
     match result.output {
-        MediaDecodeOutput::CpuBuffer {
-            bytes,
-            format,
-            hash,
-        } => Ok(DecodeOutput::CpuBuffer {
-            format,
-            bytes,
-            hash: hash.to_string(),
+        MediaDecodeOutput::CpuBuffer { bytes, format } => {
+            Ok(DecodeOutput::CpuBuffer { format, bytes })
+        }
+        MediaDecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            samples,
+        } => Ok(DecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            samples,
+        }),
+        MediaDecodeOutput::AudioPcmF32 {
+            sample_rate,
+            channels,
+            samples,
+        } => Ok(DecodeOutput::AudioPcmF32 {
+            sample_rate,
+            channels,
+            samples,
         }),
         MediaDecodeOutput::MediaSurfaceToken(_) => Err(invalid(
             "decode.submit",
@@ -1609,13 +1605,13 @@ fn decode(
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-fn build_video_spool(
+fn open_headless_video_stream(
     codec: &str,
     encoded: &[u8],
     video_binding: &str,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
-) -> Result<HeadlessVideoSpool, PlatformError> {
+) -> Result<HeadlessVideoStream, PlatformError> {
     if video_binding != "ffmpeg-vcpkg" {
         return Err(PlatformError::new(
             PlatformErrorCode::ProviderUnavailable,
@@ -1624,13 +1620,13 @@ fn build_video_spool(
         ));
     }
     astra_media::probe_ffmpeg_provider().map_err(media_error)?;
-    let frame_limit = usize::try_from(max_video_frames).map_err(|_| {
+    let max_video_frames_usize = usize::try_from(max_video_frames).map_err(|_| {
         invalid(
             "decode.video.stream.start",
             "video frame limit exceeds the current host address space",
         )
     })?;
-    let frame_byte_limit = usize::try_from(max_decode_output_bytes).map_err(|_| {
+    let max_decode_output_bytes_usize = usize::try_from(max_decode_output_bytes).map_err(|_| {
         invalid(
             "decode.video.stream.start",
             "video byte limit exceeds the current host address space",
@@ -1638,325 +1634,93 @@ fn build_video_spool(
     })?;
     let limits = astra_media::FfmpegStreamLimits {
         max_encoded_bytes: encoded.len(),
-        max_video_frames: frame_limit,
-        max_video_frame_bytes: frame_byte_limit,
+        max_video_frames: max_video_frames_usize,
+        max_video_frame_bytes: max_decode_output_bytes_usize,
         ..astra_media::FfmpegStreamLimits::default()
     };
-    let mut decoder =
+    let decoder =
         astra_media::FfmpegPlaybackDecoder::open(codec, encoded, limits).map_err(media_error)?;
     let duration_us = decoder.playback_config().duration_us;
-    let mut file = tempfile::NamedTempFile::new().map_err(|error| {
-        PlatformError::new(
-            PlatformErrorCode::Io,
-            "decode.video.stream.spool",
-            format!("could not create private video spool: {error}"),
-        )
-    })?;
-    let mut frames = Vec::new();
-    let mut decoded_byte_count = 0_u64;
-    let mut previous_sequence = 0_u64;
-    let mut previous_pts = None;
-    let mut digest = Sha256::new();
-    digest.update(DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.as_bytes());
-    digest.update(duration_us.to_le_bytes());
-    while let Some(packet) = decoder.read_next().map_err(media_error)? {
-        let FfmpegDecodedPacket::Video { packet, bgra8 } = packet else {
-            continue;
-        };
-        let byte_len = bgra8.len() as u64;
-        let expected_byte_len = u64::from(packet.width)
-            .checked_mul(u64::from(packet.height))
-            .and_then(|pixels| pixels.checked_mul(4));
-        if packet.sequence != previous_sequence.saturating_add(1)
-            || packet.duration_us == 0
-            || packet.width == 0
-            || packet.height == 0
-            || expected_byte_len != Some(byte_len)
-            || packet.pts_us >= duration_us
-            || packet
-                .pts_us
-                .checked_add(packet.duration_us)
-                .is_none_or(|end| end > duration_us)
-            || previous_pts.is_some_and(|pts| packet.pts_us < pts)
-        {
-            return Err(invalid(
-                "decode.video.stream.start",
-                "decoded video frame order, timing, or dimensions are invalid",
-            ));
-        }
-        decoded_byte_count = decoded_byte_count.checked_add(byte_len).ok_or_else(|| {
-            invalid(
-                "decode.video.stream.start",
-                "decoded video byte accounting overflowed",
-            )
-        })?;
-        if frames.len() >= frame_limit || decoded_byte_count > max_decode_output_bytes {
-            return Err(PlatformError::new(
-                PlatformErrorCode::QueueOverflow,
-                "decode.video.stream.start",
-                "decoded video exceeds its profile-bound frame or byte limit",
-            ));
-        }
-        if astra_core::Hash256::from_sha256(&bgra8) != packet.content_hash {
-            return Err(invalid(
-                "decode.video.stream.start",
-                "decoder frame content hash does not match its bytes",
-            ));
-        }
-        let offset = file.as_file().stream_position().map_err(|error| {
-            PlatformError::new(
-                PlatformErrorCode::Io,
-                "decode.video.stream.spool",
-                format!("could not query private video spool position: {error}"),
-            )
-        })?;
-        file.write_all(&bgra8).map_err(|error| {
-            PlatformError::new(
-                PlatformErrorCode::Io,
-                "decode.video.stream.spool",
-                format!("could not write private video spool: {error}"),
-            )
-        })?;
-        digest.update(packet.sequence.to_le_bytes());
-        digest.update(packet.pts_us.to_le_bytes());
-        digest.update(packet.duration_us.to_le_bytes());
-        digest.update(packet.width.to_le_bytes());
-        digest.update(packet.height.to_le_bytes());
-        digest.update(packet.content_hash.as_bytes());
-        frames.push(HeadlessVideoFrameIndex {
-            offset,
-            byte_len,
-            sequence: packet.sequence,
-            pts_us: packet.pts_us,
-            duration_us: packet.duration_us,
-            width: packet.width,
-            height: packet.height,
-            content_hash: packet.content_hash,
-        });
-        previous_sequence = packet.sequence;
-        previous_pts = Some(packet.pts_us);
-    }
-    if frames.is_empty() {
+    if duration_us == 0 {
         return Err(invalid(
             "decode.video.stream.start",
-            "decoded video stream contains no frames",
+            "video decoder reported an empty duration",
         ));
     }
-    file.as_file_mut().flush().map_err(|error| {
-        PlatformError::new(
-            PlatformErrorCode::Io,
-            "decode.video.stream.spool",
-            format!("could not flush private video spool: {error}"),
-        )
-    })?;
-    digest.update((frames.len() as u64).to_le_bytes());
-    digest.update(decoded_byte_count.to_le_bytes());
-    let stream_hash = {
-        let digest = digest.finalize();
-        let mut bytes = [0_u8; 32];
-        bytes.copy_from_slice(&digest);
-        astra_core::Hash256::from_bytes(bytes)
-    };
-    let descriptor = DecodedVideoStreamDescriptor {
-        schema: DECODED_VIDEO_STREAM_DESCRIPTOR_SCHEMA.to_string(),
+    Ok(HeadlessVideoStream {
+        decoder,
         duration_us,
-        frame_count: frames.len() as u64,
-        decoded_byte_count,
-        stream_hash,
-    };
-    descriptor
-        .validate(max_video_frames, max_decode_output_bytes)
-        .map_err(media_error)?;
-    tracing::info!(
-        event = "platform.headless.decode.video_spool.ready",
-        frame_count = descriptor.frame_count,
-        decoded_byte_count = descriptor.decoded_byte_count,
-        stream_hash = %descriptor.stream_hash,
-        "decoded and validated complete video stream into a private bounded spool"
-    );
-    Ok(HeadlessVideoSpool {
-        file,
-        frames,
-        cursor: 0,
-        descriptor,
+        max_frames: max_video_frames,
+        max_decoded_byte_count: max_decode_output_bytes,
+        frame_count: 0,
+        decoded_byte_count: 0,
+        end_emitted: false,
     })
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-fn next_video_spool_output(
-    state: &mut DecodeState,
-    max_decode_output_bytes: u64,
-) -> Result<DecodeOutput, PlatformError> {
-    let spool = state.video_spool.as_mut().ok_or_else(|| {
+fn next_headless_video_output(state: &mut DecodeState) -> Result<DecodeOutput, PlatformError> {
+    let stream = state.video_stream.as_mut().ok_or_else(|| {
         invalid(
             "decode.video.stream.next",
             "video stream has not been started",
         )
     })?;
-    let Some(index) = spool.frames.get(spool.cursor) else {
-        let end = DecodedVideoStreamEnd {
-            schema: DECODED_VIDEO_STREAM_END_SCHEMA.to_string(),
-            frame_count: spool.descriptor.frame_count,
-            decoded_byte_count: spool.descriptor.decoded_byte_count,
-            stream_hash: spool.descriptor.stream_hash,
+    while let Some(packet) = stream.decoder.read_next().map_err(media_error)? {
+        let FfmpegDecodedPacket::Video { packet, bgra8 } = packet else {
+            continue;
         };
-        end.validate_against(&spool.descriptor)
-            .map_err(media_error)?;
-        let bytes = postcard::to_allocvec(&end).map_err(|error| {
-            PlatformError::new(
-                PlatformErrorCode::InvalidState,
-                "decode.video.stream.end",
-                format!("could not encode video stream end marker: {error}"),
-            )
-        })?;
-        return Ok(DecodeOutput::CpuBuffer {
-            format: format!("postcard:{DECODED_VIDEO_STREAM_END_SCHEMA}"),
-            hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
-            bytes,
-        });
-    };
-    let byte_len = usize::try_from(index.byte_len).map_err(|_| {
-        invalid(
-            "decode.video.stream.next",
-            "video frame exceeds the current host address space",
-        )
-    })?;
-    let mut bgra8 = vec![0_u8; byte_len];
-    spool
-        .file
-        .as_file_mut()
-        .seek(SeekFrom::Start(index.offset))
-        .and_then(|_| spool.file.as_file_mut().read_exact(&mut bgra8))
-        .map_err(|error| {
-            PlatformError::new(
-                PlatformErrorCode::Io,
+        let expected = u64::from(packet.width)
+            .checked_mul(u64::from(packet.height))
+            .and_then(|pixels| pixels.checked_mul(4));
+        if packet.sequence != stream.frame_count.saturating_add(1)
+            || packet.duration_us == 0
+            || expected != Some(bgra8.len() as u64)
+        {
+            return Err(invalid(
                 "decode.video.stream.next",
-                format!("could not read private video spool: {error}"),
-            )
-        })?;
-    let frame = DecodedVideoFrame {
-        sequence: index.sequence,
-        pts_us: index.pts_us,
-        duration_us: index.duration_us,
-        width: index.width,
-        height: index.height,
-        content_hash: index.content_hash,
-        bgra8,
-    };
-    let bytes = frame.encode(max_decode_output_bytes).map_err(media_error)?;
-    spool.cursor += 1;
-    tracing::trace!(
-        event = "platform.headless.decode.video_spool.frame",
-        frame_sequence = frame.sequence,
-        frame_pts_us = frame.pts_us,
-        cursor = spool.cursor,
-        frame_count = spool.descriptor.frame_count,
-        content_hash = %frame.content_hash,
-        "read one validated frame from the private video spool"
-    );
-    Ok(DecodeOutput::CpuBuffer {
-        format: format!("postcard:{DECODED_VIDEO_FRAME_SCHEMA}"),
-        hash: astra_core::Hash256::from_sha256(&bytes).to_string(),
-        bytes,
-    })
-}
-
-#[cfg(feature = "ffmpeg-vcpkg")]
-fn decode_video(
-    request: &DecodeRequest,
-    video_binding: &str,
-    max_video_frames: u64,
-    max_decode_output_bytes: u64,
-) -> Result<astra_media::DecodeResult, PlatformError> {
-    if video_binding != "ffmpeg-vcpkg" {
-        return Err(PlatformError::new(
-            PlatformErrorCode::ProviderUnavailable,
-            "decode.video",
-            "video decode requires the explicit ffmpeg-vcpkg profile binding",
+                "decoded video frame metadata is invalid",
+            ));
+        }
+        stream.frame_count = packet.sequence;
+        stream.decoded_byte_count = stream
+            .decoded_byte_count
+            .checked_add(bgra8.len() as u64)
+            .ok_or_else(|| {
+                invalid(
+                    "decode.video.stream.next",
+                    "decoded video byte accounting overflowed",
+                )
+            })?;
+        if stream.frame_count > stream.max_frames
+            || stream.decoded_byte_count > stream.max_decoded_byte_count
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::QueueOverflow,
+                "decode.video.stream.next",
+                "decoded video stream exceeds its profile-bound budget",
+            ));
+        }
+        return Ok(DecodeOutput::VideoFrame {
+            sequence: packet.sequence,
+            pts_us: packet.pts_us,
+            duration_us: packet.duration_us,
+            width: packet.width,
+            height: packet.height,
+            bgra8: bgra8.into(),
+        });
+    }
+    if stream.end_emitted {
+        return Err(invalid(
+            "decode.video.stream.next",
+            "video stream end was already emitted",
         ));
     }
-    astra_media::probe_ffmpeg_provider().map_err(media_error)?;
-    let max_video_frames = usize::try_from(max_video_frames).map_err(|_| {
-        invalid(
-            "decode.video",
-            "video frame limit exceeds the current host address space",
-        )
-    })?;
-    let max_decode_output_bytes = usize::try_from(max_decode_output_bytes).map_err(|_| {
-        invalid(
-            "decode.video",
-            "video byte limit exceeds the current host address space",
-        )
-    })?;
-    let limits = astra_media::FfmpegStreamLimits {
-        max_encoded_bytes: request.bytes.len(),
-        max_video_frames,
-        max_video_frame_bytes: max_decode_output_bytes,
-        ..astra_media::FfmpegStreamLimits::default()
-    };
-    let mut decoder =
-        astra_media::FfmpegPlaybackDecoder::open(&request.codec, &request.bytes, limits)
-            .map_err(media_error)?;
-    let duration_us = decoder.playback_config().duration_us;
-    let mut frames = Vec::new();
-    let mut decoded_bytes = 0_usize;
-    while let Some(packet) = decoder.read_next().map_err(media_error)? {
-        if let FfmpegDecodedPacket::Video { packet, bgra8 } = packet {
-            decoded_bytes = decoded_bytes.checked_add(bgra8.len()).ok_or_else(|| {
-                invalid("decode.video", "decoded video byte accounting overflowed")
-            })?;
-            if frames.len() >= max_video_frames || decoded_bytes > max_decode_output_bytes {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::QueueOverflow,
-                    "decode.video",
-                    "decoded video exceeds its profile-bound frame or byte limit",
-                ));
-            }
-            frames.push(DecodedVideoFrame {
-                sequence: packet.sequence,
-                pts_us: packet.pts_us,
-                duration_us: packet.duration_us,
-                width: packet.width,
-                height: packet.height,
-                content_hash: packet.content_hash,
-                bgra8,
-            });
-        }
-    }
-    let stream = DecodedVideoStream {
-        schema: DECODED_VIDEO_STREAM_SCHEMA.to_string(),
-        duration_us,
-        frames,
-    };
-    let bytes = stream
-        .encode(max_video_frames as u64, max_decode_output_bytes as u64)
-        .map_err(media_error)?;
-    let hash = astra_core::Hash256::from_sha256(&bytes);
-    Ok(astra_media::DecodeResult {
-        provider_id: "astra.decode.ffmpeg".to_string(),
-        kind: MediaDecodeKind::Video,
-        codec: request.codec.clone(),
-        output: MediaDecodeOutput::CpuBuffer {
-            bytes,
-            format: format!("postcard:{DECODED_VIDEO_STREAM_SCHEMA}"),
-            hash,
-        },
-        diagnostics: Vec::new(),
+    stream.end_emitted = true;
+    Ok(DecodeOutput::VideoStreamEnd {
+        frame_count: stream.frame_count,
+        decoded_byte_count: stream.decoded_byte_count,
     })
-}
-
-#[cfg(not(feature = "ffmpeg-vcpkg"))]
-fn decode_video(
-    _request: &DecodeRequest,
-    _video_binding: &str,
-    _max_video_frames: u64,
-    _max_decode_output_bytes: u64,
-) -> Result<astra_media::DecodeResult, PlatformError> {
-    Err(PlatformError::new(
-        PlatformErrorCode::ProviderUnavailable,
-        "decode.video",
-        "video requires an explicitly compiled and bound ffmpeg-vcpkg provider",
-    ))
 }
 
 async fn package_range(
@@ -2214,160 +1978,33 @@ fn canonical_json_digest(value: &impl serde::Serialize) -> Result<[u8; 32], serd
     Ok(digest.finalize().into())
 }
 
-fn scene_submission_digest(
+fn scene_submission_identity(
     sequence: u64,
     width: u32,
     height: u32,
     clear_rgba: [u8; 4],
-    commands: &[SceneCommand],
+    command_count: usize,
     semantics: &Option<astra_ui_core::UiSemanticSnapshot>,
-) -> Result<[u8; 32], serde_json::Error> {
-    let mut digest = Sha256::new();
-    write_json_digest_record(
-        &mut digest,
-        &(
-            "astra.headless.scene_submission.v2",
-            sequence,
-            width,
-            height,
-            clear_rgba,
-            semantics,
-        ),
-    )?;
-    for command in commands {
-        match command {
-            SceneCommand::UploadTexture { resource_id, frame } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "upload_texture",
-                    resource_id,
-                    frame.width,
-                    frame.height,
-                    frame.rgba8.len(),
-                    frame.hash,
-                ),
-            )?,
-            SceneCommand::UploadLiveTexture { resource_id, frame } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "upload_live_texture",
-                    resource_id,
-                    frame.width,
-                    frame.height,
-                    frame.rgba8.len(),
-                ),
-            )?,
-            SceneCommand::UpdateLiveTextureRegion {
-                resource_id,
-                x,
-                y,
-                width,
-                height,
-                rgba8,
-            } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "update_live_texture_region",
-                    resource_id,
-                    x,
-                    y,
-                    width,
-                    height,
-                    rgba8.len(),
-                ),
-            )?,
-            SceneCommand::UploadGlyph { resource_id, glyph } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "upload_glyph",
-                    resource_id,
-                    glyph.width,
-                    glyph.height,
-                    &glyph.format,
-                    glyph.pixels.len(),
-                    glyph.hash,
-                ),
-            )?,
-            SceneCommand::Texture {
-                id,
-                frame,
-                destination,
-                opacity,
-                blend,
-            } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "texture",
-                    id,
-                    frame.width,
-                    frame.height,
-                    frame.rgba8.len(),
-                    frame.hash,
-                    destination,
-                    opacity,
-                    blend,
-                ),
-            )?,
-            SceneCommand::VideoFrame {
-                id,
-                frame,
-                destination,
-                opacity,
-                blend,
-                presentation_time_ns,
-            } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "video_frame",
-                    id,
-                    frame.width,
-                    frame.height,
-                    frame.rgba8.len(),
-                    frame.hash,
-                    destination,
-                    opacity,
-                    blend,
-                    presentation_time_ns,
-                ),
-            )?,
-            SceneCommand::Glyph {
-                id,
-                glyph,
-                x,
-                y,
-                rgba,
-                opacity,
-                blend,
-            } => write_json_digest_record(
-                &mut digest,
-                &(
-                    "glyph",
-                    id,
-                    glyph.width,
-                    glyph.height,
-                    &glyph.format,
-                    glyph.pixels.len(),
-                    glyph.hash,
-                    x,
-                    y,
-                    rgba,
-                    opacity,
-                    blend,
-                ),
-            )?,
-            _ => write_json_digest_record(&mut digest, command)?,
-        }
-    }
-    Ok(digest.finalize().into())
-}
-
-fn write_json_digest_record(
-    digest: &mut Sha256,
-    value: &impl serde::Serialize,
-) -> Result<(), serde_json::Error> {
-    serde_json::to_writer(Sha256Writer(digest), value)?;
-    digest.update(b"\n");
-    Ok(())
+) -> Result<[u8; 32], PlatformError> {
+    let command_count = u32::try_from(command_count).map_err(|_| {
+        invalid(
+            "surface.present_scene",
+            "scene command count exceeds the submission identity format",
+        )
+    })?;
+    let mut identity = [0_u8; 32];
+    identity[..8].copy_from_slice(&sequence.to_le_bytes());
+    identity[8..12].copy_from_slice(&width.to_le_bytes());
+    identity[12..16].copy_from_slice(&height.to_le_bytes());
+    identity[16..20].copy_from_slice(&command_count.to_le_bytes());
+    identity[20..24].copy_from_slice(&clear_rgba);
+    identity[24..32].copy_from_slice(
+        &semantics
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.generation)
+            .to_le_bytes(),
+    );
+    Ok(identity)
 }
 
 fn elapsed_ns(

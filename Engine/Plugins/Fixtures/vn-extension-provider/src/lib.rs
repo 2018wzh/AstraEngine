@@ -64,7 +64,6 @@ extern "C" fn register() -> FfiPluginRegistration {
             ),
         ]),
         runtime_providers: RVec::new(),
-        actions: RVec::new(),
         callbacks: 0,
     }
 }

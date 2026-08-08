@@ -1,92 +1,167 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
-use astra_platform::{PlatformError, PlatformErrorCode};
+use astra_platform::{AudioOutputLane, AudioWakeRegistration, PlatformError, PlatformErrorCode};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AudioQueueTelemetry {
-    pub sample_count: u64,
+    pub queued_samples: u64,
+    pub consumed_samples: u64,
     pub underflow_count: u64,
+}
+
+#[derive(Default)]
+struct SharedTelemetry {
+    queued_samples: AtomicU64,
+    consumed_samples: AtomicU64,
+    underflow_count: AtomicU64,
 }
 
 #[derive(Clone)]
 pub struct AudioQueueTelemetryReader {
-    sample_count: Arc<AtomicU64>,
-    underflow_count: Arc<AtomicU64>,
+    shared: Arc<SharedTelemetry>,
 }
 
 impl AudioQueueTelemetryReader {
     pub fn snapshot(&self) -> AudioQueueTelemetry {
         AudioQueueTelemetry {
-            sample_count: self.sample_count.load(Ordering::Relaxed),
-            underflow_count: self.underflow_count.load(Ordering::Relaxed),
+            queued_samples: self.shared.queued_samples.load(Ordering::Acquire),
+            consumed_samples: self.shared.consumed_samples.load(Ordering::Acquire),
+            underflow_count: self.shared.underflow_count.load(Ordering::Relaxed),
         }
     }
 }
 
 pub struct NativeAudioProducer {
-    inner: Producer<f32>,
+    ready: Producer<Vec<f32>>,
+    recycled: Consumer<Vec<f32>>,
+    chunk_samples: usize,
+    wake: AudioWakeRegistration,
+    observed_wake: u64,
+    telemetry: Arc<SharedTelemetry>,
 }
 
 impl NativeAudioProducer {
-    pub fn push_samples(&mut self, samples: &[f32]) -> Result<(), PlatformError> {
-        if self.inner.slots() < samples.len() {
-            return Err(PlatformError::new(
-                PlatformErrorCode::QueueOverflow,
-                "audio.submit",
-                "audio output queue is full",
+    pub fn try_submit_owned(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        if samples.len() != self.chunk_samples || self.ready.slots() == 0 {
+            return Err(queue_overflow(
+                "audio output lane has no capacity for the chunk",
             ));
         }
-        self.inner.push_entire_slice(samples).map_err(|_| {
-            PlatformError::new(
-                PlatformErrorCode::QueueOverflow,
-                "audio.submit",
-                "audio output queue changed while producer was submitting",
-            )
-        })
+        let sample_count = samples.len() as u64;
+        self.ready
+            .push(samples)
+            .map_err(|_| queue_overflow("audio output lane changed while submitting"))?;
+        self.telemetry
+            .queued_samples
+            .fetch_add(sample_count, Ordering::Release);
+        self.recycled
+            .pop()
+            .map_err(|_| queue_overflow("audio output lane has no recycled allocation"))
     }
+}
+
+impl AudioOutputLane for NativeAudioProducer {
+    fn wait_for_capacity(
+        &mut self,
+        requested_samples: usize,
+        stop: &AtomicBool,
+    ) -> Result<(), PlatformError> {
+        if requested_samples != self.chunk_samples {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.lane.wait",
+                "mixer chunk size does not match the opened output lane",
+            ));
+        }
+        while self.ready.slots() == 0 || self.recycled.slots() == 0 {
+            if stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            if let Some(sequence) = self
+                .wake
+                .wait_timeout(self.observed_wake, std::time::Duration::from_millis(20))
+            {
+                self.observed_wake = sequence;
+            }
+        }
+        Ok(())
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        self.try_submit_owned(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.telemetry.consumed_samples.load(Ordering::Acquire)
+    }
+
+    fn underflow_count(&self) -> u64 {
+        self.telemetry.underflow_count.load(Ordering::Relaxed)
+    }
+}
+
+struct CurrentChunk {
+    samples: Vec<f32>,
+    offset: usize,
 }
 
 pub struct NativeAudioConsumer {
-    inner: Consumer<f32>,
-    sample_count: Arc<AtomicU64>,
-    underflow_count: Arc<AtomicU64>,
+    ready: Consumer<Vec<f32>>,
+    recycled: Producer<Vec<f32>>,
+    current: Option<CurrentChunk>,
+    telemetry: Arc<SharedTelemetry>,
 }
 
 impl NativeAudioConsumer {
+    /// Copies only into the final device callback buffer. Source chunks remain owned and are
+    /// returned whole to the mixer after the last sample is consumed.
     pub fn pop_samples(&mut self, target: &mut [f32]) -> usize {
-        let available = self.inner.slots().min(target.len());
-        if available == 0 {
-            return 0;
+        let mut written = 0;
+        while written < target.len() {
+            if self.current.is_none() {
+                let Ok(samples) = self.ready.pop() else {
+                    break;
+                };
+                self.current = Some(CurrentChunk { samples, offset: 0 });
+            }
+            let current = self.current.as_mut().expect("current chunk exists");
+            let available = current.samples.len() - current.offset;
+            let count = available.min(target.len() - written);
+            target[written..written + count]
+                .copy_from_slice(&current.samples[current.offset..current.offset + count]);
+            current.offset += count;
+            written += count;
+            if current.offset == current.samples.len() {
+                let chunk = self.current.take().expect("completed chunk exists").samples;
+                self.recycled
+                    .push(chunk)
+                    .expect("recycle queue capacity invariant must hold");
+            }
         }
-        if self
-            .inner
-            .pop_entire_slice(&mut target[..available])
-            .is_err()
-        {
-            return 0;
+        if written != 0 {
+            self.telemetry
+                .queued_samples
+                .fetch_sub(written as u64, Ordering::Release);
+            self.telemetry
+                .consumed_samples
+                .fetch_add(written as u64, Ordering::Release);
         }
-        self.sample_count
-            .fetch_add(available as u64, Ordering::Relaxed);
-        available
+        written
     }
 
     pub fn pop_sample(&mut self) -> Option<f32> {
-        match self.inner.pop() {
-            Ok(sample) => {
-                self.sample_count.fetch_add(1, Ordering::Relaxed);
-                Some(sample)
-            }
-            Err(_) => None,
-        }
+        let mut sample = [0.0];
+        (self.pop_samples(&mut sample) == 1).then_some(sample[0])
     }
 
-    /// Records one native callback that could not fill its requested output buffer.
     pub fn record_underflow(&self) {
-        self.underflow_count.fetch_add(1, Ordering::Relaxed);
+        self.telemetry
+            .underflow_count
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -94,7 +169,9 @@ pub struct NativeAudioQueue;
 
 impl NativeAudioQueue {
     pub fn create(
-        capacity: usize,
+        chunk_capacity: usize,
+        chunk_samples: usize,
+        wake: AudioWakeRegistration,
     ) -> Result<
         (
             NativeAudioProducer,
@@ -103,27 +180,41 @@ impl NativeAudioQueue {
         ),
         PlatformError,
     > {
-        if capacity == 0 {
+        if chunk_capacity == 0 || chunk_samples == 0 {
             return Err(PlatformError::new(
                 PlatformErrorCode::InvalidState,
                 "audio.queue.create",
-                "audio output queue capacity must be non-zero",
+                "audio output chunk capacity and size must be non-zero",
             ));
         }
-        let (producer, consumer) = RingBuffer::new(capacity);
-        let sample_count = Arc::new(AtomicU64::new(0));
-        let underflow_count = Arc::new(AtomicU64::new(0));
+        let (ready_producer, ready_consumer) = RingBuffer::new(chunk_capacity);
+        let (mut recycle_producer, recycle_consumer) = RingBuffer::new(chunk_capacity);
+        for _ in 0..chunk_capacity {
+            recycle_producer
+                .push(vec![0.0; chunk_samples])
+                .expect("new recycle queue has declared capacity");
+        }
+        let telemetry = Arc::new(SharedTelemetry::default());
         Ok((
-            NativeAudioProducer { inner: producer },
+            NativeAudioProducer {
+                ready: ready_producer,
+                recycled: recycle_consumer,
+                chunk_samples,
+                wake,
+                observed_wake: 0,
+                telemetry: Arc::clone(&telemetry),
+            },
             NativeAudioConsumer {
-                inner: consumer,
-                sample_count: Arc::clone(&sample_count),
-                underflow_count: Arc::clone(&underflow_count),
+                ready: ready_consumer,
+                recycled: recycle_producer,
+                current: None,
+                telemetry: Arc::clone(&telemetry),
             },
-            AudioQueueTelemetryReader {
-                sample_count,
-                underflow_count,
-            },
+            AudioQueueTelemetryReader { shared: telemetry },
         ))
     }
+}
+
+fn queue_overflow(message: &'static str) -> PlatformError {
+    PlatformError::new(PlatformErrorCode::QueueOverflow, "audio.submit", message)
 }

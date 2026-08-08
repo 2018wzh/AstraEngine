@@ -22,7 +22,7 @@ WASAPI underflow 以一次 native callback 为单位，不再按缺失 sample �
 
 ## Headless GPU E2
 
-性能运行使用 `astra.headless_host_profile.v3`。`gpu_adapter` 必须声明 backend、device type、timestamp query 和可选 adapter identity；性能门禁拒绝 v2 迁移、软件 adapter、backend 漂移、device type 漂移和缺少 timestamp query。`adapter_identity_hash` 使用 `RendererExecutionIdentity` 的 canonical hash，与 run report、artifact manifest 和 performance trace manifest 完全一致。探测报告中的 hash 可以直接写回 profile；任何设备或驱动字段变化都会在创建 device 前阻断。普通功能测试仍可显式迁移 v2，不能把迁移结果当成性能证据。
+性能运行使用 `astra.headless_host_profile.v3`。`gpu_adapter` 必须声明 backend、device type、timestamp query 和可选 adapter identity；性能门禁拒绝旧 v1/v2、软件 adapter、backend 漂移、device type 漂移和缺少 timestamp query。`adapter_identity_hash` 使用 `RendererExecutionIdentity` 的 canonical hash，与 run report、artifact manifest 和 performance trace manifest 完全一致。探测报告中的 hash 可以直接写回 profile；任何设备或驱动字段变化都会在创建 device 前阻断。普通功能测试同样只接受 v3，不提供迁移或 fallback。
 
 `astra-headless performance-e2` 固定执行 1,200 帧 warmup 和 72,000 帧 measurement，目标节拍为 120 Hz。Runtime 的权威 fixed tick 仍是 60 Hz；v3 profile 的 `presentation_rate_hz: 120` 把每个 Runtime tick 拆成两个总时长严格相等的 presentation substep，不能修改输入 occurrence、deterministic tick 或 replay hash。deadline 按 `frame_index × 1 s / 120` 计算，不能反复累加截断后的 8,333,333 ns。warmup 会完成 atlas、pipeline、output texture 和 staging buffer 初始化，但不会进入统计 sample。预算至少覆盖 CPU/GPU/end-to-end 帧时、deadline miss、working set、private bytes、增长量、decoded cache、GPU resource/atlas、upload/readback、draw/queue/pipeline 和 allocator 指标。正式集显门禁每个 workload 独立执行三次，三份报告都要通过；独显只作对照，不参与放行。
 

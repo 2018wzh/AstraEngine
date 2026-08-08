@@ -18,10 +18,9 @@ use astra_core::SchemaVersion;
 use abi_stable::std_types::RVec;
 #[cfg(feature = "dynamic-abi")]
 use astra_plugin_abi::{
-    FfiRuntimeAudioBus, FfiRuntimeAudioCommandKind, FfiRuntimeAudioEncoding,
-    FfiRuntimeAudioSampleFormat, FfiRuntimeAudioSyncKind, FfiRuntimeAwaitResult,
-    FfiRuntimeBlendMode, FfiRuntimeInputEdge, FfiRuntimeInstanceRequest, FfiRuntimeIntegrityMode,
-    FfiRuntimeLiveOutput, FfiRuntimeOpenRequest, FfiRuntimePcmBuffer, FfiRuntimePersistedOutput,
+    FfiRuntimeAudioBus, FfiRuntimeAudioEncoding, FfiRuntimeAudioSampleFormat, FfiRuntimeAudioSync,
+    FfiRuntimeAwaitResult, FfiRuntimeBlendMode, FfiRuntimeInputEdge, FfiRuntimeInstanceRequest,
+    FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput, FfiRuntimeOpenRequest, FfiRuntimePcmBuffer,
     FfiRuntimePrepareRequest, FfiRuntimeProbeRequest, FfiRuntimeProviderRegistration,
     FfiRuntimeProviderResultItem, FfiRuntimeReportResult, FfiRuntimeRestoreRequest,
     FfiRuntimeSaveRequest, FfiRuntimeSaveResult, FfiRuntimeSceneResourceOperation,
@@ -46,11 +45,10 @@ use astra_plugin_abi::{
     RuntimeLiveSceneTransaction, RuntimeLiveScissor, RuntimeLiveTextLease,
     RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFormat,
     RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait,
-    RuntimeLiveWaitKind, RuntimeOutputDomain, RuntimePersistedOutput, RuntimeSectionCodec,
-    RuntimeSectionPayload,
+    RuntimeLiveWaitKind, RuntimeSectionCodec, RuntimeSectionPayload,
 };
 
-use crate::{RuntimeHostError, RuntimeHostSchemaRegistry, WorkerBudgetBroker};
+use crate::{RuntimeHostError, RuntimeHostLimits, WorkerBudgetBroker};
 
 pub trait ProductRuntimeSession: Send {
     fn step(&mut self, input: RuntimeStepInput) -> Result<RuntimeStepOutput, String>;
@@ -115,7 +113,7 @@ const SESSION_MAILBOX_CAPACITY: usize = 32;
 pub struct ConcurrentProductRuntimeHost {
     instance_id: ProviderInstanceId,
     factory: Arc<dyn ProductRuntimeProviderFactory>,
-    schemas: RuntimeHostSchemaRegistry,
+    limits: RuntimeHostLimits,
     sessions: Arc<Mutex<BTreeMap<String, Arc<SessionMailbox>>>>,
     control: Arc<Mutex<ConcurrentControl>>,
     runtime_binding: Option<ValidatedRuntimeProviderSelection>,
@@ -127,17 +125,17 @@ impl ConcurrentProductRuntimeHost {
     pub fn new<F: ProductRuntimeProviderFactory + 'static>(
         instance_id: impl Into<String>,
         factory: F,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
-        Self::create(instance_id, Arc::new(factory), schemas, timeout, None)
+        Self::create(instance_id, Arc::new(factory), limits, timeout, None)
     }
 
     pub fn bound_in_process<F: ProductRuntimeProviderFactory + 'static>(
         instance_id: impl Into<String>,
         selection: &ValidatedRuntimeProviderSelection,
         factory: F,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         let descriptor = factory.descriptor().map_err(|message| {
@@ -149,7 +147,7 @@ impl ConcurrentProductRuntimeHost {
         Self::create(
             instance_id,
             Arc::new(factory),
-            schemas,
+            limits,
             timeout,
             Some(selection.clone()),
         )
@@ -160,14 +158,14 @@ impl ConcurrentProductRuntimeHost {
         instance_id: impl Into<String>,
         selection: &ValidatedRuntimeProviderSelection,
         registration: FfiRuntimeProviderRegistration,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::bound_in_process(
             instance_id,
             selection,
             FfiRuntimeProviderFactory::new(registration)?,
-            schemas,
+            limits,
             timeout,
         )
     }
@@ -176,13 +174,13 @@ impl ConcurrentProductRuntimeHost {
     pub fn reference_ffi(
         instance_id: impl Into<String>,
         registration: FfiRuntimeProviderRegistration,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
     ) -> Result<Self, RuntimeHostError> {
         Self::new(
             instance_id,
             FfiRuntimeProviderFactory::new(registration)?,
-            schemas,
+            limits,
             timeout,
         )
     }
@@ -190,7 +188,7 @@ impl ConcurrentProductRuntimeHost {
     fn create(
         instance_id: impl Into<String>,
         factory: Arc<dyn ProductRuntimeProviderFactory>,
-        schemas: RuntimeHostSchemaRegistry,
+        limits: RuntimeHostLimits,
         timeout: Duration,
         runtime_binding: Option<ValidatedRuntimeProviderSelection>,
     ) -> Result<Self, RuntimeHostError> {
@@ -219,7 +217,7 @@ impl ConcurrentProductRuntimeHost {
         Ok(Self {
             instance_id,
             factory,
-            schemas,
+            limits,
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             control: Arc::new(Mutex::new(ConcurrentControl {
                 destroyed: false,
@@ -329,7 +327,7 @@ impl ConcurrentProductRuntimeHost {
         let entry = self.session(&session_id, "step")?;
         let state = Arc::clone(&entry.state);
         let poison_entry = Arc::clone(&state);
-        let schemas = self.schemas.clone();
+        let limits = self.limits.clone();
         let result = self
             .invoke_session(&entry, "step", move || {
                 let mut session = state.lock().map_err(|_| {
@@ -342,10 +340,7 @@ impl ConcurrentProductRuntimeHost {
                     .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_STEP", message));
                 match output {
                     Ok(output) if output.session_id == session_id => {
-                        schemas.validate_output_bounds(&output)?;
-                        for persisted in &output.persisted {
-                            schemas.validate(persisted.domain, persisted)?;
-                        }
+                        limits.validate_output_bounds(&output)?;
                         session.last_fixed_step = Some(fixed_step);
                         session.next_step_mode = RuntimeStepMode::Live;
                         Ok(output)
@@ -378,7 +373,7 @@ impl ConcurrentProductRuntimeHost {
         let entry = self.session(&session_id, "save")?;
         let state = Arc::clone(&entry.state);
         let poison_entry = Arc::clone(&state);
-        let schemas = self.schemas.clone();
+        let limits = self.limits.clone();
         let result = self
             .invoke_session(&entry, "save", move || {
                 let mut session = state.lock().map_err(|_| {
@@ -396,7 +391,7 @@ impl ConcurrentProductRuntimeHost {
                     .map_err(|message| RuntimeHostError::new("ASTRA_RUNTIME_HOST_SAVE", message));
                 match report {
                     Ok(report) if report.session_id == session_id => {
-                        schemas.validate_sections(&report.sections)?;
+                        limits.validate_sections(&report.sections)?;
                         Ok(report)
                     }
                     Ok(_) => {
@@ -424,7 +419,7 @@ impl ConcurrentProductRuntimeHost {
         request: RuntimeRestoreRequest,
     ) -> Result<RuntimeRestoreReport, RuntimeHostError> {
         let session_id = request.session_id.clone();
-        self.schemas.validate_sections(&request.sections)?;
+        self.limits.validate_sections(&request.sections)?;
         let entry = self.session(&session_id, "restore")?;
         let state = Arc::clone(&entry.state);
         let poison_entry = Arc::clone(&state);
@@ -1146,7 +1141,7 @@ fn runtime_live_scene(
                                 RuntimeLiveTextureFormat::LumaAlpha8
                             }
                         },
-                        pixels: value.pixels.into_vec(),
+                        pixels: value.pixels.into_owned(),
                     }
                 }
                 FfiRuntimeSceneResourceOperation::Update(value) => {
@@ -1163,7 +1158,7 @@ fn runtime_live_scene(
                                 RuntimeLiveTextureFormat::LumaAlpha8
                             }
                         },
-                        pixels: value.pixels.into_vec(),
+                        pixels: value.pixels.into_owned(),
                     }
                 }
                 FfiRuntimeSceneResourceOperation::Destroy {
@@ -1241,115 +1236,117 @@ fn runtime_live_draw(draw: astra_plugin_abi::FfiRuntimeDraw) -> astra_plugin_abi
 fn runtime_live_audio_command(
     command: astra_plugin_abi::FfiRuntimeAudioCommand,
 ) -> Result<RuntimeLiveAudioCommand, String> {
-    let astra_plugin_abi::FfiRuntimeAudioCommand {
-        sequence,
-        kind,
-        stream_id,
-        sample_rate,
-        channels,
-        encoding,
-        sample_format,
-        resource_uri,
-        samples,
-        volume,
-        pan,
-        repeat,
-        fade_ms,
-    } = command;
-    let encoding = match encoding {
-        FfiRuntimeAudioEncoding::Unknown => RuntimeLiveAudioEncoding::Unknown,
-        FfiRuntimeAudioEncoding::Wav => RuntimeLiveAudioEncoding::Wav,
-        FfiRuntimeAudioEncoding::Ogg => RuntimeLiveAudioEncoding::Ogg,
-        FfiRuntimeAudioEncoding::Mp3 => RuntimeLiveAudioEncoding::Mp3,
-        FfiRuntimeAudioEncoding::Flac => RuntimeLiveAudioEncoding::Flac,
-    };
-    let sample_format = match sample_format {
-        FfiRuntimeAudioSampleFormat::I16 => RuntimeLiveAudioSampleFormat::I16,
-        FfiRuntimeAudioSampleFormat::F32 => RuntimeLiveAudioSampleFormat::F32,
-    };
-    let resource_uri = resource_uri.to_string();
-    let samples = match (kind, samples) {
-        (FfiRuntimeAudioCommandKind::SubmitI16, FfiRuntimePcmBuffer::I16(values)) => {
-            Some(RuntimeLivePcmBuffer::I16(values.into_vec()))
-        }
-        (FfiRuntimeAudioCommandKind::SubmitF32, FfiRuntimePcmBuffer::F32(values)) => {
-            Some(RuntimeLivePcmBuffer::F32(values.into_vec()))
-        }
-        (FfiRuntimeAudioCommandKind::SubmitI16, FfiRuntimePcmBuffer::F32(_))
-        | (FfiRuntimeAudioCommandKind::SubmitF32, FfiRuntimePcmBuffer::I16(_)) => {
-            return Err("ASTRA_RUNTIME_AUDIO_SAMPLE_FORMAT_MISMATCH".into())
-        }
-        (_, FfiRuntimePcmBuffer::I16(values)) if !values.is_empty() => {
-            return Err("ASTRA_RUNTIME_AUDIO_UNEXPECTED_I16_PAYLOAD".into())
-        }
-        (_, FfiRuntimePcmBuffer::F32(values)) if !values.is_empty() => {
-            return Err("ASTRA_RUNTIME_AUDIO_UNEXPECTED_F32_PAYLOAD".into())
-        }
-        (_, _) => None,
-    };
-    Ok(match kind {
-        FfiRuntimeAudioCommandKind::LoadResource => RuntimeLiveAudioCommand::LoadResource {
+    Ok(match command {
+        astra_plugin_abi::FfiRuntimeAudioCommand::LoadResource {
             sequence,
             stream_id,
             encoding,
             resource_uri,
+        } => RuntimeLiveAudioCommand::LoadResource {
+            sequence,
+            stream_id,
+            encoding: match encoding {
+                FfiRuntimeAudioEncoding::Unknown => RuntimeLiveAudioEncoding::Unknown,
+                FfiRuntimeAudioEncoding::Wav => RuntimeLiveAudioEncoding::Wav,
+                FfiRuntimeAudioEncoding::Ogg => RuntimeLiveAudioEncoding::Ogg,
+                FfiRuntimeAudioEncoding::Mp3 => RuntimeLiveAudioEncoding::Mp3,
+                FfiRuntimeAudioEncoding::Flac => RuntimeLiveAudioEncoding::Flac,
+            },
+            resource_uri: resource_uri.to_string(),
         },
-        FfiRuntimeAudioCommandKind::CreateStream => RuntimeLiveAudioCommand::CreateStream {
+        astra_plugin_abi::FfiRuntimeAudioCommand::CreateStream {
             sequence,
             stream_id,
             sample_rate,
             channels,
             sample_format,
-        },
-        FfiRuntimeAudioCommandKind::SubmitI16 => RuntimeLiveAudioCommand::SubmitI16 {
+        } => RuntimeLiveAudioCommand::CreateStream {
             sequence,
             stream_id,
-            samples: match samples.expect("sample command payload was checked") {
-                RuntimeLivePcmBuffer::I16(values) => values,
-                RuntimeLivePcmBuffer::F32(_) => unreachable!(),
+            sample_rate,
+            channels,
+            sample_format: match sample_format {
+                FfiRuntimeAudioSampleFormat::I16 => RuntimeLiveAudioSampleFormat::I16,
+                FfiRuntimeAudioSampleFormat::F32 => RuntimeLiveAudioSampleFormat::F32,
             },
         },
-        FfiRuntimeAudioCommandKind::SubmitF32 => RuntimeLiveAudioCommand::SubmitF32 {
+        astra_plugin_abi::FfiRuntimeAudioCommand::SubmitI16 {
             sequence,
             stream_id,
-            samples: match samples.expect("sample command payload was checked") {
-                RuntimeLivePcmBuffer::F32(values) => values,
-                RuntimeLivePcmBuffer::I16(_) => unreachable!(),
-            },
+            samples,
+        } => RuntimeLiveAudioCommand::SubmitI16 {
+            sequence,
+            stream_id,
+            samples: samples.into_vec(),
         },
-        FfiRuntimeAudioCommandKind::Play => RuntimeLiveAudioCommand::Play {
+        astra_plugin_abi::FfiRuntimeAudioCommand::SubmitF32 {
+            sequence,
+            stream_id,
+            samples,
+        } => RuntimeLiveAudioCommand::SubmitF32 {
+            sequence,
+            stream_id,
+            samples: samples.into_vec(),
+        },
+        astra_plugin_abi::FfiRuntimeAudioCommand::Play {
             sequence,
             stream_id,
             volume,
             pan,
             repeat,
-            fade_in_ms: fade_ms,
+            fade_in_ms,
+        } => RuntimeLiveAudioCommand::Play {
+            sequence,
+            stream_id,
+            volume,
+            pan,
+            repeat,
+            fade_in_ms,
         },
-        FfiRuntimeAudioCommandKind::Stop => RuntimeLiveAudioCommand::Stop {
+        astra_plugin_abi::FfiRuntimeAudioCommand::Stop {
+            sequence,
+            stream_id,
+            fade_ms,
+        } => RuntimeLiveAudioCommand::Stop {
             sequence,
             stream_id,
             fade_ms,
         },
-        FfiRuntimeAudioCommandKind::Pause => RuntimeLiveAudioCommand::Pause {
+        astra_plugin_abi::FfiRuntimeAudioCommand::Pause {
+            sequence,
+            stream_id,
+        } => RuntimeLiveAudioCommand::Pause {
             sequence,
             stream_id,
         },
-        FfiRuntimeAudioCommandKind::Resume => RuntimeLiveAudioCommand::Resume {
+        astra_plugin_abi::FfiRuntimeAudioCommand::Resume {
+            sequence,
+            stream_id,
+        } => RuntimeLiveAudioCommand::Resume {
             sequence,
             stream_id,
         },
-        FfiRuntimeAudioCommandKind::SetParams => RuntimeLiveAudioCommand::SetParams {
+        astra_plugin_abi::FfiRuntimeAudioCommand::SetParams {
+            sequence,
+            stream_id,
+            volume,
+            pan,
+            repeat,
+        } => RuntimeLiveAudioCommand::SetParams {
             sequence,
             stream_id,
             volume,
             pan,
             repeat,
         },
-        FfiRuntimeAudioCommandKind::DestroyStream => RuntimeLiveAudioCommand::DestroyStream {
+        astra_plugin_abi::FfiRuntimeAudioCommand::DestroyStream {
+            sequence,
+            stream_id,
+        } => RuntimeLiveAudioCommand::DestroyStream {
             sequence,
             stream_id,
         },
-        FfiRuntimeAudioCommandKind::MasterVolume => {
+        astra_plugin_abi::FfiRuntimeAudioCommand::MasterVolume { sequence, volume } => {
             RuntimeLiveAudioCommand::MasterVolume { sequence, volume }
         }
     })
@@ -1421,11 +1418,11 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
             asset: cue.asset.to_string(),
             looped: cue.looped,
             fade_ms: cue.fade_ms,
-            sync: match cue.sync_kind {
-                FfiRuntimeAudioSyncKind::None => RuntimeLiveAudioSync::None,
-                FfiRuntimeAudioSyncKind::Text => RuntimeLiveAudioSync::Text,
-                FfiRuntimeAudioSyncKind::Fence => {
-                    RuntimeLiveAudioSync::Fence(cue.sync_fence.to_string())
+            sync: match cue.sync {
+                FfiRuntimeAudioSync::None => RuntimeLiveAudioSync::None,
+                FfiRuntimeAudioSync::Text => RuntimeLiveAudioSync::Text,
+                FfiRuntimeAudioSync::Fence { fence_id } => {
+                    RuntimeLiveAudioSync::Fence(fence_id.to_string())
                 }
             },
         })
@@ -1480,28 +1477,35 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
     let video = value
         .video
         .into_iter()
-        .map(|video| RuntimeLiveVideoCommand {
-            sequence: video.sequence,
-            command: match video.command {
-                astra_plugin_abi::FfiRuntimeVideoCommandKind::Play => {
-                    RuntimeLiveVideoCommandKind::Play {
-                        playback_id: video.playback_id.to_string(),
-                        resource_uri: video.resource_uri.to_string(),
-                        mode: match video.mode {
-                            FfiRuntimeVideoMode::ModalWithAudio => {
-                                RuntimeLiveVideoMode::ModalWithAudio
-                            }
-                            FfiRuntimeVideoMode::LayerNoAudio => RuntimeLiveVideoMode::LayerNoAudio,
-                        },
-                        stage_width: video.stage_width,
-                        stage_height: video.stage_height,
-                    }
-                }
-                astra_plugin_abi::FfiRuntimeVideoCommandKind::Stop => {
-                    RuntimeLiveVideoCommandKind::Stop {
-                        playback_id: video.playback_id.to_string(),
-                    }
-                }
+        .map(|video| match video {
+            astra_plugin_abi::FfiRuntimeVideoCommand::Play {
+                sequence,
+                playback_id,
+                resource_uri,
+                mode,
+                stage_width,
+                stage_height,
+            } => RuntimeLiveVideoCommand {
+                sequence,
+                command: RuntimeLiveVideoCommandKind::Play {
+                    playback_id: playback_id.to_string(),
+                    resource_uri: resource_uri.to_string(),
+                    mode: match mode {
+                        FfiRuntimeVideoMode::ModalWithAudio => RuntimeLiveVideoMode::ModalWithAudio,
+                        FfiRuntimeVideoMode::LayerNoAudio => RuntimeLiveVideoMode::LayerNoAudio,
+                    },
+                    stage_width,
+                    stage_height,
+                },
+            },
+            astra_plugin_abi::FfiRuntimeVideoCommand::Stop {
+                sequence,
+                playback_id,
+            } => RuntimeLiveVideoCommand {
+                sequence,
+                command: RuntimeLiveVideoCommandKind::Stop {
+                    playback_id: playback_id.to_string(),
+                },
             },
         })
         .collect::<Vec<_>>();
@@ -1512,28 +1516,26 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
             sequence: wait.sequence,
             token_id: wait.token_id.to_string(),
             kind: match wait.kind {
-                FfiRuntimeWaitKind::Frame => RuntimeLiveWaitKind::Frame {
-                    frames: wait.number,
+                FfiRuntimeWaitKind::Frame { frames } => RuntimeLiveWaitKind::Frame { frames },
+                FfiRuntimeWaitKind::Time { milliseconds } => {
+                    RuntimeLiveWaitKind::Time { milliseconds }
+                }
+                FfiRuntimeWaitKind::Input { keys } => RuntimeLiveWaitKind::Input {
+                    keys: keys.into_iter().map(|key| key.to_string()).collect(),
                 },
-                FfiRuntimeWaitKind::Time => RuntimeLiveWaitKind::Time {
-                    milliseconds: wait.number,
+                FfiRuntimeWaitKind::MediaFence { media_id } => RuntimeLiveWaitKind::MediaFence {
+                    media_id: media_id.to_string(),
                 },
-                FfiRuntimeWaitKind::Input => RuntimeLiveWaitKind::Input {
-                    keys: wait.keys.into_iter().map(|key| key.to_string()).collect(),
-                },
-                FfiRuntimeWaitKind::MediaFence => RuntimeLiveWaitKind::MediaFence {
-                    media_id: wait.name.to_string(),
-                },
-                FfiRuntimeWaitKind::PresentationFence => RuntimeLiveWaitKind::PresentationFence {
-                    fence_id: wait.name.to_string(),
-                },
-                FfiRuntimeWaitKind::ProviderCompletion => RuntimeLiveWaitKind::ProviderCompletion {
-                    request_id: wait.name.to_string(),
-                },
-                FfiRuntimeWaitKind::FamilyOpaque => RuntimeLiveWaitKind::FamilyOpaque {
-                    wait_kind: wait.name.to_string(),
-                    payload_len: wait.payload_len,
-                },
+                FfiRuntimeWaitKind::PresentationFence { fence_id } => {
+                    RuntimeLiveWaitKind::PresentationFence {
+                        fence_id: fence_id.to_string(),
+                    }
+                }
+                FfiRuntimeWaitKind::ProviderCompletion { request_id } => {
+                    RuntimeLiveWaitKind::ProviderCompletion {
+                        request_id: request_id.to_string(),
+                    }
+                }
             },
         })
         .collect::<Vec<_>>();
@@ -1543,8 +1545,7 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
         .map(|event| RuntimeLiveEvent {
             sequence: event.sequence,
             event: event.event.to_string(),
-            payload: event.payload.into_vec(),
-            due_tick: event.due_tick.into_option(),
+            value: event.value.to_string(),
         })
         .collect::<Vec<_>>();
     let blackboard = value
@@ -1553,7 +1554,7 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
         .map(|mutation| RuntimeLiveBlackboardMutation {
             sequence: mutation.sequence,
             key: mutation.key.to_string(),
-            value: mutation.value.into_vec(),
+            value: mutation.value.to_string(),
         })
         .collect::<Vec<_>>();
     let dirty_sections = value
@@ -1564,6 +1565,21 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
             section_id: dirty.section_id.to_string(),
         })
         .collect::<Vec<_>>();
+    let presentations = value
+        .presentations
+        .into_iter()
+        .map(|command| command.into_runtime())
+        .collect::<Result<Vec<_>, _>>()?;
+    let timeline = value
+        .timeline
+        .into_iter()
+        .map(|task| task.into_runtime())
+        .collect::<Vec<_>>();
+    let vn_state = value
+        .vn_state
+        .into_option()
+        .map(|state| state.into_runtime());
+    let vn_step = value.vn_step.into_option().map(|step| step.into_runtime());
     Ok(RuntimeLiveOutput {
         scenes,
         resource_scenes,
@@ -1572,6 +1588,10 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
         audio_cues,
         text,
         text_presentations,
+        presentations,
+        timeline,
+        vn_state,
+        vn_step,
         video,
         waits,
         events,
@@ -1586,6 +1606,8 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
             text_events: value.text_events,
             capture_bytes: value.capture_bytes,
             operation_bytes: value.operation_bytes,
+            scene_moved_bytes: value.scene_moved_bytes,
+            scene_copied_bytes: value.scene_copied_bytes,
             pcm_moved_bytes: value.pcm_moved_bytes,
             pcm_copied_bytes: value.pcm_copied_bytes,
         },
@@ -1596,40 +1618,10 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
 #[cfg(feature = "dynamic-abi")]
 fn runtime_step_result(result: FfiRuntimeStepResult) -> Result<RuntimeStepOutput, String> {
     diagnostics(result.ok, result.diagnostics.as_slice())?;
-    let persisted = result
-        .persisted
-        .into_iter()
-        .map(|value: FfiRuntimePersistedOutput| {
-            if !matches!(value.codec, FfiRuntimeSectionCodec::Postcard) {
-                return Err("ASTRA_RUNTIME_PROVIDER_PERSISTED_CODEC".into());
-            }
-            let domain = match value.domain {
-                0 => RuntimeOutputDomain::Effect,
-                1 => RuntimeOutputDomain::Presentation,
-                2 => RuntimeOutputDomain::Audio,
-                3 => RuntimeOutputDomain::Await,
-                4 => RuntimeOutputDomain::Observation,
-                5 => RuntimeOutputDomain::Trace,
-                6 => RuntimeOutputDomain::DirtySaveSection,
-                _ => return Err("ASTRA_RUNTIME_PROVIDER_OUTPUT_DOMAIN".into()),
-            };
-            Ok(RuntimePersistedOutput::postcard_bytes(
-                domain,
-                value.schema.to_string(),
-                SchemaVersion::new(
-                    value.version_major,
-                    value.version_minor,
-                    value.version_patch,
-                ),
-                value.bytes.into_vec().into(),
-            ))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
     Ok(RuntimeStepOutput {
         session_id: GameRuntimeSessionId(result.session_id.to_string()),
         status: result.status.to_string(),
         live: runtime_live_output(result.live)?,
-        persisted,
         diagnostics: result
             .diagnostics
             .into_iter()

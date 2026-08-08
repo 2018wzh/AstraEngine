@@ -157,7 +157,6 @@ enum PendingWait {
     PresentationFence,
     MediaFence(String),
     ProviderCompletion,
-    FamilyOpaque,
 }
 
 struct RuntimeBridge {
@@ -444,8 +443,7 @@ impl RuntimeBridge {
                 PendingWait::Input(mask) => input_mask & *mask != 0,
                 PendingWait::PresentationFence
                 | PendingWait::MediaFence(_)
-                | PendingWait::ProviderCompletion
-                | PendingWait::FamilyOpaque => false,
+                | PendingWait::ProviderCompletion => false,
             })
             .map(|(token, _)| token.clone())
             .collect::<Vec<_>>();
@@ -507,9 +505,6 @@ impl RuntimeBridge {
         let fixed_delta_ns = active.fixed_delta_ns;
         active.fixed_step = next_step;
         active.next_tick += Duration::from_nanos(fixed_delta_ns);
-        if !output.persisted.is_empty() {
-            return Err("ASTRA_EMU_LIVE_PERSISTED_OUTPUT_REJECTED".into());
-        }
         let live = output.live;
         let active = self
             .active
@@ -690,15 +685,17 @@ impl RuntimeBridge {
             Hash256::from_sha256(format!("{}\n", coverage_ids.join("\n")).as_bytes());
         self.provider.shutdown(active.session_id)?;
         if let Some(mut audio) = self.audio.take() {
-            let audio_meter_hash = audio.meter_hash();
+            let audio_telemetry = audio.telemetry();
             let audio_non_silent = audio.has_audible_output();
             self.video.reset(&mut audio)?;
             let _meter_trace = audio.shutdown()?;
             tracing::info!(
                 event = "astra.emu.manager.audio_meter_observed",
                 session_hash = %session_hash,
-                audio_meter_hash = %audio_meter_hash,
-                audio_non_silent
+                audio_non_silent,
+                submitted_frames = audio_telemetry.submitted_frames,
+                consumed_frames = audio_telemetry.consumed_frames,
+                underflow_count = audio_telemetry.underflow_count,
             );
         }
         self.terminal = false;
@@ -940,7 +937,7 @@ impl RuntimeBridge {
                     width: texture.decoded_width,
                     height: texture.decoded_height,
                     format: texture.decoded_format,
-                    pixels,
+                    pixels: pixels.into(),
                 }
             } else {
                 RuntimeLiveSceneResourceOperation::CreateTexture {
@@ -949,7 +946,7 @@ impl RuntimeBridge {
                     width: texture.decoded_width,
                     height: texture.decoded_height,
                     format: texture.decoded_format,
-                    pixels,
+                    pixels: pixels.into(),
                 }
             };
             resources.push(operation);
@@ -1115,16 +1112,15 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
                 }
             }
             PatchHostAction::DeterministicEffect { target, payload } => {
+                let value = String::from_utf8(payload)
+                    .map_err(|_| "ASTRA_EMU_PATCH_EFFECT_UTF8".to_owned())?;
                 let effect = if target.starts_with("event.") {
                     QueuedPatchEffect::RuntimeEvent {
                         event: target,
-                        payload,
+                        value,
                     }
                 } else if target.starts_with("blackboard.") {
-                    QueuedPatchEffect::SetBlackboard {
-                        key: target,
-                        value: payload,
-                    }
+                    QueuedPatchEffect::SetBlackboard { key: target, value }
                 } else {
                     return Err("ASTRA_EMU_PATCH_EFFECT_TARGET".into());
                 };
@@ -1323,7 +1319,6 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
         RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::MediaFence(media_id),
         RuntimeLiveWaitKind::PresentationFence { .. } => PendingWait::PresentationFence,
         RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::ProviderCompletion,
-        RuntimeLiveWaitKind::FamilyOpaque { .. } => PendingWait::FamilyOpaque,
     };
     (token_id, condition)
 }
@@ -1412,6 +1407,7 @@ impl PatchVfsReader for MountedPatchReader {
     fn read(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, PatchDiagnostic> {
         self.vfs
             .read_file(&self.mount_set_id, path, max_bytes as u64)
+            .map(|bytes| bytes.as_slice().to_vec())
             .map_err(|error| PatchDiagnostic {
                 code: error.code().into(),
                 message: "trusted patch VFS read failed".into(),
@@ -4085,8 +4081,8 @@ mod manager_tests {
         assert_eq!(media[&target_hash], "audio/replacement.ogg");
         assert!(matches!(
             &effects[0],
-            QueuedPatchEffect::RuntimeEvent { event, payload }
-                if event == "event.patch_ready" && payload == &[1, 2, 3]
+            QueuedPatchEffect::RuntimeEvent { event, value }
+                if event == "event.patch_ready" && value == "\u{1}\u{2}\u{3}"
         ));
 
         let mut command = astra_emu_family_api::LegacyAudioCommandV1::LoadResource {

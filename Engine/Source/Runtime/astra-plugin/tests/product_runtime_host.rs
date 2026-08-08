@@ -8,7 +8,7 @@ use std::{
 };
 
 use astra_plugin::{
-    AsyncProductRuntimeHost, ProductRuntimeHost, ProductRuntimeProvider, RuntimeHostSchemaRegistry,
+    AsyncProductRuntimeHost, ProductRuntimeHost, ProductRuntimeProvider, RuntimeHostLimits,
 };
 use astra_plugin_abi::*;
 
@@ -145,13 +145,6 @@ impl ProductRuntimeProvider for Provider {
             session_id: input.session_id,
             status: "blocked".into(),
             live: Default::default(),
-            persisted: vec![RuntimePersistedOutput::postcard(
-                RuntimeOutputDomain::Effect,
-                "astra.test.effect.v1",
-                SchemaVersion::new(1, 0, 0),
-                &7_u32,
-            )
-            .unwrap()],
             diagnostics: vec![],
         })
     }
@@ -207,12 +200,6 @@ fn provider_descriptor() -> ProductRuntimeDescriptor {
         capabilities: vec!["runtime.test".into()],
         package_sections: vec![],
         release_checks: vec![],
-        output_schemas: vec![RuntimeOutputSchemaDescriptor {
-            domain: RuntimeOutputDomain::Effect,
-            schema: "astra.test.effect.v1".into(),
-            version: SchemaVersion::new(1, 0, 0),
-            codec: RuntimePersistedCodec::Postcard,
-        }],
     }
 }
 
@@ -224,7 +211,7 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
         required_capability: capability.into(),
         engine_version: "0.1.0".into(),
         rustc_fingerprint: "rustc-stable".into(),
-        feature_fingerprint: "runtime-envelope-v3".into(),
+        feature_fingerprint: "runtime-typed-v3".into(),
         abi_fingerprint: "astra-plugin-abi-v3".into(),
     };
     let presentation =
@@ -246,7 +233,7 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v3".into(),
+                feature_fingerprint: "runtime-typed-v3".into(),
                 abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
             ProviderExtensionRecord {
@@ -257,7 +244,7 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v3".into(),
+                feature_fingerprint: "runtime-typed-v3".into(),
                 abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
         ],
@@ -268,7 +255,6 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
         schema: PROVIDER_POLICY_SCHEMA.into(),
         profile: "release".into(),
         renderer: "test.renderer".into(),
-        decode_fallback: "forbid".into(),
         runtime_provider: provider_descriptor(),
         bindings: vec![presentation, runtime],
     };
@@ -280,12 +266,12 @@ fn bound_selection() -> ValidatedRuntimeProviderSelection {
 #[astra_headless_test::test]
 fn bound_host_blocks_request_and_provider_report_identity_drift() {
     let selection = bound_selection();
-    let schemas = RuntimeHostSchemaRegistry::from_descriptor(selection.descriptor());
+    let limits = RuntimeHostLimits::from_descriptor(selection.descriptor());
     let mut host = ProductRuntimeHost::bound_in_process(
         "bound-instance",
         &selection,
         Provider::default(),
-        schemas.clone(),
+        limits.clone(),
     )
     .unwrap();
     let mut wrong_context = prepare_request();
@@ -304,7 +290,7 @@ fn bound_host_blocks_request_and_provider_report_identity_drift() {
             wrong_identity: true,
             ..Provider::default()
         },
-        schemas,
+        limits,
     )
     .unwrap();
     assert_eq!(
@@ -327,11 +313,10 @@ fn prepare_request() -> RuntimePrepareRequest {
 }
 
 #[astra_headless_test::test]
-fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+fn in_process_host_owns_provider_lifecycle_and_validates_typed_steps() {
+    let limits = RuntimeHostLimits::new();
     let mut host =
-        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), limits).unwrap();
     host.prepare(prepare_request()).unwrap();
     host.probe(RuntimeProbeRequest {
         target_id: "test".into(),
@@ -363,7 +348,7 @@ fn in_process_host_owns_provider_lifecycle_and_validates_step_envelopes() {
             ..RuntimeStepInput::default()
         })
         .unwrap();
-    assert_eq!(output.persisted.len(), 1);
+    assert_eq!(output.status, "blocked");
     host.save(RuntimeSaveRequest {
         session_id: open.session_id.clone(),
         slot: "slot".into(),
@@ -388,7 +373,7 @@ fn host_rolls_back_failed_and_malformed_instance_creation() {
                 malformed_report,
                 destroy_calls: Arc::clone(&destroy_calls),
             },
-            RuntimeHostSchemaRegistry::new(),
+            RuntimeHostLimits::new(),
         )
         .err()
         .expect("create must fail");
@@ -406,10 +391,9 @@ fn host_rolls_back_failed_and_malformed_instance_creation() {
 
 #[astra_headless_test::test]
 fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let limits = RuntimeHostLimits::new();
     let mut host =
-        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
+        ProductRuntimeHost::reference_in_process("instance", Provider::default(), limits).unwrap();
     let request = RuntimeOpenRequest {
         target_id: "test".into(),
         profile: "release".into(),
@@ -440,76 +424,8 @@ fn duplicate_open_rolls_back_and_blocks_use_until_cleanup() {
 }
 
 #[astra_headless_test::test]
-fn host_blocks_unknown_step_schema() {
-    let mut host = ProductRuntimeHost::reference_in_process(
-        "instance",
-        Provider::default(),
-        RuntimeHostSchemaRegistry::new(),
-    )
-    .unwrap();
-    let open = host
-        .open(RuntimeOpenRequest {
-            target_id: "test".into(),
-            profile: "release".into(),
-            locale: "und".into(),
-            seed: 1,
-            integrity_mode: RuntimeTickIntegrityMode::Evidence,
-            executor: RuntimeExecutorConfig::serial(),
-            package_hash: "sha256:test".into(),
-            sections: vec![],
-        })
-        .unwrap();
-    let error = host
-        .step(RuntimeStepInput {
-            session_id: open.session_id,
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            session_seed: 1,
-            mode: RuntimeStepMode::Live,
-            action: "advance".into(),
-            ..RuntimeStepInput::default()
-        })
-        .unwrap_err();
-    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_PERSISTED_SCHEMA");
-}
-
-#[astra_headless_test::test]
-fn host_blocks_output_count_and_payload_bounds() {
-    let schemas = RuntimeHostSchemaRegistry::new()
-        .allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1")
-        .with_bounds(0, 1);
-    let mut host =
-        ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
-    let open = host
-        .open(RuntimeOpenRequest {
-            target_id: "test".into(),
-            profile: "release".into(),
-            locale: "und".into(),
-            seed: 1,
-            integrity_mode: RuntimeTickIntegrityMode::Evidence,
-            executor: RuntimeExecutorConfig::serial(),
-            package_hash: "sha256:test".into(),
-            sections: vec![],
-        })
-        .unwrap();
-    let error = host
-        .step(RuntimeStepInput {
-            session_id: open.session_id,
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            session_seed: 1,
-            mode: RuntimeStepMode::Live,
-            action: "advance".into(),
-            ..RuntimeStepInput::default()
-        })
-        .unwrap_err();
-    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_OUTPUT_COUNT");
-}
-
-#[astra_headless_test::test]
 fn host_validates_save_and_restore_sections_without_content_hashes() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let schemas = RuntimeHostLimits::new();
     let mut host =
         ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
@@ -559,15 +475,14 @@ fn host_validates_save_and_restore_sections_without_content_hashes() {
             ..RuntimeStepInput::default()
         })
         .unwrap();
-    assert_eq!(step.persisted.len(), 1);
+    assert_eq!(step.status, "blocked");
     host.shutdown_session(open.session_id).unwrap();
     host.destroy().unwrap();
 }
 
 #[astra_headless_test::test]
 fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let schemas = RuntimeHostLimits::new();
     let mut host =
         ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
@@ -606,8 +521,7 @@ fn host_rejects_non_monotonic_fixed_steps_and_poisons_the_session() {
 
 #[astra_headless_test::test]
 fn host_requires_first_step_one_and_catches_provider_panics() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let schemas = RuntimeHostLimits::new();
     let mut host =
         ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
@@ -637,8 +551,7 @@ fn host_requires_first_step_one_and_catches_provider_panics() {
     host.shutdown_session(open.session_id).unwrap();
     host.destroy().unwrap();
 
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let schemas = RuntimeHostLimits::new();
     let mut host =
         ProductRuntimeHost::reference_in_process("instance-panic", Provider::default(), schemas)
             .unwrap();
@@ -697,8 +610,7 @@ fn host_enforces_seed_delta_and_step_mode_boundaries_before_dispatch() {
         ),
     ];
     for (delta_ns, session_seed, mode, expected_code) in invalid_cases {
-        let schemas = RuntimeHostSchemaRegistry::new()
-            .allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+        let schemas = RuntimeHostLimits::new();
         let mut host =
             ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas)
                 .unwrap();
@@ -732,8 +644,7 @@ fn host_enforces_seed_delta_and_step_mode_boundaries_before_dispatch() {
 
 #[astra_headless_test::test]
 fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let schemas = RuntimeHostLimits::new();
     let mut host =
         ProductRuntimeHost::reference_in_process("instance", Provider::default(), schemas).unwrap();
     let open = host
@@ -791,8 +702,7 @@ fn host_resynchronizes_fixed_step_and_requires_restore_continuation() {
 
 #[astra_headless_test::tokio_test]
 async fn async_host_supports_multiple_sessions_on_one_ordered_provider_worker() {
-    let schemas =
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1");
+    let schemas = RuntimeHostLimits::new();
     let host = AsyncProductRuntimeHost::reference_in_process(
         "instance",
         Provider::default(),
@@ -841,7 +751,7 @@ async fn async_host_timeout_poisons_the_provider_instance() {
     let host = AsyncProductRuntimeHost::reference_in_process(
         "instance",
         Provider::default(),
-        RuntimeHostSchemaRegistry::new().allow(RuntimeOutputDomain::Effect, "astra.test.effect.v1"),
+        RuntimeHostLimits::new(),
         Duration::from_millis(5),
     )
     .unwrap();

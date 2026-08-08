@@ -35,7 +35,7 @@ RuntimeWorld tick
   -> AwaitToken and delayed events return on a fixed tick
 ```
 
-Provider 输出只能是可序列化 effect list、await token、presentation/audio command、diagnostic、trace 和 dirty save section。Host adapter 负责用 `DeterministicActionContext` 提交变更。Provider action 失败时，不提交候选 mutation，当前 machine 进入 release profile 指定的 fault policy。
+Provider step 输出只有分类后的 typed live DTO 与轻量 control transaction。RuntimeWorld 先原子提交 event、blackboard、wait、dirty-section 等 control metadata；成功后 scene、PCM、video 与 presentation allocation 才消费式移动到 host。不存在通用 effect/payload envelope 或 host adapter 二次反序列化。
 
 ## NativeVN Provider
 
@@ -45,7 +45,7 @@ Provider 输出只能是可序列化 effect list、await token、presentation/au
 - `probe` 校验 package sections、target/profile、scenario refs 和 player route model。
 - `open` 创建 session-owned `RuntimeWorld`、VN Actor、typed VN/policy components、runtime cursor、policy state 和 flat story StateMachine。
 - `step` 把 launch、advance、choose、system page、wait completion 等输入编码成 RuntimeEvent，由 `astra.vn.step` action 推进 dialogue、choice、system story、wait、presentation、audio、timeline 和 mutation。
-- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v3` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。v2 不提供迁移入口。
+- `save/restore` 只读写权威 `runtime.world`/`astra.runtime.save_blob.v4` section。Nested Runtime save container 保存完整 RuntimeSnapshot；restore 在 outer hash、container footer、section hash 和 schema/version 全部通过后事务替换 world，并回报 restored step/seed。旧格式直接拒绝。
 
 Runtime v3 的 Action descriptor 强制包含 execution class、read/write set 和 StableId reservation。FFI Action ABI v2 传递完整 descriptor JSON；metadata 不一致、pure action 声明写入、StableId 声明不闭合、effect 越权或实际 ID 消耗超额都会产生 blocking diagnostic。AstraVN reducer 按实际写入记录 variable mutation journal；backlog、read-state、route coverage 和 voice replay 使用固定 64 条 chunk、stable ordinal/bitset 与历史 root，普通 step 只替换 hot state 和变化的尾 chunk，save/checkpoint 才物化完整 v3 state。Runtime tick 的 Actor、Blackboard、Event、Await 和 DelayedEvent 已切换 inverse journal，conflict-DAG 在明确的 1/2/4/8 worker 配置下并行无冲突 machine。
 - `package_sections` 继续输出 `vn.*` sections。
@@ -55,7 +55,7 @@ VN Core 保持 dialogue、choice、backlog、save/load、read-state 和 voice re
 
 当前 FFI adapter 有显式 provider instance registry。`create_instance`、`destroy_instance`、`open`、`step`、`save`、`restore` 和 `shutdown` 都调用同一真实 provider 路径；in-process provider 也必须实现真实 instance lifecycle，host 不提供默认成功实现。Host 在 create/open 部分失败时 rollback，校验 instance/session identity、连续 fixed step、1..=1 秒 delta、session seed、live/restore mode、output/save section schema/hash/bounds，并阻断 live provider replay。Restore report 回传 snapshot step/seed，下一 tick 只能使用一次 `RestoreContinuation`，随后恢复 `Live`。Provider panic、错误、malformed output 和 timeout 会进入 poisoned lifecycle。timeout 返回前先等待 blocking worker drain；调用方随后用 `cleanup_after_failure` shutdown 全部 session 并 destroy instance。`open` 从请求中的 `vn.compiled_story` section 解码 story，不能创建未绑定 session。外部 dylib 的分发、签名和版本协商仍留给插件发布工作，不影响当前 ABI lifecycle 行为证据。
 
-Release validator 从 package 内的 `vn.compiled_story` 执行 package-bound lifecycle conformance，并记录 state/event/presentation hash。Runtime replay 另存 hash-validated `ProviderReplayOutput`，回放阶段不调用 FFI 或 in-process provider。
+Release validator 从 package 内的 `vn.compiled_story` 执行 package-bound lifecycle conformance。Evidence observer 在提交后记录 state/event/presentation digest；Runtime replay 只保存 typed ingress/completion 与 checkpoint，回放阶段不调用 FFI 或 in-process provider。
 
 ## Concurrent Session Migration
 

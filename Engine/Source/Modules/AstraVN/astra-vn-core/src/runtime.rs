@@ -24,37 +24,6 @@ pub struct VnRuntime {
 }
 
 #[derive(Debug)]
-pub struct ValidatedVnRuntimeState {
-    state: VnRuntimeState,
-    state_hash: Hash128,
-}
-
-impl ValidatedVnRuntimeState {
-    pub fn decode_postcard(bytes: &[u8]) -> Result<Self, VnError> {
-        let state: VnRuntimeState = postcard::from_bytes(bytes)
-            .map_err(|error| VnError::message(format!("decode VN runtime state: {error}")))?;
-        if state.schema != VN_RUNTIME_STATE_SCHEMA {
-            return Err(VnError::diagnostic(
-                "ASTRA_VN_RUNTIME_STATE_SCHEMA",
-                "VN runtime state schema is invalid",
-            ));
-        }
-        Ok(Self {
-            state,
-            state_hash: Hash128::from_blake3(bytes),
-        })
-    }
-
-    pub fn state(&self) -> &VnRuntimeState {
-        &self.state
-    }
-
-    pub fn into_state_and_hash(self) -> (VnRuntimeState, Hash128) {
-        (self.state, self.state_hash)
-    }
-}
-
-#[derive(Debug)]
 pub struct VnRuntimeIndex {
     story_hash: Hash128,
     state_ids: BTreeSet<String>,
@@ -252,6 +221,7 @@ impl VnRuntime {
             index,
             state: VnRuntimeState {
                 schema: VN_RUNTIME_STATE_SCHEMA.to_string(),
+                revision: 0,
                 instance_id: "vn.default".to_string(),
                 profile: config.profile,
                 locale: config.locale,
@@ -331,11 +301,8 @@ impl VnRuntime {
         })
     }
 
-    pub fn state_hash(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(&self.state)
-                .expect("AstraVN runtime state must serialize for hashing"),
-        )
+    pub fn state_revision(&self) -> u64 {
+        self.state.revision
     }
 
     pub fn replay_ui_state(&self) -> VnReplayUiState {
@@ -350,49 +317,26 @@ impl VnRuntime {
     }
 
     pub fn apply(&mut self, command: VnPlayerCommand) -> Result<VnStepOutput, VnError> {
-        let before = self.state_hash();
-        self.apply_with_state_hash(command, before)
+        let before = self.state.revision;
+        let pending = self.apply_pending(command, before)?;
+        let after = before.checked_add(1).ok_or_else(|| {
+            VnError::diagnostic(
+                "ASTRA_VN_STATE_REVISION_OVERFLOW",
+                "VN state revision exhausted its deterministic range",
+            )
+        })?;
+        self.state.revision = after;
+        Ok(pending.finalize(after))
     }
 
-    fn apply_with_state_hash(
+    fn apply_pending(
         &mut self,
         command: VnPlayerCommand,
-        before: Hash128,
-    ) -> Result<VnStepOutput, VnError> {
-        self.apply_with_state_hash_encoded(command, before)
-            .map(|(output, _)| output)
-    }
-
-    fn apply_with_state_hash_encoded(
-        &mut self,
-        command: VnPlayerCommand,
-        before: Hash128,
-    ) -> Result<(VnStepOutput, Arc<[u8]>), VnError> {
-        let (pending, encoded) = self.apply_with_state_hash_pending_encoded(command, before)?;
-        let after = Hash128::from_blake3(&encoded);
-        Ok((pending.finalize(after), encoded))
-    }
-
-    fn apply_with_state_hash_pending_encoded(
-        &mut self,
-        command: VnPlayerCommand,
-        before: Hash128,
-    ) -> Result<(PendingVnStepOutput, Arc<[u8]>), VnError> {
-        let pending = self.apply_with_state_hash_pending(command, before)?;
-        let encoded_state: Arc<[u8]> = postcard::to_allocvec(&self.state)
-            .expect("AstraVN runtime state must serialize for hashing")
-            .into();
-        Ok((pending, encoded_state))
-    }
-
-    fn apply_with_state_hash_pending(
-        &mut self,
-        command: VnPlayerCommand,
-        before: Hash128,
+        before: u64,
     ) -> Result<PendingVnStepOutput, VnError> {
         tracing::trace!(
             event = "vn.runtime.command.start",
-            before_state_hash = %before,
+            before_state_revision = before,
             "AstraVN player command started"
         );
         self.mutation_journal.clear();
@@ -708,22 +652,21 @@ impl VnRuntime {
             timeline_tasks,
             mutations,
             coverage: VnCoverage { reached },
-            state_hash_before_advance: before,
-            state_hash_after_advance: before,
+            state_revision_before_advance: before,
+            state_revision_after_advance: before,
         }))
     }
 
     pub fn save_slot(&self, slot: impl Into<String>) -> Result<VnSaveBlob, VnError> {
         Ok(VnSaveBlob {
-            schema: "astra.vn.save_slot.v1".to_string(),
+            schema: "astra.vn.save_slot.v2".to_string(),
             slot: slot.into(),
-            state_hash: self.state_hash(),
             state: self.state.clone(),
         })
     }
 
     pub fn load_slot(&mut self, save: VnSaveBlob) -> Result<(), VnError> {
-        if save.schema != "astra.vn.save_slot.v1" {
+        if save.schema != "astra.vn.save_slot.v2" || save.state.schema != VN_RUNTIME_STATE_SCHEMA {
             return Err(VnError::diagnostic(
                 "ASTRA_VN_SAVE_SCHEMA",
                 "AstraVN save slot schema is invalid",
@@ -1407,11 +1350,13 @@ impl VnRuntime {
     }
 }
 
-/// A reducer output whose after-state hash must be finalized from the exact
-/// encoded state bytes before it can cross a provider boundary.
 pub struct PendingVnStepOutput(VnStepOutput);
 
 impl PendingVnStepOutput {
+    pub fn events(&self) -> &[crate::VnEvent] {
+        &self.0.events
+    }
+
     pub fn set_wait(&mut self, wait: VnWaitState) {
         self.0.wait = Some(wait);
     }
@@ -1420,8 +1365,8 @@ impl PendingVnStepOutput {
         self.0.awaits.push(await_id);
     }
 
-    pub fn finalize(mut self, state_hash_after_advance: Hash128) -> VnStepOutput {
-        self.0.state_hash_after_advance = state_hash_after_advance;
+    pub fn finalize(mut self, state_revision_after_advance: u64) -> VnStepOutput {
+        self.0.state_revision_after_advance = state_revision_after_advance;
         self.0
     }
 }
@@ -1446,63 +1391,15 @@ pub fn reduce_vn_step_indexed(
     Ok((runtime.state, output))
 }
 
-pub fn reduce_vn_step_indexed_prehashed(
+pub fn reduce_vn_step_indexed_pending(
     compiled: Arc<CompiledStory>,
     index: Arc<VnRuntimeIndex>,
     state: VnRuntimeState,
-    state_hash: Hash128,
-    command: VnPlayerCommand,
-) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
-    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
-    let output = runtime.apply_with_state_hash(command, state_hash)?;
-    Ok((runtime.state, output))
-}
-
-pub fn reduce_vn_step_indexed_prehashed_encoded(
-    compiled: Arc<CompiledStory>,
-    index: Arc<VnRuntimeIndex>,
-    state: VnRuntimeState,
-    state_hash: Hash128,
-    command: VnPlayerCommand,
-) -> Result<(VnRuntimeState, VnStepOutput, Arc<[u8]>), VnError> {
-    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
-    let (output, encoded_state) = runtime.apply_with_state_hash_encoded(command, state_hash)?;
-    Ok((runtime.state, output, encoded_state))
-}
-
-pub fn reduce_vn_step_indexed_prehashed_pending_encoded(
-    compiled: Arc<CompiledStory>,
-    index: Arc<VnRuntimeIndex>,
-    state: VnRuntimeState,
-    state_hash: Hash128,
-    command: VnPlayerCommand,
-) -> Result<(VnRuntimeState, PendingVnStepOutput, Arc<[u8]>), VnError> {
-    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
-    let (output, encoded_state) =
-        runtime.apply_with_state_hash_pending_encoded(command, state_hash)?;
-    Ok((runtime.state, output, encoded_state))
-}
-
-pub fn reduce_vn_step_indexed_prehashed_pending(
-    compiled: Arc<CompiledStory>,
-    index: Arc<VnRuntimeIndex>,
-    state: VnRuntimeState,
-    state_hash: Hash128,
     command: VnPlayerCommand,
 ) -> Result<(VnRuntimeState, PendingVnStepOutput), VnError> {
     let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, state)?;
-    let output = runtime.apply_with_state_hash_pending(command, state_hash)?;
-    Ok((runtime.state, output))
-}
-
-pub fn reduce_vn_step_indexed_validated(
-    compiled: Arc<CompiledStory>,
-    index: Arc<VnRuntimeIndex>,
-    validated: ValidatedVnRuntimeState,
-    command: VnPlayerCommand,
-) -> Result<(VnRuntimeState, VnStepOutput), VnError> {
-    let mut runtime = VnRuntime::from_shared_state_indexed(compiled, index, validated.state)?;
-    let output = runtime.apply_with_state_hash(command, validated.state_hash)?;
+    let before = runtime.state.revision;
+    let output = runtime.apply_pending(command, before)?;
     Ok((runtime.state, output))
 }
 

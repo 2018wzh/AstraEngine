@@ -19,18 +19,14 @@ fn ffmpeg_audio_stream_produces_timestamped_packets_accepted_by_scheduler() {
     let mut packet_count = 0;
 
     while let Some(decoded) = decoder.read_next().unwrap() {
-        let FfmpegDecodedPacket::Audio { packet, pcm_s16le } = decoded else {
+        let FfmpegDecodedPacket::Audio { packet, samples } = decoded else {
             panic!("audio fixture produced a video packet");
         };
         assert_eq!(packet.sequence, packet_count + 1);
         assert!(packet.pts_us >= previous_end);
         assert_eq!(
-            packet.content_hash,
-            astra_core::Hash256::from_sha256(&pcm_s16le)
-        );
-        assert_eq!(
-            pcm_s16le.len(),
-            packet.frame_count as usize * packet.channels as usize * 2
+            samples.len(),
+            packet.frame_count as usize * packet.channels as usize
         );
         previous_end = packet.pts_us + packet.duration_us;
         session.queue_audio(packet).unwrap();
@@ -62,10 +58,6 @@ fn ffmpeg_video_stream_is_monotonic_seekable_and_cancellable() {
             assert_eq!(
                 bgra8.len(),
                 packet.width as usize * packet.height as usize * 4
-            );
-            assert_eq!(
-                packet.content_hash,
-                astra_core::Hash256::from_sha256(&bgra8)
             );
             previous_pts = packet.pts_us;
             video_count += 1;
@@ -148,12 +140,12 @@ fn ffmpeg_packets_flow_through_scheduler_with_owned_payloads() {
     for _ in 0..8 {
         let decoded = audio_decoder.read_next().unwrap().unwrap();
         let queued = audio_pipeline.queue_decoded(decoded).unwrap();
-        let QueuedMediaOutput::Audio { packet, pcm_s16le } = queued else {
+        let QueuedMediaOutput::Audio { packet, samples } = queued else {
             panic!("audio stream buffered a video frame");
         };
         assert_eq!(
-            packet.content_hash,
-            astra_core::Hash256::from_sha256(&pcm_s16le)
+            samples.len(),
+            packet.frame_count as usize * packet.channels as usize
         );
         first_audio_end.get_or_insert(packet.pts_us + packet.duration_us);
     }
@@ -203,13 +195,13 @@ fn ffmpeg_packets_flow_through_scheduler_with_owned_payloads() {
     let presented = output.presented_video.unwrap();
     assert!(presented.packet.pts_us >= first_video_pts.unwrap());
     assert_eq!(
-        presented.packet.content_hash,
-        astra_core::Hash256::from_sha256(&presented.bgra8)
+        presented.bgra8.len(),
+        presented.packet.width as usize * presented.packet.height as usize * 4
     );
 }
 
 #[astra_headless_test::test]
-fn media_pipeline_rejects_payload_tamper_without_partial_queue() {
+fn media_pipeline_rejects_malformed_payload_without_partial_queue() {
     let mut decoder = FfmpegPlaybackDecoder::open(
         "mp3",
         &fixture_bytes("t-rex-roar.mp3"),
@@ -220,10 +212,10 @@ fn media_pipeline_rejects_payload_tamper_without_partial_queue() {
         MediaPlaybackPipeline::new(decoder.playback_config(), MediaPipelineLimits::default())
             .unwrap();
     let mut decoded = decoder.read_next().unwrap().unwrap();
-    let DecodedMediaPacket::Audio { pcm_s16le, .. } = &mut decoded else {
+    let DecodedMediaPacket::Audio { samples, .. } = &mut decoded else {
         panic!("audio fixture produced video");
     };
-    pcm_s16le[0] ^= 0xff;
+    samples.pop();
     assert!(pipeline.queue_decoded(decoded).is_err());
     assert!(pipeline.scheduler().audio_queue.is_empty());
 }
@@ -241,12 +233,12 @@ fn ffmpeg_stream_resamples_to_explicit_native_audio_format() {
     )
     .unwrap();
     let packet = decoder.read_next().unwrap().unwrap();
-    let DecodedMediaPacket::Audio { packet, pcm_s16le } = packet else {
+    let DecodedMediaPacket::Audio { packet, samples } = packet else {
         panic!("audio fixture produced video");
     };
     assert_eq!(packet.sample_rate, 48_000);
     assert_eq!(packet.channels, 1);
-    assert_eq!(pcm_s16le.len(), packet.frame_count as usize * 2);
+    assert_eq!(samples.len(), packet.frame_count as usize);
     assert!(decoder
         .configure_audio_output(FfmpegAudioOutputFormat {
             sample_rate: 44_100,

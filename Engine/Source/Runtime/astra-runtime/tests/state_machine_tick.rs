@@ -544,7 +544,7 @@ fn state_machine_runs_transitions_until_it_reaches_a_stable_state() {
 }
 
 #[astra_headless_test::test]
-fn state_machine_cycle_blocks_without_committing_partial_progress() {
+fn evidence_state_machine_cycle_uses_microstep_budget_without_live_hash_guard() {
     let (mut world, actor) = cycle_world(TickIntegrityMode::Evidence);
     let report = world
         .tick(astra_runtime::TickRequest::live(
@@ -560,7 +560,7 @@ fn state_machine_cycle_blocks_without_committing_partial_progress() {
     assert!(report
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_CYCLE"));
+        .any(|diagnostic| diagnostic.code == "ASTRA_RUNTIME_STATE_MACHINE_BUDGET"));
     assert_eq!(
         world.debug_session().state_machines(actor)[0].current_state,
         StableId::deterministic_v7(8, 1, 11)

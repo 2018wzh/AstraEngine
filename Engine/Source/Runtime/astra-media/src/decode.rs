@@ -1,10 +1,9 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{Cursor, ErrorKind},
-    sync::Arc,
 };
 
-use astra_core::{Diagnostic, Hash256};
+use astra_core::Diagnostic;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use symphonia::core::{
@@ -39,15 +38,15 @@ pub enum DecodeKind {
     Video,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodeRequest {
     pub kind: DecodeKind,
     pub codec: String,
-    pub bytes: Vec<u8>,
+    pub bytes: astra_byte_source::OwnedByteBuffer,
     pub profile: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DecodeResult {
     pub provider_id: String,
     pub kind: DecodeKind,
@@ -56,13 +55,21 @@ pub struct DecodeResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DecodeOutput {
     CpuBuffer {
-        bytes: Vec<u8>,
+        bytes: astra_byte_source::OwnedByteBuffer,
         format: String,
-        hash: Hash256,
+    },
+    AudioPcmI16 {
+        sample_rate: u32,
+        channels: u16,
+        samples: Vec<i16>,
+    },
+    AudioPcmF32 {
+        sample_rate: u32,
+        channels: u16,
+        samples: Vec<f32>,
     },
     MediaSurfaceToken(MediaSurfaceToken),
 }
@@ -120,6 +127,17 @@ pub struct WindowsVideoStreamDecoder {
 }
 
 impl WindowsVideoStreamDecoder {
+    pub fn duration_us(&self) -> u64 {
+        #[cfg(windows)]
+        {
+            self.inner.duration_us
+        }
+        #[cfg(not(windows))]
+        {
+            0
+        }
+    }
+
     pub fn next_frame(&mut self) -> Result<Option<crate::DecodedVideoFrame>, MediaError> {
         #[cfg(windows)]
         {
@@ -162,14 +180,14 @@ pub struct WindowsDecodedAudioChunk {
     pub pts_us: u64,
     pub sample_rate: u32,
     pub channels: u16,
-    pub pcm_s16le: Vec<u8>,
+    pub samples: Vec<i16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymphoniaDecodedAudioChunk {
     pub sample_rate: u32,
     pub channels: u16,
-    pub pcm_s16le: Vec<u8>,
+    pub samples: Vec<i16>,
 }
 
 pub struct SymphoniaAudioStreamDecoder {
@@ -245,14 +263,10 @@ impl SymphoniaAudioStreamDecoder {
                     "streaming audio exceeds the declared session decode budget",
                 ));
             }
-            let mut pcm_s16le = Vec::with_capacity(chunk_bytes as usize);
-            for sample in samples {
-                pcm_s16le.extend_from_slice(&sample.to_le_bytes());
-            }
             return Ok(Some(SymphoniaDecodedAudioChunk {
                 sample_rate: self.sample_rate,
                 channels: self.channels,
-                pcm_s16le,
+                samples,
             }));
         }
     }
@@ -260,7 +274,7 @@ impl SymphoniaAudioStreamDecoder {
 
 pub fn open_symphonia_audio_stream(
     codec: &str,
-    bytes: Arc<[u8]>,
+    bytes: astra_byte_source::OwnedByteBuffer,
     max_decoded_bytes: u64,
 ) -> Result<SymphoniaAudioStreamDecoder, MediaError> {
     if !matches!(codec, "wav" | "ogg" | "flac" | "mp3")
@@ -580,15 +594,29 @@ fn validate_request(
 
 fn validate_output(output: &DecodeOutput) -> Result<(), MediaError> {
     match output {
-        DecodeOutput::CpuBuffer {
-            bytes,
-            format,
-            hash,
-        } => {
-            if bytes.is_empty() || format.is_empty() || Hash256::from_sha256(bytes) != *hash {
+        DecodeOutput::CpuBuffer { bytes, format } => {
+            if bytes.is_empty() || format.is_empty() {
                 return Err(decode_error(
                     "ASTRA_DECODE_OUTPUT_INVALID",
-                    "decoded CPU buffer is empty or has an invalid hash",
+                    "decoded CPU buffer is empty or has an invalid format",
+                ));
+            }
+        }
+        DecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            samples,
+        } => validate_audio_samples(*sample_rate, *channels, samples.len(), true)?,
+        DecodeOutput::AudioPcmF32 {
+            sample_rate,
+            channels,
+            samples,
+        } => {
+            validate_audio_samples(*sample_rate, *channels, samples.len(), true)?;
+            if samples.iter().any(|sample| !sample.is_finite()) {
+                return Err(decode_error(
+                    "ASTRA_DECODE_OUTPUT_INVALID",
+                    "decoded floating-point PCM contains a non-finite sample",
                 ));
             }
         }
@@ -603,6 +631,25 @@ fn validate_output(output: &DecodeOutput) -> Result<(), MediaError> {
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_audio_samples(
+    sample_rate: u32,
+    channels: u16,
+    sample_count: usize,
+    require_non_empty: bool,
+) -> Result<(), MediaError> {
+    if !(8_000..=384_000).contains(&sample_rate)
+        || !(1..=8).contains(&channels)
+        || (require_non_empty && sample_count == 0)
+        || !sample_count.is_multiple_of(usize::from(channels))
+    {
+        return Err(decode_error(
+            "ASTRA_DECODE_OUTPUT_INVALID",
+            "decoded PCM format, length, or frame alignment is invalid",
+        ));
     }
     Ok(())
 }
@@ -658,8 +705,7 @@ impl DecodeProvider for ImageDecodeProvider {
             kind: request.kind,
             codec: request.codec.clone(),
             output: DecodeOutput::CpuBuffer {
-                hash: Hash256::from_sha256(&rgba),
-                bytes: rgba,
+                bytes: rgba.into(),
                 format: "rgba8".to_string(),
             },
             diagnostics: Vec::new(),
@@ -702,7 +748,7 @@ impl DecodeProvider for SyntheticPlatformDecodeProvider {
             codec: request.codec.clone(),
             output: DecodeOutput::MediaSurfaceToken(MediaSurfaceToken {
                 provider_id: self.provider_id.clone(),
-                token_id: format!("surface:{}", Hash256::from_sha256(&request.bytes).to_hex()),
+                token_id: "surface.synthetic".to_string(),
                 format: request.codec.clone(),
             }),
             diagnostics: Vec::new(),
@@ -776,7 +822,7 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
         let mut decoder = symphonia::default::get_codecs()
             .make_audio_decoder(codec_params, &AudioDecoderOptions::default())
             .map_err(|err| MediaError::message(format!("create audio decoder: {err}")))?;
-        let mut pcm = Vec::new();
+        let mut pcm = Vec::<i16>::new();
         let mut sample_rate = codec_params.sample_rate.unwrap_or_default();
         let mut channels = codec_params
             .channels
@@ -812,28 +858,19 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
             channels = decoded.spec().channels().count();
             let mut samples = vec![0i16; decoded.samples_interleaved()];
             decoded.copy_to_slice_interleaved(&mut samples);
-            let additional = samples
-                .len()
-                .checked_mul(std::mem::size_of::<i16>())
-                .ok_or_else(|| {
-                    decode_error(
-                        "ASTRA_AUDIO_DECODE_BUDGET",
-                        "decoded audio byte count overflowed",
-                    )
-                })?;
+            let additional = samples.len();
             if pcm
                 .len()
                 .checked_add(additional)
-                .is_none_or(|total| total > MAX_DECODED_AUDIO_BYTES)
+                .and_then(|total| total.checked_mul(std::mem::size_of::<i16>()))
+                .is_none_or(|total_bytes| total_bytes > MAX_DECODED_AUDIO_BYTES)
             {
                 return Err(decode_error(
                     "ASTRA_AUDIO_DECODE_BUDGET",
                     "decoded audio exceeds the bounded CPU buffer budget",
                 ));
             }
-            for sample in samples {
-                pcm.extend_from_slice(&sample.to_le_bytes());
-            }
+            pcm.extend(samples);
         }
 
         if pcm.is_empty() || sample_rate == 0 || channels == 0 {
@@ -843,10 +880,15 @@ impl DecodeProvider for SymphoniaAudioDecodeProvider {
             provider_id: self.capability().provider_id,
             kind: request.kind,
             codec: request.codec.clone(),
-            output: DecodeOutput::CpuBuffer {
-                hash: Hash256::from_sha256(&pcm),
-                bytes: pcm,
-                format: format!("pcm_s16le:{sample_rate}:{channels}"),
+            output: DecodeOutput::AudioPcmI16 {
+                samples: pcm,
+                sample_rate,
+                channels: u16::try_from(channels).map_err(|_| {
+                    decode_error(
+                        "ASTRA_AUDIO_DECODE_CHANNELS",
+                        "decoded audio channel count exceeds u16",
+                    )
+                })?,
             },
             diagnostics: Vec::new(),
         })
@@ -982,15 +1024,30 @@ impl DecodeProvider for WebCodecsDecodeProvider {
             codec: request.codec.clone(),
             output: DecodeOutput::MediaSurfaceToken(MediaSurfaceToken {
                 provider_id: capability.provider_id,
-                token_id: format!(
-                    "webcodecs:{}",
-                    Hash256::from_sha256(&request.bytes).to_hex()
-                ),
+                token_id: next_webcodecs_token()?,
                 format: request.codec.clone(),
             }),
             diagnostics: Vec::new(),
         })
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn next_webcodecs_token() -> Result<String, MediaError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
+    let token = NEXT_TOKEN
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .map_err(|_| {
+            decode_error(
+                "ASTRA_WEBCODECS_TOKEN_EXHAUSTED",
+                "WebCodecs token sequence is exhausted",
+            )
+        })?;
+    Ok(format!("webcodecs:{token}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1007,7 +1064,7 @@ fn webcodecs_available() -> bool {
 mod wmf_decode {
     use std::{ptr, slice};
 
-    use astra_core::{Diagnostic, Hash256};
+    use astra_core::Diagnostic;
     use windows::{
         core::{Error as WindowsError, Interface, HRESULT},
         Win32::{
@@ -1018,10 +1075,10 @@ mod wmf_decode {
                 MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video,
                 MFShutdown, MFStartup, MFVideoFormat_RGB32, MFSTARTUP_FULL,
                 MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE,
-                MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+                MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
                 MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READERF_ENDOFSTREAM,
                 MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-                MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE, MF_VERSION,
             },
             System::{
                 Com::{
@@ -1057,10 +1114,12 @@ mod wmf_decode {
             provider_id,
             kind: DecodeKind::Audio,
             codec: request.codec.clone(),
-            output: DecodeOutput::CpuBuffer {
-                hash: Hash256::from_sha256(&output.pcm),
-                bytes: output.pcm,
-                format: format!("pcm_s16le:{}:{}", output.sample_rate, output.channels),
+            output: DecodeOutput::AudioPcmI16 {
+                samples: output.samples,
+                sample_rate: output.sample_rate,
+                channels: u16::try_from(output.channels).map_err(|_| {
+                    blocking("ASTRA_WMF_AUDIO_CHANNELS", "channel count exceeds u16")
+                })?,
             },
             diagnostics: output.diagnostics,
         })
@@ -1077,8 +1136,7 @@ mod wmf_decode {
             kind: DecodeKind::Video,
             codec: request.codec.clone(),
             output: DecodeOutput::CpuBuffer {
-                hash: Hash256::from_sha256(&output.bgra),
-                bytes: output.bgra,
+                bytes: output.bgra.into(),
                 format: format!("bgra8:first_frame:{}x{}", output.width, output.height),
             },
             diagnostics: Vec::new(),
@@ -1109,7 +1167,7 @@ mod wmf_decode {
     }
 
     struct AudioOutput {
-        pcm: Vec<u8>,
+        samples: Vec<i16>,
         sample_rate: u32,
         channels: u32,
         diagnostics: Vec<Diagnostic>,
@@ -1128,6 +1186,7 @@ mod wmf_decode {
         height: u32,
         expected_frame_bytes: usize,
         frame_duration_us: u64,
+        pub(super) duration_us: u64,
         max_frames: u64,
         max_bytes: u64,
         emitted_frames: u64,
@@ -1210,18 +1269,18 @@ mod wmf_decode {
                     let Some(sample) = sample else {
                         continue;
                     };
-                    let pcm_s16le = sample_bytes(&sample)?;
-                    let frame_bytes = usize::from(self.channels) * 2;
-                    if pcm_s16le.is_empty()
-                        || pcm_s16le.len() > MAX_DECODED_AUDIO_BYTES
-                        || !pcm_s16le.len().is_multiple_of(frame_bytes)
+                    let samples = sample_i16(&sample)?;
+                    if samples.is_empty()
+                        || samples.len().saturating_mul(std::mem::size_of::<i16>())
+                            > MAX_DECODED_AUDIO_BYTES
+                        || !samples.len().is_multiple_of(usize::from(self.channels))
                         || timestamp_100ns < 0
                     {
                         return Err(wmf_error(
                             "audio decode produced an invalid PCM chunk or timestamp",
                         ));
                     }
-                    let chunk_samples = u64::try_from(pcm_s16le.len() / 2)
+                    let chunk_samples = u64::try_from(samples.len())
                         .map_err(|_| wmf_error("decoded audio sample count overflowed"))?;
                     let emitted_samples = self
                         .emitted_samples
@@ -1241,7 +1300,7 @@ mod wmf_decode {
                         pts_us,
                         sample_rate: self.sample_rate,
                         channels: self.channels,
-                        pcm_s16le,
+                        samples,
                     }));
                 }
             }
@@ -1260,6 +1319,14 @@ mod wmf_decode {
                 }
                 let session = WmfSession::new()?;
                 let reader = source_reader_from_bytes(bytes)?;
+                let duration = reader.GetPresentationAttribute(
+                    MF_SOURCE_READER_MEDIASOURCE.0 as u32,
+                    &MF_PD_DURATION,
+                )?;
+                let duration_us = u64::try_from(&duration)? / 10;
+                if duration_us == 0 {
+                    return Err(wmf_error("video decode reported an empty duration"));
+                }
                 let stream_index = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
                 let media_type = media_type(&MFMediaType_Video, &MFVideoFormat_RGB32)?;
                 reader.SetCurrentMediaType(stream_index, None, &media_type)?;
@@ -1290,6 +1357,7 @@ mod wmf_decode {
                     height,
                     expected_frame_bytes,
                     frame_duration_us,
+                    duration_us,
                     max_frames,
                     max_bytes,
                     emitted_frames: 0,
@@ -1342,9 +1410,10 @@ mod wmf_decode {
                         .filter(|value| *value <= self.max_bytes)
                         .ok_or_else(|| wmf_error("decoded video exceeds the byte budget"))?;
                     let pts_us = timestamp_100ns as u64 / 10;
-                    if self
-                        .previous_pts_us
-                        .is_some_and(|previous| pts_us < previous)
+                    if pts_us >= self.duration_us
+                        || self
+                            .previous_pts_us
+                            .is_some_and(|previous| pts_us < previous)
                     {
                         return Err(wmf_error("decoded video timestamps are not ordered"));
                     }
@@ -1361,11 +1430,10 @@ mod wmf_decode {
                     return Ok(Some(crate::DecodedVideoFrame {
                         sequence: self.emitted_frames,
                         pts_us,
-                        duration_us: self.frame_duration_us,
+                        duration_us: self.frame_duration_us.min(self.duration_us - pts_us),
                         width: self.width,
                         height: self.height,
-                        content_hash: Hash256::from_sha256(&bgra8),
-                        bgra8,
+                        bgra8: bgra8.into(),
                     }));
                 }
             }
@@ -1418,7 +1486,7 @@ mod wmf_decode {
             let channels = attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS)
                 .filter(|value| *value > 0)
                 .ok_or_else(|| wmf_error("audio decode reported an invalid channel count"))?;
-            let mut pcm = Vec::new();
+            let mut samples = Vec::new();
 
             loop {
                 let mut flags = 0;
@@ -1437,24 +1505,24 @@ mod wmf_decode {
                 let Some(sample) = sample else {
                     continue;
                 };
-                let chunk = sample_bytes(&sample)?;
+                let chunk = sample_i16(&sample)?;
                 if chunk.is_empty() {
                     continue;
                 }
-                let remaining = MAX_DECODED_AUDIO_BYTES.saturating_sub(pcm.len());
-                if chunk.len() > remaining {
+                let max_samples = MAX_DECODED_AUDIO_BYTES / std::mem::size_of::<i16>();
+                if chunk.len() > max_samples.saturating_sub(samples.len()) {
                     return Err(wmf_error(
                         "decoded audio exceeds the bounded CPU buffer budget",
                     ));
                 }
-                pcm.extend_from_slice(&chunk);
+                samples.extend(chunk);
             }
 
-            if pcm.is_empty() {
+            if samples.is_empty() {
                 return Err(wmf_error("audio decode produced no PCM samples"));
             }
             Ok(AudioOutput {
-                pcm,
+                samples,
                 sample_rate,
                 channels,
                 diagnostics: Vec::new(),
@@ -1612,8 +1680,7 @@ mod wmf_decode {
                     duration_us: duration.min(duration_us - pts_us),
                     width,
                     height,
-                    content_hash: Hash256::from_sha256(&bgra8),
-                    bgra8,
+                    bgra8: bgra8.into(),
                 });
             }
             Ok(crate::DecodedVideoStream {
@@ -1717,6 +1784,31 @@ mod wmf_decode {
         };
         buffer.Unlock()?;
         Ok(bytes)
+    }
+
+    unsafe fn sample_i16(sample: &IMFSample) -> windows::core::Result<Vec<i16>> {
+        let buffer = sample.ConvertToContiguousBuffer()?;
+        let len = buffer.GetCurrentLength()? as usize;
+        let mut data = ptr::null_mut();
+        let mut current_len = 0;
+        buffer.Lock(&mut data, None, Some(&mut current_len))?;
+        let copy_len = (current_len as usize).min(len);
+        if !copy_len.is_multiple_of(std::mem::size_of::<i16>()) {
+            buffer.Unlock()?;
+            return Err(wmf_error("audio sample ends inside an i16 value"));
+        }
+        let sample_count = copy_len / std::mem::size_of::<i16>();
+        let mut samples = Vec::<i16>::with_capacity(sample_count);
+        if sample_count != 0 && !data.is_null() {
+            ptr::copy_nonoverlapping(
+                data.cast::<u8>(),
+                samples.as_mut_ptr().cast::<u8>(),
+                copy_len,
+            );
+            samples.set_len(sample_count);
+        }
+        buffer.Unlock()?;
+        Ok(samples)
     }
 }
 

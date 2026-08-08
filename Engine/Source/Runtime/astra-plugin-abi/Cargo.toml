@@ -6,10 +6,11 @@ version.workspace = true
 
 [features]
 default = ["ffi"]
-ffi = ["dep:abi_stable"]
+ffi = ["dep:abi_stable", "astra-byte-source/ffi"]
 
 [dependencies]
 abi_stable = { workspace = true, optional = true }
+astra-byte-source = { path = "../astra-byte-source" }
 astra-core = { path = "../astra-core" }
 postcard.workspace = true
 schemars.workspace = true

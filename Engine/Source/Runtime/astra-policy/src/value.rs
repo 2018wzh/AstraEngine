@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use astra_core::Hash128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -19,11 +18,6 @@ pub enum PolicyValue {
 impl PolicyValue {
     pub fn validate_depth(&self, max_depth: usize) -> Result<(), PolicyError> {
         self.validate_at_depth(0, max_depth)
-    }
-
-    pub fn stable_hash(&self) -> Hash128 {
-        let bytes = postcard::to_allocvec(self).expect("PolicyValue serialization is infallible");
-        Hash128::from_blake3(&bytes)
     }
 
     fn validate_at_depth(&self, depth: usize, max_depth: usize) -> Result<(), PolicyError> {
@@ -55,7 +49,7 @@ pub struct PolicyQueryRecord {
     pub api: String,
     pub target: String,
     pub args: BTreeMap<String, PolicyValue>,
-    pub result_hash: Hash128,
+    pub result: PolicyValue,
     pub replay_event: String,
 }
 

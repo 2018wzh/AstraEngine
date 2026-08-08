@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_core::{Diagnostic, Hash256};
-use cosmic_text::FontFeatures;
+use astra_core::Diagnostic;
+use cosmic_text::{FontFeatures, SubpixelBin};
 
 use crate::MediaError;
 
@@ -10,15 +10,13 @@ use super::{
     provider::{FontState, RawLayout},
     shaping::{append_shaped_glyph, glyph_bitmap, shape_raw},
     validation::{
-        cluster_covered, cosmic_features, ranges_overlap, result_hash, validate_direction,
-        validate_ruby,
+        cluster_covered, cosmic_features, ranges_overlap, validate_direction, validate_ruby,
     },
 };
 
 pub(super) fn layout_uncached(
     request: &TextLayoutRequest,
     state: &mut FontState,
-    context: &FontBindingContext,
     config: &TextLayoutConfig,
 ) -> Result<TextLayoutResult, MediaError> {
     let features = cosmic_features(&request.features)?;
@@ -175,22 +173,6 @@ pub(super) fn layout_uncached(
     } else {
         None
     };
-    let hash = result_hash(
-        request,
-        context,
-        &state.fonts,
-        width,
-        height,
-        &lines,
-        &shaped_runs,
-        &glyph_resources,
-        &ruby_boxes,
-        &voice_refs,
-        clip,
-        clipped,
-        ellipsized,
-        &diagnostics,
-    )?;
     Ok(TextLayoutResult {
         schema: TEXT_LAYOUT_SCHEMA.to_string(),
         key: request.key.clone(),
@@ -205,7 +187,7 @@ pub(super) fn layout_uncached(
         clipped,
         ellipsized,
         diagnostics,
-        hash,
+        revision: 0,
     })
 }
 
@@ -484,11 +466,17 @@ fn append_raw_layout(
                 (None, None, None)
             } else if let Some(image) = image {
                 let bitmap = glyph_bitmap(&image)?;
-                let mut identity = Vec::new();
-                identity.extend_from_slice(face.hash.as_bytes());
-                identity.extend_from_slice(&glyph.glyph_id.to_le_bytes());
-                identity.extend_from_slice(bitmap.hash.as_bytes());
-                let resource_id = format!("glyph:{}", Hash256::from_sha256(&identity).to_hex());
+                let cache_key = physical.cache_key;
+                let resource_id = format!(
+                    "glyph:{}:{}:{}:{}:{}:{}:{}",
+                    face.asset_id,
+                    face.face_index,
+                    cache_key.glyph_id,
+                    cache_key.font_size_bits,
+                    subpixel_bin_id(cache_key.x_bin),
+                    subpixel_bin_id(cache_key.y_bin),
+                    cache_key.flags.bits(),
+                );
                 resources
                     .entry(resource_id.clone())
                     .or_insert_with(|| GlyphResource {
@@ -546,6 +534,15 @@ fn append_raw_layout(
         }
     }
     Ok(())
+}
+
+const fn subpixel_bin_id(bin: SubpixelBin) -> u8 {
+    match bin {
+        SubpixelBin::Zero => 0,
+        SubpixelBin::One => 1,
+        SubpixelBin::Two => 2,
+        SubpixelBin::Three => 3,
+    }
 }
 
 fn is_vertical(direction: TextDirection) -> bool {

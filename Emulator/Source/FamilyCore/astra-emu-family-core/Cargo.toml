@@ -8,6 +8,7 @@ license.workspace = true
 doctest = false
 
 [dependencies]
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 schemars.workspace = true
 serde.workspace = true

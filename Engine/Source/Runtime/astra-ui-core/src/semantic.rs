@@ -70,7 +70,6 @@ pub struct UiSemanticSnapshot {
     pub generation: u64,
     pub root_id: String,
     pub nodes: Vec<UiSemanticNode>,
-    pub hash: Hash256,
 }
 
 /// Redacted accessibility evidence. Human-readable commercial strings and
@@ -124,7 +123,7 @@ impl UiAccessibilityReport {
             schema: "astra.ui_accessibility_report.v1".into(),
             provider: provider.into(),
             generation: snapshot.generation,
-            semantic_snapshot_hash: snapshot.hash,
+            semantic_snapshot_hash: snapshot.compute_hash()?,
             nodes,
             result: result.into(),
             hash: Hash256::from_sha256(&[]),
@@ -180,7 +179,7 @@ impl ValidateUi for UiAccessibilityReport {
                 "accessibility report hash mismatch",
             ));
         }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }
 
@@ -315,13 +314,6 @@ impl ValidateUi for UiSemanticSnapshot {
                 cursor = parents.get(current).copied().flatten();
             }
         }
-        let expected = self.compute_hash()?;
-        if expected != self.hash {
-            return Err(UiValidationError::invalid(
-                "ASTRA_UI_SEMANTIC_HASH",
-                "semantic snapshot hash mismatch",
-            ));
-        }
-        crate::validate_serialized_size(self)
+        Ok(())
     }
 }

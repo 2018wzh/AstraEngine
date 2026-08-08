@@ -487,9 +487,8 @@ fn log_consumed_vn_step(
         event = "astra.player.input.consumed",
         player_sequence,
         fixed_step = evidence.fixed_step,
-        runtime_state_hash = %evidence.runtime_state_hash,
-        runtime_event_hash = %evidence.runtime_event_hash,
-        runtime_presentation_hash = %evidence.runtime_presentation_hash,
+        presentation_count = evidence.presentation_count,
+        coverage_count = evidence.coverage_reached.len(),
         "Player consumed physical platform input"
     );
     Ok(())

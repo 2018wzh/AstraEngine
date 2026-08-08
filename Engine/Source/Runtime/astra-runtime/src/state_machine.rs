@@ -304,17 +304,9 @@ impl StateMachineStore {
         actions: &ActionRegistry,
         id_source: &mut StableIdGenerator,
         worker_count: usize,
-        detect_cycles: bool,
+        evidence_mode: bool,
     ) -> StateMachineTickOutput {
         let mut output = StateMachineTickOutput::default();
-        let event_root = if detect_cycles {
-            Some(astra_core::Hash128::from_blake3(
-                &postcard::to_allocvec(&("astra.runtime.tick_events.v1", events))
-                    .expect("runtime tick events must serialize for deterministic scheduling"),
-            ))
-        } else {
-            None
-        };
         let waves = build_conflict_waves(&self.machines, actions);
         for wave in waves {
             let base_id_source = id_source.clone();
@@ -329,8 +321,7 @@ impl StateMachineStore {
                     blackboard,
                     actions,
                     &base_id_source,
-                    event_root,
-                    detect_cycles,
+                    evidence_mode,
                 )
             } else {
                 wave.iter()
@@ -344,8 +335,7 @@ impl StateMachineStore {
                             blackboard,
                             actions,
                             &base_id_source,
-                            event_root,
-                            detect_cycles,
+                            evidence_mode,
                         )
                     })
                     .collect()
@@ -565,8 +555,7 @@ fn execute_parallel_wave(
     blackboard: &Blackboard,
     actions: &ActionRegistry,
     id_source: &StableIdGenerator,
-    event_root: Option<astra_core::Hash128>,
-    detect_cycles: bool,
+    evidence_mode: bool,
 ) -> Vec<MachineCandidate> {
     let workers = worker_count.max(1).min(wave.len());
     let chunk_size = wave.len().div_ceil(workers);
@@ -587,8 +576,7 @@ fn execute_parallel_wave(
                                 blackboard,
                                 actions,
                                 id_source,
-                                event_root,
-                                detect_cycles,
+                                evidence_mode,
                             )
                         })
                         .collect::<Vec<_>>()
@@ -616,8 +604,7 @@ fn execute_machine_caught(
     blackboard: &Blackboard,
     actions: &ActionRegistry,
     id_source: &StableIdGenerator,
-    event_root: Option<astra_core::Hash128>,
-    detect_cycles: bool,
+    evidence_mode: bool,
 ) -> MachineCandidate {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         execute_machine(
@@ -629,8 +616,7 @@ fn execute_machine_caught(
             blackboard,
             actions,
             id_source,
-            event_root,
-            detect_cycles,
+            evidence_mode,
         )
     }))
     .unwrap_or_else(|_| MachineCandidate {
@@ -652,11 +638,10 @@ struct CandidateEvents<'a> {
     events: &'a [RuntimeEvent],
     consumed: Vec<bool>,
     by_kind: BTreeMap<&'a str, Vec<usize>>,
-    base_root: Option<astra_core::Hash128>,
 }
 
 impl<'a> CandidateEvents<'a> {
-    fn new(events: &'a [RuntimeEvent], base_root: Option<astra_core::Hash128>) -> Self {
+    fn new(events: &'a [RuntimeEvent]) -> Self {
         let mut by_kind = BTreeMap::new();
         for (index, event) in events.iter().enumerate() {
             by_kind
@@ -668,7 +653,6 @@ impl<'a> CandidateEvents<'a> {
             events,
             consumed: vec![false; events.len()],
             by_kind,
-            base_root,
         }
     }
 
@@ -720,20 +704,6 @@ impl<'a> CandidateEvents<'a> {
         }
         *consumed = true;
         Ok(())
-    }
-
-    fn fingerprint(&self) -> Option<astra_core::Hash128> {
-        let base_root = self.base_root?;
-        let consumed = self
-            .consumed
-            .iter()
-            .enumerate()
-            .filter_map(|(index, consumed)| consumed.then_some(index))
-            .collect::<Vec<_>>();
-        Some(astra_core::Hash128::from_blake3(
-            &postcard::to_allocvec(&("astra.runtime.candidate_events.v1", base_root, consumed))
-                .expect("candidate event fingerprint must serialize"),
-        ))
     }
 }
 
@@ -800,8 +770,7 @@ fn execute_machine(
     blackboard: &Blackboard,
     actions: &ActionRegistry,
     id_source: &StableIdGenerator,
-    event_root: Option<astra_core::Hash128>,
-    detect_cycles: bool,
+    evidence_mode: bool,
 ) -> MachineCandidate {
     let compiled = machine.compiled_definition();
     let mut candidate_machine = machine.clone();
@@ -809,35 +778,12 @@ fn execute_machine(
     let mut candidate_blackboard = BlackboardOverlay::new(blackboard);
     let mut candidate_id_source = id_source.clone();
     let mut candidate_output = StateMachineTickOutput::default();
-    let mut available_events = CandidateEvents::new(events, event_root);
-    let mut visited = if detect_cycles {
-        Some(BTreeSet::new())
-    } else {
-        None
-    };
+    let mut available_events = CandidateEvents::new(events);
     let mut microsteps = 0_u32;
     let mut failed = None;
     loop {
         if candidate_machine.completed {
             break;
-        }
-        if let Some(visited) = visited.as_mut() {
-            let fingerprint = machine_fingerprint(
-                &candidate_machine,
-                &candidate_actors,
-                &candidate_blackboard,
-                &candidate_id_source,
-                available_events
-                    .fingerprint()
-                    .expect("cycle detection requires an event root"),
-            );
-            if !visited.insert(fingerprint) {
-                failed = Some(Diagnostic::blocking(
-                    "ASTRA_RUNTIME_STATE_MACHINE_CYCLE",
-                    "state machine repeated the same deterministic microstep state",
-                ));
-                break;
-            }
         }
         if microsteps >= 1024 {
             failed = Some(
@@ -895,10 +841,9 @@ fn execute_machine(
                 &mut candidate_output.delayed_events,
                 &mut candidate_output.delayed_cancellations,
                 &mut candidate_output.mutations,
-                &mut candidate_output.effects,
                 invocation.action_id.clone(),
                 trigger_event.clone(),
-                detect_cycles,
+                evidence_mode,
             );
             let action_result = action.run(&mut ctx, &invocation.input);
             let observed_access = ctx.observed_access();
@@ -1012,28 +957,6 @@ fn find_transition(
     None
 }
 
-fn machine_fingerprint(
-    machine: &StateMachineInstance,
-    actors: &dyn ActorStoreAccess,
-    blackboard: &dyn BlackboardAccess,
-    id_source: &StableIdGenerator,
-    event_fingerprint: astra_core::Hash128,
-) -> astra_core::Hash128 {
-    let actor_fingerprint = actors.deterministic_fingerprint();
-    let blackboard_fingerprint = blackboard.deterministic_fingerprint();
-    astra_core::Hash128::from_blake3(
-        &postcard::to_allocvec(&(
-            machine.current_state,
-            machine.completed,
-            actor_fingerprint,
-            blackboard_fingerprint,
-            id_source,
-            event_fingerprint,
-        ))
-        .expect("state machine candidate must serialize for cycle detection"),
-    )
-}
-
 fn guard_conflict_key(guard: &GuardExpr) -> String {
     match guard {
         GuardExpr::Always => "always".to_string(),
@@ -1050,7 +973,6 @@ pub struct StateMachineTickOutput {
     pub delayed_cancellations: Vec<DelayedEventId>,
     pub trace: Vec<ActionTrace>,
     pub mutations: Vec<crate::RuntimeMutationRecord>,
-    pub effects: Vec<crate::SerializedEffectEnvelope>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -1064,7 +986,6 @@ impl StateMachineTickOutput {
             .append(&mut other.delayed_cancellations);
         self.trace.append(&mut other.trace);
         self.mutations.append(&mut other.mutations);
-        self.effects.append(&mut other.effects);
         self.diagnostics.append(&mut other.diagnostics);
     }
 }

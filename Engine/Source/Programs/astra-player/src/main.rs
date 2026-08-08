@@ -363,10 +363,7 @@ fn run_bundled_game() -> Result<(), PlayerCliError> {
     }
     let profiles: Profiles =
         serde_json::from_slice(&package.container().read_section("platform.profiles")?)?;
-    if !matches!(
-        profiles.schema.as_str(),
-        "astra.platform_profiles.v1" | "astra.platform_profiles.v2"
-    ) {
+    if !matches!(profiles.schema.as_str(), "astra.platform_profiles.v3") {
         return Err("unsupported platform profile section".into());
     }
     let profile = profiles
@@ -1180,9 +1177,8 @@ fn log_consumed_vn_step(
         player_sequence,
         fixed_step = evidence.fixed_step,
         coverage = %coverage,
-        runtime_state_hash = %evidence.runtime_state_hash,
-        runtime_event_hash = %evidence.runtime_event_hash,
-        runtime_presentation_hash = %evidence.runtime_presentation_hash,
+        presentation_count = evidence.presentation_count,
+        coverage_count = evidence.coverage_reached.len(),
         current_state_id,
         pending_choice_ids = %pending_choice_ids,
         terminal_route_ids = %terminal_route_ids,

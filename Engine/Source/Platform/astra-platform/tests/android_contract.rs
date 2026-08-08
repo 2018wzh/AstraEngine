@@ -10,7 +10,11 @@ fn android_release_profile_is_explicit_and_hardware_bound() {
     assert_eq!(profile.platform, PlatformId::Android);
     assert_eq!(profile.renderer.providers, ["wgpu_vulkan"]);
     assert_eq!(profile.decode.providers, ["mediacodec"]);
-    assert_eq!(profile.audio.providers, ["oboe_aaudio", "oboe_opensl_es"]);
+    assert_eq!(profile.audio_mixer.providers, ["kira"]);
+    assert_eq!(
+        profile.audio_output.providers,
+        ["oboe_aaudio", "oboe_opensl_es"]
+    );
     assert_eq!(profile.save.providers, ["android_app_storage"]);
     assert_eq!(
         profile.package_sources,

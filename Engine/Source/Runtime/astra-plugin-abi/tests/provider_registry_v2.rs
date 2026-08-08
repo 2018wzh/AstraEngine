@@ -1,8 +1,7 @@
 use astra_plugin_abi::{
     LoadPhase, PluginExtensionRegistrySnapshot, ProductRuntimeDescriptor, ProviderBinding,
-    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy, RuntimeOutputDomain,
-    RuntimeOutputSchemaDescriptor, RuntimePersistedCodec, PLUGIN_EXTENSION_REGISTRY_SCHEMA,
-    PROVIDER_POLICY_SCHEMA,
+    ProviderBindingContext, ProviderExtensionRecord, ProviderPolicy,
+    PLUGIN_EXTENSION_REGISTRY_SCHEMA, PROVIDER_POLICY_SCHEMA,
 };
 
 fn context(required_capability: &str) -> ProviderBindingContext {
@@ -13,7 +12,7 @@ fn context(required_capability: &str) -> ProviderBindingContext {
         required_capability: required_capability.into(),
         engine_version: "0.1.0".into(),
         rustc_fingerprint: "rustc-stable".into(),
-        feature_fingerprint: "runtime-envelope-v3".into(),
+        feature_fingerprint: "runtime-typed-v3".into(),
         abi_fingerprint: "astra-plugin-abi-v3".into(),
     }
 }
@@ -42,7 +41,7 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v3".into(),
+                feature_fingerprint: "runtime-typed-v3".into(),
                 abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
             ProviderExtensionRecord {
@@ -53,7 +52,7 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
                 packaged: true,
                 engine_version: "0.1.0".into(),
                 rustc_fingerprint: "rustc-stable".into(),
-                feature_fingerprint: "runtime-envelope-v3".into(),
+                feature_fingerprint: "runtime-typed-v3".into(),
                 abi_fingerprint: "astra-plugin-abi-v3".into(),
             },
         ],
@@ -64,7 +63,6 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
         schema: PROVIDER_POLICY_SCHEMA.into(),
         profile: "desktop-release".into(),
         renderer: "astra.renderer.wgpu".into(),
-        decode_fallback: "profile_bound".into(),
         runtime_provider: ProductRuntimeDescriptor {
             runtime_id: "native_vn".into(),
             product_kind: "visual_novel".into(),
@@ -73,12 +71,6 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
             capabilities: vec!["runtime.native_vn".into()],
             package_sections: vec![],
             release_checks: vec![],
-            output_schemas: vec![RuntimeOutputSchemaDescriptor {
-                domain: RuntimeOutputDomain::Effect,
-                schema: "astra.vn.runtime_step_effect.v2".into(),
-                version: astra_core::SchemaVersion::new(2, 0, 0),
-                codec: RuntimePersistedCodec::Postcard,
-            }],
         },
         bindings: vec![binding, runtime_binding],
     };
@@ -106,7 +98,7 @@ fn v2_registry_closes_policy_provider_and_package_identity() {
         .unwrap();
 
     let mut linked_drift = policy.runtime_provider.clone();
-    linked_drift.output_schemas[0].schema = "astra.vn.runtime_step_effect.drift".into();
+    linked_drift.runtime_id = "native_vn.drift".into();
     assert_eq!(
         selection
             .validate_linked_descriptor(&linked_drift)

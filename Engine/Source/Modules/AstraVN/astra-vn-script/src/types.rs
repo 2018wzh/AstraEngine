@@ -8,10 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::CommandSourceMap;
 use crate::VnError;
 
-pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v3";
-pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 3;
-pub const VN_RUNTIME_VIEW_STATE_SCHEMA: &str = "astra.vn.runtime_view_state.v1";
-pub const VN_RUNTIME_VIEW_STATE_SCHEMA_MAJOR: u16 = 1;
+pub const VN_RUNTIME_STATE_SCHEMA: &str = "astra.vn.runtime_state.v4";
+pub const VN_RUNTIME_STATE_SCHEMA_MAJOR: u16 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AstraSource {
@@ -559,6 +557,7 @@ impl VnRunConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VnRuntimeState {
     pub schema: String,
+    pub revision: u64,
     pub instance_id: String,
     pub profile: String,
     pub locale: String,
@@ -603,14 +602,6 @@ impl VnTextRevealState {
     pub fn complete(&self) -> bool {
         self.visible_graphemes >= self.text_graphemes
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct VnRuntimeViewState {
-    pub schema: String,
-    pub authoritative_state_hash: Hash128,
-    pub backlog_count: usize,
-    pub state: VnRuntimeState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -763,14 +754,6 @@ pub struct VnReplayUiState {
     pub unread_count: usize,
 }
 
-impl VnReplayUiState {
-    pub fn state_hash(&self) -> Hash128 {
-        Hash128::from_blake3(
-            &postcard::to_allocvec(self).expect("replay UI state must serialize for hashing"),
-        )
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct VnWaitState {
     pub schema: String,
@@ -826,8 +809,8 @@ pub struct VnStepOutput {
     pub timeline_tasks: Vec<VnTimelineTask>,
     pub mutations: Vec<VnMutationRecord>,
     pub coverage: VnCoverage,
-    pub state_hash_before_advance: Hash128,
-    pub state_hash_after_advance: Hash128,
+    pub state_revision_before_advance: u64,
+    pub state_revision_after_advance: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -884,7 +867,6 @@ pub enum VnPlayerCommand {
 pub struct VnSaveBlob {
     pub schema: String,
     pub slot: String,
-    pub state_hash: Hash128,
     pub state: VnRuntimeState,
 }
 

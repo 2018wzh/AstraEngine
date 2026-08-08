@@ -27,7 +27,7 @@ Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspa
 1. 定义 `AstraEmuRuntimeProvider` descriptor、prepare/probe/open/step/save/restore/shutdown、package section plan、release checks 和 editor metadata。
 2. 让 case target 显式绑定 `astra_emu` runtime provider；Manager 只负责 program shell、profile、UI 和 local operator workflow。
 3. `open` 创建 RuntimeWorld lifecycle StateMachine，并选择 family `LegacyRuntimeProvider` session。
-4. `step` 调用 family provider，收集 `LegacyEffect`、AwaitToken、TextCaptureEvent、PresentationCommand、AudioCommand、trace 和 diagnostic。
+4. `step` 调用 family provider，原子提交轻量 `LegacyControlTransaction`，再把 typed scene、PCM、text、video、wait、trace 和 diagnostic 移动给 host owner。
 5. Release Gate 校验 `emu.game_runtime_provider`、provider fingerprint、package sections、save/replay hash 和 report redaction。
 
 **Done Evidence:** `cargo test -p astra-emu-manager game_runtime_provider` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.game_runtime_provider`，且 family plugin 仍不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
@@ -40,7 +40,7 @@ Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspa
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** Family 内部把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机，公共 Runtime 只接收可序列化 effect 和 snapshot envelope。
+**Goal:** Family 内部把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机，公共 Runtime 只接收 typed control transaction，host 直接接收 owned live output。
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-FAMILY-01`、[EmulatorCore StateMachine Mapping](../../implementation/emulator-core-state-machine.md)
 
@@ -51,7 +51,7 @@ Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspa
 1. 定义 family-private scheduler trace、context id、sequence、budget、wait/yield/fault/terminal 状态和 snapshot cursor。
 2. 多线程、多 fiber 或多 context VM 使用 child state machine，并按固定 `(priority, context_id, sequence)` 推进。
 3. Basic block 执行到 syscall、branch、wait、fault 或预算耗尽时停止，并输出 action trace。
-4. Syscall/action bridge 只输出 `LegacyEffect`、AwaitToken、PresentationCommand、AudioCommand、TextCaptureEvent 和 diagnostic。
+4. Syscall/action bridge 只输出 typed scene、PCM、text、video、wait、control transaction 和 diagnostic。
 5. 编写 scheduler ordering、await boundary、snapshot/replay hash、fault isolation 和 FVP detailed mapping 测试。
 
 **Done Evidence:** `cargo test -p astra-emu-family-api family_scheduler` 和 `cargo test -p astra-emu-fvp state_machine_mapping` 通过；report 输出 `emu.vm_state_machine_trace`、context coverage、await boundary 和 replay hash。
@@ -143,7 +143,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyRuntimeProvider`、`LegacyRuntimeSessionId`、`LegacyRuntimeHostCtx`、`LegacyStepInput`、`LegacyStepOutput`、`LegacyEffect`、`LegacyWaitRequest` 和 `LegacySnapshotEnvelope`。
+**Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyRuntimeProvider`、`LegacyRuntimeSessionId`、`LegacyRuntimeHostCtx`、`LegacyStepInput`、`LegacyStepOutput`、`LegacyLiveOutput`、`LegacyControlTransaction`、`LegacyWaitRequest` 和 `LegacySnapshotEnvelope`。
 
 **Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`S5-LEGACY-VFS-01`、`S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
 
@@ -154,7 +154,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 1. 定义 family descriptor、runtime provider id、format capability、permission、failure classification 和 redaction policy。
 2. 定义 lifecycle API：`probe`、`open`、`step`、`save`、`restore`、`shutdown`；`open` 返回 session id，provider 负责区分并行 case。
 3. 定义 provider DTO，稳定 ID、revision、section ref、source span、capability diagnostic 和 typed ABI-owned bulk 分离；实时 scene/PCM 不携带 content hash 或 postcard payload。
-4. 让 `step` 返回有序 typed live effect、`LegacyWaitRequest`、snapshot dirty section、VFS read evidence 和 redaction summary，由 host adapter 应用到 `DeterministicActionContext`。
+4. 让 `step` 返回 typed owned live output 与轻量 control transaction；host 先原子提交 control，再消费式移动 scene/PCM，不建立完整镜像。
 5. 编写 provider registration、session lifecycle、typed live ownership、snapshot envelope、restore compatibility 和 redaction 测试。
 
 **Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks，family VM state 只存在于 provider session。
@@ -213,7 +213,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 1. 定义 `TrustedEmuScriptProfile`，统一使用 Luau，不把 Lua/TJS 作为用户脚本语言。
 2. 暴露 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent host API。
-3. 状态注入只能提交 `LegacyEffect`、Blackboard、input 或 tag intent，并在 fixed tick 边界应用。
+3. 状态注入只能提交 typed Blackboard、input、tag 或 media intent，并在 fixed tick 边界应用。
 4. 禁止 native handle、Actor 指针、raw filesystem、raw network、system call、未授权 key 提取和访问控制规避。
 5. 脚本触发禁止能力时隔离禁用该脚本并写入 redacted diagnostic；只有 case profile 明确允许无补丁模式时继续，否则阻断启动。
 

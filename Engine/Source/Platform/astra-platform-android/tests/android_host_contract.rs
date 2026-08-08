@@ -36,6 +36,6 @@ fn audio_backend_and_luau_policy_are_fail_closed() {
     assert!(validate_interpreter_only_features(["luau_jit"]).is_err());
 
     let mut invalid = profile;
-    invalid.audio.providers = vec!["oboe_opensl_es".to_string()];
+    invalid.audio_output.providers = vec!["oboe_opensl_es".to_string()];
     assert!(validate_selected_audio_backend(&invalid, AndroidAudioBackend::OpenSlEs).is_err());
 }

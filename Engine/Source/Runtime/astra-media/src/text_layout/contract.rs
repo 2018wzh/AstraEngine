@@ -242,7 +242,7 @@ pub struct ShapedGlyphRun {
     pub glyphs: Vec<ShapedGlyph>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlyphResource {
     pub resource_id: String,
     pub font_asset_id: String,
@@ -278,7 +278,7 @@ pub struct VoiceReplayRefRecord {
     pub cue: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextLayoutResult {
     pub schema: String,
     pub key: String,
@@ -293,7 +293,9 @@ pub struct TextLayoutResult {
     pub clipped: bool,
     pub ellipsized: bool,
     pub diagnostics: Vec<Diagnostic>,
-    pub hash: Hash256,
+    /// Provider-local immutable layout revision. This is assigned once on a
+    /// cache miss and reused by every cache hit; it is not a content digest.
+    pub revision: u64,
 }
 
 impl TextLayoutResult {
@@ -323,7 +325,7 @@ struct OwnedGlyphResource {
 #[derive(Debug, Clone)]
 struct OwnedTextLayout {
     resource_ids: BTreeSet<String>,
-    layout_hash: Hash256,
+    layout_revision: u64,
     rgba: [u8; 4],
     translation: (i32, i32),
     commands: Vec<SceneCommand>,
@@ -376,7 +378,7 @@ struct PreparedTextLayout {
     clip: Option<LayoutClip>,
     rgba: [u8; 4],
     translation: (i32, i32),
-    layout_hash: Hash256,
+    layout_revision: u64,
     cached_commands: Option<Vec<SceneCommand>>,
     shared_layout: Option<Arc<TextLayoutResult>>,
 }
@@ -447,7 +449,7 @@ impl TextRenderResourceOwner {
             if let (Some(previous), Some(shared_layout)) =
                 (self.layouts.get(update.layout_id), update.shared_layout)
             {
-                if previous.layout_hash == update.layout.hash
+                if previous.layout_revision == update.layout.revision
                     && previous.rgba == update.rgba
                     && previous.translation == update.translation
                     && previous
@@ -463,7 +465,7 @@ impl TextRenderResourceOwner {
                         clip: None,
                         rgba: update.rgba,
                         translation: update.translation,
-                        layout_hash: update.layout.hash,
+                        layout_revision: update.layout.revision,
                         cached_commands: Some(previous.commands.clone()),
                         shared_layout: update.shared_layout.cloned(),
                     });
@@ -547,7 +549,7 @@ impl TextRenderResourceOwner {
                     .transpose()?,
                 rgba: update.rgba,
                 translation: update.translation,
-                layout_hash: update.layout.hash,
+                layout_revision: update.layout.revision,
                 cached_commands: None,
                 shared_layout: update.shared_layout.cloned(),
             });
@@ -670,7 +672,7 @@ impl TextRenderResourceOwner {
                 layout.layout_id.clone(),
                 OwnedTextLayout {
                     resource_ids: layout.next_ids,
-                    layout_hash: layout.layout_hash,
+                    layout_revision: layout.layout_revision,
                     rgba: layout.rgba,
                     translation: layout.translation,
                     commands: commands.clone(),
@@ -862,17 +864,15 @@ pub struct TextLayoutMeasurement {
     pub height: f32,
     pub clipped: bool,
     pub ellipsized: bool,
-    pub hash: Hash256,
+    pub revision: u64,
 }
 
 pub trait TextLayoutProvider {
     fn identity(&self) -> Result<TextLayoutProviderIdentity, MediaError>;
-    fn request_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError>;
     fn layout(&self, request: &TextLayoutRequest) -> Result<TextLayoutResult, MediaError>;
     fn measure(&self, request: &TextLayoutRequest) -> Result<TextLayoutMeasurement, MediaError> {
         Ok(TextLayoutMeasurement::from(&self.layout(request)?))
     }
-    fn layout_hash(&self, request: &TextLayoutRequest) -> Result<Hash256, MediaError>;
 }
 
 impl From<&TextLayoutResult> for TextLayoutMeasurement {
@@ -882,7 +882,7 @@ impl From<&TextLayoutResult> for TextLayoutMeasurement {
             height: result.height,
             clipped: result.clipped,
             ellipsized: result.ellipsized,
-            hash: result.hash,
+            revision: result.revision,
         }
     }
 }

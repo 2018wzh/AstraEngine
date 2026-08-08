@@ -1852,35 +1852,48 @@ fn append_checkpoint_artifacts(
             "ASTRA_HEADLESS_CHECKPOINT_AUDIO_CAPTURE_MISSING: retained checkpoint requires audio"
                 .to_string()
         })?;
-        let audio_bytes = wav_bytes(&audio.samples)?;
-        let frame_count = (audio.samples.len() / usize::from(audio.channels)) as u64;
-        let duration_ns = frame_count
-            .checked_mul(1_000_000_000)
-            .and_then(|value| value.checked_div(u64::from(audio.sample_rate)))
-            .ok_or_else(|| "ASTRA_HEADLESS_CHECKPOINT_AUDIO_DURATION_OVERFLOW".to_string())?;
-        reserve_appended_artifacts(
-            profile,
-            manifest,
-            &[bytes.len() as u64, audio_bytes.len() as u64],
-        )?;
+        let audio_artifact = if audio.samples.is_empty() {
+            None
+        } else {
+            let audio_bytes = wav_bytes(&audio.samples)?;
+            let frame_count = (audio.samples.len() / usize::from(audio.channels)) as u64;
+            let duration_ns = frame_count
+                .checked_mul(1_000_000_000)
+                .and_then(|value| value.checked_div(u64::from(audio.sample_rate)))
+                .ok_or_else(|| "ASTRA_HEADLESS_CHECKPOINT_AUDIO_DURATION_OVERFLOW".to_string())?;
+            Some((audio_bytes, frame_count, duration_ns))
+        };
+        let mut added_bytes = vec![bytes.len() as u64];
+        if let Some((audio_bytes, _, _)) = &audio_artifact {
+            added_bytes.push(audio_bytes.len() as u64);
+        }
+        reserve_appended_artifacts(profile, manifest, &added_bytes)?;
         let relative = format!("checkpoints/{id}.png");
         let path = root.join(&relative);
         let partial = path.with_extension("png.partial");
         let audio_relative = format!("checkpoints/{id}.wav");
         let audio_path = root.join(&audio_relative);
         let audio_partial = audio_path.with_extension("wav.partial");
-        if let Err(error) =
-            fs::write(&partial, &bytes).and_then(|_| fs::write(&audio_partial, &audio_bytes))
-        {
+        if let Err(error) = fs::write(&partial, &bytes).and_then(|_| {
+            if let Some((audio_bytes, _, _)) = &audio_artifact {
+                fs::write(&audio_partial, audio_bytes)
+            } else {
+                Ok(())
+            }
+        }) {
             let _ = fs::remove_file(&partial);
             let _ = fs::remove_file(&audio_partial);
             return Err(format!(
                 "ASTRA_HEADLESS_CHECKPOINT_ARTIFACT_WRITE_FAILED: {error}"
             ));
         }
-        if let Err(error) =
-            fs::rename(&partial, &path).and_then(|_| fs::rename(&audio_partial, &audio_path))
-        {
+        if let Err(error) = fs::rename(&partial, &path).and_then(|_| {
+            if audio_artifact.is_some() {
+                fs::rename(&audio_partial, &audio_path)
+            } else {
+                Ok(())
+            }
+        }) {
             let _ = fs::remove_file(&partial);
             let _ = fs::remove_file(&audio_partial);
             let _ = fs::remove_file(&path);
@@ -1899,16 +1912,18 @@ fn append_checkpoint_artifacts(
             sequence: capture.sequence,
             checkpoint_ids: vec![id.clone()],
         });
-        manifest.artifacts.push(ArtifactEntry::Audio {
-            relative_path: audio_relative,
-            sha256: astra_core::Hash256::from_sha256(&audio_bytes).to_string(),
-            byte_size: audio_bytes.len() as u64,
-            sample_rate: audio.sample_rate,
-            channels: audio.channels,
-            frame_count,
-            duration_ns,
-            checkpoint: Some(id.clone()),
-        });
+        if let Some((audio_bytes, frame_count, duration_ns)) = audio_artifact {
+            manifest.artifacts.push(ArtifactEntry::Audio {
+                relative_path: audio_relative,
+                sha256: astra_core::Hash256::from_sha256(&audio_bytes).to_string(),
+                byte_size: audio_bytes.len() as u64,
+                sample_rate: audio.sample_rate,
+                channels: audio.channels,
+                frame_count,
+                duration_ns,
+                checkpoint: Some(id.clone()),
+            });
+        }
     }
     if let Some(observer) = performance_observer {
         observer.end_cpu_scope("artifact.cpu", "checkpoint.encode_write", None)?;
