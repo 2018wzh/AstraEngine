@@ -8,7 +8,8 @@ use std::{
 use astra_core::Hash256;
 use astra_emu_family_api::{LegacyRuntimeProvider, LegacyVfsReader, LEGACY_FAMILY_ABI_FINGERPRINT};
 use astra_emu_manager_core::{
-    DynamicFamilyLoader, Ed25519FamilySignatureVerifier, FamilyPluginGate, FamilyPluginManifest,
+    DynamicFamilyHostServicesV8, DynamicFamilyLoader, Ed25519FamilySignatureVerifier,
+    FamilyPluginGate, FamilyPluginManifest,
 };
 
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
@@ -95,7 +96,7 @@ impl CliFamilyHostConfig {
                 &self.library_path,
                 manifest,
                 format!("astra.emu.cli.family.{}", self.family_id),
-                vfs,
+                DynamicFamilyHostServicesV8::vfs_only(vfs),
             )
             .map(|provider| {
                 (

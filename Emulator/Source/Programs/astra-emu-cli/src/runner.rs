@@ -14,8 +14,8 @@ use astra_core::{
 #[cfg(test)]
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8, LegacyAudioSampleFormat,
+    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV8, LegacyProbeRequest,
     LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextPresentationV1, LegacyTextRegionV1,
     LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1,
     LegacyVideoMode,
@@ -90,15 +90,15 @@ use crate::{
     text_presentation::BoundTextPresenter,
 };
 
-fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
-    LegacyAudioPacketV7 {
+fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV8 {
+    LegacyAudioPacketV8 {
         sequence: packet.sequence,
         stream_id: packet.stream_id,
         sample_rate: packet.sample_rate,
         channels: packet.channels,
         pcm: match packet.pcm {
-            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples),
-            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples),
+            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV8::I16(samples),
+            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV8::F32(samples),
         },
     }
 }
@@ -6029,6 +6029,9 @@ impl<'a> RuntimeDriver<'a> {
             compositing: astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb,
             resources,
             draws,
+            mesh_batches: Vec::new(),
+            text_draws: Vec::new(),
+            effects: Vec::new(),
             reset_resources: false,
         })
     }
@@ -6535,7 +6538,7 @@ impl AudioExecutor {
         self.service()?.execute(command, resource)
     }
 
-    async fn execute_live_pcm(&mut self, packet: LegacyAudioPacketV7) -> Result<(), String> {
+    async fn execute_live_pcm(&mut self, packet: LegacyAudioPacketV8) -> Result<(), String> {
         self.service()?.execute_live_pcm(packet)
     }
 

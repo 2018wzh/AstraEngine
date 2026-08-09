@@ -8,18 +8,21 @@ use astra_byte_source::{FfiOwnedByteBuffer, FfiOwnedF32Buffer, FfiOwnedI16Buffer
 use astra_core::{Hash256, SchemaVersion};
 
 use crate::{
-    FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
+    FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8,
     LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode,
-    LegacyControlTransaction, LegacyCoverageDelta, LegacyDiagnostic, LegacyDirtySection,
-    LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyPluginDescriptor, LegacyInputEdge,
-    LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
-    LegacyProviderError, LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode,
-    LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacyRuntimeStatus,
-    LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacyScissorV1, LegacySequenced,
-    LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepBudget,
-    LegacyStepInput, LegacyStepOutput, LegacyTextLease, LegacyTextPresentationLeaseV1,
+    LegacyControlTransaction, LegacyCoverageDelta, LegacyDepthStateV8, LegacyDepthTestV8,
+    LegacyDiagnostic, LegacyDirtySection, LegacyDrawV1, LegacyEphemeralText, LegacyEvent,
+    LegacyFamilyPluginDescriptor, LegacyInputEdge, LegacyLiveOutput, LegacyMaterialV8,
+    LegacyMeshBatchV8, LegacyMeshVertexV8, LegacyOpenRequest, LegacyPcmBufferV8, LegacyProbeReport,
+    LegacyProbeRequest, LegacyProviderError, LegacyProviderResult, LegacyRenderResourceFrameV1,
+    LegacyReplayMode, LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeSessionId,
+    LegacyRuntimeStatus, LegacySceneEffectV8, LegacySceneResourceOperationV8,
+    LegacySceneTransactionV8, LegacyScissorV1, LegacySequenced, LegacyShutdownReport,
+    LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepBudget, LegacyStepInput,
+    LegacyStepOutput, LegacyTextDrawV8, LegacyTextLease, LegacyTextPresentationLeaseV1,
     LegacyTextureFormat, LegacyTraceEntry, LegacyVertexV1, LegacyVfsListedFile,
     LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacyWipeKindV8,
 };
 
 #[repr(C)]
@@ -811,7 +814,7 @@ impl From<FfiCoverageDelta> for LegacyCoverageDelta {
     }
 }
 
-// Family ABI v7 live values own the allocation that moves through the
+// Family ABI v8 live values own the allocation that moves through the
 // provider boundary without a bytes envelope or an application-level copy.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
@@ -905,7 +908,96 @@ pub struct FfiLiveSceneTransaction {
     pub compositing: FfiLiveSceneCompositing,
     pub resources: RVec<FfiLiveSceneResourceOperation>,
     pub draws: RVec<FfiLiveDraw>,
+    pub mesh_batches: RVec<FfiLiveMeshBatchV8>,
+    pub text_draws: RVec<FfiLiveTextDrawV8>,
+    pub effects: RVec<FfiLiveSceneEffectV8>,
     pub reset_resources: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, StableAbi)]
+pub struct FfiLiveMeshVertexV8 {
+    pub position: [f32; 3],
+    pub tex_coord: [f32; 2],
+    pub color: [f32; 4],
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveMaterialV8 {
+    Textured {
+        blend: FfiLiveBlendMode,
+        texture_filter: FfiLiveTextureFilter,
+    },
+    VertexColor {
+        blend: FfiLiveBlendMode,
+    },
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveDepthTestV8 {
+    Disabled,
+    Less,
+    LessEqual,
+    Always,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, StableAbi)]
+pub struct FfiLiveDepthStateV8 {
+    pub test: FfiLiveDepthTestV8,
+    pub write: bool,
+    pub bias: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiLiveMeshBatchV8 {
+    pub order: u32,
+    pub texture_id: ROption<u32>,
+    pub vertices: RVec<FfiLiveMeshVertexV8>,
+    pub indices: RVec<u32>,
+    pub material: FfiLiveMaterialV8,
+    pub depth: FfiLiveDepthStateV8,
+    pub scissor: ROption<FfiLiveScissor>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiLiveTextDrawV8 {
+    pub order: u32,
+    pub layout_token: RString,
+    pub origin: [f32; 2],
+    pub rgba: [u8; 4],
+    pub depth: f32,
+    pub scissor: ROption<FfiLiveScissor>,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiLiveWipeKindV8 {
+    Linear,
+    Radial,
+    Mask,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub enum FfiLiveSceneEffectV8 {
+    FilterGraph {
+        order: u32,
+        graph_id: RString,
+        parameters: RVec<f32>,
+    },
+    Wipe {
+        order: u32,
+        kind: FfiLiveWipeKindV8,
+        progress: f32,
+        softness: f32,
+        direction: [f32; 2],
+        mask_texture_id: ROption<u32>,
+    },
 }
 
 #[repr(u8)]
@@ -1186,7 +1278,228 @@ fn legacy_live_draw(value: FfiLiveDraw) -> LegacyDrawV1 {
     }
 }
 
-fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
+fn ffi_live_mesh(value: LegacyMeshBatchV8) -> FfiLiveMeshBatchV8 {
+    FfiLiveMeshBatchV8 {
+        order: value.order,
+        texture_id: value.texture_id.into(),
+        vertices: value
+            .vertices
+            .into_iter()
+            .map(|vertex| FfiLiveMeshVertexV8 {
+                position: vertex.position,
+                tex_coord: vertex.tex_coord,
+                color: vertex.color,
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        indices: value.indices.into(),
+        material: match value.material {
+            LegacyMaterialV8::Textured {
+                blend,
+                texture_filter,
+            } => FfiLiveMaterialV8::Textured {
+                blend: ffi_live_blend(blend),
+                texture_filter: ffi_live_filter(texture_filter),
+            },
+            LegacyMaterialV8::VertexColor { blend } => FfiLiveMaterialV8::VertexColor {
+                blend: ffi_live_blend(blend),
+            },
+        },
+        depth: FfiLiveDepthStateV8 {
+            test: match value.depth.test {
+                LegacyDepthTestV8::Disabled => FfiLiveDepthTestV8::Disabled,
+                LegacyDepthTestV8::Less => FfiLiveDepthTestV8::Less,
+                LegacyDepthTestV8::LessEqual => FfiLiveDepthTestV8::LessEqual,
+                LegacyDepthTestV8::Always => FfiLiveDepthTestV8::Always,
+            },
+            write: value.depth.write,
+            bias: value.depth.bias,
+        },
+        scissor: value.scissor.map(ffi_live_scissor).into(),
+    }
+}
+
+fn legacy_live_mesh(value: FfiLiveMeshBatchV8) -> LegacyMeshBatchV8 {
+    LegacyMeshBatchV8 {
+        order: value.order,
+        texture_id: value.texture_id.into_option(),
+        vertices: value
+            .vertices
+            .into_iter()
+            .map(|vertex| LegacyMeshVertexV8 {
+                position: vertex.position,
+                tex_coord: vertex.tex_coord,
+                color: vertex.color,
+            })
+            .collect(),
+        indices: value.indices.into_iter().collect(),
+        material: match value.material {
+            FfiLiveMaterialV8::Textured {
+                blend,
+                texture_filter,
+            } => LegacyMaterialV8::Textured {
+                blend: legacy_live_blend(blend),
+                texture_filter: legacy_live_filter(texture_filter),
+            },
+            FfiLiveMaterialV8::VertexColor { blend } => LegacyMaterialV8::VertexColor {
+                blend: legacy_live_blend(blend),
+            },
+        },
+        depth: LegacyDepthStateV8 {
+            test: match value.depth.test {
+                FfiLiveDepthTestV8::Disabled => LegacyDepthTestV8::Disabled,
+                FfiLiveDepthTestV8::Less => LegacyDepthTestV8::Less,
+                FfiLiveDepthTestV8::LessEqual => LegacyDepthTestV8::LessEqual,
+                FfiLiveDepthTestV8::Always => LegacyDepthTestV8::Always,
+            },
+            write: value.depth.write,
+            bias: value.depth.bias,
+        },
+        scissor: value.scissor.into_option().map(legacy_live_scissor),
+    }
+}
+
+fn ffi_live_text_draw(value: LegacyTextDrawV8) -> FfiLiveTextDrawV8 {
+    FfiLiveTextDrawV8 {
+        order: value.order,
+        layout_token: value.layout_token.into(),
+        origin: value.origin,
+        rgba: value.rgba,
+        depth: value.depth,
+        scissor: value.scissor.map(ffi_live_scissor).into(),
+    }
+}
+
+fn legacy_live_text_draw(value: FfiLiveTextDrawV8) -> LegacyTextDrawV8 {
+    LegacyTextDrawV8 {
+        order: value.order,
+        layout_token: value.layout_token.to_string(),
+        origin: value.origin,
+        rgba: value.rgba,
+        depth: value.depth,
+        scissor: value.scissor.into_option().map(legacy_live_scissor),
+    }
+}
+
+fn ffi_live_effect(value: LegacySceneEffectV8) -> FfiLiveSceneEffectV8 {
+    match value {
+        LegacySceneEffectV8::FilterGraph {
+            order,
+            graph_id,
+            parameters,
+        } => FfiLiveSceneEffectV8::FilterGraph {
+            order,
+            graph_id: graph_id.into(),
+            parameters: parameters.into(),
+        },
+        LegacySceneEffectV8::Wipe {
+            order,
+            kind,
+            progress,
+            softness,
+            direction,
+            mask_texture_id,
+        } => FfiLiveSceneEffectV8::Wipe {
+            order,
+            kind: match kind {
+                LegacyWipeKindV8::Linear => FfiLiveWipeKindV8::Linear,
+                LegacyWipeKindV8::Radial => FfiLiveWipeKindV8::Radial,
+                LegacyWipeKindV8::Mask => FfiLiveWipeKindV8::Mask,
+            },
+            progress,
+            softness,
+            direction,
+            mask_texture_id: mask_texture_id.into(),
+        },
+    }
+}
+
+fn legacy_live_effect(value: FfiLiveSceneEffectV8) -> LegacySceneEffectV8 {
+    match value {
+        FfiLiveSceneEffectV8::FilterGraph {
+            order,
+            graph_id,
+            parameters,
+        } => LegacySceneEffectV8::FilterGraph {
+            order,
+            graph_id: graph_id.to_string(),
+            parameters: parameters.into_iter().collect(),
+        },
+        FfiLiveSceneEffectV8::Wipe {
+            order,
+            kind,
+            progress,
+            softness,
+            direction,
+            mask_texture_id,
+        } => LegacySceneEffectV8::Wipe {
+            order,
+            kind: match kind {
+                FfiLiveWipeKindV8::Linear => LegacyWipeKindV8::Linear,
+                FfiLiveWipeKindV8::Radial => LegacyWipeKindV8::Radial,
+                FfiLiveWipeKindV8::Mask => LegacyWipeKindV8::Mask,
+            },
+            progress,
+            softness,
+            direction,
+            mask_texture_id: mask_texture_id.into_option(),
+        },
+    }
+}
+
+fn ffi_live_blend(value: LegacyBlendMode) -> FfiLiveBlendMode {
+    match value {
+        LegacyBlendMode::Alpha => FfiLiveBlendMode::Alpha,
+        LegacyBlendMode::Add => FfiLiveBlendMode::Additive,
+        LegacyBlendMode::Opaque => FfiLiveBlendMode::Opaque,
+        LegacyBlendMode::Multiply => FfiLiveBlendMode::Multiply,
+        LegacyBlendMode::Screen => FfiLiveBlendMode::Screen,
+    }
+}
+
+fn legacy_live_blend(value: FfiLiveBlendMode) -> LegacyBlendMode {
+    match value {
+        FfiLiveBlendMode::Alpha => LegacyBlendMode::Alpha,
+        FfiLiveBlendMode::Additive => LegacyBlendMode::Add,
+        FfiLiveBlendMode::Opaque => LegacyBlendMode::Opaque,
+        FfiLiveBlendMode::Multiply => LegacyBlendMode::Multiply,
+        FfiLiveBlendMode::Screen => LegacyBlendMode::Screen,
+    }
+}
+
+fn ffi_live_filter(value: crate::LegacyTextureFilter) -> FfiLiveTextureFilter {
+    match value {
+        crate::LegacyTextureFilter::Nearest => FfiLiveTextureFilter::Nearest,
+        crate::LegacyTextureFilter::Linear => FfiLiveTextureFilter::Linear,
+    }
+}
+
+fn legacy_live_filter(value: FfiLiveTextureFilter) -> crate::LegacyTextureFilter {
+    match value {
+        FfiLiveTextureFilter::Nearest => crate::LegacyTextureFilter::Nearest,
+        FfiLiveTextureFilter::Linear => crate::LegacyTextureFilter::Linear,
+    }
+}
+
+fn ffi_live_scissor(value: LegacyScissorV1) -> FfiLiveScissor {
+    FfiLiveScissor {
+        x: value.x,
+        y: value.y,
+        width: value.width,
+        height: value.height,
+    }
+}
+
+fn legacy_live_scissor(value: FfiLiveScissor) -> LegacyScissorV1 {
+    LegacyScissorV1 {
+        x: value.x,
+        y: value.y,
+        width: value.width,
+        height: value.height,
+    }
+}
+
+fn ffi_live_scene(value: LegacySceneTransactionV8) -> FfiLiveSceneTransaction {
     FfiLiveSceneTransaction {
         sequence: value.sequence,
         width: value.width,
@@ -1199,7 +1512,7 @@ fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
             .resources
             .into_iter()
             .map(|operation| match operation {
-                LegacySceneResourceOperationV7::CreateTexture {
+                LegacySceneResourceOperationV8::CreateTexture {
                     texture_id,
                     generation,
                     width,
@@ -1214,7 +1527,7 @@ fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
                     format: ffi_live_format(format),
                     pixels: pixels.into_ffi(),
                 }),
-                LegacySceneResourceOperationV7::UpdateTexture {
+                LegacySceneResourceOperationV8::UpdateTexture {
                     texture_id,
                     generation,
                     x,
@@ -1233,7 +1546,7 @@ fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
                     format: ffi_live_format(format),
                     pixels: pixels.into_ffi(),
                 }),
-                LegacySceneResourceOperationV7::DestroyTexture {
+                LegacySceneResourceOperationV8::DestroyTexture {
                     texture_id,
                     generation,
                 } => FfiLiveSceneResourceOperation::Destroy {
@@ -1249,12 +1562,30 @@ fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
             .map(ffi_live_draw)
             .collect::<Vec<_>>()
             .into(),
+        mesh_batches: value
+            .mesh_batches
+            .into_iter()
+            .map(ffi_live_mesh)
+            .collect::<Vec<_>>()
+            .into(),
+        text_draws: value
+            .text_draws
+            .into_iter()
+            .map(ffi_live_text_draw)
+            .collect::<Vec<_>>()
+            .into(),
+        effects: value
+            .effects
+            .into_iter()
+            .map(ffi_live_effect)
+            .collect::<Vec<_>>()
+            .into(),
         reset_resources: value.reset_resources,
     }
 }
 
-fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7 {
-    LegacySceneTransactionV7 {
+fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV8 {
+    LegacySceneTransactionV8 {
         sequence: value.sequence,
         width: value.width,
         height: value.height,
@@ -1267,7 +1598,7 @@ fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7
             .into_iter()
             .map(|operation| match operation {
                 FfiLiveSceneResourceOperation::Create(value) => {
-                    LegacySceneResourceOperationV7::CreateTexture {
+                    LegacySceneResourceOperationV8::CreateTexture {
                         texture_id: value.texture_id,
                         generation: value.generation,
                         width: value.width,
@@ -1277,7 +1608,7 @@ fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7
                     }
                 }
                 FfiLiveSceneResourceOperation::Update(value) => {
-                    LegacySceneResourceOperationV7::UpdateTexture {
+                    LegacySceneResourceOperationV8::UpdateTexture {
                         texture_id: value.texture_id,
                         generation: value.generation,
                         x: value.x,
@@ -1291,39 +1622,50 @@ fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7
                 FfiLiveSceneResourceOperation::Destroy {
                     texture_id,
                     generation,
-                } => LegacySceneResourceOperationV7::DestroyTexture {
+                } => LegacySceneResourceOperationV8::DestroyTexture {
                     texture_id,
                     generation,
                 },
             })
             .collect(),
         draws: value.draws.into_iter().map(legacy_live_draw).collect(),
+        mesh_batches: value
+            .mesh_batches
+            .into_iter()
+            .map(legacy_live_mesh)
+            .collect(),
+        text_draws: value
+            .text_draws
+            .into_iter()
+            .map(legacy_live_text_draw)
+            .collect(),
+        effects: value.effects.into_iter().map(legacy_live_effect).collect(),
         reset_resources: value.reset_resources,
     }
 }
 
-fn ffi_live_audio(value: LegacyAudioPacketV7) -> FfiLiveAudioPacket {
+fn ffi_live_audio(value: LegacyAudioPacketV8) -> FfiLiveAudioPacket {
     FfiLiveAudioPacket {
         sequence: value.sequence,
         stream_id: value.stream_id,
         sample_rate: value.sample_rate,
         channels: value.channels,
         pcm: match value.pcm {
-            LegacyPcmBufferV7::I16(samples) => FfiLivePcmBuffer::I16(samples.into_ffi()),
-            LegacyPcmBufferV7::F32(samples) => FfiLivePcmBuffer::F32(samples.into_ffi()),
+            LegacyPcmBufferV8::I16(samples) => FfiLivePcmBuffer::I16(samples.into_ffi()),
+            LegacyPcmBufferV8::F32(samples) => FfiLivePcmBuffer::F32(samples.into_ffi()),
         },
     }
 }
 
-fn legacy_live_audio(value: FfiLiveAudioPacket) -> LegacyAudioPacketV7 {
-    LegacyAudioPacketV7 {
+fn legacy_live_audio(value: FfiLiveAudioPacket) -> LegacyAudioPacketV8 {
+    LegacyAudioPacketV8 {
         sequence: value.sequence,
         stream_id: value.stream_id,
         sample_rate: value.sample_rate,
         channels: value.channels,
         pcm: match value.pcm {
-            FfiLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples.into_owned()),
-            FfiLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples.into_owned()),
+            FfiLivePcmBuffer::I16(samples) => LegacyPcmBufferV8::I16(samples.into_owned()),
+            FfiLivePcmBuffer::F32(samples) => LegacyPcmBufferV8::F32(samples.into_owned()),
         },
     }
 }
@@ -1972,12 +2314,12 @@ mod live_zero_copy_tests {
     fn scene_rgba8_allocation_moves_across_family_ffi_wire() {
         let pixels = vec![255, 0, 128, 255];
         let source_ptr = pixels.as_ptr();
-        let transaction = LegacySceneTransactionV7 {
+        let transaction = LegacySceneTransactionV8 {
             sequence: 7,
             width: 1,
             height: 1,
             compositing: crate::LegacySceneCompositingV1::LinearSrgb,
-            resources: vec![LegacySceneResourceOperationV7::CreateTexture {
+            resources: vec![LegacySceneResourceOperationV8::CreateTexture {
                 texture_id: 11,
                 generation: 1,
                 width: 1,
@@ -1986,6 +2328,53 @@ mod live_zero_copy_tests {
                 pixels: pixels.into(),
             }],
             draws: Vec::new(),
+            mesh_batches: vec![LegacyMeshBatchV8 {
+                order: 1,
+                texture_id: None,
+                vertices: vec![
+                    LegacyMeshVertexV8 {
+                        position: [0.0, 0.0, 0.0],
+                        tex_coord: [0.0, 0.0],
+                        color: [1.0; 4],
+                    },
+                    LegacyMeshVertexV8 {
+                        position: [1.0, 0.0, 0.0],
+                        tex_coord: [1.0, 0.0],
+                        color: [1.0; 4],
+                    },
+                    LegacyMeshVertexV8 {
+                        position: [0.0, 1.0, 0.0],
+                        tex_coord: [0.0, 1.0],
+                        color: [1.0; 4],
+                    },
+                ],
+                indices: vec![0, 1, 2],
+                material: LegacyMaterialV8::VertexColor {
+                    blend: LegacyBlendMode::Alpha,
+                },
+                depth: LegacyDepthStateV8 {
+                    test: LegacyDepthTestV8::LessEqual,
+                    write: true,
+                    bias: 0.0,
+                },
+                scissor: None,
+            }],
+            text_draws: vec![LegacyTextDrawV8 {
+                order: 2,
+                layout_token: "layout.test".into(),
+                origin: [2.0, 3.0],
+                rgba: [255; 4],
+                depth: 0.0,
+                scissor: None,
+            }],
+            effects: vec![LegacySceneEffectV8::Wipe {
+                order: 3,
+                kind: LegacyWipeKindV8::Linear,
+                progress: 0.5,
+                softness: 0.1,
+                direction: [1.0, 0.0],
+                mask_texture_id: None,
+            }],
             reset_resources: false,
         };
 
@@ -1998,22 +2387,31 @@ mod live_zero_copy_tests {
 
         let legacy = legacy_live_scene(ffi);
         let returned_ptr = match legacy.resources.as_slice().first().expect("scene resource") {
-            LegacySceneResourceOperationV7::CreateTexture { pixels, .. } => pixels.as_ptr(),
+            LegacySceneResourceOperationV8::CreateTexture { pixels, .. } => pixels.as_ptr(),
             _ => panic!("expected create texture"),
         };
         assert_eq!(returned_ptr, source_ptr);
+        assert_eq!(legacy.mesh_batches.len(), 1);
+        assert_eq!(legacy.text_draws[0].layout_token, "layout.test");
+        assert!(matches!(
+            legacy.effects.as_slice(),
+            [LegacySceneEffectV8::Wipe {
+                kind: LegacyWipeKindV8::Linear,
+                ..
+            }]
+        ));
     }
 
     #[test]
     fn pcm_i16_allocation_moves_across_family_ffi_wire() {
         let samples = vec![-3_i16, 0, 17, 4096];
         let source_ptr = samples.as_ptr();
-        let packet = LegacyAudioPacketV7 {
+        let packet = LegacyAudioPacketV8 {
             sequence: 9,
             stream_id: 2,
             sample_rate: 48_000,
             channels: 2,
-            pcm: LegacyPcmBufferV7::I16(samples.into()),
+            pcm: LegacyPcmBufferV8::I16(samples.into()),
         };
 
         let ffi = ffi_live_audio(packet);
@@ -2025,8 +2423,8 @@ mod live_zero_copy_tests {
 
         let legacy = legacy_live_audio(ffi);
         let returned_ptr = match legacy.pcm {
-            LegacyPcmBufferV7::I16(samples) => samples.as_ptr(),
-            LegacyPcmBufferV7::F32(_) => panic!("expected i16 PCM"),
+            LegacyPcmBufferV8::I16(samples) => samples.as_ptr(),
+            LegacyPcmBufferV8::F32(_) => panic!("expected i16 PCM"),
         };
         assert_eq!(returned_ptr, source_ptr);
     }

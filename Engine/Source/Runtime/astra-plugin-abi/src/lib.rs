@@ -866,6 +866,9 @@ pub struct RuntimeLiveSceneTransaction {
     pub compositing: RuntimeLiveSceneCompositing,
     pub resources: Vec<RuntimeLiveSceneResourceOperation>,
     pub draws: Vec<RuntimeLiveDraw>,
+    pub mesh_batches: Vec<RuntimeLiveMeshBatch>,
+    pub text_draws: Vec<RuntimeLiveTextDraw>,
+    pub effects: Vec<RuntimeLiveSceneEffect>,
     pub reset_resources: bool,
 }
 
@@ -950,6 +953,87 @@ pub struct RuntimeLiveDraw {
     pub blend: RuntimeLiveBlendMode,
     pub texture_filter: RuntimeLiveTextureFilter,
     pub scissor: Option<RuntimeLiveScissor>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveMeshBatch {
+    pub order: u32,
+    pub texture_id: Option<u32>,
+    pub vertices: Vec<RuntimeLiveMeshVertex>,
+    pub indices: Vec<u32>,
+    pub material: RuntimeLiveMaterial,
+    pub depth: RuntimeLiveDepthState,
+    pub scissor: Option<RuntimeLiveScissor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeLiveMeshVertex {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub u: f32,
+    pub v: f32,
+    pub color: [u8; 4],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveMaterial {
+    Textured {
+        blend: RuntimeLiveBlendMode,
+        texture_filter: RuntimeLiveTextureFilter,
+    },
+    VertexColor {
+        blend: RuntimeLiveBlendMode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeLiveDepthState {
+    pub test: RuntimeLiveDepthTest,
+    pub write: bool,
+    pub bias: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveDepthTest {
+    Disabled,
+    Less,
+    LessEqual,
+    Always,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveTextDraw {
+    pub order: u32,
+    pub layout_token: String,
+    pub origin: [f32; 2],
+    pub rgba: [u8; 4],
+    pub depth: f32,
+    pub scissor: Option<RuntimeLiveScissor>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeLiveSceneEffect {
+    FilterGraph {
+        order: u32,
+        graph_id: String,
+        parameters: Vec<f32>,
+    },
+    Wipe {
+        order: u32,
+        kind: RuntimeLiveWipeKind,
+        progress: f32,
+        softness: f32,
+        direction: [f32; 2],
+        mask_texture_id: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveWipeKind {
+    Linear,
+    Radial,
+    Mask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1307,6 +1391,92 @@ impl RuntimeLiveSceneTransaction {
                     "ASTRA_RUNTIME_LIVE_SCENE_VERTEX",
                     "live scene contains a non-finite vertex",
                 ));
+            }
+        }
+        if self.mesh_batches.len() > 262_144
+            || self.text_draws.len() > 262_144
+            || self.effects.len() > 256
+        {
+            return Err(RuntimeEnvelopeError::new(
+                "ASTRA_RUNTIME_LIVE_SCENE_COMMAND_BOUNDS",
+                "live scene command count exceeds the bounded contract",
+            ));
+        }
+        for mesh in &self.mesh_batches {
+            if mesh.vertices.is_empty()
+                || mesh.vertices.len() > 1_048_576
+                || mesh.indices.is_empty()
+                || mesh.indices.len() > 3_145_728
+                || mesh.indices.len() % 3 != 0
+                || mesh.indices.iter().any(|index| {
+                    usize::try_from(*index).map_or(true, |index| index >= mesh.vertices.len())
+                })
+                || !mesh.depth.bias.is_finite()
+                || mesh.vertices.iter().any(|vertex| {
+                    !vertex.x.is_finite()
+                        || !vertex.y.is_finite()
+                        || !vertex.z.is_finite()
+                        || !vertex.u.is_finite()
+                        || !vertex.v.is_finite()
+                })
+                || (matches!(mesh.material, RuntimeLiveMaterial::Textured { .. })
+                    && mesh.texture_id.is_none())
+            {
+                return Err(RuntimeEnvelopeError::new(
+                    "ASTRA_RUNTIME_LIVE_SCENE_MESH",
+                    "live mesh is malformed or exceeds its bounds",
+                ));
+            }
+        }
+        for draw in &self.text_draws {
+            if draw.layout_token.is_empty()
+                || draw.layout_token.len() > 128
+                || draw.rgba[3] == 0
+                || draw.origin.iter().any(|value| !value.is_finite())
+                || !draw.depth.is_finite()
+            {
+                return Err(RuntimeEnvelopeError::new(
+                    "ASTRA_RUNTIME_LIVE_TEXT_DRAW",
+                    "live text draw is invalid",
+                ));
+            }
+        }
+        for effect in &self.effects {
+            match effect {
+                RuntimeLiveSceneEffect::FilterGraph {
+                    graph_id,
+                    parameters,
+                    ..
+                } if graph_id.is_empty()
+                    || graph_id.len() > 128
+                    || parameters.len() > 256
+                    || parameters.iter().any(|value| !value.is_finite()) =>
+                {
+                    return Err(RuntimeEnvelopeError::new(
+                        "ASTRA_RUNTIME_LIVE_FILTER_GRAPH",
+                        "live FilterGraph effect is invalid",
+                    ));
+                }
+                RuntimeLiveSceneEffect::Wipe {
+                    kind,
+                    progress,
+                    softness,
+                    direction,
+                    mask_texture_id,
+                    ..
+                } if !progress.is_finite()
+                    || !(0.0..=1.0).contains(progress)
+                    || !softness.is_finite()
+                    || !(0.0..=1.0).contains(softness)
+                    || direction.iter().any(|value| !value.is_finite())
+                    || (matches!(kind, RuntimeLiveWipeKind::Mask) && mask_texture_id.is_none()) =>
+                {
+                    return Err(RuntimeEnvelopeError::new(
+                        "ASTRA_RUNTIME_LIVE_WIPE",
+                        "live wipe effect is invalid",
+                    ));
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -1715,6 +1885,106 @@ pub struct FfiRuntimeDraw {
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub struct FfiRuntimeMeshVertex {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub u: f32,
+    pub v: f32,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub enum FfiRuntimeMaterial {
+    Textured {
+        blend: FfiRuntimeBlendMode,
+        texture_filter: FfiRuntimeTextureFilter,
+    },
+    VertexColor {
+        blend: FfiRuntimeBlendMode,
+    },
+}
+
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub enum FfiRuntimeDepthTest {
+    Disabled,
+    Less,
+    LessEqual,
+    Always,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub struct FfiRuntimeDepthState {
+    pub test: FfiRuntimeDepthTest,
+    pub write: bool,
+    pub bias: f32,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiRuntimeMeshBatch {
+    pub order: u32,
+    pub texture_id: ROption<u32>,
+    pub vertices: RVec<FfiRuntimeMeshVertex>,
+    pub indices: RVec<u32>,
+    pub material: FfiRuntimeMaterial,
+    pub depth: FfiRuntimeDepthState,
+    pub scissor: ROption<FfiRuntimeScissor>,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, StableAbi)]
+pub struct FfiRuntimeTextDraw {
+    pub order: u32,
+    pub layout_token: RString,
+    pub origin: [f32; 2],
+    pub rgba: [u8; 4],
+    pub depth: f32,
+    pub scissor: ROption<FfiRuntimeScissor>,
+}
+
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, StableAbi)]
+pub enum FfiRuntimeWipeKind {
+    Linear,
+    Radial,
+    Mask,
+}
+
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, StableAbi)]
+pub enum FfiRuntimeSceneEffect {
+    FilterGraph {
+        order: u32,
+        graph_id: RString,
+        parameters: RVec<f32>,
+    },
+    Wipe {
+        order: u32,
+        kind: FfiRuntimeWipeKind,
+        progress: f32,
+        softness: f32,
+        direction: [f32; 2],
+        mask_texture_id: ROption<u32>,
+    },
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
 #[derive(Debug, StableAbi)]
 pub struct FfiRuntimeSceneTransaction {
     pub sequence: u64,
@@ -1723,6 +1993,9 @@ pub struct FfiRuntimeSceneTransaction {
     pub compositing: FfiRuntimeSceneCompositing,
     pub resources: RVec<FfiRuntimeSceneResourceOperation>,
     pub draws: RVec<FfiRuntimeDraw>,
+    pub mesh_batches: RVec<FfiRuntimeMeshBatch>,
+    pub text_draws: RVec<FfiRuntimeTextDraw>,
+    pub effects: RVec<FfiRuntimeSceneEffect>,
     pub reset_resources: bool,
 }
 

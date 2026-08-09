@@ -7,8 +7,8 @@
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioSampleFormat, LegacyBlendMode,
-    LegacyDrawV1, LegacySceneCompositingV1, LegacySceneResourceOperationV7,
-    LegacySceneResourceStateV1, LegacySceneTransactionV7, LegacyScissorV1, LegacyTextureFilter,
+    LegacyDrawV1, LegacySceneCompositingV1, LegacySceneResourceOperationV8,
+    LegacySceneResourceStateV1, LegacySceneTransactionV8, LegacyScissorV1, LegacyTextureFilter,
     LegacyTextureFormat, LegacyVertexV1, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use rfvp_hosted::{
@@ -29,7 +29,7 @@ pub struct HostedSceneTranslator {
     // first samples it. Keep the bounded semantic operation until that frame
     // closes so the renderer receives one atomic commit rather than losing a
     // resource-only delta between steps.
-    pending_live_resources: Vec<LegacySceneResourceOperationV7>,
+    pending_live_resources: Vec<LegacySceneResourceOperationV8>,
     pending_live_upload_bytes: usize,
     rehydrate_resources: bool,
     next_generation: u64,
@@ -57,7 +57,7 @@ impl HostedSceneTranslator {
     pub fn translate(
         &mut self,
         delta: &mut HostedStepDelta,
-    ) -> Result<Option<LegacySceneTransactionV7>, HostedAdapterError> {
+    ) -> Result<Option<LegacySceneTransactionV8>, HostedAdapterError> {
         let mut frame: Option<(u32, u32)> = None;
         let mut ended = false;
         let mut presented = false;
@@ -83,7 +83,7 @@ impl HostedSceneTranslator {
                         pixels,
                     )?;
                     let generation = take_generation(&mut self.next_generation)?;
-                    resources.push(LegacySceneResourceOperationV7::CreateTexture {
+                    resources.push(LegacySceneResourceOperationV8::CreateTexture {
                         texture_id: texture.id.0,
                         generation,
                         width: texture.desc.width,
@@ -102,7 +102,7 @@ impl HostedSceneTranslator {
                         update.pixels,
                     )?;
                     let generation = take_generation(&mut self.next_generation)?;
-                    resources.push(LegacySceneResourceOperationV7::UpdateTexture {
+                    resources.push(LegacySceneResourceOperationV8::UpdateTexture {
                         texture_id: update.id.0,
                         generation,
                         x: update.rect.x,
@@ -114,7 +114,7 @@ impl HostedSceneTranslator {
                     });
                 }
                 HostedSceneOperation::DestroyTexture(id) => {
-                    resources.push(LegacySceneResourceOperationV7::DestroyTexture {
+                    resources.push(LegacySceneResourceOperationV8::DestroyTexture {
                         texture_id: id.0,
                         generation: take_generation(&mut self.next_generation)?,
                     });
@@ -158,13 +158,16 @@ impl HostedSceneTranslator {
                 Ok(None)
             }
             (Some((width, height)), true, true) => {
-                let mut transaction = LegacySceneTransactionV7 {
+                let mut transaction = LegacySceneTransactionV8 {
                     sequence: 0,
                     width,
                     height,
                     compositing: LegacySceneCompositingV1::EncodedSrgb,
                     resources,
                     draws,
+                    mesh_batches: Vec::new(),
+                    text_draws: Vec::new(),
+                    effects: Vec::new(),
                     reset_resources: self.rehydrate_resources,
                 };
                 let next = self
@@ -571,7 +574,7 @@ mod tests {
             .expect("complete frame");
         assert!(matches!(
             transaction.resources.as_slice(),
-            [LegacySceneResourceOperationV7::UpdateTexture { x: 1, .. }]
+            [LegacySceneResourceOperationV8::UpdateTexture { x: 1, .. }]
         ));
         assert!(translator.snapshot().textures.contains_key(&9));
     }
@@ -613,7 +616,7 @@ mod tests {
             .expect("complete frame");
         assert!(matches!(
             transaction.resources.as_slice(),
-            [LegacySceneResourceOperationV7::CreateTexture { texture_id: 9, .. }]
+            [LegacySceneResourceOperationV8::CreateTexture { texture_id: 9, .. }]
         ));
         assert!(translator.snapshot().textures.contains_key(&9));
     }

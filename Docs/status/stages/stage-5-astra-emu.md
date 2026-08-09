@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 仍是 Program target；legacy case 通过 `AstraEmuRuntimeProvider` 运行，每个 session 持有独立 `RuntimeWorld`。family 只注册 `LegacyRuntimeProvider` facade，私有 VM、VFS、媒体状态、诊断和 snapshot section 留在 provider session 内。Manager/RuntimeWorld 负责统一管理、Trusted Luau、文本翻译和滤镜 preset。family API、FVP provider、Manager Core、ECNU translation、Slint host、desktop/Android dynamic registration、iOS static registry、签名工具和 evidence encoder 已进入主 workspace。family ABI 已 hard cut 到 v7：descriptor、lifecycle、VFS 与 bulk payload 使用显式 `StableAbi` wire DTO，v5/v6 binary/manifest 直接拒绝；FVP hosted fork 使用已推送的精确 revision。正式平台签名、完整逐帧 media/full-flow parity、最终 clean Release 原生性能复跑、Windows/Android E3 与真机证据尚未形成，因此 Stage 5 继续保持 `IN_PROGRESS`。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 仍是 Program target；legacy case 通过 `AstraEmuRuntimeProvider` 运行，每个 session 持有独立 `RuntimeWorld`。family 只注册 `LegacyRuntimeProvider` facade，私有 VM、VFS、媒体状态、诊断和 snapshot section 留在 provider session 内。Manager/RuntimeWorld 负责统一管理、Trusted Luau、文本翻译和滤镜 preset。family API、FVP provider、Manager Core、ECNU translation、Slint host、desktop/Android dynamic registration、iOS static registry、签名工具和 evidence encoder 已进入主 workspace。family ABI 已 hard cut 到 v8：descriptor、lifecycle、VFS、typed scene 与 bulk payload 使用显式 `StableAbi` wire DTO，v5/v6/v7 binary、manifest 与 snapshot 直接拒绝。正式平台签名、完整逐帧 media/full-flow parity、最终 clean Release 原生性能复跑、Windows/Android E3 与真机证据尚未形成，因此 Stage 5 继续保持 `IN_PROGRESS`。
 
 FVP host-command media 已覆盖资源引用音频、流式 PCM、WMV/MPEG 与 Windows MP4 影片、fixed-tick frame selection、同 device wgpu composition、严格 `MediaFence` identity，以及 pending movie 的 family snapshot/rebind。runtime snapshot 使用有界压缩 envelope，并嵌入 live texture 的精确 RGBA；host-command audio restore 不重新读取 raw desktop VFS，而由 host 清理旧 stream 后通过 session resource channel 重建。Windows 本机授权样本的 ignored Headless run 已连续执行 188 tick、188 个 presented frame、10 条输入消息和一次 save/restore continuation，恢复后无扩展名 OGG 由 ABI encoding、合法扩展名和受控 magic 共同确定 codec，PCM 通过 Symphonia 增量 decoder 按 tick 提交，累计解码预算为 512 MiB，不再受 16 MiB whole-file PCM buffer 阻断。该 run 的 lifecycle、音频 meter、输入 trace、snapshot round-trip 与 redaction report 通过，但仍只属于 local-private Headless E2，不能替代逐帧 RFVP 对照或 Windows E3。同一样本也通过签名 development package 启动真实 Slint/WGPU 单窗口并保持响应，随后从 window close 走完 Manager/CLI shutdown；该次 native run 没有绑定自动输入、视觉变化、非静音 meter、route/terminal 和正式 run identity，仍只是 Windows E3 子链，不能关闭 E3。WMV/MPEG 使用增量 packet decoder；Windows MP4 video/audio 分别使用 stateful WMF SourceReader，按 PTS 合并后进入 16-frame/500ms 预取 ring 和可裁剪 PCM stream，并执行 running frame/byte/sample/timestamp budget。没有 public sanitized full-flow movie fixture 和真实 Windows/Android run identity，不能据此提升为 E3。
 
@@ -414,11 +414,13 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 1. 复用 `LegacyRuntimeProvider` facade 和 failure classification。
 2. 实现 Siglus root、Scene.pck、Gameexe header 和授权 material 缺失 diagnostic。
-3. 实现 `.ss` header、string table、label、operand decoder 和 basic stack model。
-4. 实现 G00/Ogg/OVK/NWA/OMV probe，受保护 stream 只消费用户合法提供的材料。
-5. 编写 probe-only report、script fixture 和 full-flow scenario 测试。
+3. 复用 pinned `siglus_rs` hosted fork 的现有 VM、scene、G00、NWA/OVK、OMV、MPEG 与 original save codec，不在 Astra 内重写第二套解释器。
+4. 原版 profile 固定绑定 `Gameexe.dat`/`Scene.pck`；汉化 profile 固定绑定 `Gameexe.chs`/`Scene.chs`，缺失或冲突时阻断。
+5. 编写公开自制 fixture、签名 dynamic Headless E2 和真实样本 ignored gate。
 
-**Done Evidence:** Siglus report 不包含 key、payload transform、未授权截图或私有 stream。
+**Current Evidence:** Family ABI v8 contract、FFI round-trip、dynamic instance host-service dispatch 和 v7 拒绝已落地；`siglus_rs` fork 已把 semantic session core 与 standalone renderer owner 分开，并增加只常驻 metadata、按 scene bounded range 读取的 `Scene.pck` archive。fork 的完整 hosted dependency split、Astra provider、公开 fixture 与 E2 还没有完成。当前未授权 `key.toml`，真实 Rewrite+、存档 round-trip、差分、性能和 Windows E3 均保持 blocking。
+
+**Done Evidence:** Siglus report 不包含 key、payload transform、未授权截图或私有 stream；公开 Hosted E2、真实 Rewrite+ E2、差分、性能与 Windows E3 全部通过后才能关闭本项。
 
 **Linked Test IDs:** `T-S5-SIGLUS-01`
 
@@ -469,10 +471,16 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Linked Test IDs:** `T-S5-PROGRAM-TARGET-01`
 
+## 2026-08-09 Family ABI v8 与 Siglus hosted 起点
+
+Family ABI 已硬迁移到 v8。新增 mesh/depth/material/scissor、FilterGraph effect/wipe、host-owned text layout、private material 和 logical save store wire；dynamic loader 按 instance token 绑定 service，执行 text result、secret length 与 save byte budget 校验。FVP 和 Minori snapshot 已使用 v8 schema，并新增 v7 拒绝回归。
+
+Siglus 的 pinned fork 基线为 `a8a3376049f47a141a673a49f15ab7de8746e1e1`，维护分支为 `astra-hosted`。当前候选 revision 只完成两层前置改造：standalone renderer 与 semantic session core 分离，以及 lazy `Scene.pck` range archive。它还没有形成不含 winit/wgpu/Kira/egui/network 的 hosted dependency closure，也没有可供 Astra provider 使用的完整 resource/audio/video/save host port。因此本节只记 E0/E1，不记 Siglus E2。
+
 ## 2026-08-04 RFVP stream and ABI identity update
 
-The current Family ABI hard cut is v7. The FVP/Minori runtime snapshot
-sections reject v5/v6 and use v7 schemas. Windows PlatformHost now owns the
+This section records the pre-v8 evidence identity. It is retained for history
+only and cannot release a v8 build. Windows PlatformHost now owns the
 Media Foundation incremental video/audio sessions, including sequence and
 budget validation, bounded prefetch, stable EOS diagnostics, and cleanup on
 stop/error/shutdown. Native CLI WGPU playback consumes lazy video frames from

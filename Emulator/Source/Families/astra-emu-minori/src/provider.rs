@@ -633,7 +633,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         let envelope = LegacySnapshotEnvelope {
             family_id: FamilyId(MINORI_FAMILY_ID.into()),
             session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(7, 0, 0),
+            schema_version: SchemaVersion::new(8, 0, 0),
             case_fingerprint: session.case_fingerprint,
             fixed_step: session.vm.state().fixed_tick,
             session_seed: session.session_seed,
@@ -641,7 +641,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             family_sections: vec![LegacySnapshotSection {
                 section_id: "minori.runtime".into(),
                 schema: MINORI_RUNTIME_STATE_SCHEMA.into(),
-                version: SchemaVersion::new(7, 0, 0),
+                version: SchemaVersion::new(8, 0, 0),
                 bytes,
             }],
             redaction_status: "passed".into(),
@@ -664,6 +664,12 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .get_mut(&session_id.0)
             .ok_or_else(session_missing)?;
         validate_session_binding(ctx, session)?;
+        if snapshot.schema_version != SchemaVersion::new(8, 0, 0) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SNAPSHOT_VERSION",
+                "Minori snapshots require the Family ABI v8 runtime schema",
+            ));
+        }
         if snapshot.family_id.0 != MINORI_FAMILY_ID
             || snapshot.session_id != *session_id
             || snapshot.case_fingerprint != session.case_fingerprint
@@ -678,7 +684,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         let section = &snapshot.family_sections[0];
         if section.section_id != "minori.runtime"
             || section.schema != MINORI_RUNTIME_STATE_SCHEMA
-            || section.version != SchemaVersion::new(7, 0, 0)
+            || section.version != SchemaVersion::new(8, 0, 0)
         {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_SNAPSHOT_SECTION",
@@ -1567,10 +1573,21 @@ mod tests {
             .unwrap();
         assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
         let snapshot = provider.save(&ctx, &session).unwrap();
+        let mut rejected_v7 = snapshot.clone();
+        rejected_v7.schema_version = SchemaVersion::new(7, 0, 0);
+        rejected_v7.family_sections[0].schema = "astra.emu.minori.runtime_state.v7".into();
+        rejected_v7.family_sections[0].version = SchemaVersion::new(7, 0, 0);
+        assert_eq!(
+            provider
+                .restore(&ctx, &session, &rejected_v7)
+                .expect_err("v7 snapshot must fail fast")
+                .code(),
+            "ASTRA_EMU_MINORI_SNAPSHOT_VERSION"
+        );
         provider.restore(&ctx, &session, &snapshot).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(7, 0, 0)
+            SchemaVersion::new(8, 0, 0)
         );
     }
 

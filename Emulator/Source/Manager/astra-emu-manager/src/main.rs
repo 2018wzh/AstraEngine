@@ -32,9 +32,9 @@ use std::{
 
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
-    is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
+    is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8,
     LegacyAudioSampleFormat, LegacyAwaitResult, LegacyEphemeralText, LegacyInputEdge,
-    LegacyPcmBufferV7, LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader,
+    LegacyPcmBufferV8, LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader,
     LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
@@ -1033,6 +1033,9 @@ impl RuntimeBridge {
             compositing: astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb,
             resources,
             draws: scene.draws,
+            mesh_batches: Vec::new(),
+            text_draws: Vec::new(),
+            effects: Vec::new(),
             reset_resources: false,
         })?;
         for (texture_id, revision) in pending_revisions {
@@ -1226,15 +1229,15 @@ fn apply_video_media_hook(
     command.validate().map_err(|error| error.to_string())
 }
 
-fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
-    LegacyAudioPacketV7 {
+fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV8 {
+    LegacyAudioPacketV8 {
         sequence: packet.sequence,
         stream_id: packet.stream_id,
         sample_rate: packet.sample_rate,
         channels: packet.channels,
         pcm: match packet.pcm {
-            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples),
-            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples),
+            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV8::I16(samples),
+            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV8::F32(samples),
         },
     }
 }

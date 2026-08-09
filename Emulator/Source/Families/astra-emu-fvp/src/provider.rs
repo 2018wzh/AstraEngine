@@ -518,11 +518,11 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                     .resources
                     .iter()
                     .map(|operation| match operation {
-                        LegacySceneResourceOperationV7::CreateTexture { pixels, .. }
-                        | LegacySceneResourceOperationV7::UpdateTexture { pixels, .. } => {
+                        LegacySceneResourceOperationV8::CreateTexture { pixels, .. }
+                        | LegacySceneResourceOperationV8::UpdateTexture { pixels, .. } => {
                             pixels.len()
                         }
-                        LegacySceneResourceOperationV7::DestroyTexture { .. } => 0,
+                        LegacySceneResourceOperationV8::DestroyTexture { .. } => 0,
                     })
                     .sum::<usize>(),
                 scene_operation_count = delta.scene.len(),
@@ -554,12 +554,12 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                     next_sequence = next_sequence.saturating_add(1);
                 }
                 LegacyAudioCommandV1::SubmitI16 { stream_id, samples } => {
-                    let packet = LegacyAudioPacketV7 {
+                    let packet = LegacyAudioPacketV8 {
                         sequence: next_sequence,
                         stream_id,
                         sample_rate: 0,
                         channels: 0,
-                        pcm: LegacyPcmBufferV7::I16(samples),
+                        pcm: LegacyPcmBufferV8::I16(samples),
                     };
                     packet.validate()?;
                     live.audio.push(packet);
@@ -575,12 +575,12 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                     next_sequence = next_sequence.saturating_add(1);
                 }
                 LegacyAudioCommandV1::SubmitF32 { stream_id, samples } => {
-                    let packet = LegacyAudioPacketV7 {
+                    let packet = LegacyAudioPacketV8 {
                         sequence: next_sequence,
                         stream_id,
                         sample_rate: 0,
                         channels: 0,
-                        pcm: LegacyPcmBufferV7::F32(samples),
+                        pcm: LegacyPcmBufferV8::F32(samples),
                     };
                     packet.validate()?;
                     live.audio.push(packet);
@@ -765,15 +765,15 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         let envelope = LegacySnapshotEnvelope {
             family_id: FamilyId(FVP_FAMILY_ID.into()),
             session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(7, 0, 0),
+            schema_version: SchemaVersion::new(8, 0, 0),
             case_fingerprint: session.case_fingerprint,
             fixed_step: session.last_step,
             session_seed: session.seed,
             runtime_cursor: session.instruction_count,
             family_sections: vec![LegacySnapshotSection {
                 section_id: "fvp.runtime".into(),
-                schema: "astra.emu.fvp.runtime.v7".into(),
-                version: SchemaVersion::new(7, 0, 0),
+                schema: "astra.emu.fvp.runtime.v8".into(),
+                version: SchemaVersion::new(8, 0, 0),
                 bytes,
             }],
             redaction_status: "passed".into(),
@@ -801,10 +801,10 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 "snapshot family or session identity does not match",
             ));
         }
-        if snapshot.schema_version != SchemaVersion::new(7, 0, 0) {
+        if snapshot.schema_version != SchemaVersion::new(8, 0, 0) {
             return Err(invalid(
                 "ASTRA_FVP_SNAPSHOT_VERSION",
-                "FVP snapshots require the Family ABI v7 runtime schema",
+                "FVP snapshots require the Family ABI v8 runtime schema",
             ));
         }
         if snapshot.family_sections.len() != 1 {
@@ -815,8 +815,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
         }
         let section = &snapshot.family_sections[0];
         if section.section_id != "fvp.runtime"
-            || section.schema != "astra.emu.fvp.runtime.v7"
-            || section.version != SchemaVersion::new(7, 0, 0)
+            || section.schema != "astra.emu.fvp.runtime.v8"
+            || section.version != SchemaVersion::new(8, 0, 0)
         {
             return Err(invalid(
                 "ASTRA_FVP_SNAPSHOT_SECTION",
@@ -1361,7 +1361,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_v7_session_emits_one_semantic_commit_and_restores() {
+    fn hosted_v8_session_emits_one_semantic_commit_and_restores() {
         let script = terminal_hcb();
         let fingerprint = Hash256::from_sha256(&script);
         let mut provider = FvpRuntimeProvider::default();
@@ -1377,7 +1377,7 @@ mod tests {
             })
             .expect("registered case must be valid");
         let ctx = host_ctx();
-        let session_id = LegacyRuntimeSessionId("session.hosted.v7".into());
+        let session_id = LegacyRuntimeSessionId("session.hosted.v8".into());
         open_fixture(&mut provider, &ctx, &session_id, fingerprint);
         let output = provider
             .step(&ctx, &session_id, step_input(1, Vec::new()))
@@ -1398,10 +1398,10 @@ mod tests {
         let snapshot = provider.save(&ctx, &session_id).expect("save must succeed");
         let saved_next_live_sequence = provider.sessions[&session_id.0].next_live_sequence;
         assert!(saved_next_live_sequence > transaction.sequence);
-        assert_eq!(snapshot.schema_version, SchemaVersion::new(7, 0, 0));
+        assert_eq!(snapshot.schema_version, SchemaVersion::new(8, 0, 0));
         assert_eq!(
             snapshot.family_sections[0].schema,
-            "astra.emu.fvp.runtime.v7"
+            "astra.emu.fvp.runtime.v8"
         );
         let before = output.state_revision;
         let before_components = provider
@@ -1422,9 +1422,20 @@ mod tests {
                 .code(),
             "ASTRA_FVP_SNAPSHOT_VERSION"
         );
+        let mut rejected_v7 = snapshot.clone();
+        rejected_v7.schema_version = SchemaVersion::new(7, 0, 0);
+        rejected_v7.family_sections[0].schema = "astra.emu.fvp.runtime.v7".into();
+        rejected_v7.family_sections[0].version = SchemaVersion::new(7, 0, 0);
+        assert_eq!(
+            provider
+                .restore(&ctx, &session_id, &rejected_v7)
+                .expect_err("v7 snapshot must fail fast")
+                .code(),
+            "ASTRA_FVP_SNAPSHOT_VERSION"
+        );
         let restored = provider
             .restore(&ctx, &session_id, &snapshot)
-            .expect("v7 snapshot must restore");
+            .expect("v8 snapshot must restore");
         let restored_components = provider
             .sessions
             .get(&session_id.0)

@@ -18,19 +18,21 @@ use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, Produc
 use astra_plugin_abi::{
     FfiRuntimeAudioBus, FfiRuntimeAudioCommand, FfiRuntimeAudioCue, FfiRuntimeAudioEncoding,
     FfiRuntimeAudioPacket, FfiRuntimeAudioSampleFormat, FfiRuntimeAudioSync,
-    FfiRuntimeBlackboardMutation, FfiRuntimeBlendMode, FfiRuntimeDirtySection,
-    FfiRuntimeEditorMetadataResult, FfiRuntimeEvent, FfiRuntimeInstanceRequest,
-    FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput, FfiRuntimeOpenRequest, FfiRuntimeOpenResult,
+    FfiRuntimeBlackboardMutation, FfiRuntimeBlendMode, FfiRuntimeDepthState, FfiRuntimeDepthTest,
+    FfiRuntimeDirtySection, FfiRuntimeEditorMetadataResult, FfiRuntimeEvent,
+    FfiRuntimeInstanceRequest, FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput, FfiRuntimeMaterial,
+    FfiRuntimeMeshBatch, FfiRuntimeMeshVertex, FfiRuntimeOpenRequest, FfiRuntimeOpenResult,
     FfiRuntimePackageSectionsResult, FfiRuntimePcmBuffer, FfiRuntimePrepareRequest,
     FfiRuntimeProbeRequest, FfiRuntimeProviderRegistration, FfiRuntimeReleaseChecksResult,
     FfiRuntimeReportResult, FfiRuntimeResourceScene, FfiRuntimeResourceTexture,
     FfiRuntimeRestoreRequest, FfiRuntimeRestoreResult, FfiRuntimeSaveRequest, FfiRuntimeSaveResult,
-    FfiRuntimeSceneResourceOperation, FfiRuntimeSceneTextureCreate, FfiRuntimeSceneTextureUpdate,
-    FfiRuntimeScissor, FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeSectionResult,
-    FfiRuntimeShutdownRequest, FfiRuntimeShutdownResult, FfiRuntimeStepMode, FfiRuntimeStepRequest,
-    FfiRuntimeStepResult, FfiRuntimeTextLease, FfiRuntimeTextPresentation, FfiRuntimeTextRegion,
-    FfiRuntimeTextureFilter, FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand,
-    FfiRuntimeVideoMode, FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    FfiRuntimeSceneEffect, FfiRuntimeSceneResourceOperation, FfiRuntimeSceneTextureCreate,
+    FfiRuntimeSceneTextureUpdate, FfiRuntimeScissor, FfiRuntimeSection, FfiRuntimeSectionCodec,
+    FfiRuntimeSectionResult, FfiRuntimeShutdownRequest, FfiRuntimeShutdownResult,
+    FfiRuntimeStepMode, FfiRuntimeStepRequest, FfiRuntimeStepResult, FfiRuntimeTextDraw,
+    FfiRuntimeTextLease, FfiRuntimeTextPresentation, FfiRuntimeTextRegion, FfiRuntimeTextureFilter,
+    FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand, FfiRuntimeVideoMode,
+    FfiRuntimeWait, FfiRuntimeWaitKind, FfiRuntimeWipeKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
     PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
@@ -3224,7 +3226,150 @@ fn ffi_live_scene(
                 })
                 .collect::<Vec<_>>(),
         ),
+        mesh_batches: transaction
+            .mesh_batches
+            .into_iter()
+            .map(ffi_live_mesh)
+            .collect::<Vec<_>>()
+            .into(),
+        text_draws: transaction
+            .text_draws
+            .into_iter()
+            .map(|draw| FfiRuntimeTextDraw {
+                order: draw.order,
+                layout_token: draw.layout_token.into(),
+                origin: draw.origin,
+                rgba: draw.rgba,
+                depth: draw.depth,
+                scissor: draw
+                    .scissor
+                    .map(|scissor| FfiRuntimeScissor {
+                        x: scissor.x,
+                        y: scissor.y,
+                        width: scissor.width,
+                        height: scissor.height,
+                    })
+                    .into(),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        effects: transaction
+            .effects
+            .into_iter()
+            .map(ffi_live_effect)
+            .collect::<Vec<_>>()
+            .into(),
         reset_resources: transaction.reset_resources,
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_mesh(mesh: astra_plugin_abi::RuntimeLiveMeshBatch) -> FfiRuntimeMeshBatch {
+    FfiRuntimeMeshBatch {
+        order: mesh.order,
+        texture_id: mesh.texture_id.into(),
+        vertices: mesh
+            .vertices
+            .into_iter()
+            .map(|vertex| FfiRuntimeMeshVertex {
+                x: vertex.x,
+                y: vertex.y,
+                z: vertex.z,
+                u: vertex.u,
+                v: vertex.v,
+                r: vertex.color[0],
+                g: vertex.color[1],
+                b: vertex.color[2],
+                a: vertex.color[3],
+            })
+            .collect::<Vec<_>>()
+            .into(),
+        indices: mesh.indices.into(),
+        material: match mesh.material {
+            astra_plugin_abi::RuntimeLiveMaterial::Textured {
+                blend,
+                texture_filter,
+            } => FfiRuntimeMaterial::Textured {
+                blend: ffi_live_blend(blend),
+                texture_filter: match texture_filter {
+                    astra_plugin_abi::RuntimeLiveTextureFilter::Nearest => {
+                        FfiRuntimeTextureFilter::Nearest
+                    }
+                    astra_plugin_abi::RuntimeLiveTextureFilter::Linear => {
+                        FfiRuntimeTextureFilter::Linear
+                    }
+                },
+            },
+            astra_plugin_abi::RuntimeLiveMaterial::VertexColor { blend } => {
+                FfiRuntimeMaterial::VertexColor {
+                    blend: ffi_live_blend(blend),
+                }
+            }
+        },
+        depth: FfiRuntimeDepthState {
+            test: match mesh.depth.test {
+                astra_plugin_abi::RuntimeLiveDepthTest::Disabled => FfiRuntimeDepthTest::Disabled,
+                astra_plugin_abi::RuntimeLiveDepthTest::Less => FfiRuntimeDepthTest::Less,
+                astra_plugin_abi::RuntimeLiveDepthTest::LessEqual => FfiRuntimeDepthTest::LessEqual,
+                astra_plugin_abi::RuntimeLiveDepthTest::Always => FfiRuntimeDepthTest::Always,
+            },
+            write: mesh.depth.write,
+            bias: mesh.depth.bias,
+        },
+        scissor: mesh
+            .scissor
+            .map(|scissor| FfiRuntimeScissor {
+                x: scissor.x,
+                y: scissor.y,
+                width: scissor.width,
+                height: scissor.height,
+            })
+            .into(),
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_effect(effect: astra_plugin_abi::RuntimeLiveSceneEffect) -> FfiRuntimeSceneEffect {
+    match effect {
+        astra_plugin_abi::RuntimeLiveSceneEffect::FilterGraph {
+            order,
+            graph_id,
+            parameters,
+        } => FfiRuntimeSceneEffect::FilterGraph {
+            order,
+            graph_id: graph_id.into(),
+            parameters: parameters.into(),
+        },
+        astra_plugin_abi::RuntimeLiveSceneEffect::Wipe {
+            order,
+            kind,
+            progress,
+            softness,
+            direction,
+            mask_texture_id,
+        } => FfiRuntimeSceneEffect::Wipe {
+            order,
+            kind: match kind {
+                astra_plugin_abi::RuntimeLiveWipeKind::Linear => FfiRuntimeWipeKind::Linear,
+                astra_plugin_abi::RuntimeLiveWipeKind::Radial => FfiRuntimeWipeKind::Radial,
+                astra_plugin_abi::RuntimeLiveWipeKind::Mask => FfiRuntimeWipeKind::Mask,
+            },
+            progress,
+            softness,
+            direction,
+            mask_texture_id: mask_texture_id.into(),
+        },
+    }
+}
+
+#[cfg(feature = "ffi")]
+fn ffi_live_blend(blend: RuntimeLiveBlendMode) -> FfiRuntimeBlendMode {
+    match blend {
+        RuntimeLiveBlendMode::Alpha => FfiRuntimeBlendMode::Alpha,
+        RuntimeLiveBlendMode::Additive => FfiRuntimeBlendMode::Additive,
+        RuntimeLiveBlendMode::Opaque => FfiRuntimeBlendMode::Opaque,
+        RuntimeLiveBlendMode::Multiply => FfiRuntimeBlendMode::Multiply,
+        RuntimeLiveBlendMode::Screen => FfiRuntimeBlendMode::Screen,
     }
 }
 

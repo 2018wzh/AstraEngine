@@ -9,7 +9,8 @@ use astra_emu_family_api::{LegacyRuntimeProvider, LegacyVfsReader, LEGACY_FAMILY
 #[cfg(target_os = "android")]
 use astra_emu_manager_core::{family_base_identity_hash, AndroidNativePluginManifest};
 use astra_emu_manager_core::{
-    DynamicFamilyLoader, Ed25519FamilySignatureVerifier, FamilyPluginGate, FamilyPluginManifest,
+    DynamicFamilyHostServicesV8, DynamicFamilyLoader, Ed25519FamilySignatureVerifier,
+    FamilyPluginGate, FamilyPluginManifest,
 };
 #[cfg(target_os = "ios")]
 use astra_emu_manager_core::{
@@ -143,7 +144,7 @@ impl FamilyHostConfig {
                     &self.library_path,
                     manifest,
                     "astra.emu.manager.family.fvp".into(),
-                    vfs,
+                    DynamicFamilyHostServicesV8::vfs_only(vfs),
                 )
                 .map_err(|error| error.to_string())?;
             Ok(Box::new(provider))
@@ -225,7 +226,7 @@ fn create_dynamic_android_provider(
             &library_path,
             family,
             "astra.emu.manager.family.fvp".into(),
-            vfs,
+            DynamicFamilyHostServicesV8::vfs_only(vfs),
         )
         .map(|provider| Box::new(provider) as Box<dyn LegacyRuntimeProvider>)
         .map_err(|error| error.to_string())

@@ -8,13 +8,13 @@ use std::{
 
 use astra_core::{Diagnostic, Hash256, SchemaVersion, StableId};
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8, LegacyAudioSampleFormat,
     LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction,
     LegacyDiagnostic, LegacyEphemeralText, LegacyEvent, LegacyInputEdge, LegacyLiveOutput,
-    LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
+    LegacyOpenRequest, LegacyPcmBufferV8, LegacyProbeReport, LegacyProbeRequest,
     LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode, LegacyResourceRead,
     LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacyShutdownReport,
+    LegacySceneResourceOperationV8, LegacySceneTransactionV8, LegacyShutdownReport,
     LegacySnapshotEnvelope, LegacyStepBudget, LegacyStepInput, LegacyTextPresentationLeaseV1,
     LegacyTextureFormat, LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
 };
@@ -23,17 +23,18 @@ use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeLiveAudioCommand,
     RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket, RuntimeLiveAudioSampleFormat,
     RuntimeLiveBlackboardMutation, RuntimeLiveBlendMode, RuntimeLiveCoverage,
-    RuntimeLiveDirtySection, RuntimeLiveDraw, RuntimeLiveEvent, RuntimeLiveOutput,
-    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveResourceTexture,
-    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveScissor,
-    RuntimeLiveTextLease, RuntimeLiveTextPresentation, RuntimeLiveTextRegion,
-    RuntimeLiveTextureFilter, RuntimeLiveTextureFormat, RuntimeLiveVertex, RuntimeLiveVideoCommand,
-    RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind,
-    RuntimeOpenReport, RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest,
-    RuntimeProbeReport, RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionCodec,
-    RuntimeSectionPayload, RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode,
-    RuntimeStepOutput, RuntimeTickIntegrityMode,
+    RuntimeLiveDepthState, RuntimeLiveDepthTest, RuntimeLiveDirtySection, RuntimeLiveDraw,
+    RuntimeLiveEvent, RuntimeLiveMaterial, RuntimeLiveMeshBatch, RuntimeLiveMeshVertex,
+    RuntimeLiveOutput, RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveResourceTexture,
+    RuntimeLiveSceneEffect, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
+    RuntimeLiveScissor, RuntimeLiveTextDraw, RuntimeLiveTextLease, RuntimeLiveTextPresentation,
+    RuntimeLiveTextRegion, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat, RuntimeLiveVertex,
+    RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait,
+    RuntimeLiveWaitKind, RuntimeLiveWipeKind, RuntimeOpenReport, RuntimeOpenRequest,
+    RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport, RuntimeProbeRequest,
+    RuntimeProviderInstanceReport, RuntimeRestoreReport, RuntimeRestoreRequest, RuntimeSaveRequest,
+    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeShutdownReport,
+    RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput, RuntimeTickIntegrityMode,
 };
 use astra_runtime::{
     ActionAccess, ActionDescriptor, ActionExecutionClass, ActionInvocation, ActionResourceKey,
@@ -91,13 +92,13 @@ fn live_color(color: [f32; 4]) -> Result<[u8; 4], String> {
 }
 
 fn move_live_scene(
-    transaction: LegacySceneTransactionV7,
+    transaction: LegacySceneTransactionV8,
 ) -> Result<RuntimeLiveSceneTransaction, String> {
     let resources = transaction
         .resources
         .into_iter()
         .map(|operation| match operation {
-            LegacySceneResourceOperationV7::CreateTexture {
+            LegacySceneResourceOperationV8::CreateTexture {
                 texture_id,
                 generation,
                 width,
@@ -112,7 +113,7 @@ fn move_live_scene(
                 format: live_texture_format(format),
                 pixels,
             }),
-            LegacySceneResourceOperationV7::UpdateTexture {
+            LegacySceneResourceOperationV8::UpdateTexture {
                 texture_id,
                 generation,
                 x,
@@ -131,7 +132,7 @@ fn move_live_scene(
                 format: live_texture_format(format),
                 pixels,
             }),
-            LegacySceneResourceOperationV7::DestroyTexture {
+            LegacySceneResourceOperationV8::DestroyTexture {
                 texture_id,
                 generation,
             } => Ok(RuntimeLiveSceneResourceOperation::DestroyTexture {
@@ -196,6 +197,111 @@ fn move_live_scene(
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let mesh_batches = transaction
+        .mesh_batches
+        .into_iter()
+        .map(|mesh| {
+            let vertices = mesh
+                .vertices
+                .into_iter()
+                .map(|vertex| {
+                    Ok(RuntimeLiveMeshVertex {
+                        x: vertex.position[0],
+                        y: vertex.position[1],
+                        z: vertex.position[2],
+                        u: vertex.tex_coord[0],
+                        v: vertex.tex_coord[1],
+                        color: live_color(vertex.color)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(RuntimeLiveMeshBatch {
+                order: mesh.order,
+                texture_id: mesh.texture_id,
+                vertices,
+                indices: mesh.indices,
+                material: match mesh.material {
+                    astra_emu_family_api::LegacyMaterialV8::Textured {
+                        blend,
+                        texture_filter,
+                    } => RuntimeLiveMaterial::Textured {
+                        blend: live_blend(blend),
+                        texture_filter: live_filter(texture_filter),
+                    },
+                    astra_emu_family_api::LegacyMaterialV8::VertexColor { blend } => {
+                        RuntimeLiveMaterial::VertexColor {
+                            blend: live_blend(blend),
+                        }
+                    }
+                },
+                depth: RuntimeLiveDepthState {
+                    test: match mesh.depth.test {
+                        astra_emu_family_api::LegacyDepthTestV8::Disabled => {
+                            RuntimeLiveDepthTest::Disabled
+                        }
+                        astra_emu_family_api::LegacyDepthTestV8::Less => RuntimeLiveDepthTest::Less,
+                        astra_emu_family_api::LegacyDepthTestV8::LessEqual => {
+                            RuntimeLiveDepthTest::LessEqual
+                        }
+                        astra_emu_family_api::LegacyDepthTestV8::Always => {
+                            RuntimeLiveDepthTest::Always
+                        }
+                    },
+                    write: mesh.depth.write,
+                    bias: mesh.depth.bias,
+                },
+                scissor: mesh.scissor.map(live_scissor).transpose()?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let text_draws = transaction
+        .text_draws
+        .into_iter()
+        .map(|draw| {
+            Ok(RuntimeLiveTextDraw {
+                order: draw.order,
+                layout_token: draw.layout_token,
+                origin: draw.origin,
+                rgba: draw.rgba,
+                depth: draw.depth,
+                scissor: draw.scissor.map(live_scissor).transpose()?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let effects = transaction
+        .effects
+        .into_iter()
+        .map(|effect| match effect {
+            astra_emu_family_api::LegacySceneEffectV8::FilterGraph {
+                order,
+                graph_id,
+                parameters,
+            } => RuntimeLiveSceneEffect::FilterGraph {
+                order,
+                graph_id,
+                parameters,
+            },
+            astra_emu_family_api::LegacySceneEffectV8::Wipe {
+                order,
+                kind,
+                progress,
+                softness,
+                direction,
+                mask_texture_id,
+            } => RuntimeLiveSceneEffect::Wipe {
+                order,
+                kind: match kind {
+                    astra_emu_family_api::LegacyWipeKindV8::Linear => RuntimeLiveWipeKind::Linear,
+                    astra_emu_family_api::LegacyWipeKindV8::Radial => RuntimeLiveWipeKind::Radial,
+                    astra_emu_family_api::LegacyWipeKindV8::Mask => RuntimeLiveWipeKind::Mask,
+                },
+                progress,
+                softness,
+                direction,
+                mask_texture_id,
+            },
+        })
+        .collect();
     let live = RuntimeLiveSceneTransaction {
         sequence: transaction.sequence,
         width: transaction.width,
@@ -210,17 +316,51 @@ fn move_live_scene(
         },
         resources,
         draws,
+        mesh_batches,
+        text_draws,
+        effects,
         reset_resources: transaction.reset_resources,
     };
     live.validate().map_err(|error| error.to_string())?;
     Ok(live)
 }
 
-fn move_live_audio(packet: LegacyAudioPacketV7) -> Result<RuntimeLiveAudioPacket, String> {
+fn live_blend(blend: LegacyBlendMode) -> RuntimeLiveBlendMode {
+    match blend {
+        LegacyBlendMode::Alpha => RuntimeLiveBlendMode::Alpha,
+        LegacyBlendMode::Add => RuntimeLiveBlendMode::Additive,
+        LegacyBlendMode::Opaque => RuntimeLiveBlendMode::Opaque,
+        LegacyBlendMode::Multiply => RuntimeLiveBlendMode::Multiply,
+        LegacyBlendMode::Screen => RuntimeLiveBlendMode::Screen,
+    }
+}
+
+fn live_filter(filter: astra_emu_family_api::LegacyTextureFilter) -> RuntimeLiveTextureFilter {
+    match filter {
+        astra_emu_family_api::LegacyTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
+        astra_emu_family_api::LegacyTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
+    }
+}
+
+fn live_scissor(
+    scissor: astra_emu_family_api::LegacyScissorV1,
+) -> Result<RuntimeLiveScissor, String> {
+    if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
+        return Err("ASTRA_EMU_LIVE_SCENE_SCISSOR".to_string());
+    }
+    Ok(RuntimeLiveScissor {
+        x: scissor.x as u32,
+        y: scissor.y as u32,
+        width: scissor.width as u32,
+        height: scissor.height as u32,
+    })
+}
+
+fn move_live_audio(packet: LegacyAudioPacketV8) -> Result<RuntimeLiveAudioPacket, String> {
     packet.validate().map_err(|error| error.to_string())?;
     let pcm = match packet.pcm {
-        LegacyPcmBufferV7::I16(samples) => RuntimeLivePcmBuffer::I16(samples),
-        LegacyPcmBufferV7::F32(samples) => RuntimeLivePcmBuffer::F32(samples),
+        LegacyPcmBufferV8::I16(samples) => RuntimeLivePcmBuffer::I16(samples),
+        LegacyPcmBufferV8::F32(samples) => RuntimeLivePcmBuffer::F32(samples),
     };
     if pcm.is_empty() {
         return Err("ASTRA_EMU_LIVE_PCM_EMPTY".into());
@@ -1952,12 +2092,12 @@ mod tests {
         let pixels = vec![1_u8, 2, 3, 4];
         let allocation = pixels.as_ptr();
         let live = LegacyLiveOutput {
-            scenes: vec![LegacySceneTransactionV7 {
+            scenes: vec![LegacySceneTransactionV8 {
                 sequence: 0,
                 width: 1,
                 height: 1,
                 compositing: astra_emu_family_api::LegacySceneCompositingV1::LinearSrgb,
-                resources: vec![LegacySceneResourceOperationV7::CreateTexture {
+                resources: vec![LegacySceneResourceOperationV8::CreateTexture {
                     texture_id: 1,
                     generation: 1,
                     width: 1,
@@ -1966,6 +2106,9 @@ mod tests {
                     pixels: pixels.into(),
                 }],
                 draws: Vec::new(),
+                mesh_batches: Vec::new(),
+                text_draws: Vec::new(),
+                effects: Vec::new(),
                 reset_resources: false,
             }],
             ..LegacyLiveOutput::default()
@@ -1981,7 +2124,7 @@ mod tests {
         assert_eq!(control.len(), 1);
         assert_eq!(live.len(), 1);
         let transaction = &live.scenes[0];
-        let LegacySceneResourceOperationV7::CreateTexture { pixels, .. } =
+        let LegacySceneResourceOperationV8::CreateTexture { pixels, .. } =
             &transaction.resources[0]
         else {
             panic!("typed texture create is required");

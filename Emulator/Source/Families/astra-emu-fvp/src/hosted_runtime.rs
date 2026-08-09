@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use astra_emu_family_api::{LegacySceneResourceStateV1, LegacySceneTransactionV7, LegacyVfsReader};
+use astra_emu_family_api::{LegacySceneResourceStateV1, LegacySceneTransactionV8, LegacyVfsReader};
 use rfvp_hosted::{
     hosted::{
         HostedBootConfig, HostedConfig, HostedLimits, HostedSession, HostedStateComponentHashesV1,
@@ -195,7 +195,7 @@ impl HostedFvpSession {
         &self,
         delta_ns: u64,
         input: HostedStepInput,
-    ) -> Result<(HostedStepDelta, Option<LegacySceneTransactionV7>), HostedRuntimeError> {
+    ) -> Result<(HostedStepDelta, Option<LegacySceneTransactionV8>), HostedRuntimeError> {
         self.worker.execute_result(move |state| {
             state
                 .host

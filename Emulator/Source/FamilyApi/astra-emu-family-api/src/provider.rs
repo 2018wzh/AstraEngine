@@ -9,6 +9,7 @@ use astra_core::{Hash256, SchemaVersion};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 use crate::is_valid_input_control;
 
@@ -20,6 +21,9 @@ const MAX_SNAPSHOT_SECTIONS: usize = 128;
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_EFFECT_PAYLOAD_BYTES_PER_STEP: usize = 256 * 1024 * 1024;
 const MAX_RENDER_DRAWS: usize = 262_144;
+const MAX_RENDER_MESH_VERTICES: usize = 1_048_576;
+const MAX_RENDER_MESH_INDICES: usize = 3_145_728;
+const MAX_RENDER_EFFECTS: usize = 256;
 const MAX_RENDER_TEXTURE_UPDATES: usize = 4096;
 const MAX_AUDIO_SAMPLES_PER_COMMAND: usize = 4_194_304;
 const MAX_WAITS_PER_STEP: usize = 4096;
@@ -417,14 +421,32 @@ impl LegacyStepOutput {
                     .resources
                     .iter()
                     .map(|operation| match operation {
-                        LegacySceneResourceOperationV7::CreateTexture { pixels, .. }
-                        | LegacySceneResourceOperationV7::UpdateTexture { pixels, .. } => {
+                        LegacySceneResourceOperationV8::CreateTexture { pixels, .. }
+                        | LegacySceneResourceOperationV8::UpdateTexture { pixels, .. } => {
                             pixels.len()
                         }
-                        LegacySceneResourceOperationV7::DestroyTexture { .. } => 0,
+                        LegacySceneResourceOperationV8::DestroyTexture { .. } => 0,
                     })
                     .sum(),
             )?;
+            let mesh_bytes = transaction
+                .mesh_batches
+                .iter()
+                .try_fold(0usize, |total, mesh| {
+                    total
+                        .checked_add(
+                            mesh.vertices
+                                .len()
+                                .checked_mul(std::mem::size_of::<LegacyMeshVertexV8>())?,
+                        )?
+                        .checked_add(mesh.indices.len().checked_mul(std::mem::size_of::<u32>())?)
+                });
+            add_payload(mesh_bytes.ok_or_else(|| {
+                LegacyProviderError::invalid(
+                    "ASTRA_EMU_EFFECT_PAYLOAD_BOUNDS",
+                    "live mesh byte length overflow",
+                )
+            })?)?;
         }
         for scene in &self.live.resource_scenes {
             add_sequence(scene.sequence)?;
@@ -435,10 +457,10 @@ impl LegacyStepOutput {
             packet.validate()?;
             add_payload(
                 match &packet.pcm {
-                    LegacyPcmBufferV7::I16(samples) => {
+                    LegacyPcmBufferV8::I16(samples) => {
                         samples.len().checked_mul(std::mem::size_of::<i16>())
                     }
-                    LegacyPcmBufferV7::F32(samples) => {
+                    LegacyPcmBufferV8::F32(samples) => {
                         samples.len().checked_mul(std::mem::size_of::<f32>())
                     }
                 }
@@ -608,9 +630,9 @@ pub struct LegacyDirtySection {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct LegacyLiveOutput {
-    pub scenes: Vec<LegacySceneTransactionV7>,
+    pub scenes: Vec<LegacySceneTransactionV8>,
     pub resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
-    pub audio: Vec<LegacyAudioPacketV7>,
+    pub audio: Vec<LegacyAudioPacketV8>,
     pub audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
     pub text: Vec<LegacyTextLease>,
     pub text_presentations: Vec<LegacySequenced<LegacyTextPresentationLeaseV1>>,
@@ -789,20 +811,306 @@ pub struct LegacyRenderFrameV1 {
     pub draws: Vec<LegacyDrawV1>,
 }
 
-/// Live scene transaction used by Family ABI v7.  Unlike the v1 persisted
+/// Live scene transaction used by Family ABI v8. Unlike the v1 persisted
 /// packet this type has no postcard representation or content identity.  The
 /// provider moves the capture allocation into `pixels`; the RuntimeWorld and
 /// host must continue moving that owner until the renderer performs its final
 /// device upload.
 #[derive(Debug, PartialEq)]
-pub struct LegacySceneTransactionV7 {
+pub struct LegacySceneTransactionV8 {
     pub sequence: u64,
     pub width: u32,
     pub height: u32,
     pub compositing: LegacySceneCompositingV1,
-    pub resources: Vec<LegacySceneResourceOperationV7>,
+    pub resources: Vec<LegacySceneResourceOperationV8>,
     pub draws: Vec<LegacyDrawV1>,
+    pub mesh_batches: Vec<LegacyMeshBatchV8>,
+    pub text_draws: Vec<LegacyTextDrawV8>,
+    pub effects: Vec<LegacySceneEffectV8>,
     pub reset_resources: bool,
+}
+
+/// Instance-bound host text service. Requests are intentionally not
+/// serializable because they contain a short-lived plaintext lease.
+pub trait LegacyTextLayoutHostV8: Send + Sync {
+    fn layout(
+        &self,
+        session: &LegacyRuntimeSessionId,
+        request: LegacyTextLayoutRequestV8,
+    ) -> Result<LegacyTextLayoutResultV8, LegacyProviderError>;
+
+    fn release_layout(
+        &self,
+        session: &LegacyRuntimeSessionId,
+        layout_token: &str,
+    ) -> Result<(), LegacyProviderError>;
+}
+
+pub struct LegacyTextLayoutRequestV8 {
+    pub lease_id: String,
+    pub text: String,
+    pub language: String,
+    pub font_families: Vec<String>,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub width: u32,
+    pub height: u32,
+    pub max_lines: u32,
+    pub wrap: LegacyTextWrapV8,
+    pub overflow: LegacyTextOverflowV8,
+}
+
+impl core::fmt::Debug for LegacyTextLayoutRequestV8 {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("LegacyTextLayoutRequestV8")
+            .field("lease_id", &self.lease_id)
+            .field("text_bytes", &self.text.len())
+            .field("language", &self.language)
+            .field("font_families", &self.font_families)
+            .field("font_size", &self.font_size)
+            .field("line_height", &self.line_height)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("max_lines", &self.max_lines)
+            .field("wrap", &self.wrap)
+            .field("overflow", &self.overflow)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyTextWrapV8 {
+    None,
+    Word,
+    Glyph,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyTextOverflowV8 {
+    Clip,
+    Ellipsis,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyTextLayoutResultV8 {
+    pub layout_token: String,
+    pub width: f32,
+    pub height: f32,
+    pub baseline: f32,
+    pub line_count: u32,
+    pub glyph_count: u32,
+    pub clipped: bool,
+    pub cache_revision: u64,
+}
+
+impl LegacyTextLayoutResultV8 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("layout_token", &self.layout_token)?;
+        if self.cache_revision == 0
+            || self.line_count == 0
+            || self.glyph_count > 1_048_576
+            || [self.width, self.height, self.baseline]
+                .into_iter()
+                .any(|value| !value.is_finite() || value < 0.0)
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_LAYOUT_RESULT",
+                "text layout result is invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Instance-bound secret port. The buffer clears its allocation on drop.
+pub trait LegacyPrivateMaterialHostV8: Send + Sync {
+    fn read_private_material(
+        &self,
+        session: &LegacyRuntimeSessionId,
+        request: LegacyPrivateMaterialRequestV8,
+    ) -> Result<LegacySecretBufferV8, LegacyProviderError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyPrivateMaterialRequestV8 {
+    pub secret_id: String,
+    pub exact_len: u32,
+}
+
+pub struct LegacySecretBufferV8(Zeroizing<Vec<u8>>);
+
+impl LegacySecretBufferV8 {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(Zeroizing::new(bytes))
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl core::fmt::Debug for LegacySecretBufferV8 {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("LegacySecretBufferV8")
+            .field("len", &self.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Instance-bound logical save storage. Implementations own platform paths and
+/// must commit writes atomically before returning a new revision.
+pub trait LegacySaveStoreHostV8: Send + Sync {
+    fn list_slots(
+        &self,
+        session: &LegacyRuntimeSessionId,
+        max_slots: u32,
+    ) -> Result<Vec<LegacySaveSlotV8>, LegacyProviderError>;
+
+    fn read_slot(
+        &self,
+        session: &LegacyRuntimeSessionId,
+        slot_id: &str,
+        expected_revision: Option<u64>,
+        max_bytes: u64,
+    ) -> Result<LegacySaveReadResultV8, LegacyProviderError>;
+
+    fn atomic_write_slot(
+        &self,
+        session: &LegacyRuntimeSessionId,
+        request: LegacySaveWriteRequestV8,
+    ) -> Result<LegacySaveWriteResultV8, LegacyProviderError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacySaveSlotV8 {
+    pub slot_id: String,
+    pub revision: u64,
+    pub byte_len: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacySaveReadResultV8 {
+    pub slot_id: String,
+    pub revision: u64,
+    pub payload: OwnedByteBuffer,
+}
+
+pub struct LegacySaveWriteRequestV8 {
+    pub slot_id: String,
+    pub expected_revision: Option<u64>,
+    pub max_bytes: u64,
+    pub payload: OwnedByteBuffer,
+}
+
+impl core::fmt::Debug for LegacySaveWriteRequestV8 {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("LegacySaveWriteRequestV8")
+            .field("slot_id", &self.slot_id)
+            .field("expected_revision", &self.expected_revision)
+            .field("max_bytes", &self.max_bytes)
+            .field("payload_bytes", &self.payload.len())
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacySaveWriteResultV8 {
+    pub slot_id: String,
+    pub revision: u64,
+    pub byte_len: u64,
+    pub verified: bool,
+}
+
+/// Generic retained mesh draw. It contains no shader bytes or backend handle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyMeshBatchV8 {
+    pub order: u32,
+    pub texture_id: Option<u32>,
+    pub vertices: Vec<LegacyMeshVertexV8>,
+    pub indices: Vec<u32>,
+    pub material: LegacyMaterialV8,
+    pub depth: LegacyDepthStateV8,
+    pub scissor: Option<LegacyScissorV1>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LegacyMeshVertexV8 {
+    pub position: [f32; 3],
+    pub tex_coord: [f32; 2],
+    pub color: [f32; 4],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyMaterialV8 {
+    Textured {
+        blend: LegacyBlendMode,
+        texture_filter: LegacyTextureFilter,
+    },
+    VertexColor {
+        blend: LegacyBlendMode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LegacyDepthStateV8 {
+    pub test: LegacyDepthTestV8,
+    pub write: bool,
+    pub bias: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyDepthTestV8 {
+    Disabled,
+    Less,
+    LessEqual,
+    Always,
+}
+
+/// Draws a host-owned shaped layout. The token is non-serializable and valid
+/// only for the instance and session that created it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyTextDrawV8 {
+    pub order: u32,
+    pub layout_token: String,
+    pub origin: [f32; 2],
+    pub rgba: [u8; 4],
+    pub depth: f32,
+    pub scissor: Option<LegacyScissorV1>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LegacySceneEffectV8 {
+    FilterGraph {
+        order: u32,
+        graph_id: String,
+        parameters: Vec<f32>,
+    },
+    Wipe {
+        order: u32,
+        kind: LegacyWipeKindV8,
+        progress: f32,
+        softness: f32,
+        direction: [f32; 2],
+        mask_texture_id: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyWipeKindV8 {
+    Linear,
+    Radial,
+    Mask,
 }
 
 /// Defines how sampled RGB and the render target participate in blending.
@@ -821,7 +1129,7 @@ pub enum LegacySceneCompositingV1 {
 pub const LIVE_BUILTIN_WHITE_TEXTURE_ID: u32 = u32::MAX;
 
 #[derive(Debug, PartialEq)]
-pub enum LegacySceneResourceOperationV7 {
+pub enum LegacySceneResourceOperationV8 {
     CreateTexture {
         texture_id: u32,
         generation: u64,
@@ -846,7 +1154,7 @@ pub enum LegacySceneResourceOperationV7 {
     },
 }
 
-impl LegacySceneTransactionV7 {
+impl LegacySceneTransactionV8 {
     pub fn validate(&self) -> Result<(), LegacyProviderError> {
         if self.width == 0 || self.height == 0 || self.width > 16_384 || self.height > 16_384 {
             return Err(LegacyProviderError::invalid(
@@ -857,7 +1165,7 @@ impl LegacySceneTransactionV7 {
         let mut generations = BTreeSet::new();
         for operation in &self.resources {
             let (texture_id, generation, width, height, format, pixels) = match operation {
-                LegacySceneResourceOperationV7::CreateTexture {
+                LegacySceneResourceOperationV8::CreateTexture {
                     texture_id,
                     generation,
                     width,
@@ -865,7 +1173,7 @@ impl LegacySceneTransactionV7 {
                     format,
                     pixels,
                 } => (*texture_id, *generation, *width, *height, *format, pixels),
-                LegacySceneResourceOperationV7::UpdateTexture {
+                LegacySceneResourceOperationV8::UpdateTexture {
                     texture_id,
                     generation,
                     x: _,
@@ -875,7 +1183,7 @@ impl LegacySceneTransactionV7 {
                     format,
                     pixels,
                 } => (*texture_id, *generation, *width, *height, *format, pixels),
-                LegacySceneResourceOperationV7::DestroyTexture {
+                LegacySceneResourceOperationV8::DestroyTexture {
                     texture_id,
                     generation,
                 } => {
@@ -891,7 +1199,7 @@ impl LegacySceneTransactionV7 {
             let valid_builtin_white = texture_id == LIVE_BUILTIN_WHITE_TEXTURE_ID
                 && matches!(
                     operation,
-                    LegacySceneResourceOperationV7::CreateTexture { .. }
+                    LegacySceneResourceOperationV8::CreateTexture { .. }
                 )
                 && width == 1
                 && height == 1
@@ -939,17 +1247,126 @@ impl LegacySceneTransactionV7 {
                 "live scene contains a non-finite vertex",
             ));
         }
+        if self.draws.len() > MAX_RENDER_DRAWS
+            || self.mesh_batches.len() > MAX_RENDER_DRAWS
+            || self.text_draws.len() > MAX_RENDER_DRAWS
+            || self.effects.len() > MAX_RENDER_EFFECTS
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SCENE_COMMAND_BOUNDS",
+                "live scene command count exceeds the bounded contract",
+            ));
+        }
+        for mesh in &self.mesh_batches {
+            if mesh.vertices.is_empty()
+                || mesh.vertices.len() > MAX_RENDER_MESH_VERTICES
+                || mesh.indices.is_empty()
+                || mesh.indices.len() > MAX_RENDER_MESH_INDICES
+                || mesh.indices.len() % 3 != 0
+                || mesh.indices.iter().any(|index| {
+                    usize::try_from(*index).map_or(true, |index| index >= mesh.vertices.len())
+                })
+                || !mesh.depth.bias.is_finite()
+                || mesh.vertices.iter().any(|vertex| {
+                    vertex
+                        .position
+                        .iter()
+                        .chain(vertex.tex_coord.iter())
+                        .chain(vertex.color.iter())
+                        .any(|value| !value.is_finite())
+                })
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SCENE_MESH",
+                    "live scene mesh is malformed or exceeds its bounds",
+                ));
+            }
+            if matches!(mesh.material, LegacyMaterialV8::Textured { .. })
+                && mesh.texture_id.is_none()
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SCENE_MATERIAL",
+                    "textured mesh requires an explicit retained texture",
+                ));
+            }
+            validate_live_scissor(mesh.scissor)?;
+        }
+        for draw in &self.text_draws {
+            validate_symbol("layout_token", &draw.layout_token)?;
+            if draw.rgba[3] == 0
+                || draw
+                    .origin
+                    .iter()
+                    .chain(std::iter::once(&draw.depth))
+                    .any(|value| !value.is_finite())
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_TEXT_DRAW",
+                    "text draw contains invalid geometry or color",
+                ));
+            }
+            validate_live_scissor(draw.scissor)?;
+        }
+        for effect in &self.effects {
+            match effect {
+                LegacySceneEffectV8::FilterGraph {
+                    graph_id,
+                    parameters,
+                    ..
+                } => {
+                    validate_symbol("filter_graph_id", graph_id)?;
+                    if parameters.len() > 256 || parameters.iter().any(|value| !value.is_finite()) {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_FILTER_GRAPH_PARAMETERS",
+                            "FilterGraph parameters are malformed or exceed their bound",
+                        ));
+                    }
+                }
+                LegacySceneEffectV8::Wipe {
+                    kind,
+                    progress,
+                    softness,
+                    direction,
+                    mask_texture_id,
+                    ..
+                } => {
+                    if !progress.is_finite()
+                        || !(0.0..=1.0).contains(progress)
+                        || !softness.is_finite()
+                        || !(0.0..=1.0).contains(softness)
+                        || direction.iter().any(|value| !value.is_finite())
+                        || (matches!(kind, LegacyWipeKindV8::Mask) && mask_texture_id.is_none())
+                    {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_SCENE_WIPE",
+                            "wipe parameters are invalid",
+                        ));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }
 
+fn validate_live_scissor(scissor: Option<LegacyScissorV1>) -> Result<(), LegacyProviderError> {
+    if matches!(scissor, Some(value) if value.x < 0 || value.y < 0 || value.width <= 0 || value.height <= 0)
+    {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_SCENE_SCISSOR",
+            "scene scissor is outside the supported coordinate range",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum LegacyPcmBufferV7 {
+pub enum LegacyPcmBufferV8 {
     I16(OwnedI16Buffer),
     F32(OwnedF32Buffer),
 }
 
-impl LegacyPcmBufferV7 {
+impl LegacyPcmBufferV8 {
     pub fn sample_count(&self) -> usize {
         match self {
             Self::I16(samples) => samples.len(),
@@ -975,15 +1392,15 @@ impl LegacyPcmBufferV7 {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LegacyAudioPacketV7 {
+pub struct LegacyAudioPacketV8 {
     pub sequence: u64,
     pub stream_id: u32,
     pub sample_rate: u32,
     pub channels: u16,
-    pub pcm: LegacyPcmBufferV7,
+    pub pcm: LegacyPcmBufferV8,
 }
 
-impl LegacyAudioPacketV7 {
+impl LegacyAudioPacketV8 {
     pub fn validate(&self) -> Result<(), LegacyProviderError> {
         if self.stream_id == u32::MAX || self.sample_rate > 384_000 || self.channels > 32 {
             return Err(LegacyProviderError::invalid(
@@ -1384,12 +1801,12 @@ impl LegacyRenderFrameV1 {
 }
 
 impl LegacySceneResourceStateV1 {
-    /// Validates the non-serialized Family ABI v7 transaction.  This is the
+    /// Validates the non-serialized Family ABI v8 transaction. This is the
     /// live counterpart to `validate`; it checks retained texture metadata
     /// and generation/lifecycle rules without hashing or encoding pixels.
     pub fn validate_live(
         &self,
-        transaction: &LegacySceneTransactionV7,
+        transaction: &LegacySceneTransactionV8,
     ) -> Result<LegacySceneResourceStateV1, LegacyProviderError> {
         transaction.validate()?;
         let mut next = if transaction.reset_resources {
@@ -1399,7 +1816,7 @@ impl LegacySceneResourceStateV1 {
         };
         for operation in &transaction.resources {
             match operation {
-                LegacySceneResourceOperationV7::CreateTexture {
+                LegacySceneResourceOperationV8::CreateTexture {
                     texture_id,
                     width,
                     height,
@@ -1421,7 +1838,7 @@ impl LegacySceneResourceStateV1 {
                         },
                     );
                 }
-                LegacySceneResourceOperationV7::UpdateTexture {
+                LegacySceneResourceOperationV8::UpdateTexture {
                     texture_id,
                     x,
                     y,
@@ -1448,7 +1865,7 @@ impl LegacySceneResourceStateV1 {
                         ));
                     }
                 }
-                LegacySceneResourceOperationV7::DestroyTexture { texture_id, .. } => {
+                LegacySceneResourceOperationV8::DestroyTexture { texture_id, .. } => {
                     if next.textures.remove(texture_id).is_none() {
                         return Err(LegacyProviderError::invalid(
                             "ASTRA_EMU_SCENE_TEXTURE_MISSING",

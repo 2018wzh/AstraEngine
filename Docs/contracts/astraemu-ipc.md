@@ -6,9 +6,10 @@ AstraEMU v1 采用 Manager + `AstraEmuRuntimeProvider` + AstraEngine `RuntimeWor
 
 ## Descriptor
 
-The current hard-cut identity is `astra.emu.family_abi.v7`. Any v5 or v6
+The current hard-cut identity is `astra.emu.family_abi.v8`. Any v5, v6, or v7
 fingerprint, manifest, binary, runtime section, or snapshot is rejected before
-provider execution; this page's older v6 wording is migration history only.
+provider execution. The host does not provide a compatibility shim or runtime
+migrator.
 
 ```rust
 pub struct LegacyFamilyPluginDescriptor {
@@ -89,13 +90,21 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-Family ABI v7 对 descriptor、instance、probe、open、step、save、restore、resource read、VFS callback 和 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。v5/v6 binary、fingerprint 和 FVP runtime snapshot 都会 fail-fast，host 不保留兼容 shim。
+Family ABI v8 对 descriptor、instance、probe、open、step、save、restore、resource read、host service、VFS callback 和 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。v5/v6/v7 binary、fingerprint 和 runtime snapshot 都会 fail-fast。
 
-v7 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径；range result 只返回 range、revision、length/bounds 可验证的 owned bytes，不计算或传输 per-read content hash。scene bytes、encoded bytes 和 PCM bulk 以 ABI-owned allocation 过边界；host 只借用 slice 做尺寸校验、decode 或上传，不用 `into_vec()` 跨 allocator 复制。FVP live step 直接发 Family ABI v7 typed scene transaction，RGBA8 `Vec<u8>` 从 hosted capture allocation 移交到 Runtime、Scene2D 和 GPU adapter；同尺寸 partial update 只携带变化区域，LumaAlpha8 只在明确的格式转换边界生成一次 RGBA8。live 路径不发 `astra.emu.scene_packet.v1`，不执行 scene postcard reader，也不计算 texture/frame content hash；旧 scene packet translator 只属于独立的冷/测试 contract，不能由 v7 live provider 选择。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
+v8 的 host VFS 使用 `stat_file`、有界 `list` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径；range result 只返回 range、revision、length/bounds 可验证的 owned bytes，不计算或传输 per-read content hash。scene bytes、encoded bytes 和 PCM bulk 以 ABI-owned allocation 过边界；host 只借用 slice 做尺寸校验、decode 或上传，不用 `into_vec()` 跨 allocator 复制。FVP live step 直接发 Family ABI v8 typed scene transaction，RGBA8 allocation 从 hosted capture 移交到 Runtime、Scene2D 和 GPU adapter；同尺寸 partial update 只携带变化区域。live 路径不发 `astra.emu.scene_packet.v1`，不执行 scene postcard reader，也不计算 texture/frame content hash。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output；两者都必须校验 session、context 和 byte bound，失败后不得改读 raw filesystem。
+
+v8 的 instance-bound host service 包含三类能力：
+
+- `LegacyTextLayoutHostV8` 接收单次 plaintext lease 与 layout request，用 AstraText/cosmic-text 完成 font database、shaping、fallback、换行、裁剪和 glyph cache。返回值只包含确定性 metrics 和 host-owned layout token；plaintext 不进入 hash、snapshot、report、log 或 package。
+- `LegacyPrivateMaterialHostV8` 只接受逻辑 secret id 和精确长度。返回 buffer 在调用结束后清零，错误诊断不得包含 secret、十六进制 key 或本地路径。
+- `LegacySaveStoreHostV8` 只接受逻辑槽位别名，提供有界 list/read、revision compare 和 atomic write。family 不接触平台路径，save payload 不进入 Runtime output 或 replay transcript。
+
+v8 scene transaction 除 retained texture 与 quad draw 外，还可提交通用 typed mesh batch、depth/material、clip/scissor、FilterGraph effect 和 wipe。DTO 只表达 Astra 公共渲染语义；family shader bytes、`wgpu` 类型、window/device/queue/texture handle 均被拒绝。`LegacyTextDrawV8` 只能引用 layout host 返回的 token。restore 后必须重新建立 layout cache，任何 token 重建失败都会 poison session。
 
 Typed scene 的 `Rgba8` 保持通用 straight-alpha sRGBA8 allocation，blend 与 texture filter 都是显式 draw state，不能把 RFVP 的素材约定写成全引擎特例。`LegacyTextureFilter`/`RuntimeLiveTextureFilter` 是 draw contract 的必填字段，Family、Provider、Headless CPU、Manager GPU 和 PlatformHost GPU 必须原样传递 `nearest`/`linear`，不得由 host 猜测默认值。FVP adapter 只负责把 RFVP 上游原版的 NVSG bytes、vertex color、blend 和 filter 映射到这些通用字段；Yakui 在自身 adapter 边界转换上传表示，Minori decoder 保持 straight-alpha 输出。禁止 renderer 为单个 family 增加隐式颜色补偿、fallback 或第二条 scene path。
 
-Typed PCM 由 `LegacyLiveOutput.audio` 直接携带 `LegacyAudioPacketV7` 和 ABI-owned
+Typed PCM 由 `LegacyLiveOutput.audio` 直接携带 `LegacyAudioPacketV8` 和 ABI-owned
 `I16`/`F32` buffer，不再拆成 control、bulk reference 和第二条 payload envelope。
 Family FFI、Manager 与音频队列按所有权移动同一 allocation，并校验 stream id、采样格式、
 sample count、channel count 和边界。相同格式不得重建 PCM；只有 decoder 或 resampler 的
@@ -186,8 +195,8 @@ Family session 可以把旧 VM 映射为私有 scheduler、context、basic-block
 
 ```rust
 pub struct LegacyLiveOutput {
-    pub scenes: Vec<LegacySceneTransactionV7>,
-    pub audio: Vec<LegacyAudioPacketV7>,
+    pub scenes: Vec<LegacySceneTransactionV8>,
+    pub audio: Vec<LegacyAudioPacketV8>,
     pub audio_commands: Vec<LegacyAudioCommandV7>,
     pub text: Vec<LegacyTextPresentationV7>,
     pub video: Vec<LegacyVideoCommandV7>,

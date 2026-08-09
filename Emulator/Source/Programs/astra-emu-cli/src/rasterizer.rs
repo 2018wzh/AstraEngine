@@ -47,7 +47,7 @@ impl PreparedRenderFrame {
 }
 
 impl CpuStageRasterizer {
-    /// Applies a Family ABI v7 scene transaction without constructing a
+    /// Applies a Family ABI v8 scene transaction without constructing a
     /// serialized packet or hashing its pixels.  The retained CPU texture is
     /// the destination allocation; only the explicitly required LumaAlpha8
     /// conversion creates a new RGBA buffer.
@@ -56,6 +56,12 @@ impl CpuStageRasterizer {
         transaction: RuntimeLiveSceneTransaction,
     ) -> Result<PreparedRenderFrame, String> {
         transaction.validate().map_err(|error| error.to_string())?;
+        if !transaction.mesh_batches.is_empty()
+            || !transaction.text_draws.is_empty()
+            || !transaction.effects.is_empty()
+        {
+            return Err("ASTRA_EMU_HEADLESS_V8_SCENE_COMMAND_UNBOUND".into());
+        }
         if transaction.reset_resources {
             self.textures.clear();
             self.scene_resources = LegacySceneResourceStateV1::default();
@@ -742,6 +748,9 @@ mod tests {
                 pixels: pixels.into(),
             }],
             draws: Vec::new(),
+            mesh_batches: Vec::new(),
+            text_draws: Vec::new(),
+            effects: Vec::new(),
             reset_resources: false,
         };
         let mut rasterizer = CpuStageRasterizer::default();

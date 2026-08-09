@@ -441,6 +441,12 @@ impl StageGpu {
         transaction: RuntimeLiveSceneTransaction,
     ) -> Result<(), String> {
         transaction.validate().map_err(|error| error.to_string())?;
+        if !transaction.mesh_batches.is_empty()
+            || !transaction.text_draws.is_empty()
+            || !transaction.effects.is_empty()
+        {
+            return Err("ASTRA_EMU_MANAGER_V8_SCENE_COMMAND_UNBOUND".into());
+        }
         let RuntimeLiveSceneTransaction {
             width,
             height,

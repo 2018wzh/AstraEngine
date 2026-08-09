@@ -19,14 +19,15 @@ use abi_stable::std_types::RVec;
 #[cfg(feature = "dynamic-abi")]
 use astra_plugin_abi::{
     FfiRuntimeAudioBus, FfiRuntimeAudioEncoding, FfiRuntimeAudioSampleFormat, FfiRuntimeAudioSync,
-    FfiRuntimeAwaitResult, FfiRuntimeBlendMode, FfiRuntimeInputEdge, FfiRuntimeInstanceRequest,
-    FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput, FfiRuntimeOpenRequest, FfiRuntimePcmBuffer,
-    FfiRuntimePrepareRequest, FfiRuntimeProbeRequest, FfiRuntimeProviderRegistration,
-    FfiRuntimeProviderResultItem, FfiRuntimeReportResult, FfiRuntimeRestoreRequest,
-    FfiRuntimeSaveRequest, FfiRuntimeSaveResult, FfiRuntimeSceneResourceOperation,
-    FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeShutdownRequest, FfiRuntimeStepMode,
-    FfiRuntimeStepRequest, FfiRuntimeStepResult, FfiRuntimeTextureFilter, FfiRuntimeTextureFormat,
-    FfiRuntimeVideoMode, FfiRuntimeWaitKind, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
+    FfiRuntimeAwaitResult, FfiRuntimeBlendMode, FfiRuntimeDepthTest, FfiRuntimeInputEdge,
+    FfiRuntimeInstanceRequest, FfiRuntimeIntegrityMode, FfiRuntimeLiveOutput, FfiRuntimeMaterial,
+    FfiRuntimeOpenRequest, FfiRuntimePcmBuffer, FfiRuntimePrepareRequest, FfiRuntimeProbeRequest,
+    FfiRuntimeProviderRegistration, FfiRuntimeProviderResultItem, FfiRuntimeReportResult,
+    FfiRuntimeRestoreRequest, FfiRuntimeSaveRequest, FfiRuntimeSaveResult, FfiRuntimeSceneEffect,
+    FfiRuntimeSceneResourceOperation, FfiRuntimeSection, FfiRuntimeSectionCodec,
+    FfiRuntimeShutdownRequest, FfiRuntimeStepMode, FfiRuntimeStepRequest, FfiRuntimeStepResult,
+    FfiRuntimeTextureFilter, FfiRuntimeTextureFormat, FfiRuntimeVideoMode, FfiRuntimeWaitKind,
+    FfiRuntimeWipeKind, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
@@ -40,13 +41,14 @@ use astra_plugin_abi::{
     RuntimeLiveAudioBus, RuntimeLiveAudioCommand, RuntimeLiveAudioCue, RuntimeLiveAudioEncoding,
     RuntimeLiveAudioPacket, RuntimeLiveAudioSampleFormat, RuntimeLiveAudioSync,
     RuntimeLiveBlackboardMutation, RuntimeLiveBlendMode, RuntimeLiveCoverage,
-    RuntimeLiveDirtySection, RuntimeLiveEvent, RuntimeLiveOutput, RuntimeLivePcmBuffer,
-    RuntimeLiveResourceScene, RuntimeLiveResourceTexture, RuntimeLiveSceneResourceOperation,
-    RuntimeLiveSceneTransaction, RuntimeLiveScissor, RuntimeLiveTextLease,
-    RuntimeLiveTextPresentation, RuntimeLiveTextRegion, RuntimeLiveTextureFilter,
-    RuntimeLiveTextureFormat, RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind,
-    RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeSectionCodec,
-    RuntimeSectionPayload,
+    RuntimeLiveDepthState, RuntimeLiveDepthTest, RuntimeLiveDirtySection, RuntimeLiveEvent,
+    RuntimeLiveMaterial, RuntimeLiveMeshBatch, RuntimeLiveMeshVertex, RuntimeLiveOutput,
+    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveResourceTexture,
+    RuntimeLiveSceneEffect, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
+    RuntimeLiveScissor, RuntimeLiveTextDraw, RuntimeLiveTextLease, RuntimeLiveTextPresentation,
+    RuntimeLiveTextRegion, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat,
+    RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait,
+    RuntimeLiveWaitKind, RuntimeLiveWipeKind, RuntimeSectionCodec, RuntimeSectionPayload,
 };
 
 use crate::{RuntimeHostError, RuntimeHostLimits, WorkerBudgetBroker};
@@ -1212,7 +1214,126 @@ fn runtime_live_scene(
                 }),
             })
             .collect(),
+        mesh_batches: transaction
+            .mesh_batches
+            .into_iter()
+            .map(|mesh| RuntimeLiveMeshBatch {
+                order: mesh.order,
+                texture_id: mesh.texture_id.into_option(),
+                vertices: mesh
+                    .vertices
+                    .into_iter()
+                    .map(|vertex| RuntimeLiveMeshVertex {
+                        x: vertex.x,
+                        y: vertex.y,
+                        z: vertex.z,
+                        u: vertex.u,
+                        v: vertex.v,
+                        color: [vertex.r, vertex.g, vertex.b, vertex.a],
+                    })
+                    .collect(),
+                indices: mesh.indices.into_iter().collect(),
+                material: match mesh.material {
+                    FfiRuntimeMaterial::Textured {
+                        blend,
+                        texture_filter,
+                    } => RuntimeLiveMaterial::Textured {
+                        blend: runtime_live_blend(blend),
+                        texture_filter: runtime_live_filter(texture_filter),
+                    },
+                    FfiRuntimeMaterial::VertexColor { blend } => RuntimeLiveMaterial::VertexColor {
+                        blend: runtime_live_blend(blend),
+                    },
+                },
+                depth: RuntimeLiveDepthState {
+                    test: match mesh.depth.test {
+                        FfiRuntimeDepthTest::Disabled => RuntimeLiveDepthTest::Disabled,
+                        FfiRuntimeDepthTest::Less => RuntimeLiveDepthTest::Less,
+                        FfiRuntimeDepthTest::LessEqual => RuntimeLiveDepthTest::LessEqual,
+                        FfiRuntimeDepthTest::Always => RuntimeLiveDepthTest::Always,
+                    },
+                    write: mesh.depth.write,
+                    bias: mesh.depth.bias,
+                },
+                scissor: mesh.scissor.into_option().map(runtime_live_scissor),
+            })
+            .collect(),
+        text_draws: transaction
+            .text_draws
+            .into_iter()
+            .map(|draw| RuntimeLiveTextDraw {
+                order: draw.order,
+                layout_token: draw.layout_token.to_string(),
+                origin: draw.origin,
+                rgba: draw.rgba,
+                depth: draw.depth,
+                scissor: draw.scissor.into_option().map(runtime_live_scissor),
+            })
+            .collect(),
+        effects: transaction
+            .effects
+            .into_iter()
+            .map(|effect| match effect {
+                FfiRuntimeSceneEffect::FilterGraph {
+                    order,
+                    graph_id,
+                    parameters,
+                } => RuntimeLiveSceneEffect::FilterGraph {
+                    order,
+                    graph_id: graph_id.to_string(),
+                    parameters: parameters.into_iter().collect(),
+                },
+                FfiRuntimeSceneEffect::Wipe {
+                    order,
+                    kind,
+                    progress,
+                    softness,
+                    direction,
+                    mask_texture_id,
+                } => RuntimeLiveSceneEffect::Wipe {
+                    order,
+                    kind: match kind {
+                        FfiRuntimeWipeKind::Linear => RuntimeLiveWipeKind::Linear,
+                        FfiRuntimeWipeKind::Radial => RuntimeLiveWipeKind::Radial,
+                        FfiRuntimeWipeKind::Mask => RuntimeLiveWipeKind::Mask,
+                    },
+                    progress,
+                    softness,
+                    direction,
+                    mask_texture_id: mask_texture_id.into_option(),
+                },
+            })
+            .collect(),
         reset_resources: transaction.reset_resources,
+    }
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn runtime_live_blend(value: FfiRuntimeBlendMode) -> RuntimeLiveBlendMode {
+    match value {
+        FfiRuntimeBlendMode::Alpha => RuntimeLiveBlendMode::Alpha,
+        FfiRuntimeBlendMode::Additive => RuntimeLiveBlendMode::Additive,
+        FfiRuntimeBlendMode::Opaque => RuntimeLiveBlendMode::Opaque,
+        FfiRuntimeBlendMode::Multiply => RuntimeLiveBlendMode::Multiply,
+        FfiRuntimeBlendMode::Screen => RuntimeLiveBlendMode::Screen,
+    }
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn runtime_live_filter(value: FfiRuntimeTextureFilter) -> RuntimeLiveTextureFilter {
+    match value {
+        FfiRuntimeTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
+        FfiRuntimeTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
+    }
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn runtime_live_scissor(value: astra_plugin_abi::FfiRuntimeScissor) -> RuntimeLiveScissor {
+    RuntimeLiveScissor {
+        x: value.x,
+        y: value.y,
+        width: value.width,
+        height: value.height,
     }
 }
 

@@ -13,8 +13,8 @@ use std::{
 use astra_audio_kira::{AstraChunkBackendSettings, AudioServiceConfig, AudioServiceSession};
 use astra_byte_source::{OwnedByteBuffer, OwnedF32Buffer, OwnedI16Buffer};
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyPcmBufferV7,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8, LegacyAudioSampleFormat,
+    LegacyPcmBufferV8,
 };
 use astra_media::{open_symphonia_audio_stream, MediaError, SymphoniaAudioStreamDecoder};
 use astra_platform::{
@@ -74,7 +74,7 @@ enum WorkerCommand {
         command: LegacyAudioCommandV1,
         resource: Option<OwnedByteBuffer>,
     },
-    ExecuteLive(LegacyAudioPacketV7),
+    ExecuteLive(LegacyAudioPacketV8),
     BeginMovie {
         stream_id: u32,
         sample_rate: u32,
@@ -237,7 +237,7 @@ impl FamilyAudioService {
         self.try_send(WorkerCommand::Execute { command, resource })
     }
 
-    pub fn execute_live_pcm(&self, packet: LegacyAudioPacketV7) -> Result<(), String> {
+    pub fn execute_live_pcm(&self, packet: LegacyAudioPacketV8) -> Result<(), String> {
         packet.validate().map_err(|error| error.to_string())?;
         self.try_send(WorkerCommand::ExecuteLive(packet))
     }
@@ -735,7 +735,7 @@ impl WorkerState {
         }
     }
 
-    fn execute_live(&mut self, packet: LegacyAudioPacketV7) -> Result<(), String> {
+    fn execute_live(&mut self, packet: LegacyAudioPacketV8) -> Result<(), String> {
         let stream = self
             .streams
             .get(&packet.stream_id)
@@ -746,12 +746,12 @@ impl WorkerState {
             return Err("ASTRA_EMU_AUDIO_SAMPLE_FORMAT_MISMATCH".into());
         }
         match packet.pcm {
-            LegacyPcmBufferV7::I16(samples) => self.push_segment(
+            LegacyPcmBufferV8::I16(samples) => self.push_segment(
                 packet.stream_id,
                 LegacyAudioSampleFormat::I16,
                 AudioSegment::I16(samples),
             ),
-            LegacyPcmBufferV7::F32(samples) => self.push_segment(
+            LegacyPcmBufferV8::F32(samples) => self.push_segment(
                 packet.stream_id,
                 LegacyAudioSampleFormat::F32,
                 AudioSegment::F32(samples),
