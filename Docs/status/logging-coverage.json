@@ -257,6 +257,10 @@
       "status": "instrumented",
       "reason": "Minori PAZ mount, source validation, decrypt and cache lifecycle"
     },
+    "astra-emu-siglus": {
+      "status": "not_applicable",
+      "reason": "current slice is a pure Family ABI v8 host-port adapter; provider session lifecycle remains unimplemented"
+    },
     "astra-emu-manager-core": {
       "status": "instrumented",
       "reason": "Library, family loading and RuntimeWorld provider lifecycle"

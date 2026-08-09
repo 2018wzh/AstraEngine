@@ -496,7 +496,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
 dependencies = [
  "clipboard-win",
- "image",
+ "image 0.25.10",
  "log",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -653,7 +653,7 @@ dependencies = [
  "astra-byte-source",
  "astra-headless-test",
  "astra-platform",
- "kira",
+ "kira 0.12.2",
  "rtrb",
  "schemars",
  "serde",
@@ -712,7 +712,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "hex",
- "image",
+ "image 0.25.10",
  "postcard",
  "schemars",
  "serde",
@@ -733,7 +733,7 @@ dependencies = [
  "astra-headless-test",
  "astra-package",
  "camino",
- "image",
+ "image 0.25.10",
  "postcard",
  "schemars",
  "serde",
@@ -805,7 +805,7 @@ dependencies = [
  "fuser",
  "globset",
  "hex",
- "image",
+ "image 0.25.10",
  "libc",
  "postcard",
  "rayon",
@@ -944,7 +944,7 @@ dependencies = [
  "astra-emu-family-core",
  "bincode 1.3.3",
  "encoding_rs",
- "na_mpeg2_decoder",
+ "na_mpeg2_decoder 0.1.0",
  "postcard",
  "proptest",
  "rfvp",
@@ -981,7 +981,7 @@ dependencies = [
  "directories",
  "gilrs",
  "hex",
- "image",
+ "image 0.25.10",
  "jni 0.21.1",
  "ndk 0.9.0",
  "pollster",
@@ -1041,7 +1041,7 @@ version = "0.1.0"
 dependencies = [
  "bangumi-api",
  "hex",
- "image",
+ "image 0.25.10",
  "reqwest 0.12.28",
  "reqwest 0.13.4",
  "schemars",
@@ -1072,7 +1072,7 @@ dependencies = [
  "directories",
  "encoding_rs",
  "flate2",
- "image",
+ "image 0.25.10",
  "lru",
  "postcard",
  "rc4",
@@ -1096,7 +1096,7 @@ dependencies = [
  "astra-observability",
  "clap",
  "flate2",
- "image",
+ "image 0.25.10",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1115,6 +1115,20 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "astra-emu-siglus"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "astra-byte-source",
+ "astra-emu-family-api",
+ "serde_json",
+ "sha2 0.10.9",
+ "siglus_scene_vm",
+ "tempfile",
+ "zeroize",
 ]
 
 [[package]]
@@ -1163,7 +1177,7 @@ dependencies = [
  "astra-product-host",
  "clap",
  "hound",
- "image",
+ "image 0.25.10",
  "rustfft",
  "serde",
  "serde_json",
@@ -1243,7 +1257,7 @@ dependencies = [
  "astra-worker-budget",
  "cosmic-text",
  "ffmpeg-next",
- "image",
+ "image 0.25.10",
  "js-sys",
  "postcard",
  "rubato",
@@ -1403,7 +1417,7 @@ dependencies = [
  "astra-platform-common",
  "astra-ui-core",
  "hound",
- "image",
+ "image 0.25.10",
  "postcard",
  "rcgen",
  "reqwest 0.13.4",
@@ -1628,7 +1642,7 @@ dependencies = [
  "astra-vn-runtime-provider",
  "astra-vn-system",
  "astra-vn-ui",
- "image",
+ "image 0.25.10",
  "postcard",
  "serde",
  "serde_json",
@@ -3135,6 +3149,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "const-field-offset"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3554,6 +3578,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "defmt"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2953bfe4f93bbd20cc71198842756f77d161884c99ebbabc41d80231ded88d1"
+dependencies = [
+ "bitflags 1.3.2",
+ "defmt-macros",
+]
+
+[[package]]
+name = "defmt-macros"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad9c72e7ca2137e0dc3813245a0d282fd6daad32fd800af018306a9169b5fe8"
+dependencies = [
+ "defmt-parser",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "defmt-parser"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "der-parser"
 version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3869,10 +3924,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
+dependencies = [
+ "log",
+ "regex",
+]
+
+[[package]]
 name = "env_home"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7f84e12ccf0a7ddc17a6c41c93326024c42920d7ee630d04950e6926645c0fe"
+
+[[package]]
+name = "env_logger"
+version = "0.11.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "env_filter",
+ "jiff",
+ "log",
+]
 
 [[package]]
 name = "equator"
@@ -4470,9 +4548,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4571,6 +4651,15 @@ checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
 dependencies = [
  "bytemuck",
  "libm",
+]
+
+[[package]]
+name = "glam"
+version = "0.29.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
+dependencies = [
+ "mint",
 ]
 
 [[package]]
@@ -5331,7 +5420,7 @@ dependencies = [
  "derive_more",
  "i-slint-common",
  "icu_normalizer",
- "image",
+ "image 0.25.10",
  "itertools 0.14.0",
  "linked_hash_set",
  "lyon_extra",
@@ -5369,7 +5458,7 @@ dependencies = [
  "i-slint-common",
  "i-slint-core-macros",
  "icu_normalizer",
- "image",
+ "image 0.25.10",
  "lyon_algorithms",
  "lyon_extra",
  "lyon_geom",
@@ -5722,6 +5811,20 @@ dependencies = [
 
 [[package]]
 name = "image"
+version = "0.24.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "color_quant",
+ "jpeg-decoder",
+ "num-traits",
+ "png 0.17.16",
+]
+
+[[package]]
+name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
@@ -5734,7 +5837,7 @@ dependencies = [
  "image-webp",
  "moxcms",
  "num-traits",
- "png",
+ "png 0.18.1",
  "qoi",
  "ravif",
  "rayon",
@@ -5940,6 +6043,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jiff"
+version = "0.2.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc"
+dependencies = [
+ "defmt",
+ "jiff-core",
+ "jiff-static",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+]
+
+[[package]]
+name = "jiff-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7feca88439efe53da3754500c1851dedf3cb36c524dd5cf8225cc0794de95d09"
+dependencies = [
+ "defmt",
+]
+
+[[package]]
+name = "jiff-static"
+version = "0.2.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204"
+dependencies = [
+ "jiff-core",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6024,6 +6163,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+
+[[package]]
 name = "js-sys"
 version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6094,6 +6239,21 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kira"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb5a9f9dff5e262540b628b00d5e1a772270a962d6869f8695bb24832ff3b394"
+dependencies = [
+ "glam 0.29.3",
+ "mint",
+ "paste",
+ "ringbuf",
+ "send_wrapper",
+ "symphonia 0.5.5",
+ "triple_buffer 8.1.1",
+]
+
+[[package]]
+name = "kira"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40962061330cfa2fb59d040be05955247a91573a87353bfbe8a4c4be2c62e90a"
@@ -6104,7 +6264,7 @@ dependencies = [
  "pastey 0.2.3",
  "rtrb",
  "send_wrapper",
- "triple_buffer",
+ "triple_buffer 9.0.0",
 ]
 
 [[package]]
@@ -6142,6 +6302,17 @@ name = "lebe"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
+
+[[package]]
+name = "lewton"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "777b48df9aaab155475a83a7df3070395ea1ac6902f5cd062b8f2b028075c030"
+dependencies = [
+ "byteorder",
+ "ogg 0.8.0",
+ "tinyvec",
+]
 
 [[package]]
 name = "libc"
@@ -6674,7 +6845,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "once_cell",
- "png",
+ "png 0.18.1",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
 ]
@@ -6691,6 +6862,18 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "log",
+ "symphonia 0.5.5",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "na_mpeg2_decoder"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183#a815b590f944bc9b40374e76efb0f0fdef97e183"
+dependencies = [
+ "byteorder",
+ "log",
+ "oxideav-ac3",
  "symphonia 0.5.5",
  "thiserror 1.0.69",
 ]
@@ -7505,6 +7688,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ogg"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6951b4e8bf21c8193da321bcce9c9dd2e13c858fe078bf9054a288b419ae5d6e"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
+name = "ogg"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdab8dcd8d4052eaacaf8fb07a3ccd9a6e26efadb42878a413c68fc4af1dee2b"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "oid-registry"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7651,6 +7852,25 @@ name = "owo-colors"
 version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
+
+[[package]]
+name = "oxideav-ac3"
+version = "0.0.2"
+source = "git+https://github.com/OxideAV/oxideav-ac3?rev=e8016175180e85fc39df6f08bc819bf450b4aa6e#e8016175180e85fc39df6f08bc819bf450b4aa6e"
+dependencies = [
+ "oxideav-core",
+]
+
+[[package]]
+name = "oxideav-core"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a68d9a74d6d0a7373589eca0c0bb8ab380c46fd1d7fc807e696d716cdad078c"
+dependencies = [
+ "bytemuck",
+ "serde_json",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "page_size"
@@ -7873,6 +8093,19 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
+
+[[package]]
+name = "png"
+version = "0.17.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
+dependencies = [
+ "bitflags 1.3.2",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide 0.8.9",
+]
 
 [[package]]
 name = "png"
@@ -8797,6 +9030,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ringbuf"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79abed428d1fd2a128201cec72c5f6938e2da607c6f3745f769fabea399d950a"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "rowan"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9365,6 +9607,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "shion-xfile"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183#a815b590f944bc9b40374e76efb0f0fdef97e183"
+dependencies = [
+ "flate2",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9375,6 +9625,63 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "siglus_assets"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183#a815b590f944bc9b40374e76efb0f0fdef97e183"
+dependencies = [
+ "anyhow",
+ "encoding_rs",
+ "hex",
+ "image 0.24.9",
+ "lewton",
+ "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183)",
+ "zeroize",
+]
+
+[[package]]
+name = "siglus_omv_decoder"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183#a815b590f944bc9b40374e76efb0f0fdef97e183"
+dependencies = [
+ "anyhow",
+ "lewton",
+ "ogg 0.9.2",
+ "theora-rs",
+]
+
+[[package]]
+name = "siglus_scene_vm"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183#a815b590f944bc9b40374e76efb0f0fdef97e183"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "bytemuck",
+ "chrono",
+ "clap",
+ "console_error_panic_hook",
+ "encoding_rs",
+ "env_logger",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "image 0.24.9",
+ "js-sys",
+ "kira 0.9.6",
+ "log",
+ "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183)",
+ "ndk-context",
+ "shion-xfile",
+ "siglus_assets",
+ "siglus_omv_decoder",
+ "ttf-parser",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+ "zeroize",
+]
 
 [[package]]
 name = "signal-hook-registry"
@@ -10365,6 +10672,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "theora-rs"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=a815b590f944bc9b40374e76efb0f0fdef97e183#a815b590f944bc9b40374e76efb0f0fdef97e183"
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10488,7 +10800,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "log",
- "png",
+ "png 0.18.1",
  "tiny-skia-path 0.12.0",
 ]
 
@@ -10835,6 +11147,15 @@ checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
 dependencies = [
  "num-integer",
  "strength_reduce",
+]
+
+[[package]]
+name = "triple_buffer"
+version = "8.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "420466259f9fa5decc654c490b9ab538400e5420df8237f84ecbe20368bcf72b"
+dependencies = [
+ "crossbeam-utils",
 ]
 
 [[package]]

@@ -1,0 +1,35 @@
+[package]
+name = "astra-emu-siglus"
+version.workspace = true
+edition.workspace = true
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+doctest = false
+
+[features]
+default = []
+dynamic-plugin-export = []
+
+[dependencies]
+anyhow = "1"
+astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+siglus-hosted = { package = "siglus_scene_vm", git = "https://github.com/2018wzh/siglus_rs.git", rev = "a815b590f944bc9b40374e76efb0f0fdef97e183", default-features = false, features = ["hosted"] }
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+serde_json.workspace = true
+sha2.workspace = true
+
+[package.metadata.astra]
+upstream = "https://github.com/2018wzh/siglus_rs"
+upstream_revision = "a8a3376049f47a141a673a49f15ab7de8746e1e1"
+hosted_fork = "https://github.com/2018wzh/siglus_rs"
+hosted_fork_revision = "a815b590f944bc9b40374e76efb0f0fdef97e183"
+license_notice = "THIRD_PARTY_NOTICES.md"

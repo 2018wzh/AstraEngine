@@ -626,3 +626,17 @@ PlatformHost window/device/audio path but accepts only the validated Headless
 JSONL sequence; external gameplay input is rejected and counted, while surface
 readback is restricted to declared checkpoints. This is developer E2 evidence,
 not manual E3 or clean Release performance evidence.
+
+## 2026-08-09 Siglus 授权材料与 v8 host adapter
+
+Siglus hosted fork 已固定到 `a815b590f944bc9b40374e76efb0f0fdef97e183`。fork 的授权材料
+测试通过严格 profile 解析、`key.toml` 长度与字段校验、原版 `Gameexe.dat` 解码，以及
+`Scene.pck` 首场景的有界 range-read 解码；测试只输出脱敏 diagnostic，不记录 secret、商业
+payload 或本地路径。该结果解除 private material 的前置阻断，但只证明材料可由 hosted 资源
+边界读取，不代表真实游戏流程已经运行。
+
+`astra-emu-siglus` 已加入 workspace，并把 Astra Family ABI v8 的 VFS、private material 和
+save store host 映射到 fork hosted ports。adapter 单元测试覆盖逻辑资源身份、revision、range
+bounds、secret 精确长度与首个空槽写入约束。当前 fork 尚未实现完整 `HostedSession`
+生命周期，因此 crate 不导出 runtime provider；公开 fixture、动态 Headless E2、真实 Rewrite+
+长流程、存档 round-trip、差分、性能和 Windows E3 继续保持 `IN_PROGRESS`。
