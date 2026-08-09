@@ -418,7 +418,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 4. 原版 profile 固定绑定 `Gameexe.dat`/`Scene.pck`；汉化 profile 固定绑定 `Gameexe.chs`/`Scene.chs`，缺失或冲突时阻断。
 5. 编写公开自制 fixture、签名 dynamic Headless E2 和真实样本 ignored gate。
 
-**Current Evidence:** Family ABI v8 contract、FFI round-trip、dynamic instance host-service dispatch 和 v7 拒绝已落地。`siglus_rs` 的 `astra-hosted` 候选 revision 为 `74f66f45ad197a43f2ad411a82d55299320e7cff`：semantic session core 已与 standalone renderer owner 分开；`Scene.pck` 只常驻 metadata，scene body 通过 revision-bound bounded range 读取；host port 已覆盖显式原版/汉化 profile、root/`StartData/GameData` 歧义阻断、private material 精确长度、logical save、LRU range cache，以及首个空槽原子写和复读校验。`cargo check -p siglus_scene_vm --lib --no-default-features --features hosted` 已通过，依赖树不含 cpal、winit、wgpu、egui 或 ureq；默认 standalone library check 和 7 项 hosted port 测试也已通过。该 revision 尚未推送到远端，因此 Astra 还不能把它作为可解析 Git dependency 固定下来。完整 `HostedSession`、Astra provider、公开 fixture 与 E2 仍未完成。当前未授权 `key.toml`，真实 Rewrite+、存档 round-trip、差分、性能和 Windows E3 均保持 blocking。
+**Current Evidence:** Family ABI v8 contract、FFI round-trip、dynamic instance host-service dispatch 和 v7 拒绝已落地。`siglus_rs` 的 `astra-hosted` 候选 revision 为 `cc487d4e0105fef0dd9f5d1dcff48279da82c6f5`：semantic session core 已与 standalone renderer owner 分开；`Scene.pck` 只常驻 metadata，scene body 通过 revision-bound bounded range 读取，VM 后续 scene 切换也复用同一 lazy archive，不会重新落回文件路径；host port 已覆盖显式原版/汉化 profile、root/`StartData/GameData` 歧义阻断、private material 精确长度、logical save、LRU range cache，以及首个空槽原子写和复读校验。`cargo check -p siglus_scene_vm --lib --no-default-features --features hosted` 已通过，依赖树不含 cpal、winit、wgpu、egui 或 ureq；默认 standalone library check、7 项 hosted port 测试和 2 项 lazy archive 测试也已通过。该 revision 尚未推送到远端，因此 Astra 还不能把它作为可解析 Git dependency 固定下来。完整 `HostedSession`、Astra provider、公开 fixture 与 E2 仍未完成。当前未授权 `key.toml`，真实 Rewrite+、存档 round-trip、差分、性能和 Windows E3 均保持 blocking。
 
 **Done Evidence:** Siglus report 不包含 key、payload transform、未授权截图或私有 stream；公开 Hosted E2、真实 Rewrite+ E2、差分、性能与 Windows E3 全部通过后才能关闭本项。
 
@@ -475,7 +475,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 Family ABI 已硬迁移到 v8。新增 mesh/depth/material/scissor、FilterGraph effect/wipe、host-owned text layout、private material 和 logical save store wire；dynamic loader 按 instance token 绑定 service，执行 text result、secret length 与 save byte budget 校验。FVP 和 Minori snapshot 已使用 v8 schema，并新增 v7 拒绝回归。
 
-Siglus 的 fork 基线为 `a8a3376049f47a141a673a49f15ab7de8746e1e1`，维护分支为 `astra-hosted`，当前候选 revision 是 `74f66f45ad197a43f2ad411a82d55299320e7cff`。standalone renderer 与 semantic session core 已分离，lazy `Scene.pck` archive、resource/private-material/save host port、显式 case binding、revision-bound range cache 和空槽原子写校验已经落地。hosted feature 的依赖树不再包含 cpal、winit、wgpu、egui 或 ureq，默认 standalone library 仍可构建。
+Siglus 的 fork 基线为 `a8a3376049f47a141a673a49f15ab7de8746e1e1`，维护分支为 `astra-hosted`，当前候选 revision 是 `cc487d4e0105fef0dd9f5d1dcff48279da82c6f5`。standalone renderer 与 semantic session core 已分离，lazy `Scene.pck` archive、VM lazy scene switch、resource/private-material/save host port、显式 case binding、revision-bound range cache 和空槽原子写校验已经落地。hosted feature 的依赖树不再包含 cpal、winit、wgpu、egui 或 ureq，默认 standalone library 仍可构建。
 
 这仍是 E0/E1。VM 内部的图片、音频、影片、字体、时钟和 runtime save 路径尚未全部改接 instance-bound host port，`HostedSession` 也没有形成可供 provider 调用的 `open/step/save/restore/shutdown` 完整生命周期。候选 revision 还未推送，Astra 不能提前写入无法解析的 Git pin。公开 fixture、dynamic Headless E2 和真实样本证据都没有生成。
 

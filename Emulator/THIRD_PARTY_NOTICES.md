@@ -23,7 +23,7 @@
 - Upstream and hosted fork: <https://github.com/2018wzh/siglus_rs>
 - Baseline revision: `a8a3376049f47a141a673a49f15ab7de8746e1e1`
 - Hosted branch: `astra-hosted`
-- Current unpinned candidate revision: `74f66f45ad197a43f2ad411a82d55299320e7cff`
+- Current unpinned candidate revision: `cc487d4e0105fef0dd9f5d1dcff48279da82c6f5`
 - License: MPL-2.0
 - Status: candidate source only; no Astra provider binary or release evidence yet
 - 修改包括 host VFS、bounded deterministic stepping、effect/trace journal、snapshot isolation、fail-fast syscall coverage 与 ABI provider adapter。发布时同时分发 `MODIFICATIONS.md` 与对应 source archive/source offer；更细的文件级历史由 Git 保留。
