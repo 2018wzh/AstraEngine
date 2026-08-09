@@ -17,6 +17,15 @@
 - License: Mozilla Public License 2.0.
 - Hosted derivative source: pinned `2018wzh/rfvp` `astra-hosted` revision recorded by `astra-emu-fvp`
 - Astra wrapper source: `Emulator/Source/Families/astra-emu-fvp/`
+
+## siglus_rs hosted derivative candidate
+
+- Upstream and hosted fork: <https://github.com/2018wzh/siglus_rs>
+- Baseline revision: `a8a3376049f47a141a673a49f15ab7de8746e1e1`
+- Hosted branch: `astra-hosted`
+- Current unpinned candidate revision: `74f66f45ad197a43f2ad411a82d55299320e7cff`
+- License: MPL-2.0
+- Status: candidate source only; no Astra provider binary or release evidence yet
 - 修改包括 host VFS、bounded deterministic stepping、effect/trace journal、snapshot isolation、fail-fast syscall coverage 与 ABI provider adapter。发布时同时分发 `MODIFICATIONS.md` 与对应 source archive/source offer；更细的文件级历史由 Git 保留。
 
 MPL-2.0 要求的 covered source 以随 release 对应的 AstraEngine source archive 或公开 source offer 提供；release gate 必须把 source archive hash/source offer identity 与 binary/package identity 绑定。
