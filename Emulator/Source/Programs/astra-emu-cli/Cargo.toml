@@ -25,6 +25,7 @@ astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-suppor
 astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
 astra-emu-fvp = { path = "../../Families/astra-emu-fvp" }
 astra-emu-minori = { path = "../../Families/astra-emu-minori" }
+astra-emu-siglus = { path = "../../Families/astra-emu-siglus" }
 astra-headless-protocol = { path = "../../../../Engine/Source/Runtime/astra-headless-protocol" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
@@ -49,8 +50,10 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+toml = "0.8"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 astra-platform-windows = { path = "../../../../Engine/Source/Platform/astra-platform-windows", features = ["platform-test-driver"] }

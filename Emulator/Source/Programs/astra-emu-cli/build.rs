@@ -55,9 +55,9 @@ fn main() {
         hex_sha256(identity.as_bytes())
     );
     let fvp_manifest = Path::new(&manifest_dir).join("../../Families/astra-emu-fvp/Cargo.toml");
-    let hosted_fork_revision = hosted_fork_revision(&fvp_manifest);
+    let fvp_hosted_revision = hosted_fork_revision(&fvp_manifest);
     println!("cargo:rerun-if-changed={}", fvp_manifest.display());
-    let features = format!("rfvp={hosted_fork_revision};features=none");
+    let features = format!("rfvp={fvp_hosted_revision};features=none");
     println!(
         "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(features.as_bytes())
@@ -66,6 +66,15 @@ fn main() {
     println!(
         "cargo:rustc-env=ASTRA_EMU_MINORI_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(minori_features.as_bytes())
+    );
+    let siglus_manifest =
+        Path::new(&manifest_dir).join("../../Families/astra-emu-siglus/Cargo.toml");
+    let siglus_revision = hosted_fork_revision(&siglus_manifest);
+    println!("cargo:rerun-if-changed={}", siglus_manifest.display());
+    let siglus_features = format!("siglus={siglus_revision};features=hosted");
+    println!(
+        "cargo:rustc-env=ASTRA_EMU_SIGLUS_FEATURE_FINGERPRINT=sha256.{}",
+        hex_sha256(siglus_features.as_bytes())
     );
     println!(
         "cargo:rustc-env=ASTRA_EMU_TARGET={}",

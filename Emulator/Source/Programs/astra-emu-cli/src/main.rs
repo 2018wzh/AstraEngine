@@ -51,6 +51,9 @@ enum CliCommand {
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
+        /// Local-private family material. Siglus requires a profile-declared logical secret id.
+        #[arg(long)]
+        private_material: Option<PathBuf>,
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
@@ -82,6 +85,8 @@ enum CliCommand {
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
         #[arg(long)]
+        private_material: Option<PathBuf>,
+        #[arg(long)]
         input: PathBuf,
         #[arg(long)]
         artifacts: PathBuf,
@@ -108,6 +113,8 @@ enum CliCommand {
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
+        #[arg(long)]
+        private_material: Option<PathBuf>,
         #[arg(long, default_value_t = 1280)]
         viewport_width: u32,
         #[arg(long, default_value_t = 720)]
@@ -170,6 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry,
             family_manifest,
             family_library,
+            private_material,
             enable_audio,
             perfetto_trace,
             input,
@@ -186,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 entry,
                 family_manifest,
                 family_library,
+                private_material,
                 enable_audio,
                 perfetto_trace,
                 input_path: input,
@@ -205,6 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry,
             family_manifest,
             family_library,
+            private_material,
             input,
             artifacts,
             enable_audio,
@@ -221,6 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 entry,
                 family_manifest,
                 family_library,
+                private_material,
                 enable_audio,
                 perfetto_trace,
                 input_path: Some(input),
@@ -244,6 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifacts,
             family_manifest,
             family_library,
+            private_material,
             viewport_width,
             viewport_height,
             video_provider,
@@ -289,6 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 artifact_root: artifacts,
                 family_manifest,
                 family_library,
+                private_material,
                 viewport_width,
                 viewport_height,
                 video_provider,

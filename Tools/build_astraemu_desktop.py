@@ -24,12 +24,13 @@ from typing import Any
 
 
 SUPPORTED_TARGETS = {
-    "x86_64-pc-windows-msvc": ("astra-emu-manager.exe", "astra-emu-cli.exe", "astra_emu_fvp.dll"),
-    "x86_64-unknown-linux-gnu": ("astra-emu-manager", "astra-emu-cli", "libastra_emu_fvp.so"),
-    "aarch64-unknown-linux-gnu": ("astra-emu-manager", "astra-emu-cli", "libastra_emu_fvp.so"),
-    "x86_64-apple-darwin": ("astra-emu-manager", "astra-emu-cli", "libastra_emu_fvp.dylib"),
-    "aarch64-apple-darwin": ("astra-emu-manager", "astra-emu-cli", "libastra_emu_fvp.dylib"),
+    "x86_64-pc-windows-msvc": ("astra-emu-manager.exe", "astra-emu-cli.exe", ".dll"),
+    "x86_64-unknown-linux-gnu": ("astra-emu-manager", "astra-emu-cli", ".so"),
+    "aarch64-unknown-linux-gnu": ("astra-emu-manager", "astra-emu-cli", ".so"),
+    "x86_64-apple-darwin": ("astra-emu-manager", "astra-emu-cli", ".dylib"),
+    "aarch64-apple-darwin": ("astra-emu-manager", "astra-emu-cli", ".dylib"),
 }
+SUPPORTED_FAMILIES = {"fvp", "siglus"}
 MAX_REPORT_BYTES = 1024 * 1024
 
 
@@ -37,6 +38,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--target")
+    parser.add_argument("--family", choices=sorted(SUPPORTED_FAMILIES), default="fvp")
     parser.add_argument("--development-ephemeral-signer", action="store_true")
     parser.add_argument("--development-reuse-build", action="store_true")
     parser.add_argument("--signer-identity")
@@ -76,9 +78,11 @@ def main() -> int:
         environment["ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX"] = derive_public_key(root, environment)
     validate_hex(environment["ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX"], 64, "ASTRA_EMU_FAMILY_PUBLIC_KEY_ENCODING")
 
-    descriptor = cargo_build(root, target, target_root, environment)
+    descriptor = cargo_build(root, target, target_root, environment, args.family)
     profile = target_root / target / "release"
-    manager_name, cli_name, family_name = SUPPORTED_TARGETS[target]
+    manager_name, cli_name, suffix = SUPPORTED_TARGETS[target]
+    prefix = "" if suffix == ".dll" else "lib"
+    family_name = f"{prefix}astra_emu_{args.family}{suffix}"
     manager = profile / manager_name
     cli = profile / cli_name
     family = profile / family_name
@@ -89,7 +93,7 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = pathlib.Path(tempfile.mkdtemp(prefix=f".{output.name}.", dir=output.parent))
     try:
-        family_root = temporary / "families" / "fvp"
+        family_root = temporary / "families" / args.family
         family_root.mkdir(parents=True)
         manifest = family_root / "manifest.json"
         native_sign(root, family, descriptor, manifest, target, environment)
@@ -97,8 +101,8 @@ def main() -> int:
         shutil.copy2(manager, temporary / manager_name)
         shutil.copy2(cli, temporary / cli_name)
         copy_notice(root / "Emulator" / "THIRD_PARTY_NOTICES.md", temporary)
-        copy_notice(root / "Emulator" / "Source" / "Families" / "astra-emu-fvp" / "THIRD_PARTY_NOTICES.md", temporary)
-        verify_distribution(temporary, manager_name, cli_name, family_name, manifest, target, environment)
+        copy_notice(root / "Emulator" / "Source" / "Families" / f"astra-emu-{args.family}" / "THIRD_PARTY_NOTICES.md", temporary)
+        verify_distribution(temporary, manager_name, cli_name, family_name, manifest, target, environment, args.family)
         report = distribution_report(
             temporary,
             manager_name,
@@ -109,6 +113,7 @@ def main() -> int:
             identity,
             args.development_ephemeral_signer or args.development_reuse_build,
             environment["ASTRA_EMU_FAMILY_SIGNER_ID"],
+            args.family,
         )
         write_json_new(temporary / "astraemu-desktop-package-evidence.json", report)
         temporary.replace(output)
@@ -178,14 +183,15 @@ def cargo_build(
     target: str,
     target_root: pathlib.Path,
     environment: dict[str, str],
+    family_id: str,
 ) -> pathlib.Path:
     # Build the host and dynamic family in one Cargo invocation. Running these
     # separately toggles `dynamic-plugin-export` in the same target directory
     # and forces Cargo to relink the family graph twice on every iteration.
     command = [
         "cargo", "build", "--locked", "--release", "--target", target,
-        "-p", "astra-emu-manager", "-p", "astra-emu-cli", "-p", "astra-emu-fvp",
-        "--features", "astra-emu-fvp/dynamic-plugin-export",
+        "-p", "astra-emu-manager", "-p", "astra-emu-cli", "-p", f"astra-emu-{family_id}",
+        "--features", f"astra-emu-{family_id}/dynamic-plugin-export",
         "--message-format=json-render-diagnostics",
     ]
     process = subprocess.Popen(
@@ -203,17 +209,17 @@ def cargo_build(
             message = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if message.get("reason") == "build-script-executed" and "astra-emu-fvp" in message.get("package_id", ""):
-            candidate = pathlib.Path(message["out_dir"]) / "astra-fvp-descriptor.json"
+        if message.get("reason") == "build-script-executed" and f"astra-emu-{family_id}" in message.get("package_id", ""):
+            candidate = pathlib.Path(message["out_dir"]) / f"astra-{family_id}-descriptor.json"
             descriptor = candidate
     if process.wait() != 0:
         fail("ASTRA_EMU_DESKTOP_CARGO_BUILD_FAILED")
     if descriptor is None:
-        candidates = list(target_root.glob(f"{target}/release/build/astra-emu-fvp-*/out/astra-fvp-descriptor.json"))
+        candidates = list(target_root.glob(f"{target}/release/build/astra-emu-{family_id}-*/out/astra-{family_id}-descriptor.json"))
         if len(candidates) != 1:
-            fail("ASTRA_EMU_FVP_DESCRIPTOR_MISSING")
+            fail("ASTRA_EMU_FAMILY_DESCRIPTOR_MISSING")
         descriptor = candidates[0]
-    require_file(descriptor, "ASTRA_EMU_FVP_DESCRIPTOR_MISSING")
+    require_file(descriptor, "ASTRA_EMU_FAMILY_DESCRIPTOR_MISSING")
     return descriptor
 
 
@@ -246,10 +252,11 @@ def verify_distribution(
     manifest_path: pathlib.Path,
     target: str,
     environment: dict[str, str],
+    family_id: str,
 ) -> None:
     require_file(root / manager_name, "ASTRA_EMU_DESKTOP_MANAGER_MISSING")
     require_file(root / cli_name, "ASTRA_EMU_DESKTOP_CLI_MISSING")
-    family = root / "families" / "fvp" / family_name
+    family = root / "families" / family_id / family_name
     require_file(family, "ASTRA_EMU_DESKTOP_FAMILY_MISSING")
     manifest = load_json(manifest_path)
     required = {
@@ -262,7 +269,7 @@ def verify_distribution(
         fail("ASTRA_EMU_DESKTOP_MANIFEST_FIELDS")
     if (
         manifest["schema"] != "astra.emu.native_plugin_manifest.v1"
-        or manifest["family_id"] != "fvp"
+        or manifest["family_id"] != family_id
         or manifest["signer_identity"] != environment["ASTRA_EMU_FAMILY_SIGNER_ID"]
         or manifest["signature_algorithm"] != "ed25519-v1"
         or manifest["package_eligible"] is not True
@@ -283,10 +290,11 @@ def distribution_report(
     identity: dict[str, Any],
     ephemeral: bool,
     signer_identity: str,
+    family_id: str,
 ) -> dict[str, Any]:
     manager = root / manager_name
     cli = root / cli_name
-    family = root / "families" / "fvp" / family_name
+    family = root / "families" / family_id / family_name
     report = {
         "schema": "astra.emu.desktop_package_evidence.v1",
         "status": "PASS",
@@ -296,7 +304,7 @@ def distribution_report(
         "manager_sha256": "sha256." + sha256_file(manager),
         "cli_file": cli_name,
         "cli_sha256": "sha256." + sha256_file(cli),
-        "family_file": f"families/fvp/{family_name}",
+        "family_file": f"families/{family_id}/{family_name}",
         "family_sha256": "sha256." + sha256_file(family),
         "family_manifest_sha256": "sha256." + sha256_file(manifest),
         "signer_identity": signer_identity,

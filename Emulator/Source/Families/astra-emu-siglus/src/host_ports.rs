@@ -64,9 +64,9 @@ impl SiglusResourcePortV8 {
         let mount_set_id = mount_set_id.into();
         let uri_prefix = uri_prefix.into().trim_end_matches('/').to_string();
         if mount_set_id.is_empty()
-            || uri_prefix.is_empty()
             || uri_prefix.contains('\\')
-            || !uri_prefix.contains("://")
+            || uri_prefix.starts_with('/')
+            || uri_prefix.split('/').any(|part| matches!(part, "." | ".."))
         {
             bail!("ASTRA_SIGLUS_HOST_VFS_BINDING_INVALID");
         }
@@ -92,14 +92,21 @@ impl SiglusResourcePortV8 {
     fn uri(&self, resource_id: &str) -> Result<String> {
         let resource_id = normalize_resource_id(resource_id)
             .map_err(|_| port_error("ASTRA_SIGLUS_RESOURCE_ID_INVALID"))?;
-        Ok(format!("{}/{resource_id}", self.uri_prefix))
+        if self.uri_prefix.is_empty() {
+            Ok(resource_id)
+        } else {
+            Ok(format!("{}/{resource_id}", self.uri_prefix))
+        }
     }
 
     fn resource_id(&self, uri: &str) -> Result<String> {
-        let prefix = format!("{}/", self.uri_prefix);
-        let resource_id = uri
-            .strip_prefix(&prefix)
-            .ok_or_else(|| port_error("ASTRA_SIGLUS_ENUMERATED_URI_OUTSIDE_BINDING"))?;
+        let resource_id = if self.uri_prefix.is_empty() {
+            uri
+        } else {
+            let prefix = format!("{}/", self.uri_prefix);
+            uri.strip_prefix(&prefix)
+                .ok_or_else(|| port_error("ASTRA_SIGLUS_ENUMERATED_URI_OUTSIDE_BINDING"))?
+        };
         normalize_resource_id(resource_id)
             .map_err(|_| port_error("ASTRA_SIGLUS_ENUMERATED_RESOURCE_ID_INVALID"))
     }
@@ -191,10 +198,7 @@ impl HostedResourcePort for SiglusResourcePortV8 {
         {
             bail!("ASTRA_SIGLUS_VFS_RANGE_RESULT_INVALID");
         }
-        result
-            .bytes
-            .try_into_vec()
-            .map_err(|_| port_error("ASTRA_SIGLUS_VFS_RANGE_OWNER_NOT_MOVABLE"))
+        Ok(result.bytes.as_slice().to_vec())
     }
 }
 

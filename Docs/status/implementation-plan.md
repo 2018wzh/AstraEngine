@@ -21,7 +21,7 @@
 
 ## 当前代码快照
 
-2026-08-09 身份更新：Family ABI 已硬迁移到 v8；FVP/Minori descriptor、FFI、snapshot、Manager、CLI 和 dynamic loader 同步迁移，v7 输入 fail-fast。v8 typed scene 新增 mesh/depth/material/scissor、effect/wipe、host-owned text layout、private material 与 logical save store；instance service dispatch 的长度、预算和 owned allocation 回归已通过。下表 Stage 5 长段中的 v5/v6/v7 只保留为历史 evidence，不能放行 v8。Siglus pinned fork 当前只有 semantic core/renderer 分层与 lazy `Scene.pck` range reader 的 E1；完整 hosted dependency closure、`astra-emu-siglus`、公开 E2、真实 Rewrite+、差分、性能与 Windows E3 均未完成。没有授权 `key.toml` 时，真实样本保持 blocking。
+2026-08-09 身份更新：Family ABI 已硬迁移到 v8；FVP/Minori descriptor、FFI、snapshot、Manager、CLI 和 dynamic loader 同步迁移，v7 输入 fail-fast。v8 typed scene 新增 mesh/depth/material/scissor、effect/wipe、host-owned text layout、private material 与 logical save store；instance service dispatch 的长度、预算和 owned allocation 回归已通过。下表 Stage 5 长段中的 v5/v6/v7 只保留为历史 evidence，不能放行 v8。Siglus pinned fork、dynamic provider、签名 desktop package 和 Rewrite+ Headless GPU smoke 已接通；授权 material 只由 host 从授权根读取，并以 logical secret id 跨 ABI。当前 smoke 仍是黑帧且无 snapshot，完整 resource/media/text host 化、逐帧差分、完整路线、性能与 Windows E3 均未完成。
 
 | Area | Code status | Evidence |
 | --- | --- | --- |
@@ -629,7 +629,7 @@ not manual E3 or clean Release performance evidence.
 
 ## 2026-08-09 Siglus 授权材料与 hosted lifecycle
 
-Siglus hosted fork 已固定到 `1b0814595ae83321666357a3b27b79802a328e76`。fork 的授权材料
+Siglus hosted fork 已固定到 `1e752ba96ab08cf3fb224e247815492c5dd8c5e4`。fork 的授权材料
 测试通过严格 profile 解析、`key.toml` 长度与字段校验、原版 `Gameexe.dat` 解码，以及
 `Scene.pck` 首场景的有界 range-read 解码；测试只输出脱敏 diagnostic，不记录 secret、商业
 payload 或本地路径。新增的 `HostedSession::open/step/shutdown` 使用显式 profile、逻辑 secret
@@ -642,8 +642,9 @@ open、首个 fixed step、resource ledger 与 shutdown。它没有覆盖 G00、
 save/load，因此只计入 lifecycle E1，不计入计划中的完整公开 E2。
 
 `astra-emu-siglus` 已加入 workspace，并把 Astra Family ABI v8 的 VFS、private material 和
-save store host 映射到 fork hosted ports。adapter 单元测试覆盖逻辑资源身份、revision、range
-bounds、secret 精确长度与首个空槽写入约束。当前 fork 还没有 snapshot/save/restore、完整
-resource/media/text host 化和有界 typed delta，因此 crate 暂不导出 runtime provider；公开
-fixture、动态 Headless E2、真实 Rewrite+ 长流程、存档 round-trip、差分、性能和 Windows E3
-继续保持 `IN_PROGRESS`。
+save store host 映射到 fork hosted ports。adapter 与 provider fixture 覆盖逻辑资源身份、revision、
+range bounds、secret 精确长度、首个空槽约束以及 probe/open/step/shutdown。crate 已导出 dynamic
+provider，基础 2D retained scene 可进入共享 Headless GPU host；授权 Rewrite+ 的签名 development
+distribution 已完成 10 tick、3 条物理输入、8 次 presentation 的 smoke。该 run 全是黑帧并关闭了
+snapshot，因此只证明 dynamic lifecycle，不证明视觉或路线准确。图片/媒体/文本 host 化、
+snapshot/save/restore、fork oracle、逐帧比对、完整路线、性能和 Windows E3 继续保持 `IN_PROGRESS`。

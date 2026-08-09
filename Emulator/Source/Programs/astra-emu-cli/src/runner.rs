@@ -14,11 +14,11 @@ use astra_core::{
 #[cfg(test)]
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV8, LegacyProbeRequest,
-    LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextPresentationV1, LegacyTextRegionV1,
-    LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1,
-    LegacyVideoMode,
+    validate_symbol, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV8,
+    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV8,
+    LegacyProbeRequest, LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextPresentationV1,
+    LegacyTextRegionV1, LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
@@ -84,7 +84,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc as tokio_mpsc, task::JoinHandle};
 
 use crate::{
-    family_host::CliFamilyHostConfig,
+    family_host::{CliFamilyHostConfig, CliPrivateMaterialHost},
     input::{read_input_sequence, ValidatedInputSequence},
     rasterizer::{CpuStageRasterizer, PreparedRenderFrame},
     text_presentation::BoundTextPresenter,
@@ -278,6 +278,7 @@ pub struct HeadlessLaunch {
     pub artifact_root: PathBuf,
     pub family_manifest: Option<PathBuf>,
     pub family_library: Option<PathBuf>,
+    pub private_material: Option<PathBuf>,
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub video_provider: String,
@@ -313,6 +314,7 @@ pub struct NativeLaunch {
     pub entry: Option<String>,
     pub family_manifest: Option<PathBuf>,
     pub family_library: Option<PathBuf>,
+    pub private_material: Option<PathBuf>,
     pub enable_audio: bool,
     pub perfetto_trace: Option<PathBuf>,
     pub input_path: Option<PathBuf>,
@@ -475,6 +477,8 @@ struct PreparedFamilyCase {
     package_hash: Hash256,
     entry_uri: String,
     fvp_pack_paths: Option<Vec<String>>,
+    siglus_profile: Option<String>,
+    siglus_private_material_id: Option<String>,
     reader: Arc<dyn LegacyVfsReader>,
     evidence: VfsEvidenceBackend,
 }
@@ -576,6 +580,7 @@ fn prepare_family_case(
     match family_id {
         "fvp" => prepare_fvp_case(game_root, mount_profile, entry, mount_set_id),
         "minori" => prepare_minori_case(game_root, mount_profile, entry, mount_set_id),
+        "siglus" => prepare_siglus_case(game_root, mount_profile, entry, mount_set_id),
         _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
     }
 }
@@ -617,6 +622,8 @@ fn prepare_fvp_case(
         package_hash,
         entry_uri: case.relative_path,
         fvp_pack_paths: Some(pack_paths.into_iter().collect()),
+        siglus_profile: None,
+        siglus_private_material_id: None,
         reader: registry.clone(),
         evidence: VfsEvidenceBackend::Desktop {
             registry,
@@ -694,9 +701,124 @@ fn prepare_minori_case(
         package_hash,
         entry_uri,
         fvp_pack_paths: None,
+        siglus_profile: None,
+        siglus_private_material_id: None,
         reader: adapter.clone(),
         evidence: VfsEvidenceBackend::Mounted(adapter),
     })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SiglusMountOptions {
+    case_profile: String,
+    #[serde(default)]
+    private_material_id: Option<String>,
+}
+
+fn prepare_siglus_case(
+    game_root: &Path,
+    mount_profile: &Path,
+    entry: Option<&str>,
+    mount_set_id: &str,
+) -> Result<PreparedFamilyCase, String> {
+    let loaded = astra_emu_family_support::load_mount_profile(mount_profile)
+        .map_err(|error| error.to_string())?;
+    if loaded.profile.family_id != "siglus"
+        || loaded.profile.family_options_schema != "astra.emu.siglus_mount_options.v1"
+    {
+        return Err("ASTRA_EMU_SIGLUS_MOUNT_PROFILE".into());
+    }
+    let options: SiglusMountOptions = serde_json::from_slice(&loaded.family_config.payload)
+        .map_err(|_| "ASTRA_EMU_SIGLUS_MOUNT_OPTIONS".to_owned())?;
+    let (gameexe_name, scene_name) = match options.case_profile.as_str() {
+        "siglus.original" => ("Gameexe.dat", "Scene.pck"),
+        "siglus.translated" => ("Gameexe.chs", "Scene.chs"),
+        _ => return Err("ASTRA_EMU_SIGLUS_CASE_PROFILE".into()),
+    };
+    if options
+        .private_material_id
+        .as_deref()
+        .is_some_and(|id| validate_symbol("private_material_id", id).is_err())
+    {
+        return Err("ASTRA_EMU_SIGLUS_PRIVATE_MATERIAL_ID".into());
+    }
+    let roots = ["", "StartData/GameData"];
+    let mut selected = Vec::new();
+    for root in roots {
+        let physical_root = if root.is_empty() {
+            game_root.to_path_buf()
+        } else {
+            game_root.join(root)
+        };
+        if physical_root.join(gameexe_name).is_file() && physical_root.join(scene_name).is_file() {
+            selected.push(root);
+        }
+    }
+    if selected.len() != 1 {
+        return Err("ASTRA_EMU_SIGLUS_ROOT_AMBIGUOUS".into());
+    }
+    let root = selected[0];
+    let gameexe_uri = if root.is_empty() {
+        gameexe_name.to_owned()
+    } else {
+        format!("{root}/{gameexe_name}")
+    };
+    if entry.is_some_and(|entry| entry != gameexe_uri) {
+        return Err("ASTRA_EMU_SIGLUS_ENTRY_INVALID".into());
+    }
+    let registry = Arc::new(DesktopVfsRegistry::default());
+    registry.bind(mount_set_id, &game_root.to_string_lossy())?;
+    let scene_uri = if root.is_empty() {
+        scene_name.to_owned()
+    } else {
+        format!("{root}/{scene_name}")
+    };
+    let gameexe_stat = registry
+        .stat_file(mount_set_id, &gameexe_uri)
+        .map_err(|error| error.to_string())?;
+    let scene_stat = registry
+        .stat_file(mount_set_id, &scene_uri)
+        .map_err(|error| error.to_string())?;
+    let package_hash = Hash256::from_sha256(
+        format!(
+            "siglus-case-v1\0{gameexe_uri}\0{}\0{}\0{scene_uri}\0{}\0{}",
+            gameexe_stat.len, gameexe_stat.revision.0, scene_stat.len, scene_stat.revision.0,
+        )
+        .as_bytes(),
+    );
+    Ok(PreparedFamilyCase {
+        family_id: "siglus".into(),
+        case_identity: format!("siglus-{}", &package_hash.to_string()[7..23]),
+        package_hash,
+        entry_uri: gameexe_uri,
+        fvp_pack_paths: None,
+        siglus_profile: Some(options.case_profile),
+        siglus_private_material_id: options.private_material_id,
+        reader: registry.clone(),
+        evidence: VfsEvidenceBackend::Desktop {
+            registry,
+            mount_set_id: mount_set_id.into(),
+        },
+    })
+}
+
+fn prepare_private_material_host(
+    family_id: &str,
+    game_root: &Path,
+    path: Option<&Path>,
+    case: &PreparedFamilyCase,
+) -> Result<Option<Arc<dyn astra_emu_family_api::LegacyPrivateMaterialHostV8>>, String> {
+    match (family_id, path, case.siglus_private_material_id.as_deref()) {
+        ("siglus", Some(path), Some(secret_id)) => {
+            CliPrivateMaterialHost::load_siglus(game_root, path, secret_id).map(Some)
+        }
+        ("siglus", None, Some(_)) => Err("ASTRA_EMU_PRIVATE_MATERIAL_REQUIRED".into()),
+        ("siglus", Some(_), None) => Err("ASTRA_EMU_PRIVATE_MATERIAL_UNDECLARED".into()),
+        ("siglus", None, None) => Ok(None),
+        (_, None, None) => Ok(None),
+        _ => Err("ASTRA_EMU_PRIVATE_MATERIAL_FAMILY".into()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -822,8 +944,14 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         _ => return Err("ASTRA_EMU_CLI_FAMILY_PATH_PAIR_REQUIRED".into()),
     };
     let phase_started = Instant::now();
+    let private_material = prepare_private_material_host(
+        &launch.family_id,
+        &game_root,
+        launch.private_material.as_deref(),
+        &prepared,
+    )?;
     let (family, family_binary_hash) =
-        family_config.create_provider_with_identity(prepared.reader.clone())?;
+        family_config.create_provider_with_services(prepared.reader.clone(), private_material)?;
     let family_provider_id = family.descriptor().provider_id.clone();
     record_native_launch_phase("family_load", phase_started, launch_started);
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
@@ -1293,8 +1421,14 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         }
         _ => return Err("ASTRA_EMU_HEADLESS_FAMILY_PATH_PAIR".into()),
     };
+    let private_material = prepare_private_material_host(
+        &launch.family_id,
+        &game_root,
+        launch.private_material.as_deref(),
+        &prepared,
+    )?;
     let (family, family_binary_hash) =
-        family_config.create_provider_with_identity(prepared.reader.clone())?;
+        family_config.create_provider_with_services(prepared.reader.clone(), private_material)?;
     let family_provider_id = family.descriptor().provider_id.clone();
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.headless.instance".into()))?;
@@ -2564,6 +2698,20 @@ fn probe_profile(
     request: ProbeProfileRequest<'_>,
 ) -> Result<ProbeProfile, String> {
     let (requested_stage_width, requested_stage_height) = request.stage_size;
+    let candidate_uris = if case.family_id == "siglus" {
+        let scene_name = match case.siglus_profile.as_deref() {
+            Some("siglus.original") => "Scene.pck",
+            Some("siglus.translated") => "Scene.chs",
+            _ => return Err("ASTRA_EMU_SIGLUS_CASE_PROFILE".into()),
+        };
+        let scene_uri = case.entry_uri.rsplit_once('/').map_or_else(
+            || scene_name.to_owned(),
+            |(root, _)| format!("{root}/{scene_name}"),
+        );
+        vec![case.entry_uri.clone(), scene_uri]
+    } else {
+        vec![case.entry_uri.clone()]
+    };
     let report = runtime.probe_family(
         &LegacyRuntimeHostCtx {
             case_id: case.case_identity.clone(),
@@ -2578,11 +2726,11 @@ fn probe_profile(
         },
         LegacyProbeRequest {
             root_mount_id: request.mount_set_id.into(),
-            candidate_uris: vec![case.entry_uri.clone()],
+            candidate_uris,
             // Installation identity belongs to the host. The family returns the
             // bounded entry/script identity used by the runtime profile.
             marker_hashes: Vec::new(),
-            max_entries: 1,
+            max_entries: if case.family_id == "siglus" { 2 } else { 1 },
             max_metadata_bytes: 512 * 1024 * 1024,
         },
     )?;
@@ -2614,6 +2762,38 @@ fn probe_profile(
                 ]
                 .into_iter()
                 .collect(),
+            },
+            content_identity: report.content_identity,
+        });
+    }
+    if case.family_id == "siglus" {
+        if requested_stage_width == 0 || requested_stage_height == 0 {
+            return Err("ASTRA_EMU_SIGLUS_PROBE_STAGE_INVALID".into());
+        }
+        let compatibility_profile = case
+            .siglus_profile
+            .clone()
+            .ok_or_else(|| "ASTRA_EMU_SIGLUS_CASE_PROFILE".to_owned())?;
+        let mut family_options = BTreeMap::from([
+            (
+                "astra.stage_width".into(),
+                requested_stage_width.to_string(),
+            ),
+            (
+                "astra.stage_height".into(),
+                requested_stage_height.to_string(),
+            ),
+        ]);
+        if let Some(secret_id) = &case.siglus_private_material_id {
+            family_options.insert("siglus.private_material_id".into(), secret_id.clone());
+        }
+        return Ok(ProbeProfile {
+            runtime: astra_emu_manager_core::CaseRuntimeProfileRecord {
+                case_identity: case.case_identity.clone(),
+                family_id: case.family_id.clone(),
+                fixed_delta_ns: FIXED_DELTA_NS,
+                compatibility_profile,
+                family_options,
             },
             content_identity: report.content_identity,
         });
