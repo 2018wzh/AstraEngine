@@ -629,12 +629,14 @@ not manual E3 or clean Release performance evidence.
 
 ## 2026-08-09 Siglus 授权材料与 hosted lifecycle
 
-Siglus hosted fork 已固定到 `c4ce03c343ea303894c315fcbf49cb37f955d362`。fork 的授权材料
+Siglus hosted fork 已固定到 `0351787f0a2163bf32e0fcb8e18106dff7a4e3a1`。fork 的授权材料
 测试通过严格 profile 解析、`key.toml` 长度与字段校验、原版 `Gameexe.dat` 解码，以及
 `Scene.pck` 首场景的有界 range-read 解码；测试只输出脱敏 diagnostic，不记录 secret、商业
 payload 或本地路径。新增的 `HostedSession::open/step/shutdown` 使用显式 profile、逻辑 secret
 id、严格递增的 input sequence 和有理数 fixed tick。仓库外 Rewrite+ 已完成一次 open 与首个
 fixed step，并验证错误后 session poison；这只证明启动边界可运行，不代表长流程通过。
+scene bytecode 现由 reference-counted owned storage 持有，scene switch、resume point 与 cache 不再
+依赖 `Box::leak`；最后一个 stream 释放后底层 buffer 同步释放。
 
 `astra-emu-siglus` 已加入 workspace，并把 Astra Family ABI v8 的 VFS、private material 和
 save store host 映射到 fork hosted ports。adapter 单元测试覆盖逻辑资源身份、revision、range

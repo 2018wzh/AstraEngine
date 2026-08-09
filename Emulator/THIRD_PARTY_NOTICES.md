@@ -23,7 +23,7 @@
 - Upstream and hosted fork: <https://github.com/2018wzh/siglus_rs>
 - Baseline revision: `a8a3376049f47a141a673a49f15ab7de8746e1e1`
 - Hosted branch: `astra-hosted`
-- Pinned hosted revision: `c4ce03c343ea303894c315fcbf49cb37f955d362`
+- Pinned hosted revision: `0351787f0a2163bf32e0fcb8e18106dff7a4e3a1`
 - License: MPL-2.0
 - Astra adapter source: `Emulator/Source/Families/astra-emu-siglus/`
 - Status: host-port adapter only; no runtime provider or release evidence yet
