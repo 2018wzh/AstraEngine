@@ -2,7 +2,7 @@
 
 `astra-emu-siglus` links the MPL-2.0 `siglus_rs` hosted fork from
 <https://github.com/2018wzh/siglus_rs> at revision
-`a815b590f944bc9b40374e76efb0f0fdef97e183`.
+`c4ce03c343ea303894c315fcbf49cb37f955d362`.
 
 The reviewed upstream baseline is
 `a8a3376049f47a141a673a49f15ab7de8746e1e1`. Astra-specific changes remain in

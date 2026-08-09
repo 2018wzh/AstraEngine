@@ -627,16 +627,18 @@ JSONL sequence; external gameplay input is rejected and counted, while surface
 readback is restricted to declared checkpoints. This is developer E2 evidence,
 not manual E3 or clean Release performance evidence.
 
-## 2026-08-09 Siglus 授权材料与 v8 host adapter
+## 2026-08-09 Siglus 授权材料与 hosted lifecycle
 
-Siglus hosted fork 已固定到 `a815b590f944bc9b40374e76efb0f0fdef97e183`。fork 的授权材料
+Siglus hosted fork 已固定到 `c4ce03c343ea303894c315fcbf49cb37f955d362`。fork 的授权材料
 测试通过严格 profile 解析、`key.toml` 长度与字段校验、原版 `Gameexe.dat` 解码，以及
 `Scene.pck` 首场景的有界 range-read 解码；测试只输出脱敏 diagnostic，不记录 secret、商业
-payload 或本地路径。该结果解除 private material 的前置阻断，但只证明材料可由 hosted 资源
-边界读取，不代表真实游戏流程已经运行。
+payload 或本地路径。新增的 `HostedSession::open/step/shutdown` 使用显式 profile、逻辑 secret
+id、严格递增的 input sequence 和有理数 fixed tick。仓库外 Rewrite+ 已完成一次 open 与首个
+fixed step，并验证错误后 session poison；这只证明启动边界可运行，不代表长流程通过。
 
 `astra-emu-siglus` 已加入 workspace，并把 Astra Family ABI v8 的 VFS、private material 和
 save store host 映射到 fork hosted ports。adapter 单元测试覆盖逻辑资源身份、revision、range
-bounds、secret 精确长度与首个空槽写入约束。当前 fork 尚未实现完整 `HostedSession`
-生命周期，因此 crate 不导出 runtime provider；公开 fixture、动态 Headless E2、真实 Rewrite+
-长流程、存档 round-trip、差分、性能和 Windows E3 继续保持 `IN_PROGRESS`。
+bounds、secret 精确长度与首个空槽写入约束。当前 fork 还没有 snapshot/save/restore、完整
+resource/media/text host 化和有界 typed delta，因此 crate 暂不导出 runtime provider；公开
+fixture、动态 Headless E2、真实 Rewrite+ 长流程、存档 round-trip、差分、性能和 Windows E3
+继续保持 `IN_PROGRESS`。

@@ -16,7 +16,7 @@ dynamic-plugin-export = []
 anyhow = "1"
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-siglus-hosted = { package = "siglus_scene_vm", git = "https://github.com/2018wzh/siglus_rs.git", rev = "a815b590f944bc9b40374e76efb0f0fdef97e183", default-features = false, features = ["hosted"] }
+siglus-hosted = { package = "siglus_scene_vm", git = "https://github.com/2018wzh/siglus_rs.git", rev = "c4ce03c343ea303894c315fcbf49cb37f955d362", default-features = false, features = ["hosted"] }
 zeroize.workspace = true
 
 [dev-dependencies]
@@ -31,5 +31,5 @@ sha2.workspace = true
 upstream = "https://github.com/2018wzh/siglus_rs"
 upstream_revision = "a8a3376049f47a141a673a49f15ab7de8746e1e1"
 hosted_fork = "https://github.com/2018wzh/siglus_rs"
-hosted_fork_revision = "a815b590f944bc9b40374e76efb0f0fdef97e183"
+hosted_fork_revision = "c4ce03c343ea303894c315fcbf49cb37f955d362"
 license_notice = "THIRD_PARTY_NOTICES.md"
