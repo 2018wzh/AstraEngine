@@ -6869,7 +6869,7 @@ dependencies = [
 [[package]]
 name = "na_mpeg2_decoder"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1#0351787f0a2163bf32e0fcb8e18106dff7a4e3a1"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76#1b0814595ae83321666357a3b27b79802a328e76"
 dependencies = [
  "byteorder",
  "log",
@@ -9609,7 +9609,7 @@ dependencies = [
 [[package]]
 name = "shion-xfile"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1#0351787f0a2163bf32e0fcb8e18106dff7a4e3a1"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76#1b0814595ae83321666357a3b27b79802a328e76"
 dependencies = [
  "flate2",
 ]
@@ -9629,21 +9629,21 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 [[package]]
 name = "siglus_assets"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1#0351787f0a2163bf32e0fcb8e18106dff7a4e3a1"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76#1b0814595ae83321666357a3b27b79802a328e76"
 dependencies = [
  "anyhow",
  "encoding_rs",
  "hex",
  "image 0.24.9",
  "lewton",
- "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1)",
+ "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76)",
  "zeroize",
 ]
 
 [[package]]
 name = "siglus_omv_decoder"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1#0351787f0a2163bf32e0fcb8e18106dff7a4e3a1"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76#1b0814595ae83321666357a3b27b79802a328e76"
 dependencies = [
  "anyhow",
  "lewton",
@@ -9654,7 +9654,7 @@ dependencies = [
 [[package]]
 name = "siglus_scene_vm"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1#0351787f0a2163bf32e0fcb8e18106dff7a4e3a1"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76#1b0814595ae83321666357a3b27b79802a328e76"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -9670,7 +9670,7 @@ dependencies = [
  "js-sys",
  "kira 0.9.6",
  "log",
- "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1)",
+ "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76)",
  "ndk-context",
  "shion-xfile",
  "siglus_assets",
@@ -10674,7 +10674,7 @@ dependencies = [
 [[package]]
 name = "theora-rs"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/siglus_rs.git?rev=0351787f0a2163bf32e0fcb8e18106dff7a4e3a1#0351787f0a2163bf32e0fcb8e18106dff7a4e3a1"
+source = "git+https://github.com/2018wzh/siglus_rs.git?rev=1b0814595ae83321666357a3b27b79802a328e76#1b0814595ae83321666357a3b27b79802a328e76"
 
 [[package]]
 name = "thiserror"
