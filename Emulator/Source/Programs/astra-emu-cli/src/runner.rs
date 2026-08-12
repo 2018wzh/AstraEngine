@@ -378,6 +378,7 @@ pub fn headless_performance_budget_template(
     });
     profile.render_policy = HeadlessRenderPolicy::All;
     profile.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
+    profile.artifacts.retention = astra_platform::HeadlessArtifactRetention::ManifestOnly;
     let frame_bytes = usize::try_from(viewport_width)
         .ok()
         .and_then(|width| {
