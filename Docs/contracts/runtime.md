@@ -80,7 +80,7 @@ Tokio task 完成后只提交 `AwaitResult`。Runtime 在固定 tick 边界按 `
 - Transition 使用 `actions: Vec<ActionInvocation>`，同一个 transition 内按顺序执行。
 - 同一 machine 在单个 fixed tick 内连续执行 transition，直到稳定态、terminal state 或出现 blocking diagnostic。循环和 microstep 超限会回滚该 machine 在本 tick 的全部候选变更。
 - Action 只通过 `DeterministicActionContext` 改 Actor/typed Component、Blackboard、EventQueue、AwaitToken、PresentationCommand 和 delayed event queue；实时路径不生成序列化 effect。
-- Runtime action 在 host 内以 typed Rust action 注册。通用动态 action ABI 与 bytes invoke adapter 已删除；动态 gameplay provider 只通过 Provider ABI v3 返回 typed live/control output。
+- Runtime action 在 host 内以 typed Rust action 注册。通用动态 action ABI 与 bytes invoke adapter 已删除；动态 gameplay provider 只通过 Provider ABI v4 返回 typed live/control output。
 - `ActionRegistry` 拒绝空 descriptor、重复 action id 和 provider 冲突，不按后注册覆盖前注册。
 - 状态机定义分双轨：引擎系统用 Rust code-first；项目 gameplay/VN 可以用 YAML/Graph 定义并 Cook 成 IR。
 - Save 保存 `StableIdGenerator`、Actor/typed Component、StateMachine、Blackboard、AwaitQueue、完整 EventQueue、DelayedEventQueue 和 MutationLog，不保存实时 effect trace、ECS entity、native handle 或 Future 内部状态。typed component 只在 save 时编码，restore 后首次 typed read 才懒解码。

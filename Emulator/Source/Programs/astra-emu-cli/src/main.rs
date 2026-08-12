@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use astra_emu_cli::{
-    run_headless, run_native, ExtensionBinding, HeadlessLaunch, HeadlessPerformanceArtifacts,
+    run_headless, run_native, write_headless_performance_budget,
+    write_headless_performance_budget_template, HeadlessLaunch, HeadlessPerformanceArtifacts,
     NativeLaunch, NativeLaunchMode,
 };
 use clap::{Parser, Subcommand};
@@ -20,14 +21,12 @@ fn parse_presentation_rate(value: &str) -> Result<u32, String> {
     }
 }
 
-fn extension_binding(
-    library: Option<PathBuf>,
-    timeout_ms: Option<u32>,
-) -> Option<ExtensionBinding> {
-    library.map(|library| ExtensionBinding {
-        library,
-        timeout_ms: timeout_ms.unwrap_or(2_000),
-    })
+fn ensure_headless_status(status: &str) -> Result<(), &'static str> {
+    if status == "passed" {
+        Ok(())
+    } else {
+        Err("ASTRA_EMU_HEADLESS_RUN_BLOCKED")
+    }
 }
 
 #[derive(Debug, Parser)]
@@ -47,6 +46,30 @@ struct Cli {
 enum CliCommand {
     /// Inspect, verify, extract, or mount a family-owned legacy VFS.
     Vfs(vfs::VfsArgs),
+    /// Write the reusable profile used to prepare a family Headless GPU budget.
+    PrepareHeadlessPerformanceProfile {
+        #[arg(long)]
+        family: String,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1280)]
+        viewport_width: u32,
+        #[arg(long, default_value_t = 720)]
+        viewport_height: u32,
+    },
+    /// Write the exact AstraEMU Headless 120 Hz performance budget.
+    PrepareHeadlessPerformanceBudget {
+        #[arg(long)]
+        family: String,
+        #[arg(long)]
+        budget_id: String,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1280)]
+        viewport_width: u32,
+        #[arg(long, default_value_t = 720)]
+        viewport_height: u32,
+    },
     /// Launch the selected family directly in an overlay-free native game host.
     Run {
         #[arg(long)]
@@ -61,10 +84,6 @@ enum CliCommand {
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
-        #[arg(long)]
-        extension_library: Option<PathBuf>,
-        #[arg(long, requires = "extension_library")]
-        extension_timeout_ms: Option<u32>,
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
@@ -96,10 +115,6 @@ enum CliCommand {
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
         #[arg(long)]
-        extension_library: Option<PathBuf>,
-        #[arg(long, requires = "extension_library")]
-        extension_timeout_ms: Option<u32>,
-        #[arg(long)]
         input: PathBuf,
         #[arg(long)]
         artifacts: PathBuf,
@@ -126,16 +141,14 @@ enum CliCommand {
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
-        #[arg(long)]
-        extension_library: Option<PathBuf>,
-        #[arg(long, requires = "extension_library")]
-        extension_timeout_ms: Option<u32>,
         #[arg(long, default_value_t = 1280)]
         viewport_width: u32,
         #[arg(long, default_value_t = 720)]
         viewport_height: u32,
         #[arg(long, default_value = "disabled", value_parser = ["disabled", "ffmpeg-vcpkg"])]
         video_provider: String,
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        verify_snapshot: bool,
         #[arg(
             long,
             default_value = "checkpoints",
@@ -166,6 +179,12 @@ enum CliCommand {
         /// Stream and hash every visible resource after the gameplay run.
         #[arg(long, default_value_t = false)]
         audit_all_resources: bool,
+        /// Restore an identity-bound local-private Headless continuation snapshot.
+        #[arg(long)]
+        resume_snapshot: Option<PathBuf>,
+        /// Atomically export an identity-bound local-private continuation snapshot.
+        #[arg(long)]
+        snapshot_output: Option<PathBuf>,
     },
 }
 
@@ -177,6 +196,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _observability = astra_observability::init_host(observability)?;
     match Cli::parse().command {
         CliCommand::Vfs(arguments) => vfs::run(arguments)?,
+        CliCommand::PrepareHeadlessPerformanceProfile {
+            family,
+            output,
+            viewport_width,
+            viewport_height,
+        } => write_headless_performance_budget_template(
+            &family,
+            viewport_width,
+            viewport_height,
+            &output,
+        )?,
+        CliCommand::PrepareHeadlessPerformanceBudget {
+            family,
+            budget_id,
+            output,
+            viewport_width,
+            viewport_height,
+        } => write_headless_performance_budget(
+            &family,
+            viewport_width,
+            viewport_height,
+            &budget_id,
+            &output,
+        )?,
         CliCommand::Run {
             family,
             game_dir,
@@ -184,8 +227,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry,
             family_manifest,
             family_library,
-            extension_library,
-            extension_timeout_ms,
             enable_audio,
             perfetto_trace,
             input,
@@ -202,7 +243,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 entry,
                 family_manifest,
                 family_library,
-                extension: extension_binding(extension_library, extension_timeout_ms),
                 enable_audio,
                 perfetto_trace,
                 input_path: input,
@@ -222,8 +262,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry,
             family_manifest,
             family_library,
-            extension_library,
-            extension_timeout_ms,
             input,
             artifacts,
             enable_audio,
@@ -240,7 +278,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 entry,
                 family_manifest,
                 family_library,
-                extension: extension_binding(extension_library, extension_timeout_ms),
                 enable_audio,
                 perfetto_trace,
                 input_path: Some(input),
@@ -264,11 +301,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifacts,
             family_manifest,
             family_library,
-            extension_library,
-            extension_timeout_ms,
             viewport_width,
             viewport_height,
             video_provider,
+            verify_snapshot,
             artifact_retention,
             frame_sample_interval,
             presentation_rate_hz,
@@ -278,6 +314,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             performance_trace_manifest,
             performance_warmup_presentations,
             audit_all_resources,
+            resume_snapshot,
+            snapshot_output,
         } => {
             tracing::info!(
                 event = "astra_emu_cli_headless_started",
@@ -308,16 +346,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 artifact_root: artifacts,
                 family_manifest,
                 family_library,
-                extension: extension_binding(extension_library, extension_timeout_ms),
                 viewport_width,
                 viewport_height,
                 video_provider,
+                verify_snapshot,
                 artifact_retention,
                 frame_sample_interval,
                 presentation_rate_hz,
                 perfetto_trace,
                 performance,
                 audit_all_resources,
+                resume_snapshot,
+                snapshot_output,
             })
             .await?;
             tracing::info!(
@@ -325,9 +365,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 family = family.as_str(),
                 fixed_steps = report.fixed_steps,
                 presented_frames = report.presented_frames,
-                terminal = report.terminal_reached
+                terminal = report.terminal_reached,
+                status = report.status.as_str()
             );
             println!("{}", serde_json::to_string(&report)?);
+            ensure_headless_status(&report.status)?;
         }
     }
     Ok(())
@@ -390,5 +432,14 @@ mod tests {
             "artifacts"
         ])
         .is_ok());
+    }
+
+    #[test]
+    fn blocked_headless_report_returns_a_failing_process_result() {
+        assert_eq!(ensure_headless_status("passed"), Ok(()));
+        assert_eq!(
+            ensure_headless_status("blocked"),
+            Err("ASTRA_EMU_HEADLESS_RUN_BLOCKED")
+        );
     }
 }

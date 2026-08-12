@@ -2,6 +2,7 @@
 //!
 
 pub mod asf;
+pub mod avi;
 pub mod bitreader;
 pub mod decoder;
 pub mod error;
@@ -23,7 +24,11 @@ pub mod api;
 
 #[cfg(feature = "audio")]
 pub use api::{AsfWmaDecoder, DecodedAudioFrame};
-pub use api::{AsfWmv2Decoder, DecodedFrame, Wmv2Decoder};
+pub use api::{AsfWmv2Decoder, DecodedFrame, Wmv2Decoder, Wmv3Decoder};
+pub use avi::{
+    AviAudioInfo, AviDemuxer, AviPacket, AviPacketKind, AviStreamFormat, AviStreamInfo,
+    AviVideoInfo,
+};
 pub use decoder::YuvFrame;
 pub use error::{DecoderError, Result};
 

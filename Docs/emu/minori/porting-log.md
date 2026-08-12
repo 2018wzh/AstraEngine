@@ -1,5 +1,103 @@
 # Minori 移植日志
 
+## 2026-08-12
+
+### message voice 资源绑定
+
+- 对 89 个解密脚本与 `voice.paz` 做了脱敏全量绑定：18,319 条 message 中 7,049 条携带 voice，形成 7,047 个唯一 identity。7,015 个 identity 与 archive entry 直接同名；其余 32 个都带 `[volume,pan]` 修饰，去除修饰后分别唯一命中余下 32 个 entry。两侧基础 identity 集合完全闭合，没有缺失、歧义或路径非法项；公开记录只保留计数和集合 hash。
+- IDA 复核 `CommandMessage` 后确认 voice 使用通用音频资源解析器：`[` 前是资源名，volume 默认 100 并限制到 0–100，pan 默认 0 并限制到 -100–100。每条新 message 先停止当前 voice stream，非空 voice 再单次播放。runtime 已据此通过公共 `LegacyAudioCommandV1` 发出 Ogg load/play/stop，没有 Luau、系统 codec 或命名 fallback。
+- 原程序 backlog state 12 的 Enter 分支会取当前 `CLog` 记录、停止 voice，再调用同一播放函数；它不提交脚本 command。provider 因此只在 Backlog 页把物理 Enter 映射为当前记录重播，并保持原 message await 不变；与 wheel 同 tick 的冲突输入直接阻断。
+- runtime state 硬切到 `astra.emu.minori.runtime_state.v21`，message/backlog 保存有界 voice URI、volume、pan 与 hash，restore 重新走 VFS/resource channel。107 个 `astra-emu-minori` library tests 和该 crate 全 targets clippy 通过。真实签名 plugin、Headless voice meter、backlog voice replay 与人工听审仍待重跑，不能把本次 E1 关闭写成新的 E2。
+- 当前 v21 release CLI 与签名动态 plugin 已完成真实八包首路线复跑：33553 fixed steps、34172 个呈现帧、16957 条物理输入和 34 个 checkpoint，最终到达 terminal；snapshot round-trip、用户 save/restore、自然解锁、结局返回标题和零 diagnostic 均成立。backlog 页的物理 Enter 在不推进 VM 的情况下重播当前记录，随后仍恢复同一 message wait；Host 同 tick 返回旧输入 completion 的冲突已在 provider 边界显式消费，未通过丢弃结果或隐式推进规避。
+- 模型检查 `backlog_open`、`backlog_voice_replay`、首个 choice 与返回标题画面，未发现重播导致的画面跳变、裁剪、错层或残留。完整 WAV 为 48 kHz 双声道、27311104 frame（约 568.981 秒），master peak 0.989529，离线量测无 full-scale sample，output overload 与 underflow 均为 0。该结果把 message voice 与 backlog replay 纳入同一条 Headless E2，但不替代具名人工整段听审、Windows E3 或第四条路线后的鉴赏验收。
+
+### Auto/Skip 三态与原版菜单入口
+
+- 再次 fetch 后确认 `origin/master` 仍是当前分支祖先，rebase 为 no-op，未触碰工作树中的任务改动。
+- IDA 复核确认原程序只保存一个互斥 `playMode`：0 为 normal、1 为 auto、2 为 skip。`auto`/`skip` 动作再次触发会回到 normal；Control 是受 `enable_control` 与 `skip_enable` 双门控的临时快进，不等同于持久 skip。runtime 因此删除可重复推导的 `auto_mode`/`skip_mode`，改为 snapshot-safe 三态，并把 schema 硬切到 `astra.emu.minori.runtime_state.v20`。
+- 原版游戏菜单首项根据配置偏好选择 Auto 或 Skip，点击时把对应模式写入同一个状态。参考舞台为 1280×720，菜单背景按右下角布局，首项图片命中区为 `[1125,1177) × [577,616)`。provider 只接受有界的 stage-space `pointer.x/y` 与主键物理输入；该点击即使同时完成 host 的 message await，也只切换模式，不把同一点击再次解释为普通正文推进。
+- 原程序设置项 `messageSpeedAutoPlay` 缺省为 50，消息态以该值乘 10 ms 建立 Auto 文末等待。新 message 在 Auto 状态下因此发布 500 ms 的公共 time wait；当前已经显示的 message 不因中途切换而丢失。106 个 Minori 定向测试通过，新增覆盖三态互斥、snapshot、500 ms wait 与菜单点击冲突。
+- release CLI 与动态 Minori library 已从当前源码重建，并使用只存在于本地进程环境的临时开发签名身份绑定最终 DLL；private key、manifest 和 artifact 均留在 ignored 私有目录。真实八包短程 Headless E2 推进 2255 fixed steps，严格 `minori.play_mode=auto` observation 通过，500 ms 后正文自然进入下一记录，两个 checkpoint 的 frame 与 observation hash 都发生变化，diagnostic 为空。人工查看两帧未见缺字、裁剪、拉伸或图层残留。
+- 同一 build 又把 Auto 物理菜单输入与严格状态 observation 纳入完整首路线：在首条正文处切换 Auto、捕获 checkpoint，再以同一原版菜单动作恢复 Normal 后继续既有路线。运行完成 33498 fixed steps、16959 条输入和 34 个 checkpoint；snapshot round-trip、用户 save/restore、terminal、自然解锁与零 diagnostic 均成立，coverage hash 与未插入模式切换的 v20 完整路线一致，master output overload/underflow 为 0。人工查看 Auto checkpoint 未见新的视觉阻断。单次 500 ms 自动推进由前述短程 E2 单独证明；持久 Auto 跑完整条路线、Skip 菜单选择和 Windows E3 仍开放。
+
+### 同一路线 choice、restore continuation 与结局媒体闭合
+
+- fetch 后确认当前 `origin/master` 已是分支 `HEAD` 的祖先，因此本轮同步是 no-op；没有对包含任务改动的工作树做自动 stash 或重放。
+- Manager 的 restore transaction 会先保存新开 session 的 rollback snapshot。启用全局进度、尚未发起首次 storage read 的状态是合法静止态，旧实现却以 `ASTRA_EMU_MINORI_GLOBAL_PROGRESS_SAVE_PENDING` 阻断。现在 family snapshot 除 `astra.emu.minori.runtime_state.v20` 外，固定包含独立的 `astra.emu.minori.global_progress_snapshot.v1` section；它只保存 enabled/loaded 与已确认 clear flag hash，实际 pending I/O 仍禁止保存。restore 严格校验两个 section、schema 和 enabled identity，恢复后重新走 ordered platform storage，不把 key、正文、资源或路径放入 snapshot。
+- restore 后的第一 tick 可以同时消费旧 message wait 并产生下一条 message。此前 retained scene 只在 wait 仍未完成时重发，导致新 Headless host 收到文字而当前 GPU scene 仍为 0×0。provider 现在在首个 restore output 没有 scene、但 stage identity 完整时，把 retained gameplay scene 与新文字放进同一 typed live transaction；已有 scene 时不重复提交，失败时不清除 pending restore 状态。该修复没有构造虚假 viewport、丢弃文字或 CPU fallback。
+- 修复后的单次标题启动运行在同一签名 plugin、mount、profile 和物理输入序列中推进 33490 fixed steps、呈现 34108 帧、消费 16951 条输入并通过 33 个 checkpoint。首个 choice、实际分支的 post-choice、Config、backlog、用户 save/restore、真实开场和结局媒体、自然 unlock、结局返回标题与最终 Exit 都在同一个 run report 中；terminal、snapshot round-trip 与 user save/restore 均已通过，diagnostic 为空。
+- 结局影片明确不可由 Control 跳过；runtime 等待 15000 个 fixed tick 使 media fence 自然完成后才继续返回标题。音频 pre-master peak 为 2.711029，master output peak 为 0.989551，master overload 与 underflow 都为 0。
+- 模型逐项查看了正式 bundle 的 33 个 required checkpoint。标题、Config、影片、普通剧情、多人构图、choice、post-choice、转场、结局和返回标题都未发现缺字、裁剪、拉伸、错层、透明残留或影片比例阻断。白场中的重复小标记只按当前脚本演出记录，未取得原版同点画面前不声明逐像素一致。
+- `prepare-review` 的自动门禁为通过；local-private review 对 33 个 frame 都给出通过，但完整 WAV 尚未逐段听审，因此 `full_audio` 保留 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING`，`validate-review` 按设计返回 `ASTRA_HEADLESS_REVIEW_BLOCKED`。这次运行补齐同一路线 choice 与结局媒体，不替代此前两次重复运行的确定性证据，也不关闭正式音频 review、第四条 clear route 后的 `Memories`、完整系统页或 Windows E3。
+- 复核 validator 时发现，bundle 虽强制选择完整 WAV，旧 `ReviewRecord` 却没有绑定音频 verdict；省略音频审查仍可能通过正式 preflight。公共 Headless review 已硬切 v3：记录 run report hash、review bundle hash，并用 typed artifact verdict 绑定每个 selected audio 的 role/path/hash。视觉和音频 verdict 各自保存 reviewer provenance，完整 WAV 只有具名人工 verdict 才能通过。CLI validator 会重新计算实际 artifact hash；缺失、额外、失败、hash 漂移、错误 reviewer kind 或 bundle 漂移都会阻断，不能用 frame verdict 冒充音频审查。protocol、CLI validator、Python platform acceptance 和 release preflight 的定向回归均已通过。
+- 为后续具名听审，完整 27260416 frame、48 kHz、双声道 WAV 已在 ignored 私有目录按连续 60 秒区间切成 10 段。catalog 保存源文件与分段 hash、起始 frame 和 frame count；覆盖总数与源 frame count 完全一致，源 hash 匹配 review bundle。该准备动作不等于听审通过，分段文件和 catalog 不进入 Git、report 或 package。
+
+## 2026-08-11
+
+### 平台全局进度与完整单路线 Headless E2
+
+- Family runtime 的 ordered provider wait 现在携带有界的 `request_id/provider_id/operation/key/payload`，provider result 返回同样受 1 MiB 上限约束的 payload。Family ABI 与 Provider ABI 两层 wire DTO 都做显式映射，不传平台对象、路径或 handle。Headless composition 只绑定 `astra.platform.storage`，用现有 `PlatformHostClient` 的 `begin/write/commit` 和 `read` 完成原子存储；未知 provider、operation、slot 或不匹配的结果直接阻断。
+- Minori 使用 `astra.emu.minori.global_progress.v1` 保存四个已由原程序确认的 clear flag hash。首次 fixed tick 先读平台 slot，缺失表示空状态；路线写入已确认 flag 后，provider 必须等平台原子提交完成才允许 terminal。restore 保留同一 provider session 已确认的全局进度，并把它重新并入旧 snapshot，不能通过恢复旧进度回滚解锁。key、正文、资源和本地路径不进入 report。
+- 两次同构的真实 Headless 运行都从标题进入 Config，再开始完整路线；途中用物理滚轮打开并关闭 backlog，以 F5/F9 完成用户 save/restore，并播放真实 AVI/WMV3/PCM 影片。每次推进 31006 fixed steps、呈现 2662 帧并消费全部输入；第二次为 20060 条输入，比第一次多一个只比较 hash 的自然解锁断言。两次均到达 terminal，snapshot round-trip 与用户 save/restore 成立，diagnostic 为 0。
+- 两次运行的 visual trace、runtime state trace、route terminal、coverage 和 audio meter hash 完全一致。pre-master peak 为 2.711029，说明素材混合前确有超限；共享 Kira master limiter 后的 output peak 为 0.989551，output overload 与 underflow 都为 0。这个结论只覆盖最终输出安全，不把 limiter 写成原版混音 parity。
+- 模型实际检查了第二次运行的全部 30 个 checkpoint。标题、Config、影片、backlog、多人构图、近景 CG、白场/黑场转场和路线前中后画面均有真实内容；日文字形完整，未发现横向裁剪、非预期拉伸、透明边缘错误、人物残留或影片比例错误。白场与黑场是脚本演出的一部分，正文轮廓保持可读。模型结论是本次 Headless 质量审查通过，不等价于原版逐像素一致。
+- 第二次运行在 terminal 后严格等待 `blackboard.minori.gallery_unlock_count == hash("1")`，证明首条路线自然产生一个脱敏解锁项；平台私有 slot 也由同一 ordered write 成功提交。原版标题资源表明 `Memories` 菜单只在第四条已确认 clear route 后出现，首条路线完成后仍使用不含鉴赏入口的标题 variant。因此本次不能伪造 CG/BGM/回想 checkpoint；这些页面与结局返回标题继续保留为后续多路线系统 UI 工作，Windows E3 也仍开放。
+- 增量全库测试随后发现，直接从 gameplay 打开 skippable movie 时，`Play` 曾把 instruction count 当作 live effect sequence，与首 tick blackboard observation 撞号。movie command 现统一从 VM effect allocator 取 sequence；100 个 Minori 单元测试通过。修复后的真实路线又连续运行两次，两次上述计数、visual/runtime/terminal/coverage/audio hash 和自然解锁断言全部一致，因此本节数字只引用修复后的运行。
+
+## 2026-08-09
+
+### ABI v8 rebase、纯 Rust AVI 与首条路线 terminal
+
+- 分支已 rebase 到当时本机 `master` 的 `adf25787`。由于网络更新未确认，本文只记录本地基线。恢复 Minori runtime 后，provider 已改用 Family ABI v8 与 Provider ABI v4 的 typed scene/audio/video/text/control DTO；旧 effect envelope、postcard live payload 和兼容 fallback 没有恢复。
+- 重新核对 `mov` role 后，5 个授权条目均为 RIFF/AVI，不是先前记录的 Matroska/MPEG wrapper。视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。range-backed AVI reader 每次最多读取 4 MiB，WMV3 与 PCM 都走仓库现有纯 Rust组件；5 个条目共解出 17480 个视频 sample，零长度 sample 只作为 dropped frame 计数。
+- Headless rebase 后改走 retained GPU scene，旧文本适配仍依赖 CPU underlay，真实运行因而阻断。现有 CosmicText `TextRenderResourceOwner` 直接产出 glyph lifecycle 和 draw command，并与同一 `SceneFrame` 合并；没有整帧回读，也没有 CPU 或字体 fallback。多个消息在采样帧之间合并时，glyph mutation 会按平台 resident state 归并，避免同一 resource id 在单帧内反复 release/upload。
+- 背景或立绘复用 texture id 但尺寸变化时，Host 现在用 typed `reset_resources` 原子重建当前帧声明的全部纹理。source revision 与 GPU generation 不再被当成同一个概念，也不通过忽略尺寸变化继续运行。
+- 最终私有输入序列全程按住 Control，只在 `runtime.awaiting_input` 出现时发送 Enter。运行消费 8033 条消息，推进 34567 fixed ticks，提交 5761 帧，自然到达稳定 route terminal；snapshot round-trip、10 个 checkpoint、3431 个脱敏 VM coverage id、VFS/resource identity、音频 meter 和完整 shutdown 均通过，diagnostic 为 0。报告只保留计数与 hash，不含正文、key、资源内容或本地路径。
+- 首轮模型检查发现最后一个 checkpoint 的白场正文对比度不足。补齐原程序文字轮廓后，以同一输入、mount 和签名 plugin 重跑仍消费 8033 条消息、推进 34567 fixed ticks、提交 5761 帧并自然到达 terminal；snapshot round-trip、10 个 checkpoint、3431 个脱敏 VM coverage id 和零 diagnostic 均保持不变。模型复核全部 10 个新 checkpoint，日文字形、人物比例、背景尺寸、图层和透明边缘正常，末尾白场正文清晰可读，没有缺字方框、横向裁剪、非预期拉伸或旧帧残留。这项剧情路线视觉 blocker 已关闭，但不外推为原版像素一致。
+- route terminal、非空 VM coverage、标题启动、Config、用户 save/restore、backlog 和真实影片 checkpoint 已有 Headless E2 证据。trace 收集由 host 显式传入的 `astra.hosted_trace_profile=evidence` 开启，shipping profile 不收集，未知 profile 直接阻断。global progress、CG/BGM/回想鉴赏和 Windows E3 仍未覆盖，不把这次剧情路线写成完整模拟器完成。
+- 针对白场低对比度问题，原程序反编译确认 `CTextDrawer` 构造时默认开启轮廓：glyph mask 先以黑色 alpha 层扩展 2 像素，再绘制正文颜色。AstraEMU 因此在通用 typed text presentation 中加入有界 outline，而不是按 Minori layout id 做 host 特判；Host 复用同一 CosmicText glyph resource，以 Renderer2D glyph run 组合轮廓和正文。合成白底回归和同路线真实 checkpoint 复验均已通过。
+- 继续核对原程序的选择界面后确认：单次选择严格截断为最多 4 项，每项分别构建 blur、focus、active 三态。授权样本内的首个资源名实际为大小写敏感的 `SelectBLur.png`，另两个为 `SelectFocus.png` 和 `SelectActive.png`；文本字号为 26 px，各项按资源高度纵向排列，整组按 stage 宽高居中，交互 id 为 `SELECT%d`。runtime 现已按 archive identity 加载并校验三态资源，按当前焦点选择 blur/focus 纹理，并把一至四项正文作为单批 ephemeral text lease 交给 CosmicText；选项正文水平居中，确认后通过 ABI 的 `clear_text` 信号释放 retained glyph。parser/VM/provider/host 的增量测试已经通过，但真实路线尚未生成选择 checkpoint，active 状态的指针按压语义也未形成视觉证据。
+
+### 纠正旧结论
+
+本页 2026-08-03 条目保留为历史过程。其中 `af564c07` rebase、481-tick slice、Matroska/MPEG movie census、Firefly/select/stand 尚未实现等描述，均已由本节的新代码和证据覆盖；引用当前状态时应以 2026-08-09 为准。
+
+## 2026-08-03
+
+### rebase 后的 runtime 与 Headless E2 复核
+
+- 当前实现已 rebase 到 `master` 的 `af564c07`；Minori 分支保留在其上继续开发。动态 `cdylib` 的 abi-stable root symbol 现在会在启用 `dynamic-plugin-export` 时保留，native package signer 可以读取 descriptor 并完成签名校验。
+- family provider 不再把宿主传入的 canonical input edge 一律判为未验证。对 `enter`、`space` 和 `pointer.primary` 的按下 edge，若当前是 input wait，则解析为同一个 wait；已完成的 await 与重复按下同时出现会阻断。无匹配等待的物理 edge 只作为已验证的输入通道数据消费，不猜测成脚本 action。provider result 仍要求匹配显式 Provider wait。
+- 使用私有签名动态 plugin、真实挂载 profile 和 `test.sc` 链接入口完成一次 Headless slice：481 fixed steps、24 个呈现帧、27 条输入消息、snapshot round-trip 成立、diagnostic 数为 0；artifact 中有非静音音频且无 clipping。该 slice 未到 terminal，不能作为完整路线或 E3 证据。
+- 模型视觉检查了全部五个 checkpoint。启动帧的竖排日文标题字形完整、比例正确；中段三个 checkpoint 与启动帧保持同一标题画面，说明当前输入时间点没有形成可见消息层；末帧进入非空的暗色场景。自动 report 的 `passed` 只表示 Headless 生命周期、资源读取、快照和 artifact 门禁通过，不覆盖消息内容视觉正确性。
+
+### movie 全量 census（覆盖此前的五个 MPEG 结论）
+
+- 真实 `mov` role 的 full scan 现在得到 5 个 entry、882835050 decoded bytes；聚合容器分类为 `matroska_wrapped: 1`、`mpeg_pes_wrapped: 2`、`unrecognized: 2`。报告只保存计数和 hash，不保存 entry 名称、字节或本地路径。
+- `MpegRangeDecoder` 的纯 Rust 路径已补齐跨 chunk start-code telemetry 和 EOF trailing PES flush；这只证明 MPEG-PS/PES 路径的读取边界，不等价于 Matroska 或两个未识别容器的 codec 支持。缺少明确 container/codec provider 时继续返回稳定 blocker，不调用平台 codec 或 fallback。
+
+### 当前 blocker
+
+- 该阶段以原版入口继续运行时，曾在 `Firefly` 和 secondary effect slot 阻断；两者后来按样本与 IDA 合同补齐了局部实现。其他未知 effect 仍不按名称猜测，继续返回 `ASTRA_EMU_MINORI_RUNTIME_EFFECT_KIND`。movie 的 Matroska/未识别容器同样未关闭。
+- 因此当前证据边界是“VFS + 签名 plugin + 可复现 Headless slice + 受限视觉检查”，不是完整 VM、完整路线、电影播放、自然解锁或 Windows E3。
+
+### Control 快进语义（IDA 复核）
+
+- 使用同一签名动态 plugin 的私有 Headless control sequence 已完成 300 fixed steps、54 个实际呈现帧、9 条物理输入、snapshot round-trip 和非静音音频，diagnostic 为 0；Control 让时间等待路径继续推进，但仍未到达 terminal，不能视为完整路线或 E3。
+
+- 原程序的 `VK_CONTROL` 快进路径不是全局输入动作。IDA 复核确认它同时受两组独立状态门控：`enable_control`/`disable_control` 控制是否接收 Control，`skip_enable`/`skip_disable` 控制脚本是否允许跳过；原程序初始化时后者为 enabled。runtime state v20 分别保存 `control_enabled`、`skip_enabled`、物理按键状态与 play mode；有效快进由这些权威状态即时推导。任一 disable pragma 都立即关闭对应快进路径，但不伪造按键 release；恢复后按同一组合重建状态。
+- 生效时只跳过已确认的 `.wait` 时间命令，并继续在同一个固定 tick 内执行后续已验证命令；Host 仍逐 tick 调用 provider，不直接跳过 deterministic tick，也不自动完成 message input、media fence、presentation fence 或 provider wait。
+- 未知 pragma 仍返回 `ASTRA_EMU_MINORI_RUNTIME_PRAGMA` blocking diagnostic。runtime snapshot schema 已升为 `astra.emu.minori.runtime_state.v20`，保存两组 gate、Control pressed 与互斥 play mode，不保存可重复推导的 effective skip 布尔值。
+- focused runtime/provider tests 已覆盖 pragma gate、未知 pragma、Control edge 和 timer fast-forward。该语义尚未证明完整原版演出、影片或首条攻略路线，因此不能扩大为全局 skip 或 E3 parity 结论。
+
+### runtime state v19 单路线复验（2026 年 8 月 12 日，已由 v20 schema 取代）
+
+- 分支同步检查确认最新 `master` 已是当前提交的祖先，因此 rebase 没有产生新提交。随后使用普通 Cargo target 重建 release CLI、签名动态 Minori plugin 和 manifest；旧 v193 plugin、manifest 与报告没有被当作当前构建证据。
+- 第一次复验错误地显式指定了脚本 entry，按既有合同直接进入剧情并跳过标题页。旧输入序列在配置页 observation 超时，Headless 以 `ASTRA_EMU_HEADLESS_AWAIT_TIMEOUT_INPUT_PREDICATE` 阻断。去掉该参数后，同一 v19 二进制按默认标题入口重跑，未修改输入序列或放宽 timeout。
+- 当前构建完成同一条首路线：33490 fixed steps、34108 个呈现帧、16951 条物理输入、33 个 required checkpoint，最终到达 route terminal。snapshot round-trip、用户 save/restore、影片 fence、首个选择、自然 unlock、返回标题和 Exit 均通过，diagnostic 为空。
+- 全资源审计覆盖 14502 个 VFS entry、43818 个 range 和 6624958365 byte；最大 range 为 4 MiB。完整音频为 48 kHz 双声道、27260416 frame，master peak 为 0.989551，overload 与 underflow 均为 0。34 个 manifest artifact 已逐项复算 hash，没有 identity drift。
+- v19 的 33 张 checkpoint PNG 与 v193 逐项 hash 相同。模型重新查看了标题、配置、影片、首个选择、结局和返回标题，未见缺字、拉伸、图层错位或残留。其余 27 张沿用相同 hash 的既有全量视觉审查结论。完整 WAV 仍缺具名人工逐段听审，因此正式 review 继续由 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING` 阻断；这次结果是当前构建的 Headless E2，不是 Windows E3 或完整产品验收。
+
 ## 2026-08-02
 
 ### PAZ 影片 reader 与 cache 边界复核
@@ -82,7 +180,9 @@
 - `stage` 只提交 `astra.emu.render_resource_frame.v1`：effect 保存 VFS URI、编码 hash、已验证尺寸和绘制指令，不保存商业像素。Headless 与 Manager 通过 session resource channel 取回编码数据，再交给唯一显式绑定的 Astra `DecodeProviderRegistry`；纯 Rust `ImageDecodeProvider` 是 packaged-eligible 主 provider，不走 fallback。Host 校验编码 hash、RGBA hash 和尺寸后才生成临时 `LegacyRenderFrameV1`。迁移后的真实八包运行前 5 个 fixed tick 已通过：入口 tail-chain、BGM、SE、全黑背景和竖排标题共提交 2 帧，两个 checkpoint 均为 1280×720，视觉发生变化，snapshot round-trip 与音频 artifact 同时成立。新旧路径的 checkpoint hash 与 visual trace hash 完全一致；截图与正文只留在 ignored 私有 artifact。
 - 当时的 effect 实现依据合成 fixture 将首个 operand 后的字段解释为资源序列与时钟参数。该解释已被后续真实单 operand E2 与原程序 parser 推翻，现仅作为已撤回的研究记录保留；生产 runtime 不再使用该路径。
 - 资源规格的分隔、单资源对象行为、时钟参数和 frame composite 仍需以原程序对象生命周期与真实样本逐项闭合；当前不再把零资源或单资源情形解释为静态替代 presentation。
-- 命令注册与构造路径确认 `.effect`、`.effect2` 复用同一 `CommandEffect`，但由构造参数绑定到两个独立的原程序 effect slot。当前 runtime 只实现首个 slot；第二个 slot 仍保持 blocking，待把双层 timeline、composition 和 snapshot 一起接入后再开放，不能把 `.effect2` 合并到首层。
+- 命令注册与构造路径确认 `.effect`、`.effect2` 复用同一 `CommandEffect`，但由构造参数绑定到两个独立的原程序 effect slot。runtime 已为第二 slot 增加独立 state、timeline、composition 与 snapshot，未把 `.effect2` 合并到首层。
+- 当前样本 census 只观察到 `SnowH` 和 `fadeout`。IDA 跟踪到 `SnowH` 构造函数绑定 `snowS.png`、`snowM.png`、`snowL.png`，创建 50 个粒子；更新函数使用定点坐标、横向速度、上下抖动方向和 16 ms alpha 累计。实现仅开放这两种已确认形式，其他 kind 保持 blocking。
+- `astra.emu.minori.runtime_state` 因新增第二 slot 状态从 v13 硬切到 v14。87 个 `astra-emu-minori` library tests 全部通过，其中新增测试覆盖第一/第二 slot 隔离、同 seed 确定性、定点移动、fadeout、损坏 snapshot 阻断以及三纹理/50 draw 的 provider 合成。这里是 E1 证据；真实签名 plugin 与 Headless 路线仍需重跑。
 - `.panel` parser、`CMessagePanel` 调用和 mode switch 已确认：最多接收两个整数和一个字符串，缺省值分别为 `0`、`-1` 和空串；mode 0 清除当前可见 panel，mode 1 选择 `msgPanel.png`，mode 与文件名分别以 `!panel_Mode`、`!panel_Filename` 进入存档。runtime 现实现无附加 operand 的 `.panel 0` 与 `.panel 1`；其他 mode、过渡参数和资源覆盖继续阻断。snapshot schema 随可见 effect frame 与 panel state升为 v6。
 - IDA 进一步确认 mode 1 的坐标计算：横坐标取 panel 全局 x，纵坐标为 viewport 高度减图片高度再加 64。真实资源为 263 px 高，因此 720p viewport 中从 y=521 开始绘制，底部 64 px 按原程序语义落在 viewport 外。首次视觉检查发现实现错误地把 panel 放在顶部；现已修正根因并用尺寸回归测试固定，不以视觉容差掩盖。
 - 修正 positional tokenizer 与 input-await edge routing 后，真实八包 Headless 运行到 373 个 fixed tick：实际提交 9 帧，保存黑场、标题、可见 CrossFade2、panel 和前两条 message 六个 checkpoint，消费 16 条物理输入，snapshot round-trip 为 true，diagnostic 为 0。运行读取 10 个资源、35 次 range、4913549 bytes；两条 message frame hash 均与 panel 及彼此不同。人工查看确认日文字形完整可读，没有缺字方框、横向裁剪、拉伸或旧文本残留。该证据只关闭两条可见 message E2，不代表原版像素一致。
@@ -92,6 +192,50 @@
 - `.movie` 现生成 `LegacyVideoCommandV1::Play` 和同一 media id 的 `MediaFence`，复用公共 video command、Host media completion、snapshot state 和 VFS URI 绑定；资源、尺寸、重复播放与 stage identity 不匹配均阻断。没有引入 Minori 私有播放器或 codec fallback。
 - 新增 `census-movies`：默认只对每个 movie 读取有界的前 4 MiB VFS probe；显式 local-private `--full-scan` 以相同 chunk 上限遍历完整 entry。全量扫描确认五项授权 movie 都在 wrapper 后包含 MPEG start code，修正了默认 probe 的不完整结论。该命令的 report 只含 entry 数、总 decoded bytes 和格式类别计数，不写 entry 名、header、路径或内容 hash。
 - 重新核对 GARbro 的 `MovPazArchive`：v1+ RC4 key 以“解码后的 entry name lower，再 CP932 编码”的字节序列构造。Rust reader 已替换此前的原始字节 ASCII lower 做法并加入 CP932 回归；真实五项的 format census 结论不变，故该差异不是当前未知容器的根因。
+
+### 2026-08-11 路线级确定性复核
+
+- 分支已 rebase 到本机最新 `master`。本轮没有修改八包 mount、private profile 或 key 边界。
+- 原程序的 stage character 生命周期已按样本控制流闭合：`.char keep` 是只对下一次 `.stage` 生效的一次性保留标记；切换 stage 时，未标记 slot 必须退场，已标记 slot 在消费标记后保留。此前长期运行耗尽共享 texture atlas 的根因是旧实现让所有 character slot 永久存活，而不是 atlas 容量不足。runtime、provider 与 snapshot 回归均固定了该语义。
+- Headless 音频采集改为只在 deterministic host 中显式打开；native realtime 不采集输出，也不改变平台音频端点。Headless 不再启动 wall-clock wake forwarder。
+- Headless execution budget 现在由最后一条物理输入 tick 加所有有界 `Await.timeout_ticks` 计算，并使用 checked arithmetic。artifact 帧数和持续时间预算、标准报告的 `duration_ns` 都绑定实际执行步数，不再把等待时间误判为超限。
+- fixed-tick Headless 在发出 audio command 的同一 tick 完成有界 VFS resource read；realtime host 继续异步读取。该改动消除了文件读取完成时刻跨 tick 漂移造成的 PCM 起始点差异，没有引入同步解码、系统 codec 或 fallback。
+- 同一签名 plugin、mount、物理输入和 Headless profile 连续运行两次，均在 63774 fixed steps 后自然到达 terminal，消费 15032 条输入，提交并栅格化 5314 帧，生成 25 个 checkpoint 和 51018752 个 audio frame；snapshot round-trip 成立，diagnostic 为空，音频非静音。
+- 两次运行的 input sequence、consumed input trace、visual trace、runtime state trace、route terminal、audio meter、submitted scene stream、rasterized frame stream 和 audio stream hash 全部一致。模型查看了全部 25 个 checkpoint；未见缺字、裁剪、拉伸、图层残影或未退场人物。截图和商业内容只保存在 ignored 私有 review artifact。
+- audio artifact 仍报告 clipping。它不影响本轮确定性和非静音门禁，但在与原程序输出增益对照前不能写成音频质量通过。
+- 为避免靠降低总增益掩盖问题，公共 Kira service 增加了只读 pre-master meter effect。它在 Kira 最终硬裁前累计 peak 和 overload frame，不修改 PCM。相同路线的诊断复跑仍以 63774 fixed steps、5314 帧、15032 条输入、terminal、snapshot round-trip 和零 diagnostic 通过；pre-master peak 为 1.849267，overload 为 6263 frame。首次超限时有 3 个 active stream，后续峰值发生在 3、4 或 7 个流并行时，说明 clipping 来自多流叠加，不是 WAV 量化或单个满幅样本误报。原程序的 bus headroom/limiter 行为尚未确认，因此暂不改 master gain。
+
+### 2026-08-11 backlog 行为复核
+
+- 当前分支再次获取远端 `master` 并执行 rebase。`origin/master` 已是当前提交的祖先，rebase 为无冲突 no-op；未提交实现和未跟踪源码在操作后完整恢复，`git diff --check` 通过。
+- IDA 交叉检查 `CMessagePanel` vtable、mode setter、state 11 和 state 12。进入 backlog 时原程序不会切换 panel mode；它重新显示现有 mode 1 面板，把选中的 `CLog` 记录送入同一文本排版器。此前只绘制 `backlogGauge.png` 和 `ball.png` 的画面缺少面板与正文，已按根因修正。
+- runtime state v18 保存有界的 lossless backlog、cursor 和总字节数。历史达到 16384 条、单字段 64 KiB 或合计 16 MiB 时直接阻断，不做静默淘汰。正文只存在于 local-private snapshot，并通过一次性 lease 交给 Host；公开 evidence 仍只记录计数和 hash。
+- 受影响的 `astra-emu-minori` 96 个 library tests 全部通过。新增回归覆盖 message wait 挂起、滚轮打开/关闭、mode 1 panel、当前记录 lease、cursor、snapshot round-trip 和正文恢复。
+- 真实八包短程 Headless E2 使用签名动态 plugin 和序列化物理滚轮输入完成 126 fixed steps、126 个呈现帧、15 条输入、3 个 checkpoint、snapshot round-trip 和零 diagnostic。人工检查确认打开页包含原版 panel、当前历史记录与滚动条，关闭后正文恢复，下一次 Enter 仍正常推进。关闭 checkpoint 需要在滚轮输入后的下一固定 tick 采样；同 tick 截图只能证明输入到达，不能证明恢复画面。
+- 这次证据只关闭 backlog 的单记录显示、边界移动和关闭恢复。多条历史翻页、voice replay、配置页、显式 save/load、鉴赏页和完整标题入口路线仍未形成同一次 required-checkpoint E2。
+
+### 2026-08-11 snapshot presentation 与 config 输入复核
+
+- Headless restore 会按契约清空 Host 持有的临时文字与资源。Minori 过去只重发音频，恢复后的 VM 虽仍处在同一 message wait，画面却可能失去正文。provider 现在把 presentation rebind 作为 session 临时状态处理：下一固定 tick 重建当前 stage、panel、message 或 choice，成功提交后才清除 pending 标记；restore 同时销毁旧的一次性文字 lease，避免过期正文继续可取。
+- 新增回归分别覆盖 message 和 choice 的 save、restore、下一 tick 资源重建与一次性 lease。标题和其他 system page 每个 tick 本来就完整重画，现也会在成功提交后清除 rebind 标记，不再把标题页的 restore 状态泄漏到第一段剧情等待。
+- IDA 复核 `SystemMenuConfig` 的按键处理与 action switch：Enter 对应 apply-and-close，Escape 对应 restore-and-close；音量滑块、复选项和其他设置由独立鼠标命中区驱动。runtime 已修正标题页 config 的 Enter/Escape 返回行为，但没有把方向键猜成鼠标控件，也没有把 base 图当作完整 config E2。knob、checkmark、circle 的状态绑定和 required checkpoint 仍开放。
+- 一次标题、snapshot、backlog 短程运行完成 189 fixed steps、189 个呈现帧、20 条输入、4 个 checkpoint，snapshot round-trip 成立且 diagnostic 为 0。人工检查标题和 backlog 打开画面非空，后续正文仍可推进；该序列打开 backlog 时所在的是普通 input wait，不是 active message wait，因此关闭 checkpoint 没有当前正文，不能替代此前已通过的 message-wait backlog 恢复证据。
+- 首个 checkpoint 会执行强制 save/restore，下一步属于 `RestoreContinuation`。此前 Config 导航恰好与该步重叠，输入没有形成可证明的页面切换。Minori 现在通过通用 blackboard control mutation 发布 `minori.system_page`；Headless 只保留 value hash，并把该有界 observation 一并保存到 v2 resume snapshot，不把页面值或商业内容写入 report。
+- 通用 `astra.emu.apply_legacy_control` action 补齐显式 Blackboard write access；未声明写入仍由 RuntimeWorld 阻断。真实标题短程复验在恢复完成后发送物理方向键和 Enter，并等待 Config observation，190 个 fixed step、190 个呈现帧、27 条输入、3 个 checkpoint、snapshot round-trip 和零 diagnostic 均通过。
+- 视觉复核随后发现 Config observation 已切换而 checkpoint 仍保留标题纹理。根因是多个 system page 复用同一 texture id，同时把 archive source revision 误当作 texture binding revision。现在 revision 由 source revision 与资源 URI 共同派生，保持同资源稳定、不同资源分离；Host 因而执行严格 destroy/create，而不是静默复用旧纹理。复验已显示真实 `configBase.png` 页面。Config 的鼠标控件状态仍未实现，不能据此标记完整 Config 完成。
+- IDA 对 Save/Load 和鉴赏构造函数的交叉引用补充确认：`SaveLoadMenu` 每页构造 10 个 slot record，mode `0` 选择 Save、mode `1` 选择 Load；页码限制在 `0..=9`，选择动作使用 `100..=109` 映射当前页的 10 个 slot。Save/Load 共用 base，并按 mode 选择独立标题层、selection、button、icon 和分页资源。鉴赏入口分为 CG、Flash、Music、Movie。当前只记录已确认的构造和输入契约；slot payload、命中区、自然 unlock 和页面行为仍需继续沿调用链复核，尚未进入生产 runtime。
+
+### 2026-08-11 checkpoint、影片与 master output 复核
+
+- 分支已获取最新 `master`；远端提交已是当前分支祖先，rebase 无冲突，未提交实现完整恢复。
+- Headless 的显式 checkpoint 现在先提交待处理 Scene2D 并排空 presentation receipt。此前 Config 和 backlog observation 已切换，但截图仍可能采到上一张按间隔保留的 surface；短程真实复验中，Config、backlog 打开与关闭三组画面已经分别变化。
+- decoded video 通过现有 `SceneCommand::VideoFrame` 进入 Scene2D：剧情层影片在正文前合成，modal 影片在正文后覆盖。没有增加 CPU 整帧回读或 Minori 私有 renderer。首次真实 checkpoint 依次暴露了 transient draw 只接受 Alpha blend，以及连续帧复用 deterministic transient id 时 placement 被错误释放的问题；前者在 Host adapter 修正，后者在公共 WGPU atlas 更新器修正，均未加入 family fallback。
+- `Control` 长按只在脚本自己的 movie skip flag 为真时发出一次 `Stop`。首轮播放的非 skippable 分支继续等待原 media fence；回想或重播分支才能跳过。Host 关闭媒体后在下一固定 tick 完成同一 fence，family 不直接伪造 completion。
+- 修正后的 local-private 标题启动完整路线完成 28814 fixed steps、2480 个呈现帧、20058 条物理输入、30 个 checkpoint、snapshot round-trip、用户 save/restore 和 terminal；报告没有 unknown/unsupported diagnostic。人工检查标题、Config、剧情、backlog、恢复点和 terminal，未见明显缺字、裁剪、拉伸或层级错误。鉴赏自然解锁和 Windows E3 仍未闭合，因此这次通过只计 Headless E2。
+- 公共 Kira main track 现按 `pre-master meter -> Kira Compressor -> master-output meter` 显式组成。Compressor 使用零 attack、`-0.1 dB` threshold 和高 ratio 作为 peak limiter；pre-master 仍保留超限计数，不掩盖 family mix。定向回归用两个 `0.75` 流证明输入超过 full scale，而 master output 不超限。
+- 完整路线复验观测到约 `2.71` 的 pre-master peak 和 25549 个 pre-master overload frame，但 master output peak 约为 `0.990`、overload 为 `0`、underflow 为 `0`，报告状态为 passed。完整 WAV 峰值低于 i16 full scale，RMS 非零。Headless 现在只以 master-output overload 阻断，仍把 pre-master 数据写入脱敏 telemetry 和 Perfetto counter；blocked report 写完 machine-readable 输出后返回非零退出码。
+- 另一个 3028-fixed-step 真实 slice 在影片进入稳定画面后保存 checkpoint。人工查看确认 decoded frame 非空、比例正确，剧情层文字保持在影片上方，未见拉伸、裁剪、缺字或旧帧残留；该 slice 的 master output overload 与 underflow 同样为 0。网络截图仍只作外部结构参考，不用于替代该真实 runtime checkpoint。
+- 原程序反编译进一步确认四个全局 clear flag：四条路线分别写入各自 flag。标题资源选择不是按文件名猜测：一个 flag 选择 `topMenu2`，另外三个全部成立时选择 `topMenu1`，其余使用 `topMenu0`。runtime 只识别这四个已确认 flag 的精确写入，并把脱敏 unlock identity 纳入 snapshot；provider 以 blackboard count 报告 session 内变化。任意带 `CLEAR` 的名称不会被猜成解锁项。global progress 的平台原子提交与新 session 恢复仍未实现，因此这些 session 证据还不能证明自然鉴赏解锁。
 
 ### 已确认事实
 
@@ -112,7 +256,7 @@
 | BGM/SE resource operand | 原程序反编译 + 本地样本 | token 还包含由原程序解析的资源 metadata；必须先解析再绑定 VFS |
 | BGM/SE 非控制资源绑定 | 原程序反编译 + 本地样本 | 401 条引用均精确、唯一命中；`resource[volume,pan]` 在映射前剥离 metadata |
 | 音频 `*` token | 原程序反编译 + 本地样本 | BGM、SE1/2/3 与 voice 均停止各自固定 stream；不是资源名 |
-| 真实 Minori Headless 启动 | 本地样本 | 签名动态 plugin、八包 mount、373 fixed tick、9 实际呈现帧、6 checkpoint、snapshot round-trip、音频 artifact 和公共 review 流程通过；已到第二条可见 message |
+| 真实 Minori Headless 路线 | 本地样本 | 签名动态 plugin、八包 mount、63774 fixed steps、5314 个提交/栅格帧、25 checkpoint、15032 条物理输入、snapshot round-trip、非静音音频和 terminal 通过；同输入复跑的 VM、画面、音频与 terminal hash 全部一致。另有短程物理滚轮 E2 验证 backlog panel、当前记录和关闭恢复 |
 
 ### 冲突与 blocker
 
@@ -120,9 +264,9 @@
 - 启用 cache 的八包验证因平台私有缓存卷空间不足，在首个写入处阻断。no-cache full verify 已通过，但 cache identity 第二轮全命中仍需单独证据。
 - 首次八包挂载需要读取约 5.74 GiB source 并为 entry 建立完整性身份。旧实现先顺序哈希全包，再逐 entry 随机重读 encrypted range；现已改为一次有界顺序流同时计算 source 与 entry hash，并阻断重叠 range、短读和期间的 metadata drift。跨分卷、零长度和 overlap 回归已通过。相同本地样本的 mount 区间由约 466 秒降至两次单流运行的约 367 秒和 403 秒；各 role 的 `archive_hashed` 后均立即完成 mount。机械卷吞吐仍占主要成本，因此只记录约 14%–21% 的实测改善，不宣称秒级启动。
 - `stage` 已覆盖无 stand 的普通图像路径，但 stand position 不能按名称猜成像素坐标；遇到 stand 时返回稳定 blocker。transition 配置已保存，动画插值和 fence 尚未接入。
-- 真实 Headless 已到第二条可见 message，但只检查了选定帧，没有完成整个 effect 周期的逐帧节奏比较。`select`、普通 voice、其他 panel/effect 和后续主要演出仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
+- 真实 Headless 已完成当前入口的整条剧情路线，并检查 25 个选定 checkpoint；这仍不是与原程序逐帧节奏或像素一致的证明。普通 voice、其他 panel/effect、系统页和后续路线仍需逐项确认；assignment 的字符串值和除零行为也仍需脱敏 census。
 - AstraEMU runner 同时输出专用 `astra.emu.headless_run_report.v2` 和公共 `astra.headless_run_report.v2`；两者绑定同一 manifest hash、输入、checkpoint 和 diagnostic 状态。真实八包 v24 已通过 `prepare-review`，模型按 bundle 查看 6 个 required checkpoint、首尾/最大差异选择，并检查 3 个完整 WAV 的时长、电平、静音与 clipping；`validate-review` 随后通过。该 review 只适用于 373-tick slice，不能覆盖完整路线或自动失败。
-- 尚无首条完整路线、全 movie codec inventory、完整 required checkpoint 集合或 Windows E3 证据。
+- 当前入口的首条剧情路线已有 terminal E2 和重复运行确定性证据，backlog 也有独立短程 E2；required checkpoint 仍未在同一次标题启动路线中覆盖配置、显式 save/load 与鉴赏，也没有 Windows E3 证据。
 - 实际入口的首个 movie 为约 196 MiB，超过 family VFS 单次 64 MiB read 上限。Headless 现改用有界 range-backed reader，并在 wrapper 中逐块扫描 MPEG start code；当前不再触发 `ASTRA_EMU_VFS_RUNTIME_RANGE` 或以固定前缀错误判为未知容器。仍需由 decoder 的实际 frame/audio 输出验证 container 与 codec，真实路线在 movie fence 处保持 blocking。
 - 原始 movie extension 不是容器证明。私有全量 census 确认五项均为 `mpeg_wrapped`，但 start code 只说明候选 MPEG 流的偏移，不等于完整解码或播放。runtime 只会以相同有界 offset 交给显式 pure-Rust provider；解析、格式、时间线或 media fence 任一失败均阻断，不得使用 FVP decoder、平台媒体 API 或伪造 completion 继续路线。
 
@@ -141,9 +285,31 @@ python Tools/check_docs.py
 
 此外，ignored 私有样本完成一次签名动态 Minori Headless E2：373 fixed tick、9 个实际呈现帧、6 个 checkpoint、snapshot round-trip 和音频 artifact。自动报告为 passed，消费 16 条物理输入，diagnostic 为空。模型按公共 review bundle 查看黑场、居中竖排标题、可见灯光 effect、底部 panel 和前两条日文正文，并检查三条完整 WAV；`validate-review` 通过。画面未见缺字方框、横向裁剪、拉伸或旧文本残留，音频无 clipping。这仍不代表完整 effect 周期、完整 VM、完整路线或 Windows E3 完成。
 
+2026-08-11 的路线级复核使用同一组序列化物理输入连续执行两次。两次均完成 63774 fixed steps、5314 个提交/栅格帧、15032 条输入、25 个 checkpoint、51018752 个 audio frame、snapshot round-trip、terminal 和零 diagnostic；九项输入、VM、scene、raster、audio 与 terminal identity 全部一致。模型检查全部 checkpoint，未见缺字、裁剪、拉伸、图层残影或人物生命周期泄漏。audio artifact 为非静音，但 clipping 标志为 true，因此只关闭确定性与可听性，不关闭音频质量对照。
+
 ### 下一步
 
-1. 在具备足够空间的私有缓存卷复核 cache identity，并对 49 个 Ogg 与 5 个 movie 做 provider-level codec inventory。
-2. 继续复核 `CrossFade2` 完整周期并确认 stand position；通过显式 provider binding 接入人物 ANI、MediaPlayback 和平台存储。
-3. 扩展物理输入序列到首个后续演出 blocker 与首个选择，逐段补齐 required checkpoint。
-4. 在保持每段公共 review 的同时推进首条完整路线，最终再形成路线级 review 与 Windows E3。
+1. 按原程序的四路线 clear gate 完成后续路线，补齐 `Memories`、CG、BGM、Flash/回想与 Movie 页面 required checkpoint；首路线不会人为解锁该入口。
+2. 完成 Config 鼠标命中区、Save/Load slot 页面与 voice replay 的真实输入 E2。
+3. 在具备足够空间的私有缓存卷复核 cache identity，并补齐 Manager media preview、Linux FUSE 与 macOS extract 证据。
+4. 使用同一 build/profile/package/input identity 进入 Windows Manager E3；在此之前不把 Headless E2 写成平台完成。
+
+### 2026-08-12 结局返回标题与 choice 视觉复核
+
+- `origin/master` 的最新提交已是当前分支祖先，本轮 rebase 为 no-op；工作树中的实现与私有研究产物未被覆盖。
+- 原程序反编译确认 `.end` 在标题启动 session 中回到 `SceneMainMenu`。runtime 现区分 title launch 与 direct entry：前者清理剧情瞬态状态并重建标题，后者保持 terminal 语义。返回标题后再由物理方向键和 Enter 选择 Exit，不能把黑场或 `.end` 本身当作应用退出。
+- 原程序标题资源和菜单 gate 已按四个已确认 clear flag 实现。首路线只自然写入其中一个 flag，标题仍使用普通四项菜单；`Memories` 只有在原程序要求的后续 clear 条件满足时出现。CG、Flash、BGM 的静态入口资源已按原程序构造关系绑定；Movie 页面依赖脚本驱动，未实现时保持稳定 blocking，不生成替代页。
+- 真实脚本 slice 以严格 `minori.choice_active` blackboard observation 捕获首个 choice，并把 `post-choice` 延后到分支已进入实际剧情画面后再取证。运行完成 156 fixed steps、290 条输入，snapshot round-trip 成立、diagnostic 为空；人工检查选项资源、选中态、日文字形、背景合成和提交后的剧情画面均正常。该选项帧的 raw RGBA hash 也命中完整路线 fixed step 13928，证明 slice 与完整路线观察到同一画面，不把相似截图当成关联证据。
+- 同一签名 plugin、mount、Headless profile 和物理输入连续执行两次完整路线。两次均为 31011 fixed steps、16947 条输入、31627 个提交/栅格帧、31 个 checkpoint、25277440 个 audio frame；snapshot round-trip、用户 save/restore、自然 unlock、结局返回标题和最终 Exit 均通过，diagnostic 为空。
+- 两次运行的 VM state、visual trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。local-private session id 会进入 input sequence 与 consumed input trace，因此这两项 hash 按设计不同，不把它们误写成跨 session 一致。
+- master output peak 为 0.989551，overload 与 underflow 均为 0。人工查看标题、Config、首条消息、转场、多人构图、结尾和返回标题 checkpoint，未见缺字、裁剪、拉伸、图层残影或影片比例错误。该结论只关闭 Headless E2；Windows E3、Config 控件、完整 Save/Load UI 与四路线后的鉴赏页仍开放。
+- 完整路线与 choice slice 均已生成 `astra.headless_review_bundle.v2`。模型查看了 bundle 要求的全部 frame；完整路线 WAV 为 48 kHz 双声道、526.613 秒，peak 0.989532、无 full-scale sample，左右声道 RMS 差 0.005 dB；choice slice WAV 为 2.592 秒，peak 0.980255、无 full-scale sample。当前环境没有完成涉及语音内容的整段试听，因此最新 review v3 以绑定 WAV hash 的 typed artifact verdict 记录 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING`，`validate-review` 按预期返回 `ASTRA_HEADLESS_REVIEW_BLOCKED`。不得把视觉检查或自动音频量测写成正式 review 已通过。
+- 尝试在同一次标题启动运行中追加 choice checkpoint 时，严格 observation 已通过，但第一选项分支在原 4200 次输入预算结束后仍停在一个输入等待，随后 `route_complete` 等待按预算阻断。失败 run 已清理且未作为 evidence；当前仍以两次完整路线自动证据加独立 choice slice 作为分层证据，不能宣称“同一次完整路线已包含 choice checkpoint”。
+
+### 2026-08-12 动态立绘与 GPU 性能门禁整理
+
+- 本轮再次同步 `origin/master`，远端最新提交已是当前分支祖先；rebase 没有改写现有提交，autostash 完整恢复了未提交实现。
+- 原程序 `CCharLayerManager` 的 parser 与 executor 交叉确认了 `.char trans`：参数依次是 slot、毫秒持续时间和目标透明度。执行时保持当前位置，透明度按当前值到目标值线性插值；命令等待原生 layer 的 transition flag 清除后才结束。`.char vis` 使用原程序既有的首字符布尔解析规则。生产实现只开放这两种已确认语义，不增加呼吸、文件名推断或 ANI 自动播放。
+- runtime state 硬切为 v22。每个活动 transition 保存起始/目标透明度、持续时间、已过纳秒和完成位；同一时刻只允许一个由命令阻塞的 character transition。provider 在等待期间持续提交 retained Scene2D 更新。定向测试覆盖 50% 中间帧、最终帧、等待 token、非法时长/透明度、snapshot continuation 与 provider 合成。该 title 的 290 条真实 `.char` 只包含 87 条 `load`、87 条 `pos` 和 116 条 `keep`，所以这些测试属于 E1，不冒充真实脚本动态立绘 E2。
+- 既有完整路线 artifact 已核对为 `wgpu_offscreen`、DX12 集显，而不是 CPU reference；该次运行提交并栅格化 34172 帧。它证明真实路线走过 native GPU retained scene，但没有正式 performance budget、固定采样窗和 Perfetto identity，不能关闭 GPU 性能验收。
+- CLI 的通用性能路径仍把 trace workload 写死为 `fvp.real_game.120hz`。现已改为显式 family identity，并提供 `prepare-headless-performance-profile` 生成可复用 budget profile。正式 Minori run 仍需在 clean Release 身份下完成精确 36600 fixed tick、73200 presentation、1200 帧 warmup、72000 帧测量，并生成共享 report 和 trace manifest；这项证据尚未生成。

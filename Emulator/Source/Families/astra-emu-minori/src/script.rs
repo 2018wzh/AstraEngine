@@ -81,13 +81,28 @@ pub struct ScOpcodeSpec {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScControlFlowKind {
     Next,
-    LabelSymbol { operand: usize },
-    JumpSymbol { operand: usize },
-    ConditionalJumpSymbol { operand: usize },
-    ChainSymbol { operand: usize },
+    LabelSymbol {
+        operand: usize,
+    },
+    JumpSymbol {
+        operand: usize,
+    },
+    ConditionalJumpSymbol {
+        operand: usize,
+    },
+    ChainSymbol {
+        operand: usize,
+    },
     Return,
     Terminate,
-    ChoiceSymbols { operands: Vec<usize> },
+    ChoiceSymbols {
+        operands: Vec<usize>,
+    },
+    /// A Minori `.select` command stores each option as `display:label`.
+    /// The option count is data-defined (the observed sample uses three and
+    /// four entries), so this is decoded as a bounded sequence rather than a
+    /// fixed operand-position list.
+    ChoicePairs,
     Unknown,
 }
 
@@ -110,7 +125,6 @@ impl ScOpcodeCatalog {
     }
 
     /// Catalog entries whose syntax was verified across the authorized 89-file sample.
-    /// `select` remains explicitly unknown because its branch semantics are not proven.
     pub fn observed_minori() -> Self {
         let mut catalog = Self::default();
         for opcode in [
@@ -157,7 +171,7 @@ impl ScOpcodeCatalog {
             ),
             ("chain", ScControlFlowKind::ChainSymbol { operand: 0 }),
             ("end", ScControlFlowKind::Terminate),
-            ("select", ScControlFlowKind::Unknown),
+            ("select", ScControlFlowKind::ChoicePairs),
         ] {
             catalog
                 .insert(
@@ -475,6 +489,22 @@ fn decode_control_flow(
                 .map(|operand| symbol(*operand))
                 .collect::<Result<_, _>>()?,
         },
+        ScControlFlowKind::ChoicePairs => {
+            if tokens.is_empty() || tokens.len() > 4 {
+                return Err(ScParseError::OperandSchema(offset));
+            }
+            let targets = tokens
+                .iter()
+                .map(|token| {
+                    let (_, target) = token
+                        .split_once(':')
+                        .filter(|(display, target)| !display.is_empty() && safe_symbol(target))
+                        .ok_or(ScParseError::OperandSchema(offset))?;
+                    Ok(target.to_owned())
+                })
+                .collect::<Result<Vec<_>, ScParseError>>()?;
+            ScControlFlow::Choice { targets }
+        }
         ScControlFlowKind::Unknown => unreachable!("handled before operand tokenization"),
     })
 }
@@ -623,5 +653,30 @@ mod tests {
             vec!["100", "", "speaker", "body"]
         );
         assert_eq!(tokenize_operands(b"", 0).unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn select_decodes_display_label_pairs_without_losing_source() {
+        let source = b".select first:label1 second:label2 third:label3\r\n.label label1\r\n.end\r\n.label label2\r\n.end\r\n.label label3\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let ScLineKind::Command { command } = &script.lines[0].kind else {
+            panic!("first line must be a command");
+        };
+        assert_eq!(
+            command.control_flow,
+            ScControlFlow::Choice {
+                targets: vec!["label1".into(), "label2".into(), "label3".into()]
+            }
+        );
+        assert_eq!(encode_sc(&script).unwrap(), source);
+    }
+
+    #[test]
+    fn select_rejects_missing_label_separator() {
+        let source = b".select first:label1 malformed\r\n.label label1\r\n.end\r\n";
+        assert_eq!(
+            parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap_err(),
+            ScParseError::OperandSchema(0)
+        );
     }
 }

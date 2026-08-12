@@ -2267,17 +2267,56 @@ fn validate_review(
     let review: ReviewRecord = read_json(review_path, "ASTRA_HEADLESS_REVIEW_RECORD")?;
     review.validate().map_err(|error| error.to_string())?;
     let report_hash = hash_file(run_report_path)?;
+    let bundle_hash = hash_file(bundle_path)?;
+    let artifact_root = bundle_path
+        .parent()
+        .ok_or_else(|| "ASTRA_HEADLESS_REVIEW_BUNDLE_ROOT".to_owned())?;
+    for artifact in bundle.selected_frames.iter().chain(&bundle.selected_audio) {
+        if hash_file(&artifact_root.join(&artifact.relative_path))? != artifact.sha256 {
+            return Err("ASTRA_HEADLESS_REVIEW_ARTIFACT_HASH".into());
+        }
+    }
+    let required_checkpoints = bundle
+        .required_checkpoints
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let reviewed_checkpoints = review
+        .checkpoints
+        .iter()
+        .map(|verdict| verdict.checkpoint.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let selected_audio = bundle
+        .selected_audio
+        .iter()
+        .map(|artifact| {
+            (
+                artifact.role,
+                artifact.relative_path.as_str(),
+                artifact.sha256.as_str(),
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let reviewed_audio = review
+        .artifacts
+        .iter()
+        .map(|verdict| {
+            (
+                verdict.role,
+                verdict.relative_path.as_str(),
+                verdict.sha256.as_str(),
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
     if report.status != RunStatus::Passed
         || !bundle.automatic_passed
         || bundle.run_report_hash != report_hash
         || review.run_report_hash != report_hash
-        || bundle.required_checkpoints.iter().any(|checkpoint| {
-            !review
-                .checkpoints
-                .iter()
-                .any(|verdict| verdict.checkpoint == *checkpoint && verdict.passed)
-        })
+        || review.review_bundle_hash != bundle_hash
+        || reviewed_checkpoints != required_checkpoints
         || review.checkpoints.iter().any(|verdict| !verdict.passed)
+        || reviewed_audio != selected_audio
+        || review.artifacts.iter().any(|verdict| !verdict.passed)
     {
         return Err(
             "ASTRA_HEADLESS_REVIEW_BLOCKED: review cannot override automatic failure and must pass every required checkpoint".into(),
@@ -2633,9 +2672,9 @@ mod evidence_tests {
 
     use astra_headless_protocol::{
         ArtifactEntry, ArtifactManifest, CheckpointResult, PlatformRunIdentity,
-        RendererExecutionIdentity, ReviewRecord, ReviewVerdict, ReviewerKind, RunReport, RunStatus,
-        HEADLESS_ARTIFACT_MANIFEST_SCHEMA, HEADLESS_REVIEW_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA,
-        PLATFORM_RUN_IDENTITY_SCHEMA,
+        RendererExecutionIdentity, ReviewArtifactRole, ReviewArtifactVerdict, ReviewRecord,
+        ReviewVerdict, ReviewerKind, RunReport, RunStatus, HEADLESS_ARTIFACT_MANIFEST_SCHEMA,
+        HEADLESS_REVIEW_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA, PLATFORM_RUN_IDENTITY_SCHEMA,
     };
 
     use super::{hash_file, link_preflight, prepare_review, validate_review, write_atomic_json};
@@ -2734,18 +2773,35 @@ mod evidence_tests {
         let review = ReviewRecord {
             schema: HEADLESS_REVIEW_SCHEMA.into(),
             run_report_hash: hash_file(&report_path).unwrap(),
-            reviewer_kind: ReviewerKind::Human,
-            reviewer_identity: "release-reviewer".into(),
-            tool_identity_hash: hash(b"review-tool"),
+            review_bundle_hash: hash_file(&bundle_path).unwrap(),
             checkpoints: vec![ReviewVerdict {
                 checkpoint: "required.final".into(),
                 passed: true,
                 diagnostic_codes: Vec::new(),
+                reviewer_kind: ReviewerKind::Model,
+                reviewer_identity: "visual-review-model".into(),
+                tool_identity_hash: hash(b"visual-review-tool"),
+            }],
+            artifacts: vec![ReviewArtifactVerdict {
+                role: ReviewArtifactRole::FullAudio,
+                relative_path: "audio.wav".into(),
+                sha256: hash(b"audio"),
+                passed: true,
+                diagnostic_codes: Vec::new(),
+                reviewer_kind: ReviewerKind::Human,
+                reviewer_identity: "release-audio-reviewer".into(),
+                tool_identity_hash: hash(b"audio-review-tool"),
             }],
         };
         let review_path = temp.path().join("review.json");
         write_atomic_json(&review_path, &review).unwrap();
         validate_review(&report_path, &bundle_path, &review_path).unwrap();
+
+        let mut missing_audio = review.clone();
+        missing_audio.artifacts.clear();
+        write_atomic_json(&review_path, &missing_audio).unwrap();
+        assert!(validate_review(&report_path, &bundle_path, &review_path).is_err());
+        write_atomic_json(&review_path, &review).unwrap();
 
         let platform = PlatformRunIdentity {
             schema: PLATFORM_RUN_IDENTITY_SCHEMA.into(),

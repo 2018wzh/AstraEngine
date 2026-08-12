@@ -195,3 +195,52 @@ fn active_pcm_is_pinned_when_cache_budget_is_exhausted() {
         .prepare_pcm(other, 48_000, 2, vec![0.0; 128])
         .is_err());
 }
+
+#[astra_headless_test::test]
+fn main_track_peak_limiter_preserves_pre_master_diagnostics_and_bounds_output() {
+    let mut session = AudioServiceSession::new(
+        AudioServiceConfig {
+            max_voices: 2,
+            max_buses: 1,
+            max_events: 4,
+            pcm_cache_bytes: 4096,
+        },
+        AstraChunkBackendSettings {
+            sample_rate: 48_000,
+            channels: 2,
+            chunk_frames: 64,
+            endpoint: Box::new(DeterministicEndpoint { consumed: 0 }),
+            deterministic_fixed_tick_hz: Some(60),
+        },
+    )
+    .expect("audio service");
+    let first = asset();
+    let mut second = asset();
+    second.uri = "asset://voice/second".into();
+    session
+        .prepare_pcm(first.clone(), 48_000, 2, vec![0.75; 128])
+        .expect("prepare first");
+    session
+        .prepare_pcm(second.clone(), 48_000, 2, vec![0.75; 128])
+        .expect("prepare second");
+    for (voice_id, asset) in [("first", first), ("second", second)] {
+        session
+            .apply(AudioServiceCommand::Play {
+                voice_id: voice_id.into(),
+                bus: "voice".into(),
+                asset,
+                start_frame: 0,
+                looping: true,
+            })
+            .expect("play mixed voice");
+    }
+
+    session.poll_fixed_tick().expect("render mixed frame");
+
+    let pre_master = session.pre_master_mix_telemetry();
+    let output = session.master_output_telemetry();
+    assert!(pre_master.peak_amplitude > 1.0);
+    assert!(pre_master.overload_frames > 0);
+    assert!(output.peak_amplitude <= 1.0);
+    assert_eq!(output.overload_frames, 0);
+}

@@ -2,10 +2,11 @@ use std::io::{BufReader, Cursor};
 
 use astra_headless_protocol::{
     AudioTolerance, ButtonState, CheckpointConfig, CheckpointExpectation, ImageTolerance,
-    InputMessage, JsonlReader, JsonlWriter, PhysicalInput, PreflightLink, ReviewRecord,
-    ReviewVerdict, ReviewerKind, SequenceValidator, ToleranceApproval, ToleranceApprovalBinding,
-    ToleranceApproverKind, HEADLESS_CHECKPOINT_CONFIG_SCHEMA, HEADLESS_PREFLIGHT_LINK_SCHEMA,
-    HEADLESS_REVIEW_SCHEMA, HEADLESS_TOLERANCE_APPROVAL_SCHEMA, USER_INPUT_SEQUENCE_SCHEMA,
+    InputMessage, JsonlReader, JsonlWriter, PhysicalInput, PreflightLink, ReviewArtifactRole,
+    ReviewArtifactVerdict, ReviewRecord, ReviewVerdict, ReviewerKind, SequenceValidator,
+    ToleranceApproval, ToleranceApprovalBinding, ToleranceApproverKind,
+    HEADLESS_CHECKPOINT_CONFIG_SCHEMA, HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_REVIEW_SCHEMA,
+    HEADLESS_TOLERANCE_APPROVAL_SCHEMA, USER_INPUT_SEQUENCE_SCHEMA,
 };
 
 fn hash(label: &str) -> String {
@@ -80,19 +81,42 @@ fn review_and_preflight_reject_incomplete_or_unsafe_evidence() {
     let review = ReviewRecord {
         schema: HEADLESS_REVIEW_SCHEMA.into(),
         run_report_hash: hash("run"),
-        reviewer_kind: ReviewerKind::Model,
-        reviewer_identity: "model-v1".into(),
-        tool_identity_hash: hash("tool"),
+        review_bundle_hash: hash("bundle"),
         checkpoints: vec![ReviewVerdict {
             checkpoint: "required.final".into(),
             passed: true,
             diagnostic_codes: Vec::new(),
+            reviewer_kind: ReviewerKind::Model,
+            reviewer_identity: "model-v1".into(),
+            tool_identity_hash: hash("tool"),
+        }],
+        artifacts: vec![ReviewArtifactVerdict {
+            role: ReviewArtifactRole::FullAudio,
+            relative_path: "audio/full.wav".into(),
+            sha256: hash("audio"),
+            passed: true,
+            diagnostic_codes: Vec::new(),
+            reviewer_kind: ReviewerKind::Human,
+            reviewer_identity: "audio-reviewer".into(),
+            tool_identity_hash: hash("audio-tool"),
         }],
     };
     review.validate().unwrap();
     let mut invalid = review.clone();
     invalid.checkpoints.push(invalid.checkpoints[0].clone());
     assert!(invalid.validate().is_err());
+    let mut missing_audio = review.clone();
+    missing_audio.artifacts.clear();
+    assert!(missing_audio.validate().is_err());
+    let mut model_only_audio = review.clone();
+    model_only_audio.artifacts[0].reviewer_kind = ReviewerKind::Model;
+    assert!(model_only_audio.validate().is_err());
+    let mut pending_audio = review.clone();
+    pending_audio.artifacts[0].reviewer_kind = ReviewerKind::Model;
+    pending_audio.artifacts[0].passed = false;
+    pending_audio.artifacts[0].diagnostic_codes =
+        vec!["ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING".into()];
+    pending_audio.validate().unwrap();
 
     let mut link = PreflightLink {
         schema: HEADLESS_PREFLIGHT_LINK_SCHEMA.into(),

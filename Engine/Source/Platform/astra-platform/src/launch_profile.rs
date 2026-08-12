@@ -269,8 +269,17 @@ impl HeadlessHostProfile {
         policy.package_id.clear();
         policy.build_fingerprint.clear();
         policy.package_hash.clear();
+        // These bounds are derived from the concrete input sequence and its
+        // execution horizon. They remain enforced by the run profile and are
+        // recorded in the report, but cannot be part of a reusable policy
+        // budget identity.
+        policy.input.max_messages = 0;
+        policy.input.max_tick = 0;
         policy.artifacts.namespace.clear();
         policy.artifacts.required_checkpoints.clear();
+        policy.artifacts.max_submitted_frames = 0;
+        policy.artifacts.max_rasterized_frames = 0;
+        policy.artifacts.max_duration_ns = 0;
         policy.hash()
     }
 }

@@ -10,6 +10,7 @@ use std::io::{Read, Seek, SeekFrom};
 use crate::asf::{AsfFile, AsfPayload, VideoStreamInfo};
 use crate::decoder::{MacroblockDecoder, YuvFrame};
 use crate::error::{DecoderError, Result};
+use crate::vc1::{FrameType, PictureHeader, Profile, SequenceHeader};
 #[cfg(feature = "audio")]
 use crate::wma::{PcmFrameF32, WmaDecoder};
 use crate::wmv2::{Wmv2FrameHeader, Wmv2FrameType, Wmv2Params};
@@ -162,6 +163,66 @@ impl Wmv2Decoder {
             return Ok(None);
         };
         Ok(Some(f.clone()))
+    }
+}
+
+/// WMV3/VC-1 Simple and Main profile decoder for one assembled frame per call.
+pub struct Wmv3Decoder {
+    sequence: SequenceHeader,
+    macroblocks: MacroblockDecoder,
+    current: YuvFrame,
+}
+
+impl Wmv3Decoder {
+    pub fn new(width: u32, height: u32, extra_data: &[u8]) -> Result<Self> {
+        if width == 0 || height == 0 || width > 16_384 || height > 16_384 {
+            return Err(DecoderError::InvalidData(
+                "WMV3 dimensions violate the configured bound".into(),
+            ));
+        }
+        let mut sequence = SequenceHeader::parse(extra_data)?;
+        if sequence.profile == Profile::Advanced {
+            return Err(DecoderError::Unsupported(
+                "WMV3 Advanced profile requires a distinct provider".into(),
+            ));
+        }
+        sequence.width = width;
+        sequence.height = height;
+        sequence.display_width = width;
+        sequence.display_height = height;
+        Ok(Self {
+            sequence,
+            macroblocks: MacroblockDecoder::new(width, height),
+            current: YuvFrame::new(width, height),
+        })
+    }
+
+    pub fn width(&self) -> u32 {
+        self.sequence.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.sequence.height
+    }
+
+    pub fn decode_frame_owned(&mut self, payload: &[u8], pts_ms: u32) -> Result<DecodedFrame> {
+        if payload.is_empty() {
+            return Err(DecoderError::InvalidData(
+                "WMV3 frame payload is empty".into(),
+            ));
+        }
+        let mb_w = usize::try_from(self.sequence.width.div_ceil(16))
+            .map_err(|_| DecoderError::InvalidData("WMV3 width is oversized".into()))?;
+        let mb_h = usize::try_from(self.sequence.height.div_ceil(16))
+            .map_err(|_| DecoderError::InvalidData("WMV3 height is oversized".into()))?;
+        let header = PictureHeader::parse(payload, &self.sequence, pts_ms, mb_w, mb_h)?;
+        self.macroblocks
+            .decode_frame(payload, &header, &self.sequence, &mut self.current)?;
+        Ok(DecodedFrame {
+            pts_ms,
+            is_key_frame: matches!(header.frame_type, FrameType::I | FrameType::BI),
+            frame: self.current.clone(),
+        })
     }
 }
 

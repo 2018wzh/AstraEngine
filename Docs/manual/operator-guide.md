@@ -101,11 +101,11 @@ astra-headless performance-e2 \
 
 Trace 写入 ignored 目录后，Codex 通过外部 `perfetto-mcp==0.1.4` 的 `find_slices` 和 `execute_sql_query` 查看热点。不要把第三方 MCP 放进仓库，也不要修改 `astra-mcp`。设备名、本地路径和原始 trace 不进入文档、package 或 report。性能报告只证明所声明 adapter、workload 和 E2 identity；Windows E3 仍需另行验收。
 
-产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行省略条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v2` 必须再通过 `validate-review`；模型不能覆盖自动失败或自行放宽容差。
+产品、Player、样例或 full-playthrough 必须先通过自动比较，再运行 `prepare-review`。模型或具名人工只能按 bundle 查看 required checkpoint、首尾帧、最大差异帧、失败邻近帧和完整 WAV，不得自行增删条目。音频要检查波形、频谱、响度、静音、削波、声道和时长；涉及语音内容或音画同步时还要试听。完成的 `astra.headless_review.v3` 必须绑定 run report hash、review bundle hash 和每个 selected audio artifact 的 role/path/hash；每个 verdict 分别记录 reviewer provenance，完整 WAV 的通过 verdict 必须由实际完成听审的具名人工给出。随后再运行 `validate-review`；模型不能覆盖自动失败、冒充人工审听或自行放宽容差。
 
 checkpoint 未显式改写时使用固定的受控宽松默认容差。任何自定义容差都要在 config 中绑定 `astra.headless_tolerance_approval.v2` 的相对路径和 SHA-256；approval 只能是具名人工，必须匹配 tolerance-set hash。`astra-headless` 会把完整 checkpoint config hash 写入新 run report。修改 approval、config 或 baseline 后必须重跑，不能复用或编辑旧 report。
 
-真实平台验收只能在 `astra.headless_run_report.v2`、`astra.headless_review_bundle.v2` 和 `astra.headless_review.v2` 全部通过后启动。平台 automation 完成后输出 `astra.platform_run_identity.v1`，再运行 `astra-headless link-preflight --headless-run-report ... --platform-run-identity ... --output ...`。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；`astra.headless_preflight_link.v2` 只建立关联，Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
+真实平台验收只能在 `astra.headless_run_report.v2`、`astra.headless_review_bundle.v2` 和 `astra.headless_review.v3` 全部通过后启动。平台 automation 完成后输出 `astra.platform_run_identity.v1`，再运行 `astra-headless link-preflight --headless-run-report ... --platform-run-identity ... --output ...`。Headless 与真实平台 run 必须绑定同一 build、cooked package、input sequence、scenario、target 和 content identity；`astra.headless_preflight_link.v2` 只建立关联，Headless 结果不能替代真实窗口、浏览器、音频设备或原生输入证据。
 
 正式 Windows/Web 联合验收统一走 `Tools/run_platform_host_acceptance.py`。该入口在启动任何真实 host 命令前先校验 Headless run、review bundle、review、两份 platform run identity 和两份 preflight link；自动失败、review verdict 缺失、artifact hash 漂移或任一 identity 不一致都会在 host 启动前阻断。`--skip-host-runs` 只用于复核已经形成的同 run 证据，不能生成 E3：
 
@@ -228,7 +228,7 @@ Windows shipping Player 默认使用平台 writable `Saved/Logs` 与 `Saved/Cras
 | `astra.platform_host_conformance_report.v1` | build/profile/package/session 绑定的真实 host 生命周期证据 |
 | `astra.headless_artifact_manifest.v2` | Headless submitted/rasterized 双流、PNG/WAV、render policy 和 renderer identity |
 | `astra.headless_run_report.v2` | 平台无关 host、输入、双流产物与自动比较结果 |
-| `astra.headless_review.v2` | 具名模型或人工的视觉/音频审查结果；不能覆盖自动失败 |
+| `astra.headless_review.v3` | 具名模型或人工的视觉/音频审查结果；绑定 review bundle 与 media artifact hash，不能覆盖自动失败 |
 | `astra.headless_preflight_link.v2` | Headless E2 与真实平台 run 的 identity 关联 |
 | `astra.plugin_report.v1` | 插件加载、卸载和 provider |
 | `astra.emu.local_case_report.v1` | AstraEMU FVP 和后续 family；只允许 alias/hash/offset/size 与稳定 diagnostic，禁止绝对路径和商业 payload |

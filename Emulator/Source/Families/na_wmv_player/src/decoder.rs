@@ -62,6 +62,51 @@ impl YuvFrame {
         out
     }
 
+    /// Convert bounded YUV420p video to BGRA8 using the BT.601 limited-range
+    /// integer matrix used by the desktop decoder tooling.
+    pub fn to_bgra8(&self) -> Result<Vec<u8>> {
+        if self.width == 0 || self.height == 0 || self.width % 2 != 0 || self.height % 2 != 0 {
+            return Err(DecoderError::InvalidData(
+                "YUV420 frame dimensions are invalid".into(),
+            ));
+        }
+        let width = usize::try_from(self.width)
+            .map_err(|_| DecoderError::InvalidData("YUV frame width is oversized".into()))?;
+        let height = usize::try_from(self.height)
+            .map_err(|_| DecoderError::InvalidData("YUV frame height is oversized".into()))?;
+        let pixels = width
+            .checked_mul(height)
+            .ok_or_else(|| DecoderError::InvalidData("YUV frame size overflow".into()))?;
+        if self.y.len() != pixels || self.cb.len() != pixels / 4 || self.cr.len() != pixels / 4 {
+            return Err(DecoderError::InvalidData(
+                "YUV420 frame planes violate their declared dimensions".into(),
+            ));
+        }
+        let mut bgra = vec![
+            0u8;
+            pixels.checked_mul(4).ok_or_else(|| {
+                DecoderError::InvalidData("BGRA frame size overflow".into())
+            })?
+        ];
+        for y in 0..height {
+            for x in 0..width {
+                let luma = i32::from(self.y[y * width + x]) - 16;
+                let chroma_index = (y / 2) * (width / 2) + (x / 2);
+                let cb = i32::from(self.cb[chroma_index]) - 128;
+                let cr = i32::from(self.cr[chroma_index]) - 128;
+                let red = ((298 * luma + 409 * cr + 128) >> 8).clamp(0, 255) as u8;
+                let green = ((298 * luma - 100 * cb - 208 * cr + 128) >> 8).clamp(0, 255) as u8;
+                let blue = ((298 * luma + 516 * cb + 128) >> 8).clamp(0, 255) as u8;
+                let offset = (y * width + x) * 4;
+                bgra[offset] = blue;
+                bgra[offset + 1] = green;
+                bgra[offset + 2] = red;
+                bgra[offset + 3] = 255;
+            }
+        }
+        Ok(bgra)
+    }
+
     pub fn clear(&mut self) {
         self.y.fill(16);
         self.cb.fill(128);

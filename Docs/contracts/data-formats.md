@@ -137,7 +137,7 @@ Migration 11 Headless 测试格式已经由 Rust 类型实现，仍不得进入 
 | `astra.headless_run_report.v2` | `IN_PROGRESS` | 已实现原子 pass/blocked report、checkpoint config hash、双流计数/hash、比较结果与 blocking diagnostic |
 | `astra.decoded_video_stream_descriptor.v2` / `astra.decoded_video_frame.v2` / `astra.decoded_video_stream_end.v2` | `CONTRACT_DONE` | `OpenDecode` 后以 `Start` 完整解码并校验到 host-private spool，只跨 Player boundary 返回小型 descriptor、单帧或 end marker；三者绑定 frame count、decoded byte count、stream hash、逐帧 sequence/PTS/duration/尺寸/content hash，`Next` 只允许空 payload，close 删除 spool |
 | `astra.headless_review_bundle.v2` | `IN_PROGRESS` | `prepare-review` 从稀疏 artifact 中选择 required checkpoint、首尾/最大差异/失败邻近帧和完整 WAV，并逐文件复核 hash |
-| `astra.headless_review.v2` | `IN_PROGRESS` | DTO、`validate-review` 与自动失败不可覆盖规则已实现；正式具名模型/人工 evidence 尚待生成 |
+| `astra.headless_review.v3` | `IN_PROGRESS` | review 绑定 run report、review bundle 与 typed media artifact role/path/hash；每个 frame/audio verdict 独立记录 reviewer provenance，完整 WAV 的通过 verdict 必须来自具名人工。`validate-review` 会重算实际 artifact hash，并阻断自动失败、缺失或额外 verdict、失败 verdict、错误 reviewer kind 或 identity drift。正式人工音频 evidence 尚待生成 |
 | `astra.platform_run_identity.v1` | `IN_PROGRESS` | 真实平台工具记录 report/build/package/input/scenario/target/content/profile/session continuity；不能由 Headless 自称平台证据 |
 | `astra.headless_preflight_link.v2` | `IN_PROGRESS` | DTO、identity 校验与 formal release check 已实现；真实 Windows/Web link evidence 尚待生成 |
 

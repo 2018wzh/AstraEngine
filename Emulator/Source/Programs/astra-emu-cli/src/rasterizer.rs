@@ -48,7 +48,7 @@ impl PreparedRenderFrame {
 }
 
 impl CpuStageRasterizer {
-    /// Applies a Family ABI v7 scene transaction without constructing a
+    /// Applies a Family ABI v8 scene transaction without constructing a
     /// serialized packet or hashing its pixels.  The retained CPU texture is
     /// the destination allocation; only the explicitly required LumaAlpha8
     /// conversion creates a new RGBA buffer.

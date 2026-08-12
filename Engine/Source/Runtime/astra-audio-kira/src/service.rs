@@ -5,6 +5,7 @@ use std::{
 };
 
 use kira::{
+    effect::compressor::CompressorBuilder,
     effect::panning_control::{PanningControlBuilder, PanningControlHandle},
     track::{MainTrackBuilder, TrackBuilder, TrackHandle},
     AudioManager, AudioManagerSettings, Capacities, Decibels, Panning, Tween,
@@ -14,6 +15,7 @@ use crate::{
     AstraChunkBackend, AstraChunkBackendSettings, AstraPcmSoundData, AstraPcmSoundHandle,
     AstraStreamSoundData, AstraStreamSoundHandle, AudioAssetRevision, AudioBusState,
     AudioServiceCommand, AudioServiceEvent, AudioTimelineStateV1, AudioVoiceState,
+    MasterMixMeterBuilder, MasterMixMeterHandle, MasterMixTelemetry,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +76,8 @@ struct AudioBus {
 
 pub struct AudioServiceSession {
     manager: AudioManager<AstraChunkBackend>,
+    pre_master_mix_meter: MasterMixMeterHandle,
+    master_output_meter: MasterMixMeterHandle,
     timeline: AudioTimelineStateV1,
     events: VecDeque<AudioServiceEvent>,
     buses: BTreeMap<String, AudioBus>,
@@ -106,6 +110,18 @@ impl AudioServiceSession {
         if !matches!(channels, 1 | 2) {
             return Err(AudioServiceError::InvalidConfig);
         }
+        let mut main_track_builder = MainTrackBuilder::default();
+        let pre_master_mix_meter = main_track_builder.add_effect(MasterMixMeterBuilder);
+        // Keep the diagnostic meter ahead of Kira's main-track peak limiter. Families can
+        // therefore expose an excessive mix while the platform output remains unclipped.
+        main_track_builder.add_effect(
+            CompressorBuilder::new()
+                .threshold(-0.1)
+                .ratio(1_000.0)
+                .attack_duration(std::time::Duration::ZERO)
+                .release_duration(std::time::Duration::from_millis(100)),
+        );
+        let master_output_meter = main_track_builder.add_effect(MasterMixMeterBuilder);
         let manager = AudioManager::<AstraChunkBackend>::new(AudioManagerSettings {
             capacities: Capacities {
                 sub_track_capacity: config.max_buses,
@@ -114,7 +130,7 @@ impl AudioServiceSession {
                 modulator_capacity: 0,
                 listener_capacity: 0,
             },
-            main_track_builder: MainTrackBuilder::default(),
+            main_track_builder,
             internal_buffer_size: 128,
             backend_settings: backend,
         })
@@ -128,6 +144,8 @@ impl AudioServiceSession {
         );
         Ok(Self {
             manager,
+            pre_master_mix_meter,
+            master_output_meter,
             timeline: AudioTimelineStateV1::new(sample_rate, channels),
             events: VecDeque::with_capacity(config.max_events),
             buses: BTreeMap::new(),
@@ -724,6 +742,16 @@ impl AudioServiceSession {
     #[must_use]
     pub fn telemetry(&mut self) -> crate::AudioChunkTelemetry {
         self.manager.backend_mut().telemetry()
+    }
+
+    #[must_use]
+    pub fn pre_master_mix_telemetry(&self) -> MasterMixTelemetry {
+        self.pre_master_mix_meter.telemetry()
+    }
+
+    #[must_use]
+    pub fn master_output_telemetry(&self) -> MasterMixTelemetry {
+        self.master_output_meter.telemetry()
     }
 
     #[must_use]

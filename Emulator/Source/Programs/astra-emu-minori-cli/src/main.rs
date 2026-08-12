@@ -168,16 +168,126 @@ fn census(
     }
     let census = ScCensus::from_scripts(&scripts);
     let audio_resources = census_audio_resources(&scripts, vfs.manifest())?;
+    let character_commands = census_character_commands(&scripts);
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "schema": "astra.emu.minori.sc_census.v3",
+            "schema": "astra.emu.minori.sc_census.v4",
             "script_count": scripts.len(),
             "census": census,
             "audio_resources": audio_resources,
+            "character_commands": character_commands,
         }))?
     );
     Ok(())
+}
+
+#[derive(Debug, Default, Serialize)]
+struct CharacterCommandCensus {
+    command_count: u64,
+    unknown_mode_count: u64,
+    unknown_extension_count: u64,
+    modes: BTreeMap<String, CharacterModeCensus>,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct CharacterModeCensus {
+    command_count: u64,
+    arity_counts: BTreeMap<u32, u64>,
+    numeric_bounds: BTreeMap<u32, NumericBounds>,
+    extension_counts: BTreeMap<u32, BTreeMap<String, u64>>,
+}
+
+#[derive(Debug, Serialize)]
+struct NumericBounds {
+    minimum: i64,
+    maximum: i64,
+}
+
+fn census_character_commands(scripts: &[ScScript]) -> CharacterCommandCensus {
+    const VERIFIED_MODES: &[&str] = &[
+        "allmove",
+        "blendrate",
+        "clear",
+        "freeze",
+        "keep",
+        "load",
+        "move",
+        "moveofs",
+        "off",
+        "order",
+        "order2",
+        "pos",
+        "seq",
+        "size",
+        "visible",
+    ];
+    let mut report = CharacterCommandCensus::default();
+    for script in scripts {
+        for line in &script.lines {
+            let ScLineKind::Command { command } = &line.kind else {
+                continue;
+            };
+            if command.opcode != "char" {
+                continue;
+            }
+            report.command_count += 1;
+            let Some(mode) = command.operands.first().and_then(operand_text) else {
+                report.unknown_mode_count += 1;
+                continue;
+            };
+            let mode = mode.to_ascii_lowercase();
+            if !VERIFIED_MODES.contains(&mode.as_str()) {
+                report.unknown_mode_count += 1;
+                continue;
+            }
+            let mode_report = report.modes.entry(mode).or_default();
+            mode_report.command_count += 1;
+            *mode_report
+                .arity_counts
+                .entry(command.operands.len().saturating_sub(1) as u32)
+                .or_default() += 1;
+            for (position, operand) in command.operands.iter().skip(1).enumerate() {
+                if let ScOperand::Integer { value } = operand {
+                    let bounds = mode_report.numeric_bounds.entry(position as u32).or_insert(
+                        NumericBounds {
+                            minimum: *value,
+                            maximum: *value,
+                        },
+                    );
+                    bounds.minimum = bounds.minimum.min(*value);
+                    bounds.maximum = bounds.maximum.max(*value);
+                    continue;
+                }
+                let Some(value) = operand_text(operand) else {
+                    continue;
+                };
+                let extension = std::path::Path::new(value)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::to_ascii_lowercase);
+                let extension_is_valid = extension.as_ref().is_some_and(|extension| {
+                    !extension.is_empty()
+                        && extension.len() <= 8
+                        && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                });
+                let Some(extension) = extension else {
+                    continue;
+                };
+                if !extension_is_valid {
+                    report.unknown_extension_count += 1;
+                    continue;
+                }
+                *mode_report
+                    .extension_counts
+                    .entry(position as u32)
+                    .or_default()
+                    .entry(extension)
+                    .or_default() += 1;
+            }
+        }
+    }
+    report
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -582,7 +692,9 @@ fn classify_movie_container_at(kind: &'static str, at_start: bool) -> &'static s
     }
     match kind {
         "avi" => "avi_wrapped",
-        "mpeg" => "mpeg_wrapped",
+        "mpeg_program_stream" => "mpeg_program_stream_wrapped",
+        "mpeg_video_es" => "mpeg_video_es_wrapped",
+        "mpeg_pes" => "mpeg_pes_wrapped",
         "asf" => "asf_wrapped",
         "isobmff" => "isobmff_wrapped",
         "matroska" => "matroska_wrapped",
@@ -592,13 +704,21 @@ fn classify_movie_container_at(kind: &'static str, at_start: bool) -> &'static s
 }
 
 fn find_movie_container(bytes: &[u8]) -> Option<(&'static str, usize)> {
+    let mut pes_packet = None;
     for offset in 0..bytes.len() {
         let remaining = &bytes[offset..];
         if remaining.len() >= 12 && &remaining[..4] == b"RIFF" && &remaining[8..12] == b"AVI " {
             return Some(("avi", offset));
         }
-        if remaining.starts_with(&[0, 0, 1]) {
-            return Some(("mpeg", offset));
+        if remaining.starts_with(&[0, 0, 1]) && remaining.len() >= 4 {
+            match remaining[3] {
+                0xBA => return Some(("mpeg_program_stream", offset)),
+                0xB3 => return Some(("mpeg_video_es", offset)),
+                0xE0..=0xEF => {
+                    pes_packet.get_or_insert(offset);
+                }
+                _ => {}
+            }
         }
         if remaining.starts_with(&[0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11]) {
             return Some(("asf", offset));
@@ -613,7 +733,7 @@ fn find_movie_container(bytes: &[u8]) -> Option<(&'static str, usize)> {
             return Some(("ogg", offset));
         }
     }
-    None
+    pes_packet.map(|offset| ("mpeg_pes", offset))
 }
 
 fn record_dimensions(
@@ -638,7 +758,10 @@ mod tests {
     #[test]
     fn movie_container_inventory_classifies_only_explicit_signatures() {
         assert_eq!(classify_movie_container(b"RIFF\0\0\0\0AVI "), "avi");
-        assert_eq!(classify_movie_container(&[0, 0, 1, 0xBA]), "mpeg");
+        assert_eq!(
+            classify_movie_container(&[0, 0, 1, 0xBA]),
+            "mpeg_program_stream"
+        );
         assert_eq!(
             classify_movie_container(&[0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11]),
             "asf"
@@ -648,6 +771,13 @@ mod tests {
         assert_eq!(
             classify_movie_container(b"opaqueRIFF\0\0\0\0AVI "),
             "avi_wrapped"
+        );
+        assert_eq!(
+            classify_movie_container(&[
+                0, 0, 1, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF,
+                0x11,
+            ]),
+            "asf_wrapped"
         );
         assert_eq!(classify_movie_container(b"opaque"), "unrecognized");
     }

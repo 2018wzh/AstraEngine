@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use astra_core::Hash256;
 use schemars::JsonSchema;
@@ -10,7 +10,42 @@ use crate::{
     SourceSpan,
 };
 
-pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v7";
+pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v22";
+
+const MINORI_BACKLOG_MAX_ENTRIES: usize = 16_384;
+const MINORI_BACKLOG_MAX_ENTRY_BYTES: usize = 64 * 1024;
+const MINORI_BACKLOG_MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+
+const MINORI_FIREFLY_STAGE_WIDTH: i32 = 1280;
+const MINORI_FIREFLY_STAGE_HEIGHT: i32 = 720;
+const MINORI_FIREFLY_CONTROL_POINTS: usize = 7;
+const MINORI_FIREFLY_MAX_PARTICLES: usize = 256;
+const MINORI_FIREFLY_MAX_PARTICLES_U32: u32 = 256;
+const MINORI_FIREFLY_MAX_DURATION_MS: u32 = 60_000;
+const MINORI_FIREFLY_FADE_SCALE: u16 = 256;
+const MINORI_FIREFLY_FADE_STEP_NS: u64 = 16_000_000;
+const MINORI_SNOW_H_PARTICLE_COUNT: usize = 50;
+const MINORI_SNOW_H_FADE_SCALE: u16 = 256;
+const MINORI_SNOW_H_FADE_STEP_NS: u64 = 16_000_000;
+const MINORI_SNOW_H_STAGE_WIDTH: i32 = 1280;
+const MINORI_SNOW_H_STAGE_HEIGHT: i32 = 720;
+const MINORI_SCREEN_SHAKE_MAX_AMPLITUDE: i32 = 1280;
+const MINORI_SCREEN_SHAKE_MAX_INTERVAL_MS: u32 = 60_000;
+const MINORI_SCROLL_XF_MAX_EXTENT: i32 = 16_384;
+const MINORI_SCROLL_XF_MAX_DURATION_MS: u32 = 60_000;
+const MINORI_SCROLL_XF_SCALE: u64 = 1_000_000;
+pub(crate) const MINORI_ROUTE_CLEAR_FLAGS: [&str; 4] =
+    ["TOHKA_CLEAR", "AYAME_CLEAR", "SUI_CLEAR", "REN_CLEAR"];
+const MINORI_WSCROLL2_TICKS_PER_SECOND: u64 = 60;
+const MINORI_WSCROLL2_MAX_PERIOD_TICKS: u32 = 60_000;
+const MINORI_WSCROLL2_MAX_SPEED_TENTHS: i32 = 10_000;
+const MINORI_CHARACTER_MAX_SLOTS: usize = 64;
+const MINORI_CHARACTER_MAX_SLOT_ID: u32 = 4096;
+const MINORI_CHARACTER_RESOURCE_COUNT: usize = 1;
+const MINORI_CHARACTER_MAX_COORDINATE: i32 = 65_536;
+const MINORI_CHARACTER_MAX_TRANSITION_MS: u32 = 60_000;
+const MINORI_AXIS_SCROLL_MAX_COORDINATE: i32 = 65_536;
+const MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS: i32 = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriRuntimeState {
@@ -22,14 +57,26 @@ pub struct MinoriRuntimeState {
     pub global_variables: BTreeMap<String, i64>,
     pub wait: Option<MinoriWaitState>,
     pub message: Option<MinoriMessageState>,
+    pub backlog: Vec<MinoriBacklogEntry>,
+    pub backlog_bytes: u64,
     pub choice: Option<MinoriChoiceState>,
-    pub layers: BTreeMap<u32, MinoriLayerState>,
+    pub stage: Option<MinoriStageCommand>,
+    pub characters: BTreeMap<u32, MinoriCharacterState>,
+    pub axis_scroll: Option<MinoriAxisScrollState>,
+    pub linear_scroll: Option<MinoriLinearScrollState>,
+    pub scroll_xf: Option<MinoriScrollXfState>,
+    pub wscroll2: Option<MinoriWScroll2State>,
     pub transition: MinoriTransitionState,
     pub effect: Option<MinoriEffectState>,
+    pub firefly: Option<MinoriFireflyState>,
+    pub secondary_effect: Option<MinoriSecondaryEffectState>,
+    pub screen_shake: Option<MinoriScreenShakeState>,
     pub panel: Option<MinoriPanelState>,
     pub audio: BTreeMap<u32, MinoriAudioState>,
     pub movie: Option<MinoriMovieState>,
+    pub launch_mode: MinoriLaunchMode,
     pub system_ui: MinoriSystemUiState,
+    pub gallery_unlocks: Vec<Hash256>,
     pub fixed_tick: u64,
     pub session_seed: u64,
     pub random_state: u64,
@@ -46,7 +93,23 @@ pub enum MinoriWaitState {
         timer_ticks: u32,
         milliseconds: u32,
     },
+    AxisScroll {
+        token_id: String,
+        milliseconds: u32,
+    },
+    LinearScroll {
+        token_id: String,
+        milliseconds: u32,
+    },
+    CharacterTransition {
+        token_id: String,
+        slot_id: u32,
+        milliseconds: u32,
+    },
     Input {
+        token_id: String,
+    },
+    Choice {
         token_id: String,
     },
     Media {
@@ -67,23 +130,49 @@ pub enum MinoriWaitState {
 pub struct MinoriMessageState {
     pub source: SourceSpan,
     pub message_id: i64,
+    pub text_hash: Hash256,
+    pub speaker_hash: Option<Hash256>,
+    pub voice_hash: Option<Hash256>,
+    pub voice: Option<MinoriMessageVoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriMessageVoice {
+    pub resource_uri: String,
+    pub volume_milli: u16,
+    pub pan_milli: i16,
+}
+
+/// Local-private dialogue history retained by the runtime snapshot. Plaintext is
+/// required to reproduce the original backlog after restore, but never enters
+/// evidence, reports, diagnostics, or logs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriBacklogEntry {
+    pub source: SourceSpan,
+    pub message_id: i64,
+    pub text: String,
+    pub speaker: Option<String>,
+    pub text_hash: Hash256,
+    pub speaker_hash: Option<Hash256>,
+    pub voice_hash: Option<Hash256>,
+    pub voice: Option<MinoriMessageVoice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriChoiceState {
     pub source: SourceSpan,
+    pub option_hashes: Vec<Hash256>,
+    pub targets: Vec<String>,
     pub selected_index: Option<u32>,
 }
 
+pub const MINORI_CHOICE_PRESENTATION_SCHEMA: &str = "astra.emu.minori.choice.v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct MinoriLayerState {
-    pub resource_uri: String,
-    pub x_milli: i32,
-    pub y_milli: i32,
-    pub scale_x_milli: i32,
-    pub scale_y_milli: i32,
-    pub opacity_milli: u16,
-    pub blend: String,
+pub struct MinoriChoicePresentation {
+    pub schema: String,
+    pub option_hashes: Vec<Hash256>,
+    pub selected_index: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
@@ -109,6 +198,56 @@ pub struct MinoriEffectState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriFireflyState {
+    pub resources: [String; 3],
+    pub target_count: u32,
+    pub duration_ms: u32,
+    pub ending: bool,
+    pub fade_alpha_256: u16,
+    pub fade_elapsed_ns: u64,
+    pub particles: Vec<MinoriFireflyParticle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriFireflyParticle {
+    pub control_points: [[i32; 2]; MINORI_FIREFLY_CONTROL_POINTS],
+    pub kind: u8,
+    pub elapsed_ns: u64,
+    pub lifetime_ns: u64,
+    pub position: [i32; 2],
+    pub opacity_255: u16,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriSecondaryEffectState {
+    pub kind: MinoriSecondaryEffectKind,
+    pub resources: [String; 3],
+    pub ending: bool,
+    pub alpha_256: u16,
+    pub fade_elapsed_ns: u64,
+    pub motion_elapsed_ns: u64,
+    pub particles: Vec<MinoriSnowHParticle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MinoriSecondaryEffectKind {
+    SnowHorizontal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriSnowHParticle {
+    pub fixed_position: [i64; 2],
+    pub horizontal_velocity: u32,
+    pub vertical_velocity: u32,
+    pub vertical_positive: bool,
+    pub kind: u8,
+    pub position: [i32; 2],
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriPanelState {
     pub mode: u32,
     pub resource_uri: String,
@@ -129,25 +268,169 @@ pub struct MinoriEffectFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriFireflyFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriSecondaryEffectFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriScreenShakeState {
+    pub kind: MinoriScreenShakeKind,
+    pub amplitude: i32,
+    pub interval_ms: u32,
+    pub elapsed_ns: u64,
+    pub update_index: u64,
+    pub offset: [i32; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MinoriScreenShakeKind {
+    Random,
+    Vertical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriScreenShakeFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriStageCommand {
-    pub foreground: Option<MinoriStageLayer>,
+    pub resource_sequence: Vec<Option<String>>,
+    pub reference_position: Option<[i32; 2]>,
     pub background: Option<MinoriStageLayer>,
     pub stands: Vec<MinoriStandLayer>,
     pub transition: MinoriTransitionState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriStageLayer {
     pub resource_uri: String,
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriStandLayer {
     pub resource_uri: String,
     pub position: i32,
-    pub offset: i32,
+    pub resource_parameter: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriCharacterState {
+    /// Original character manager key. The native engine normalizes signed
+    /// command ids with `abs` before lookup.
+    pub slot_id: u32,
+    /// The sign captured by `.char load`. Native CCharLayer stores it on both
+    /// sprite nodes and later position commands retain it.
+    pub positive_orientation: bool,
+    pub resource_uris: Vec<String>,
+    /// Native CCharLayer anchor: horizontal center and bottom-relative Y.
+    pub anchor_position: [i32; 2],
+    pub visible: bool,
+    pub opacity_256: u16,
+    pub transition: Option<MinoriCharacterTransitionState>,
+    /// Native `CCharLayer` one-shot retention flag. `.char keep` sets it;
+    /// scene finalization consumes it when deciding which previous-scene
+    /// characters survive into the next scene.
+    pub keep_once: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriCharacterTransitionState {
+    pub start_opacity_256: u16,
+    pub target_opacity_256: u16,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriCharacterFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MinoriAxisScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriAxisScrollState {
+    pub axis: MinoriAxisScrollAxis,
+    pub start: i32,
+    pub target: i32,
+    /// Native scroll speed in tenths of a pixel per millisecond.
+    pub speed_tenths: i32,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub current: i32,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriAxisScrollFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriLinearScrollState {
+    pub start: [i32; 2],
+    pub target: [i32; 2],
+    pub speed_tenths: u32,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub current: [i32; 2],
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriLinearScrollFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriScrollXfState {
+    pub start_extent: [i32; 2],
+    pub end_extent: [i32; 2],
+    pub start_offset: [i32; 2],
+    pub end_offset: [i32; 2],
+    pub duration_ms: u32,
+    pub easing: u8,
+    pub elapsed_ns: u64,
+    pub completed: bool,
+    pub visible_extent: [i32; 2],
+    pub visible_offset: [i32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriScrollXfFrame {
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriWScroll2State {
+    pub sync_resource_uri: String,
+    pub period_ticks: u32,
+    pub speed_tenths: i32,
+    pub elapsed_ns: u64,
+    pub elapsed_ticks: u64,
+    pub foreground_offset: i64,
+    pub background_offset: i64,
+    pub background_remainder: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriWScroll2Frame {
+    pub sequence: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -181,7 +464,15 @@ pub struct MinoriMovieState {
     pub fence_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MinoriLaunchMode {
+    #[default]
+    DirectEntry,
+    Title,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MinoriSystemPage {
     #[default]
@@ -191,20 +482,64 @@ pub enum MinoriSystemPage {
     Save,
     Config,
     Backlog,
+    Memories,
     GalleryCg,
     GalleryBgm,
     GalleryReplay,
+    GalleryMovie,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MinoriPlayMode {
+    #[default]
+    Normal,
+    Auto,
+    Skip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriSystemUiState {
     pub page: MinoriSystemPage,
     pub focus_index: u32,
-    pub auto_mode: bool,
-    pub skip_mode: bool,
+    pub play_mode: MinoriPlayMode,
+    pub preferred_play_mode: MinoriPlayMode,
+    /// Original `messageSpeedAutoPlay` setting in 10 ms units.
+    pub auto_wait_ticks: u32,
+    /// Script-owned permission corresponding to the original
+    /// `skip_enable`/`skip_disable` pragma state. It defaults to enabled at
+    /// scene construction and remains independent from Control input gating.
+    pub skip_enabled: bool,
+    /// The original Control fast path is explicitly gated by script pragmas.
+    /// Keep the physical key state separate from the effective skip state so a
+    /// held key survives fixed-tick boundaries without enabling the feature.
+    pub control_enabled: bool,
+    pub control_pressed: bool,
+    pub pointer_x: i32,
+    pub pointer_y: i32,
     pub backlog_cursor: Option<u32>,
     pub pending_save_slot: Option<u32>,
     pub pending_load_slot: Option<u32>,
+}
+
+impl Default for MinoriSystemUiState {
+    fn default() -> Self {
+        Self {
+            page: MinoriSystemPage::None,
+            focus_index: 0,
+            play_mode: MinoriPlayMode::Normal,
+            preferred_play_mode: MinoriPlayMode::Auto,
+            auto_wait_ticks: 50,
+            skip_enabled: true,
+            control_enabled: false,
+            control_pressed: false,
+            pointer_x: 0,
+            pointer_y: 0,
+            backlog_cursor: None,
+            pending_save_slot: None,
+            pending_load_slot: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,18 +550,38 @@ pub enum MinoriVmEvent {
         capture_sequence: u64,
         text: String,
         speaker: Option<String>,
+        audio_commands: Vec<MinoriAudioCommand>,
         wait: MinoriWaitState,
     },
     Audio {
         commands: Vec<MinoriAudioCommand>,
     },
     Stage(MinoriStageCommand),
+    Character(MinoriCharacterFrame),
+    AxisScroll(MinoriAxisScrollFrame),
+    LinearScroll(MinoriLinearScrollFrame),
+    ScrollXf(MinoriScrollXfFrame),
+    WScroll2(MinoriWScroll2Frame),
     Effect(MinoriEffectFrame),
     EffectCleared {
         sequence: u64,
     },
+    Firefly(MinoriFireflyFrame),
+    FireflyCleared {
+        sequence: u64,
+    },
+    SecondaryEffect(MinoriSecondaryEffectFrame),
+    SecondaryEffectCleared {
+        sequence: u64,
+    },
+    ScreenShake(MinoriScreenShakeFrame),
     Panel {
         sequence: u64,
+    },
+    Choice {
+        sequence: u64,
+        option_hashes: Vec<Hash256>,
+        selected_index: u32,
     },
     Movie(MinoriMovieState),
     Chain {
@@ -278,14 +633,16 @@ pub enum MinoriRuntimeError {
         "ASTRA_EMU_MINORI_RUNTIME_OPCODE: command `{opcode}` at ordinal {ordinal} is not verified"
     )]
     UnsupportedOpcode { opcode: String, ordinal: u32 },
-    #[error("ASTRA_EMU_MINORI_RUNTIME_NON_YIELDING_CYCLE: command execution repeated a control state without yielding")]
-    NonYieldingCycle,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_PRAGMA: pragma is not verified (identity={identity})")]
+    UnsupportedPragma { identity: Hash256 },
+    #[error("ASTRA_EMU_MINORI_RUNTIME_BUDGET: instruction budget is exhausted")]
+    Budget,
     #[error("ASTRA_EMU_MINORI_RUNTIME_WAIT: runtime is awaiting an unresolved token")]
     Waiting,
     #[error("ASTRA_EMU_MINORI_RUNTIME_OVERFLOW: deterministic counter overflowed")]
     Overflow,
-    #[error("ASTRA_EMU_MINORI_NATIVE_SAVE_FORMAT: native save data is malformed")]
-    NativeSaveFormat,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_SNAPSHOT: runtime snapshot is malformed")]
+    Snapshot,
     #[error("ASTRA_EMU_MINORI_RUNTIME_CHAIN: chain target is outside the script mount")]
     ChainTarget,
     #[error("ASTRA_EMU_MINORI_RUNTIME_AUDIO_RESOURCE: audio resource specification is invalid")]
@@ -301,13 +658,34 @@ pub enum MinoriRuntimeError {
         operand_count: u8,
         mode: Option<u32>,
     },
+    #[error("ASTRA_EMU_MINORI_RUNTIME_CHOICE: choice schema or selection state is invalid")]
+    Choice,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_FIREFLY: firefly effect schema or state is invalid")]
+    Firefly,
+    #[error(
+        "ASTRA_EMU_MINORI_RUNTIME_SECONDARY_EFFECT: secondary effect schema or state is invalid"
+    )]
+    SecondaryEffect,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_SCREEN_SHAKE: screen shake schema or state is invalid")]
+    ScreenShake,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_SCROLL_XF: scrollXF schema or state is invalid")]
+    ScrollXf,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_WSCROLL2: WScroll2 schema or state is invalid")]
+    WScroll2,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_CHARACTER: character command schema or state is invalid")]
+    Character,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_AXIS_SCROLL: axis scroll command or state is invalid")]
+    AxisScroll,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_LINEAR_SCROLL: linear scroll command or state is invalid")]
+    LinearScroll,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_BACKLOG: backlog state exceeds its verified bounds")]
+    Backlog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MinoriEffectViolation {
     Tokenization,
     UnsupportedKind,
-    SecondarySlot,
     OperandCount { count: u8 },
     ResourceSequence { count: u8 },
     Timing,
@@ -373,6 +751,14 @@ pub struct MinoriVm {
     script: ScScript,
     labels: BTreeMap<String, u32>,
     state: MinoriRuntimeState,
+    executed_commands: Vec<MinoriExecutedCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinoriExecutedCommand {
+    pub script_hash: Hash256,
+    pub command_ordinal: u32,
+    pub opcode: String,
 }
 
 impl MinoriVm {
@@ -392,14 +778,26 @@ impl MinoriVm {
             global_variables: BTreeMap::new(),
             wait: None,
             message: None,
+            backlog: Vec::new(),
+            backlog_bytes: 0,
             choice: None,
-            layers: BTreeMap::new(),
+            stage: None,
+            characters: BTreeMap::new(),
+            axis_scroll: None,
+            linear_scroll: None,
+            scroll_xf: None,
+            wscroll2: None,
             transition: MinoriTransitionState::default(),
             effect: None,
+            firefly: None,
+            secondary_effect: None,
+            screen_shake: None,
             panel: None,
             audio: BTreeMap::new(),
             movie: None,
+            launch_mode: MinoriLaunchMode::DirectEntry,
             system_ui: MinoriSystemUiState::default(),
+            gallery_unlocks: Vec::new(),
             fixed_tick: 0,
             session_seed,
             random_state: session_seed,
@@ -411,6 +809,7 @@ impl MinoriVm {
             script,
             labels,
             state,
+            executed_commands: Vec::new(),
         })
     }
 
@@ -418,16 +817,255 @@ impl MinoriVm {
         &self.state
     }
 
-    pub fn encode_native_save(&self) -> Result<Vec<u8>, MinoriRuntimeError> {
-        postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::NativeSaveFormat)
+    pub fn merge_verified_gallery_unlocks(
+        &mut self,
+        unlocks: &[Hash256],
+    ) -> Result<(), MinoriRuntimeError> {
+        let verified =
+            MINORI_ROUTE_CLEAR_FLAGS.map(|flag| (flag, Hash256::from_sha256(flag.as_bytes())));
+        if unlocks.len() > verified.len()
+            || unlocks.windows(2).any(|pair| pair[0] >= pair[1])
+            || unlocks
+                .iter()
+                .any(|identity| !verified.iter().any(|(_, known)| known == identity))
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        for (flag, identity) in verified {
+            if unlocks.contains(&identity) {
+                self.state.global_variables.insert(flag.into(), 1);
+                if !self.state.gallery_unlocks.contains(&identity) {
+                    self.state.gallery_unlocks.push(identity);
+                }
+            }
+        }
+        self.state.gallery_unlocks.sort_unstable();
+        Ok(())
     }
 
-    pub fn decode_native_save(bytes: &[u8]) -> Result<MinoriRuntimeState, MinoriRuntimeError> {
+    pub fn title_variant(&self) -> u8 {
+        let is_set = |flag: &str| self.state.global_variables.get(flag) == Some(&1);
+        if is_set("TOHKA_CLEAR") {
+            2
+        } else if ["AYAME_CLEAR", "SUI_CLEAR", "REN_CLEAR"]
+            .into_iter()
+            .all(is_set)
+        {
+            1
+        } else {
+            0
+        }
+    }
+
+    pub fn advance_provider_tick(&mut self, fixed_tick: u64) -> Result<(), MinoriRuntimeError> {
+        if fixed_tick == 0 || fixed_tick != self.state.fixed_tick + 1 || self.state.terminal {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.executed_commands.clear();
+        self.state.fixed_tick = fixed_tick;
+        Ok(())
+    }
+
+    pub fn begin_title_launch(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.fixed_tick != 0
+            || self.state.pc_line != 0
+            || self.state.instruction_count != 0
+            || self.state.wait.is_some()
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.launch_mode = MinoriLaunchMode::Title;
+        self.state.system_ui.page = MinoriSystemPage::Title;
+        self.state.system_ui.focus_index = 0;
+        Ok(())
+    }
+
+    pub fn open_backlog(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::None
+            || self.state.backlog.is_empty()
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::Backlog);
+        }
+        let cursor =
+            u32::try_from(self.state.backlog.len() - 1).map_err(|_| MinoriRuntimeError::Backlog)?;
+        self.state.system_ui.page = MinoriSystemPage::Backlog;
+        self.state.system_ui.focus_index = 0;
+        self.state.system_ui.backlog_cursor = Some(cursor);
+        Ok(())
+    }
+
+    pub fn move_backlog(&mut self, direction: i32) -> Result<(), MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Backlog || direction == 0 {
+            return Err(MinoriRuntimeError::Backlog);
+        }
+        let last = u32::try_from(
+            self.state
+                .backlog
+                .len()
+                .checked_sub(1)
+                .ok_or(MinoriRuntimeError::Backlog)?,
+        )
+        .map_err(|_| MinoriRuntimeError::Backlog)?;
+        let cursor = self
+            .state
+            .system_ui
+            .backlog_cursor
+            .ok_or(MinoriRuntimeError::Backlog)?;
+        self.state.system_ui.backlog_cursor = Some(if direction < 0 {
+            cursor.saturating_sub(1)
+        } else {
+            cursor.saturating_add(1).min(last)
+        });
+        Ok(())
+    }
+
+    pub fn close_backlog(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Backlog {
+            return Err(MinoriRuntimeError::Backlog);
+        }
+        self.state.system_ui.page = MinoriSystemPage::None;
+        self.state.system_ui.focus_index = 0;
+        self.state.system_ui.backlog_cursor = None;
+        Ok(())
+    }
+
+    pub fn replay_backlog_voice(&mut self) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Backlog {
+            return Err(MinoriRuntimeError::Backlog);
+        }
+        let cursor = usize::try_from(
+            self.state
+                .system_ui
+                .backlog_cursor
+                .ok_or(MinoriRuntimeError::Backlog)?,
+        )
+        .map_err(|_| MinoriRuntimeError::Backlog)?;
+        let voice = self
+            .state
+            .backlog
+            .get(cursor)
+            .ok_or(MinoriRuntimeError::Backlog)?
+            .voice
+            .clone();
+        let mut commands = Vec::new();
+        if self
+            .state
+            .audio
+            .get(&VOICE_STREAM_ID)
+            .is_some_and(|current| current.playing)
+        {
+            commands.push(MinoriAudioCommand::Stop {
+                sequence: next_effect_sequence(&mut self.state)?,
+                stream_id: VOICE_STREAM_ID,
+                fade_ms: 0,
+            });
+        }
+        if let Some(voice) = voice {
+            append_audio_load_and_play(
+                &mut self.state,
+                &mut commands,
+                VOICE_STREAM_ID,
+                &voice.resource_uri,
+                voice.volume_milli,
+                voice.pan_milli,
+                false,
+                0,
+            )?;
+            self.state.audio.insert(
+                VOICE_STREAM_ID,
+                MinoriAudioState {
+                    bus: "voice".into(),
+                    resource_uri: voice.resource_uri,
+                    looped: false,
+                    volume_milli: voice.volume_milli,
+                    pan_milli: voice.pan_milli,
+                    playing: true,
+                    continuation_pts: 0,
+                },
+            );
+        } else if let Some(current) = self.state.audio.get_mut(&VOICE_STREAM_ID) {
+            current.playing = false;
+        }
+        Ok(commands)
+    }
+
+    pub fn advance_system_tick(&mut self, fixed_tick: u64) -> Result<(), MinoriRuntimeError> {
+        if fixed_tick == 0
+            || fixed_tick != self.state.fixed_tick + 1
+            || self.state.system_ui.page == MinoriSystemPage::None
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.executed_commands.clear();
+        self.state.fixed_tick = fixed_tick;
+        Ok(())
+    }
+
+    pub fn set_system_page(
+        &mut self,
+        page: MinoriSystemPage,
+        focus_index: u32,
+    ) -> Result<(), MinoriRuntimeError> {
+        if self.state.launch_mode != MinoriLaunchMode::Title || self.state.terminal {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.page = page;
+        self.state.system_ui.focus_index = focus_index;
+        Ok(())
+    }
+
+    pub fn move_system_focus(
+        &mut self,
+        direction: i32,
+        item_count: u32,
+    ) -> Result<(), MinoriRuntimeError> {
+        if self.state.system_ui.page == MinoriSystemPage::None || item_count == 0 || direction == 0
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        let current = self.state.system_ui.focus_index % item_count;
+        self.state.system_ui.focus_index = if direction < 0 {
+            current.checked_sub(1).unwrap_or(item_count - 1)
+        } else {
+            current.checked_add(1).unwrap_or(0) % item_count
+        };
+        Ok(())
+    }
+
+    pub fn terminate_system_session(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.launch_mode != MinoriLaunchMode::Title
+            || self.state.system_ui.page != MinoriSystemPage::Title
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.terminal = true;
+        Ok(())
+    }
+
+    pub fn take_executed_commands(&mut self) -> Vec<MinoriExecutedCommand> {
+        std::mem::take(&mut self.executed_commands)
+    }
+
+    pub fn state_hash(&self) -> Result<Hash256, MinoriRuntimeError> {
+        let bytes = postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::Snapshot)?;
+        Ok(Hash256::from_sha256(&bytes))
+    }
+
+    pub fn snapshot_bytes(&self) -> Result<Vec<u8>, MinoriRuntimeError> {
+        postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::Snapshot)
+    }
+
+    pub fn decode_snapshot(bytes: &[u8]) -> Result<MinoriRuntimeState, MinoriRuntimeError> {
         let state: MinoriRuntimeState =
-            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::NativeSaveFormat)?;
+            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::Snapshot)?;
         if state.schema != MINORI_RUNTIME_STATE_SCHEMA {
             return Err(MinoriRuntimeError::State);
         }
+        validate_runtime_state(&state)?;
         Ok(state)
     }
 
@@ -447,17 +1085,20 @@ impl MinoriVm {
         self.state.wait = None;
         self.state.message = None;
         self.state.choice = None;
+        self.state.effect = None;
+        self.state.firefly = None;
+        self.state.secondary_effect = None;
+        self.state.screen_shake = None;
+        self.state.axis_scroll = None;
+        self.state.linear_scroll = None;
+        self.state.wscroll2 = None;
         self.state.terminal = false;
         Ok(())
     }
 
-    pub fn restore_native_save(
-        &mut self,
-        bytes: &[u8],
-        next_fixed_tick: u64,
-    ) -> Result<(), MinoriRuntimeError> {
+    pub fn restore_state(&mut self, bytes: &[u8]) -> Result<(), MinoriRuntimeError> {
         let restored: MinoriRuntimeState =
-            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::NativeSaveFormat)?;
+            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::Snapshot)?;
         if restored.schema != MINORI_RUNTIME_STATE_SCHEMA
             || restored.script_uri != self.state.script_uri
             || restored.script_hash != self.state.script_hash
@@ -466,10 +1107,8 @@ impl MinoriVm {
         {
             return Err(MinoriRuntimeError::State);
         }
+        validate_runtime_state(&restored)?;
         self.state = restored;
-        self.state.fixed_tick = next_fixed_tick
-            .checked_sub(1)
-            .ok_or(MinoriRuntimeError::State)?;
         Ok(())
     }
 
@@ -481,7 +1120,11 @@ impl MinoriVm {
             .ok_or(MinoriRuntimeError::Waiting)?;
         let expected = match current {
             MinoriWaitState::Time { token_id, .. }
+            | MinoriWaitState::AxisScroll { token_id, .. }
+            | MinoriWaitState::LinearScroll { token_id, .. }
+            | MinoriWaitState::CharacterTransition { token_id, .. }
             | MinoriWaitState::Input { token_id }
+            | MinoriWaitState::Choice { token_id }
             | MinoriWaitState::Media { token_id, .. }
             | MinoriWaitState::Presentation { token_id, .. }
             | MinoriWaitState::Provider { token_id, .. } => token_id,
@@ -489,10 +1132,166 @@ impl MinoriVm {
         if expected != token_id {
             return Err(MinoriRuntimeError::Waiting);
         }
-        if matches!(current, MinoriWaitState::Media { .. }) {
+        let completes_media = matches!(current, MinoriWaitState::Media { .. });
+        let completes_axis_scroll = matches!(current, MinoriWaitState::AxisScroll { .. });
+        let completes_linear_scroll = matches!(current, MinoriWaitState::LinearScroll { .. });
+        let completes_character_transition =
+            matches!(current, MinoriWaitState::CharacterTransition { .. });
+        if completes_media {
             self.state.movie = None;
         }
+        if completes_axis_scroll {
+            self.complete_axis_scroll()?;
+        }
+        if completes_linear_scroll {
+            complete_linear_scroll_state(&mut self.state)?;
+        }
+        if completes_character_transition {
+            complete_character_transition_state(&mut self.state)?;
+        }
         self.state.wait = None;
+        Ok(())
+    }
+
+    /// Update the physical Control key state. Text/timer fast-forward additionally
+    /// requires `.pragma enable_control`; a modal movie uses its own script-owned
+    /// `skippable` flag before the provider may turn the held key into a stop.
+    pub fn set_control_pressed(&mut self, pressed: bool) {
+        self.state.system_ui.control_pressed = pressed;
+    }
+
+    pub fn set_control_enabled(&mut self, enabled: bool) {
+        self.state.system_ui.control_enabled = enabled;
+    }
+
+    pub fn set_pointer_axis(&mut self, axis: char, value: f32) -> Result<(), MinoriRuntimeError> {
+        if !value.is_finite() || value.fract() != 0.0 {
+            return Err(MinoriRuntimeError::State);
+        }
+        let value = value as i32;
+        match axis {
+            'x' if (0..=1280).contains(&value) => self.state.system_ui.pointer_x = value,
+            'y' if (0..=720).contains(&value) => self.state.system_ui.pointer_y = value,
+            _ => return Err(MinoriRuntimeError::State),
+        }
+        Ok(())
+    }
+
+    pub fn toggle_preferred_play_mode(&mut self) -> Result<(), MinoriRuntimeError> {
+        let target = self.state.system_ui.preferred_play_mode;
+        if target == MinoriPlayMode::Normal {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.play_mode = if self.state.system_ui.play_mode == target {
+            MinoriPlayMode::Normal
+        } else {
+            target
+        };
+        Ok(())
+    }
+
+    pub fn fast_forward_active(&self) -> bool {
+        self.state.system_ui.skip_enabled
+            && (self.state.system_ui.play_mode == MinoriPlayMode::Skip
+                || (self.state.system_ui.control_enabled && self.state.system_ui.control_pressed))
+    }
+
+    /// Allocate an effect sequence for a host-side presentation update that
+    /// does not execute a script command (for example, choice cursor motion).
+    /// Keeping this counter inside the VM makes those updates part of the
+    /// deterministic snapshot and prevents the next command from reusing the
+    /// same sequence.
+    pub fn allocate_effect_sequence(&mut self) -> Result<u64, MinoriRuntimeError> {
+        next_effect_sequence(&mut self.state)
+    }
+
+    pub fn move_choice(&mut self, direction: i32) -> Result<(), MinoriRuntimeError> {
+        let choice = self
+            .state
+            .choice
+            .as_mut()
+            .ok_or(MinoriRuntimeError::Choice)?;
+        let len = choice.option_hashes.len();
+        if !(1..=4).contains(&len) {
+            return Err(MinoriRuntimeError::Choice);
+        }
+        let current = usize::try_from(choice.selected_index.unwrap_or(0))
+            .map_err(|_| MinoriRuntimeError::Choice)?;
+        if current >= len {
+            return Err(MinoriRuntimeError::Choice);
+        }
+        let next = if direction < 0 {
+            if current == 0 {
+                len - 1
+            } else {
+                current - 1
+            }
+        } else if direction > 0 {
+            (current + 1) % len
+        } else {
+            current
+        };
+        choice.selected_index = Some(u32::try_from(next).map_err(|_| MinoriRuntimeError::Choice)?);
+        Ok(())
+    }
+
+    /// Reconstruct the current choice labels from the immutable parsed script.
+    /// Plaintext remains outside snapshot state; the stored source span, target
+    /// list, and hashes prove that the reconstructed labels are the same choice.
+    pub fn choice_display_texts(&self) -> Result<Vec<String>, MinoriRuntimeError> {
+        let choice = self
+            .state
+            .choice
+            .as_ref()
+            .ok_or(MinoriRuntimeError::Choice)?;
+        let command = self
+            .script
+            .lines
+            .iter()
+            .find_map(|line| match &line.kind {
+                ScLineKind::Command { command } if command.span == choice.source => Some(command),
+                _ => None,
+            })
+            .ok_or(MinoriRuntimeError::Choice)?;
+        if command.opcode != "select" {
+            return Err(MinoriRuntimeError::Choice);
+        }
+        let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MinoriRuntimeError::Choice)?;
+        if tokens.len() != choice.targets.len() || tokens.len() != choice.option_hashes.len() {
+            return Err(MinoriRuntimeError::Choice);
+        }
+        tokens
+            .iter()
+            .zip(&choice.targets)
+            .zip(&choice.option_hashes)
+            .map(|((token, expected_target), expected_hash)| {
+                let (display, target) = token
+                    .split_once(':')
+                    .filter(|(display, target)| !display.is_empty() && !target.is_empty())
+                    .ok_or(MinoriRuntimeError::Choice)?;
+                if target != expected_target
+                    || Hash256::from_sha256(display.as_bytes()) != *expected_hash
+                {
+                    return Err(MinoriRuntimeError::Choice);
+                }
+                Ok(display.to_owned())
+            })
+            .collect()
+    }
+
+    pub fn commit_choice(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.wait.is_some() {
+            return Err(MinoriRuntimeError::Choice);
+        }
+        let choice = self.state.choice.take().ok_or(MinoriRuntimeError::Choice)?;
+        let index = usize::try_from(choice.selected_index.unwrap_or(0))
+            .map_err(|_| MinoriRuntimeError::Choice)?;
+        let target = choice
+            .targets
+            .get(index)
+            .ok_or(MinoriRuntimeError::Choice)?;
+        self.state.pc_line = *self.labels.get(target).ok_or(MinoriRuntimeError::Label)?;
         Ok(())
     }
 
@@ -548,7 +1347,332 @@ impl MinoriVm {
         Ok(Some(frame))
     }
 
-    pub fn step(&mut self, fixed_tick: u64) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    pub fn advance_axis_scroll_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriAxisScrollFrame>, MinoriRuntimeError> {
+        let (axis_scroll, stage) = (&mut self.state.axis_scroll, &mut self.state.stage);
+        let Some(scroll) = axis_scroll.as_mut() else {
+            return Ok(None);
+        };
+        if scroll.completed {
+            return Ok(None);
+        }
+        let duration_ns = u64::from(scroll.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let previous = scroll.current;
+        scroll.elapsed_ns = scroll
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?
+            .min(duration_ns);
+        scroll.current = axis_scroll_visible_position(scroll)?;
+        scroll.completed = scroll.elapsed_ns == duration_ns;
+        set_stage_axis_position(
+            stage.as_mut().ok_or(MinoriRuntimeError::AxisScroll)?,
+            scroll.axis,
+            scroll.current,
+        )?;
+        if scroll.current == previous && !scroll.completed {
+            return Ok(None);
+        }
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriAxisScrollFrame { sequence }))
+    }
+
+    pub fn advance_character_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriCharacterFrame>, MinoriRuntimeError> {
+        let Some((_, character)) = self
+            .state
+            .characters
+            .iter_mut()
+            .find(|(_, character)| character.transition.is_some())
+        else {
+            return Ok(None);
+        };
+        let transition = character
+            .transition
+            .as_mut()
+            .ok_or(MinoriRuntimeError::Character)?;
+        if transition.completed {
+            return Ok(None);
+        }
+        let duration_ns = u64::from(transition.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        transition.elapsed_ns = transition
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?
+            .min(duration_ns);
+        character.opacity_256 = interpolate_character_opacity(transition, duration_ns)?;
+        transition.completed = transition.elapsed_ns == duration_ns;
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriCharacterFrame { sequence }))
+    }
+
+    pub fn advance_linear_scroll_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriLinearScrollFrame>, MinoriRuntimeError> {
+        let (linear_scroll, stage) = (&mut self.state.linear_scroll, &mut self.state.stage);
+        let Some(scroll) = linear_scroll.as_mut() else {
+            return Ok(None);
+        };
+        if scroll.completed {
+            return Ok(None);
+        }
+        let duration_ns = u64::from(scroll.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let previous = scroll.current;
+        scroll.elapsed_ns = scroll
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?
+            .min(duration_ns);
+        scroll.current = linear_scroll_visible_position(scroll)?;
+        scroll.completed = scroll.elapsed_ns == duration_ns;
+        set_stage_position(
+            stage.as_mut().ok_or(MinoriRuntimeError::LinearScroll)?,
+            scroll.current,
+        )?;
+        if scroll.current == previous && !scroll.completed {
+            return Ok(None);
+        }
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriLinearScrollFrame { sequence }))
+    }
+
+    fn complete_axis_scroll(&mut self) -> Result<(), MinoriRuntimeError> {
+        complete_axis_scroll_state(&mut self.state)
+    }
+
+    pub fn advance_scroll_xf_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriScrollXfFrame>, MinoriRuntimeError> {
+        let Some(scroll) = self.state.scroll_xf.as_mut() else {
+            return Ok(None);
+        };
+        if scroll.completed {
+            return Ok(None);
+        }
+        let duration_ns = u64::from(scroll.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        scroll.elapsed_ns = scroll
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?
+            .min(duration_ns);
+        let (visible_extent, visible_offset) = scroll_xf_visible_state(scroll)?;
+        scroll.visible_extent = visible_extent;
+        scroll.visible_offset = visible_offset;
+        scroll.completed = scroll.elapsed_ns == duration_ns;
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriScrollXfFrame { sequence }))
+    }
+
+    pub fn advance_wscroll2_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriWScroll2Frame>, MinoriRuntimeError> {
+        let Some(scroll) = self.state.wscroll2.as_mut() else {
+            return Ok(None);
+        };
+        let previous_ticks = scroll.elapsed_ticks;
+        scroll.elapsed_ns = scroll
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let (elapsed_ticks, foreground_offset, background_offset, background_remainder) =
+            wscroll2_visible_state(scroll.elapsed_ns, scroll.speed_tenths)?;
+        scroll.elapsed_ticks = elapsed_ticks;
+        scroll.foreground_offset = foreground_offset;
+        scroll.background_offset = background_offset;
+        scroll.background_remainder = background_remainder;
+        if elapsed_ticks == previous_ticks {
+            return Ok(None);
+        }
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriWScroll2Frame { sequence }))
+    }
+
+    /// Advances the verified Firefly screen effect.  The original effect keeps
+    /// a bounded particle pool alive until the script issues `.effect end`; a
+    /// particle that reaches its individual lifetime is re-seeded in place.
+    /// All random state is owned by the VM so a replay or snapshot continuation
+    /// cannot depend on a process-global RNG.
+    pub fn advance_firefly_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+        let mut random_state = self.state.random_state;
+        let mut clear = false;
+        let Some(firefly) = self.state.firefly.as_mut() else {
+            return Ok(None);
+        };
+        firefly.fade_elapsed_ns = firefly
+            .fade_elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let fade_steps = firefly.fade_elapsed_ns / MINORI_FIREFLY_FADE_STEP_NS;
+        firefly.fade_elapsed_ns %= MINORI_FIREFLY_FADE_STEP_NS;
+        let fade_steps = u16::try_from(fade_steps.min(u64::from(u16::MAX)))
+            .map_err(|_| MinoriRuntimeError::Overflow)?;
+        if firefly.ending {
+            firefly.fade_alpha_256 = firefly.fade_alpha_256.saturating_sub(fade_steps);
+            if firefly.fade_alpha_256 == 0 {
+                clear = true;
+            }
+        } else {
+            firefly.fade_alpha_256 = firefly
+                .fade_alpha_256
+                .saturating_add(fade_steps)
+                .min(MINORI_FIREFLY_FADE_SCALE);
+        }
+        if !clear {
+            for particle in &mut firefly.particles {
+                particle.elapsed_ns = particle
+                    .elapsed_ns
+                    .checked_add(delta_ns)
+                    .ok_or(MinoriRuntimeError::Overflow)?;
+                if particle.elapsed_ns >= particle.lifetime_ns {
+                    respawn_firefly_particle(particle, firefly.duration_ms, &mut random_state)?;
+                }
+                let t = fixed_firefly_parameter(particle.elapsed_ns, particle.lifetime_ns)?;
+                particle.position = firefly_curve_position(&particle.control_points, t)?;
+                particle.opacity_255 = firefly_particle_opacity(t);
+            }
+        }
+        self.state.random_state = random_state;
+        if clear {
+            self.state.firefly = None;
+            let sequence = next_effect_sequence(&mut self.state)?;
+            return Ok(Some(MinoriVmEvent::FireflyCleared { sequence }));
+        }
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriVmEvent::Firefly(MinoriFireflyFrame {
+            sequence,
+        })))
+    }
+
+    /// Advances the independently composited `.effect2 SnowH` slot. Native
+    /// Musica keeps this slot separate from the primary effect pointer; its
+    /// fade and particle pool therefore survive primary stage/effect changes.
+    pub fn advance_secondary_effect_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+        let mut random_state = self.state.random_state;
+        let mut clear = false;
+        let mut changed = false;
+        let Some(effect) = self.state.secondary_effect.as_mut() else {
+            return Ok(None);
+        };
+        effect.fade_elapsed_ns = effect
+            .fade_elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let fade_steps = effect.fade_elapsed_ns / MINORI_SNOW_H_FADE_STEP_NS;
+        effect.fade_elapsed_ns %= MINORI_SNOW_H_FADE_STEP_NS;
+        if fade_steps != 0 {
+            changed = true;
+            let fade_steps = u16::try_from(fade_steps.min(u64::from(u16::MAX)))
+                .map_err(|_| MinoriRuntimeError::Overflow)?;
+            if effect.ending {
+                effect.alpha_256 = effect.alpha_256.saturating_sub(fade_steps);
+                clear = effect.alpha_256 == 0;
+            } else {
+                effect.alpha_256 = effect
+                    .alpha_256
+                    .saturating_add(fade_steps)
+                    .min(MINORI_SNOW_H_FADE_SCALE);
+            }
+        }
+        effect.motion_elapsed_ns = effect
+            .motion_elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let elapsed_ms = effect.motion_elapsed_ns / 1_000_000;
+        effect.motion_elapsed_ns %= 1_000_000;
+        if elapsed_ms != 0 && !clear {
+            changed = true;
+            for particle in &mut effect.particles {
+                advance_snow_h_particle(particle, elapsed_ms)?;
+                if particle.position[0] >= MINORI_SNOW_H_STAGE_WIDTH {
+                    initialize_snow_h_particle(particle, &mut random_state)?;
+                }
+            }
+        }
+        self.state.random_state = random_state;
+        if clear {
+            self.state.secondary_effect = None;
+            let sequence = next_effect_sequence(&mut self.state)?;
+            return Ok(Some(MinoriVmEvent::SecondaryEffectCleared { sequence }));
+        }
+        if !changed {
+            return Ok(None);
+        }
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriVmEvent::SecondaryEffect(
+            MinoriSecondaryEffectFrame { sequence },
+        )))
+    }
+
+    /// Advances the native screen-copy shake mode. Musica performs at most
+    /// one displacement update per render pass and resets the interval origin
+    /// to the current clock; retaining excess elapsed time would therefore
+    /// fabricate updates that the original engine never displayed.
+    pub fn advance_screen_shake_clock(
+        &mut self,
+        delta_ns: u64,
+    ) -> Result<Option<MinoriScreenShakeFrame>, MinoriRuntimeError> {
+        let Some(shake) = self.state.screen_shake.as_mut() else {
+            return Ok(None);
+        };
+        shake.elapsed_ns = shake
+            .elapsed_ns
+            .checked_add(delta_ns)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let interval_ns = u64::from(shake.interval_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        if shake.elapsed_ns < interval_ns {
+            return Ok(None);
+        }
+        shake.elapsed_ns = 0;
+        let amplitude = shake.amplitude;
+        shake.offset = match shake.kind {
+            MinoriScreenShakeKind::Vertical => {
+                if shake.update_index.is_multiple_of(2) {
+                    [0, -amplitude]
+                } else {
+                    [0, amplitude]
+                }
+            }
+            MinoriScreenShakeKind::Random => {
+                let pattern = next_native_random_15(&mut self.state.random_state) % 8;
+                random_screen_shake_offset(pattern, amplitude)?
+            }
+        };
+        shake.update_index = shake
+            .update_index
+            .checked_add(1)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriScreenShakeFrame { sequence }))
+    }
+
+    pub fn step(
+        &mut self,
+        fixed_tick: u64,
+        max_instructions: u32,
+    ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
         if fixed_tick == 0 || fixed_tick != self.state.fixed_tick + 1 {
             return Err(MinoriRuntimeError::State);
         }
@@ -558,17 +1682,9 @@ impl MinoriVm {
         if self.state.terminal {
             return Ok(Some(MinoriVmEvent::Terminal));
         }
+        self.executed_commands.clear();
         self.state.fixed_tick = fixed_tick;
-        let mut visited = BTreeSet::new();
-        loop {
-            let control_state = (
-                self.state.pc_line,
-                self.state.variables.clone(),
-                self.state.global_variables.clone(),
-            );
-            if !visited.insert(control_state) {
-                return Err(MinoriRuntimeError::NonYieldingCycle);
-            }
+        for _ in 0..max_instructions {
             let line_index = self.state.pc_line as usize;
             let line = self
                 .script
@@ -583,6 +1699,11 @@ impl MinoriVm {
             let ScLineKind::Command { command } = &line.kind else {
                 continue;
             };
+            self.executed_commands.push(MinoriExecutedCommand {
+                script_hash: self.state.script_hash,
+                command_ordinal: self.state.pc_line - 1,
+                opcode: command.opcode.clone(),
+            });
             self.state.instruction_count = self
                 .state
                 .instruction_count
@@ -592,6 +1713,7 @@ impl MinoriVm {
                 return Ok(Some(event));
             }
         }
+        Err(MinoriRuntimeError::Budget)
     }
 }
 
@@ -601,13 +1723,15 @@ fn execute_control(
     state: &mut MinoriRuntimeState,
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
     match command.opcode.as_str() {
-        "pragma" | "label" => Ok(None),
+        "pragma" => execute_pragma(command, state),
+        "label" => Ok(None),
         "set" | "setglobal" => {
             let (key, value) = evaluate_assignment(&command.operands, state)?;
             if command.opcode == "set" {
                 state.variables.insert(key.to_owned(), value);
             } else {
                 state.global_variables.insert(key.to_owned(), value);
+                record_verified_route_clear(state, key, value);
             }
             Ok(None)
         }
@@ -638,6 +1762,16 @@ fn execute_control(
                 return Err(MinoriRuntimeError::Operand);
             };
             let timer_ticks = u32::try_from(*value).map_err(|_| MinoriRuntimeError::Operand)?;
+            // The original Control fast path bypasses timing work only while
+            // the script has enabled it explicitly. Keeping this at command
+            // execution time avoids fabricating an await completion in the
+            // host and preserves one deterministic fixed tick per call.
+            if state.system_ui.skip_enabled
+                && (state.system_ui.play_mode == MinoriPlayMode::Skip
+                    || (state.system_ui.control_enabled && state.system_ui.control_pressed))
+            {
+                return Ok(None);
+            }
             let milliseconds = timer_ticks
                 .checked_mul(10)
                 .ok_or(MinoriRuntimeError::Overflow)?;
@@ -651,6 +1785,7 @@ fn execute_control(
             Ok(Some(MinoriVmEvent::Wait(wait)))
         }
         "message" => execute_message(command, state),
+        "select" => execute_select(command, labels, state),
         "playbgm" => execute_play_bgm(command, state),
         "playse" => execute_play_se(command, state, 1, "se"),
         "playse2" => execute_play_se(command, state, 2, "se2"),
@@ -658,14 +1793,15 @@ fn execute_control(
         "playvoice" => execute_play_voice(command, state),
         "transition" => execute_transition(command, state),
         "stage" => execute_stage(command, state),
+        "char" => execute_character(command, state),
+        "hscroll" => execute_axis_scroll(command, state, MinoriAxisScrollAxis::Horizontal),
+        "vscroll" => execute_axis_scroll(command, state, MinoriAxisScrollAxis::Vertical),
+        "scroll" => execute_linear_scroll(command, state),
+        "scrollxf" => execute_scroll_xf(command, state),
+        "endscroll" => execute_end_scroll(command, state),
         "effect" => execute_effect(command, state),
-        // The original command registration routes `.effect2` through the
-        // same parser but binds it to a separate compositor slot. It must not
-        // overwrite the primary timeline until dual-slot composition and
-        // snapshot semantics are implemented together.
-        "effect2" => Err(MinoriRuntimeError::Effect {
-            violation: MinoriEffectViolation::SecondarySlot,
-        }),
+        "effect2" => execute_secondary_effect(command, state),
+        "shakescreen" => execute_screen_shake(command, state),
         "panel" => execute_panel(command, state),
         "movie" => execute_movie(command, state),
         "chain" => {
@@ -678,7 +1814,20 @@ fn execute_control(
             }))
         }
         "end" => {
-            state.terminal = true;
+            // The original CommandEnd returns a title-launched game scene to
+            // SceneMainMenu. Direct-entry sessions remain bounded command-line
+            // executions and therefore terminate at the same script boundary.
+            if state.launch_mode == MinoriLaunchMode::Title {
+                state.wait = None;
+                state.message = None;
+                state.choice = None;
+                state.movie = None;
+                state.system_ui.page = MinoriSystemPage::Title;
+                state.system_ui.focus_index = 0;
+                state.system_ui.backlog_cursor = None;
+            } else {
+                state.terminal = true;
+            }
             Ok(Some(MinoriVmEvent::Terminal))
         }
         _ => Err(MinoriRuntimeError::UnsupportedOpcode {
@@ -686,6 +1835,201 @@ fn execute_control(
             ordinal: command.ordinal,
         }),
     }
+}
+
+fn record_verified_route_clear(state: &mut MinoriRuntimeState, key: &str, value: i64) {
+    if value != 1 || !MINORI_ROUTE_CLEAR_FLAGS.contains(&key) {
+        return;
+    }
+    let identity = Hash256::from_sha256(key.as_bytes());
+    if !state.gallery_unlocks.contains(&identity) {
+        state.gallery_unlocks.push(identity);
+        state.gallery_unlocks.sort_unstable();
+    }
+}
+
+fn execute_pragma(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::Operand)?;
+    let identity = Hash256::from_sha256(&command.raw_operands);
+    let [pragma] = tokens.as_slice() else {
+        return Err(MinoriRuntimeError::UnsupportedPragma { identity });
+    };
+    match pragma.as_str() {
+        "enable_control" => {
+            state.system_ui.control_enabled = true;
+            Ok(None)
+        }
+        "disable_control" => {
+            state.system_ui.control_enabled = false;
+            Ok(None)
+        }
+        "skip_enable" => {
+            state.system_ui.skip_enabled = true;
+            Ok(None)
+        }
+        "skip_disable" => {
+            state.system_ui.skip_enabled = false;
+            Ok(None)
+        }
+        _ => Err(MinoriRuntimeError::UnsupportedPragma { identity }),
+    }
+}
+
+fn execute_character(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::Character)?;
+    let mode = tokens
+        .first()
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or(MinoriRuntimeError::Character)?;
+    match mode.as_str() {
+        "load" => {
+            let [_, slot, resource] = tokens.as_slice() else {
+                return Err(MinoriRuntimeError::Character);
+            };
+            let signed_slot = parse_character_slot(slot)?;
+            let slot_id = signed_slot.unsigned_abs();
+            if !state.characters.contains_key(&slot_id)
+                && state.characters.len() >= MINORI_CHARACTER_MAX_SLOTS
+            {
+                return Err(MinoriRuntimeError::Character);
+            }
+            validate_scene_filename(resource).map_err(|_| MinoriRuntimeError::Character)?;
+            let resource_uris = vec![format!("minori:/st/{resource}")];
+            state.characters.insert(
+                slot_id,
+                MinoriCharacterState {
+                    slot_id,
+                    positive_orientation: signed_slot >= 0,
+                    resource_uris,
+                    anchor_position: [0, 0],
+                    visible: true,
+                    opacity_256: 256,
+                    transition: None,
+                    keep_once: false,
+                },
+            );
+        }
+        "pos" => {
+            let [_, slot, x, y] = tokens.as_slice() else {
+                return Err(MinoriRuntimeError::Character);
+            };
+            let slot_id = parse_character_slot(slot)?.unsigned_abs();
+            let x = parse_character_coordinate(x)?;
+            let y = parse_character_coordinate(y)?;
+            let character = state
+                .characters
+                .get_mut(&slot_id)
+                .ok_or(MinoriRuntimeError::Character)?;
+            character.anchor_position = [x, y];
+        }
+        "trans" => {
+            let [_, slot, duration, opacity] = tokens.as_slice() else {
+                return Err(MinoriRuntimeError::Character);
+            };
+            let slot_id = parse_character_slot(slot)?.unsigned_abs();
+            let duration_ms = parse_character_transition_duration(duration)?;
+            let target_opacity_256 = parse_character_opacity(opacity)?;
+            let character = state
+                .characters
+                .get_mut(&slot_id)
+                .ok_or(MinoriRuntimeError::Character)?;
+            if character.transition.is_some() {
+                return Err(MinoriRuntimeError::Character);
+            }
+            if duration_ms == 0 {
+                character.opacity_256 = target_opacity_256;
+            } else {
+                character.transition = Some(MinoriCharacterTransitionState {
+                    start_opacity_256: character.opacity_256,
+                    target_opacity_256,
+                    duration_ms,
+                    elapsed_ns: 0,
+                    completed: false,
+                });
+                let wait = MinoriWaitState::CharacterTransition {
+                    token_id: format!("minori.character.{slot_id}.{}", state.instruction_count),
+                    slot_id,
+                    milliseconds: duration_ms,
+                };
+                state.wait = Some(wait.clone());
+                return Ok(Some(MinoriVmEvent::Wait(wait)));
+            }
+        }
+        "vis" => {
+            let [_, slot, visible] = tokens.as_slice() else {
+                return Err(MinoriRuntimeError::Character);
+            };
+            let slot_id = parse_character_slot(slot)?.unsigned_abs();
+            let visible = parse_native_bool(visible);
+            let character = state
+                .characters
+                .get_mut(&slot_id)
+                .ok_or(MinoriRuntimeError::Character)?;
+            character.visible = visible;
+        }
+        "keep" => {
+            let [_, slot] = tokens.as_slice() else {
+                return Err(MinoriRuntimeError::Character);
+            };
+            let slot_id = parse_character_slot(slot)?.unsigned_abs();
+            if let Some(character) = state.characters.get_mut(&slot_id) {
+                character.keep_once = true;
+            }
+        }
+        _ => return Err(MinoriRuntimeError::Character),
+    }
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::Character(MinoriCharacterFrame {
+        sequence,
+    })))
+}
+
+fn parse_character_slot(token: &str) -> Result<i32, MinoriRuntimeError> {
+    let slot = token
+        .parse::<i32>()
+        .ok()
+        .filter(|slot| *slot != 0 && slot.unsigned_abs() <= MINORI_CHARACTER_MAX_SLOT_ID)
+        .ok_or(MinoriRuntimeError::Character)?;
+    Ok(slot)
+}
+
+fn parse_character_coordinate(token: &str) -> Result<i32, MinoriRuntimeError> {
+    token
+        .parse::<i32>()
+        .ok()
+        .filter(|value| value.unsigned_abs() <= MINORI_CHARACTER_MAX_COORDINATE as u32)
+        .ok_or(MinoriRuntimeError::Character)
+}
+
+fn parse_character_transition_duration(token: &str) -> Result<u32, MinoriRuntimeError> {
+    token
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value <= MINORI_CHARACTER_MAX_TRANSITION_MS)
+        .ok_or(MinoriRuntimeError::Character)
+}
+
+fn parse_character_opacity(token: &str) -> Result<u16, MinoriRuntimeError> {
+    token
+        .parse::<u16>()
+        .ok()
+        .filter(|value| *value <= 255)
+        .ok_or(MinoriRuntimeError::Character)
+}
+
+fn parse_native_bool(token: &str) -> bool {
+    token
+        .as_bytes()
+        .first()
+        .is_some_and(|value| matches!(value, b'1'..=b'9' | b't' | b'T'))
 }
 
 fn execute_movie(
@@ -756,10 +2100,94 @@ fn execute_effect(
     }
     if tokens[0] == "*" {
         state.effect = None;
+        state.firefly = None;
+        state.wscroll2 = None;
         next_effect_sequence(state)?;
         return Ok(Some(MinoriVmEvent::EffectCleared {
             sequence: state.effect_sequence,
         }));
+    }
+    if tokens[0] == "end" {
+        if tokens.len() != 1 {
+            return Err(MinoriRuntimeError::Firefly);
+        }
+        if let Some(firefly) = state.firefly.as_mut() {
+            firefly.ending = true;
+            next_effect_sequence(state)?;
+            return Ok(Some(MinoriVmEvent::Firefly(MinoriFireflyFrame {
+                sequence: state.effect_sequence,
+            })));
+        }
+        state.effect = None;
+        state.wscroll2 = None;
+        next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::EffectCleared {
+            sequence: state.effect_sequence,
+        }));
+    }
+    if tokens[0] == "Firefly" {
+        if tokens.len() != 4 {
+            return Err(MinoriRuntimeError::Firefly);
+        }
+        validate_scene_filename(&tokens[1]).map_err(|_| MinoriRuntimeError::Firefly)?;
+        let target_count = tokens[2]
+            .parse::<u32>()
+            .ok()
+            .filter(|value| (1..=MINORI_FIREFLY_MAX_PARTICLES_U32).contains(value))
+            .ok_or(MinoriRuntimeError::Firefly)?;
+        let duration_ms = tokens[3]
+            .parse::<u32>()
+            .ok()
+            .filter(|value| (1..=MINORI_FIREFLY_MAX_DURATION_MS).contains(value))
+            .ok_or(MinoriRuntimeError::Firefly)?;
+        state.effect = None;
+        state.wscroll2 = None;
+        let firefly = new_firefly_state(
+            &tokens[1],
+            target_count,
+            duration_ms,
+            &mut state.random_state,
+        )?;
+        state.firefly = Some(firefly);
+        next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::Firefly(MinoriFireflyFrame {
+            sequence: state.effect_sequence,
+        })));
+    }
+    if tokens[0] == "WScroll2" {
+        if tokens.len() != 4 || state.stage.is_none() || state.scroll_xf.is_some() {
+            return Err(MinoriRuntimeError::WScroll2);
+        }
+        let sync_resource = tokens[1]
+            .strip_prefix("sync:")
+            .ok_or(MinoriRuntimeError::WScroll2)?;
+        validate_scene_filename(sync_resource).map_err(|_| MinoriRuntimeError::WScroll2)?;
+        let period_ticks = tokens[2]
+            .parse::<u32>()
+            .ok()
+            .filter(|value| (1..=MINORI_WSCROLL2_MAX_PERIOD_TICKS).contains(value))
+            .ok_or(MinoriRuntimeError::WScroll2)?;
+        let speed_tenths = tokens[3]
+            .parse::<i32>()
+            .ok()
+            .filter(|value| value.unsigned_abs() <= MINORI_WSCROLL2_MAX_SPEED_TENTHS as u32)
+            .ok_or(MinoriRuntimeError::WScroll2)?;
+        state.effect = None;
+        state.firefly = None;
+        state.wscroll2 = Some(MinoriWScroll2State {
+            sync_resource_uri: format!("minori:/st/{sync_resource}"),
+            period_ticks,
+            speed_tenths,
+            elapsed_ns: 0,
+            elapsed_ticks: 0,
+            foreground_offset: 0,
+            background_offset: 0,
+            background_remainder: 0,
+        });
+        let sequence = next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::WScroll2(MinoriWScroll2Frame {
+            sequence,
+        })));
     }
     if tokens[0] != "CrossFade2" {
         tracing::info!(
@@ -788,6 +2216,8 @@ fn execute_effect(
     // a self-crossfade.
     if tokens.len() == 1 {
         state.effect = None;
+        state.firefly = None;
+        state.wscroll2 = None;
         next_effect_sequence(state)?;
         return Ok(Some(MinoriVmEvent::EffectCleared {
             sequence: state.effect_sequence,
@@ -801,6 +2231,8 @@ fn execute_effect(
     // guessed background URI.
     if tokens[1] == "*" {
         state.effect = None;
+        state.firefly = None;
+        state.wscroll2 = None;
         next_effect_sequence(state)?;
         return Ok(Some(MinoriVmEvent::EffectCleared {
             sequence: state.effect_sequence,
@@ -836,6 +2268,8 @@ fn execute_effect(
             violation: MinoriEffectViolation::Timing,
         });
     }
+    state.firefly = None;
+    state.wscroll2 = None;
     state.effect = Some(MinoriEffectState {
         kind: MinoriEffectKind::CrossFade2,
         resources,
@@ -855,6 +2289,85 @@ fn execute_effect(
     })?)?;
     frame.sequence = state.effect_sequence;
     Ok(Some(MinoriVmEvent::Effect(frame)))
+}
+
+fn execute_secondary_effect(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::SecondaryEffect)?;
+    let [kind] = tokens.as_slice() else {
+        return Err(MinoriRuntimeError::SecondaryEffect);
+    };
+    match kind.as_str() {
+        "SnowH" => {
+            state.secondary_effect = Some(new_snow_h_state(&mut state.random_state)?);
+        }
+        "fadeout" => {
+            let effect = state
+                .secondary_effect
+                .as_mut()
+                .ok_or(MinoriRuntimeError::SecondaryEffect)?;
+            if effect.kind != MinoriSecondaryEffectKind::SnowHorizontal {
+                return Err(MinoriRuntimeError::SecondaryEffect);
+            }
+            effect.ending = true;
+        }
+        _ => {
+            tracing::info!(
+                target: "astra_emu_minori::runtime",
+                event = "astra_emu_minori_secondary_effect_kind_unsupported",
+                effect_identity = %Hash256::from_sha256(kind.as_bytes()),
+                "Minori secondary effect kind is not implemented"
+            );
+            return Err(MinoriRuntimeError::UnsupportedEffectKind {
+                identity: Hash256::from_sha256(kind.as_bytes()),
+            });
+        }
+    }
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::SecondaryEffect(
+        MinoriSecondaryEffectFrame { sequence },
+    )))
+}
+
+fn execute_screen_shake(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::ScreenShake)?;
+    let [kind, amplitude, interval_ms] = tokens.as_slice() else {
+        return Err(MinoriRuntimeError::ScreenShake);
+    };
+    let kind = match kind.as_str() {
+        "R" | "r" => MinoriScreenShakeKind::Random,
+        "V" | "v" => MinoriScreenShakeKind::Vertical,
+        _ => return Err(MinoriRuntimeError::ScreenShake),
+    };
+    let amplitude = amplitude
+        .parse::<i32>()
+        .ok()
+        .filter(|value| (1..=MINORI_SCREEN_SHAKE_MAX_AMPLITUDE).contains(value))
+        .ok_or(MinoriRuntimeError::ScreenShake)?;
+    let interval_ms = interval_ms
+        .parse::<u32>()
+        .ok()
+        .filter(|value| (1..=MINORI_SCREEN_SHAKE_MAX_INTERVAL_MS).contains(value))
+        .ok_or(MinoriRuntimeError::ScreenShake)?;
+    state.screen_shake = Some(MinoriScreenShakeState {
+        kind,
+        amplitude,
+        interval_ms,
+        elapsed_ns: 0,
+        update_index: 0,
+        offset: [0, 0],
+    });
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::ScreenShake(MinoriScreenShakeFrame {
+        sequence,
+    })))
 }
 
 fn execute_panel(
@@ -949,6 +2462,1098 @@ fn effect_frame(effect: &MinoriEffectState) -> Result<MinoriEffectFrame, MinoriR
     })
 }
 
+fn next_firefly_random(state: &mut u64) -> u32 {
+    // SplitMix64 is small, deterministic on every supported target, and keeps
+    // the adapter independent from the process-global C rand() state used by
+    // the original executable.
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    (value ^ (value >> 31)) as u32
+}
+
+fn next_native_random_15(state: &mut u64) -> u32 {
+    next_firefly_random(state) & 0x7fff
+}
+
+fn random_screen_shake_offset(
+    pattern: u32,
+    amplitude: i32,
+) -> Result<[i32; 2], MinoriRuntimeError> {
+    let offset = match pattern {
+        // These eight cases preserve the native switch fall-through. Cases
+        // 2, 4, and 6 apply two buffer-copy helpers and therefore produce a
+        // diagonal displacement rather than a single-axis approximation.
+        0 => [0, -amplitude],
+        1 => [-amplitude, 0],
+        2 => [amplitude, amplitude],
+        3 => [amplitude, 0],
+        4 => [-amplitude, amplitude],
+        5 => [0, amplitude],
+        6 => [amplitude, -amplitude],
+        7 => [0, -amplitude],
+        _ => return Err(MinoriRuntimeError::ScreenShake),
+    };
+    Ok(offset)
+}
+
+fn new_snow_h_state(
+    random_state: &mut u64,
+) -> Result<MinoriSecondaryEffectState, MinoriRuntimeError> {
+    let mut particles = Vec::with_capacity(MINORI_SNOW_H_PARTICLE_COUNT);
+    for _ in 0..MINORI_SNOW_H_PARTICLE_COUNT {
+        let mut particle = MinoriSnowHParticle {
+            fixed_position: [0, 0],
+            horizontal_velocity: 0,
+            vertical_velocity: 0,
+            vertical_positive: false,
+            kind: 0,
+            position: [0, 0],
+            active: false,
+        };
+        initialize_snow_h_particle(&mut particle, random_state)?;
+        particles.push(particle);
+    }
+    Ok(MinoriSecondaryEffectState {
+        kind: MinoriSecondaryEffectKind::SnowHorizontal,
+        resources: [
+            "minori:/sys/snowS.png".into(),
+            "minori:/sys/snowM.png".into(),
+            "minori:/sys/snowL.png".into(),
+        ],
+        ending: false,
+        alpha_256: 0,
+        fade_elapsed_ns: 0,
+        motion_elapsed_ns: 0,
+        particles,
+    })
+}
+
+fn initialize_snow_h_particle(
+    particle: &mut MinoriSnowHParticle,
+    random_state: &mut u64,
+) -> Result<(), MinoriRuntimeError> {
+    let x = next_native_random_15(random_state)
+        % u32::try_from(MINORI_SNOW_H_STAGE_WIDTH + 100)
+            .map_err(|_| MinoriRuntimeError::Overflow)?;
+    let y = next_native_random_15(random_state)
+        % u32::try_from(MINORI_SNOW_H_STAGE_HEIGHT + 60)
+            .map_err(|_| MinoriRuntimeError::Overflow)?;
+    let horizontal_velocity = next_native_random_15(random_state)
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(0x4000))
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let vertical_velocity = next_native_random_15(random_state) % 0x2000;
+    let vertical_positive = next_native_random_15(random_state) > 0x3fff;
+    let kind = if horizontal_velocity < 0x5000 {
+        0
+    } else if horizontal_velocity < 0xa000 {
+        1
+    } else {
+        2
+    };
+    particle.fixed_position = [i64::from(x) << 16, i64::from(y) << 16];
+    particle.horizontal_velocity = horizontal_velocity;
+    particle.vertical_velocity = vertical_velocity;
+    particle.vertical_positive = vertical_positive;
+    particle.kind = kind;
+    particle.position = snow_h_visible_position(particle.fixed_position)?;
+    particle.active = true;
+    Ok(())
+}
+
+fn advance_snow_h_particle(
+    particle: &mut MinoriSnowHParticle,
+    elapsed_ms: u64,
+) -> Result<(), MinoriRuntimeError> {
+    if !particle.active {
+        return Err(MinoriRuntimeError::SecondaryEffect);
+    }
+    let horizontal_delta = u64::from(particle.horizontal_velocity)
+        .checked_mul(elapsed_ms)
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let vertical_delta = u64::from(particle.vertical_velocity)
+        .checked_mul(elapsed_ms)
+        .and_then(|value| i64::try_from(value).ok())
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    particle.fixed_position[0] = particle.fixed_position[0]
+        .checked_add(horizontal_delta)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    particle.fixed_position[1] = if particle.vertical_positive {
+        particle.fixed_position[1].checked_add(vertical_delta)
+    } else {
+        particle.fixed_position[1].checked_sub(vertical_delta)
+    }
+    .ok_or(MinoriRuntimeError::Overflow)?;
+    particle.position = snow_h_visible_position(particle.fixed_position)?;
+    Ok(())
+}
+
+fn snow_h_visible_position(fixed: [i64; 2]) -> Result<[i32; 2], MinoriRuntimeError> {
+    let x = (fixed[0] >> 16)
+        .checked_sub(50)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let y = (fixed[1] >> 16)
+        .checked_sub(30)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    Ok([x, y])
+}
+
+fn firefly_random_bounded(state: &mut u64, bound: u32) -> Result<i32, MinoriRuntimeError> {
+    if bound == 0 {
+        return Err(MinoriRuntimeError::Firefly);
+    }
+    Ok((next_firefly_random(state) % bound) as i32)
+}
+
+fn respawn_firefly_particle(
+    particle: &mut MinoriFireflyParticle,
+    duration_ms: u32,
+    random_state: &mut u64,
+) -> Result<(), MinoriRuntimeError> {
+    if duration_ms == 0 {
+        return Err(MinoriRuntimeError::Firefly);
+    }
+    for point in &mut particle.control_points {
+        let x = firefly_random_bounded(
+            random_state,
+            u32::try_from(MINORI_FIREFLY_STAGE_WIDTH * 2)
+                .map_err(|_| MinoriRuntimeError::Overflow)?,
+        )? - MINORI_FIREFLY_STAGE_WIDTH / 2;
+        let y = firefly_random_bounded(
+            random_state,
+            u32::try_from(MINORI_FIREFLY_STAGE_HEIGHT * 2)
+                .map_err(|_| MinoriRuntimeError::Overflow)?,
+        )? - MINORI_FIREFLY_STAGE_HEIGHT / 2;
+        *point = [x, y];
+    }
+    let lifetime_offset = next_firefly_random(random_state) % duration_ms;
+    let lifetime_ms = duration_ms
+        .checked_add(lifetime_offset)
+        .and_then(|value| value.checked_sub(duration_ms / 2))
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    particle.kind = (next_firefly_random(random_state) % 3) as u8;
+    particle.elapsed_ns = 0;
+    particle.lifetime_ns = u64::from(lifetime_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    particle.position = particle.control_points[0];
+    particle.opacity_255 = 0;
+    particle.active = true;
+    Ok(())
+}
+
+fn fixed_firefly_parameter(elapsed_ns: u64, lifetime_ns: u64) -> Result<u32, MinoriRuntimeError> {
+    if lifetime_ns == 0 {
+        return Err(MinoriRuntimeError::Firefly);
+    }
+    let numerator = u128::from(elapsed_ns.min(lifetime_ns))
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    u32::try_from(numerator / u128::from(lifetime_ns)).map_err(|_| MinoriRuntimeError::Overflow)
+}
+
+fn firefly_curve_position(
+    control_points: &[[i32; 2]; MINORI_FIREFLY_CONTROL_POINTS],
+    parameter: u32,
+) -> Result<[i32; 2], MinoriRuntimeError> {
+    const SCALE: i128 = 1_000_000;
+    if parameter > SCALE as u32 {
+        return Err(MinoriRuntimeError::Firefly);
+    }
+    let t = i128::from(parameter);
+    let one_minus_t = SCALE - t;
+    let mut points = control_points.map(|point| [i128::from(point[0]), i128::from(point[1])]);
+    // De Casteljau is the exact degree-six Bernstein curve used by the
+    // original seven control-point particle path, evaluated in fixed-point so
+    // the snapshot hash is independent of a platform's floating-point mode.
+    for level in 1..MINORI_FIREFLY_CONTROL_POINTS {
+        for index in 0..(MINORI_FIREFLY_CONTROL_POINTS - level) {
+            let (left, right) = points.split_at_mut(index + 1);
+            let current = &mut left[index];
+            let next = &right[0];
+            for (value, next_value) in current.iter_mut().zip(next.iter()) {
+                *value = ((*value)
+                    .checked_mul(one_minus_t)
+                    .and_then(|left| {
+                        next_value
+                            .checked_mul(t)
+                            .and_then(|right| left.checked_add(right))
+                    })
+                    .ok_or(MinoriRuntimeError::Overflow)?)
+                    / SCALE;
+            }
+        }
+    }
+    Ok([
+        i32::try_from(points[0][0]).map_err(|_| MinoriRuntimeError::Overflow)?,
+        i32::try_from(points[0][1]).map_err(|_| MinoriRuntimeError::Overflow)?,
+    ])
+}
+
+fn firefly_particle_opacity(parameter: u32) -> u16 {
+    let value = if parameter < 255_000 {
+        parameter.saturating_mul(255) / 255_000
+    } else if parameter > 755_000 {
+        (1_000_000u32.saturating_sub(parameter)).saturating_mul(255) / 245_000
+    } else {
+        255
+    };
+    value.min(255) as u16
+}
+
+fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntimeError> {
+    validate_backlog_state(state)?;
+    if let Some(message) = state.message.as_ref() {
+        if message.voice.is_some() != message.voice_hash.is_some() {
+            return Err(MinoriRuntimeError::AudioResource);
+        }
+        if let Some(voice) = message.voice.as_ref() {
+            validate_message_voice(voice)?;
+        }
+    }
+    if state.system_ui.auto_wait_ticks > 10_000
+        || state.system_ui.preferred_play_mode == MinoriPlayMode::Normal
+        || !(0..=1280).contains(&state.system_ui.pointer_x)
+        || !(0..=720).contains(&state.system_ui.pointer_y)
+    {
+        return Err(MinoriRuntimeError::State);
+    }
+    let verified_unlocks = MINORI_ROUTE_CLEAR_FLAGS
+        .map(|flag| Hash256::from_sha256(flag.as_bytes()))
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if state.gallery_unlocks.len() > verified_unlocks.len()
+        || state
+            .gallery_unlocks
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || state
+            .gallery_unlocks
+            .iter()
+            .any(|identity| !verified_unlocks.contains(identity))
+    {
+        return Err(MinoriRuntimeError::State);
+    }
+    if let Some(stage) = state.stage.as_ref() {
+        validate_stage_state(stage)?;
+    }
+    validate_character_state(&state.characters)?;
+    let transition_slot = state
+        .characters
+        .iter()
+        .find_map(|(slot_id, character)| character.transition.as_ref().map(|_| *slot_id));
+    match (&state.wait, transition_slot) {
+        (Some(MinoriWaitState::CharacterTransition { slot_id, .. }), Some(transition_slot))
+            if *slot_id == transition_slot => {}
+        (Some(MinoriWaitState::CharacterTransition { .. }), _) | (_, Some(_)) => {
+            return Err(MinoriRuntimeError::Character)
+        }
+        _ => {}
+    }
+    if let Some(scroll) = state.axis_scroll.as_ref() {
+        validate_axis_scroll_state(
+            scroll,
+            state.stage.as_ref().ok_or(MinoriRuntimeError::AxisScroll)?,
+        )?;
+        if state.linear_scroll.is_some() || state.scroll_xf.is_some() || state.wscroll2.is_some() {
+            return Err(MinoriRuntimeError::AxisScroll);
+        }
+    }
+    if matches!(state.wait, Some(MinoriWaitState::AxisScroll { .. })) && state.axis_scroll.is_none()
+    {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    if let Some(scroll) = state.linear_scroll.as_ref() {
+        validate_linear_scroll_state(
+            scroll,
+            state
+                .stage
+                .as_ref()
+                .ok_or(MinoriRuntimeError::LinearScroll)?,
+        )?;
+        if state.axis_scroll.is_some() || state.scroll_xf.is_some() || state.wscroll2.is_some() {
+            return Err(MinoriRuntimeError::LinearScroll);
+        }
+    }
+    if matches!(state.wait, Some(MinoriWaitState::LinearScroll { .. }))
+        && state.linear_scroll.is_none()
+    {
+        return Err(MinoriRuntimeError::LinearScroll);
+    }
+    if let Some(scroll) = state.scroll_xf.as_ref() {
+        validate_scroll_xf_state(scroll)?;
+        if state.stage.is_none() {
+            return Err(MinoriRuntimeError::ScrollXf);
+        }
+    }
+    if let Some(scroll) = state.wscroll2.as_ref() {
+        validate_wscroll2_state(scroll)?;
+        if state.stage.is_none() || state.scroll_xf.is_some() {
+            return Err(MinoriRuntimeError::WScroll2);
+        }
+    }
+    if usize::from(state.effect.is_some())
+        + usize::from(state.firefly.is_some())
+        + usize::from(state.wscroll2.is_some())
+        > 1
+    {
+        return Err(MinoriRuntimeError::State);
+    }
+    if let Some(effect) = state.secondary_effect.as_ref() {
+        validate_secondary_effect_state(effect)?;
+    }
+    if let Some(shake) = state.screen_shake.as_ref() {
+        validate_screen_shake_state(shake)?;
+    }
+    let Some(firefly) = state.firefly.as_ref() else {
+        return Ok(());
+    };
+    if state.effect.is_some()
+        || !(1..=MINORI_FIREFLY_MAX_PARTICLES_U32).contains(&firefly.target_count)
+        || usize::try_from(firefly.target_count).map_err(|_| MinoriRuntimeError::Overflow)?
+            != firefly.particles.len()
+        || firefly.particles.len() > MINORI_FIREFLY_MAX_PARTICLES
+        || !(1..=MINORI_FIREFLY_MAX_DURATION_MS).contains(&firefly.duration_ms)
+        || firefly.fade_alpha_256 > MINORI_FIREFLY_FADE_SCALE
+        || firefly.fade_elapsed_ns >= MINORI_FIREFLY_FADE_STEP_NS
+    {
+        return Err(MinoriRuntimeError::Firefly);
+    }
+
+    let suffixes = ["S.png", "M.png", "L.png"];
+    let mut common_prefix: Option<&str> = None;
+    for (resource, suffix) in firefly.resources.iter().zip(suffixes) {
+        let filename = resource
+            .strip_prefix("minori:/sys/")
+            .ok_or(MinoriRuntimeError::Firefly)?;
+        validate_scene_filename(filename).map_err(|_| MinoriRuntimeError::Firefly)?;
+        let prefix = filename
+            .strip_suffix(suffix)
+            .filter(|prefix| !prefix.is_empty())
+            .ok_or(MinoriRuntimeError::Firefly)?;
+        if common_prefix
+            .replace(prefix)
+            .is_some_and(|value| value != prefix)
+        {
+            return Err(MinoriRuntimeError::Firefly);
+        }
+    }
+
+    let min_x = -MINORI_FIREFLY_STAGE_WIDTH / 2;
+    let max_x = MINORI_FIREFLY_STAGE_WIDTH + MINORI_FIREFLY_STAGE_WIDTH / 2 - 1;
+    let min_y = -MINORI_FIREFLY_STAGE_HEIGHT / 2;
+    let max_y = MINORI_FIREFLY_STAGE_HEIGHT + MINORI_FIREFLY_STAGE_HEIGHT / 2 - 1;
+    for particle in &firefly.particles {
+        if !particle.active
+            || particle.kind >= 3
+            || particle.lifetime_ns == 0
+            || particle.elapsed_ns >= particle.lifetime_ns
+            || particle.opacity_255 > 255
+            || !(min_x..=max_x).contains(&particle.position[0])
+            || !(min_y..=max_y).contains(&particle.position[1])
+            || particle.control_points.iter().any(|point| {
+                !(min_x..=max_x).contains(&point[0]) || !(min_y..=max_y).contains(&point[1])
+            })
+        {
+            return Err(MinoriRuntimeError::Firefly);
+        }
+    }
+    Ok(())
+}
+
+fn validate_backlog_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntimeError> {
+    if state.backlog.len() > MINORI_BACKLOG_MAX_ENTRIES {
+        return Err(MinoriRuntimeError::Backlog);
+    }
+    let mut total_bytes = 0usize;
+    for entry in &state.backlog {
+        if entry.text.len() > MINORI_BACKLOG_MAX_ENTRY_BYTES
+            || entry
+                .speaker
+                .as_ref()
+                .is_some_and(|speaker| speaker.len() > MINORI_BACKLOG_MAX_ENTRY_BYTES)
+            || Hash256::from_sha256(entry.text.as_bytes()) != entry.text_hash
+            || entry
+                .speaker
+                .as_ref()
+                .map(|speaker| Hash256::from_sha256(speaker.as_bytes()))
+                != entry.speaker_hash
+            || entry.voice.is_some() != entry.voice_hash.is_some()
+            || entry
+                .voice
+                .as_ref()
+                .is_some_and(|voice| validate_message_voice(voice).is_err())
+        {
+            return Err(MinoriRuntimeError::Backlog);
+        }
+        total_bytes = total_bytes
+            .checked_add(entry.text.len())
+            .and_then(|bytes| bytes.checked_add(entry.speaker.as_ref().map_or(0, String::len)))
+            .filter(|bytes| *bytes <= MINORI_BACKLOG_MAX_TOTAL_BYTES)
+            .ok_or(MinoriRuntimeError::Backlog)?;
+    }
+    if state.backlog_bytes != u64::try_from(total_bytes).map_err(|_| MinoriRuntimeError::Backlog)? {
+        return Err(MinoriRuntimeError::Backlog);
+    }
+    match state.system_ui.page {
+        MinoriSystemPage::Backlog => {
+            let cursor = usize::try_from(
+                state
+                    .system_ui
+                    .backlog_cursor
+                    .ok_or(MinoriRuntimeError::Backlog)?,
+            )
+            .map_err(|_| MinoriRuntimeError::Backlog)?;
+            if cursor >= state.backlog.len() {
+                return Err(MinoriRuntimeError::Backlog);
+            }
+        }
+        _ if state.system_ui.backlog_cursor.is_some() => {
+            return Err(MinoriRuntimeError::Backlog);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_message_voice(voice: &MinoriMessageVoice) -> Result<(), MinoriRuntimeError> {
+    let resource = voice
+        .resource_uri
+        .strip_prefix("minori:/voice/")
+        .ok_or(MinoriRuntimeError::AudioResource)?;
+    validate_audio_relative_path(resource)?;
+    if voice.volume_milli > 1000 || !(-1000..=1000).contains(&voice.pan_milli) {
+        return Err(MinoriRuntimeError::AudioResource);
+    }
+    Ok(())
+}
+
+fn validate_secondary_effect_state(
+    effect: &MinoriSecondaryEffectState,
+) -> Result<(), MinoriRuntimeError> {
+    let expected_resources = [
+        "minori:/sys/snowS.png",
+        "minori:/sys/snowM.png",
+        "minori:/sys/snowL.png",
+    ];
+    if effect.kind != MinoriSecondaryEffectKind::SnowHorizontal
+        || effect
+            .resources
+            .iter()
+            .map(String::as_str)
+            .ne(expected_resources)
+        || effect.particles.len() != MINORI_SNOW_H_PARTICLE_COUNT
+        || effect.alpha_256 > MINORI_SNOW_H_FADE_SCALE
+        || effect.fade_elapsed_ns >= MINORI_SNOW_H_FADE_STEP_NS
+        || effect.motion_elapsed_ns >= 1_000_000
+    {
+        return Err(MinoriRuntimeError::SecondaryEffect);
+    }
+    for particle in &effect.particles {
+        let expected_kind = if particle.horizontal_velocity < 0x5000 {
+            0
+        } else if particle.horizontal_velocity < 0xa000 {
+            1
+        } else {
+            2
+        };
+        let visible = snow_h_visible_position(particle.fixed_position)
+            .map_err(|_| MinoriRuntimeError::SecondaryEffect)?;
+        if !particle.active
+            || !(0x4000..=0x13ffe).contains(&particle.horizontal_velocity)
+            || particle.vertical_velocity >= 0x2000
+            || particle.kind != expected_kind
+            || particle.position != visible
+            || !(-50..MINORI_SNOW_H_STAGE_WIDTH).contains(&particle.position[0])
+            || !(-2048..=2048).contains(&particle.position[1])
+        {
+            return Err(MinoriRuntimeError::SecondaryEffect);
+        }
+    }
+    Ok(())
+}
+
+fn validate_screen_shake_state(shake: &MinoriScreenShakeState) -> Result<(), MinoriRuntimeError> {
+    let interval_ns = u64::from(shake.interval_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::ScreenShake)?;
+    let expected_offset = match shake.kind {
+        MinoriScreenShakeKind::Vertical if shake.update_index == 0 => Some([0, 0]),
+        MinoriScreenShakeKind::Vertical if (shake.update_index - 1).is_multiple_of(2) => {
+            Some([0, -shake.amplitude])
+        }
+        MinoriScreenShakeKind::Vertical => Some([0, shake.amplitude]),
+        MinoriScreenShakeKind::Random if shake.update_index == 0 => Some([0, 0]),
+        MinoriScreenShakeKind::Random => None,
+    };
+    let random_offset_is_valid = (0..8).any(|pattern| {
+        random_screen_shake_offset(pattern, shake.amplitude)
+            .is_ok_and(|offset| offset == shake.offset)
+    });
+    if !(1..=MINORI_SCREEN_SHAKE_MAX_AMPLITUDE).contains(&shake.amplitude)
+        || !(1..=MINORI_SCREEN_SHAKE_MAX_INTERVAL_MS).contains(&shake.interval_ms)
+        || shake.elapsed_ns >= interval_ns
+        || shake
+            .offset
+            .iter()
+            .any(|value| value.unsigned_abs() > shake.amplitude as u32)
+        || expected_offset.is_some_and(|expected| shake.offset != expected)
+        || (shake.kind == MinoriScreenShakeKind::Random
+            && shake.update_index != 0
+            && !random_offset_is_valid)
+    {
+        return Err(MinoriRuntimeError::ScreenShake);
+    }
+    Ok(())
+}
+
+fn validate_character_state(
+    characters: &BTreeMap<u32, MinoriCharacterState>,
+) -> Result<(), MinoriRuntimeError> {
+    if characters.len() > MINORI_CHARACTER_MAX_SLOTS {
+        return Err(MinoriRuntimeError::Character);
+    }
+    let mut transition_count = 0usize;
+    for (slot_id, character) in characters {
+        if *slot_id == 0
+            || *slot_id > MINORI_CHARACTER_MAX_SLOT_ID
+            || character.slot_id != *slot_id
+            || character.resource_uris.len() != MINORI_CHARACTER_RESOURCE_COUNT
+            || character.opacity_256 > 256
+            || character
+                .anchor_position
+                .iter()
+                .any(|value| value.unsigned_abs() > MINORI_CHARACTER_MAX_COORDINATE as u32)
+        {
+            return Err(MinoriRuntimeError::Character);
+        }
+        if let Some(transition) = character.transition.as_ref() {
+            transition_count = transition_count
+                .checked_add(1)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            let duration_ns = u64::from(transition.duration_ms)
+                .checked_mul(1_000_000)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            if transition.duration_ms == 0
+                || transition.duration_ms > MINORI_CHARACTER_MAX_TRANSITION_MS
+                || transition.start_opacity_256 > 256
+                || transition.target_opacity_256 > 255
+                || transition.elapsed_ns > duration_ns
+                || transition.completed != (transition.elapsed_ns == duration_ns)
+                || character.opacity_256 != interpolate_character_opacity(transition, duration_ns)?
+            {
+                return Err(MinoriRuntimeError::Character);
+            }
+        }
+        for resource_uri in &character.resource_uris {
+            validate_scene_uri(resource_uri, "minori:/st/")
+                .map_err(|_| MinoriRuntimeError::Character)?;
+        }
+    }
+    if transition_count > 1 {
+        return Err(MinoriRuntimeError::Character);
+    }
+    Ok(())
+}
+
+fn interpolate_character_opacity(
+    transition: &MinoriCharacterTransitionState,
+    duration_ns: u64,
+) -> Result<u16, MinoriRuntimeError> {
+    if duration_ns == 0 || transition.elapsed_ns > duration_ns {
+        return Err(MinoriRuntimeError::Character);
+    }
+    let start = i128::from(transition.start_opacity_256);
+    let delta = i128::from(transition.target_opacity_256) - start;
+    let elapsed = i128::from(transition.elapsed_ns);
+    let duration = i128::from(duration_ns);
+    let value = start
+        .checked_add(
+            delta
+                .checked_mul(elapsed)
+                .ok_or(MinoriRuntimeError::Overflow)?
+                / duration,
+        )
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    u16::try_from(value).map_err(|_| MinoriRuntimeError::Character)
+}
+
+fn complete_character_transition_state(
+    state: &mut MinoriRuntimeState,
+) -> Result<(), MinoriRuntimeError> {
+    let slot_id = match state.wait.as_ref() {
+        Some(MinoriWaitState::CharacterTransition { slot_id, .. }) => *slot_id,
+        _ => return Err(MinoriRuntimeError::Character),
+    };
+    let character = state
+        .characters
+        .get_mut(&slot_id)
+        .ok_or(MinoriRuntimeError::Character)?;
+    let transition = character
+        .transition
+        .take()
+        .ok_or(MinoriRuntimeError::Character)?;
+    character.opacity_256 = transition.target_opacity_256;
+    Ok(())
+}
+
+fn validate_stage_state(stage: &MinoriStageCommand) -> Result<(), MinoriRuntimeError> {
+    if stage.resource_sequence.is_empty()
+        || stage.resource_sequence.len() > 2
+        || stage.stands.len() > 10
+    {
+        return Err(MinoriRuntimeError::Operand);
+    }
+    for resource in stage.resource_sequence.iter().flatten() {
+        validate_scene_uri(resource, "minori:/bg/")?;
+    }
+    if let Some(background) = stage.background.as_ref() {
+        validate_scene_uri(&background.resource_uri, "minori:/bg/")?;
+    }
+    for stand in &stage.stands {
+        validate_scene_uri(&stand.resource_uri, "minori:/st/")?;
+        if !stand.resource_uri.to_ascii_lowercase().ends_with(".png") {
+            return Err(MinoriRuntimeError::Operand);
+        }
+    }
+    if let Some(resource) = stage.transition.resource.as_deref() {
+        validate_scene_filename(resource)?;
+    }
+    Ok(())
+}
+
+fn validate_scene_uri(value: &str, prefix: &str) -> Result<(), MinoriRuntimeError> {
+    let filename = value
+        .strip_prefix(prefix)
+        .ok_or(MinoriRuntimeError::Operand)?;
+    validate_scene_filename(filename)
+}
+
+fn stage_axis_position(
+    stage: &MinoriStageCommand,
+    axis: MinoriAxisScrollAxis,
+) -> Result<i32, MinoriRuntimeError> {
+    let background = stage
+        .background
+        .as_ref()
+        .ok_or(MinoriRuntimeError::AxisScroll)?;
+    Ok(match axis {
+        MinoriAxisScrollAxis::Horizontal => background.x,
+        MinoriAxisScrollAxis::Vertical => background.y,
+    })
+}
+
+fn set_stage_axis_position(
+    stage: &mut MinoriStageCommand,
+    axis: MinoriAxisScrollAxis,
+    value: i32,
+) -> Result<(), MinoriRuntimeError> {
+    let background = stage
+        .background
+        .as_mut()
+        .ok_or(MinoriRuntimeError::AxisScroll)?;
+    match axis {
+        MinoriAxisScrollAxis::Horizontal => background.x = value,
+        MinoriAxisScrollAxis::Vertical => background.y = value,
+    }
+    Ok(())
+}
+
+fn stage_position(stage: &MinoriStageCommand) -> Result<[i32; 2], MinoriRuntimeError> {
+    let background = stage
+        .background
+        .as_ref()
+        .ok_or(MinoriRuntimeError::LinearScroll)?;
+    Ok([background.x, background.y])
+}
+
+fn set_stage_position(
+    stage: &mut MinoriStageCommand,
+    value: [i32; 2],
+) -> Result<(), MinoriRuntimeError> {
+    let background = stage
+        .background
+        .as_mut()
+        .ok_or(MinoriRuntimeError::LinearScroll)?;
+    background.x = value[0];
+    background.y = value[1];
+    Ok(())
+}
+
+fn axis_scroll_duration_ms(
+    start: i32,
+    target: i32,
+    speed_tenths: i32,
+) -> Result<u32, MinoriRuntimeError> {
+    if speed_tenths == 0 {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    let distance = (i64::from(target) - i64::from(start)).unsigned_abs();
+    if distance == 0 {
+        return Ok(0);
+    }
+    let numerator = distance
+        .checked_mul(10)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let speed = u64::from(speed_tenths.unsigned_abs());
+    u32::try_from(numerator.div_ceil(speed)).map_err(|_| MinoriRuntimeError::Overflow)
+}
+
+fn linear_scroll_duration_ms(
+    start: [i32; 2],
+    target: [i32; 2],
+    speed_tenths: u32,
+) -> Result<u32, MinoriRuntimeError> {
+    if speed_tenths == 0 {
+        return Err(MinoriRuntimeError::LinearScroll);
+    }
+    let distance = start
+        .iter()
+        .zip(target)
+        .map(|(start, target)| (i64::from(target) - i64::from(*start)).unsigned_abs())
+        .max()
+        .unwrap_or(0);
+    if distance == 0 {
+        return Ok(0);
+    }
+    let numerator = distance
+        .checked_mul(10)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    u32::try_from(numerator.div_ceil(u64::from(speed_tenths)))
+        .map_err(|_| MinoriRuntimeError::Overflow)
+}
+
+fn linear_scroll_visible_position(
+    scroll: &MinoriLinearScrollState,
+) -> Result<[i32; 2], MinoriRuntimeError> {
+    let distance = scroll
+        .start
+        .iter()
+        .zip(scroll.target)
+        .map(|(start, target)| (i64::from(target) - i64::from(*start)).unsigned_abs())
+        .max()
+        .unwrap_or(0);
+    if distance == 0 {
+        return Ok(scroll.target);
+    }
+    let elapsed_ms = scroll.elapsed_ns / 1_000_000;
+    let travelled = elapsed_ms
+        .checked_mul(u64::from(scroll.speed_tenths))
+        .ok_or(MinoriRuntimeError::Overflow)?
+        / 10;
+    let travelled = travelled.min(distance);
+    let interpolate = |start: i32, target: i32| {
+        let delta = i128::from(target) - i128::from(start);
+        let offset = delta
+            .checked_mul(i128::from(travelled))
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / i128::from(distance);
+        i32::try_from(i128::from(start) + offset).map_err(|_| MinoriRuntimeError::Overflow)
+    };
+    Ok([
+        interpolate(scroll.start[0], scroll.target[0])?,
+        interpolate(scroll.start[1], scroll.target[1])?,
+    ])
+}
+
+fn axis_scroll_visible_position(scroll: &MinoriAxisScrollState) -> Result<i32, MinoriRuntimeError> {
+    if scroll.start == scroll.target {
+        return Ok(scroll.target);
+    }
+    let elapsed_ms =
+        i64::try_from(scroll.elapsed_ns / 1_000_000).map_err(|_| MinoriRuntimeError::Overflow)?;
+    let delta = elapsed_ms
+        .checked_mul(i64::from(scroll.speed_tenths))
+        .ok_or(MinoriRuntimeError::Overflow)?
+        / 10;
+    let raw = i64::from(scroll.start)
+        .checked_add(delta)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let clamped = if scroll.speed_tenths > 0 {
+        raw.min(i64::from(scroll.target))
+    } else {
+        raw.max(i64::from(scroll.target))
+    };
+    i32::try_from(clamped).map_err(|_| MinoriRuntimeError::Overflow)
+}
+
+fn complete_axis_scroll_state(state: &mut MinoriRuntimeState) -> Result<(), MinoriRuntimeError> {
+    let (axis_scroll, stage) = (&mut state.axis_scroll, &mut state.stage);
+    let scroll = axis_scroll.as_mut().ok_or(MinoriRuntimeError::AxisScroll)?;
+    scroll.elapsed_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    scroll.current = scroll.target;
+    scroll.completed = true;
+    set_stage_axis_position(
+        stage.as_mut().ok_or(MinoriRuntimeError::AxisScroll)?,
+        scroll.axis,
+        scroll.target,
+    )
+}
+
+fn complete_linear_scroll_state(state: &mut MinoriRuntimeState) -> Result<(), MinoriRuntimeError> {
+    let (linear_scroll, stage) = (&mut state.linear_scroll, &mut state.stage);
+    let scroll = linear_scroll
+        .as_mut()
+        .ok_or(MinoriRuntimeError::LinearScroll)?;
+    scroll.elapsed_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    scroll.current = scroll.target;
+    scroll.completed = true;
+    set_stage_position(
+        stage.as_mut().ok_or(MinoriRuntimeError::LinearScroll)?,
+        scroll.target,
+    )
+}
+
+fn validate_axis_scroll_state(
+    scroll: &MinoriAxisScrollState,
+    stage: &MinoriStageCommand,
+) -> Result<(), MinoriRuntimeError> {
+    if scroll
+        .start
+        .unsigned_abs()
+        .max(scroll.target.unsigned_abs())
+        .max(scroll.current.unsigned_abs())
+        > MINORI_AXIS_SCROLL_MAX_COORDINATE as u32
+        || scroll.speed_tenths == 0
+        || scroll.speed_tenths.unsigned_abs() > MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS as u32
+        || (scroll.start < scroll.target && scroll.speed_tenths < 0)
+        || (scroll.start > scroll.target && scroll.speed_tenths > 0)
+        || scroll.duration_ms
+            != axis_scroll_duration_ms(scroll.start, scroll.target, scroll.speed_tenths)?
+    {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    let duration_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    if scroll.elapsed_ns > duration_ns
+        || scroll.completed != (scroll.elapsed_ns == duration_ns)
+        || scroll.current != axis_scroll_visible_position(scroll)?
+        || stage_axis_position(stage, scroll.axis)? != scroll.current
+    {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    Ok(())
+}
+
+fn validate_linear_scroll_state(
+    scroll: &MinoriLinearScrollState,
+    stage: &MinoriStageCommand,
+) -> Result<(), MinoriRuntimeError> {
+    if scroll
+        .start
+        .iter()
+        .chain(&scroll.target)
+        .chain(&scroll.current)
+        .any(|value| value.unsigned_abs() > MINORI_AXIS_SCROLL_MAX_COORDINATE as u32)
+        || scroll.speed_tenths == 0
+        || scroll.speed_tenths > MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS as u32
+        || scroll.duration_ms
+            != linear_scroll_duration_ms(scroll.start, scroll.target, scroll.speed_tenths)?
+    {
+        return Err(MinoriRuntimeError::LinearScroll);
+    }
+    let duration_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    if scroll.elapsed_ns > duration_ns
+        || scroll.completed != (scroll.elapsed_ns == duration_ns)
+        || scroll.current != linear_scroll_visible_position(scroll)?
+        || stage_position(stage)? != scroll.current
+    {
+        return Err(MinoriRuntimeError::LinearScroll);
+    }
+    Ok(())
+}
+
+fn validate_scroll_xf_state(scroll: &MinoriScrollXfState) -> Result<(), MinoriRuntimeError> {
+    let duration_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    if !(1..=MINORI_SCROLL_XF_MAX_DURATION_MS).contains(&scroll.duration_ms)
+        || scroll.easing > 2
+        || scroll.elapsed_ns > duration_ns
+        || scroll.completed != (scroll.elapsed_ns == duration_ns)
+        || scroll
+            .start_extent
+            .iter()
+            .chain(scroll.end_extent.iter())
+            .chain(scroll.start_offset.iter())
+            .chain(scroll.end_offset.iter())
+            .any(|value| !(0..=MINORI_SCROLL_XF_MAX_EXTENT).contains(value))
+    {
+        return Err(MinoriRuntimeError::ScrollXf);
+    }
+    let (visible_extent, visible_offset) = scroll_xf_visible_state(scroll)?;
+    if scroll.visible_extent != visible_extent || scroll.visible_offset != visible_offset {
+        return Err(MinoriRuntimeError::ScrollXf);
+    }
+    Ok(())
+}
+
+fn scroll_xf_visible_state(
+    scroll: &MinoriScrollXfState,
+) -> Result<([i32; 2], [i32; 2]), MinoriRuntimeError> {
+    let duration_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let linear = u64::try_from(
+        u128::from(scroll.elapsed_ns)
+            .checked_mul(u128::from(MINORI_SCROLL_XF_SCALE))
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / u128::from(duration_ns),
+    )
+    .map_err(|_| MinoriRuntimeError::Overflow)?
+    .min(MINORI_SCROLL_XF_SCALE);
+    let squared = u64::try_from(
+        u128::from(linear)
+            .checked_mul(u128::from(linear))
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / u128::from(MINORI_SCROLL_XF_SCALE),
+    )
+    .map_err(|_| MinoriRuntimeError::Overflow)?;
+    let eased = match scroll.easing {
+        0 => linear,
+        1 => squared,
+        2 => linear
+            .checked_mul(2)
+            .and_then(|value| value.checked_sub(squared))
+            .ok_or(MinoriRuntimeError::Overflow)?,
+        _ => return Err(MinoriRuntimeError::ScrollXf),
+    };
+    Ok((
+        interpolate_scroll_pair(scroll.start_extent, scroll.end_extent, eased)?,
+        interpolate_scroll_pair(scroll.start_offset, scroll.end_offset, eased)?,
+    ))
+}
+
+fn validate_wscroll2_state(scroll: &MinoriWScroll2State) -> Result<(), MinoriRuntimeError> {
+    validate_scene_uri(&scroll.sync_resource_uri, "minori:/st/")
+        .map_err(|_| MinoriRuntimeError::WScroll2)?;
+    if !(1..=MINORI_WSCROLL2_MAX_PERIOD_TICKS).contains(&scroll.period_ticks)
+        || scroll.speed_tenths.unsigned_abs() > MINORI_WSCROLL2_MAX_SPEED_TENTHS as u32
+    {
+        return Err(MinoriRuntimeError::WScroll2);
+    }
+    let (elapsed_ticks, foreground_offset, background_offset, background_remainder) =
+        wscroll2_visible_state(scroll.elapsed_ns, scroll.speed_tenths)?;
+    if scroll.elapsed_ticks != elapsed_ticks
+        || scroll.foreground_offset != foreground_offset
+        || scroll.background_offset != background_offset
+        || scroll.background_remainder != background_remainder
+    {
+        return Err(MinoriRuntimeError::WScroll2);
+    }
+    Ok(())
+}
+
+fn wscroll2_visible_state(
+    elapsed_ns: u64,
+    speed_tenths: i32,
+) -> Result<(u64, i64, i64, i64), MinoriRuntimeError> {
+    let elapsed_ticks = u64::try_from(
+        u128::from(elapsed_ns)
+            .checked_mul(u128::from(MINORI_WSCROLL2_TICKS_PER_SECOND))
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / 1_000_000_000u128,
+    )
+    .map_err(|_| MinoriRuntimeError::Overflow)?;
+    let foreground_offset = i64::try_from(
+        i128::from(elapsed_ticks)
+            .checked_mul(i128::from(speed_tenths))
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / 10,
+    )
+    .map_err(|_| MinoriRuntimeError::Overflow)?;
+    let background_offset = if foreground_offset == 0 {
+        0
+    } else {
+        (foreground_offset - foreground_offset.signum()) / 5
+    };
+    let background_remainder = foreground_offset
+        .checked_sub(
+            background_offset
+                .checked_mul(5)
+                .ok_or(MinoriRuntimeError::Overflow)?,
+        )
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    Ok((
+        elapsed_ticks,
+        foreground_offset,
+        background_offset,
+        background_remainder,
+    ))
+}
+
+fn interpolate_scroll_pair(
+    start: [i32; 2],
+    end: [i32; 2],
+    t: u64,
+) -> Result<[i32; 2], MinoriRuntimeError> {
+    let interpolate = |start: i32, end: i32| {
+        let delta = i64::from(end) - i64::from(start);
+        let scaled = i128::from(delta)
+            .checked_mul(i128::from(t))
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / i128::from(MINORI_SCROLL_XF_SCALE);
+        i32::try_from(i128::from(start) + scaled).map_err(|_| MinoriRuntimeError::Overflow)
+    };
+    Ok([
+        interpolate(start[0], end[0])?,
+        interpolate(start[1], end[1])?,
+    ])
+}
+
+fn new_firefly_state(
+    prefix: &str,
+    target_count: u32,
+    duration_ms: u32,
+    random_state: &mut u64,
+) -> Result<MinoriFireflyState, MinoriRuntimeError> {
+    if !(1..=MINORI_FIREFLY_MAX_PARTICLES_U32).contains(&target_count)
+        || !(1..=MINORI_FIREFLY_MAX_DURATION_MS).contains(&duration_ms)
+    {
+        return Err(MinoriRuntimeError::Firefly);
+    }
+    let resources = [
+        format!("minori:/sys/{prefix}S.png"),
+        format!("minori:/sys/{prefix}M.png"),
+        format!("minori:/sys/{prefix}L.png"),
+    ];
+    let mut particles = Vec::with_capacity(target_count as usize);
+    for _ in 0..target_count {
+        let mut particle = MinoriFireflyParticle {
+            control_points: [[0; 2]; MINORI_FIREFLY_CONTROL_POINTS],
+            kind: 0,
+            elapsed_ns: 0,
+            lifetime_ns: 0,
+            position: [0, 0],
+            opacity_255: 0,
+            active: false,
+        };
+        respawn_firefly_particle(&mut particle, duration_ms, random_state)?;
+        particles.push(particle);
+    }
+    Ok(MinoriFireflyState {
+        resources,
+        target_count,
+        duration_ms,
+        ending: false,
+        fade_alpha_256: 0,
+        fade_elapsed_ns: 0,
+        particles,
+    })
+}
+
 fn execute_transition(
     command: &ScCommand,
     state: &mut MinoriRuntimeState,
@@ -975,6 +3580,10 @@ fn execute_transition(
         resource,
         duration_ticks,
     };
+    // Both commands replace the same native presentation-mode slot. A new
+    // transition therefore terminates an active shake instead of allowing a
+    // private adapter effect to leak into later scenes.
+    state.screen_shake = None;
     Ok(None)
 }
 
@@ -982,21 +3591,17 @@ fn execute_stage(
     command: &ScCommand,
     state: &mut MinoriRuntimeState,
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
-    const BACKGROUND_LAYER: u32 = 0;
-    const FOREGROUND_LAYER: u32 = 1;
-    const STAND_LAYER_BASE: u32 = 16;
-
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MinoriRuntimeError::Operand)?;
     if tokens.len() < 4 || tokens.len() > 26 {
         return Err(MinoriRuntimeError::Operand);
     }
-    let foreground_name = &tokens[0];
+    let resource_sequence = parse_stage_resource_sequence(&tokens[0])?;
     let mut cursor = 1usize;
-    let mut foreground_position = (0, 0);
+    let mut reference_position = None;
     if tokens.len() >= 6 && !tokens[1].contains('.') && !tokens[2].contains('.') {
         if let (Ok(x), Ok(y)) = (tokens[1].parse::<i32>(), tokens[2].parse::<i32>()) {
-            foreground_position = (x, y);
+            reference_position = Some([x, y]);
             cursor = 3;
         }
     }
@@ -1012,31 +3617,16 @@ fn execute_stage(
         .map_err(|_| MinoriRuntimeError::Operand)?;
     cursor += 3;
 
-    let foreground = stage_layer(
-        "bg",
-        foreground_name,
-        foreground_position.0,
-        foreground_position.1,
-    )?;
     let background = stage_layer("bg", background_name, background_x, background_y)?;
     let mut stands = Vec::with_capacity((tokens.len() - cursor) / 2);
     while cursor < tokens.len() {
-        let (filename, offset) = tokens[cursor]
-            .split_once(',')
-            .map_or((tokens[cursor].as_str(), "0"), |(filename, offset)| {
-                (filename, offset)
-            });
+        let filename = &tokens[cursor];
         validate_scene_filename(filename)?;
-        let offset = offset
-            .parse::<i32>()
-            .map_err(|_| MinoriRuntimeError::Operand)?;
-        let position = tokens[cursor + 1]
-            .parse::<i32>()
-            .map_err(|_| MinoriRuntimeError::Operand)?;
+        let (position, resource_parameter) = parse_stand_position_spec(&tokens[cursor + 1])?;
         stands.push(MinoriStandLayer {
             resource_uri: format!("minori:/st/{filename}"),
             position,
-            offset,
+            resource_parameter,
         });
         cursor += 2;
     }
@@ -1044,43 +3634,347 @@ fn execute_stage(
         return Err(MinoriRuntimeError::Operand);
     }
 
-    state.layers.clear();
-    if let Some(layer) = &background {
-        state
-            .layers
-            .insert(BACKGROUND_LAYER, stage_layer_state(layer, "alpha"));
-    }
-    if let Some(layer) = &foreground {
-        state
-            .layers
-            .insert(FOREGROUND_LAYER, stage_layer_state(layer, "alpha"));
-    }
-    for (index, stand) in stands.iter().enumerate() {
-        let layer_id = STAND_LAYER_BASE
-            .checked_add(u32::try_from(index).map_err(|_| MinoriRuntimeError::Overflow)?)
-            .ok_or(MinoriRuntimeError::Overflow)?;
-        state.layers.insert(
-            layer_id,
-            MinoriLayerState {
-                resource_uri: stand.resource_uri.clone(),
-                // The original passes position and offset as separate stage parameters;
-                // they are not pixel coordinates and remain on the typed stage event.
-                x_milli: 0,
-                y_milli: 0,
-                scale_x_milli: 1000,
-                scale_y_milli: 1000,
-                opacity_milli: 1000,
-                blend: "alpha".into(),
-            },
-        );
-    }
+    // Native CCharLayer finalizes its transient character table at the scene
+    // boundary. Only slots explicitly marked by `.char keep` survive into the
+    // next stage, and the marker is consumed exactly once. Without this
+    // boundary the runtime retains every character loaded by the route and the
+    // shared renderer atlas eventually fills with historical stand textures.
+    state.characters.retain(|_, character| {
+        let retained = character.keep_once;
+        character.keep_once = false;
+        retained
+    });
+    state.scroll_xf = None;
+    state.axis_scroll = None;
+    state.linear_scroll = None;
     next_effect_sequence(state)?;
-    Ok(Some(MinoriVmEvent::Stage(MinoriStageCommand {
-        foreground,
+    let stage = MinoriStageCommand {
+        resource_sequence,
+        reference_position,
         background,
         stands,
         transition: state.transition.clone(),
+    };
+    validate_stage_state(&stage)?;
+    state.stage = Some(stage.clone());
+    Ok(Some(MinoriVmEvent::Stage(stage)))
+}
+
+fn execute_axis_scroll(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+    axis: MinoriAxisScrollAxis,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::AxisScroll)?;
+    if tokens.len() > 2 {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    if state.linear_scroll.is_some()
+        || state.scroll_xf.is_some()
+        || state.wscroll2.is_some()
+        || state
+            .axis_scroll
+            .as_ref()
+            .is_some_and(|scroll| !scroll.completed)
+    {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    let target = tokens
+        .first()
+        .map_or(Ok(0), |value| value.parse::<i32>())
+        .map_err(|_| MinoriRuntimeError::AxisScroll)?;
+    let speed_tenths = tokens
+        .get(1)
+        .map_or(Ok(10), |value| value.parse::<i32>())
+        .map_err(|_| MinoriRuntimeError::AxisScroll)?;
+    if !(-MINORI_AXIS_SCROLL_MAX_COORDINATE..=MINORI_AXIS_SCROLL_MAX_COORDINATE).contains(&target)
+        || speed_tenths == 0
+        || !(-MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS..=MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS)
+            .contains(&speed_tenths)
+    {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    let stage = state.stage.as_ref().ok_or(MinoriRuntimeError::AxisScroll)?;
+    let start = stage_axis_position(stage, axis)?;
+    if !(-MINORI_AXIS_SCROLL_MAX_COORDINATE..=MINORI_AXIS_SCROLL_MAX_COORDINATE).contains(&start)
+        || (start < target && speed_tenths < 0)
+        || (start > target && speed_tenths > 0)
+    {
+        return Err(MinoriRuntimeError::AxisScroll);
+    }
+    let duration_ms = axis_scroll_duration_ms(start, target, speed_tenths)?;
+    let completed = start == target;
+    let scroll = MinoriAxisScrollState {
+        axis,
+        start,
+        target,
+        speed_tenths,
+        duration_ms,
+        elapsed_ns: 0,
+        current: start,
+        completed,
+    };
+    validate_axis_scroll_state(&scroll, stage)?;
+    state.axis_scroll = Some(scroll);
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::AxisScroll(MinoriAxisScrollFrame {
+        sequence,
     })))
+}
+
+fn execute_linear_scroll(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::LinearScroll)?;
+    let [target_x, target_y, speed_tenths] = tokens.as_slice() else {
+        return Err(MinoriRuntimeError::LinearScroll);
+    };
+    if state.axis_scroll.is_some()
+        || state.scroll_xf.is_some()
+        || state.wscroll2.is_some()
+        || state
+            .linear_scroll
+            .as_ref()
+            .is_some_and(|scroll| !scroll.completed)
+    {
+        return Err(MinoriRuntimeError::LinearScroll);
+    }
+    let parse_coordinate = |value: &str| {
+        value
+            .parse::<i32>()
+            .ok()
+            .filter(|value| value.unsigned_abs() <= MINORI_AXIS_SCROLL_MAX_COORDINATE as u32)
+            .ok_or(MinoriRuntimeError::LinearScroll)
+    };
+    let target = [parse_coordinate(target_x)?, parse_coordinate(target_y)?];
+    let speed_tenths = speed_tenths
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value != 0 && *value <= MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS as u32)
+        .ok_or(MinoriRuntimeError::LinearScroll)?;
+    let stage = state
+        .stage
+        .as_ref()
+        .ok_or(MinoriRuntimeError::LinearScroll)?;
+    let start = stage_position(stage)?;
+    let duration_ms = linear_scroll_duration_ms(start, target, speed_tenths)?;
+    let completed = start == target;
+    let scroll = MinoriLinearScrollState {
+        start,
+        target,
+        speed_tenths,
+        duration_ms,
+        elapsed_ns: 0,
+        current: start,
+        completed,
+    };
+    validate_linear_scroll_state(&scroll, stage)?;
+    state.linear_scroll = Some(scroll);
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::LinearScroll(MinoriLinearScrollFrame {
+        sequence,
+    })))
+}
+
+fn execute_scroll_xf(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::ScrollXf)?;
+    let [start_width, start_height, end_width, end_height, start_x, start_y, end_x, end_y, duration, easing] =
+        tokens.as_slice()
+    else {
+        return Err(MinoriRuntimeError::ScrollXf);
+    };
+    if state.stage.is_none()
+        || state.linear_scroll.is_some()
+        || state.wscroll2.is_some()
+        || state
+            .axis_scroll
+            .as_ref()
+            .is_some_and(|scroll| !scroll.completed)
+    {
+        return Err(MinoriRuntimeError::ScrollXf);
+    }
+    state.axis_scroll = None;
+    let parse_extent = |value: &str| {
+        value
+            .parse::<i32>()
+            .ok()
+            .filter(|value| (0..=MINORI_SCROLL_XF_MAX_EXTENT).contains(value))
+            .ok_or(MinoriRuntimeError::ScrollXf)
+    };
+    let duration_ms = duration
+        .parse::<u32>()
+        .ok()
+        .filter(|value| (1..=MINORI_SCROLL_XF_MAX_DURATION_MS).contains(value))
+        .ok_or(MinoriRuntimeError::ScrollXf)?;
+    let easing = easing
+        .parse::<u8>()
+        .ok()
+        .filter(|value| *value <= 2)
+        .ok_or(MinoriRuntimeError::ScrollXf)?;
+    let scroll = MinoriScrollXfState {
+        start_extent: [parse_extent(start_width)?, parse_extent(start_height)?],
+        end_extent: [parse_extent(end_width)?, parse_extent(end_height)?],
+        start_offset: [parse_extent(start_x)?, parse_extent(start_y)?],
+        end_offset: [parse_extent(end_x)?, parse_extent(end_y)?],
+        duration_ms,
+        easing,
+        elapsed_ns: 0,
+        completed: false,
+        visible_extent: [parse_extent(start_width)?, parse_extent(start_height)?],
+        visible_offset: [parse_extent(start_x)?, parse_extent(start_y)?],
+    };
+    validate_scroll_xf_state(&scroll)?;
+    state.scroll_xf = Some(scroll);
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::ScrollXf(MinoriScrollXfFrame {
+        sequence,
+    })))
+}
+
+fn execute_end_scroll(
+    command: &ScCommand,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::ScrollXf)?;
+    let [finish] = tokens.as_slice() else {
+        return Err(MinoriRuntimeError::ScrollXf);
+    };
+    let force_finish = finish
+        .as_bytes()
+        .first()
+        .is_some_and(|value| matches!(value, b'1'..=b'9' | b't' | b'T'));
+    if state
+        .axis_scroll
+        .as_ref()
+        .is_some_and(|scroll| !scroll.completed)
+    {
+        if force_finish {
+            complete_axis_scroll_state(state)?;
+            let sequence = next_effect_sequence(state)?;
+            return Ok(Some(MinoriVmEvent::AxisScroll(MinoriAxisScrollFrame {
+                sequence,
+            })));
+        }
+        let scroll = state
+            .axis_scroll
+            .as_ref()
+            .ok_or(MinoriRuntimeError::AxisScroll)?;
+        let duration_ns = u64::from(scroll.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let remaining_ns = duration_ns
+            .checked_sub(scroll.elapsed_ns)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(MinoriRuntimeError::AxisScroll)?;
+        let milliseconds = u32::try_from(remaining_ns.div_ceil(1_000_000))
+            .map_err(|_| MinoriRuntimeError::Overflow)?;
+        let wait = MinoriWaitState::AxisScroll {
+            token_id: format!("minori.scroll.{}", state.instruction_count),
+            milliseconds,
+        };
+        state.wait = Some(wait.clone());
+        return Ok(Some(MinoriVmEvent::Wait(wait)));
+    }
+    if state
+        .linear_scroll
+        .as_ref()
+        .is_some_and(|scroll| !scroll.completed)
+    {
+        if force_finish {
+            complete_linear_scroll_state(state)?;
+            let sequence = next_effect_sequence(state)?;
+            return Ok(Some(MinoriVmEvent::LinearScroll(MinoriLinearScrollFrame {
+                sequence,
+            })));
+        }
+        let scroll = state
+            .linear_scroll
+            .as_ref()
+            .ok_or(MinoriRuntimeError::LinearScroll)?;
+        let duration_ns = u64::from(scroll.duration_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        let remaining_ns = duration_ns
+            .checked_sub(scroll.elapsed_ns)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(MinoriRuntimeError::LinearScroll)?;
+        let milliseconds = u32::try_from(remaining_ns.div_ceil(1_000_000))
+            .map_err(|_| MinoriRuntimeError::Overflow)?;
+        let wait = MinoriWaitState::LinearScroll {
+            token_id: format!("minori.scroll.{}", state.instruction_count),
+            milliseconds,
+        };
+        state.wait = Some(wait.clone());
+        return Ok(Some(MinoriVmEvent::Wait(wait)));
+    }
+    let Some(scroll) = state.scroll_xf.as_mut() else {
+        return Ok(None);
+    };
+    if !force_finish || scroll.completed {
+        return Ok(None);
+    }
+    scroll.elapsed_ns = u64::from(scroll.duration_ms)
+        .checked_mul(1_000_000)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    scroll.completed = true;
+    scroll.visible_extent = scroll.end_extent;
+    scroll.visible_offset = scroll.end_offset;
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::ScrollXf(MinoriScrollXfFrame {
+        sequence,
+    })))
+}
+
+fn parse_stage_resource_sequence(value: &str) -> Result<Vec<Option<String>>, MinoriRuntimeError> {
+    let tokens = value.split(':').collect::<Vec<_>>();
+    if tokens.is_empty() || tokens.len() > 2 || tokens.iter().any(|token| token.is_empty()) {
+        return Err(MinoriRuntimeError::Operand);
+    }
+    tokens
+        .into_iter()
+        .map(|token| {
+            if token == "*" {
+                Ok(None)
+            } else {
+                validate_scene_filename(token)?;
+                Ok(Some(format!("minori:/bg/{token}")))
+            }
+        })
+        .collect()
+}
+
+fn parse_stand_position_spec(value: &str) -> Result<(i32, i32), MinoriRuntimeError> {
+    let mut components = value.split(',');
+    let position = components
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or(MinoriRuntimeError::Operand)?
+        .parse::<i32>()
+        .map_err(|_| MinoriRuntimeError::Operand)?;
+    let resource_parameter = components
+        .next()
+        .map(|value| {
+            if value.is_empty() {
+                return Err(MinoriRuntimeError::Operand);
+            }
+            value
+                .parse::<i32>()
+                .map_err(|_| MinoriRuntimeError::Operand)
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if components.next().is_some() {
+        return Err(MinoriRuntimeError::Operand);
+    }
+    Ok((position, resource_parameter))
 }
 
 fn stage_layer(
@@ -1098,18 +3992,6 @@ fn stage_layer(
         x,
         y,
     }))
-}
-
-fn stage_layer_state(layer: &MinoriStageLayer, blend: &str) -> MinoriLayerState {
-    MinoriLayerState {
-        resource_uri: layer.resource_uri.clone(),
-        x_milli: layer.x.saturating_mul(1000),
-        y_milli: layer.y.saturating_mul(1000),
-        scale_x_milli: 1000,
-        scale_y_milli: 1000,
-        opacity_milli: 1000,
-        blend: blend.into(),
-    }
 }
 
 fn validate_scene_filename(value: &str) -> Result<(), MinoriRuntimeError> {
@@ -1441,28 +4323,103 @@ fn execute_message(
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MinoriRuntimeError::Operand)?;
-    let (message_id, speaker, text) = if tokens.len() >= 4 {
+    let (message_id, voice, speaker, text) = if tokens.len() >= 4 {
         let message_id = tokens[0]
             .parse::<i64>()
             .map_err(|_| MinoriRuntimeError::Operand)?;
         (
             message_id,
+            (!tokens[1].is_empty()).then(|| tokens[1].clone()),
             (!tokens[2].is_empty()).then(|| tokens[2].clone()),
             tokens[3..].join(" "),
         )
     } else {
         // The original CommandMessage parser leaves constructor defaults intact when fewer
         // than four operands are present, then still executes the empty message update.
-        (-1, None, String::new())
+        (-1, None, None, String::new())
     };
+    let text_hash = Hash256::from_sha256(text.as_bytes());
+    let speaker_hash = speaker
+        .as_ref()
+        .map(|value| Hash256::from_sha256(value.as_bytes()));
+    let voice_hash = voice
+        .as_ref()
+        .map(|value| Hash256::from_sha256(value.as_bytes()));
+    let voice = voice.as_deref().map(parse_message_voice).transpose()?;
+    let mut audio_commands = Vec::new();
+    if state
+        .audio
+        .get(&VOICE_STREAM_ID)
+        .is_some_and(|current| current.playing)
+    {
+        audio_commands.push(MinoriAudioCommand::Stop {
+            sequence: next_effect_sequence(state)?,
+            stream_id: VOICE_STREAM_ID,
+            fade_ms: 0,
+        });
+    }
+    if let Some(voice) = &voice {
+        append_audio_load_and_play(
+            state,
+            &mut audio_commands,
+            VOICE_STREAM_ID,
+            &voice.resource_uri,
+            voice.volume_milli,
+            voice.pan_milli,
+            false,
+            0,
+        )?;
+        state.audio.insert(
+            VOICE_STREAM_ID,
+            MinoriAudioState {
+                bus: "voice".into(),
+                resource_uri: voice.resource_uri.clone(),
+                looped: false,
+                volume_milli: voice.volume_milli,
+                pan_milli: voice.pan_milli,
+                playing: true,
+                continuation_pts: 0,
+            },
+        );
+    } else if let Some(current) = state.audio.get_mut(&VOICE_STREAM_ID) {
+        current.playing = false;
+    }
+    append_backlog_entry(
+        state,
+        MinoriBacklogEntry {
+            source: command.span,
+            message_id,
+            text: text.clone(),
+            speaker: speaker.clone(),
+            text_hash,
+            speaker_hash,
+            voice_hash,
+            voice: voice.clone(),
+        },
+    )?;
     state.message = Some(MinoriMessageState {
         source: command.span,
         message_id,
+        text_hash,
+        speaker_hash,
+        voice_hash,
+        voice,
     });
     let presentation_sequence = next_effect_sequence(state)?;
     let capture_sequence = next_effect_sequence(state)?;
-    let wait = MinoriWaitState::Input {
-        token_id: format!("minori.message.{}", state.instruction_count),
+    let token_id = format!("minori.message.{}", state.instruction_count);
+    let wait = if state.system_ui.play_mode == MinoriPlayMode::Auto {
+        MinoriWaitState::Time {
+            token_id,
+            timer_ticks: state.system_ui.auto_wait_ticks,
+            milliseconds: state
+                .system_ui
+                .auto_wait_ticks
+                .checked_mul(10)
+                .ok_or(MinoriRuntimeError::Overflow)?,
+        }
+    } else {
+        MinoriWaitState::Input { token_id }
     };
     state.wait = Some(wait.clone());
     Ok(Some(MinoriVmEvent::Message {
@@ -1470,7 +4427,93 @@ fn execute_message(
         capture_sequence,
         text,
         speaker,
+        audio_commands,
         wait,
+    }))
+}
+
+const VOICE_STREAM_ID: u32 = 4;
+
+fn parse_message_voice(token: &str) -> Result<MinoriMessageVoice, MinoriRuntimeError> {
+    let spec = parse_audio_resource_spec(token)?;
+    validate_audio_relative_path(&spec.resource)?;
+    Ok(MinoriMessageVoice {
+        resource_uri: format!("minori:/voice/{}", spec.resource),
+        volume_milli: spec.volume_percent * 10,
+        pan_milli: spec.pan_percent * 10,
+    })
+}
+
+fn append_backlog_entry(
+    state: &mut MinoriRuntimeState,
+    entry: MinoriBacklogEntry,
+) -> Result<(), MinoriRuntimeError> {
+    if state.backlog.len() >= MINORI_BACKLOG_MAX_ENTRIES
+        || entry.text.len() > MINORI_BACKLOG_MAX_ENTRY_BYTES
+        || entry
+            .speaker
+            .as_ref()
+            .is_some_and(|speaker| speaker.len() > MINORI_BACKLOG_MAX_ENTRY_BYTES)
+    {
+        return Err(MinoriRuntimeError::Backlog);
+    }
+    let entry_bytes = entry
+        .text
+        .len()
+        .checked_add(entry.speaker.as_ref().map_or(0, String::len))
+        .ok_or(MinoriRuntimeError::Backlog)?;
+    let backlog_bytes = usize::try_from(state.backlog_bytes)
+        .map_err(|_| MinoriRuntimeError::Backlog)?
+        .checked_add(entry_bytes)
+        .filter(|bytes| *bytes <= MINORI_BACKLOG_MAX_TOTAL_BYTES)
+        .ok_or(MinoriRuntimeError::Backlog)?;
+    state.backlog.push(entry);
+    state.backlog_bytes = u64::try_from(backlog_bytes).map_err(|_| MinoriRuntimeError::Backlog)?;
+    Ok(())
+}
+
+fn execute_select(
+    command: &ScCommand,
+    labels: &BTreeMap<String, u32>,
+    state: &mut MinoriRuntimeState,
+) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    let targets = match &command.control_flow {
+        ScControlFlow::Choice { targets } if (1..=4).contains(&targets.len()) => targets,
+        _ => return Err(MinoriRuntimeError::Choice),
+    };
+    if state.choice.is_some() || state.wait.is_some() {
+        return Err(MinoriRuntimeError::Choice);
+    }
+    let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+        .map_err(|_| MinoriRuntimeError::Choice)?;
+    if tokens.len() != targets.len() {
+        return Err(MinoriRuntimeError::Choice);
+    }
+    let mut option_hashes = Vec::with_capacity(tokens.len());
+    for (token, target) in tokens.iter().zip(targets) {
+        let (display, parsed_target) = token
+            .split_once(':')
+            .filter(|(display, parsed_target)| !display.is_empty() && !parsed_target.is_empty())
+            .ok_or(MinoriRuntimeError::Choice)?;
+        if parsed_target != target || !labels.contains_key(target) {
+            return Err(MinoriRuntimeError::Choice);
+        }
+        option_hashes.push(Hash256::from_sha256(display.as_bytes()));
+    }
+    let selected_index = 0u32;
+    state.choice = Some(MinoriChoiceState {
+        source: command.span,
+        option_hashes: option_hashes.clone(),
+        targets: targets.clone(),
+        selected_index: Some(selected_index),
+    });
+    let token_id = format!("minori.choice.{}", state.instruction_count);
+    state.wait = Some(MinoriWaitState::Choice { token_id });
+    let sequence = next_effect_sequence(state)?;
+    Ok(Some(MinoriVmEvent::Choice {
+        sequence,
+        option_hashes,
+        selected_index,
     }))
 }
 
@@ -1589,8 +4632,254 @@ mod tests {
 
     use super::*;
 
+    fn firefly_vm(source: &[u8], seed: u64) -> MinoriVm {
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        MinoriVm::new(
+            "minori:/scr/firefly-fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            seed,
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn deterministic_control_flow_wait_and_native_save_round_trip() {
+    fn character_load_and_position_are_snapshot_safe_and_preserve_signed_orientation() {
+        let source = b".char load -11 WALK.png\r\n.char pos -11 727 -1685\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        assert!(matches!(
+            vm.step(1, 1).unwrap(),
+            Some(MinoriVmEvent::Character(_))
+        ));
+        let loaded = vm.state().characters.get(&11).unwrap();
+        assert!(!loaded.positive_orientation);
+        assert_eq!(loaded.resource_uris, ["minori:/st/WALK.png"]);
+        assert_eq!(loaded.anchor_position, [0, 0]);
+        assert!(!loaded.keep_once);
+
+        assert!(matches!(
+            vm.step(2, 1).unwrap(),
+            Some(MinoriVmEvent::Character(_))
+        ));
+        assert_eq!(
+            vm.state().characters.get(&11).unwrap().anchor_position,
+            [727, -1685]
+        );
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let snapshot_hash = vm.state_hash().unwrap();
+        vm.state.characters.get_mut(&11).unwrap().anchor_position = [1, 2];
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state_hash().unwrap(), snapshot_hash);
+        assert_eq!(vm.step(3, 1).unwrap(), Some(MinoriVmEvent::Terminal));
+    }
+
+    #[test]
+    fn character_keep_sets_the_native_one_shot_retention_flag() {
+        let source = b".char load -100 WALK.png\r\n.char keep 100\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 1).unwrap();
+        assert!(matches!(
+            vm.step(2, 1).unwrap(),
+            Some(MinoriVmEvent::Character(_))
+        ));
+        assert!(vm.state().characters.get(&100).unwrap().keep_once);
+        let snapshot = vm.snapshot_bytes().unwrap();
+        vm.restore_state(&snapshot).unwrap();
+        assert!(vm.state().characters.get(&100).unwrap().keep_once);
+
+        let missing = b".char keep 100\r\n.end\r\n";
+        let mut missing_vm = firefly_vm(missing, 7);
+        assert!(matches!(
+            missing_vm.step(1, 1).unwrap(),
+            Some(MinoriVmEvent::Character(_))
+        ));
+        assert!(missing_vm.state().characters.is_empty());
+    }
+
+    #[test]
+    fn character_transition_is_linear_blocking_and_snapshot_safe() {
+        let source =
+            b".char load 11 WALK.png\r\n.char trans 11 100 0\r\n.char vis 11 false\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 1).unwrap();
+        let Some(MinoriVmEvent::Wait(MinoriWaitState::CharacterTransition {
+            token_id,
+            slot_id,
+            milliseconds,
+        })) = vm.step(2, 1).unwrap()
+        else {
+            panic!("expected character transition wait");
+        };
+        assert_eq!(slot_id, 11);
+        assert_eq!(milliseconds, 100);
+        assert_eq!(vm.state().characters[&11].opacity_256, 256);
+
+        let frame = vm.advance_character_clock(50_000_000).unwrap().unwrap();
+        assert_ne!(frame.sequence, 0);
+        assert_eq!(vm.state().characters[&11].opacity_256, 128);
+        let snapshot = vm.snapshot_bytes().unwrap();
+        vm.advance_character_clock(50_000_000).unwrap();
+        assert_eq!(vm.state().characters[&11].opacity_256, 0);
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state().characters[&11].opacity_256, 128);
+
+        vm.advance_character_clock(50_000_000).unwrap();
+        vm.resolve_wait(&token_id).unwrap();
+        assert!(vm.state().characters[&11].transition.is_none());
+        assert_eq!(vm.state().characters[&11].opacity_256, 0);
+        assert!(matches!(
+            vm.step(3, 1).unwrap(),
+            Some(MinoriVmEvent::Character(_))
+        ));
+        assert!(!vm.state().characters[&11].visible);
+    }
+
+    #[test]
+    fn character_transition_rejects_invalid_duration_opacity_and_overlap() {
+        for source in [
+            b".char load 1 A.png\r\n.char trans 1 60001 0\r\n".as_slice(),
+            b".char load 1 A.png\r\n.char trans 1 1 256\r\n".as_slice(),
+            b".char trans 1 1 0\r\n".as_slice(),
+        ] {
+            let mut vm = firefly_vm(source, 7);
+            if source.starts_with(b".char load") {
+                vm.step(1, 1).unwrap();
+                assert_eq!(vm.step(2, 1).unwrap_err(), MinoriRuntimeError::Character);
+            } else {
+                assert_eq!(vm.step(1, 1).unwrap_err(), MinoriRuntimeError::Character);
+            }
+        }
+    }
+
+    #[test]
+    fn stage_consumes_character_keep_and_discards_unmarked_slots() {
+        let source = b".char load 11 KEEP.png\r\n.char load 12 DROP.png\r\n.char keep 11\r\n.stage * BG.png 0 0\r\n.stage * BG2.png 0 0\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+
+        for tick in 1..=4 {
+            vm.step(tick, 1).unwrap();
+        }
+        assert_eq!(vm.state().characters.len(), 1);
+        let retained = vm.state().characters.get(&11).unwrap();
+        assert!(!retained.keep_once);
+        assert!(!vm.state().characters.contains_key(&12));
+
+        vm.step(5, 1).unwrap();
+        assert!(vm.state().characters.is_empty());
+        assert!(matches!(
+            vm.step(6, 1).unwrap(),
+            Some(MinoriVmEvent::Terminal)
+        ));
+    }
+
+    #[test]
+    fn character_commands_reject_unverified_modes_missing_slots_and_invalid_bounds() {
+        for source in [
+            b".char pos 11 1 2\r\n".as_slice(),
+            b".char load 0 A.png\r\n".as_slice(),
+            b".char load 4097 A.png\r\n".as_slice(),
+            b".char load 1 ../A.png\r\n".as_slice(),
+            b".char load 1 A.png B.png\r\n".as_slice(),
+            b".char load 1 A.png B.png C.png D.png\r\n".as_slice(),
+            b".char pos 1 65537 0\r\n".as_slice(),
+            b".char move 1 0 0 1 1 10\r\n".as_slice(),
+        ] {
+            assert_eq!(
+                firefly_vm(source, 7).step(1, 1).unwrap_err(),
+                MinoriRuntimeError::Character
+            );
+        }
+    }
+
+    #[test]
+    fn firefly_is_deterministic_snapshot_safe_and_fades_after_end() {
+        let source = b".effect Firefly Firefly_c 3 1000\r\n.wait 20\r\n.effect end\r\n.end\r\n";
+        let mut first = firefly_vm(source, 7);
+        let mut second = firefly_vm(source, 7);
+        let mut different_seed = firefly_vm(source, 8);
+
+        assert!(matches!(
+            first.step(1, 16).unwrap(),
+            Some(MinoriVmEvent::Firefly(_))
+        ));
+        second.step(1, 16).unwrap();
+        different_seed.step(1, 16).unwrap();
+        assert_eq!(first.state_hash().unwrap(), second.state_hash().unwrap());
+        assert_ne!(
+            first.state_hash().unwrap(),
+            different_seed.state_hash().unwrap()
+        );
+
+        let firefly = first.state().firefly.as_ref().unwrap();
+        assert_eq!(firefly.resources[0], "minori:/sys/Firefly_cS.png");
+        assert_eq!(firefly.resources[1], "minori:/sys/Firefly_cM.png");
+        assert_eq!(firefly.resources[2], "minori:/sys/Firefly_cL.png");
+        assert_eq!(firefly.target_count, 3);
+        assert_eq!(firefly.particles.len(), 3);
+        assert_eq!(firefly.fade_alpha_256, 0);
+
+        first.advance_firefly_clock(16_000_000).unwrap();
+        second.advance_firefly_clock(16_000_000).unwrap();
+        assert_eq!(first.state_hash().unwrap(), second.state_hash().unwrap());
+        assert_eq!(first.state().firefly.as_ref().unwrap().fade_alpha_256, 1);
+        let snapshot = first.snapshot_bytes().unwrap();
+        let snapshot_hash = first.state_hash().unwrap();
+        first.advance_firefly_clock(32_000_000).unwrap();
+        first.restore_state(&snapshot).unwrap();
+        assert_eq!(first.state_hash().unwrap(), snapshot_hash);
+
+        let wait = first.step(2, 16).unwrap().unwrap();
+        let MinoriVmEvent::Wait(MinoriWaitState::Time { token_id, .. }) = wait else {
+            panic!("expected Firefly fixture wait")
+        };
+        first.resolve_wait(&token_id).unwrap();
+        assert!(matches!(
+            first.step(3, 16).unwrap(),
+            Some(MinoriVmEvent::Firefly(_))
+        ));
+        assert!(first.state().firefly.as_ref().unwrap().ending);
+        assert!(matches!(
+            first.advance_firefly_clock(16_000_000).unwrap(),
+            Some(MinoriVmEvent::FireflyCleared { .. })
+        ));
+        assert!(first.state().firefly.is_none());
+        assert_eq!(first.step(4, 16).unwrap(), Some(MinoriVmEvent::Terminal));
+    }
+
+    #[test]
+    fn firefly_rejects_invalid_operands_and_corrupt_snapshot_state() {
+        for source in [
+            b".effect Firefly Firefly_c 0 1000\r\n".as_slice(),
+            b".effect Firefly Firefly_c 257 1000\r\n".as_slice(),
+            b".effect Firefly Firefly_c 1 0\r\n".as_slice(),
+            b".effect Firefly Firefly_c 1 60001\r\n".as_slice(),
+            b".effect Firefly Firefly_c 1\r\n".as_slice(),
+            b".effect end unexpected\r\n".as_slice(),
+        ] {
+            assert!(matches!(
+                firefly_vm(source, 7).step(1, 8),
+                Err(MinoriRuntimeError::Firefly)
+            ));
+        }
+
+        let source = b".effect Firefly Firefly_c 1 1000\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 8).unwrap();
+        let mut state = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        state.firefly.as_mut().unwrap().particles[0].kind = 3;
+        let corrupt = postcard::to_allocvec(&state).unwrap();
+        assert!(matches!(
+            MinoriVm::decode_snapshot(&corrupt),
+            Err(MinoriRuntimeError::Firefly)
+        ));
+        assert!(matches!(
+            vm.restore_state(&corrupt),
+            Err(MinoriRuntimeError::Firefly)
+        ));
+    }
+
+    #[test]
+    fn deterministic_control_flow_wait_and_restore_round_trip() {
         let source = b".setglobal route = 1\r\n.label loop\r\n.set count = count + 1\r\n.if count < 3 loop\r\n.wait 20\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let mut vm = MinoriVm::new(
@@ -1600,7 +4889,7 @@ mod tests {
             7,
         )
         .unwrap();
-        let event = vm.step(1).unwrap().unwrap();
+        let event = vm.step(1, 32).unwrap().unwrap();
         let MinoriVmEvent::Wait(MinoriWaitState::Time {
             token_id,
             timer_ticks,
@@ -1612,17 +4901,60 @@ mod tests {
         assert_eq!(timer_ticks, 20);
         assert_eq!(milliseconds, 200);
         assert_eq!(vm.state().variables.get("count"), Some(&3));
-        let save = vm.encode_native_save().unwrap();
-        let state = vm.state().clone();
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let hash = vm.state_hash().unwrap();
         vm.resolve_wait(&token_id).unwrap();
-        assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
-        vm.restore_native_save(&save, 2).unwrap();
-        assert_eq!(vm.state(), &state);
+        assert_eq!(vm.step(2, 4).unwrap(), Some(MinoriVmEvent::Terminal));
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state_hash().unwrap(), hash);
     }
 
     #[test]
-    fn unsupported_presentation_command_blocks_without_advancing_silently() {
-        let source = b".char 0\r\n.end\r\n";
+    fn verified_route_clear_is_a_stable_snapshot_unlock_without_name_guessing() {
+        let source = b".setGlobal OP_CLEAR = 1\r\n.setGlobal REN_CLEAR = 1\r\n.setGlobal REN_CLEAR = 1\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        assert_eq!(vm.step(1, 16).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert_eq!(
+            vm.state().gallery_unlocks,
+            [Hash256::from_sha256(b"REN_CLEAR")]
+        );
+        let snapshot = vm.snapshot_bytes().unwrap();
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(
+            vm.state().gallery_unlocks,
+            [Hash256::from_sha256(b"REN_CLEAR")]
+        );
+
+        let mut invalid = MinoriVm::decode_snapshot(&snapshot).unwrap();
+        invalid
+            .gallery_unlocks
+            .push(Hash256::from_sha256(b"UNKNOWN_CLEAR"));
+        assert_eq!(
+            MinoriVm::decode_snapshot(&postcard::to_allocvec(&invalid).unwrap()).unwrap_err(),
+            MinoriRuntimeError::State
+        );
+    }
+
+    #[test]
+    fn verified_clear_flags_select_only_the_original_title_variants() {
+        let mut vm = firefly_vm(b".end\r\n", 7);
+        assert_eq!(vm.title_variant(), 0);
+        let mut first_three = vec![
+            Hash256::from_sha256(b"AYAME_CLEAR"),
+            Hash256::from_sha256(b"REN_CLEAR"),
+            Hash256::from_sha256(b"SUI_CLEAR"),
+        ];
+        first_three.sort_unstable();
+        vm.merge_verified_gallery_unlocks(&first_three).unwrap();
+        assert_eq!(vm.title_variant(), 1);
+        vm.merge_verified_gallery_unlocks(&[Hash256::from_sha256(b"TOHKA_CLEAR")])
+            .unwrap();
+        assert_eq!(vm.title_variant(), 2);
+    }
+
+    #[test]
+    fn control_pragma_enables_only_the_held_key_fast_path() {
+        let source = b".pragma enable_control\r\n.wait 500\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let mut vm = MinoriVm::new(
             "minori:/scr/fixture.sc".into(),
@@ -1631,13 +4963,164 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(
-            vm.step(1).unwrap_err(),
-            MinoriRuntimeError::UnsupportedOpcode {
-                opcode: "char".into(),
-                ordinal: 0,
+
+        vm.set_control_pressed(true);
+        assert!(!vm.state().system_ui.control_enabled);
+        assert!(!vm.fast_forward_active());
+        assert_eq!(vm.step(1, 16).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert!(vm.state().system_ui.control_enabled);
+        assert!(vm.state().system_ui.control_pressed);
+        assert!(vm.fast_forward_active());
+        assert_eq!(vm.state().wait, None);
+
+        vm.set_control_pressed(false);
+        assert!(!vm.fast_forward_active());
+    }
+
+    #[test]
+    fn play_mode_is_mutually_exclusive_snapshot_safe_and_drives_auto_wait() {
+        let source =
+            b".message 1 voice speaker first\r\n.message 2 voice speaker second\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script.clone(),
+            1,
+        )
+        .unwrap();
+
+        let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(1, 16).unwrap() else {
+            panic!("expected message")
+        };
+        assert!(matches!(wait, MinoriWaitState::Input { .. }));
+        vm.toggle_preferred_play_mode().unwrap();
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Auto);
+        let snapshot = vm.snapshot_bytes().unwrap();
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Auto);
+
+        let token = match vm.state().wait.as_ref().unwrap() {
+            MinoriWaitState::Input { token_id } => token_id.clone(),
+            _ => panic!("expected input wait"),
+        };
+        vm.resolve_wait(&token).unwrap();
+        let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(2, 16).unwrap() else {
+            panic!("expected auto message")
+        };
+        assert!(matches!(
+            wait,
+            MinoriWaitState::Time {
+                timer_ticks: 50,
+                milliseconds: 500,
+                ..
             }
-        );
+        ));
+
+        vm.toggle_preferred_play_mode().unwrap();
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Normal);
+        vm.state.system_ui.preferred_play_mode = MinoriPlayMode::Skip;
+        vm.toggle_preferred_play_mode().unwrap();
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
+        assert!(vm.fast_forward_active());
+    }
+
+    #[test]
+    fn skip_and_control_pragmas_are_independent_fast_path_gates() {
+        let source = b".pragma skip_disable\r\n.pragma enable_control\r\n.wait 1\r\n.pragma skip_enable\r\n.wait 1\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        vm.set_control_pressed(true);
+        let first = vm.step(1, 16).unwrap().unwrap();
+        assert!(matches!(
+            first,
+            MinoriVmEvent::Wait(MinoriWaitState::Time { .. })
+        ));
+        assert!(!vm.state().system_ui.skip_enabled);
+        assert!(vm.state().system_ui.control_enabled);
+        assert!(vm.state().system_ui.control_pressed);
+        assert!(!vm.fast_forward_active());
+
+        let token = match vm.state().wait.as_ref().unwrap() {
+            MinoriWaitState::Time { token_id, .. } => token_id.clone(),
+            _ => panic!("expected time wait"),
+        };
+        vm.resolve_wait(&token).unwrap();
+        assert_eq!(vm.step(2, 16).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert!(vm.state().system_ui.skip_enabled);
+        assert!(vm.fast_forward_active());
+        assert!(vm.state().wait.is_none());
+    }
+
+    #[test]
+    fn skip_gate_round_trips_in_the_runtime_snapshot() {
+        let source = b".pragma skip_disable\r\n.wait 1\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script.clone(),
+            1,
+        )
+        .unwrap();
+        vm.set_control_pressed(true);
+        vm.set_control_enabled(true);
+        assert!(matches!(vm.step(1, 16), Ok(Some(MinoriVmEvent::Wait(_)))));
+        assert!(!vm.state().system_ui.skip_enabled);
+        assert!(!vm.fast_forward_active());
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let mut restored = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        restored.restore_state(&snapshot).unwrap();
+        assert!(!restored.state().system_ui.skip_enabled);
+        assert!(restored.state().system_ui.control_enabled);
+        assert!(restored.state().system_ui.control_pressed);
+        assert!(!restored.fast_forward_active());
+    }
+
+    #[test]
+    fn unknown_control_pragma_is_a_stable_blocking_error() {
+        let source = b".pragma unknown_control\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            vm.step(1, 4),
+            Err(MinoriRuntimeError::UnsupportedPragma { .. })
+        ));
+    }
+
+    #[test]
+    fn malformed_screen_shake_blocks_without_advancing_silently() {
+        let source = b".shakescreen 0\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        assert_eq!(vm.step(1, 4), Err(MinoriRuntimeError::ScreenShake));
     }
 
     #[test]
@@ -1651,7 +5134,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Panel { sequence }) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Panel { sequence }) = vm.step(1, 4).unwrap() else {
             panic!("expected panel event")
         };
         assert_eq!(sequence, 1);
@@ -1662,9 +5145,9 @@ mod tests {
                 resource_uri: "minori:/sys/msgPanel.png".into(),
             })
         );
-        let save = vm.encode_native_save().unwrap();
+        let snapshot = vm.snapshot_bytes().unwrap();
         assert_eq!(
-            MinoriVm::decode_native_save(&save).unwrap().panel,
+            MinoriVm::decode_snapshot(&snapshot).unwrap().panel,
             vm.state().panel
         );
 
@@ -1678,33 +5161,32 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            clear_vm.step(1).unwrap(),
+            clear_vm.step(1, 4).unwrap(),
             Some(MinoriVmEvent::Panel { .. })
         ));
         assert!(clear_vm.state().panel.is_some());
         assert!(matches!(
-            clear_vm.step(2).unwrap(),
+            clear_vm.step(2, 4).unwrap(),
             Some(MinoriVmEvent::Panel { .. })
         ));
         assert_eq!(clear_vm.state().panel, None);
 
-        for (source, operand_count, mode) in [(b".panel 1 -1\r\n".as_slice(), 2, Some(1))] {
-            let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
-            let mut vm = MinoriVm::new(
-                "minori:/scr/fixture.sc".into(),
-                Hash256::from_sha256(source),
-                script,
-                1,
-            )
-            .unwrap();
-            assert_eq!(
-                vm.step(1).unwrap_err(),
-                MinoriRuntimeError::Panel {
-                    operand_count,
-                    mode,
-                }
-            );
-        }
+        let (source, operand_count, mode) = (b".panel 1 -1\r\n".as_slice(), 2, Some(1));
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.step(1, 4).unwrap_err(),
+            MinoriRuntimeError::Panel {
+                operand_count,
+                mode,
+            }
+        );
     }
 
     #[test]
@@ -1719,14 +5201,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1).unwrap(),
+            vm.step(1, 4).unwrap(),
             Some(MinoriVmEvent::EffectCleared { sequence: 1 })
         );
         assert_eq!(vm.state().effect, None);
         assert_eq!(vm.state().effect_sequence, 1);
         assert_eq!(vm.advance_effect_clock(1_000_000).unwrap(), None);
-        let save = vm.encode_native_save().unwrap();
-        let restored = MinoriVm::decode_native_save(&save).unwrap();
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let restored = MinoriVm::decode_snapshot(&snapshot).unwrap();
         assert_eq!(restored.effect, vm.state().effect);
         assert_eq!(restored.effect_sequence, vm.state().effect_sequence);
     }
@@ -1743,7 +5225,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1).unwrap(),
+            vm.step(1, 4).unwrap(),
             Some(MinoriVmEvent::EffectCleared { sequence: 1 })
         );
         assert_eq!(vm.state().effect, None);
@@ -1760,7 +5242,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Movie(movie)) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Movie(movie)) = vm.step(1, 4).unwrap() else {
             panic!("expected movie event");
         };
         assert_eq!(movie.resource_uri, "minori:/mov/op.avi");
@@ -1768,6 +5250,51 @@ mod tests {
         vm.resolve_wait(&movie.fence_id).unwrap();
         assert_eq!(vm.state().movie, None);
         assert_eq!(vm.state().wait, None);
+    }
+
+    #[test]
+    fn select_preserves_option_targets_and_commits_the_selected_label() {
+        let source = b".select first:label1 second:label2 third:label3\r\n.label label1\r\n.end\r\n.label label2\r\n.end\r\n.label label3\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Choice {
+            sequence,
+            option_hashes,
+            selected_index,
+        }) = vm.step(1, 4).unwrap()
+        else {
+            panic!("expected choice event")
+        };
+        assert_eq!(sequence, 1);
+        assert_eq!(option_hashes.len(), 3);
+        assert_eq!(selected_index, 0);
+        assert_eq!(
+            vm.choice_display_texts().unwrap(),
+            ["first", "second", "third"]
+        );
+        assert_eq!(
+            vm.state().choice.as_ref().unwrap().targets,
+            ["label1", "label2", "label3"]
+        );
+        let token = match vm.state().wait.as_ref().unwrap() {
+            MinoriWaitState::Choice { token_id } => token_id.clone(),
+            _ => panic!("expected choice wait"),
+        };
+        vm.move_choice(1).unwrap();
+        assert_eq!(vm.state().choice.as_ref().unwrap().selected_index, Some(1));
+        vm.resolve_wait(&token).unwrap();
+        vm.commit_choice().unwrap();
+        assert_eq!(vm.state().pc_line, 4);
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::Terminal)
+        ));
     }
 
     #[test]
@@ -1783,7 +5310,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            vm.step(1).unwrap(),
+            vm.step(1, 4).unwrap(),
             Some(MinoriVmEvent::EffectCleared { sequence: 1 })
         );
         assert_eq!(vm.state().effect, None);
@@ -1804,7 +5331,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            vm.step(1).unwrap(),
+            vm.step(1, 4).unwrap(),
             Some(MinoriVmEvent::Effect(_))
         ));
         let effect = vm.state().effect.as_ref().expect("CrossFade2 effect state");
@@ -1826,7 +5353,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            unsupported_vm.step(1).unwrap_err(),
+            unsupported_vm.step(1, 4).unwrap_err(),
             MinoriRuntimeError::UnsupportedEffectKind {
                 identity: Hash256::from_sha256(b"CrossFade"),
             }
@@ -1855,7 +5382,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                vm.step(1).unwrap_err(),
+                vm.step(1, 4).unwrap_err(),
                 MinoriRuntimeError::Effect { violation }
             );
         }
@@ -1883,15 +5410,15 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                vm.step(1).unwrap_err(),
+                vm.step(1, 4).unwrap_err(),
                 MinoriRuntimeError::Effect { violation }
             );
         }
     }
 
     #[test]
-    fn effect2_is_a_verified_secondary_slot_boundary() {
-        let source = b".effect2 CrossFade2 first.png:second.png 320 100\r\n";
+    fn effect2_rejects_unverified_secondary_kinds() {
+        let source = b".effect2 CrossFade2\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let mut vm = MinoriVm::new(
             "minori:/scr/fixture.sc".into(),
@@ -1901,11 +5428,203 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1).unwrap_err(),
-            MinoriRuntimeError::Effect {
-                violation: MinoriEffectViolation::SecondarySlot,
+            vm.step(1, 4).unwrap_err(),
+            MinoriRuntimeError::UnsupportedEffectKind {
+                identity: Hash256::from_sha256(b"CrossFade2"),
             }
         );
+    }
+
+    #[test]
+    fn snow_h_uses_an_independent_secondary_slot() {
+        let source = b".effect CrossFade2 first.png:second.png 32 16\r\n.effect2 SnowH\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            7,
+        )
+        .unwrap();
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Effect(_))
+        ));
+        let primary = vm.state().effect.clone().unwrap();
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::SecondaryEffect(_))
+        ));
+        assert_eq!(vm.state().effect.as_ref(), Some(&primary));
+        let secondary = vm.state().secondary_effect.as_ref().unwrap();
+        assert_eq!(secondary.resources[0], "minori:/sys/snowS.png");
+        assert_eq!(secondary.resources[1], "minori:/sys/snowM.png");
+        assert_eq!(secondary.resources[2], "minori:/sys/snowL.png");
+        assert_eq!(secondary.particles.len(), 50);
+        assert!(secondary.particles.iter().all(|particle| particle.active));
+    }
+
+    #[test]
+    fn snow_h_motion_is_deterministic_and_snapshot_validated() {
+        let source = b".effect2 SnowH\r\n.end\r\n";
+        let make_vm = |seed| {
+            MinoriVm::new(
+                "minori:/scr/fixture.sc".into(),
+                Hash256::from_sha256(source),
+                parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap(),
+                seed,
+            )
+            .unwrap()
+        };
+        let mut first = make_vm(7);
+        let mut second = make_vm(7);
+        let mut different = make_vm(8);
+        first.step(1, 4).unwrap();
+        second.step(1, 4).unwrap();
+        different.step(1, 4).unwrap();
+        assert_eq!(
+            first.state().secondary_effect,
+            second.state().secondary_effect
+        );
+        assert_ne!(
+            first.state().secondary_effect,
+            different.state().secondary_effect
+        );
+
+        let before = first.state().secondary_effect.as_ref().unwrap().particles[0].clone();
+        assert!(matches!(
+            first.advance_secondary_effect_clock(16_000_000).unwrap(),
+            Some(MinoriVmEvent::SecondaryEffect(_))
+        ));
+        second.advance_secondary_effect_clock(16_000_000).unwrap();
+        assert_eq!(
+            first.state().secondary_effect,
+            second.state().secondary_effect
+        );
+        let after = &first.state().secondary_effect.as_ref().unwrap().particles[0];
+        assert_eq!(
+            after.fixed_position[0],
+            before.fixed_position[0] + i64::from(before.horizontal_velocity) * 16
+        );
+        let vertical_delta = i64::from(before.vertical_velocity) * 16;
+        assert_eq!(
+            after.fixed_position[1],
+            if before.vertical_positive {
+                before.fixed_position[1] + vertical_delta
+            } else {
+                before.fixed_position[1] - vertical_delta
+            }
+        );
+        assert_eq!(
+            first.state().secondary_effect.as_ref().unwrap().alpha_256,
+            1
+        );
+
+        let snapshot = first.snapshot_bytes().unwrap();
+        assert_eq!(
+            MinoriVm::decode_snapshot(&snapshot).unwrap(),
+            *first.state()
+        );
+        let mut corrupt = first.state().clone();
+        corrupt.secondary_effect.as_mut().unwrap().particles[0].kind = 3;
+        let corrupt = postcard::to_allocvec(&corrupt).unwrap();
+        assert_eq!(
+            MinoriVm::decode_snapshot(&corrupt),
+            Err(MinoriRuntimeError::SecondaryEffect)
+        );
+    }
+
+    #[test]
+    fn snow_h_fadeout_clears_only_the_secondary_slot() {
+        let source = b".effect2 SnowH\r\n.effect2 fadeout\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            7,
+        )
+        .unwrap();
+        vm.step(1, 4).unwrap();
+        vm.advance_secondary_effect_clock(32_000_000).unwrap();
+        assert_eq!(vm.state().secondary_effect.as_ref().unwrap().alpha_256, 2);
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::SecondaryEffect(_))
+        ));
+        assert!(vm.state().secondary_effect.as_ref().unwrap().ending);
+        assert!(matches!(
+            vm.advance_secondary_effect_clock(32_000_000).unwrap(),
+            Some(MinoriVmEvent::SecondaryEffectCleared { .. })
+        ));
+        assert!(vm.state().secondary_effect.is_none());
+        assert!(vm.state().effect.is_none());
+    }
+
+    #[test]
+    fn screen_shake_vertical_mode_uses_native_interval_and_alternation() {
+        let source = b".shakeScreen V 10 30\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::ScreenShake(_))
+        ));
+        assert_eq!(vm.state().screen_shake.as_ref().unwrap().offset, [0, 0]);
+        assert_eq!(vm.advance_screen_shake_clock(29_000_000).unwrap(), None);
+        let first = vm.advance_screen_shake_clock(1_000_000).unwrap().unwrap();
+        assert!(first.sequence > 0);
+        assert_eq!(vm.state().screen_shake.as_ref().unwrap().offset, [0, -10]);
+        // Musica resets the interval origin instead of carrying excess time.
+        assert!(vm.advance_screen_shake_clock(31_000_000).unwrap().is_some());
+        assert_eq!(vm.state().screen_shake.as_ref().unwrap().offset, [0, 10]);
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        assert_eq!(MinoriVm::decode_snapshot(&snapshot).unwrap(), *vm.state());
+        let mut corrupt = vm.state().clone();
+        corrupt.screen_shake.as_mut().unwrap().offset = [1, 10];
+        assert_eq!(
+            MinoriVm::decode_snapshot(&postcard::to_allocvec(&corrupt).unwrap()),
+            Err(MinoriRuntimeError::ScreenShake)
+        );
+    }
+
+    #[test]
+    fn screen_shake_random_mode_is_deterministic_and_preserves_switch_fallthrough() {
+        let source = b".shakeScreen R 50 100\r\n.end\r\n";
+        let mut first = firefly_vm(source, 11);
+        let mut second = firefly_vm(source, 11);
+        first.step(1, 4).unwrap();
+        second.step(1, 4).unwrap();
+        for _ in 0..32 {
+            first.advance_screen_shake_clock(100_000_000).unwrap();
+            second.advance_screen_shake_clock(100_000_000).unwrap();
+            assert_eq!(first.state().screen_shake, second.state().screen_shake);
+            let offset = first.state().screen_shake.as_ref().unwrap().offset;
+            assert!([
+                [0, -50],
+                [-50, 0],
+                [50, 50],
+                [50, 0],
+                [-50, 50],
+                [0, 50],
+                [50, -50],
+            ]
+            .contains(&offset));
+        }
+    }
+
+    #[test]
+    fn screen_shake_rejects_unverified_modes_and_is_replaced_by_transition() {
+        let invalid_source = b".shakeScreen H 10 10\r\n";
+        let mut invalid = firefly_vm(invalid_source, 1);
+        assert_eq!(invalid.step(1, 4), Err(MinoriRuntimeError::ScreenShake));
+
+        let source = b".shakeScreen V 10 10\r\n.transition 0 * 10\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 1);
+        vm.step(1, 1).unwrap();
+        assert!(vm.state().screen_shake.is_some());
+        assert_eq!(vm.step(2, 2).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert!(vm.state().screen_shake.is_none());
     }
 
     #[test]
@@ -1919,10 +5638,11 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1, 4).unwrap() else {
             panic!("expected stage event")
         };
-        assert_eq!(stage.foreground, None);
+        assert_eq!(stage.resource_sequence, vec![None]);
+        assert_eq!(stage.reference_position, None);
         assert_eq!(
             stage.background,
             Some(MinoriStageLayer {
@@ -1934,6 +5654,427 @@ mod tests {
         assert_eq!(stage.transition.mode, 0);
         assert_eq!(stage.transition.resource, None);
         assert_eq!(stage.transition.duration_ticks, 10);
+    }
+
+    #[test]
+    fn stage_preserves_resource_sequence_and_verified_stand_pair_contract() {
+        let source =
+            b".stage PRELOAD_A.png:PRELOAD_B.png BG.png 0 0 STAND.png 727,1685\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1, 4).unwrap() else {
+            panic!("expected stage event")
+        };
+        assert_eq!(
+            stage.resource_sequence,
+            vec![
+                Some("minori:/bg/PRELOAD_A.png".into()),
+                Some("minori:/bg/PRELOAD_B.png".into()),
+            ]
+        );
+        assert_eq!(stage.reference_position, None);
+        assert_eq!(
+            stage.stands,
+            vec![MinoriStandLayer {
+                resource_uri: "minori:/st/STAND.png".into(),
+                position: 727,
+                resource_parameter: 1685,
+            }]
+        );
+        assert_eq!(vm.state().stage.as_ref(), Some(&stage));
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let restored = MinoriVm::decode_snapshot(&snapshot).unwrap();
+        assert_eq!(restored.stage, Some(stage));
+    }
+
+    #[test]
+    fn stage_defaults_missing_resource_parameter_and_rejects_malformed_pairs() {
+        let source = b".stage * BG.png 0 0 STAND.png 727\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1, 4).unwrap() else {
+            panic!("expected stage event")
+        };
+        assert_eq!(stage.stands[0].resource_parameter, 0);
+
+        for operands in [
+            ".stage * BG.png 0 0 STAND.png 727,1685,1\r\n",
+            ".stage * BG.png 0 0 STAND.png 727,\r\n",
+            ".stage A.png:B.png:C.png BG.png 0 0\r\n",
+        ] {
+            let script = parse_sc(
+                format!("{operands}.end\r\n").as_bytes(),
+                &ScOpcodeCatalog::observed_minori(),
+            )
+            .unwrap();
+            let mut vm = MinoriVm::new(
+                "minori:/scr/fixture.sc".into(),
+                Hash256::from_sha256(operands.as_bytes()),
+                script,
+                1,
+            )
+            .unwrap();
+            assert_eq!(vm.step(1, 4).unwrap_err(), MinoriRuntimeError::Operand);
+        }
+    }
+
+    #[test]
+    fn horizontal_scroll_waits_for_the_native_linear_clock_and_round_trips() {
+        let source = b".stage * BG.png 461 0\r\n.hscroll 0 -10\r\n.endscroll 0\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 4).unwrap();
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::AxisScroll(_))
+        ));
+        let started = vm.state().axis_scroll.as_ref().unwrap();
+        assert_eq!(started.axis, MinoriAxisScrollAxis::Horizontal);
+        assert_eq!(started.start, 461);
+        assert_eq!(started.target, 0);
+        assert_eq!(started.speed_tenths, -10);
+        assert_eq!(started.duration_ms, 461);
+
+        assert!(vm.advance_axis_scroll_clock(200_000_000).unwrap().is_some());
+        assert_eq!(vm.state().axis_scroll.as_ref().unwrap().current, 261);
+        assert_eq!(
+            vm.state()
+                .stage
+                .as_ref()
+                .unwrap()
+                .background
+                .as_ref()
+                .unwrap()
+                .x,
+            261
+        );
+        let Some(MinoriVmEvent::Wait(MinoriWaitState::AxisScroll {
+            token_id,
+            milliseconds,
+        })) = vm.step(3, 4).unwrap()
+        else {
+            panic!("expected axis-scroll completion wait")
+        };
+        assert_eq!(milliseconds, 261);
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let hash = vm.state_hash().unwrap();
+        vm.advance_axis_scroll_clock(261_000_000).unwrap();
+        assert!(vm.state().axis_scroll.as_ref().unwrap().completed);
+        assert_eq!(
+            vm.state()
+                .stage
+                .as_ref()
+                .unwrap()
+                .background
+                .as_ref()
+                .unwrap()
+                .x,
+            0
+        );
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state_hash().unwrap(), hash);
+        vm.resolve_wait(&token_id).unwrap();
+        assert!(vm.state().axis_scroll.as_ref().unwrap().completed);
+        assert_eq!(
+            vm.state()
+                .stage
+                .as_ref()
+                .unwrap()
+                .background
+                .as_ref()
+                .unwrap()
+                .x,
+            0
+        );
+        assert_eq!(vm.step(4, 4).unwrap(), Some(MinoriVmEvent::Terminal));
+    }
+
+    #[test]
+    fn linear_scroll_interpolates_both_axes_and_ends_through_a_time_wait() {
+        let source = b".stage * BG.png 192 723\r\n.scroll 0 0 10\r\n.endScroll f\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 4).unwrap();
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::LinearScroll(_))
+        ));
+        let started = vm.state().linear_scroll.as_ref().unwrap();
+        assert_eq!(started.start, [192, 723]);
+        assert_eq!(started.target, [0, 0]);
+        assert_eq!(started.speed_tenths, 10);
+        assert_eq!(started.duration_ms, 723);
+
+        assert!(vm
+            .advance_linear_scroll_clock(100_000_000)
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            vm.state().linear_scroll.as_ref().unwrap().current,
+            [166, 623]
+        );
+        assert_eq!(
+            stage_position(vm.state().stage.as_ref().unwrap()).unwrap(),
+            [166, 623]
+        );
+        let Some(MinoriVmEvent::Wait(MinoriWaitState::LinearScroll {
+            token_id,
+            milliseconds,
+        })) = vm.step(3, 4).unwrap()
+        else {
+            panic!("expected linear-scroll completion wait")
+        };
+        assert_eq!(milliseconds, 623);
+        let snapshot = vm.snapshot_bytes().unwrap();
+        assert_eq!(MinoriVm::decode_snapshot(&snapshot).unwrap(), *vm.state());
+        vm.resolve_wait(&token_id).unwrap();
+        let completed = vm.state().linear_scroll.as_ref().unwrap();
+        assert!(completed.completed);
+        assert_eq!(completed.current, [0, 0]);
+        assert_eq!(
+            stage_position(vm.state().stage.as_ref().unwrap()).unwrap(),
+            [0, 0]
+        );
+        assert_eq!(vm.step(4, 4).unwrap(), Some(MinoriVmEvent::Terminal));
+    }
+
+    #[test]
+    fn vertical_scroll_force_finish_updates_the_stage_at_the_command_boundary() {
+        let source = b".stage * BG.png 0 605\r\n.vscroll 0 -10\r\n.endscroll true\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 4).unwrap();
+        vm.step(2, 4).unwrap();
+        vm.advance_axis_scroll_clock(100_000_000).unwrap();
+        assert_eq!(vm.state().axis_scroll.as_ref().unwrap().current, 505);
+        assert!(matches!(
+            vm.step(3, 4).unwrap(),
+            Some(MinoriVmEvent::AxisScroll(_))
+        ));
+        let completed = vm.state().axis_scroll.as_ref().unwrap();
+        assert_eq!(completed.axis, MinoriAxisScrollAxis::Vertical);
+        assert!(completed.completed);
+        assert_eq!(completed.current, 0);
+        assert_eq!(
+            vm.state()
+                .stage
+                .as_ref()
+                .unwrap()
+                .background
+                .as_ref()
+                .unwrap()
+                .y,
+            0
+        );
+    }
+
+    #[test]
+    fn axis_scroll_rejects_direction_conflicts_and_corrupt_snapshot_state() {
+        for source in [
+            b".hscroll 0 -10\r\n".as_slice(),
+            b".stage * BG.png 461 0\r\n.hscroll 0 0\r\n".as_slice(),
+            b".stage * BG.png 461 0\r\n.hscroll 0 10\r\n".as_slice(),
+            b".stage * BG.png 461 0\r\n.hscroll 65537 10\r\n".as_slice(),
+        ] {
+            let mut vm = firefly_vm(source, 7);
+            if source.starts_with(b".stage") {
+                vm.step(1, 4).unwrap();
+                assert_eq!(vm.step(2, 4).unwrap_err(), MinoriRuntimeError::AxisScroll);
+            } else {
+                assert_eq!(vm.step(1, 4).unwrap_err(), MinoriRuntimeError::AxisScroll);
+            }
+        }
+
+        let source = b".stage * BG.png 461 0\r\n.hscroll 0 -10\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.step(1, 4).unwrap();
+        vm.step(2, 4).unwrap();
+        let mut corrupt = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        corrupt.axis_scroll.as_mut().unwrap().current -= 1;
+        let corrupt = postcard::to_allocvec(&corrupt).unwrap();
+        assert_eq!(
+            MinoriVm::decode_snapshot(&corrupt).unwrap_err(),
+            MinoriRuntimeError::AxisScroll
+        );
+    }
+
+    #[test]
+    fn scroll_xf_advances_deterministically_and_round_trips_snapshot_state() {
+        let source = b".stage * BG.png 0 0\r\n.scrollXF 0 720 1280 720 0 0 1280 0 1200 0\r\n.endScroll f\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Stage(_))
+        ));
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::ScrollXf(_))
+        ));
+        let started = vm.state().scroll_xf.as_ref().unwrap();
+        assert_eq!(started.visible_extent, [0, 720]);
+        assert_eq!(started.visible_offset, [0, 0]);
+
+        assert!(vm.advance_scroll_xf_clock(600_000_000).unwrap().is_some());
+        let halfway = vm.state().scroll_xf.as_ref().unwrap();
+        assert_eq!(halfway.visible_extent, [640, 720]);
+        assert_eq!(halfway.visible_offset, [640, 0]);
+        assert!(!halfway.completed);
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let snapshot_hash = vm.state_hash().unwrap();
+        vm.advance_scroll_xf_clock(600_000_000).unwrap();
+        let completed = vm.state().scroll_xf.as_ref().unwrap();
+        assert_eq!(completed.visible_extent, [1280, 720]);
+        assert_eq!(completed.visible_offset, [1280, 0]);
+        assert!(completed.completed);
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state_hash().unwrap(), snapshot_hash);
+
+        assert_eq!(vm.step(3, 4).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert_eq!(
+            vm.state().scroll_xf.as_ref().unwrap().visible_extent,
+            [640, 720]
+        );
+    }
+
+    #[test]
+    fn scroll_xf_easing_force_finish_and_corrupt_state_are_fail_closed() {
+        let source = b".stage * BG.png 0 0\r\n.scrollXF 0 100 100 100 0 0 100 0 1000 2\r\n.endScroll t\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        vm.step(1, 4).unwrap();
+        vm.step(2, 4).unwrap();
+        vm.advance_scroll_xf_clock(500_000_000).unwrap();
+        assert_eq!(
+            vm.state().scroll_xf.as_ref().unwrap().visible_extent,
+            [75, 100]
+        );
+        assert!(matches!(
+            vm.step(3, 4).unwrap(),
+            Some(MinoriVmEvent::ScrollXf(_))
+        ));
+        let completed = vm.state().scroll_xf.as_ref().unwrap();
+        assert_eq!(completed.visible_extent, [100, 100]);
+        assert_eq!(completed.visible_offset, [100, 0]);
+        assert!(completed.completed);
+
+        let mut state = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        state.scroll_xf.as_mut().unwrap().visible_extent = [99, 100];
+        let corrupt = postcard::to_allocvec(&state).unwrap();
+        assert!(matches!(
+            MinoriVm::decode_snapshot(&corrupt),
+            Err(MinoriRuntimeError::ScrollXf)
+        ));
+
+        for command in [
+            ".scrollXF 0 1 1 1 0 0 1 0 0 0",
+            ".scrollXF 0 1 1 1 0 0 1 0 1000 3",
+            ".scrollXF 0 1 1 1 0 0 1 0 1000",
+        ] {
+            let invalid_source = format!(".stage * BG.png 0 0\r\n{command}\r\n.end\r\n");
+            let script = parse_sc(
+                invalid_source.as_bytes(),
+                &ScOpcodeCatalog::observed_minori(),
+            )
+            .unwrap();
+            let mut vm = MinoriVm::new(
+                "minori:/scr/fixture.sc".into(),
+                Hash256::from_sha256(invalid_source.as_bytes()),
+                script,
+                1,
+            )
+            .unwrap();
+            vm.step(1, 4).unwrap();
+            assert_eq!(vm.step(2, 4).unwrap_err(), MinoriRuntimeError::ScrollXf);
+        }
+    }
+
+    #[test]
+    fn wscroll2_uses_verified_sync_profile_and_deterministic_parallax_state() {
+        let source =
+            b".stage * FAR.png 0 0 NEAR.png 0\r\n.effect WScroll2 sync:walk.txt 60 -8\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        vm.step(1, 4).unwrap();
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::WScroll2(_))
+        ));
+        let started = vm.state().wscroll2.as_ref().unwrap();
+        assert_eq!(started.sync_resource_uri, "minori:/st/walk.txt");
+        assert_eq!(started.period_ticks, 60);
+        assert_eq!(started.speed_tenths, -8);
+
+        assert!(vm.advance_wscroll2_clock(1_000_000_000).unwrap().is_some());
+        let advanced = vm.state().wscroll2.as_ref().unwrap();
+        assert_eq!(advanced.elapsed_ticks, 60);
+        assert_eq!(advanced.foreground_offset, -48);
+        assert_eq!(advanced.background_offset, -9);
+        assert_eq!(advanced.background_remainder, -3);
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let hash = vm.state_hash().unwrap();
+        vm.advance_wscroll2_clock(1_000_000_000).unwrap();
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.state_hash().unwrap(), hash);
+
+        let mut corrupt = MinoriVm::decode_snapshot(&snapshot).unwrap();
+        corrupt.wscroll2.as_mut().unwrap().foreground_offset -= 1;
+        let corrupt = postcard::to_allocvec(&corrupt).unwrap();
+        assert!(matches!(
+            MinoriVm::decode_snapshot(&corrupt),
+            Err(MinoriRuntimeError::WScroll2)
+        ));
+    }
+
+    #[test]
+    fn wscroll2_rejects_unverified_resource_modes_and_bounds() {
+        for effect in [
+            ".effect WScroll2 char:walk 60 -8",
+            ".effect WScroll2 sync:walk.txt 0 -8",
+            ".effect WScroll2 sync:walk.txt 60 10001",
+            ".effect WScroll2 sync:walk.txt 60",
+        ] {
+            let source = format!(".stage * FAR.png 0 0 NEAR.png 0\r\n{effect}\r\n.end\r\n");
+            let script = parse_sc(source.as_bytes(), &ScOpcodeCatalog::observed_minori()).unwrap();
+            let mut vm = MinoriVm::new(
+                "minori:/scr/fixture.sc".into(),
+                Hash256::from_sha256(source.as_bytes()),
+                script,
+                1,
+            )
+            .unwrap();
+            vm.step(1, 4).unwrap();
+            assert_eq!(vm.step(2, 4).unwrap_err(), MinoriRuntimeError::WScroll2);
+        }
     }
 
     #[test]
@@ -1952,19 +6093,77 @@ mod tests {
             capture_sequence,
             text,
             speaker,
+            audio_commands,
             wait: MinoriWaitState::Input { token_id },
-        }) = vm.step(1).unwrap()
+            ..
+        }) = vm.step(1, 4).unwrap()
         else {
             panic!("expected message input wait")
         };
         assert_eq!(text, "hello world");
         assert_eq!(speaker.as_deref(), Some("speaker"));
-        assert_eq!(presentation_sequence, 1);
-        assert_eq!(capture_sequence, 2);
+        assert_eq!(presentation_sequence, 3);
+        assert_eq!(capture_sequence, 4);
+        assert_eq!(audio_commands.len(), 2);
+        assert!(matches!(
+            &audio_commands[0],
+            MinoriAudioCommand::LoadResource {
+                stream_id: VOICE_STREAM_ID,
+                resource_uri,
+                ..
+            } if resource_uri == "minori:/voice/voice"
+        ));
+        assert!(matches!(
+            &audio_commands[1],
+            MinoriAudioCommand::Play {
+                stream_id: VOICE_STREAM_ID,
+                volume,
+                pan,
+                repeat: false,
+                ..
+            } if *volume == 1.0 && *pan == 0.0
+        ));
         assert_eq!(token_id, "minori.message.1");
         let state = vm.state().message.as_ref().unwrap();
         assert_eq!(state.message_id, 42);
-        assert!(state.source.length > 0);
+        assert_eq!(state.text_hash, Hash256::from_sha256(b"hello world"));
+        assert_eq!(state.voice_hash, Some(Hash256::from_sha256(b"voice")));
+        assert_eq!(
+            state.voice,
+            Some(MinoriMessageVoice {
+                resource_uri: "minori:/voice/voice".into(),
+                volume_milli: 1000,
+                pan_milli: 0,
+            })
+        );
+        assert_eq!(vm.state().backlog.len(), 1);
+        assert_eq!(vm.state().backlog_bytes, 18);
+        let backlog = &vm.state().backlog[0];
+        assert_eq!(backlog.message_id, 42);
+        assert_eq!(backlog.text, "hello world");
+        assert_eq!(backlog.speaker.as_deref(), Some("speaker"));
+        assert_eq!(backlog.text_hash, state.text_hash);
+        assert_eq!(backlog.speaker_hash, state.speaker_hash);
+        assert_eq!(backlog.voice_hash, state.voice_hash);
+        assert_eq!(backlog.voice, state.voice);
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let mut corrupt = MinoriVm::decode_snapshot(&snapshot).unwrap();
+        corrupt.backlog[0].text.push('!');
+        let corrupt = postcard::to_allocvec(&corrupt).unwrap();
+        assert_eq!(
+            MinoriVm::decode_snapshot(&corrupt).unwrap_err(),
+            MinoriRuntimeError::Backlog
+        );
+
+        vm.open_backlog().unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(0));
+        vm.advance_system_tick(2).unwrap();
+        vm.move_backlog(-1).unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(0));
+        vm.close_backlog().unwrap();
+        assert_eq!(vm.state().system_ui.page, MinoriSystemPage::None);
+        assert!(vm.state().wait.is_some());
     }
 
     #[test]
@@ -1978,13 +6177,69 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 4).unwrap() else {
             panic!("expected message input wait")
         };
         assert_eq!(text, "body words");
         assert!(speaker.is_none());
         let state = vm.state().message.as_ref().unwrap();
         assert_eq!(state.message_id, 42);
+        assert_eq!(state.text_hash, Hash256::from_sha256(b"body words"));
+        assert!(state.voice_hash.is_none());
+        assert!(state.speaker_hash.is_none());
+    }
+
+    #[test]
+    fn message_voice_uses_the_verified_suffix_and_stops_the_previous_stream() {
+        let source = b".message 1 first[25,-50] speaker one\r\n.message 2 second speaker two\r\n.message 3  speaker three\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Message { audio_commands, .. }) = vm.step(1, 4).unwrap() else {
+            panic!("expected first voiced message")
+        };
+        assert!(matches!(
+            audio_commands.as_slice(),
+            [
+                MinoriAudioCommand::LoadResource { resource_uri, .. },
+                MinoriAudioCommand::Play {
+                    volume,
+                    pan,
+                    repeat: false,
+                    ..
+                }
+            ] if resource_uri == "minori:/voice/first" && *volume == 0.25 && *pan == -0.5
+        ));
+        vm.resolve_wait("minori.message.1").unwrap();
+        let Some(MinoriVmEvent::Message { audio_commands, .. }) = vm.step(2, 4).unwrap() else {
+            panic!("expected replacement voice")
+        };
+        assert!(matches!(
+            audio_commands.as_slice(),
+            [
+                MinoriAudioCommand::Stop { stream_id: VOICE_STREAM_ID, fade_ms: 0, .. },
+                MinoriAudioCommand::LoadResource { resource_uri, .. },
+                MinoriAudioCommand::Play { repeat: false, .. }
+            ] if resource_uri == "minori:/voice/second"
+        ));
+        vm.resolve_wait("minori.message.2").unwrap();
+        let Some(MinoriVmEvent::Message { audio_commands, .. }) = vm.step(3, 4).unwrap() else {
+            panic!("expected silent message")
+        };
+        assert!(matches!(
+            audio_commands.as_slice(),
+            [MinoriAudioCommand::Stop {
+                stream_id: VOICE_STREAM_ID,
+                fade_ms: 0,
+                ..
+            }]
+        ));
+        assert!(!vm.state().audio[&VOICE_STREAM_ID].playing);
     }
 
     #[test]
@@ -1998,12 +6253,12 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 4).unwrap() else {
             panic!("expected message input wait")
         };
         assert_eq!(text, "body");
         assert_eq!(speaker.as_deref(), Some("speaker"));
-        assert_eq!(vm.state().message.as_ref().unwrap().message_id, 42);
+        assert!(vm.state().message.as_ref().unwrap().voice_hash.is_none());
     }
 
     #[test]
@@ -2017,7 +6272,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 1).unwrap() else {
             panic!("expected empty message update")
         };
         assert!(text.is_empty());
@@ -2068,7 +6323,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1, 4).unwrap() else {
             panic!("expected BGM commands")
         };
         assert_eq!(commands.len(), 2);
@@ -2108,10 +6363,10 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            vm.step(1).unwrap(),
+            vm.step(1, 1).unwrap(),
             Some(MinoriVmEvent::Audio { .. })
         ));
-        let Some(MinoriVmEvent::Audio { commands }) = vm.step(2).unwrap() else {
+        let Some(MinoriVmEvent::Audio { commands }) = vm.step(2, 1).unwrap() else {
             panic!("expected BGM stop command")
         };
         assert_eq!(
@@ -2137,7 +6392,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1).unwrap(),
+            vm.step(1, 1).unwrap(),
             Some(MinoriVmEvent::Audio {
                 commands: Vec::new()
             })
@@ -2155,7 +6410,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1).unwrap() else {
+        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1, 4).unwrap() else {
             panic!("expected SE commands")
         };
         assert_eq!(commands.len(), 2);
@@ -2195,7 +6450,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1).unwrap(),
+            vm.step(1, 4).unwrap(),
             Some(MinoriVmEvent::Chain {
                 target: "K01.sc".into()
             })
@@ -2209,7 +6464,7 @@ mod tests {
         )
         .unwrap();
         assert!(vm.state().variables.is_empty());
-        assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert_eq!(vm.step(2, 2).unwrap(), Some(MinoriVmEvent::Terminal));
     }
 
     #[test]
@@ -2223,7 +6478,7 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::ChainTarget);
+        assert_eq!(vm.step(1, 1).unwrap_err(), MinoriRuntimeError::ChainTarget);
     }
 
     #[test]
@@ -2237,7 +6492,7 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert_eq!(vm.step(1, 8).unwrap(), Some(MinoriVmEvent::Terminal));
         assert_eq!(vm.state().variables.get("sum"), Some(&10));
         assert_eq!(vm.state().variables.get("bits"), Some(&11));
         assert_eq!(vm.state().variables.get("rem"), Some(&2));
@@ -2251,6 +6506,6 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::Operand);
+        assert_eq!(vm.step(1, 1).unwrap_err(), MinoriRuntimeError::Operand);
     }
 }

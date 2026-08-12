@@ -113,7 +113,7 @@ pub struct BoundedByteSourceReader {
     stat: ByteSourceStat,
     cursor: u64,
     buffer_offset: u64,
-    buffer: Vec<u8>,
+    buffer: OwnedByteBuffer,
     buffer_bytes: usize,
 }
 
@@ -131,7 +131,7 @@ impl BoundedByteSourceReader {
             stat,
             cursor: 0,
             buffer_offset: 0,
-            buffer: Vec::new(),
+            buffer: OwnedByteBuffer::default(),
             buffer_bytes,
         })
     }
@@ -142,7 +142,7 @@ impl BoundedByteSourceReader {
 
     fn refill(&mut self) -> Result<(), ByteSourceError> {
         if self.cursor >= self.stat.len {
-            self.buffer.clear();
+            self.buffer = OwnedByteBuffer::default();
             self.buffer_offset = self.cursor;
             return Ok(());
         }

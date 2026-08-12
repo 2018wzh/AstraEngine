@@ -945,6 +945,14 @@ mod tests {
     }
 
     #[test]
+    fn manifest_gate_rejects_v7_without_compatibility_path() {
+        let mut manifest = manifest();
+        manifest.abi_fingerprint = "astra.emu.family_abi.v7".into();
+        let error = validate_manifest(&manifest, &gate()).unwrap_err();
+        assert!(matches!(error, FamilyPluginLoadError::Manifest(_)));
+    }
+
+    #[test]
     fn descriptor_binding_is_exact() {
         let manifest = manifest();
         let descriptor = LegacyFamilyPluginDescriptor {

@@ -547,7 +547,7 @@ fn engine_test_profile_isolation_check(
 }
 
 fn headless_shipping_isolation_check(package: &PackageReader) -> ReleaseCheckRecord {
-    const FORBIDDEN: [&str; 10] = [
+    const FORBIDDEN: [&str; 11] = [
         "astra.headless_host_profile.v3",
         "astra.headless_protocol.v1",
         "astra.headless_checkpoint_config.v2",
@@ -556,6 +556,7 @@ fn headless_shipping_isolation_check(package: &PackageReader) -> ReleaseCheckRec
         "astra.headless_artifact_manifest.v2",
         "astra.headless_run_report.v2",
         "astra.headless_review.v2",
+        "astra.headless_review.v3",
         "astra.headless_preflight_link.v2",
         "astra-platform-headless",
     ];
@@ -620,6 +621,38 @@ fn headless_preflight_check(
         let review = &headless.review;
         let link = &headless.preflight_link;
         let expected_target = target.unwrap_or_default();
+        let required_checkpoints = bundle
+            .required_checkpoints
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let reviewed_checkpoints = review
+            .checkpoints
+            .iter()
+            .map(|verdict| verdict.checkpoint.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let selected_audio = bundle
+            .selected_audio
+            .iter()
+            .map(|artifact| {
+                (
+                    artifact.role,
+                    artifact.relative_path.as_str(),
+                    artifact.sha256.as_str(),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let reviewed_audio = review
+            .artifacts
+            .iter()
+            .map(|verdict| {
+                (
+                    verdict.role,
+                    verdict.relative_path.as_str(),
+                    verdict.sha256.as_str(),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>();
         if run.validate().is_err()
             || run.status != RunStatus::Passed
             || run
@@ -645,8 +678,12 @@ fn headless_preflight_check(
             Some("Headless review bundle is missing, mismatched, or incomplete")
         } else if review.validate().is_err()
             || review.run_report_hash != headless.run_report_hash
+            || review.review_bundle_hash != headless.review_bundle_hash
             || review.checkpoints.is_empty()
             || review.checkpoints.iter().any(|verdict| !verdict.passed)
+            || reviewed_checkpoints != required_checkpoints
+            || reviewed_audio != selected_audio
+            || review.artifacts.iter().any(|verdict| !verdict.passed)
             || run.checkpoint_results.iter().any(|checkpoint| {
                 !review
                     .checkpoints
@@ -718,10 +755,10 @@ fn full_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod headless_preflight_tests {
     use astra_headless_protocol::{
-        CheckpointResult, PreflightLink, ReviewArtifactRole, ReviewArtifactSelection, ReviewBundle,
-        ReviewRecord, ReviewVerdict, ReviewerKind, RunReport, RunStatus,
-        HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_REVIEW_BUNDLE_SCHEMA, HEADLESS_REVIEW_SCHEMA,
-        HEADLESS_RUN_REPORT_SCHEMA,
+        CheckpointResult, PreflightLink, ReviewArtifactRole, ReviewArtifactSelection,
+        ReviewArtifactVerdict, ReviewBundle, ReviewRecord, ReviewVerdict, ReviewerKind, RunReport,
+        RunStatus, HEADLESS_PREFLIGHT_LINK_SCHEMA, HEADLESS_REVIEW_BUNDLE_SCHEMA,
+        HEADLESS_REVIEW_SCHEMA, HEADLESS_RUN_REPORT_SCHEMA,
     };
 
     use super::{headless_preflight_check, CheckStatus, HeadlessFormalEvidence};
@@ -793,13 +830,24 @@ mod headless_preflight_tests {
             review: ReviewRecord {
                 schema: HEADLESS_REVIEW_SCHEMA.into(),
                 run_report_hash: run_hash.clone(),
-                reviewer_kind: ReviewerKind::Model,
-                reviewer_identity: "review-model-v1".into(),
-                tool_identity_hash: hash("review-tool"),
+                review_bundle_hash: hash("review-bundle"),
                 checkpoints: vec![ReviewVerdict {
                     checkpoint: "required.final".into(),
                     passed: true,
                     diagnostic_codes: Vec::new(),
+                    reviewer_kind: ReviewerKind::Model,
+                    reviewer_identity: "review-model-v1".into(),
+                    tool_identity_hash: hash("review-tool"),
+                }],
+                artifacts: vec![ReviewArtifactVerdict {
+                    role: ReviewArtifactRole::FullAudio,
+                    relative_path: "audio/output.wav".into(),
+                    sha256: hash("audio"),
+                    passed: true,
+                    diagnostic_codes: Vec::new(),
+                    reviewer_kind: ReviewerKind::Human,
+                    reviewer_identity: "audio-reviewer-v1".into(),
+                    tool_identity_hash: hash("audio-review-tool"),
                 }],
             },
             review_hash: hash("review"),

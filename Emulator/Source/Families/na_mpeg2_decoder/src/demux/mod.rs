@@ -337,14 +337,10 @@ fn detect_kind(buf: &[u8]) -> ContainerKind {
     // PS: pack start code 00 00 01 BA, or standalone video PES.  Some legacy
     // wrappers omit the PS pack/system headers but retain complete PES packets;
     // treating those as raw ES forwards the PES header to the video decoder.
-    if buf
-        .windows(4)
-        .take(4096)
-        .any(|w| {
-            w == [0x00, 0x00, 0x01, 0xBA]
-                || (w[0..3] == [0x00, 0x00, 0x01] && (0xE0..=0xEF).contains(&w[3]))
-        })
-    {
+    if buf.windows(4).take(4096).any(|w| {
+        w == [0x00, 0x00, 0x01, 0xBA]
+            || (w[0..3] == [0x00, 0x00, 0x01] && (0xE0..=0xEF).contains(&w[3]))
+    }) {
         return ContainerKind::MpegPs;
     }
     ContainerKind::Es
@@ -364,11 +360,7 @@ mod tests {
     fn eos_flush_delivers_an_unbounded_standalone_video_pes() {
         let mut demuxer = Demuxer::new_auto();
         let mut packets = Vec::new();
-        demuxer.push_into(
-            &[0, 0, 1, 0xE0, 0, 0, 0x80, 0, 0, 0x0F],
-            None,
-            &mut packets,
-        );
+        demuxer.push_into(&[0, 0, 1, 0xE0, 0, 0, 0x80, 0, 0, 0x0F], None, &mut packets);
         assert!(packets.is_empty());
 
         demuxer.flush_into(&mut packets);

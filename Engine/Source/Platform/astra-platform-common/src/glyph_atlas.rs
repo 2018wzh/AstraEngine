@@ -2082,11 +2082,14 @@ fn update_gpu_atlas(
     };
     let mut allocator = AtlasAllocatorState::new(&current.packed);
     let mut placement_mutations = AtlasPlacementJournal::new();
+    // Transient command IDs are deterministic within each scene frame. When the
+    // next frame reuses one, retain its placement and upload the replacement
+    // pixels below instead of first scheduling that same placement for release.
     for stale_id in current
         .packed
         .placements
         .keys()
-        .filter(|id| !old_resources.contains_key(*id))
+        .filter(|id| !old_resources.contains_key(*id) && !new_resources.contains_key(id.as_str()))
         .cloned()
         .collect::<Vec<_>>()
     {

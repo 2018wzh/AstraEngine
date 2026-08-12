@@ -16,7 +16,7 @@ CONFORMANCE_SCHEMA = "astra.platform_host_conformance_report.v1"
 PLAYER_SCHEMA = "astra.player_automation_report.v1"
 HEADLESS_RUN_SCHEMA = "astra.headless_run_report.v2"
 HEADLESS_REVIEW_BUNDLE_SCHEMA = "astra.headless_review_bundle.v2"
-HEADLESS_REVIEW_SCHEMA = "astra.headless_review.v2"
+HEADLESS_REVIEW_SCHEMA = "astra.headless_review.v3"
 PLATFORM_RUN_IDENTITY_SCHEMA = "astra.platform_run_identity.v1"
 PREFLIGHT_LINK_SCHEMA = "astra.headless_preflight_link.v2"
 REQUIRED = {
@@ -88,15 +88,40 @@ def validate_headless_review(run_path: Path, bundle_path: Path,
         errors.append("headless.review.schema")
     if review.get("run_report_hash") != run_hash:
         errors.append("headless.review.run_hash")
-    if review.get("reviewer_kind") not in {"model", "human"}:
-        errors.append("headless.review.kind")
-    if not review.get("reviewer_identity") or not is_sha256(review.get("tool_identity_hash")):
-        errors.append("headless.review.identity")
+    if review.get("review_bundle_hash") != sha256(bundle_path):
+        errors.append("headless.review.bundle_hash")
     required = set(bundle.get("required_checkpoints", []))
     verdicts = review.get("checkpoints", [])
     reviewed = {item.get("checkpoint") for item in verdicts}
-    if not required or reviewed != required or any(not item.get("passed") for item in verdicts):
+    if (
+        not required
+        or reviewed != required
+        or len(verdicts) != len(reviewed)
+        or any(not valid_review_verdict(item) for item in verdicts)
+    ):
         errors.append("headless.review.verdicts")
+    selected_audio = {
+        (item.get("role"), item.get("relative_path"), item.get("sha256"))
+        for item in bundle.get("selected_audio", [])
+    }
+    artifact_verdicts = review.get("artifacts", [])
+    reviewed_audio = {
+        (item.get("role"), item.get("relative_path"), item.get("sha256"))
+        for item in artifact_verdicts
+        if item.get("passed") is True and not item.get("diagnostic_codes")
+    }
+    if (
+        not any(role == "full_audio" for role, _, _ in selected_audio)
+        or reviewed_audio != selected_audio
+        or len(artifact_verdicts) != len(reviewed_audio)
+        or any(item.get("passed") is not True for item in artifact_verdicts)
+        or any(not valid_review_verdict(item) for item in artifact_verdicts)
+        or any(
+            item.get("role") == "full_audio" and item.get("reviewer_kind") != "human"
+            for item in artifact_verdicts
+        )
+    ):
+        errors.append("headless.review.audio_artifacts")
     if errors:
         raise RuntimeError("formal Headless review blocked: " + ",".join(errors))
     return run
@@ -107,6 +132,21 @@ def is_sha256(value: object) -> bool:
         return False
     digest = value.removeprefix("sha256:")
     return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+
+
+def valid_review_verdict(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    diagnostics = item.get("diagnostic_codes")
+    return (
+        item.get("reviewer_kind") in {"model", "human"}
+        and isinstance(item.get("reviewer_identity"), str)
+        and 0 < len(item["reviewer_identity"]) <= 256
+        and "\0" not in item["reviewer_identity"]
+        and is_sha256(item.get("tool_identity_hash"))
+        and isinstance(diagnostics, list)
+        and (item.get("passed") is True) == (len(diagnostics) == 0)
+    )
 
 
 def validate_platform_preflight(platform: str, headless: dict, headless_run_path: Path,

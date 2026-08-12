@@ -19,7 +19,6 @@ path = "src/main.rs"
 [dependencies]
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
-astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
@@ -36,6 +35,7 @@ astra-platform-headless = { path = "../../../../Engine/Source/Platform/astra-pla
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
 na_mpeg2_decoder = { path = "../../Families/na_mpeg2_decoder" }
+wmv-decoder = { path = "../../Families/na_wmv_player", default-features = false, features = ["video-only"] }
 clap.workspace = true
 directories.workspace = true
 ed25519-dalek.workspace = true

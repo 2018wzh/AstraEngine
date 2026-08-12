@@ -760,7 +760,7 @@ pub struct RuntimeProviderResult {
     pub request_id: String,
     pub provider_id: String,
     pub status: String,
-    pub payload_len: u64,
+    pub payload: Vec<u8>,
     pub sequence: u64,
 }
 
@@ -826,7 +826,9 @@ pub enum RuntimeStepMode {
 /// into the selected renderer/audio queue.
 #[derive(Debug, PartialEq, Default)]
 pub struct RuntimeLiveOutput {
-    pub layers: Vec<astra_media_core::Layer2DTransaction>,
+    /// Requests removal of every retained ephemeral-text layout before this
+    /// step's replacement text batch is presented.
+    pub clear_text: bool,
     pub scenes: Vec<RuntimeLiveSceneTransaction>,
     pub resource_scenes: Vec<RuntimeLiveResourceScene>,
     pub audio: Vec<RuntimeLiveAudioPacket>,
@@ -1143,6 +1145,13 @@ pub struct RuntimeLiveTextPresentation {
     pub body: RuntimeLiveTextRegion,
     pub speaker: Option<RuntimeLiveTextRegion>,
     pub rgba: [u8; 4],
+    pub outline: Option<RuntimeLiveTextOutline>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLiveTextOutline {
+    pub radius: u8,
+    pub rgba: [u8; 4],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1154,6 +1163,14 @@ pub struct RuntimeLiveTextRegion {
     pub font_size: f32,
     pub line_height: f32,
     pub max_lines: u32,
+    pub horizontal_alignment: RuntimeLiveTextHorizontalAlignment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveTextHorizontalAlignment {
+    Start,
+    Center,
+    End,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1191,12 +1208,28 @@ pub struct RuntimeLiveWait {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeLiveWaitKind {
-    Frame { frames: u32 },
-    Time { milliseconds: u32 },
-    Input { keys: Vec<String> },
-    MediaFence { media_id: String },
-    PresentationFence { fence_id: String },
-    ProviderCompletion { request_id: String },
+    Frame {
+        frames: u32,
+    },
+    Time {
+        milliseconds: u32,
+    },
+    Input {
+        keys: Vec<String>,
+    },
+    MediaFence {
+        media_id: String,
+    },
+    PresentationFence {
+        fence_id: String,
+    },
+    ProviderCompletion {
+        request_id: String,
+        provider_id: String,
+        operation: String,
+        key: String,
+        payload: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1569,7 +1602,7 @@ pub struct FfiRuntimeProviderResultItem {
     pub request_id: RString,
     pub provider_id: RString,
     pub status: RString,
-    pub payload_len: u64,
+    pub payload: RVec<u8>,
     pub sequence: u64,
 }
 
@@ -1802,12 +1835,28 @@ pub enum FfiRuntimeVideoCommand {
 #[cfg(feature = "ffi")]
 #[derive(Debug, Clone, StableAbi)]
 pub enum FfiRuntimeWaitKind {
-    Frame { frames: u32 },
-    Time { milliseconds: u32 },
-    Input { keys: RVec<RString> },
-    MediaFence { media_id: RString },
-    PresentationFence { fence_id: RString },
-    ProviderCompletion { request_id: RString },
+    Frame {
+        frames: u32,
+    },
+    Time {
+        milliseconds: u32,
+    },
+    Input {
+        keys: RVec<RString>,
+    },
+    MediaFence {
+        media_id: RString,
+    },
+    PresentationFence {
+        fence_id: RString,
+    },
+    ProviderCompletion {
+        request_id: RString,
+        provider_id: RString,
+        operation: RString,
+        key: RString,
+        payload: RVec<u8>,
+    },
 }
 
 #[repr(C)]
@@ -1996,6 +2045,16 @@ pub struct FfiRuntimeTextRegion {
     pub font_size: f32,
     pub line_height: f32,
     pub max_lines: u32,
+    pub horizontal_alignment: FfiRuntimeTextHorizontalAlignment,
+}
+
+#[repr(u8)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiRuntimeTextHorizontalAlignment {
+    Start,
+    Center,
+    End,
 }
 
 #[repr(C)]
@@ -2010,178 +2069,22 @@ pub struct FfiRuntimeTextPresentation {
     pub body: FfiRuntimeTextRegion,
     pub speaker: ROption<FfiRuntimeTextRegion>,
     pub rgba: [u8; 4],
+    pub outline: ROption<FfiRuntimeTextOutline>,
 }
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeSurface2DFormat {
-    Rgba8SrgbPremultiplied,
-    Bgra8SrgbPremultiplied,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeRectI {
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeLayer2DDamage {
-    Unchanged,
-    Full,
-    Rects(RVec<FfiRuntimeRectI>),
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeLayer2DContent {
-    WritableSurface {
-        surface_id: RString,
-        generation: u64,
-        width: u32,
-        height: u32,
-        stride: u32,
-        format: FfiRuntimeSurface2DFormat,
-        damage: FfiRuntimeLayer2DDamage,
-    },
-    TextureResource {
-        resource_id: RString,
-        generation: u64,
-        width: u32,
-        height: u32,
-    },
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeTransform2D {
-    pub m11: f32,
-    pub m12: f32,
-    pub m21: f32,
-    pub m22: f32,
-    pub tx: f32,
-    pub ty: f32,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeTextureFilter2D {
-    Nearest,
-    Linear,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeLayerBlend2D {
-    Alpha,
-    Add,
-    Opaque,
-    Multiply,
-    Screen,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeFilterTarget {
-    Background,
-    Character,
-    Ui,
-    Text,
-    Video,
-    Final,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeFilterParam {
-    Float(f32),
-    Int(i64),
-    Bool(bool),
-    Text(RString),
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeFilterParamEntry {
-    pub key: RString,
-    pub value: FfiRuntimeFilterParam,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeFilterNode {
-    pub id: RString,
-    pub kind: RString,
-    pub input: FfiRuntimeFilterTarget,
-    pub output: FfiRuntimeFilterTarget,
-    pub params: RVec<FfiRuntimeFilterParamEntry>,
-    pub deterministic: bool,
-    pub allow_cpu_fallback: bool,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeFilterGraph {
-    pub schema: RString,
-    pub nodes: RVec<FfiRuntimeFilterNode>,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeLayer2DState {
-    pub id: RString,
-    pub role: RString,
-    pub z_index: i32,
-    pub content: FfiRuntimeLayer2DContent,
-    pub transform: FfiRuntimeTransform2D,
-    pub clip: ROption<FfiRuntimeRectI>,
-    pub opacity: f32,
-    pub texture_filter: FfiRuntimeTextureFilter2D,
-    pub blend: FfiRuntimeLayerBlend2D,
-    pub filter_graph: ROption<FfiRuntimeFilterGraph>,
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub enum FfiRuntimeLayer2DOperation {
-    Create(FfiRuntimeLayer2DState),
-    Update(FfiRuntimeLayer2DState),
-    Destroy(RString),
-}
-
-#[repr(C)]
-#[cfg(feature = "ffi")]
-#[derive(Debug, StableAbi)]
-pub struct FfiRuntimeLayer2DTransaction {
-    pub sequence: u64,
-    pub viewport_width: u32,
-    pub viewport_height: u32,
-    pub operations: RVec<FfiRuntimeLayer2DOperation>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub struct FfiRuntimeTextOutline {
+    pub radius: u8,
+    pub rgba: [u8; 4],
 }
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, StableAbi)]
 pub struct FfiRuntimeLiveOutput {
-    pub layers: RVec<FfiRuntimeLayer2DTransaction>,
+    pub clear_text: bool,
     pub scenes: RVec<FfiRuntimeSceneTransaction>,
     pub resource_scenes: RVec<FfiRuntimeResourceScene>,
     pub audio: RVec<FfiRuntimeAudioPacket>,
@@ -2216,7 +2119,7 @@ pub struct FfiRuntimeLiveOutput {
 impl FfiRuntimeLiveOutput {
     pub fn empty() -> Self {
         Self {
-            layers: RVec::new(),
+            clear_text: false,
             scenes: RVec::new(),
             resource_scenes: RVec::new(),
             audio: RVec::new(),

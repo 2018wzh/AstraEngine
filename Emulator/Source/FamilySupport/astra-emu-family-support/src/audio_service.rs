@@ -38,6 +38,10 @@ pub struct LegacyAudioTelemetry {
     pub decoder_refills: u64,
     pub underflow_count: u64,
     pub active_streams: u64,
+    pub pre_master_peak_microunits: u64,
+    pub pre_master_overload_frames: u64,
+    pub master_output_peak_microunits: u64,
+    pub master_output_overload_frames: u64,
 }
 
 #[derive(Default)]
@@ -50,6 +54,10 @@ struct TelemetryAtomics {
     decoder_refills: AtomicU64,
     underflow_count: AtomicU64,
     active_streams: AtomicU64,
+    pre_master_peak_microunits: AtomicU64,
+    pre_master_overload_frames: AtomicU64,
+    master_output_peak_microunits: AtomicU64,
+    master_output_overload_frames: AtomicU64,
 }
 
 impl TelemetryAtomics {
@@ -63,6 +71,14 @@ impl TelemetryAtomics {
             decoder_refills: self.decoder_refills.load(Ordering::Relaxed),
             underflow_count: self.underflow_count.load(Ordering::Relaxed),
             active_streams: self.active_streams.load(Ordering::Relaxed),
+            pre_master_peak_microunits: self.pre_master_peak_microunits.load(Ordering::Relaxed),
+            pre_master_overload_frames: self.pre_master_overload_frames.load(Ordering::Relaxed),
+            master_output_peak_microunits: self
+                .master_output_peak_microunits
+                .load(Ordering::Relaxed),
+            master_output_overload_frames: self
+                .master_output_overload_frames
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -203,13 +219,21 @@ impl FamilyAudioService {
             .map_err(|_| "ASTRA_EMU_AUDIO_WORKER_START".to_owned())?;
         let wake_stop = Arc::new(AtomicBool::new(false));
         let wake = client.audio_wake();
-        let forwarder_stop = Arc::clone(&wake_stop);
-        let forwarder_commands = commands.clone();
-        let forwarder_wake = wake.clone();
-        let wake_forwarder = thread::Builder::new()
-            .name("astra-emu-audio-wake".into())
-            .spawn(move || forward_audio_wakes(forwarder_wake, forwarder_stop, forwarder_commands))
-            .map_err(|_| "ASTRA_EMU_AUDIO_WAKE_START".to_owned())?;
+        let wake_forwarder = if deterministic {
+            None
+        } else {
+            let forwarder_stop = Arc::clone(&wake_stop);
+            let forwarder_commands = commands.clone();
+            let forwarder_wake = wake.clone();
+            Some(
+                thread::Builder::new()
+                    .name("astra-emu-audio-wake".into())
+                    .spawn(move || {
+                        forward_audio_wakes(forwarder_wake, forwarder_stop, forwarder_commands)
+                    })
+                    .map_err(|_| "ASTRA_EMU_AUDIO_WAKE_START".to_owned())?,
+            )
+        };
         Ok(Self {
             commands,
             client,
@@ -219,7 +243,7 @@ impl FamilyAudioService {
             worker: Some(worker),
             wake_stop,
             wake,
-            wake_forwarder: Some(wake_forwarder),
+            wake_forwarder,
             deterministic,
         })
     }
@@ -574,7 +598,7 @@ impl WorkerState {
                 chunk_frames,
                 max_buffered_frames: chunk_frames.saturating_mul(STREAM_CHUNK_CAPACITY),
                 start_paused: false,
-                capture_samples: false,
+                capture_samples: deterministic,
             })
             .await
             .map_err(|error| error.to_string())?;
@@ -1224,6 +1248,8 @@ impl WorkerState {
             .ok_or_else(|| "ASTRA_EMU_AUDIO_SERVICE_CLOSED".to_owned())?;
         service.poll_backend().map_err(|error| error.to_string())?;
         let values = service.telemetry();
+        let pre_master_mix = service.pre_master_mix_telemetry();
+        let master_output = service.master_output_telemetry();
         let channels = u64::from(self.output_channels);
         let submitted = values.submitted_samples / channels;
         let consumed = values.consumed_samples / channels;
@@ -1249,6 +1275,24 @@ impl WorkerState {
                 .count() as u64,
             Ordering::Relaxed,
         );
+        self.telemetry.pre_master_peak_microunits.store(
+            (f64::from(pre_master_mix.peak_amplitude) * 1_000_000.0)
+                .round()
+                .clamp(0.0, u64::MAX as f64) as u64,
+            Ordering::Relaxed,
+        );
+        self.telemetry
+            .pre_master_overload_frames
+            .store(pre_master_mix.overload_frames, Ordering::Relaxed);
+        self.telemetry.master_output_peak_microunits.store(
+            (f64::from(master_output.peak_amplitude) * 1_000_000.0)
+                .round()
+                .clamp(0.0, u64::MAX as f64) as u64,
+            Ordering::Relaxed,
+        );
+        self.telemetry
+            .master_output_overload_frames
+            .store(master_output.overload_frames, Ordering::Relaxed);
         Ok(())
     }
 

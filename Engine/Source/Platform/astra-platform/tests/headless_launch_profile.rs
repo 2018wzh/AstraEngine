@@ -58,6 +58,33 @@ fn ordinary_headless_profile_cannot_enable_performance_cadence() {
 }
 
 #[test]
+fn performance_policy_hash_excludes_only_run_specific_identity_and_bounds() {
+    let mut template =
+        HeadlessHostProfile::reference("headless-test", "template", hash('a'), hash('b'));
+    template.providers.renderer = "wgpu_offscreen".into();
+    template.presentation_rate_hz = astra_platform::HEADLESS_PERFORMANCE_PRESENTATION_RATE_HZ;
+    template.render_policy = HeadlessRenderPolicy::All;
+    template.readback_policy = HeadlessReadbackPolicy::CheckpointsOnly;
+    let expected = template.performance_policy_hash().unwrap();
+
+    let mut run = template.clone();
+    run.package_id = "private-run".into();
+    run.build_fingerprint = hash('c');
+    run.package_hash = hash('d');
+    run.input.max_messages = 17_000;
+    run.input.max_tick = 40_000;
+    run.artifacts.namespace = "private-session".into();
+    run.artifacts.required_checkpoints = vec!["title".into()];
+    run.artifacts.max_submitted_frames = 80_000;
+    run.artifacts.max_rasterized_frames = 40_000;
+    run.artifacts.max_duration_ns = 700_000_000_000;
+    assert_eq!(run.performance_policy_hash().unwrap(), expected);
+
+    run.viewport_width += 1;
+    assert_ne!(run.performance_policy_hash().unwrap(), expected);
+}
+
+#[test]
 fn headless_profile_is_identity_bound_and_separate_from_platform_id() {
     let profile =
         HeadlessHostProfile::reference("nativevn-game", "com.example.game", hash('a'), hash('b'));

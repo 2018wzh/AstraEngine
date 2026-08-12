@@ -309,10 +309,9 @@ pub struct Diagnostic {
 pub struct ReviewRecord {
     pub schema: String,
     pub run_report_hash: String,
-    pub reviewer_kind: ReviewerKind,
-    pub reviewer_identity: String,
-    pub tool_identity_hash: String,
+    pub review_bundle_hash: String,
     pub checkpoints: Vec<ReviewVerdict>,
+    pub artifacts: Vec<ReviewArtifactVerdict>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -335,6 +334,19 @@ pub struct ReviewArtifactSelection {
     pub sha256: String,
     pub sequence: Option<u64>,
     pub checkpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewArtifactVerdict {
+    pub role: ReviewArtifactRole,
+    pub relative_path: String,
+    pub sha256: String,
+    pub passed: bool,
+    pub diagnostic_codes: Vec<String>,
+    pub reviewer_kind: ReviewerKind,
+    pub reviewer_identity: String,
+    pub tool_identity_hash: String,
 }
 
 #[derive(
@@ -427,6 +439,9 @@ pub struct ReviewVerdict {
     pub checkpoint: String,
     pub passed: bool,
     pub diagnostic_codes: Vec<String>,
+    pub reviewer_kind: ReviewerKind,
+    pub reviewer_identity: String,
+    pub tool_identity_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -466,11 +481,9 @@ impl ReviewRecord {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema != HEADLESS_REVIEW_SCHEMA
             || !is_sha256(&self.run_report_hash)
-            || !is_sha256(&self.tool_identity_hash)
-            || self.reviewer_identity.is_empty()
-            || self.reviewer_identity.len() > 256
-            || self.reviewer_identity.contains('\0')
+            || !is_sha256(&self.review_bundle_hash)
             || self.checkpoints.is_empty()
+            || self.artifacts.is_empty()
         {
             return Err(ProtocolError::invalid(
                 "review.validate",
@@ -489,8 +502,103 @@ impl ReviewRecord {
             for code in &verdict.diagnostic_codes {
                 validate_symbol("review.diagnostic", code)?;
             }
+            validate_verdict_diagnostics(
+                "review.checkpoint",
+                verdict.passed,
+                &verdict.diagnostic_codes,
+            )?;
+            validate_reviewer(
+                "review.checkpoint_reviewer",
+                &verdict.reviewer_identity,
+                &verdict.tool_identity_hash,
+            )?;
+        }
+        let mut artifacts = std::collections::BTreeSet::new();
+        for verdict in &self.artifacts {
+            if !matches!(
+                verdict.role,
+                ReviewArtifactRole::FullAudio | ReviewArtifactRole::CheckpointAudio
+            ) || !safe_relative_path(&verdict.relative_path)
+                || !is_sha256(&verdict.sha256)
+                || !artifacts.insert((
+                    verdict.role,
+                    verdict.relative_path.as_str(),
+                    verdict.sha256.as_str(),
+                ))
+            {
+                return Err(ProtocolError::invalid(
+                    "review.artifact",
+                    "review artifact identity is invalid or duplicated",
+                ));
+            }
+            for code in &verdict.diagnostic_codes {
+                validate_symbol("review.artifact_diagnostic", code)?;
+            }
+            validate_verdict_diagnostics(
+                "review.artifact",
+                verdict.passed,
+                &verdict.diagnostic_codes,
+            )?;
+            validate_reviewer(
+                "review.artifact_reviewer",
+                &verdict.reviewer_identity,
+                &verdict.tool_identity_hash,
+            )?;
+            if verdict.role == ReviewArtifactRole::FullAudio
+                && verdict.passed
+                && verdict.reviewer_kind != ReviewerKind::Human
+            {
+                return Err(ProtocolError::invalid(
+                    "review.full_audio_reviewer",
+                    "a passing complete-audio verdict requires a named human reviewer",
+                ));
+            }
+        }
+        if !self
+            .artifacts
+            .iter()
+            .any(|verdict| verdict.role == ReviewArtifactRole::FullAudio)
+        {
+            return Err(ProtocolError::invalid(
+                "review.full_audio",
+                "review must include the complete audio artifact verdict",
+            ));
         }
         Ok(())
+    }
+}
+
+fn validate_reviewer(
+    operation: &'static str,
+    reviewer_identity: &str,
+    tool_identity_hash: &str,
+) -> Result<(), ProtocolError> {
+    if !reviewer_identity.is_empty()
+        && reviewer_identity.len() <= 256
+        && !reviewer_identity.contains('\0')
+        && is_sha256(tool_identity_hash)
+    {
+        Ok(())
+    } else {
+        Err(ProtocolError::invalid(
+            operation,
+            "reviewer identity or tool identity hash is invalid",
+        ))
+    }
+}
+
+fn validate_verdict_diagnostics(
+    operation: &'static str,
+    passed: bool,
+    diagnostic_codes: &[String],
+) -> Result<(), ProtocolError> {
+    if passed == diagnostic_codes.is_empty() {
+        Ok(())
+    } else {
+        Err(ProtocolError::invalid(
+            operation,
+            "passing verdicts cannot contain diagnostics and failed verdicts require one",
+        ))
     }
 }
 
@@ -501,6 +609,10 @@ impl ReviewBundle {
             || !is_sha256(&self.manifest_hash)
             || self.selected_frames.is_empty()
             || self.selected_audio.is_empty()
+            || !self
+                .selected_audio
+                .iter()
+                .any(|artifact| artifact.role == ReviewArtifactRole::FullAudio)
         {
             return Err(ProtocolError::invalid(
                 "review_bundle.validate",

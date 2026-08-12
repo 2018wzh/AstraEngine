@@ -49,7 +49,11 @@ class PlatformAcceptancePreflightTests(unittest.TestCase):
                 "manifest_hash": run_payload["manifest_hash"],
                 "automatic_passed": True,
                 "selected_frames": [{"relative_path": "frames/final.png"}],
-                "selected_audio": [{"relative_path": "audio/full.wav"}],
+                "selected_audio": [{
+                    "role": "full_audio",
+                    "relative_path": "audio/full.wav",
+                    "sha256": "sha256:" + "4" * 64,
+                }],
                 "required_checkpoints": ["final"],
             },
         )
@@ -59,12 +63,27 @@ class PlatformAcceptancePreflightTests(unittest.TestCase):
             {
                 "schema": MODULE.HEADLESS_REVIEW_SCHEMA,
                 "run_report_hash": MODULE.sha256(run),
-                "reviewer_kind": "model",
-                "reviewer_identity": "codex-visual-audio-review",
-                "tool_identity_hash": "sha256:" + "3" * 64,
+                "review_bundle_hash": MODULE.sha256(bundle),
                 "checkpoints": [
-                    {"checkpoint": "final", "passed": True, "diagnostic_codes": []}
+                    {
+                        "checkpoint": "final",
+                        "passed": True,
+                        "diagnostic_codes": [],
+                        "reviewer_kind": "model",
+                        "reviewer_identity": "codex-visual-review",
+                        "tool_identity_hash": "sha256:" + "3" * 64,
+                    }
                 ],
+                "artifacts": [{
+                    "role": "full_audio",
+                    "relative_path": "audio/full.wav",
+                    "sha256": "sha256:" + "4" * 64,
+                    "passed": True,
+                    "diagnostic_codes": [],
+                    "reviewer_kind": "human",
+                    "reviewer_identity": "audio-reviewer",
+                    "tool_identity_hash": "sha256:" + "5" * 64,
+                }],
             },
         )
         conformance = {
@@ -132,6 +151,24 @@ class PlatformAcceptancePreflightTests(unittest.TestCase):
             fixture = self.fixture(pathlib.Path(temporary))
             review = MODULE.load(fixture["review"])
             review["checkpoints"][0]["passed"] = False
+            write_json(fixture["review"], review)
+            with self.assertRaisesRegex(RuntimeError, "formal Headless review blocked"):
+                MODULE.validate_headless_review(
+                    fixture["run"], fixture["bundle"], fixture["review"]
+                )
+
+            fixture = self.fixture(pathlib.Path(temporary))
+            review = MODULE.load(fixture["review"])
+            review["artifacts"].clear()
+            write_json(fixture["review"], review)
+            with self.assertRaisesRegex(RuntimeError, "formal Headless review blocked"):
+                MODULE.validate_headless_review(
+                    fixture["run"], fixture["bundle"], fixture["review"]
+                )
+
+            fixture = self.fixture(pathlib.Path(temporary))
+            review = MODULE.load(fixture["review"])
+            review["artifacts"][0]["reviewer_kind"] = "model"
             write_json(fixture["review"], review)
             with self.assertRaisesRegex(RuntimeError, "formal Headless review blocked"):
                 MODULE.validate_headless_review(

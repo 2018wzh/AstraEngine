@@ -151,7 +151,7 @@ Developer、Modules 和 Programs 中的平台无关 Runtime、Player 与 full-fl
 
 自动分析覆盖全部帧和全部音频。模型必须逐一查看 required checkpoint、首尾帧、最大差异帧和失败邻近帧。音频审查必须读取 WAV，并使用跨平台工具检查波形、频谱、响度、静音、削波、声道和时长；涉及语音可懂度、内容或音画同步时，还需要人工或具备音频理解能力的工具试听。
 
-`astra.headless_review_bundle.v2` 只列出相对 artifact path、hash、选择角色、sequence 与 checkpoint；`astra.headless_review.v2` 记录 run report hash、检查点、工具/模型身份、verdict 和 diagnostic，不记录媒体内容或本地路径。正式 Release Gate 同时校验 bundle、review 和 preflight link，模型不能覆盖自动失败。普通 Runtime 测试只要求自动断言，不要求模型逐项审查。
+`astra.headless_review_bundle.v2` 只列出相对 artifact path、hash、选择角色、sequence 与 checkpoint；`astra.headless_review.v3` 记录 run report hash、review bundle hash、检查点、typed media artifact role/path/hash，以及每个 verdict 各自的 reviewer kind、identity、tool hash 和 diagnostic，不记录媒体内容或本地路径。视觉与音频可以由不同 reviewer 完成，但完整 WAV 只有具名人工 verdict 才能通过。正式 Release Gate 同时校验 bundle、review 和 preflight link，模型不能覆盖自动失败。普通 Runtime 测试只要求自动断言，不要求模型逐项审查。
 
 每个 checkpoint 可以定义图像与音频容差；未声明时使用本 migration 固定的受控宽松默认值。图像比较记录像素差比例、通道差、结构相似度和非空区域；音频比较记录时长、peak/RMS、BS.1770 K-weighting 门限积分响度、覆盖完整时间线的固定 1024-point/50% overlap FFT、静音和削波。超过当前容差的 run 保持失败。任何偏离默认值的容差都必须绑定具名人工 `astra.headless_tolerance_approval.v2`；CLI 校验 approval 文件 hash 与 tolerance-set hash，run report 固化新的 checkpoint config hash。修改后必须完整重跑，旧 report 不得被改写为 pass。
 
@@ -175,7 +175,7 @@ Headless 最多形成 E2 平台无关产品证据。它不能替代 Windows/Web 
 2. 先检查 `astra.headless_run_report.v2`、artifact manifest 和自动比较结果；任何 blocking diagnostic 都必须原样保留。
 3. 使用可用的图像工具打开 required checkpoint、首尾帧、最大差异帧和失败邻近帧，检查真实内容、布局、裁剪、空白、资源错误与时序变化。
 4. 使用跨平台音频工具读取 WAV、生成波形/频谱并检查响度、静音、削波、声道和时长。需要判断语音内容或同步时执行试听；工具不具备能力时明确要求人工试听，不能凭 meter 猜测。
-5. 通过 `prepare-review` 生成不可自行增删的 review bundle，逐项检查后写出脱敏 `astra.headless_review.v2`，再用 `validate-review` 复核。自动检查与模型审查都通过后，真实平台工具才可生成 `astra.platform_run_identity.v1`，并由 `link-preflight` 建立关联。
+5. 通过 `prepare-review` 生成不可自行增删的 review bundle，逐项检查后写出脱敏 `astra.headless_review.v3`，再用 `validate-review` 复核。自动检查与模型审查都通过后，真实平台工具才可生成 `astra.platform_run_identity.v1`，并由 `link-preflight` 建立关联。
 
 模型不得上传商业媒体、把媒体内容写入 report、修改失败结果、擅自放宽容差，或用 Headless 结果替代真实平台 evidence。
 

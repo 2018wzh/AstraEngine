@@ -244,7 +244,12 @@ impl MinoriPazDecryptProvider {
                 }
                 return Ok(bytes);
             }
-            let entry_key = entry_key_material(entry, None)?;
+            // Musica v1+ derives the movie RC4 material from the same
+            // extension-specific password table as ordinary entries.  The
+            // archive's 256-byte video key is then XORed with that complete
+            // entry key.  Omitting the AVI password produces a valid-looking
+            // byte stream but never the original container header.
+            let entry_key = entry_key_material(entry, password_for_entry(entry, scheme))?;
             let key = (0..256)
                 .map(|index| video_key[index] ^ entry_key[index % entry_key.len()])
                 .collect::<Vec<_>>();
@@ -849,7 +854,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
             return Ok(LegacyVfsReadResult {
                 uri: uri.into(),
                 offset,
-                bytes,
+                bytes: bytes.into(),
                 eof: end == entry.descriptor.unpacked_size,
                 cache_hit,
             });
@@ -1709,6 +1714,7 @@ mod tests {
     use std::{fs, io::Write};
 
     const FIXTURE_KEY: &[u8] = b"fixture-key";
+    const FIXTURE_MOVIE_PASSWORD: &str = "fixture-movie-password";
 
     fn fixture_archive(role: &str, version: u8) -> Vec<u8> {
         fixture_archive_with_packing(role, version, false)
@@ -1734,7 +1740,13 @@ mod tests {
         if role == "mov" {
             index.extend(0u8..=255);
         }
-        index.extend_from_slice(format!("{role}.bin\0").as_bytes());
+        let entry_name = if role == "mov" {
+            "mov.avi".to_owned()
+        } else {
+            format!("{role}.bin")
+        };
+        index.extend_from_slice(entry_name.as_bytes());
+        index.push(0);
         let descriptor_offset = index.len();
         index.extend_from_slice(&0u64.to_le_bytes());
         index.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
@@ -1751,7 +1763,7 @@ mod tests {
 
         let index = blowfish_encrypt(FIXTURE_KEY, &index);
         let payload = if role == "mov" && version > 0 {
-            movie_rc4_encrypt(format!("{role}.bin").as_bytes(), &stored)
+            movie_rc4_encrypt(entry_name.as_bytes(), &stored, FIXTURE_MOVIE_PASSWORD)
         } else if role == "mov" {
             stored
         } else {
@@ -1808,7 +1820,11 @@ mod tests {
                         } else {
                             FIXTURE_KEY.to_vec()
                         },
-                        type_passwords: BTreeMap::new(),
+                        type_passwords: if role == "mov" {
+                            BTreeMap::from([("avi".into(), FIXTURE_MOVIE_PASSWORD.into())])
+                        } else {
+                            BTreeMap::new()
+                        },
                         archive_xor: None,
                         video_key: None,
                     },
@@ -1834,9 +1850,10 @@ mod tests {
         bytes
     }
 
-    fn movie_rc4_encrypt(name: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    fn movie_rc4_encrypt(name: &[u8], plaintext: &[u8], password: &str) -> Vec<u8> {
         let mut entry_key = name.iter().map(u8::to_ascii_lowercase).collect::<Vec<_>>();
         entry_key.extend_from_slice(format!(" {:08X} ", plaintext.len()).as_bytes());
+        entry_key.extend_from_slice(password.as_bytes());
         let key = (0u8..=255)
             .enumerate()
             .map(|(index, video_key)| video_key ^ entry_key[index % entry_key.len()])
@@ -2065,9 +2082,9 @@ mod tests {
         }
         let vfs = mount_fixture(temp.path(), 0);
 
-        let read = vfs.read_range("minori:/mov/mov.bin", 1, 6).unwrap();
+        let read = vfs.read_range("minori:/mov/mov.avi", 1, 6).unwrap();
 
-        assert_eq!(read.bytes, b"ixture");
+        assert_eq!(read.bytes.as_slice(), b"ixture");
         assert!(!read.cache_hit);
     }
 
@@ -2084,9 +2101,9 @@ mod tests {
             }
             let vfs = mount_fixture(temp.path(), version);
 
-            let read = vfs.read_range("minori:/mov/mov.bin", 1, 6).unwrap();
+            let read = vfs.read_range("minori:/mov/mov.avi", 1, 6).unwrap();
 
-            assert_eq!(read.bytes, b"ixture");
+            assert_eq!(read.bytes.as_slice(), b"ixture");
             assert!(!read.cache_hit);
         }
     }
@@ -2121,13 +2138,17 @@ mod tests {
         let vfs = mount_fixture(temp.path(), 2);
 
         assert_eq!(
-            vfs.read_range("minori:/scr/scr.bin", 1, 6).unwrap().bytes,
+            vfs.read_range("minori:/scr/scr.bin", 1, 6)
+                .unwrap()
+                .bytes
+                .as_slice(),
             b"ixture"
         );
         assert_eq!(
             vfs.read_range("minori:/voice/voice.bin", 1, 6)
                 .unwrap()
-                .bytes,
+                .bytes
+                .as_slice(),
             b"ixture"
         );
     }

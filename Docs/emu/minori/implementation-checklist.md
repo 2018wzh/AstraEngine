@@ -1,5 +1,26 @@
 # Minori Implementation Checklist
 
+## 当前状态（2026-08-12）
+
+- 分支已 rebase 到本机最新 `master`。本轮只记录可由当前 worktree 复现的基线，不把本机分支状态写成远端发布状态。
+- 授权样本仍是 8 个逻辑 archive、18 个物理 PAZ 文件和 14502 个 entry。`mov` role 含 5 个 RIFF/AVI；视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。纯 Rust reader 已完整解出 17480 个视频 sample，零长度 sample 按 AVI dropped frame 处理。
+- 签名 Minori dylib 已用同一 mount、plugin、Headless profile 和序列化物理输入连续跑完两次标题启动的真实路线。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入并最终从标题执行 Exit；snapshot round-trip、用户 save/restore、Config、backlog、真实影片、自然解锁和 31 个 checkpoint 均通过，diagnostic 为 0。新的同身份单次运行进一步推进 33490 fixed steps、呈现 34108 帧、消费 16951 条输入并通过 33 个 checkpoint，把首个 choice、实际 post-choice 分支和自然完成的不可跳过结局媒体纳入同一份通过报告。
+- 两次运行的 visual trace、runtime state trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。输入 hash 因 local-private session id 不同而不同，不作为跨 session 一致性结论。平台全局进度通过 ordered storage request/result 原子读写；两次均严格证明自然解锁数为 1。restore 会合并同一 provider session 已确认的全局进度，不允许旧 snapshot 回滚解锁。
+- 模型复核新报告全部 33 个 required checkpoint；人物、背景、影片和日文字形没有缺失、横向裁剪、非预期拉伸、旧图层残留或未退场人物。choice 与 post-choice 已从独立真实 slice 升级为同一条完整路线证据。
+- 公共 Kira limiter 后 output peak 为 0.989551，output overload 与 underflow 均为 0。自动 E2 已闭合这条路线的结局返回标题、最终 Exit、snapshot continuation、用户 save/restore、自然解锁和 VM/视觉/音频重复运行确定性。原版 `Memories` 菜单只在第四条已确认路线后出现，因此首条路线不能形成 CG/BGM/回想 checkpoint；鉴赏完整入口、Config 鼠标控件和 Windows E3 仍开放。当前状态不是完整产品体验或 E3。
+- runtime state v19 已在当时的 release plugin 上重跑同一输入序列：33490 fixed steps、34108 个呈现帧、16951 条物理输入和 33 个 required checkpoint 均通过。当前代码已硬切到 state v21；三态 play mode、Auto 入口、message voice 与 backlog voice replay 均有定向回归。当前签名 Release plugin 的真实八包短程 Headless E2 通过物理 pointer、严格 play-mode observation 和 500 ms 后正文变化证明 Auto 单次推进；另一次 33498-fixed-step 完整路线在首条正文切换 Auto、捕获 checkpoint、恢复 Normal 后继续到 terminal。v21 完整路线进一步以 33553 fixed steps、34172 帧、16957 条输入和 34 个 checkpoint 验证物理 Enter 的 backlog voice replay 不推进 VM、保留同一 message wait，并继续到 terminal。持久 Auto 整路线仍开放。完整 WAV 的具名人工听审未完成，因此正式 review 保持 blocking。
+
+### Control 快进增量（2026-08-03）
+
+- `.pragma enable_control`/`.pragma disable_control` 与 `.pragma skip_enable`/`.pragma skip_disable` 已作为两组独立 gate 进入严格 runtime；Control pressed/released edge 与 `Normal/Auto/Skip` 互斥 play mode 绑定 session，并进入 runtime state v20 snapshot。
+- 只有脚本同时允许 Control 和 skip、且物理 Control 正被按住时才跳过已确认的 `.wait` 时间命令；Host 仍逐 tick 推进，message、media/presentation fence、provider completion 和未知 pragma 继续阻断或等待。
+- 同一签名动态 plugin 的私有 Headless control sequence 完成 300 fixed steps、54 个呈现帧、9 条输入、snapshot round-trip 和非静音音频，diagnostic 为 0；仍未 terminal。
+- focused runtime/provider tests 已通过；完整路线、演出、影片 codec 和 Windows E3 仍未闭合。
+
+## Rebase 状态（2026-08-03）
+
+本页的历史 E2 数字不覆盖本次 rebase 后复核。当前可复现的纯 Rust Headless slice 为 481 fixed steps、24 个呈现帧、27 条输入消息、snapshot round-trip 成立、diagnostic 为 0，并产生非静音音频 artifact；入口没有到达 terminal。视觉复核确认启动标题帧和末帧非空，但中段 checkpoint 尚未显示可读消息，因此不能把该 slice 写成“正文已验证”。`Firefly`、选择项和 `.effect2 SnowH` 已有局部实现与测试；它们尚未形成同一条真实 v8 Headless 路线证据。未确认的 effect、movie codec、系统页和完整路线继续保持 blocking。
+
 ## 当前实现与证据
 
 | 项目 | 状态 | 证据边界 |
@@ -13,11 +34,11 @@
 | 公共 desktop verify/extract | 已实现 | Windows 八包 manifest v2 full verify 已通过；extract contract 已接入，macOS 运行证据待补 |
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
 | GARbro scheme importer | 已实现 | 独立 CLI 使用纯 Rust 两阶段 NRBF reader；原子生成 patch/profile，不使用 managed helper 或 fallback |
-| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` operand 语义仍 unknown |
+| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
-| Minori deterministic VM state 与 control-flow slice | E2 slice | `set/setglobal/label/goto/if/wait/message`、BGM/SE stop、`playvoice *`、`transition`、无 stand `stage`、`chain/end`、budget、一次性文本 lease、连续 tick、尾链 VFS 切换和 postcard snapshot/restore；select、普通 voice、stand 与主要演出仍 blocking |
-| Minori runtime provider / `cdylib` ABI | E2 slice | 签名动态 plugin 经通用 `--family minori --mount-profile` composition 启动；真实八包 Headless 到达第二条可见 message，共 373 tick、9 个 frame、6 个 checkpoint，音频 evidence、snapshot round-trip 与公共 review 流程通过 |
-| Minori 演出、系统 UI、完整模拟 | 未完成 | 已验证黑场、竖排标题、CrossFade2、message panel 和首条日文正文；transition 动画、人物、UI、存储和路线仍开放 |
+| Minori deterministic VM state 与 control-flow | E2 route | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie 和 end；未确认 operand 继续阻断 |
+| Minori runtime provider / `cdylib` ABI | E2 route | Family ABI v8 / Provider ABI v4 的签名动态 plugin 已完成两次标题启动真实路线复跑；新的同身份单次运行包含 33490 fixed steps、34108 帧、16951 条输入和 33 个 checkpoint，snapshot round-trip、用户 save/restore、choice、post-choice、结局媒体、返回标题、最终 Exit 和零 diagnostic 均在同一报告成立 |
+| Minori 演出、系统 UI、完整模拟 | 未完成 | 当前首路线已自然结局并返回标题，required checkpoint 未见缺字、裁剪、拉伸、影片比例错误或图层残影；完整路线 E2 覆盖标题、Config、backlog、save/restore、choice、post-choice、影片、结局媒体和自然 unlock。原版 `Memories` 入口需第四条 clear route，正式 audio review、鉴赏完整入口、Config 控件和 Windows E3 仍开放 |
 
 当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已完成八包 manifest v2 full verify：14502 个 entry、43818 次 range read、6624958365 个 decoded bytes。验证轮显式关闭 cache；启用 cache 的运行因平台缓存卷空间不足阻断，因此新的八包 cache identity 仍没有第二轮命中实证。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 
@@ -33,25 +54,36 @@
 ## Script
 
 - [x] 从 `scr.paz` 与原程序候选确认入口文件 `test.sc`；多脚本时 CLI 要求完整稳定 URI `--entry minori:/scr/test.sc`，不接受裸文件名，也不隐式选择。
-- [ ] 拆分 select、普通 voice、stand 与其余演出 operand；音频 `*`、message、BGM/SE、变量、wait、`label/goto/if` CFG、transition/stage 前部和 `chain` 尾链语义已确认。
+- [x] 拆分 select、普通 voice、stand 与本轮路线用到的主要演出 operand；未知形态仍按 source span/raw operand 阻断。
 - [x] 未确认 command/operand 保留 raw bytes、source span 和 `Unknown`。
 - [ ] 完成全部资源引用映射；BGM/SE、stage 前景/背景和 stand role 已有严格映射。
 
 ## Runtime
 
 - [x] boot 到首个 message；正文经一次性 lease、CosmicText 和 Renderer2D 形成真实 checkpoint，未进入 snapshot/report。
-- [ ] 用户推进、auto、skip、backlog 不破坏 pc。
-- [ ] choice 写入变量并跳转。
-- [ ] save/load 后 state/event/presentation hash 一致。
+- [x] 物理 Enter 推进与受 pragma 门控的 Control 快进可跑完首条剧情路线；backlog 的当前记录、滚轮导航、关闭恢复和当前记录 voice replay 已进入真实完整路线 E2。Auto/Skip 三态、原版菜单命中区和 500 ms Auto wait 已完成定向测试；真实八包短程 Headless 已由物理 pointer 输入启用 Auto 并自动推进一条正文，完整首路线也已包含 Auto 状态 checkpoint 后恢复 Normal 的回归。持久 Auto 整路线和多记录翻页仍开放。
+- [x] choice 选择状态、label 跳转、三态资源、批量 option lease、居中排版和提交清除已进入 VM/provider/Host；真实脚本以严格 `minori.choice_active` observation 捕获 choice 与 post-choice checkpoint。
+- [x] provider snapshot restore 会重新绑定当前 system page、message 或 choice presentation，并清除恢复前未消费的一次性文字 lease；首个 restore output 会在需要时把 retained scene 与新文字放入同一 typed transaction，完整路线 user save/restore 已验证该 continuation。
+- [x] 显式 checkpoint 在捕获前提交待处理 Scene2D；Config 与 backlog 打开/关闭已由真实短程画面变化验证。
+- [x] 用户 save/load 后 continuation 成立；两次完整路线的 visual/runtime/terminal/coverage/audio hash 一致。
+- [x] runtime 只接受原程序已确认的四个 global clear flag，并把脱敏 unlock identity 纳入 snapshot；provider 会报告 session 内 unlock count，未知 `CLEAR` 名称不参与解锁。
+- [x] global clear flag 经 ordered platform storage 原子提交并在 provider session 恢复；真实路线严格断言自然解锁数为 1，title variant 只接受四个已确认 flag。
+- [x] family snapshot 固定携带独立的 `astra.emu.minori.global_progress_snapshot.v1` section；合法的 unloaded 静止态可供 restore rollback 保存，实际 pending storage I/O 仍严格阻断。
 
 ## Media
 
-- [ ] 背景、立绘和系统 UI 分 layer 输出；当前背景/前景已输出，stand 与系统 UI 未完成。
-- [ ] BGM、SE、voice 分通道；BGM/三个 SE bus 已验证，message voice 尚未绑定。
-- [ ] voice replay 不推进 VM。
-- [ ] movie 播放交给下一阶段 runtime/media 接入；缺失、空或不可校验的 `mov.paz` 在 mount preflight 阻断。
+- [x] 背景、立绘和系统 UI 使用 retained Scene2D 分层输出；立绘 `load/pos/keep/vis/trans` 已接入固定 tick 透明度动画、等待和 snapshot。真实样本没有 `trans/vis`，当前证据为合成 provider E1，不能写成真实路线动态演出 E2。
+- [x] BGM、SE、message voice 分通道；message voice 已按 IDA `resource[volume,pan]` 合同和 7,047 个真实 identity 全量绑定到 `voice.paz`，并通过公共 Ogg audio command 发出。完整首路线 Headless E2 已覆盖该路径；具名人工整段听审仍开放。
+- [x] backlog 当前记录的 voice replay 由原程序 Enter 路径确认；runtime 重播 stream 4 且保留原 message await，不推进 VM。真实 Headless 物理 Enter、checkpoint、后续 continuation 和 terminal 已通过；具名人工听审仍开放。
+- [x] `mov.paz` 的 5 个 RIFF/AVI 由 range-backed 纯 Rust AVI/WMV3/PCM 路径播放；缺 codec、格式漂移、短读和 fence 异常直接阻断。
+- [x] decoded video 通过公共 `SceneCommand::VideoFrame` 合成；movie skip 只接受脚本明确标记为 skippable 的分支，并等待 Host 完成原 fence。
+- [x] 公共 Kira main track 使用显式 peak limiter，分别报告 pre-master 与 master-output；真实短程 output overload 和 underflow 均为 0。
+- [x] 真实 movie frame checkpoint 已确认 decoded frame、比例、剧情层文字合成和无旧帧残留；完整路线 WAV 非静音、低于 i16 full scale，master output overload/underflow 为 0。
+- [ ] 完成正式 Headless audio review；视觉 bundle 已逐项检查，WAV 的格式、时长、peak、RMS、静音区间、clipping 和声道平衡已量测，但涉及语音的整段试听尚未完成，`validate-review` 保持 blocking。
+- [x] review protocol 强制 `full_audio` verdict 与 bundle 的完整 WAV selection；省略或失败必须在 validator 和 release preflight 阻断。私有 10 段连续听审清单覆盖全部 27260416 audio frame，但尚未据此宣称人工听审完成。
 
 ## Release Gate
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
 - [ ] 不包含 payload、截图、音频、视频、完整脚本或 key。
+- [ ] 完成 Minori clean Release 120 Hz GPU performance run。普通完整路线已由 DX12 集显提交 34172 帧，但正式门禁还要求精确 36600 fixed tick、73200 presentation、Perfetto、共享 budget/report/trace manifest 和 clean source identity。
