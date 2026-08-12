@@ -4059,7 +4059,17 @@ fn system_ui_output(
         audio_commands,
         ..LegacyLiveOutput::default()
     };
-    if status != LegacyRuntimeStatus::Terminal {
+    // Scene2D is retained by the host. A system page that did not change in
+    // this fixed tick must not rebuild its resource frame: doing so would
+    // reopen and parse the same PAZ image on every tick and would also submit
+    // a semantically redundant scene transaction. Input is the only way a
+    // system page can change its focus/variant here; restore explicitly asks
+    // for a fresh presentation.
+    let system_page_changed = session.reported_system_page
+        != Some(session.vm.state().system_ui.page)
+        || !input.input_edges.is_empty()
+        || session.restore_presentation_pending;
+    if status != LegacyRuntimeStatus::Terminal && system_page_changed {
         let is_backlog = session.vm.state().system_ui.page == MinoriSystemPage::Backlog;
         let sequence = session
             .vm
@@ -5584,6 +5594,11 @@ mod tests {
             title.live.resource_scenes[0].value.texture_resources[0].resource_uri,
             "minori:/sys/topMenu0.png"
         );
+        let retained_title = provider
+            .step(&ctx, &session, step_input(2, Vec::new()))
+            .unwrap();
+        assert!(retained_title.live.resource_scenes.is_empty());
+        assert!(retained_title.control.blackboard.is_empty());
         let snapshot = provider.save(&ctx, &session).unwrap();
         let title_revision = title.live.resource_scenes[0].value.texture_resources[0].revision;
         assert_eq!(
@@ -5616,7 +5631,7 @@ mod tests {
                             sequence: 3,
                         },
                     ],
-                    ..step_input(2, Vec::new())
+                    ..step_input(3, Vec::new())
                 },
             )
             .unwrap();
@@ -5641,7 +5656,7 @@ mod tests {
                         value: 1.0,
                         sequence: 1,
                     }],
-                    ..step_input(3, Vec::new())
+                    ..step_input(4, Vec::new())
                 },
             )
             .unwrap();
@@ -5668,7 +5683,7 @@ mod tests {
                         value: 1.0,
                         sequence: 1,
                     }],
-                    ..step_input(2, Vec::new())
+                    ..step_input(3, Vec::new())
                 },
             )
             .unwrap();
