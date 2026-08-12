@@ -6643,7 +6643,7 @@ impl<'a> RuntimeDriver<'a> {
         // apply bounded backpressure before the host queue itself overflows.
         // Keeping the window well below the platform capacity still permits
         // useful overlap while making every submitted fence observable.
-        const MAX_PENDING_SCENE_PRESENTS: usize = 64;
+        const MAX_PENDING_SCENE_PRESENTS: usize = 2;
         if self.capture_performance_samples
             && self.pending_scene_presents.len() >= MAX_PENDING_SCENE_PRESENTS
         {
