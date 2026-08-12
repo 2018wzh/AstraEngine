@@ -6637,6 +6637,18 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     async fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {
+        // The platform command queue is intentionally bounded.  A fast
+        // retained scene can produce presentations more quickly than the GPU
+        // worker reports completions, so polling alone is not sufficient:
+        // apply bounded backpressure before the host queue itself overflows.
+        // Keeping the window well below the platform capacity still permits
+        // useful overlap while making every submitted fence observable.
+        const MAX_PENDING_SCENE_PRESENTS: usize = 64;
+        if self.capture_performance_samples
+            && self.pending_scene_presents.len() >= MAX_PENDING_SCENE_PRESENTS
+        {
+            self.await_oldest_scene_present().await?;
+        }
         let video_command = self.current_video_scene_command()?;
         for (resource_id, glyph) in std::mem::take(&mut self.pending_text_resources) {
             match (self.resident_text_resources.contains(&resource_id), glyph) {
@@ -6832,6 +6844,29 @@ impl<'a> RuntimeDriver<'a> {
             )?;
         }
         Ok(())
+    }
+
+    async fn await_oldest_scene_present(&mut self) -> Result<(), String> {
+        let pending = self
+            .pending_scene_presents
+            .pop_front()
+            .ok_or_else(|| "ASTRA_EMU_NATIVE_PRESENT_QUEUE_EMPTY".to_owned())?;
+        pending
+            .receipt
+            .complete()
+            .await
+            .map_err(|error| error.to_string())?;
+        self.present_timings_ns.push(elapsed_ns(pending.submitted)?);
+        self.record_perfetto_flow("gpu.present", 5, pending.sequence, PerfettoFlowPhase::End)?;
+        if pending.sequence == PERFORMANCE_WARMUP_PRESENTATIONS as u64 {
+            self.performance_memory_after_warmup =
+                Some(sample_process_memory().map_err(|error| error.to_string())?);
+        }
+        self.record_perfetto_counter(
+            "gpu.present_queue_depth",
+            u64::try_from(self.pending_scene_presents.len())
+                .map_err(|_| "ASTRA_EMU_NATIVE_PRESENT_QUEUE_DEPTH_OVERFLOW".to_owned())?,
+        )
     }
 
     async fn drain_pending_scene_presents(&mut self) -> Result<(), String> {
