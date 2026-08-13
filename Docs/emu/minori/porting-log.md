@@ -313,3 +313,10 @@ python Tools/check_docs.py
 - runtime state 硬切为 v22。每个活动 transition 保存起始/目标透明度、持续时间、已过纳秒和完成位；同一时刻只允许一个由命令阻塞的 character transition。provider 在等待期间持续提交 retained Scene2D 更新。定向测试覆盖 50% 中间帧、最终帧、等待 token、非法时长/透明度、snapshot continuation 与 provider 合成。该 title 的 290 条真实 `.char` 只包含 87 条 `load`、87 条 `pos` 和 116 条 `keep`，所以这些测试属于 E1，不冒充真实脚本动态立绘 E2。
 - 既有完整路线 artifact 已核对为 `wgpu_offscreen`、DX12 集显，而不是 CPU reference；该次运行提交并栅格化 34172 帧。它证明真实路线走过 native GPU retained scene，但没有正式 performance budget、固定采样窗和 Perfetto identity，不能关闭 GPU 性能验收。
 - CLI 的通用性能路径仍把 trace workload 写死为 `fvp.real_game.120hz`。现已改为显式 family identity，并提供 `prepare-headless-performance-profile` 生成可复用 budget profile。正式 Minori run 仍需在 clean Release 身份下完成精确 36600 fixed tick、73200 presentation、1200 帧 warmup、72000 帧测量，并生成共享 report 和 trace manifest；这项证据尚未生成。
+
+### 2026-08-13 retained scene、动态立绘视觉证据与性能复测
+
+- 首轮正式采样暴露标题页每个 fixed tick 都重新读取、解密并解析同一张 PNG。Minori provider 现只在首次呈现、系统页输入变化或 restore 时重建 resource scene；未变化页面沿用 Host retained Scene2D。runtime fixed tick p99 从约 41.7 ms 降到 0.3491 ms。该修复没有增加 cache、fallback 或 family 私有 renderer。
+- 快速 retained scene 又暴露 Headless 性能路径只轮询 completion、没有在平台有界队列前施加背压。通用 runner 现于正式性能采样逐帧等待最老 GPU fence，非性能产品路径保持原行为。CLI 定向测试和 all-target clippy 通过。
+- 同一 clean Release identity 完成 36600 fixed tick、73200 presentation、1200 帧 warmup、72000 帧测量，并生成 Perfetto、`astra.performance_report.v1` 和 trace manifest。runtime p99 为 349100 ns，presentation p99 为 924060 ns；内存、增长、稳定段上传/readback/allocation、音频 underflow、trace dropped 和 scene full resync 均通过。仍有 2 次 presentation 超过 8333333 ns，`deadline.miss_count` 因零容忍预算返回 blocking。该结果不能写成正式性能门禁通过。
+- 动态立绘使用合成 `.char load/.char trans` 脚本和非商业纹理生成 256、128、0 三个透明度状态，并通过 Headless `wgpu_offscreen` 实际 capture。三张 PNG 的 SHA-256 分别为 `9ca68aeb43df0e0f48ac6689e55abd78f64ac766a3e53f149077b5ffe04229b6`、`a18cbfecb37f601bc969c77a4144629ec082271412d17745c343782a5ebc6c78`、`41ee454a1fcaf892305c58c474fa7808e681af8cb0526a3c7f50ed9a8135e9aa`。人工检查确认全显、半透明和完全消失，没有裁剪、残影或混合异常。真实 290 条 `.char` 仍只有 `load/pos/keep`，所以这项关闭的是合成动态立绘 Headless E2，不是授权样本路线覆盖。

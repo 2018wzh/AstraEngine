@@ -1,6 +1,6 @@
 # AstraEMU Minori
 
-Minori family 资料面向 PAZ + `.sc` 脚本游戏。本阶段已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已具备 typed IR、已确认 control-flow、消息、音频与无 stand stage 子集、可序列化状态和签名动态 provider 的 Headless E2 slice；真实八包已跑到竖排标题。选项、普通 voice、人物站位、transition 动画、系统页和完整路线仍未实现。
+Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已接入 typed IR、已确认控制流、消息、选择、stage/character、音频、影片、系统页、save/restore 和可序列化状态；签名动态 provider 已用真实八包跑完首条路线并返回标题。`.char trans/.char vis` 的动态立绘合同已有合成 Headless GPU 视觉证据，但真实脚本没有这两类命令。完整鉴赏、Config 控件、正式音频听审、120 Hz 性能门禁和 Windows E3 仍未完成。
 
 ## 阅读顺序
 

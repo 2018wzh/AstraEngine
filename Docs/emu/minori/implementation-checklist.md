@@ -72,7 +72,7 @@
 
 ## Media
 
-- [x] 背景、立绘和系统 UI 使用 retained Scene2D 分层输出；立绘 `load/pos/keep/vis/trans` 已接入固定 tick 透明度动画、等待和 snapshot。真实样本没有 `trans/vis`，当前证据为合成 provider E1，不能写成真实路线动态演出 E2。
+- [x] 背景、立绘和系统 UI 使用 retained Scene2D 分层输出；立绘 `load/pos/keep/vis/trans` 已接入固定 tick 透明度动画、等待和 snapshot。合成脚本的 256→128→0 透明度序列已通过 Headless WGPU capture 和人工视觉检查。真实样本没有 `trans/vis`，因此该证据只关闭合成动态立绘 E2，不计入真实路线 coverage。
 - [x] BGM、SE、message voice 分通道；message voice 已按 IDA `resource[volume,pan]` 合同和 7,047 个真实 identity 全量绑定到 `voice.paz`，并通过公共 Ogg audio command 发出。完整首路线 Headless E2 已覆盖该路径；具名人工整段听审仍开放。
 - [x] backlog 当前记录的 voice replay 由原程序 Enter 路径确认；runtime 重播 stream 4 且保留原 message await，不推进 VM。真实 Headless 物理 Enter、checkpoint、后续 continuation 和 terminal 已通过；具名人工听审仍开放。
 - [x] `mov.paz` 的 5 个 RIFF/AVI 由 range-backed 纯 Rust AVI/WMV3/PCM 路径播放；缺 codec、格式漂移、短读和 fence 异常直接阻断。
@@ -86,4 +86,4 @@
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
 - [ ] 不包含 payload、截图、音频、视频、完整脚本或 key。
-- [ ] 完成 Minori clean Release 120 Hz GPU performance run。普通完整路线已由 DX12 集显提交 34172 帧，但正式门禁还要求精确 36600 fixed tick、73200 presentation、Perfetto、共享 budget/report/trace manifest 和 clean source identity。
+- [ ] 完成 Minori clean Release 120 Hz GPU performance run。当前 clean Release 已完成精确 36600 fixed tick、73200 presentation、1200 帧 warmup、72000 帧测量并生成同身份 Perfetto/report/trace manifest。runtime p99 为 0.3491 ms，presentation p99 为 0.92406 ms，内存、上传、readback、allocation、音频、trace 和 full-resync 均通过；73200 次 presentation 中仍有 2 次超过 8.333 ms，`deadline.miss_count` 的零容忍预算阻断放行。
