@@ -86,4 +86,4 @@
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
 - [ ] 不包含 payload、截图、音频、视频、完整脚本或 key。
-- [ ] 完成 Minori clean Release 120 Hz GPU performance run。当前 clean Release 已完成精确 36600 fixed tick、73200 presentation、1200 帧 warmup、72000 帧测量并生成同身份 Perfetto/report/trace manifest。runtime p99 为 0.3491 ms，presentation p99 为 0.92406 ms，内存、上传、readback、allocation、音频、trace 和 full-resync 均通过；73200 次 presentation 中仍有 2 次超过 8.333 ms，`deadline.miss_count` 的零容忍预算阻断放行。
+- [ ] 完成 Minori clean Release 120 Hz GPU performance run。旧 run 没有实际 pacing，不能作为正式结果。修复后，clean Release 已按真实 120 Hz cadence 完成 1200 帧 warmup 和 72000 帧测量；runtime p99 为 0.3209 ms，presentation p99 为 0.90724 ms，内存、上传、readback、allocation、音频、trace 和 full-resync 均通过。仍有 8 次 deadline miss，最大 presentation 为 313.30186 ms，零容忍预算继续阻断放行。
