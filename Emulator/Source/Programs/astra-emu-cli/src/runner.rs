@@ -4,7 +4,7 @@ use std::{
     io::{Read, Seek},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use astra_core::{
@@ -1756,11 +1756,17 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV4,
         .as_ref()
         .map(|_| sample_process_memory().map_err(|error| error.to_string()))
         .transpose()?;
-    let gpu_observer = launch.performance.as_ref().map(|_| {
-        Arc::new(EmuHeadlessGpuObserver::new(
-            PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS,
-        ))
-    });
+    let gpu_observer = launch
+        .performance
+        .as_ref()
+        .map(|_| {
+            EmuHeadlessGpuObserver::new(
+                PERFORMANCE_WARMUP_PRESENTATIONS + PERFORMANCE_MEASURED_PRESENTATIONS,
+                launch.presentation_rate_hz,
+            )
+            .map(Arc::new)
+        })
+        .transpose()?;
     let mut host_factory = HeadlessPlatformFactory::new(&launch.artifact_root, &game_root)
         .with_input_sequence_hash(input.hash.to_string())
         .with_gpu(true);
@@ -3083,14 +3089,16 @@ struct HeadlessQuickSave {
 struct EmuHeadlessGpuObserver {
     expected_samples: usize,
     samples: Mutex<Vec<HeadlessGpuFrameSample>>,
+    pacer: Mutex<EmuHeadlessGpuPacer>,
 }
 
 impl EmuHeadlessGpuObserver {
-    fn new(expected_samples: usize) -> Self {
-        Self {
+    fn new(expected_samples: usize, presentation_rate_hz: u32) -> Result<Self, String> {
+        Ok(Self {
             expected_samples,
             samples: Mutex::new(Vec::with_capacity(expected_samples)),
-        }
+            pacer: Mutex::new(EmuHeadlessGpuPacer::new(presentation_rate_hz)?),
+        })
     }
 
     fn finish(&self) -> Result<Vec<HeadlessGpuFrameSample>, String> {
@@ -3110,9 +3118,26 @@ impl EmuHeadlessGpuObserver {
 }
 
 impl HeadlessPerformanceObserver for EmuHeadlessGpuObserver {
-    fn pace_gpu_frame(&self, _sequence: u64) -> Result<(), astra_platform::PlatformError> {
-        // The RuntimeDriver owns the fixed 60 Hz / presentation 120 Hz cadence.
-        // Sleeping here would alter the workload being measured.
+    fn pace_gpu_frame(&self, sequence: u64) -> Result<(), astra_platform::PlatformError> {
+        let deadline = self
+            .pacer
+            .lock()
+            .map_err(|_| {
+                astra_platform::PlatformError::new(
+                    astra_platform::PlatformErrorCode::InvalidState,
+                    "headless.performance.observer",
+                    "GPU pacer lock is poisoned",
+                )
+            })?
+            .next_deadline(sequence, Instant::now())
+            .map_err(|message| {
+                astra_platform::PlatformError::new(
+                    astra_platform::PlatformErrorCode::InvalidState,
+                    "headless.performance.observer",
+                    message,
+                )
+            })?;
+        pace_until(deadline);
         Ok(())
     }
 
@@ -3140,6 +3165,84 @@ impl HeadlessPerformanceObserver for EmuHeadlessGpuObserver {
         }
         samples.push(sample);
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct EmuHeadlessGpuPacer {
+    presentation_rate_hz: u32,
+    origin: Option<Instant>,
+    origin_sequence: Option<u64>,
+    last_sequence: Option<u64>,
+}
+
+impl EmuHeadlessGpuPacer {
+    fn new(presentation_rate_hz: u32) -> Result<Self, String> {
+        if presentation_rate_hz == 0 {
+            return Err("ASTRA_EMU_PERFORMANCE_PRESENTATION_RATE_ZERO".into());
+        }
+        Ok(Self {
+            presentation_rate_hz,
+            origin: None,
+            origin_sequence: None,
+            last_sequence: None,
+        })
+    }
+
+    fn next_deadline(&mut self, sequence: u64, now: Instant) -> Result<Instant, &'static str> {
+        let Some(origin) = self.origin else {
+            self.origin = Some(now);
+            self.origin_sequence = Some(sequence);
+            self.last_sequence = Some(sequence);
+            return Ok(now);
+        };
+        let expected_sequence = self
+            .last_sequence
+            .ok_or("GPU presentation pacing state is incomplete")?
+            .checked_add(1)
+            .ok_or("GPU presentation sequence overflowed")?;
+        if sequence != expected_sequence {
+            return Err("GPU presentation sequence is not consecutive");
+        }
+        let frame_index = sequence
+            .checked_sub(
+                self.origin_sequence
+                    .ok_or("GPU presentation pacing state is incomplete")?,
+            )
+            .ok_or("GPU presentation sequence moved backwards")?;
+        let offset_ns = u128::from(frame_index)
+            .checked_mul(1_000_000_000)
+            .ok_or("GPU presentation deadline overflowed")?
+            / u128::from(self.presentation_rate_hz);
+        let offset_ns =
+            u64::try_from(offset_ns).map_err(|_| "GPU presentation deadline overflowed")?;
+        let scheduled = origin
+            .checked_add(Duration::from_nanos(offset_ns))
+            .ok_or("GPU presentation deadline overflowed")?;
+        if scheduled < now {
+            self.origin = Some(now);
+            self.origin_sequence = Some(sequence);
+            self.last_sequence = Some(sequence);
+            return Ok(now);
+        }
+        self.last_sequence = Some(sequence);
+        Ok(scheduled)
+    }
+}
+
+fn pace_until(deadline: Instant) {
+    const SPIN_WINDOW: Duration = Duration::from_micros(200);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let remaining = deadline.duration_since(now);
+        if remaining > SPIN_WINDOW {
+            std::thread::sleep(remaining - SPIN_WINDOW);
+        } else {
+            std::hint::spin_loop();
+        }
     }
 }
 
@@ -8483,6 +8586,40 @@ mod native_tests {
         assert_eq!(distribution.p95_ns, 50);
         assert_eq!(distribution.p99_ns, 50);
         assert_eq!(distribution.max_ns, 50);
+    }
+
+    #[test]
+    fn gpu_pacer_uses_consecutive_rational_120_hz_deadlines() {
+        let origin = Instant::now();
+        let mut pacer = EmuHeadlessGpuPacer::new(120).unwrap();
+        assert_eq!(pacer.next_deadline(1, origin).unwrap(), origin);
+        assert_eq!(
+            pacer.next_deadline(2, origin).unwrap(),
+            origin + Duration::from_nanos(8_333_333)
+        );
+        for sequence in 3..=121 {
+            let deadline = pacer.next_deadline(sequence, origin).unwrap();
+            if sequence == 121 {
+                assert_eq!(deadline, origin + Duration::from_secs(1));
+            }
+        }
+        assert_eq!(
+            pacer.next_deadline(121, origin).unwrap_err(),
+            "GPU presentation sequence is not consecutive"
+        );
+    }
+
+    #[test]
+    fn gpu_pacer_rebases_after_idle_without_catch_up() {
+        let origin = Instant::now();
+        let mut pacer = EmuHeadlessGpuPacer::new(120).unwrap();
+        pacer.next_deadline(10, origin).unwrap();
+        let resumed = origin + Duration::from_secs(1);
+        assert_eq!(pacer.next_deadline(11, resumed).unwrap(), resumed);
+        assert_eq!(
+            pacer.next_deadline(12, resumed).unwrap(),
+            resumed + Duration::from_nanos(8_333_333)
+        );
     }
 
     #[test]
