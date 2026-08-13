@@ -3149,6 +3149,25 @@ impl HeadlessPerformanceObserver for EmuHeadlessGpuObserver {
         &self,
         sample: HeadlessGpuFrameSample,
     ) -> Result<(), astra_platform::PlatformError> {
+        let presentation_ns = sample
+            .scene_build_ns
+            .saturating_add(sample.cpu_submit_ns)
+            .saturating_add(sample.gpu_duration_ns);
+        if presentation_ns > PERFORMANCE_PRESENTATION_P99_NS {
+            tracing::warn!(
+                target: "astra_emu_cli::performance",
+                event = "astra_emu_headless_gpu_deadline_missed",
+                sequence = sample.sequence,
+                presentation_ns,
+                scene_build_ns = sample.scene_build_ns,
+                cpu_submit_ns = sample.cpu_submit_ns,
+                gpu_duration_ns = sample.gpu_duration_ns,
+                atlas_upload_gpu_ns = sample.atlas_upload_gpu_ns,
+                scene_gpu_ns = sample.scene_gpu_ns,
+                filter_gpu_ns = sample.filter_gpu_ns,
+                "Headless GPU presentation exceeded the profile-bound deadline"
+            );
+        }
         let mut samples = self.samples.lock().map_err(|_| {
             astra_platform::PlatformError::new(
                 astra_platform::PlatformErrorCode::InvalidState,
@@ -5657,6 +5676,9 @@ impl<'a> RuntimeDriver<'a> {
         track: u32,
         started: Instant,
     ) -> Result<(), String> {
+        if !self.should_record_perfetto_sample(self.fixed_step) && name != "gpu.submit" {
+            return Ok(());
+        }
         if let Some(perfetto) = self.perfetto.as_mut() {
             perfetto.record(name, track, self.fixed_step, started)?;
         }
@@ -5664,6 +5686,9 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn record_perfetto_counter(&mut self, name: &'static str, value: u64) -> Result<(), String> {
+        if !self.should_record_perfetto_sample(self.fixed_step) {
+            return Ok(());
+        }
         if let Some(perfetto) = self.perfetto.as_mut() {
             perfetto.counter(name, value)?;
         }
@@ -5689,6 +5714,9 @@ impl<'a> RuntimeDriver<'a> {
         track: u32,
         started: Instant,
     ) -> Result<(), String> {
+        if !self.should_record_perfetto_sample(self.fixed_step.saturating_add(1)) {
+            return Ok(());
+        }
         if let Some(perfetto) = self.perfetto.as_mut() {
             perfetto.begin(name, track, self.fixed_step.saturating_add(1), started)?;
         }
@@ -5696,10 +5724,17 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn end_perfetto_phase(&mut self, name: &'static str, track: u32) -> Result<(), String> {
+        if !self.should_record_perfetto_sample(self.fixed_step) {
+            return Ok(());
+        }
         if let Some(perfetto) = self.perfetto.as_mut() {
             perfetto.end(name, track, self.fixed_step)?;
         }
         Ok(())
+    }
+
+    fn should_record_perfetto_sample(&self, fixed_step: u64) -> bool {
+        !self.capture_performance_samples || fixed_step <= 1 || fixed_step.is_multiple_of(60)
     }
 
     fn record_audio_perfetto(&mut self, telemetry: AudioPumpTelemetry) -> Result<(), String> {
