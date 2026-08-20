@@ -792,6 +792,7 @@ dependencies = [
  "astra-media-core",
  "astra-observability",
  "astra-platform",
+ "astra-platform-common",
  "astra-platform-headless",
  "astra-platform-windows",
  "astra-plugin",

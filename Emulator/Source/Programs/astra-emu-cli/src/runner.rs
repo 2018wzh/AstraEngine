@@ -1554,6 +1554,11 @@ impl HeadlessAwaitTimeline {
 
 pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV4, String> {
     validate_launch(&launch)?;
+    let performance_scheduling = launch
+        .performance
+        .as_ref()
+        .map(|_| astra_platform_common::PerformanceSchedulingGuard::activate_coordinator())
+        .transpose()?;
     let input = read_input_sequence(&launch.input_path)?;
     let game_root = fs::canonicalize(&launch.game_dir)
         .map_err(|_| "ASTRA_EMU_HEADLESS_GAME_DIR_INVALID".to_owned())?;
@@ -2031,6 +2036,9 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV4,
     };
     let report_path = launch.artifact_root.join("astra-emu-headless-run.json");
     write_atomic_json(&report_path, &report)?;
+    if let Some(scheduling) = performance_scheduling {
+        scheduling.restore()?;
+    }
     Ok(report)
 }
 

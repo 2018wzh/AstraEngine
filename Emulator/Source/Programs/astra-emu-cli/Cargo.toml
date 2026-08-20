@@ -31,6 +31,7 @@ astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
+astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platform-common" }
 astra-platform-headless = { path = "../../../../Engine/Source/Platform/astra-platform-headless" }
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
