@@ -1947,7 +1947,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV4,
                 profile_hash: performance_profile_hash,
                 build_identity_hash,
                 game_identity_hash,
-                family_binary_hash,
+                renderer_identity: &manifest.renderer_identity,
                 session_id: &open.session_id,
                 execution: &execution,
                 memory_baseline: execution
@@ -2166,7 +2166,7 @@ struct HeadlessPerformanceFinalize<'a> {
     profile_hash: Hash256,
     build_identity_hash: Hash256,
     game_identity_hash: Hash256,
-    family_binary_hash: Hash256,
+    renderer_identity: &'a astra_headless_protocol::RendererExecutionIdentity,
     session_id: &'a GameRuntimeSessionId,
     execution: &'a ExecutionEvidence,
     memory_baseline: astra_observability::ProcessMemorySample,
@@ -2183,7 +2183,7 @@ fn finalize_headless_performance(
         profile_hash,
         build_identity_hash,
         game_identity_hash,
-        family_binary_hash,
+        renderer_identity,
         session_id,
         execution,
         memory_baseline,
@@ -2321,17 +2321,8 @@ fn finalize_headless_performance(
         &fs::read(&artifacts.report_path)
             .map_err(|_| "ASTRA_EMU_PERFORMANCE_REPORT_READBACK".to_owned())?,
     );
-    let adapter_identity_hash =
-        Hash256::from_sha256(format!("{}\\0{}", launch.family_id, family_binary_hash).as_bytes());
-    let driver_identity_hash = Hash256::from_sha256(
-        format!(
-            "semantic-gpu\\0{}\\0{}\\0{}",
-            launch.presentation_rate_hz,
-            launch.frame_sample_interval,
-            host_profile.readback_policy as u8
-        )
-        .as_bytes(),
-    );
+    let (adapter_identity_hash, driver_identity_hash) =
+        renderer_performance_identity(renderer_identity)?;
     let manifest = PerformanceTraceManifest {
         schema: PERFORMANCE_TRACE_MANIFEST_SCHEMA.into(),
         identity,
@@ -2359,6 +2350,18 @@ fn finalize_headless_performance(
         report_hash,
         trace_manifest_hash,
     })
+}
+
+fn renderer_performance_identity(
+    renderer_identity: &astra_headless_protocol::RendererExecutionIdentity,
+) -> Result<(String, String), String> {
+    let adapter_identity_hash = renderer_identity
+        .hash()
+        .map_err(|_| "ASTRA_EMU_PERFORMANCE_RENDERER_IDENTITY_INVALID".to_owned())?;
+    Ok((
+        adapter_identity_hash,
+        renderer_identity.driver_identity_hash.clone(),
+    ))
 }
 
 fn record_performance_samples(
@@ -6781,7 +6784,7 @@ impl<'a> RuntimeDriver<'a> {
         // apply bounded backpressure before the host queue itself overflows.
         // Keeping the window well below the platform capacity still permits
         // useful overlap while making every submitted fence observable.
-        const MAX_PENDING_SCENE_PRESENTS: usize = 1;
+        const MAX_PENDING_SCENE_PRESENTS: usize = 2;
         if self.capture_performance_samples
             && self.pending_scene_presents.len() >= MAX_PENDING_SCENE_PRESENTS
         {
@@ -8610,6 +8613,25 @@ mod native_tests {
         assert_eq!(report.checkpoint_results.len(), 1);
         assert_eq!(report.checkpoint_results[0].id, "message");
         report.validate().unwrap();
+    }
+
+    #[test]
+    fn performance_trace_uses_artifact_renderer_identity() {
+        let renderer_identity = astra_headless_protocol::RendererExecutionIdentity {
+            provider: "wgpu_offscreen".into(),
+            backend: "dx12".into(),
+            device_type: "integrated".into(),
+            vendor_id: 0x1234,
+            device_id: 0x5678,
+            adapter_name_hash: test_hash(b"adapter"),
+            driver_identity_hash: test_hash(b"driver"),
+        };
+
+        let (adapter_identity_hash, driver_identity_hash) =
+            renderer_performance_identity(&renderer_identity).unwrap();
+
+        assert_eq!(adapter_identity_hash, renderer_identity.hash().unwrap());
+        assert_eq!(driver_identity_hash, renderer_identity.driver_identity_hash);
     }
 
     #[test]
