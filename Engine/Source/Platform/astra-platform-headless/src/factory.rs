@@ -86,6 +86,9 @@ pub struct HeadlessGpuFrameSample {
 }
 
 pub trait HeadlessPerformanceObserver: Debug + Send + Sync {
+    fn max_gpu_frames_in_flight(&self) -> usize {
+        WGPU_TIMESTAMP_RING_SIZE
+    }
     fn pace_gpu_frame(&self, sequence: u64) -> Result<(), PlatformError>;
     fn bind_gpu_frame(&self, sequence: u64) -> Result<Option<u64>, PlatformError>;
     fn record_gpu_frame(&self, sample: HeadlessGpuFrameSample) -> Result<(), PlatformError>;
@@ -584,7 +587,18 @@ impl HostState {
         let captured = {
             let state = self.surfaces.get_mut(surface)?;
             if let Some(renderer) = &mut state.gpu_renderer {
-                if state.pending_gpu_profiles.len() >= WGPU_TIMESTAMP_RING_SIZE - 1 {
+                let max_gpu_frames_in_flight = self
+                    .performance_observer
+                    .as_ref()
+                    .map(|observer| observer.max_gpu_frames_in_flight())
+                    .unwrap_or(WGPU_TIMESTAMP_RING_SIZE);
+                if !(2..=WGPU_TIMESTAMP_RING_SIZE).contains(&max_gpu_frames_in_flight) {
+                    return Err(invalid(
+                        "surface.performance",
+                        "performance observer GPU in-flight limit is invalid",
+                    ));
+                }
+                if state.pending_gpu_profiles.len() >= max_gpu_frames_in_flight - 1 {
                     if let Some(profile) = state.pending_gpu_profiles.front() {
                         if let Some(submission) =
                             renderer.try_resolve_profiled_submission(profile.pending)?
@@ -608,7 +622,7 @@ impl HostState {
                         }
                     }
                 }
-                if state.pending_gpu_profiles.len() == WGPU_TIMESTAMP_RING_SIZE {
+                if state.pending_gpu_profiles.len() == max_gpu_frames_in_flight {
                     let profile = state
                         .pending_gpu_profiles
                         .pop_front()

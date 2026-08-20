@@ -3129,6 +3129,10 @@ impl EmuHeadlessGpuObserver {
 }
 
 impl HeadlessPerformanceObserver for EmuHeadlessGpuObserver {
+    fn max_gpu_frames_in_flight(&self) -> usize {
+        2
+    }
+
     fn pace_gpu_frame(&self, sequence: u64) -> Result<(), astra_platform::PlatformError> {
         let deadline = self
             .pacer
