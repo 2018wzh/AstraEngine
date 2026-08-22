@@ -650,9 +650,7 @@ impl RuntimeBridge {
                 .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
             for wait in waits {
                 let (token, condition) = live_wait_condition(wait, next_step, fixed_delta_ns);
-                if active.pending_waits.insert(token, condition).is_some() {
-                    return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
-                }
+                install_pending_wait(&mut active.pending_waits, token, condition)?;
             }
         }
 
@@ -1134,6 +1132,25 @@ impl RuntimeBridge {
             self.filter_preset
         )
     }
+}
+
+fn install_pending_wait(
+    waits: &mut BTreeMap<String, PendingWait>,
+    token: String,
+    condition: PendingWait,
+) -> Result<(), String> {
+    if let Some(current) = waits.get(&token) {
+        let modality_rebind = matches!(
+            (current, &condition),
+            (PendingWait::Input(_), PendingWait::DueStep(_))
+                | (PendingWait::DueStep(_), PendingWait::Input(_))
+        );
+        if !modality_rebind {
+            return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
+        }
+    }
+    waits.insert(token, condition);
+    Ok(())
 }
 
 /// Converts platform pixel/scroll coordinates to the integral legacy input contract.
@@ -4172,9 +4189,17 @@ use audio_executor::HostAudioExecutor;
 
 #[cfg(test)]
 mod manager_tests {
-    use std::{collections::BTreeMap, fs, io::Cursor, sync::Arc};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        fs,
+        io::Cursor,
+        sync::Arc,
+    };
 
-    use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
+    use crate::{
+        install_pending_wait, normalize_legacy_input_value, resolve_platform_data_dir_override,
+        PendingWait,
+    };
 
     use astra_emu_manager_core::{
         CancellationToken, DesktopVfsRegistry, GrantedSourceEntry, GrantedSourceReader, Library,
@@ -4359,6 +4384,28 @@ mod manager_tests {
                 replacement: "b".into(),
             },
         ])
+        .is_err());
+    }
+
+    #[test]
+    fn pending_wait_registration_only_allows_same_token_input_time_rebinding() {
+        let mut waits = BTreeMap::from([(
+            "message".to_owned(),
+            PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
+        )]);
+        install_pending_wait(&mut waits, "message".to_owned(), PendingWait::DueStep(42)).unwrap();
+        assert!(matches!(waits["message"], PendingWait::DueStep(42)));
+        install_pending_wait(
+            &mut waits,
+            "message".to_owned(),
+            PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
+        )
+        .unwrap();
+        assert!(install_pending_wait(
+            &mut waits,
+            "message".to_owned(),
+            PendingWait::Input(BTreeSet::from(["space".to_owned()])),
+        )
         .is_err());
     }
 }

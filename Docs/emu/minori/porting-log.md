@@ -1,5 +1,15 @@
 # Minori 移植日志
 
+## 2026-08-22
+
+### 持久 Auto 与活动消息等待重绑定
+
+- 真实完整路线暴露了一个状态机根因：消息已经建立物理输入等待后，再从原版游戏菜单切换到 Auto，只改变 `play_mode`，不会改变已发布的等待类型。短程测试之所以能推进，是因为它在下一条消息创建时才看到 Auto；持久运行则停在原来的输入等待。这不是 tick 预算或输入序列问题。
+- VM 现在把活动消息等待视为同一 token 的 modality。Normal 切到 Auto 时，等待由 `Input` 重绑定为 `Time`；Auto 切回 Normal 时反向重绑定。CLI 与 Manager Host 只接受同 token 的 `Input`/`Time` 互换，其他重复 token 仍返回稳定 blocking diagnostic。Manager Core 的 `RuntimeWorld` mirror 复用已有 `AwaitTokenId`，不生成第二个权威 token。
+- Config 的 Auto 速度值 `0` 仍保留原始设置值，但公共 time wait 必须为正，因此运行时把它映射为一个 10 ms timing unit。公共 Await contract 没有放宽，也没有加入即时完成或 tick 跳过 fallback。定向测试覆盖双向重绑定、snapshot、重复 token 阻断和最快 Auto 映射。
+- 当前签名 Release plugin 已在真实八包上用持久 Auto 跑完攻略首条路线。输入序列先把 Auto 速度调到 `0`，再用原版菜单物理 pointer 开启 Auto；正文阶段没有周期性 Enter，只在严格观察到 choice active 后提交一次确认。运行推进 25552 fixed steps，提交并栅格化 25557 个 GPU frame，消费 50 条物理输入，最终到达 terminal；snapshot round-trip 成立，coverage hash 与既有完整路线一致，diagnostic 为空。
+- 自动音频记录 20441600 frame，master peak 为 0.989444，output overload 与 underflow 均为 0；完整 WAV 非静音且未发现 clipping。人工查看标题、Config、最快 Auto、Auto 正文、路线构图和结局返回标题六个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。这关闭持久 Auto 首路线的 Headless E2，不替代正式完整音频听审、Skip 整路线、Config 剩余行为、第四条 clear route 后鉴赏或 Windows E3。
+
 ## 2026-08-12
 
 ### message voice 资源绑定

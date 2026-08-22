@@ -1588,17 +1588,41 @@ impl MinoriVm {
         self.state.system_ui.pointer_primary_pressed = pressed;
     }
 
-    pub fn toggle_preferred_play_mode(&mut self) -> Result<(), MinoriRuntimeError> {
+    pub fn toggle_preferred_play_mode(&mut self) -> Result<bool, MinoriRuntimeError> {
         let target = self.state.system_ui.config.preferred_play_mode;
         if target == MinoriPlayMode::Normal {
             return Err(MinoriRuntimeError::State);
         }
-        self.state.system_ui.play_mode = if self.state.system_ui.play_mode == target {
+        let next_mode = if self.state.system_ui.play_mode == target {
             MinoriPlayMode::Normal
         } else {
             target
         };
-        Ok(())
+        self.state.system_ui.play_mode = next_mode;
+
+        let Some(wait) = self.state.wait.clone() else {
+            return Ok(false);
+        };
+        let token_id = match &wait {
+            MinoriWaitState::Input { token_id } | MinoriWaitState::Time { token_id, .. }
+                if token_id.starts_with("minori.message.") =>
+            {
+                token_id.clone()
+            }
+            _ => return Ok(false),
+        };
+        let rebound = match next_mode {
+            MinoriPlayMode::Auto => message_auto_wait(
+                token_id,
+                self.state.system_ui.config.message_speed_auto_play,
+            )?,
+            MinoriPlayMode::Normal | MinoriPlayMode::Skip => MinoriWaitState::Input { token_id },
+        };
+        if rebound == wait {
+            return Ok(false);
+        }
+        self.state.wait = Some(rebound);
+        Ok(true)
     }
 
     pub fn fast_forward_active(&self) -> bool {
@@ -4845,13 +4869,7 @@ fn execute_message(
     let capture_sequence = next_effect_sequence(state)?;
     let token_id = format!("minori.message.{}", state.instruction_count);
     let wait = if state.system_ui.play_mode == MinoriPlayMode::Auto {
-        MinoriWaitState::Time {
-            token_id,
-            timer_ticks: u32::from(state.system_ui.config.message_speed_auto_play),
-            milliseconds: u32::from(state.system_ui.config.message_speed_auto_play)
-                .checked_mul(10)
-                .ok_or(MinoriRuntimeError::Overflow)?,
-        }
+        message_auto_wait(token_id, state.system_ui.config.message_speed_auto_play)?
     } else {
         MinoriWaitState::Input { token_id }
     };
@@ -4864,6 +4882,20 @@ fn execute_message(
         audio_commands,
         wait,
     }))
+}
+
+fn message_auto_wait(
+    token_id: String,
+    configured_units: u8,
+) -> Result<MinoriWaitState, MinoriRuntimeError> {
+    let timer_ticks = u32::from(configured_units).max(1);
+    Ok(MinoriWaitState::Time {
+        token_id,
+        timer_ticks,
+        milliseconds: timer_ticks
+            .checked_mul(10)
+            .ok_or(MinoriRuntimeError::Overflow)?,
+    })
 }
 
 const VOICE_STREAM_ID: u32 = 4;
@@ -5533,15 +5565,23 @@ mod tests {
             panic!("expected message")
         };
         assert!(matches!(wait, MinoriWaitState::Input { .. }));
-        vm.toggle_preferred_play_mode().unwrap();
+        assert!(vm.toggle_preferred_play_mode().unwrap());
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Auto);
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Time {
+                timer_ticks: 50,
+                milliseconds: 500,
+                ..
+            })
+        ));
         let snapshot = vm.snapshot_bytes().unwrap();
         vm.restore_state(&snapshot).unwrap();
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Auto);
 
         let token = match vm.state().wait.as_ref().unwrap() {
-            MinoriWaitState::Input { token_id } => token_id.clone(),
-            _ => panic!("expected input wait"),
+            MinoriWaitState::Time { token_id, .. } => token_id.clone(),
+            _ => panic!("expected rebound time wait"),
         };
         vm.resolve_wait(&token).unwrap();
         let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(2, 16).unwrap() else {
@@ -5556,12 +5596,28 @@ mod tests {
             }
         ));
 
-        vm.toggle_preferred_play_mode().unwrap();
+        assert!(vm.toggle_preferred_play_mode().unwrap());
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Normal);
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Input { .. })
+        ));
         vm.state.system_ui.config.preferred_play_mode = MinoriPlayMode::Skip;
-        vm.toggle_preferred_play_mode().unwrap();
+        assert!(!vm.toggle_preferred_play_mode().unwrap());
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
         assert!(vm.fast_forward_active());
+    }
+
+    #[test]
+    fn fastest_auto_config_maps_to_one_positive_timing_unit() {
+        assert!(matches!(
+            message_auto_wait("minori.message.1".into(), 0).unwrap(),
+            MinoriWaitState::Time {
+                timer_ticks: 1,
+                milliseconds: 10,
+                ..
+            }
+        ));
     }
 
     #[test]

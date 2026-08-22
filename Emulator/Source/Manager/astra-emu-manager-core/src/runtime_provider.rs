@@ -793,17 +793,18 @@ impl RuntimeAction for ApplyLegacyControlAction {
 
         for wait in &pending.control.waits {
             let family_token_id = wait_token_id(wait);
-            let token = ctx.create_await(astra_runtime::AwaitKind::Custom(wait_kind(wait)));
             let mut tokens = self
                 .await_tokens
                 .lock()
                 .map_err(|_| RuntimeError::message("ASTRA_EMU_AWAIT_LOCK_POISONED"))?;
-            if tokens.insert(family_token_id, token.token_id).is_some() {
-                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_EMU_AWAIT_TOKEN_DUPLICATE",
-                    "family provider emitted a duplicate pending wait token",
-                )));
+            if tokens.contains_key(&family_token_id) {
+                // The RuntimeWorld token is the stable mirror of the family
+                // token. A host-validated Input/Time modality rebind keeps the
+                // same identity and therefore must not enqueue a second token.
+                continue;
             }
+            let token = ctx.create_await(astra_runtime::AwaitKind::Custom(wait_kind(wait)));
+            tokens.insert(family_token_id, token.token_id);
             drop(tokens);
             ctx.push_await(token)?;
         }

@@ -630,6 +630,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 && (MINORI_GAME_MENU_PLAY_MODE_TOP..MINORI_GAME_MENU_PLAY_MODE_BOTTOM)
                     .contains(&session.vm.state().system_ui.pointer_y)
         });
+        let mut play_mode_wait_rebound = false;
         if game_menu_mode_pressed {
             if !input.await_results.is_empty() || !input.provider_results.is_empty() {
                 session.poisoned = true;
@@ -638,7 +639,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "play-mode menu input cannot consume an await or provider result",
                 ));
             }
-            session
+            play_mode_wait_rebound = session
                 .vm
                 .toggle_preferred_play_mode()
                 .map_err(runtime_error)?;
@@ -910,9 +911,16 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                         sequence,
                         &mut live,
                     )?;
-                    return waiting_output(session, wait, live, Some(choice_event), &input);
+                    return waiting_output(
+                        session,
+                        wait,
+                        live,
+                        Some(choice_event),
+                        play_mode_wait_rebound,
+                        &input,
+                    );
                 }
-                return waiting_output(session, wait, live, None, &input);
+                return waiting_output(session, wait, live, None, play_mode_wait_rebound, &input);
             }
             let expected = wait_token(&wait);
             if input.await_results.len() != 1
@@ -4978,9 +4986,10 @@ fn describe_config_page(
 
 fn waiting_output(
     session: &mut MinoriSession,
-    _wait: MinoriWaitState,
+    wait: MinoriWaitState,
     live: LegacyLiveOutput,
     event: Option<LegacyEvent>,
+    publish_rebound_wait: bool,
     input: &LegacyStepInput,
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
     let mut output = LegacyStepOutput {
@@ -4991,6 +5000,10 @@ fn waiting_output(
         // on later ticks would violate RuntimeWorld AwaitQueue uniqueness.
         control: LegacyControlTransaction {
             events: event.into_iter().collect(),
+            waits: publish_rebound_wait
+                .then(|| legacy_wait(&wait))
+                .into_iter()
+                .collect(),
             ..LegacyControlTransaction::default()
         },
         trace: Vec::new(),
@@ -6175,6 +6188,107 @@ mod tests {
     }
 
     #[test]
+    fn auto_menu_rebinds_the_active_message_wait_without_a_manual_advance() {
+        let mut page_png = Vec::new();
+        PngEncoder::new(&mut page_png)
+            .write_image(
+                &vec![0; 1280 * 720 * 4],
+                1280,
+                720,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let source = b".message\r\n.end\r\n";
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), source.to_vec()),
+                ("minori:/sys/topMenu0.png".into(), page_png),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.auto-rebind".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                        ("astra.launch_entry_explicit".into(), "false".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        let message = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "enter".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+        let token_id = match message.control.waits.as_slice() {
+            [LegacyWaitRequest::Input { token_id, .. }] => token_id.clone(),
+            _ => panic!("expected the initial message input wait"),
+        };
+        let rebound = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_X.into(),
+                            pressed: false,
+                            value: 1125.0,
+                            sequence: 1,
+                        },
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_Y.into(),
+                            pressed: false,
+                            value: 577.0,
+                            sequence: 2,
+                        },
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_PRIMARY.into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 3,
+                        },
+                    ],
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            rebound.control.waits.as_slice(),
+            [LegacyWaitRequest::Time {
+                token_id: rebound_token,
+                milliseconds: 500,
+            }] if rebound_token == &token_id
+        ));
+        assert_eq!(
+            provider.sessions[&session.0].vm.state().system_ui.play_mode,
+            MinoriPlayMode::Auto
+        );
+    }
+
+    #[test]
     fn config_volume_and_mute_are_applied_at_the_shared_audio_boundary() {
         let source = b".end\r\n";
         let mut vm = MinoriVm::new(
@@ -6568,7 +6682,7 @@ mod tests {
         let first = provider
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
-        let token_id = match &first.control.waits[0] {
+        let initial_token_id = match &first.control.waits[0] {
             LegacyWaitRequest::Input { token_id, .. } => token_id.clone(),
             _ => panic!("expected message input wait"),
         };
@@ -6602,11 +6716,21 @@ mod tests {
             )
             .unwrap();
         assert_eq!(output.status, LegacyRuntimeStatus::Awaiting);
-        assert!(output.control.waits.is_empty());
-        assert_eq!(
+        assert!(matches!(
+            output.control.waits.as_slice(),
+            [LegacyWaitRequest::Time {
+                token_id: rebound_token,
+                milliseconds: 500,
+            }] if rebound_token == &initial_token_id
+        ));
+        assert!(matches!(
             provider.sessions[&session.0].vm.state().wait,
-            Some(MinoriWaitState::Input { token_id })
-        );
+            Some(MinoriWaitState::Time {
+                ref token_id,
+                timer_ticks: 50,
+                milliseconds: 500,
+            }) if token_id == &initial_token_id
+        ));
         assert_eq!(
             provider.sessions[&session.0].vm.state().system_ui.play_mode,
             MinoriPlayMode::Auto

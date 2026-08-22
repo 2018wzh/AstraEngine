@@ -6556,9 +6556,7 @@ impl<'a> RuntimeDriver<'a> {
         }
         for wait in live.waits {
             let (token, condition) = live_wait_condition(wait, next_step, self.delta_ns);
-            if self.pending_waits.insert(token, condition).is_some() {
-                return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
-            }
+            install_pending_wait(&mut self.pending_waits, token, condition)?;
         }
         for event in live.events {
             self.state_trace.extend_from_slice(event.event.as_bytes());
@@ -7884,6 +7882,25 @@ impl<'a> RuntimeDriver<'a> {
     }
 }
 
+fn install_pending_wait(
+    waits: &mut BTreeMap<String, PendingWait>,
+    token: String,
+    condition: PendingWait,
+) -> Result<(), String> {
+    if let Some(current) = waits.get(&token) {
+        let modality_rebind = matches!(
+            (current, &condition),
+            (PendingWait::Input(_), PendingWait::DueStep(_))
+                | (PendingWait::DueStep(_), PendingWait::Input(_))
+        );
+        if !modality_rebind {
+            return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
+        }
+    }
+    waits.insert(token, condition);
+    Ok(())
+}
+
 fn is_avi_container_header(bytes: &[u8]) -> bool {
     bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
 }
@@ -8891,6 +8908,28 @@ mod native_tests {
             timeline.complete(10, 11).unwrap_err(),
             "ASTRA_EMU_HEADLESS_AWAIT_TICK_ACCOUNTING_INVALID"
         );
+    }
+
+    #[test]
+    fn pending_wait_registration_only_allows_same_token_input_time_rebinding() {
+        let mut waits = BTreeMap::from([(
+            "message".to_owned(),
+            PendingWait::Input(vec!["enter".to_owned()]),
+        )]);
+        install_pending_wait(&mut waits, "message".to_owned(), PendingWait::DueStep(42)).unwrap();
+        assert_eq!(waits["message"], PendingWait::DueStep(42));
+        install_pending_wait(
+            &mut waits,
+            "message".to_owned(),
+            PendingWait::Input(vec!["enter".to_owned()]),
+        )
+        .unwrap();
+        assert!(install_pending_wait(
+            &mut waits,
+            "message".to_owned(),
+            PendingWait::Input(vec!["space".to_owned()]),
+        )
+        .is_err());
     }
 
     #[test]
