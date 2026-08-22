@@ -1368,7 +1368,7 @@ impl MinoriVm {
             MinoriConfigAudioBus::Bgm => (
                 MINORI_CONFIG_TEST_BGM_STREAM_ID,
                 "bgm",
-                "minori:/sys/BGMtest.wav",
+                "minori:/sys/BGMTest.wav",
             ),
             MinoriConfigAudioBus::Voice => (
                 MINORI_CONFIG_TEST_VOICE_STREAM_ID,

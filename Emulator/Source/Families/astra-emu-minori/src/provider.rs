@@ -2102,7 +2102,7 @@ fn effective_audio_volume(
     let (volume, muted) = match audio.bus.as_str() {
         "bgm" => (config.bgm_volume, config.bgm_muted),
         "voice" => (config.voice_volume, config.voice_muted),
-        "se" => (config.se_volume, config.se_muted),
+        "se" | "se2" | "se3" => (config.se_volume, config.se_muted),
         _ => {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_AUDIO_BUS",
@@ -5904,7 +5904,7 @@ mod tests {
                 ("minori:/sys/checkmark.png".into(), encode_rgba(21, 32)),
                 ("minori:/sys/circle.png".into(), encode_rgba(74, 74)),
                 (
-                    "minori:/sys/BGMtest.wav".into(),
+                    "minori:/sys/BGMTest.wav".into(),
                     b"RIFF\x04\0\0\0WAVE".to_vec(),
                 ),
                 ("minori:/sys/saveloadBase.png".into(), page_png),
@@ -6055,7 +6055,7 @@ mod tests {
                     value: LegacyAudioCommandV1::Play { repeat: false, .. },
                     ..
                 }
-            ] if resource_uri == "minori:/sys/BGMtest.wav"
+            ] if resource_uri == "minori:/sys/BGMTest.wav"
         ));
         provider
             .step(
@@ -6221,6 +6221,24 @@ mod tests {
         vm.restore_state(&postcard::to_allocvec(&state).unwrap())
             .unwrap();
         assert_eq!(effective_audio_volume(vm.state(), 0, 0.5).unwrap(), 0.0);
+
+        state.system_ui.config.se_volume = 25;
+        state.audio.insert(
+            2,
+            crate::MinoriAudioState {
+                bus: "se2".into(),
+                encoding: MinoriAudioEncoding::Ogg,
+                resource_uri: "minori:/se/test.ogg".into(),
+                looped: true,
+                volume_milli: 800,
+                pan_milli: 0,
+                playing: true,
+                continuation_pts: 0,
+            },
+        );
+        vm.restore_state(&postcard::to_allocvec(&state).unwrap())
+            .unwrap();
+        assert_eq!(effective_audio_volume(vm.state(), 2, 0.8).unwrap(), 0.2);
     }
 
     #[test]

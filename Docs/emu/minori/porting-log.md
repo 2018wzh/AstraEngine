@@ -337,3 +337,6 @@ python Tools/check_docs.py
 - IDA 复核 `SystemMenuConfig` 构造、命中函数和 action dispatcher，确认 29 类动作、六条滑块公式、Apply/Cancel 语义和 `configBase.png`、`knob.png`、`checkmark.png`、`circle.png` 四类资源。研究记录只保存函数地址、字段语义和尺寸，不保存商业图片或私有路径。
 - runtime state 硬切到 v23。Config 使用独立 draft，Apply 原子提交，Cancel 丢弃修改；页面内 snapshot/restore 保留 draft 和指针状态。provider 只接受物理 pointer/Enter/Escape，使用原坐标命中区，不提供方向键替代。四类资源经 retained Scene2D 组合，尺寸漂移直接阻断。
 - BGM/Voice/SE 音量与静音在公共 audio command 边界计算；试听资源显式标为 WAV，离开 Config 时停止专用试听 stream，不把一次性试听带进 restore continuation。114 个 library tests 和目标 crate clippy 通过。这是 E1：真实资源 Headless 视觉、全屏 Host effect、逐字速度、视觉开关和角色语音筛选仍开放。
+- 首次真实试听严格阻断于资源查找。VFS 清单确认 archive identity 是大小写敏感的 `BGMTest.wav`；随后又发现三个原生 SE bus 分别为 `se`、`se2`、`se3`，都应受同一 SE 配置控制。实现按已确认 identity 修正，不加入大小写搜索或未知 bus fallback。
+- 修正后的签名 Release plugin 在真实八包上完成 Config 短程 Headless E2：166 fixed steps、171 个提交/栅格帧、42 条物理输入、6 个 checkpoint、snapshot round-trip 和零 diagnostic。默认页、关闭画面效果、BGM 滑块 50% 和试听 checkpoint 的状态 hash 均按输入变化；完整 WAV 有 132608 frame，peak -3.5906 dBFS、RMS -17.8713 dBFS，无静音、clipping、master overload 或 underflow。
+- 模型查看全部 6 张 checkpoint。checkmark 与 knob 对齐原版控件，开关移除和滑块移动清晰可见；标题及进入剧情后的画面也没有裁剪、拉伸、错层或残留。视觉 verdict 通过。完整试听仍未由具名人工完成，所以 v3 review 以 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING` 返回 blocking；该阻断不被模型视觉结论覆盖。

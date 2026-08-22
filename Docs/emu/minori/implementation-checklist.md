@@ -8,7 +8,7 @@
 - 两次运行的 visual trace、runtime state trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。输入 hash 因 local-private session id 不同而不同，不作为跨 session 一致性结论。平台全局进度通过 ordered storage request/result 原子读写；两次均严格证明自然解锁数为 1。restore 会合并同一 provider session 已确认的全局进度，不允许旧 snapshot 回滚解锁。
 - 模型复核新报告全部 33 个 required checkpoint；人物、背景、影片和日文字形没有缺失、横向裁剪、非预期拉伸、旧图层残留或未退场人物。choice 与 post-choice 已从独立真实 slice 升级为同一条完整路线证据。
 - 公共 Kira limiter 后 output peak 为 0.989551，output overload 与 underflow 均为 0。自动 E2 已闭合这条路线的结局返回标题、最终 Exit、snapshot continuation、用户 save/restore、自然解锁和 VM/视觉/音频重复运行确定性。原版 `Memories` 菜单只在第四条已确认路线后出现，因此首条路线不能形成 CG/BGM/回想 checkpoint；鉴赏完整入口、Config 行为级 E2 和 Windows E3 仍开放。当前状态不是完整产品体验或 E3。
-- Config 已按原程序 29 类 action 建立 v23 draft transaction、精确鼠标命中区、滑块换算、四类 retained texture overlay、WAV 试听和公共音量/静音映射。114 个 `astra-emu-minori` library tests 通过。该结果是 E1；真实资源 Headless checkpoint、全屏 Host effect、逐字速度、视觉开关和角色语音筛选仍待验证。
+- Config 已按原程序 29 类 action 建立 v23 draft transaction、精确鼠标命中区、滑块换算、四类 retained texture overlay、WAV 试听和公共音量/静音映射。114 个 `astra-emu-minori` library tests 通过。真实八包短程 Headless 又以物理 pointer 验证画面效果开关、BGM 滑块和 `BGMTest.wav` 试听；全部 6 个 checkpoint 的模型视觉审查通过。全屏 Host effect、逐字速度、视觉开关对剧情演出的实际影响和角色语音筛选仍待验证。
 - runtime state v19 已在当时的 release plugin 上重跑同一输入序列：33490 fixed steps、34108 个呈现帧、16951 条物理输入和 33 个 required checkpoint 均通过。当前代码已硬切到 state v21；三态 play mode、Auto 入口、message voice 与 backlog voice replay 均有定向回归。当前签名 Release plugin 的真实八包短程 Headless E2 通过物理 pointer、严格 play-mode observation 和 500 ms 后正文变化证明 Auto 单次推进；另一次 33498-fixed-step 完整路线在首条正文切换 Auto、捕获 checkpoint、恢复 Normal 后继续到 terminal。v21 完整路线进一步以 33553 fixed steps、34172 帧、16957 条输入和 34 个 checkpoint 验证物理 Enter 的 backlog voice replay 不推进 VM、保留同一 message wait，并继续到 terminal。持久 Auto 整路线仍开放。完整 WAV 的具名人工听审未完成，因此正式 review 保持 blocking。
 
 ### Control 快进增量（2026-08-03）
@@ -64,7 +64,8 @@
 - [x] boot 到首个 message；正文经一次性 lease、CosmicText 和 Renderer2D 形成真实 checkpoint，未进入 snapshot/report。
 - [x] 物理 Enter 推进与受 pragma 门控的 Control 快进可跑完首条剧情路线；backlog 的当前记录、滚轮导航、关闭恢复和当前记录 voice replay 已进入真实完整路线 E2。Auto/Skip 三态、原版菜单命中区和 500 ms Auto wait 已完成定向测试；真实八包短程 Headless 已由物理 pointer 输入启用 Auto 并自动推进一条正文，完整首路线也已包含 Auto 状态 checkpoint 后恢复 Normal 的回归。持久 Auto 整路线和多记录翻页仍开放。
 - [x] Config 的 29 类已确认 action、Apply/Cancel transaction、pointer drag、状态 overlay、WAV 试听、音量/静音映射和 snapshot round-trip 已完成 E1。
-- [ ] 用真实 Config 资源完成 Headless 物理输入与视觉审查，并接通全屏 Host effect、消息逐字速度、视觉开关和角色语音筛选；缺任一行为不得标完整 Config。
+- [x] 真实 Config 资源完成 Headless 物理 pointer、screen-effect checkmark、BGM knob、WAV 试听和视觉审查；短程运行自动通过，正式 review 因完整 WAV 未人工试听而按协议阻断。
+- [ ] 接通全屏 Host effect、消息逐字速度、视觉开关对剧情演出的实际影响和角色语音筛选；缺任一行为不得标完整 Config。
 - [x] choice 选择状态、label 跳转、三态资源、批量 option lease、居中排版和提交清除已进入 VM/provider/Host；真实脚本以严格 `minori.choice_active` observation 捕获 choice 与 post-choice checkpoint。
 - [x] provider snapshot restore 会重新绑定当前 system page、message 或 choice presentation，并清除恢复前未消费的一次性文字 lease；首个 restore output 会在需要时把 retained scene 与新文字放入同一 typed transaction，完整路线 user save/restore 已验证该 continuation。
 - [x] 显式 checkpoint 在捕获前提交待处理 Scene2D；Config 与 backlog 打开/关闭已由真实短程画面变化验证。
