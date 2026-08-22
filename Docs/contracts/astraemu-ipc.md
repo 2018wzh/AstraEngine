@@ -4,11 +4,13 @@ AstraEMU v1 采用 Manager + `AstraEmuRuntimeProvider` + AstraEngine `RuntimeWor
 
 `EMUCoreBridge` 只作为 extension point 保留，用于外部工具或研究环境。它不属于 v1 主路径，也不能替换 `RuntimeWorld`。
 
-## Descriptor
+## v9 迁移状态
 
-The current hard-cut identity is `astra.emu.family_abi.v7`. Any v5 or v6
-fingerprint, manifest, binary, runtime section, or snapshot is rejected before
-provider execution; this page's older v6 wording is migration history only.
+当前 hard-cut identity 为 `astra.emu.family_abi.v9`。v7/v8 module、fingerprint 与旧 runtime snapshot 必须在 provider 执行前拒绝；没有 compatibility shim。Product Runtime Provider ABI 同步 hard cut 到 v4，Extension ABI 首版 identity 为 `astra.emu.extension_abi.v1`。
+
+本次 ABI 契约已经落地，FVP、Minori、Manager、CLI、Headless 与平台 renderer 的 consumer 迁移仍是 `IN_PROGRESS`。v7 的 scene transaction、snapshot/save/restore、text lease、session resource presentation 与 step budget 只属于历史实现，不是当前接口能力。
+
+## Descriptor
 
 ```rust
 pub struct LegacyFamilyPluginDescriptor {
@@ -20,14 +22,18 @@ pub struct LegacyFamilyPluginDescriptor {
     pub runtime_provider: ProviderId,
     pub permissions: Vec<PermissionId>,
     pub report_redaction: RedactionPolicyId,
+    pub core_kind: FamilyCoreKind,
+    pub presentation_mode: FamilyPresentationMode,
 }
 ```
 
-descriptor 必须通过 plugin fingerprint、capability、permission、license 和 family feature gate。family plugin 不能声明替换 Runtime tick、Save container、MutationLog、Release Gate core checks 或 renderer/audio native handle。
+descriptor 必须通过 plugin fingerprint、capability、permission、license 和 family feature gate。只接受 `Native + MultiLayer` 和 `Ported + SingleLayer`；FVP 固定使用 `Ported + SingleLayer`，Minori 固定使用 `Native + MultiLayer`。错误组合必须在 session 创建前阻断。
+
+Product runtime descriptor 必须声明唯一 `PresentationLane::{Scene2D, Layer2D}`。AstraVN 使用 `Scene2D`，AstraEMU 使用 `Layer2D`，单个 session 禁止混用。
 
 ## Runtime Provider
 
-`LegacyRuntimeProvider` 是 family runtime 的唯一 public facade。provider 位于 `AstraEmuRuntimeProvider` 之下，可以在内部拆分 archive reader、script VM、media bridge、snapshot serializer 和 diagnostics，但这些模块不成为顶层 AstraEngine gameplay provider。
+`LegacyRuntimeProvider` 是 family runtime 的唯一 public facade。provider 位于 `AstraEmuRuntimeProvider` 之下，可以在内部拆分 archive reader、script VM、renderer、native save 和 diagnostics，但这些模块不成为顶层 AstraEngine gameplay provider。
 
 ```rust
 pub trait LegacyRuntimeProvider {
@@ -52,35 +58,6 @@ pub trait LegacyRuntimeProvider {
         input: LegacyStepInput,
     ) -> ProviderResult<LegacyStepOutput>;
 
-    fn save(
-        &self,
-        ctx: LegacyRuntimeHostCtx,
-        session: LegacyRuntimeSessionId,
-        request: LegacySnapshotSaveRequest,
-    ) -> ProviderResult<LegacySnapshotEnvelope>;
-
-    fn restore(
-        &self,
-        ctx: LegacyRuntimeHostCtx,
-        session: LegacyRuntimeSessionId,
-        snapshot: LegacySnapshotEnvelopeRef,
-    ) -> ProviderResult<LegacyRestoreReport>;
-
-    fn take_ephemeral_text(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        lease_id: &str,
-    ) -> ProviderResult<Option<LegacyEphemeralText>>;
-
-    fn read_session_resource(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> ProviderResult<Vec<u8>>;
-
     fn shutdown(
         &self,
         ctx: LegacyRuntimeHostCtx,
@@ -89,11 +66,9 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-Family ABI v7 对 descriptor、instance、probe、open、step、save、restore、resource read、VFS callback 和 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。v5/v6 binary、fingerprint 和 FVP runtime snapshot 都会 fail-fast，host 不保留兼容 shim。
+Family ABI v9 对 descriptor、instance、probe、open、step、surface、Hook、writable-file、只读 VFS 与 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。
 
-v7 的 host VFS 使用 `stat_file` 和 `read_file_range`。range 请求绑定 expected revision、offset、length 与 max bytes，host 不传文件句柄或本地路径；range result 只返回 range、revision、length/bounds 可验证的 owned bytes，不计算或传输 per-read content hash。scene bytes、encoded bytes 和 PCM bulk 以 ABI-owned allocation 过边界；host 只借用 slice 做尺寸校验、decode 或上传，不用 `into_vec()` 跨 allocator 复制。FVP live step 直接发 Family ABI v7 typed scene transaction，RGBA8 `Vec<u8>` 从 hosted capture allocation 移交到 Runtime、Scene2D 和 GPU adapter；同尺寸 partial update 只携带变化区域，LumaAlpha8 只在明确的格式转换边界生成一次 RGBA8。live 路径不发 `astra.emu.scene_packet.v1`，不执行 scene postcard reader，也不计算 texture/frame content hash；旧 scene packet translator 只属于独立的冷/测试 contract，不能由 v7 live provider 选择。`take_ephemeral_text` 与 `read_session_resource` 仍是 out-of-band host channel，不是 deterministic output：前者是单次 plaintext lease，后者把 family 已解析的有界 media bytes 交给 host decoder。两者都禁止进入 effect、RuntimeWorld、save/replay、report、log 或 package；`read_session_resource` 还必须校验 session/context、规范化 URI、最大 byte bound 和 poisoned state，失败后不得改读 raw filesystem。
-
-Typed scene 的 `Rgba8` 保持通用 straight-alpha sRGBA8 allocation，blend 与 texture filter 都是显式 draw state，不能把 RFVP 的素材约定写成全引擎特例。`LegacyTextureFilter`/`RuntimeLiveTextureFilter` 是 draw contract 的必填字段，Family、Provider、Headless CPU、Manager GPU 和 PlatformHost GPU 必须原样传递 `nearest`/`linear`，不得由 host 猜测默认值。FVP adapter 只负责把 RFVP 上游原版的 NVSG bytes、vertex color、blend 和 filter 映射到这些通用字段；Yakui 在自身 adapter 边界转换上传表示，Minori decoder 保持 straight-alpha 输出。禁止 renderer 为单个 family 增加隐式颜色补偿、fallback 或第二条 scene path。
+只读 VFS range 请求绑定 expected revision、offset、length 与 bounds，Host 不传文件句柄或本地路径，也不计算 per-read content hash。Family 只能 acquire Host-owned writable surface。lease 明确携带 RGBA8/BGRA8 sRGB premultiplied-alpha format、dimensions、stride 与 generation；core 写入后提交 `Unchanged`、`Full` 或 surface 像素坐标 `Rects` damage。step 成功且 Layer transaction 验证完成后才公开 staged generation；失败时整批回收。pool 暂时耗尽时重试同一 generation 并输出节流 WARN，不临时分配、不丢帧、不切换 presentation mode。设备丢失、整数溢出、尺寸或 stride 不匹配、所有权错误与实际分配失败继续 fail-fast。
 
 Typed PCM 由 `LegacyLiveOutput.audio` 直接携带 `LegacyAudioPacketV7` 和 ABI-owned
 `I16`/`F32` buffer，不再拆成 control、bulk reference 和第二条 payload envelope。
@@ -102,7 +77,23 @@ sample count、channel count 和边界。相同格式不得重建 PCM；只有 d
 必要格式转换可以生成新 allocation，并单独计入 conversion bytes。格式、长度或边界不匹配
 均返回 blocking diagnostic。
 
-`open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、legacy presentation/audio state、await state、snapshot cursor 和 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
+`open` 返回 `LegacyRuntimeSessionId`。session 持有 family 私有 VM state、resource resolver、presentation/audio state、await state 与 trace cursor。Manager 可以并行 probe 多个 case，也可以在测试里同时打开多个 session；provider 必须用 session id 隔离状态。
+
+## Retained Layer2D
+
+公共 Layer2D contract 包含 `Layer2DId`、`Surface2DId`、`Layer2DRole`、`Layer2DTransaction`、retained `Create/Update/Destroy`、`Layer2DDamage` 与 `Layer2DContent`。layer state 明确携带 `z_index`、role、transform、clip、opacity、nearest/linear、opaque/alpha/add/multiply/screen 和 typed `FilterGraph`。
+
+Host 按 `z_index` 排序，相同 z 按稳定 `Layer2DId` 排序。越界 damage、过期 generation、重复 create、未知 update/destroy 或无效 transform 会阻断整笔 transaction。公共 Provider ABI 允许 `WritableSurface` 与 `TextureResource`，Family ABI 只允许 writable surface。Host 把 retained state lowering 到现有 `SceneCommand`、`Mesh2D`、texture update 和 FilterGraph executor，不创建第二套 GPU backend。
+
+## Hook 与翻译 companion
+
+Extension ABI v1 的通用 Hook 只识别 family/game/hook/invocation identity 与 opaque owned bytes，Host 不解释 payload。translation companion 只定义 UTF-8 request/response。Manager、CLI 与 Headless 按 `(family_id, family_game_id)` 持有显式启用状态、唯一 provider id 与 `u32 timeout_ms`；默认 2000 ms，0 表示立即超时。
+
+Hook 必须发生在 framebuffer acquire 之前。未绑定时交给 core 处理；FVP 与 Minori 使用原文。成功结果由 family core 完成字体 fallback、shaping、换行和绘制。timeout、认证、限流、网络、协议、缺字或布局失败时保留原文并返回 typed diagnostic。没有异步 completion、晚到结果、翻译 cache、文本 hash或 Host overlay；正文、secret 和 payload 不进入日志、SQLite、report 或 package。
+
+## 原生存档文件
+
+Family ABI 不提供 save/restore/snapshot。每个 game 获得独立 writable root，只能通过安全相对路径调用 stat/list/create-dir/read-range/write-range/set-length/remove/atomic-replace；本地路径和文件句柄不跨 ABI。同一 `(family_id, family_game_id)` 只允许一个 writable session。`atomic-replace` 必须同步临时文件、原子替换并同步父目录。Host/Manager 不定义 save slot，文件组织与格式归游戏/core 所有；AstraEMU Runtime Provider 对共享 save/restore lifecycle 返回 unsupported。
 
 ## Host Context
 
@@ -164,7 +155,6 @@ pub struct LegacyStepInput {
     pub input_edges: Vec<LegacyInputEdge>,
     pub await_results: Vec<LegacyAwaitResult>,
     pub provider_results: Vec<LegacyProviderResult>,
-    pub budget: LegacyStepBudget,
     pub replay_mode: ReplayMode,
 }
 
@@ -178,20 +168,18 @@ pub struct LegacyStepOutput {
 }
 ```
 
-Runtime 每个 tick 按固定顺序把 input、await result 和 provider result 交给 provider。provider 在 family session 内推进旧 VM，直到遇到 wait、halt、fault、预算耗尽或 presentation boundary。所有输出必须在本 tick 结束前变成有序 `LegacyStepOutput`。
+Runtime 每个 tick 按固定顺序把 input、await result 和 provider result 交给 provider。provider 在 family session 内推进旧 VM，直到遇到 wait、halt、fault 或 presentation boundary。所有输出必须在本 tick 结束前变成有序 `LegacyStepOutput`。Family step 不携带策略预算；ABI 表示、checked arithmetic、buffer/stride、所有权、路径隔离和系统错误仍是阻断条件。Performance E2 是唯一预算型阻断门禁。
 
-Family session 可以把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机。多线程、多 fiber 或多 context VM 必须由 deterministic scheduler 推进，排序键固定为 `(priority, context_id, sequence)`。Host 只接收 `LegacyStepOutput`、trace 和 snapshot envelope，不读取 family private child state。
+Family session 可以把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机。多线程、多 fiber 或多 context VM 必须由 deterministic scheduler 推进，排序键固定为 `(priority, context_id, sequence)`。Host 只接收 `LegacyStepOutput` 与 diagnostic，不读取 family private child state。
 
 ## Typed Live And Control
 
 ```rust
 pub struct LegacyLiveOutput {
-    pub scenes: Vec<LegacySceneTransactionV7>,
+    pub layers: Vec<Layer2DTransaction>,
     pub audio: Vec<LegacyAudioPacketV7>,
     pub audio_commands: Vec<LegacyAudioCommandV7>,
-    pub text: Vec<LegacyTextPresentationV7>,
     pub video: Vec<LegacyVideoCommandV7>,
-    pub waits: Vec<LegacyWaitRequest>,
 }
 
 pub enum LegacyWaitRequest {
@@ -204,23 +192,11 @@ pub enum LegacyWaitRequest {
 }
 ```
 
-Framework adapter 只把轻量 `LegacyControlTransaction` 原子提交到 `DeterministicActionContext`；scene、PCM 和其他 live allocation 在 transaction 成功后直接移动给 host owner。任何异步 IO、decode、timer、audio/video completion 和平台回调都必须变成 typed completion，在下一 fixed tick 回到 `step`。Replay 消费已验证 transcript，不重新调用 family provider。
+Framework adapter 只把轻量 `LegacyControlTransaction` 原子提交到 `DeterministicActionContext`；Layer2D、PCM 和其他 live allocation 在 transaction 成功后直接移动给 Host owner。任何异步 IO、decode、timer、audio/video completion 和平台回调都必须变成 typed completion，在下一 fixed tick 回到 `step`。
 
-## Snapshot
+## Hash 与可观测性
 
-```rust
-pub struct LegacySnapshotEnvelope {
-    pub family_id: FamilyId,
-    pub session_id: LegacyRuntimeSessionId,
-    pub schema_version: SchemaVersion,
-    pub case_fingerprint: Hash256,
-    pub runtime_cursor: LegacyRuntimeCursor,
-    pub family_sections: Vec<PackageSection>,
-    pub redaction: RedactionStatus,
-}
-```
-
-Snapshot envelope 是公共壳，family section 是 opaque postcard payload。Manager 和 EngineCore 只能校验 section id、version、hash、migration manifest 和 redaction，不解析 family VM stack、opcode state、TJS object、Lua state、Siglus scene stream 或旧引擎 presentation object。
+AstraEMU state/snapshot/text/frame/audio/route/session/input 与 RFVP live 路径不生成运行时语义 hash。package、plugin binary、source/archive entry、schema、build、profile 与 artifact-file 完整性 hash 继续保留。事件只记录稳定 diagnostic code、identity、状态和计数；正文、secret、payload、本地路径与文本 hash 不得写入日志或 evidence。
 
 ## Runtime Flow
 
@@ -234,11 +210,12 @@ AstraEMU Manager
   -> tick RuntimeWorld
   -> StateMachine invokes emu.step
   -> atomically apply LegacyControlTransaction
-  -> move typed scene / PCM / text / video output to host owners
+  -> validate and publish retained Layer2D transaction
+  -> move typed PCM / video output to host owners
   -> write LocalCaseReport
 ```
 
-family plugin 可以持有 private interpreter state，但权威推进必须通过 StateMachine typed action 和 control transaction。实时输出不编码、不计算 content hash；Evidence observer 只能在提交完成后异步观察。
+family plugin 可以持有 private interpreter state，但权威推进必须通过 StateMachine typed action 和 control transaction。实时输出不编码、不计算 content hash。
 
 ## VFS And Pack Readers
 
@@ -259,7 +236,7 @@ astra emu probe cases/artemis-synthetic --family artemis --report target/reports
 astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/reports/artemis.yaml
 ```
 
-Expected report includes `emu.legacy_runtime_provider`, `emu.artemis_full_flow`, `emu.report_redaction`, `runtime.replay.determinism` and `plugin.extension_registry`.
+Expected report includes `emu.legacy_runtime_provider`, `emu.artemis_full_flow`, `emu.report_redaction` and `plugin.extension_registry`.
 
 ## Windowed E2 report
 

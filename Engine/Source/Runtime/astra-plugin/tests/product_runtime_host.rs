@@ -196,6 +196,7 @@ fn provider_descriptor() -> ProductRuntimeDescriptor {
         runtime_id: "test".into(),
         product_kind: "test".into(),
         provider_id: "test.provider".into(),
+        presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
         supported_targets: vec!["test".into()],
         capabilities: vec!["runtime.test".into()],
         package_sections: vec![],

@@ -122,6 +122,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             family_id: FamilyId(MINORI_FAMILY_ID.into()),
             plugin_id: "astra.emu.minori".into(),
             provider_id: MINORI_RUNTIME_PROVIDER_ID.into(),
+            core_kind: astra_emu_family_api::LegacyFamilyCoreKind::Native,
+            presentation_mode: astra_emu_family_api::LegacyFamilyPresentationMode::MultiLayer,
             engine_version: env!("CARGO_PKG_VERSION").into(),
             rustc_fingerprint: env!("ASTRA_MINORI_RUSTC_FINGERPRINT").into(),
             feature_fingerprint: env!("ASTRA_MINORI_FEATURE_FINGERPRINT").into(),

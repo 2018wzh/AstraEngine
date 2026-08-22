@@ -23,6 +23,7 @@ impl ProductRuntimeProviderFactory for Factory {
             runtime_id: "test.concurrent".into(),
             product_kind: "test".into(),
             provider_id: "test.concurrent.provider".into(),
+            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
             supported_targets: vec!["test".into()],
             capabilities: vec!["runtime.test".into()],
             package_sections: vec![],

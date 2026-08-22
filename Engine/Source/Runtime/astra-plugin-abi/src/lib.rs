@@ -19,7 +19,7 @@ pub use live_vn_state::*;
 pub const GAME_RUNTIME_PROVIDER_SLOT: &str = "game_runtime_provider";
 pub const NATIVE_VN_RUNTIME_ID: &str = "native_vn";
 pub const NATIVE_VN_PROVIDER_ID: &str = "astra.runtime.native_vn";
-pub const PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA: &str = "astra.product_runtime_descriptor.v1";
+pub const PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA: &str = "astra.product_runtime_descriptor.v2";
 pub const RUNTIME_PROVIDER_BINDING_SCHEMA: &str = "astra.runtime_provider_binding.v1";
 pub const RUNTIME_EDITOR_METADATA_SCHEMA: &str = "astra.runtime_editor_metadata.v1";
 pub const PLUGIN_EXTENSION_REGISTRY_SCHEMA: &str = "astra.plugin_extension_registry.v2";
@@ -580,10 +580,18 @@ pub struct ProductRuntimeDescriptor {
     pub runtime_id: String,
     pub product_kind: String,
     pub provider_id: String,
+    pub presentation_lane: RuntimePresentationLane,
     pub supported_targets: Vec<String>,
     pub capabilities: Vec<String>,
     pub package_sections: Vec<String>,
     pub release_checks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePresentationLane {
+    Scene2D,
+    Layer2D,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2251,7 +2259,7 @@ pub struct FfiRuntimeProviderRegistration {
 }
 
 #[cfg(feature = "ffi")]
-pub const PRODUCT_RUNTIME_PROVIDER_ABI_VERSION: u32 = 3;
+pub const PRODUCT_RUNTIME_PROVIDER_ABI_VERSION: u32 = 4;
 
 #[repr(C)]
 #[cfg(feature = "ffi")]
@@ -2405,6 +2413,7 @@ mod tests {
             runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
             product_kind: "visual_novel".to_string(),
             provider_id: NATIVE_VN_PROVIDER_ID.to_string(),
+            presentation_lane: RuntimePresentationLane::Scene2D,
             supported_targets: vec!["game".to_string()],
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: vec!["vn.story".to_string()],
@@ -2418,7 +2427,7 @@ mod tests {
             capability: RString::from("runtime.native_vn"),
             phase: RString::from("runtime"),
             packaged: true,
-            descriptor_schema: RString::from("astra.product_runtime_descriptor.v1"),
+            descriptor_schema: RString::from(PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA),
             descriptor_json: RVec::from(descriptor_json),
             create_instance: ok_runtime_report,
             destroy_instance: ok_runtime_report,

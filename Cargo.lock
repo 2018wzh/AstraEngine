@@ -852,6 +852,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-emu-extension-api"
+version = "0.1.0"
+dependencies = [
+ "abi_stable",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "astra-emu-family-api"
 version = "0.1.0"
 dependencies = [
@@ -862,6 +872,7 @@ dependencies = [
  "proptest",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

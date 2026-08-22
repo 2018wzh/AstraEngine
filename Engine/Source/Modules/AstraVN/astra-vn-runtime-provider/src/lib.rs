@@ -489,6 +489,7 @@ impl NativeVnRuntimeProvider {
             runtime_id: NATIVE_VN_RUNTIME_ID.to_string(),
             product_kind: "visual_novel".to_string(),
             provider_id: NATIVE_VN_PROVIDER_ID.to_string(),
+            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
             supported_targets: vec!["game".to_string()],
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: native_vn_package_sections(),

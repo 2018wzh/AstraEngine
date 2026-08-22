@@ -1005,6 +1005,7 @@ impl AstraEmuRuntimeProvider {
             runtime_id: RUNTIME_ID.into(),
             product_kind: "legacy_visual_novel".into(),
             provider_id: PROVIDER_ID.into(),
+            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Layer2D,
             supported_targets: vec!["game".into()],
             capabilities: vec!["runtime.astra_emu".into()],
             package_sections: vec!["emu.case_profile".into()],

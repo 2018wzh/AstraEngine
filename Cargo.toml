@@ -65,6 +65,7 @@ members = [
     "Engine/Plugins/Fixtures/vn-extension-provider",
     "Engine/Plugins/Fixtures/ui-component-provider",
     "Emulator/Source/FamilyApi/astra-emu-family-api",
+    "Emulator/Source/FamilyApi/astra-emu-extension-api",
     "Emulator/Source/FamilyCore/astra-emu-family-core",
     "Emulator/Source/FamilySupport/astra-emu-family-support",
     "Emulator/Source/Families/astra-emu-fvp",

@@ -195,6 +195,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             family_id: FamilyId(FVP_FAMILY_ID.into()),
             plugin_id: "astra.emu.fvp".into(),
             provider_id: FVP_PROVIDER_ID.into(),
+            core_kind: astra_emu_family_api::LegacyFamilyCoreKind::Ported,
+            presentation_mode: astra_emu_family_api::LegacyFamilyPresentationMode::SingleLayer,
             engine_version: env!("CARGO_PKG_VERSION").into(),
             rustc_fingerprint: env!("ASTRA_FVP_RUSTC_FINGERPRINT").into(),
             feature_fingerprint: env!("ASTRA_FVP_FEATURE_FINGERPRINT").into(),

@@ -9,17 +9,15 @@ use astra_core::{Hash256, SchemaVersion};
 
 use crate::{
     FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation, LegacyBlendMode,
-    LegacyControlTransaction, LegacyCoverageDelta, LegacyDiagnostic, LegacyDirtySection,
-    LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyPluginDescriptor, LegacyInputEdge,
-    LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
-    LegacyProviderError, LegacyProviderResult, LegacyRenderResourceFrameV1, LegacyReplayMode,
+    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation, LegacyControlTransaction,
+    LegacyCoverageDelta, LegacyDiagnostic, LegacyDirtySection, LegacyEphemeralText, LegacyEvent,
+    LegacyFamilyCoreKind, LegacyFamilyPluginDescriptor, LegacyFamilyPresentationMode,
+    LegacyInputEdge, LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport,
+    LegacyProbeRequest, LegacyProviderError, LegacyProviderResult, LegacyReplayMode,
     LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacyRuntimeStatus,
-    LegacySceneResourceOperationV7, LegacySceneTransactionV7, LegacyScissorV1, LegacySequenced,
-    LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepBudget,
-    LegacyStepInput, LegacyStepOutput, LegacyTextLease, LegacyTextPresentationLeaseV1,
-    LegacyTextureFormat, LegacyTraceEntry, LegacyVertexV1, LegacyVfsListedFile,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection,
+    LegacyStepInput, LegacyStepOutput, LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1,
+    LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
 };
 
 #[repr(C)]
@@ -138,6 +136,8 @@ pub struct FfiFamilyPluginDescriptor {
     pub family_id: RString,
     pub plugin_id: RString,
     pub provider_id: RString,
+    pub core_kind: FfiFamilyCoreKind,
+    pub presentation_mode: FfiFamilyPresentationMode,
     pub engine_version: RString,
     pub rustc_fingerprint: RString,
     pub feature_fingerprint: RString,
@@ -148,12 +148,34 @@ pub struct FfiFamilyPluginDescriptor {
     pub license: RString,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiFamilyCoreKind {
+    Native,
+    Ported,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiFamilyPresentationMode {
+    SingleLayer,
+    MultiLayer,
+}
+
 impl From<LegacyFamilyPluginDescriptor> for FfiFamilyPluginDescriptor {
     fn from(value: LegacyFamilyPluginDescriptor) -> Self {
         Self {
             family_id: value.family_id.0.into(),
             plugin_id: value.plugin_id.into(),
             provider_id: value.provider_id.into(),
+            core_kind: match value.core_kind {
+                LegacyFamilyCoreKind::Native => FfiFamilyCoreKind::Native,
+                LegacyFamilyCoreKind::Ported => FfiFamilyCoreKind::Ported,
+            },
+            presentation_mode: match value.presentation_mode {
+                LegacyFamilyPresentationMode::SingleLayer => FfiFamilyPresentationMode::SingleLayer,
+                LegacyFamilyPresentationMode::MultiLayer => FfiFamilyPresentationMode::MultiLayer,
+            },
             engine_version: value.engine_version.into(),
             rustc_fingerprint: value.rustc_fingerprint.into(),
             feature_fingerprint: value.feature_fingerprint.into(),
@@ -172,6 +194,14 @@ impl From<FfiFamilyPluginDescriptor> for LegacyFamilyPluginDescriptor {
             family_id: FamilyId(value.family_id.to_string()),
             plugin_id: value.plugin_id.to_string(),
             provider_id: value.provider_id.to_string(),
+            core_kind: match value.core_kind {
+                FfiFamilyCoreKind::Native => LegacyFamilyCoreKind::Native,
+                FfiFamilyCoreKind::Ported => LegacyFamilyCoreKind::Ported,
+            },
+            presentation_mode: match value.presentation_mode {
+                FfiFamilyPresentationMode::SingleLayer => LegacyFamilyPresentationMode::SingleLayer,
+                FfiFamilyPresentationMode::MultiLayer => LegacyFamilyPresentationMode::MultiLayer,
+            },
             engine_version: value.engine_version.to_string(),
             rustc_fingerprint: value.rustc_fingerprint.to_string(),
             feature_fingerprint: value.feature_fingerprint.to_string(),
@@ -412,34 +442,6 @@ impl From<FfiReplayMode> for LegacyReplayMode {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
-pub struct FfiStepBudget {
-    pub max_instructions: u32,
-    pub max_effects: u32,
-    pub max_trace_entries: u32,
-}
-
-impl From<LegacyStepBudget> for FfiStepBudget {
-    fn from(value: LegacyStepBudget) -> Self {
-        Self {
-            max_instructions: value.max_instructions,
-            max_effects: value.max_effects,
-            max_trace_entries: value.max_trace_entries,
-        }
-    }
-}
-
-impl From<FfiStepBudget> for LegacyStepBudget {
-    fn from(value: FfiStepBudget) -> Self {
-        Self {
-            max_instructions: value.max_instructions,
-            max_effects: value.max_effects,
-            max_trace_entries: value.max_trace_entries,
-        }
-    }
-}
-
-#[repr(C)]
 #[derive(Debug, Clone, PartialEq, StableAbi)]
 pub struct FfiInputEdge {
     pub control: RString,
@@ -540,7 +542,6 @@ pub struct FfiStepInput {
     pub input_edges: RVec<FfiInputEdge>,
     pub await_results: RVec<FfiAwaitResult>,
     pub provider_results: RVec<FfiProviderResult>,
-    pub budget: FfiStepBudget,
 }
 
 impl From<LegacyStepInput> for FfiStepInput {
@@ -568,7 +569,6 @@ impl From<LegacyStepInput> for FfiStepInput {
                 .map(Into::into)
                 .collect::<Vec<_>>()
                 .into(),
-            budget: value.budget.into(),
         }
     }
 }
@@ -593,7 +593,6 @@ impl From<FfiStepInput> for LegacyStepInput {
                 .cloned()
                 .map(Into::into)
                 .collect(),
-            budget: value.budget.into(),
         }
     }
 }
@@ -1104,202 +1103,10 @@ pub struct FfiLiveTextLease {
 #[repr(C)]
 #[derive(Debug, StableAbi)]
 pub struct FfiLiveOutput {
-    pub scenes: RVec<FfiLiveSceneTransaction>,
-    pub resource_scenes: RVec<FfiLiveResourceScene>,
+    pub layers: RVec<crate::FfiLayerTransactionV9>,
     pub audio: RVec<FfiLiveAudioPacket>,
     pub audio_commands: RVec<FfiLiveAudioCommand>,
-    pub text: RVec<FfiLiveTextLease>,
-    pub text_presentations: RVec<FfiLiveTextPresentation>,
     pub video: RVec<FfiLiveVideoCommand>,
-}
-
-fn ffi_live_format(value: LegacyTextureFormat) -> FfiLiveTextureFormat {
-    match value {
-        LegacyTextureFormat::Rgba8 => FfiLiveTextureFormat::Rgba8,
-        LegacyTextureFormat::LumaAlpha8 => FfiLiveTextureFormat::LumaAlpha8,
-    }
-}
-
-fn legacy_live_format(value: FfiLiveTextureFormat) -> LegacyTextureFormat {
-    match value {
-        FfiLiveTextureFormat::Rgba8 => LegacyTextureFormat::Rgba8,
-        FfiLiveTextureFormat::LumaAlpha8 => LegacyTextureFormat::LumaAlpha8,
-    }
-}
-
-fn ffi_live_draw(value: LegacyDrawV1) -> FfiLiveDraw {
-    FfiLiveDraw {
-        texture_id: value.texture_id,
-        vertices: value.vertices.map(|vertex| FfiLiveVertex {
-            position: vertex.position,
-            tex_coord: vertex.tex_coord,
-            color: vertex.color,
-        }),
-        blend: match value.blend {
-            LegacyBlendMode::Alpha => FfiLiveBlendMode::Alpha,
-            LegacyBlendMode::Add => FfiLiveBlendMode::Additive,
-            LegacyBlendMode::Opaque => FfiLiveBlendMode::Opaque,
-            LegacyBlendMode::Multiply => FfiLiveBlendMode::Multiply,
-            LegacyBlendMode::Screen => FfiLiveBlendMode::Screen,
-        },
-        texture_filter: match value.texture_filter {
-            crate::LegacyTextureFilter::Nearest => FfiLiveTextureFilter::Nearest,
-            crate::LegacyTextureFilter::Linear => FfiLiveTextureFilter::Linear,
-        },
-        scissor: value
-            .scissor
-            .map(|value| FfiLiveScissor {
-                x: value.x,
-                y: value.y,
-                width: value.width,
-                height: value.height,
-            })
-            .into(),
-    }
-}
-
-fn legacy_live_draw(value: FfiLiveDraw) -> LegacyDrawV1 {
-    LegacyDrawV1 {
-        texture_id: value.texture_id,
-        vertices: value.vertices.map(|vertex| LegacyVertexV1 {
-            position: vertex.position,
-            tex_coord: vertex.tex_coord,
-            color: vertex.color,
-        }),
-        blend: match value.blend {
-            FfiLiveBlendMode::Alpha => LegacyBlendMode::Alpha,
-            FfiLiveBlendMode::Additive => LegacyBlendMode::Add,
-            FfiLiveBlendMode::Opaque => LegacyBlendMode::Opaque,
-            FfiLiveBlendMode::Multiply => LegacyBlendMode::Multiply,
-            FfiLiveBlendMode::Screen => LegacyBlendMode::Screen,
-        },
-        texture_filter: match value.texture_filter {
-            FfiLiveTextureFilter::Nearest => crate::LegacyTextureFilter::Nearest,
-            FfiLiveTextureFilter::Linear => crate::LegacyTextureFilter::Linear,
-        },
-        scissor: value.scissor.into_option().map(|value| LegacyScissorV1 {
-            x: value.x,
-            y: value.y,
-            width: value.width,
-            height: value.height,
-        }),
-    }
-}
-
-fn ffi_live_scene(value: LegacySceneTransactionV7) -> FfiLiveSceneTransaction {
-    FfiLiveSceneTransaction {
-        sequence: value.sequence,
-        width: value.width,
-        height: value.height,
-        compositing: match value.compositing {
-            crate::LegacySceneCompositingV1::LinearSrgb => FfiLiveSceneCompositing::LinearSrgb,
-            crate::LegacySceneCompositingV1::EncodedSrgb => FfiLiveSceneCompositing::EncodedSrgb,
-        },
-        resources: value
-            .resources
-            .into_iter()
-            .map(|operation| match operation {
-                LegacySceneResourceOperationV7::CreateTexture {
-                    texture_id,
-                    generation,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                } => FfiLiveSceneResourceOperation::Create(FfiLiveTextureCreate {
-                    texture_id,
-                    generation,
-                    width,
-                    height,
-                    format: ffi_live_format(format),
-                    pixels: pixels.into_ffi(),
-                }),
-                LegacySceneResourceOperationV7::UpdateTexture {
-                    texture_id,
-                    generation,
-                    x,
-                    y,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                } => FfiLiveSceneResourceOperation::Update(FfiLiveTextureUpdate {
-                    texture_id,
-                    generation,
-                    x,
-                    y,
-                    width,
-                    height,
-                    format: ffi_live_format(format),
-                    pixels: pixels.into_ffi(),
-                }),
-                LegacySceneResourceOperationV7::DestroyTexture {
-                    texture_id,
-                    generation,
-                } => FfiLiveSceneResourceOperation::Destroy {
-                    texture_id,
-                    generation,
-                },
-            })
-            .collect::<Vec<_>>()
-            .into(),
-        draws: value
-            .draws
-            .into_iter()
-            .map(ffi_live_draw)
-            .collect::<Vec<_>>()
-            .into(),
-        reset_resources: value.reset_resources,
-    }
-}
-
-fn legacy_live_scene(value: FfiLiveSceneTransaction) -> LegacySceneTransactionV7 {
-    LegacySceneTransactionV7 {
-        sequence: value.sequence,
-        width: value.width,
-        height: value.height,
-        compositing: match value.compositing {
-            FfiLiveSceneCompositing::LinearSrgb => crate::LegacySceneCompositingV1::LinearSrgb,
-            FfiLiveSceneCompositing::EncodedSrgb => crate::LegacySceneCompositingV1::EncodedSrgb,
-        },
-        resources: value
-            .resources
-            .into_iter()
-            .map(|operation| match operation {
-                FfiLiveSceneResourceOperation::Create(value) => {
-                    LegacySceneResourceOperationV7::CreateTexture {
-                        texture_id: value.texture_id,
-                        generation: value.generation,
-                        width: value.width,
-                        height: value.height,
-                        format: legacy_live_format(value.format),
-                        pixels: value.pixels.into_owned(),
-                    }
-                }
-                FfiLiveSceneResourceOperation::Update(value) => {
-                    LegacySceneResourceOperationV7::UpdateTexture {
-                        texture_id: value.texture_id,
-                        generation: value.generation,
-                        x: value.x,
-                        y: value.y,
-                        width: value.width,
-                        height: value.height,
-                        format: legacy_live_format(value.format),
-                        pixels: value.pixels.into_owned(),
-                    }
-                }
-                FfiLiveSceneResourceOperation::Destroy {
-                    texture_id,
-                    generation,
-                } => LegacySceneResourceOperationV7::DestroyTexture {
-                    texture_id,
-                    generation,
-                },
-            })
-            .collect(),
-        draws: value.draws.into_iter().map(legacy_live_draw).collect(),
-        reset_resources: value.reset_resources,
-    }
 }
 
 fn ffi_live_audio(value: LegacyAudioPacketV7) -> FfiLiveAudioPacket {
@@ -1537,123 +1344,12 @@ fn legacy_live_audio_command(value: FfiLiveAudioCommand) -> LegacySequenced<Lega
     LegacySequenced { sequence, value }
 }
 
-fn ffi_live_text(value: LegacySequenced<LegacyTextPresentationLeaseV1>) -> FfiLiveTextPresentation {
-    let LegacySequenced {
-        sequence,
-        value: binding,
-    } = value;
-    FfiLiveTextPresentation {
-        sequence,
-        lease_id: binding.lease_id.into(),
-        layout_id: binding.presentation.layout_id.into(),
-        language: binding.presentation.language.into(),
-        font_families: strings_to_ffi(binding.presentation.font_families),
-        body: FfiLiveTextRegion {
-            x: binding.presentation.body.x,
-            y: binding.presentation.body.y,
-            width: binding.presentation.body.width,
-            height: binding.presentation.body.height,
-            font_size: binding.presentation.body.font_size,
-            line_height: binding.presentation.body.line_height,
-            max_lines: binding.presentation.body.max_lines,
-        },
-        speaker: binding
-            .presentation
-            .speaker
-            .map(|speaker| FfiLiveTextRegion {
-                x: speaker.x,
-                y: speaker.y,
-                width: speaker.width,
-                height: speaker.height,
-                font_size: speaker.font_size,
-                line_height: speaker.line_height,
-                max_lines: speaker.max_lines,
-            })
-            .into(),
-        rgba: binding.presentation.rgba,
-    }
-}
-
-fn legacy_live_text(
-    value: FfiLiveTextPresentation,
-) -> LegacySequenced<LegacyTextPresentationLeaseV1> {
-    LegacySequenced {
-        sequence: value.sequence,
-        value: LegacyTextPresentationLeaseV1 {
-            lease_id: value.lease_id.to_string(),
-            presentation: crate::LegacyTextPresentationV1 {
-                layout_id: value.layout_id.to_string(),
-                language: value.language.to_string(),
-                font_families: value
-                    .font_families
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-                body: crate::LegacyTextRegionV1 {
-                    x: value.body.x,
-                    y: value.body.y,
-                    width: value.body.width,
-                    height: value.body.height,
-                    font_size: value.body.font_size,
-                    line_height: value.body.line_height,
-                    max_lines: value.body.max_lines,
-                },
-                speaker: value
-                    .speaker
-                    .into_option()
-                    .map(|speaker| crate::LegacyTextRegionV1 {
-                        x: speaker.x,
-                        y: speaker.y,
-                        width: speaker.width,
-                        height: speaker.height,
-                        font_size: speaker.font_size,
-                        line_height: speaker.line_height,
-                        max_lines: speaker.max_lines,
-                    }),
-                rgba: value.rgba,
-            },
-        },
-    }
-}
-
 fn ffi_live_output(value: LegacyLiveOutput) -> FfiLiveOutput {
     FfiLiveOutput {
-        scenes: value
-            .scenes
+        layers: value
+            .layers
             .into_iter()
-            .map(ffi_live_scene)
-            .collect::<Vec<_>>()
-            .into(),
-        resource_scenes: value
-            .resource_scenes
-            .into_iter()
-            .map(|scene| FfiLiveResourceScene {
-                sequence: scene.sequence,
-                width: scene.value.width,
-                height: scene.value.height,
-                textures: scene
-                    .value
-                    .texture_resources
-                    .into_iter()
-                    .map(|texture| FfiLiveResourceTexture {
-                        texture_id: texture.texture_id,
-                        resource_uri: texture.resource_uri.into(),
-                        codec: texture.codec.into(),
-                        revision: texture.revision,
-                        decoded_width: texture.decoded_width,
-                        decoded_height: texture.decoded_height,
-                        decoded_format: ffi_live_format(texture.decoded_format),
-                    })
-                    .collect::<Vec<_>>()
-                    .into(),
-                draws: scene
-                    .value
-                    .draws
-                    .into_iter()
-                    .map(ffi_live_draw)
-                    .collect::<Vec<_>>()
-                    .into(),
-            })
+            .map(crate::v9::ffi_layer_transaction)
             .collect::<Vec<_>>()
             .into(),
         audio: value
@@ -1666,23 +1362,6 @@ fn ffi_live_output(value: LegacyLiveOutput) -> FfiLiveOutput {
             .audio_commands
             .into_iter()
             .map(|command| ffi_live_audio_command(command.sequence, command.value))
-            .collect::<Vec<_>>()
-            .into(),
-        text: value
-            .text
-            .into_iter()
-            .map(|text| FfiLiveTextLease {
-                sequence: text.sequence,
-                lease_id: text.lease_id.into(),
-                byte_len: text.byte_len,
-                source_ref: text.source_ref.into(),
-            })
-            .collect::<Vec<_>>()
-            .into(),
-        text_presentations: value
-            .text_presentations
-            .into_iter()
-            .map(ffi_live_text)
             .collect::<Vec<_>>()
             .into(),
         video: value
@@ -1721,52 +1400,16 @@ fn ffi_live_output(value: LegacyLiveOutput) -> FfiLiveOutput {
 
 fn legacy_live_output(value: FfiLiveOutput) -> LegacyLiveOutput {
     LegacyLiveOutput {
-        scenes: value.scenes.into_iter().map(legacy_live_scene).collect(),
-        resource_scenes: value
-            .resource_scenes
+        layers: value
+            .layers
             .into_iter()
-            .map(|scene| LegacySequenced {
-                sequence: scene.sequence,
-                value: LegacyRenderResourceFrameV1 {
-                    width: scene.width,
-                    height: scene.height,
-                    texture_resources: scene
-                        .textures
-                        .into_iter()
-                        .map(|texture| crate::LegacyTextureResourceV1 {
-                            texture_id: texture.texture_id,
-                            resource_uri: texture.resource_uri.to_string(),
-                            codec: texture.codec.to_string(),
-                            revision: texture.revision,
-                            decoded_width: texture.decoded_width,
-                            decoded_height: texture.decoded_height,
-                            decoded_format: legacy_live_format(texture.decoded_format),
-                        })
-                        .collect(),
-                    draws: scene.draws.into_iter().map(legacy_live_draw).collect(),
-                },
-            })
+            .map(crate::v9::legacy_layer_transaction)
             .collect(),
         audio: value.audio.into_iter().map(legacy_live_audio).collect(),
         audio_commands: value
             .audio_commands
             .into_iter()
             .map(legacy_live_audio_command)
-            .collect(),
-        text: value
-            .text
-            .into_iter()
-            .map(|text| LegacyTextLease {
-                sequence: text.sequence,
-                lease_id: text.lease_id.to_string(),
-                byte_len: text.byte_len,
-                source_ref: text.source_ref.to_string(),
-            })
-            .collect(),
-        text_presentations: value
-            .text_presentations
-            .into_iter()
-            .map(legacy_live_text)
             .collect(),
         video: value
             .video
@@ -1967,42 +1610,6 @@ impl TryFrom<FfiStepOutput> for LegacyStepOutput {
 #[cfg(test)]
 mod live_zero_copy_tests {
     use super::*;
-
-    #[test]
-    fn scene_rgba8_allocation_moves_across_family_ffi_wire() {
-        let pixels = vec![255, 0, 128, 255];
-        let source_ptr = pixels.as_ptr();
-        let transaction = LegacySceneTransactionV7 {
-            sequence: 7,
-            width: 1,
-            height: 1,
-            compositing: crate::LegacySceneCompositingV1::LinearSrgb,
-            resources: vec![LegacySceneResourceOperationV7::CreateTexture {
-                texture_id: 11,
-                generation: 1,
-                width: 1,
-                height: 1,
-                format: LegacyTextureFormat::Rgba8,
-                pixels: pixels.into(),
-            }],
-            draws: Vec::new(),
-            reset_resources: false,
-        };
-
-        let ffi = ffi_live_scene(transaction);
-        let ffi_ptr = match ffi.resources.as_slice().first().expect("scene resource") {
-            FfiLiveSceneResourceOperation::Create(value) => value.pixels.as_slice().as_ptr(),
-            _ => panic!("expected create texture"),
-        };
-        assert_eq!(ffi_ptr, source_ptr);
-
-        let legacy = legacy_live_scene(ffi);
-        let returned_ptr = match legacy.resources.as_slice().first().expect("scene resource") {
-            LegacySceneResourceOperationV7::CreateTexture { pixels, .. } => pixels.as_ptr(),
-            _ => panic!("expected create texture"),
-        };
-        assert_eq!(returned_ptr, source_ptr);
-    }
 
     #[test]
     fn pcm_i16_allocation_moves_across_family_ffi_wire() {

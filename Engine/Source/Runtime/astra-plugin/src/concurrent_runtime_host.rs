@@ -748,20 +748,25 @@ impl FfiRuntimeProviderFactory {
     pub(crate) fn new(
         registration: FfiRuntimeProviderRegistration,
     ) -> Result<Self, RuntimeHostError> {
-        if registration.abi_version != PRODUCT_RUNTIME_PROVIDER_ABI_VERSION {
-            return Err(RuntimeHostError::new(
-                "ASTRA_RUNTIME_PROVIDER_ABI_VERSION",
-                format!(
-                    "runtime provider ABI {} is unsupported; expected {}",
-                    registration.abi_version, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION
-                ),
-            ));
-        }
+        validate_runtime_provider_abi_version(registration.abi_version)?;
         Ok(Self {
             registration,
             instance_id: Mutex::new(None),
         })
     }
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn validate_runtime_provider_abi_version(version: u32) -> Result<(), RuntimeHostError> {
+    if version != PRODUCT_RUNTIME_PROVIDER_ABI_VERSION {
+        return Err(RuntimeHostError::new(
+            "ASTRA_RUNTIME_PROVIDER_ABI_VERSION",
+            format!(
+                "runtime provider ABI {version} is unsupported; expected {PRODUCT_RUNTIME_PROVIDER_ABI_VERSION}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "dynamic-abi")]
@@ -1764,7 +1769,17 @@ mod dynamic_pcm_tests {
         RuntimeLiveAudioCommand, RuntimeLivePcmBuffer,
     };
 
-    use super::{runtime_live_audio_command, runtime_live_audio_packet};
+    use super::{
+        runtime_live_audio_command, runtime_live_audio_packet,
+        validate_runtime_provider_abi_version,
+    };
+
+    #[test]
+    fn provider_v3_is_rejected_after_the_v4_hard_cut() {
+        let error = validate_runtime_provider_abi_version(3).unwrap_err();
+        assert_eq!(error.code(), "ASTRA_RUNTIME_PROVIDER_ABI_VERSION");
+        validate_runtime_provider_abi_version(4).unwrap();
+    }
 
     #[test]
     fn provider_packet_preserves_i16_allocation() {

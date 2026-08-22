@@ -1,21 +1,18 @@
+use crate::{
+    FfiByteRange, FfiByteSourceStat, FfiFamilyPluginDescriptor, FfiOpenRequest, FfiProbeReport,
+    FfiProbeRequest, FfiRangeReadResult, FfiRuntimeHostCtx, FfiShutdownReport, FfiStepInput,
+    FfiStepOutput, FfiVfsListedFile, LegacyProviderError,
+};
 use abi_stable::{
     library::RootModule,
     sabi_types::VersionStrings,
     std_types::{RResult, RString},
     StableAbi,
 };
-use astra_byte_source::FfiOwnedByteBuffer;
 
-use crate::{
-    FfiByteRange, FfiByteSourceStat, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiOpenRequest,
-    FfiProbeReport, FfiProbeRequest, FfiRangeReadResult, FfiRestoreReport, FfiRuntimeHostCtx,
-    FfiShutdownReport, FfiSnapshotEnvelope, FfiStepInput, FfiStepOutput, FfiVfsListedFile,
-    LegacyProviderError,
-};
-
-/// The v7 wire contract makes bulk ownership and its scalar kind explicit.
-/// v6/v5 modules are intentionally rejected by the loader; there is no shim.
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v7";
+/// The v9 wire contract makes surface, Hook, writable-file and bulk ownership explicit.
+/// v7/v8 modules are intentionally rejected by the loader; there is no shim.
+pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v9";
 
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
@@ -102,34 +99,6 @@ pub struct FfiSessionCall {
 
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiRestoreCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub session_id: RString,
-    pub snapshot: FfiSnapshotEnvelope,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiTextLeaseCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub session_id: RString,
-    pub lease_id: RString,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiResourceReadCall {
-    pub instance_id: RString,
-    pub ctx: FfiRuntimeHostCtx,
-    pub session_id: RString,
-    pub resource_uri: RString,
-    pub max_bytes: u64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub struct FfiVfsStatCall {
     pub mount_set_id: RString,
     pub uri: RString,
@@ -161,14 +130,6 @@ pub type FfiDestroyInstance = extern "C" fn(FfiProviderInstanceRequest) -> FfiLe
 pub type FfiProbe = extern "C" fn(FfiProbeCall) -> FfiLegacyResult<FfiProbeReport>;
 pub type FfiOpen = extern "C" fn(FfiOpenCall) -> FfiLegacyResult<RString>;
 pub type FfiStep = extern "C" fn(FfiStepCall) -> FfiLegacyResult<FfiStepOutput>;
-pub type FfiSave = extern "C" fn(FfiSessionCall) -> FfiLegacyResult<FfiSnapshotEnvelope>;
-pub type FfiRestore = extern "C" fn(FfiRestoreCall) -> FfiLegacyResult<FfiRestoreReport>;
-pub type FfiTakeEphemeralText =
-    extern "C" fn(
-        FfiTextLeaseCall,
-    ) -> FfiLegacyResult<abi_stable::std_types::ROption<FfiEphemeralText>>;
-pub type FfiReadSessionResource =
-    extern "C" fn(FfiResourceReadCall) -> FfiLegacyResult<FfiOwnedByteBuffer>;
 pub type FfiShutdown = extern "C" fn(FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport>;
 
 pub type FfiVfsStat = extern "C" fn(RString, FfiVfsStatCall) -> FfiLegacyResult<FfiByteSourceStat>;
@@ -190,6 +151,14 @@ pub struct FfiLegacyHostServices {
     pub read_vfs_range: FfiVfsReadRange,
     #[sabi(unsafe_opaque_field)]
     pub enumerate_vfs: FfiVfsEnumerate,
+    #[sabi(unsafe_opaque_field)]
+    pub acquire_surface: crate::FfiAcquireSurfaceV9,
+    #[sabi(unsafe_opaque_field)]
+    pub commit_surface: crate::FfiCommitSurfaceV9,
+    #[sabi(unsafe_opaque_field)]
+    pub invoke_hook: crate::FfiInvokeHookV1,
+    #[sabi(unsafe_opaque_field)]
+    pub writable_file: crate::FfiWritableFileV1,
 }
 
 impl core::fmt::Debug for FfiLegacyHostServices {
@@ -222,13 +191,6 @@ pub struct AstraLegacyFamilyModule {
     #[sabi(unsafe_opaque_field)]
     pub step: FfiStep,
     #[sabi(unsafe_opaque_field)]
-    pub save: FfiSave,
-    #[sabi(unsafe_opaque_field)]
-    pub restore: FfiRestore,
-    #[sabi(unsafe_opaque_field)]
-    pub take_ephemeral_text: FfiTakeEphemeralText,
-    #[sabi(unsafe_opaque_field)]
-    pub read_session_resource: FfiReadSessionResource,
     #[sabi(last_prefix_field)]
     #[sabi(unsafe_opaque_field)]
     pub shutdown: FfiShutdown,
@@ -248,11 +210,13 @@ mod tests {
     use crate::{FamilyId, FfiOwnedBytes, LegacyFamilyPluginDescriptor};
 
     #[test]
-    fn v7_descriptor_round_trips_through_typed_wire() {
+    fn v9_descriptor_round_trips_through_typed_wire() {
         let descriptor = LegacyFamilyPluginDescriptor {
             family_id: FamilyId("fvp".into()),
             plugin_id: "astra.emu.fvp".into(),
             provider_id: "astra.emu.fvp.runtime".into(),
+            core_kind: crate::LegacyFamilyCoreKind::Ported,
+            presentation_mode: crate::LegacyFamilyPresentationMode::SingleLayer,
             engine_version: "0.1.0".into(),
             rustc_fingerprint: "rustc.stable".into(),
             feature_fingerprint: "fvp.test".into(),
@@ -268,11 +232,34 @@ mod tests {
     }
 
     #[test]
-    fn v7_error_preserves_code_without_serialization() {
+    fn v9_error_preserves_code_without_serialization() {
         let ffi = FfiLegacyError::from(LegacyProviderError::invalid("TEST_CODE", "message"));
         let error = LegacyProviderError::from(ffi);
         assert_eq!(error.code(), "TEST_CODE");
         assert_eq!(error.message(), "message");
+    }
+
+    #[test]
+    fn v7_and_v8_descriptors_are_rejected_without_a_shim() {
+        for fingerprint in ["astra.emu.family_abi.v7", "astra.emu.family_abi.v8"] {
+            let descriptor = LegacyFamilyPluginDescriptor {
+                family_id: FamilyId("fvp".into()),
+                plugin_id: "astra.emu.fvp".into(),
+                provider_id: "astra.emu.fvp.runtime".into(),
+                core_kind: crate::LegacyFamilyCoreKind::Ported,
+                presentation_mode: crate::LegacyFamilyPresentationMode::SingleLayer,
+                engine_version: "0.1.0".into(),
+                rustc_fingerprint: "rustc.stable".into(),
+                feature_fingerprint: "fvp.test".into(),
+                abi_fingerprint: fingerprint.into(),
+                supported_formats: vec!["fvp.hcb".into()],
+                permissions: vec!["vfs.read".into()],
+                report_redaction: "astra.emu.redaction.v1".into(),
+                license: "MPL-2.0".into(),
+            };
+            let error = descriptor.validate().unwrap_err();
+            assert_eq!(error.code(), "ASTRA_EMU_FAMILY_ABI_FINGERPRINT");
+        }
     }
 
     #[test]

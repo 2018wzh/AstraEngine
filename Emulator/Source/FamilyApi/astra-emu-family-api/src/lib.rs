@@ -5,13 +5,14 @@ mod ffi_wire;
 mod input_key;
 mod provider;
 mod scheduler;
+mod v9;
 
 pub use ffi::*;
 pub use ffi_wire::*;
 pub use input_key::*;
 pub use provider::*;
 pub use scheduler::*;
+pub use v9::*;
 
-pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v2";
+pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v9";
 pub const LEGACY_EFFECT_SCHEMA: &str = "astra.emu.legacy_effect.v2";
-pub const LEGACY_SNAPSHOT_SCHEMA: &str = "astra.emu.legacy_snapshot.v2";

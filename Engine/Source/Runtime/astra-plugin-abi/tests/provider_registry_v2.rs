@@ -67,6 +67,7 @@ fn registry_and_policy() -> (PluginExtensionRegistrySnapshot, ProviderPolicy) {
             runtime_id: "native_vn".into(),
             product_kind: "visual_novel".into(),
             provider_id: "astra.runtime.native_vn".into(),
+            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
             supported_targets: vec!["game".into()],
             capabilities: vec!["runtime.native_vn".into()],
             package_sections: vec![],

@@ -4,7 +4,6 @@
   "type": "object",
   "required": [
     "await_results",
-    "budget",
     "delta_ns",
     "input_edges",
     "mode",
@@ -18,9 +17,6 @@
       "items": {
         "$ref": "#/definitions/LegacyAwaitResult"
       }
-    },
-    "budget": {
-      "$ref": "#/definitions/LegacyStepBudget"
     },
     "delta_ns": {
       "type": "integer",
@@ -144,31 +140,6 @@
         "live",
         "restore_continuation"
       ]
-    },
-    "LegacyStepBudget": {
-      "type": "object",
-      "required": [
-        "max_effects",
-        "max_instructions",
-        "max_trace_entries"
-      ],
-      "properties": {
-        "max_effects": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "max_instructions": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "max_trace_entries": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        }
-      }
     }
   }
 }

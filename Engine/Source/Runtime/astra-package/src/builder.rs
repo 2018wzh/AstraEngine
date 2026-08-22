@@ -169,6 +169,7 @@ fn default_fixture_provider_metadata(package_id: &str, profile: &str) -> (Vec<u8
             runtime_id: "native_vn".to_string(),
             product_kind: "visual_novel".to_string(),
             provider_id: "astra.runtime.native_vn".to_string(),
+            presentation_lane: astra_plugin_abi::RuntimePresentationLane::Scene2D,
             supported_targets: vec!["game".to_string()],
             capabilities: vec!["runtime.native_vn".to_string()],
             package_sections: [

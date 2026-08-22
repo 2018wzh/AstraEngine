@@ -13,16 +13,11 @@ use thiserror::Error;
 use crate::is_valid_input_control;
 
 const MAX_SYMBOL_BYTES: usize = 128;
-const MAX_EFFECTS_PER_STEP: usize = 65_536;
-const MAX_TRACE_ENTRIES_PER_STEP: u32 = 1_000_000;
-const MAX_DIAGNOSTICS_PER_STEP: usize = 256;
 const MAX_SNAPSHOT_SECTIONS: usize = 128;
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
-const MAX_EFFECT_PAYLOAD_BYTES_PER_STEP: usize = 256 * 1024 * 1024;
 const MAX_RENDER_DRAWS: usize = 262_144;
 const MAX_RENDER_TEXTURE_UPDATES: usize = 4096;
 const MAX_AUDIO_SAMPLES_PER_COMMAND: usize = 4_194_304;
-const MAX_WAITS_PER_STEP: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct FamilyId(pub String);
@@ -36,6 +31,8 @@ pub struct LegacyFamilyPluginDescriptor {
     pub family_id: FamilyId,
     pub plugin_id: String,
     pub provider_id: String,
+    pub core_kind: LegacyFamilyCoreKind,
+    pub presentation_mode: LegacyFamilyPresentationMode,
     pub engine_version: String,
     pub rustc_fingerprint: String,
     pub feature_fingerprint: String,
@@ -63,14 +60,48 @@ impl LegacyFamilyPluginDescriptor {
         }
         validate_unique_symbols("supported_formats", &self.supported_formats)?;
         validate_unique_symbols("permissions", &self.permissions)?;
+        if self.abi_fingerprint != crate::LEGACY_FAMILY_ABI_FINGERPRINT {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_FAMILY_ABI_FINGERPRINT",
+                format!(
+                    "family ABI {} is unsupported; expected {}",
+                    self.abi_fingerprint,
+                    crate::LEGACY_FAMILY_ABI_FINGERPRINT
+                ),
+            ));
+        }
         if self.supported_formats.is_empty() {
             return Err(LegacyProviderError::invalid(
                 "ASTRA_EMU_DESCRIPTOR_FORMATS",
                 "family descriptor must declare at least one supported format",
             ));
         }
+        match (self.core_kind, self.presentation_mode) {
+            (LegacyFamilyCoreKind::Native, LegacyFamilyPresentationMode::MultiLayer)
+            | (LegacyFamilyCoreKind::Ported, LegacyFamilyPresentationMode::SingleLayer) => {}
+            _ => {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_DESCRIPTOR_PRESENTATION_MODE",
+                    "native cores require multi_layer and ported cores require single_layer",
+                ));
+            }
+        }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyFamilyCoreKind {
+    Native,
+    Ported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyFamilyPresentationMode {
+    SingleLayer,
+    MultiLayer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -216,37 +247,6 @@ pub enum LegacyReplayMode {
     RestoreContinuation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyStepBudget {
-    pub max_instructions: u32,
-    pub max_effects: u32,
-    pub max_trace_entries: u32,
-}
-
-impl LegacyStepBudget {
-    pub fn validate(&self) -> Result<(), LegacyProviderError> {
-        if self.max_instructions == 0 || self.max_instructions > 10_000_000 {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_INSTRUCTION_BUDGET",
-                "instruction budget must be in 1..=10000000",
-            ));
-        }
-        if self.max_effects == 0 || self.max_effects as usize > MAX_EFFECTS_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_EFFECT_BUDGET",
-                "effect budget is outside the supported bound",
-            ));
-        }
-        if self.max_trace_entries == 0 || self.max_trace_entries > MAX_TRACE_ENTRIES_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_TRACE_BUDGET",
-                "trace budget is outside the supported bound",
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyStepInput {
     pub tick_index: u64,
@@ -256,25 +256,14 @@ pub struct LegacyStepInput {
     pub input_edges: Vec<LegacyInputEdge>,
     pub await_results: Vec<LegacyAwaitResult>,
     pub provider_results: Vec<LegacyProviderResult>,
-    pub budget: LegacyStepBudget,
 }
 
 impl LegacyStepInput {
     pub fn validate(&self) -> Result<(), LegacyProviderError> {
-        self.budget.validate()?;
         if self.tick_index == 0 || self.delta_ns == 0 || self.delta_ns > 1_000_000_000 {
             return Err(LegacyProviderError::invalid(
                 "ASTRA_EMU_STEP_TIMING",
                 "tick must be non-zero and delta must be within 1ns..=1s",
-            ));
-        }
-        if self.input_edges.len() > 4096
-            || self.await_results.len() > 4096
-            || self.provider_results.len() > 4096
-        {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_INPUT_BOUNDS",
-                "step input channel exceeds 4096 entries",
             ));
         }
         validate_sequence(
@@ -362,33 +351,7 @@ pub struct LegacyStepOutput {
 }
 
 impl LegacyStepOutput {
-    pub fn validate(&self, budget: &LegacyStepBudget) -> Result<(), LegacyProviderError> {
-        budget.validate()?;
-        let effect_count = self.live.len() + self.control.len();
-        if effect_count > budget.max_effects as usize || effect_count > MAX_EFFECTS_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_EFFECT_COUNT",
-                "provider returned more effects than the negotiated budget",
-            ));
-        }
-        if self.trace.len() > budget.max_trace_entries as usize {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_TRACE_COUNT",
-                "provider returned more trace entries than the negotiated budget",
-            ));
-        }
-        if self.diagnostics.len() > MAX_DIAGNOSTICS_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_DIAGNOSTIC_COUNT",
-                "provider returned too many diagnostics",
-            ));
-        }
-        if self.control.waits.len() > MAX_WAITS_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_STEP_WAIT_COUNT",
-                "provider returned too many wait requests",
-            ));
-        }
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
         let mut sequences = BTreeSet::new();
         let mut payload_bytes = 0usize;
         let mut add_sequence = |sequence| -> Result<(), LegacyProviderError> {
@@ -409,26 +372,9 @@ impl LegacyStepOutput {
             })?;
             Ok(())
         };
-        for transaction in &self.live.scenes {
+        for transaction in &self.live.layers {
             add_sequence(transaction.sequence)?;
             transaction.validate()?;
-            add_payload(
-                transaction
-                    .resources
-                    .iter()
-                    .map(|operation| match operation {
-                        LegacySceneResourceOperationV7::CreateTexture { pixels, .. }
-                        | LegacySceneResourceOperationV7::UpdateTexture { pixels, .. } => {
-                            pixels.len()
-                        }
-                        LegacySceneResourceOperationV7::DestroyTexture { .. } => 0,
-                    })
-                    .sum(),
-            )?;
-        }
-        for scene in &self.live.resource_scenes {
-            add_sequence(scene.sequence)?;
-            scene.value.validate()?;
         }
         for packet in &self.live.audio {
             add_sequence(packet.sequence)?;
@@ -470,15 +416,6 @@ impl LegacyStepOutput {
             })?;
             add_payload(bytes)?;
         }
-        for text in &self.live.text {
-            add_sequence(text.sequence)?;
-            validate_symbol("text_lease_id", &text.lease_id)?;
-            validate_symbol("text_source_ref", &text.source_ref)?;
-        }
-        for binding in &self.live.text_presentations {
-            add_sequence(binding.sequence)?;
-            binding.value.validate()?;
-        }
         for video in &self.live.video {
             add_sequence(video.sequence)?;
             video.value.validate()?;
@@ -496,12 +433,6 @@ impl LegacyStepOutput {
         for dirty in &self.control.dirty_sections {
             add_sequence(dirty.sequence)?;
             validate_symbol("snapshot_section", &dirty.section_id)?;
-        }
-        if payload_bytes > MAX_EFFECT_PAYLOAD_BYTES_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_EFFECT_PAYLOAD_BOUNDS",
-                "combined effect payloads exceed the per-step bound",
-            ));
         }
         let mut wait_tokens = BTreeSet::new();
         for wait in &self.control.waits {
@@ -608,24 +539,15 @@ pub struct LegacyDirtySection {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct LegacyLiveOutput {
-    pub scenes: Vec<LegacySceneTransactionV7>,
-    pub resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
+    pub layers: Vec<crate::LegacyLayerTransactionV9>,
     pub audio: Vec<LegacyAudioPacketV7>,
     pub audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
-    pub text: Vec<LegacyTextLease>,
-    pub text_presentations: Vec<LegacySequenced<LegacyTextPresentationLeaseV1>>,
     pub video: Vec<LegacySequenced<LegacyVideoCommandV1>>,
 }
 
 impl LegacyLiveOutput {
     pub fn len(&self) -> usize {
-        self.scenes.len()
-            + self.resource_scenes.len()
-            + self.audio.len()
-            + self.audio_commands.len()
-            + self.text.len()
-            + self.text_presentations.len()
-            + self.video.len()
+        self.layers.len() + self.audio.len() + self.audio_commands.len() + self.video.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -633,14 +555,11 @@ impl LegacyLiveOutput {
     }
 
     pub fn max_sequence(&self) -> Option<u64> {
-        self.scenes
+        self.layers
             .iter()
             .map(|value| value.sequence)
-            .chain(self.resource_scenes.iter().map(|value| value.sequence))
             .chain(self.audio.iter().map(|value| value.sequence))
             .chain(self.audio_commands.iter().map(|value| value.sequence))
-            .chain(self.text.iter().map(|value| value.sequence))
-            .chain(self.text_presentations.iter().map(|value| value.sequence))
             .chain(self.video.iter().map(|value| value.sequence))
             .max()
     }
@@ -1373,12 +1292,6 @@ impl LegacyRenderFrameV1 {
                 )
             })?;
         }
-        if bytes > MAX_EFFECT_PAYLOAD_BYTES_PER_STEP {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_RENDER_TEXTURE_BOUNDS",
-                "render texture uploads exceed the per-step bound",
-            ));
-        }
         validate_render_draws(&self.draws)
     }
 }
@@ -1732,46 +1645,6 @@ pub trait LegacyRuntimeProvider: Send {
         session: &LegacyRuntimeSessionId,
         input: LegacyStepInput,
     ) -> Result<LegacyStepOutput, LegacyProviderError>;
-    fn save(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-    ) -> Result<LegacySnapshotEnvelope, LegacyProviderError>;
-    fn restore(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        snapshot: &LegacySnapshotEnvelope,
-    ) -> Result<LegacyRestoreReport, LegacyProviderError>;
-    /// Consumes plaintext captured for a `TextCapture` effect. The lease is an
-    /// out-of-band, single-use channel: its value is never serializable and
-    /// must not enter RuntimeWorld, save/replay, reports, logs, or packages.
-    fn take_ephemeral_text(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        lease_id: &str,
-    ) -> Result<Option<LegacyEphemeralText>, LegacyProviderError>;
-    /// Resolves a family-owned virtual resource for a host media service.
-    ///
-    /// The returned commercial bytes are an ephemeral, bounded host channel.
-    /// They must never enter effects, RuntimeWorld, save/replay, reports, logs,
-    /// or packages. Archive and virtual-path semantics remain owned by the
-    /// family provider instead of being duplicated in Manager hosts.
-    fn read_session_resource(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<OwnedByteBuffer, LegacyProviderError>;
-    fn begin_session_resource_read(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<LegacyResourceRead, LegacyProviderError>;
     fn shutdown(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -1963,14 +1836,6 @@ mod tests {
     use super::*;
     use serde::{de::DeserializeOwned, Serialize};
 
-    fn budget() -> LegacyStepBudget {
-        LegacyStepBudget {
-            max_instructions: 1,
-            max_effects: 8,
-            max_trace_entries: 8,
-        }
-    }
-
     #[test]
     fn video_command_requires_safe_identity_uri_and_stage_bounds() {
         let command = LegacyVideoCommandV1::Play {
@@ -2056,7 +1921,7 @@ mod tests {
             state_revision: 0,
         };
         assert_eq!(
-            output.validate(&budget()).unwrap_err().code(),
+            output.validate().unwrap_err().code(),
             "ASTRA_EMU_WAIT_TOKEN_DUPLICATE"
         );
         let invalid = LegacyStepOutput {
@@ -2070,7 +1935,7 @@ mod tests {
             ..output
         };
         assert_eq!(
-            invalid.validate(&budget()).unwrap_err().code(),
+            invalid.validate().unwrap_err().code(),
             "ASTRA_EMU_WAIT_INPUT_KEYS"
         );
     }

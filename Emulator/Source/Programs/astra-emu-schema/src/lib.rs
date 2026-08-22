@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 use astra_emu_cli::HeadlessRunReportV3;
 use astra_emu_family_api::{
-    LegacyFamilyPluginDescriptor, LegacyProbeReport, LegacySnapshotEnvelope, LegacyStepInput,
+    LegacyFamilyPluginDescriptor, LegacyLayerTransactionV9, LegacyProbeReport, LegacyStepInput,
+    LegacyWritableFileRequestV1,
 };
 use astra_emu_manager_core::{
     AndroidNativePluginManifest, EmuCaseProfile, EmuPlatformRunEvidenceV1,
@@ -51,12 +52,16 @@ pub fn schemas() -> BTreeMap<&'static str, RootSchema> {
         ("fvp-parity.schema.json", schema_for!(FvpParityEvidence)),
         ("legacy-probe.schema.json", schema_for!(LegacyProbeReport)),
         (
-            "legacy-snapshot.schema.json",
-            schema_for!(LegacySnapshotEnvelope),
+            "legacy-layer-transaction-v9.schema.json",
+            schema_for!(LegacyLayerTransactionV9),
         ),
         (
             "legacy-step-input.schema.json",
             schema_for!(LegacyStepInput),
+        ),
+        (
+            "legacy-writable-file-v1.schema.json",
+            schema_for!(LegacyWritableFileRequestV1),
         ),
         (
             "library-migration.schema.json",

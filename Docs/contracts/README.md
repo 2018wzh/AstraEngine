@@ -17,5 +17,6 @@
 | Script / VN | [script-vn.md](script-vn.md) |
 | AstraRPG / `rpg.trpg` | [rpg-trpg.md](rpg-trpg.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
-| AstraEMU Legacy Runtime Provider | [astraemu-ipc.md](astraemu-ipc.md) |
+| AstraEMU Family ABI v9、Layer2D、Hook 与原生存档文件 | [astraemu-ipc.md](astraemu-ipc.md) |
+| AstraEMU Family ABI v9 迁移 | [astraemu-family-abi-v9-migration.md](astraemu-family-abi-v9-migration.md) |
 | Release Gate | [release-gate.md](release-gate.md) |

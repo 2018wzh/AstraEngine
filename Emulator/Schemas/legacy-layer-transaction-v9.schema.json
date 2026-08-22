@@ -1,0 +1,337 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyLayerTransactionV9",
+  "type": "object",
+  "required": [
+    "operations",
+    "sequence",
+    "viewport_height",
+    "viewport_width"
+  ],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacyLayerOperationV9"
+      }
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "viewport_height": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "viewport_width": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "LegacyDamageRectV9": {
+      "type": "object",
+      "required": [
+        "height",
+        "width",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "height": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "x": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "y": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "LegacyLayerBlendV9": {
+      "type": "string",
+      "enum": [
+        "opaque",
+        "alpha",
+        "add",
+        "multiply",
+        "screen"
+      ]
+    },
+    "LegacyLayerFilterV9": {
+      "type": "string",
+      "enum": [
+        "nearest",
+        "linear"
+      ]
+    },
+    "LegacyLayerOperationV9": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "layer",
+            "operation"
+          ],
+          "properties": {
+            "layer": {
+              "$ref": "#/definitions/LegacyLayerStateV9"
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "create"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "layer",
+            "operation"
+          ],
+          "properties": {
+            "layer": {
+              "$ref": "#/definitions/LegacyLayerStateV9"
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "update"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "layer",
+            "operation"
+          ],
+          "properties": {
+            "layer": {
+              "type": "object",
+              "required": [
+                "layer_id"
+              ],
+              "properties": {
+                "layer_id": {
+                  "type": "string"
+                }
+              }
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "destroy"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "LegacyLayerStateV9": {
+      "type": "object",
+      "required": [
+        "blend",
+        "damage",
+        "format",
+        "generation",
+        "height",
+        "layer_id",
+        "opacity",
+        "role",
+        "stride",
+        "surface_id",
+        "texture_filter",
+        "transform",
+        "width",
+        "z_index"
+      ],
+      "properties": {
+        "blend": {
+          "$ref": "#/definitions/LegacyLayerBlendV9"
+        },
+        "clip": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyDamageRectV9"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "damage": {
+          "$ref": "#/definitions/LegacySurfaceDamageV9"
+        },
+        "filter_graph_binding": {
+          "description": "Explicit binding to a host-registered typed FilterGraph. The Family ABI never transports JSON, postcard, shader source, or an implicit preset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "$ref": "#/definitions/LegacySurfaceFormatV9"
+        },
+        "generation": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "height": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "layer_id": {
+          "type": "string"
+        },
+        "opacity": {
+          "type": "number",
+          "format": "float"
+        },
+        "role": {
+          "type": "string"
+        },
+        "stride": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "surface_id": {
+          "type": "string"
+        },
+        "texture_filter": {
+          "$ref": "#/definitions/LegacyLayerFilterV9"
+        },
+        "transform": {
+          "$ref": "#/definitions/LegacyLayerTransformV9"
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "z_index": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "LegacyLayerTransformV9": {
+      "type": "object",
+      "required": [
+        "m11",
+        "m12",
+        "m21",
+        "m22",
+        "tx",
+        "ty"
+      ],
+      "properties": {
+        "m11": {
+          "type": "number",
+          "format": "float"
+        },
+        "m12": {
+          "type": "number",
+          "format": "float"
+        },
+        "m21": {
+          "type": "number",
+          "format": "float"
+        },
+        "m22": {
+          "type": "number",
+          "format": "float"
+        },
+        "tx": {
+          "type": "number",
+          "format": "float"
+        },
+        "ty": {
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "LegacySurfaceDamageV9": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "unchanged"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "rects"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "rects"
+              ]
+            },
+            "rects": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/LegacyDamageRectV9"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "LegacySurfaceFormatV9": {
+      "type": "string",
+      "enum": [
+        "rgba8_srgb_premultiplied",
+        "bgra8_srgb_premultiplied"
+      ]
+    }
+  }
+}

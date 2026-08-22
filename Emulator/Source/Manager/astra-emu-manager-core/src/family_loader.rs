@@ -855,19 +855,13 @@ mod tests {
     }
 
     #[test]
-    fn manifest_gate_rejects_v5_without_compatibility_path() {
-        let mut manifest = manifest();
-        manifest.abi_fingerprint = "astra.emu.family_abi.v5".into();
-        let error = validate_manifest(&manifest, &gate()).unwrap_err();
-        assert!(matches!(error, FamilyPluginLoadError::Manifest(_)));
-    }
-
-    #[test]
-    fn manifest_gate_rejects_v6_without_compatibility_path() {
-        let mut manifest = manifest();
-        manifest.abi_fingerprint = "astra.emu.family_abi.v6".into();
-        let error = validate_manifest(&manifest, &gate()).unwrap_err();
-        assert!(matches!(error, FamilyPluginLoadError::Manifest(_)));
+    fn manifest_gate_rejects_v7_and_v8_without_compatibility_path() {
+        for fingerprint in ["astra.emu.family_abi.v7", "astra.emu.family_abi.v8"] {
+            let mut manifest = manifest();
+            manifest.abi_fingerprint = fingerprint.into();
+            let error = validate_manifest(&manifest, &gate()).unwrap_err();
+            assert!(matches!(error, FamilyPluginLoadError::Manifest(_)));
+        }
     }
 
     #[test]
@@ -877,6 +871,8 @@ mod tests {
             family_id: FamilyId(manifest.family_id.clone()),
             plugin_id: manifest.plugin_id.clone(),
             provider_id: manifest.provider_id.clone(),
+            core_kind: astra_emu_family_api::LegacyFamilyCoreKind::Ported,
+            presentation_mode: astra_emu_family_api::LegacyFamilyPresentationMode::SingleLayer,
             engine_version: manifest.engine_version.clone(),
             rustc_fingerprint: manifest.rustc_fingerprint.clone(),
             feature_fingerprint: manifest.feature_fingerprint.clone(),

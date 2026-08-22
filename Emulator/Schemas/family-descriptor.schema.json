@@ -4,12 +4,14 @@
   "type": "object",
   "required": [
     "abi_fingerprint",
+    "core_kind",
     "engine_version",
     "family_id",
     "feature_fingerprint",
     "license",
     "permissions",
     "plugin_id",
+    "presentation_mode",
     "provider_id",
     "report_redaction",
     "rustc_fingerprint",
@@ -18,6 +20,9 @@
   "properties": {
     "abi_fingerprint": {
       "type": "string"
+    },
+    "core_kind": {
+      "$ref": "#/definitions/LegacyFamilyCoreKind"
     },
     "engine_version": {
       "type": "string"
@@ -40,6 +45,9 @@
     "plugin_id": {
       "type": "string"
     },
+    "presentation_mode": {
+      "$ref": "#/definitions/LegacyFamilyPresentationMode"
+    },
     "provider_id": {
       "type": "string"
     },
@@ -60,6 +68,20 @@
   "definitions": {
     "FamilyId": {
       "type": "string"
+    },
+    "LegacyFamilyCoreKind": {
+      "type": "string",
+      "enum": [
+        "native",
+        "ported"
+      ]
+    },
+    "LegacyFamilyPresentationMode": {
+      "type": "string",
+      "enum": [
+        "single_layer",
+        "multi_layer"
+      ]
     }
   }
 }
