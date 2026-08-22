@@ -14,7 +14,13 @@
 
 - Control 按键状态原本只让后续脚本 `wait` 在 command 执行时跳过；若按键在一条已显示消息上按下，旧 `Input` wait 仍会阻塞。VM 现在统一从 `skip_enabled`、`control_enabled`、Control pressed 和互斥 play mode 推导消息等待：有效快进把活动消息同 token 重绑定为 10 ms `Time`，释放 Control 后若尚未完成则恢复为 `Input`。movie/presentation/provider fence 不进入这条规则。
 - Minori VM 与 provider 定向测试分别覆盖 gate、按下、释放和双向重绑定。真实八包 Headless 运行从标题前按住物理 Control，正文阶段不发送周期性 Enter，只在启动游戏、choice active 和返回标题 Exit 处提交必要确认。运行完成 25496 fixed steps、25498 个提交/栅格帧和 28 条物理输入，terminal、snapshot round-trip、自然解锁、既有完整路线 coverage hash 与零 diagnostic 均成立。
-- 音频记录 20396544 frame，master peak 为 0.989372，output overload 与 underflow 均为 0；WAV 非静音且未 clipping。人工检查标题、路线和结局返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。这关闭按住 Control 的首路线 Headless E2；它不等同于持久 Skip 菜单路线，也不替代正式完整音频听审或 Windows E3。
+- 音频记录 20396544 frame，master peak 为 0.989372，output overload 与 underflow 均为 0；WAV 非静音且未 clipping。人工检查标题、路线和结局返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。这关闭按住 Control 的首路线 Headless E2；它不替代正式完整音频听审或 Windows E3。
+
+### 持久 Skip 与 Config 重叠命中区
+
+- 首次真实 Skip 运行在 `minori.play_mode=skip` observation 处阻断。输入与 Config 截图确认 Skip 单选没有变化；根因是左侧 slider 的 x 区间在 y 不匹配时提前返回 `None`，使同一 x 范围下方的 Auto/Skip 和一部分 Font 控件永远无法命中。修复后，slider y 范围仍优先解析，其余坐标继续进入原程序非 slider hit map；新增回归覆盖 Auto、Skip 和重叠边界的 Font previous。
+- 第二次运行完全从原版 Config UI 选择 Skip 并 Apply，启动游戏后释放 Control，再用游戏菜单物理 pointer 启用持久 Skip。严格 play-mode observation 通过；正文阶段没有周期性 Enter，只在启动、choice active 和返回标题 Exit 处提交确认。运行完成 24901 fixed steps、24906 个提交/栅格帧和 52 条物理输入，terminal、snapshot round-trip、自然解锁、既有 coverage hash 与零 diagnostic 均成立。
+- 音频记录 19920384 frame，master peak 为 0.989507，output overload 与 underflow 均为 0；WAV 非静音且未 clipping。人工检查标题、Config 默认、Skip 单选、Skip 启用、路线和返回标题六个 checkpoint；单选标记、日文文字、人物、背景和层次均未见阻断。这关闭持久 Skip 首路线 Headless E2。正式音频听审、Config 其余行为、鉴赏与 Windows E3 仍开放。
 
 ## 2026-08-12
 

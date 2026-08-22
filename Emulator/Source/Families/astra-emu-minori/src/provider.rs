@@ -4164,7 +4164,7 @@ fn config_control_at(x: i32, y: i32) -> Option<MinoriConfigControl> {
             152..192 => Some(MinoriConfigControl::MessageSpeedUnread(slider_value(40))),
             228..268 => Some(MinoriConfigControl::MessageSpeedRead(slider_value(40))),
             304..340 => Some(MinoriConfigControl::MessageSpeedAutoPlay(slider_value(40))),
-            _ => None,
+            _ => config_non_slider_control_at(x, y),
         };
     }
     if (576..796).contains(&x) {
@@ -6186,6 +6186,18 @@ mod tests {
         assert_eq!(
             config_control_at(610, 620),
             Some(MinoriConfigControl::Apply)
+        );
+        assert_eq!(
+            config_control_at(80, 600),
+            Some(MinoriConfigControl::PreferredPlayMode(MinoriPlayMode::Auto))
+        );
+        assert_eq!(
+            config_control_at(200, 600),
+            Some(MinoriConfigControl::PreferredPlayMode(MinoriPlayMode::Skip))
+        );
+        assert_eq!(
+            config_control_at(250, 500),
+            Some(MinoriConfigControl::FontPrevious)
         );
         assert_eq!(config_control_at(0, 0), None);
     }
