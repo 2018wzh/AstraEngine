@@ -7,10 +7,12 @@ mod extract;
 #[cfg(target_os = "linux")]
 mod fuse;
 mod private_profile;
+mod private_writable;
 mod profile;
 mod registry;
 mod runtime_vfs;
 mod surface_host;
+mod surface_pixels;
 #[cfg(test)]
 mod test_support;
 mod verify;
@@ -23,10 +25,12 @@ pub use extract::*;
 #[cfg(target_os = "linux")]
 pub use fuse::*;
 pub use private_profile::*;
+pub use private_writable::*;
 pub use profile::*;
 pub use registry::*;
 pub use runtime_vfs::*;
 pub use surface_host::*;
+pub use surface_pixels::*;
 pub use verify::*;
 pub use viewer::*;
 

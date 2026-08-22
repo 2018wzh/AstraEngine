@@ -2,7 +2,7 @@
 
 Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 仍是 Program target；legacy case 通过 `AstraEmuRuntimeProvider` 运行，每个 session 持有独立 `RuntimeWorld`。family 只注册 `LegacyRuntimeProvider` facade，私有 VM、VFS、媒体状态和诊断留在 provider session 内。Manager/RuntimeWorld 负责统一管理、Trusted Luau、文本翻译和滤镜 preset。Family ABI 已 hard cut 到 v9，Product Runtime Provider 使用 ABI v4；旧 scene/snapshot/text/session-resource/budget 路径全部删除。Minori 的唯一合法组合是 `Native + MultiLayer`，必须通过同步 Hook、Host-owned surface、retained `Layer2D` transaction 和 writable-file port 工作。当前 Minori consumer 尚未完成迁移，ABI v8 E2 仅作历史基线。正式平台签名、完整逐帧 media/full-flow parity、最终 clean Release 原生性能复跑、Windows/Android E3 与真机证据尚未形成，因此 Stage 5 继续保持 `IN_PROGRESS`。
 
-2026 年 8 月 23 日增量：动态 family loader 已完整绑定 ABI v9 四个 Host port，公共 support 层加入独占 allocation 的 retained surface store，Product host 开始阻断 Scene2D/Layer2D lane 混用。Manager Core 仅恢复到库级编译；FVP、CLI、Manager、Headless composition、Minori text/Hook 和 v9 真实样本复验仍未闭合，Stage 状态不变。
+2026 年 8 月 23 日增量：动态 family loader、CLI 与 Manager 已绑定 ABI v9 四个 Host port，公共 support 层提供 retained surface store、私有 writable-file Host 和像素规范化。Minori resource/text 已走 `Native + MultiLayer`；文字先经过同步 translation Hook，再由 CosmicText 与 Astra Renderer2D 写入 Host surface。typed filter graph 基线为 `e6bc3d960b87373160acd8507faeac4cc589975b`，不再使用字符串 binding。Manager per-layer graph 执行、Windows ACL、Headless composition 和 v9 真实样本复验仍未闭合，Stage 状态不变。
 
 FVP provider 与动态 FFI 随后删除了 v9 已移除的 snapshot、text lease、session resource 和 step budget consumer，签名 probe/open/shutdown lifecycle 与 Manager adapter 定向测试通过。RFVP scene/text 尚未完成 Host surface 与 family-owned shaping 迁移，相关入口保持显式 blocker，因此仍只是 E1。
 

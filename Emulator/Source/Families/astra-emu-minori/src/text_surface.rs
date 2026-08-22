@@ -1,0 +1,298 @@
+use astra_core::{DiagnosticSeverity, Hash256};
+use astra_media::{
+    CosmicTextLayoutProvider, FontBindingContext, LayoutConstraint, OverflowPolicy, PackagedFont,
+    TextDirection, TextLayoutConfig, TextLayoutProvider, TextLayoutRequest,
+    TextRenderResourceOwner, TextRun, UnicodeRange, WrapPolicy,
+};
+use astra_media_core::{
+    CpuRendererProvider, HeadlessRenderer, RenderTargetFormat, Renderer2DProvider,
+    RendererCreateRequest, SceneCommand, Transform2D,
+};
+
+const FONT_FAMILY: &str = "Noto Sans JP";
+const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum TextAlignment {
+    Start,
+    Center,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TextRegion {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub max_lines: u32,
+    pub alignment: TextAlignment,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct TextOutline {
+    pub radius: u32,
+    pub rgba: [u8; 4],
+}
+
+pub(super) struct TextSurfaceRequest {
+    pub key: String,
+    pub text: String,
+    pub speaker: Option<String>,
+    pub body: TextRegion,
+    pub speaker_region: Option<TextRegion>,
+    pub rgba: [u8; 4],
+    pub outline: Option<TextOutline>,
+}
+
+pub(super) struct MinoriTextSurfaceRenderer {
+    provider: CosmicTextLayoutProvider,
+    renderer: HeadlessRenderer,
+    width: u32,
+    height: u32,
+}
+
+impl MinoriTextSurfaceRenderer {
+    pub(super) fn new(width: u32, height: u32) -> Result<Self, &'static str> {
+        let bytes =
+            include_bytes!("../../../../../Examples/NativeVN/Assets/Fonts/NotoSansJP-Variable.ttf")
+                .to_vec();
+        let provider = CosmicTextLayoutProvider::new(
+            FontBindingContext {
+                target: "astra-emu-minori".into(),
+                profile: "minori-v1".into(),
+                default_locale: "ja-JP".into(),
+            },
+            vec![PackagedFont {
+                asset_id: FONT_ASSET_ID.into(),
+                family: FONT_FAMILY.into(),
+                face_index: 0,
+                hash: Hash256::from_sha256(&bytes),
+                license_id: "OFL-1.1".into(),
+                subset: None,
+                coverage: vec![
+                    UnicodeRange {
+                        start: 0x20,
+                        end: 0x7e,
+                    },
+                    UnicodeRange {
+                        start: 0x2010,
+                        end: 0x2027,
+                    },
+                    UnicodeRange {
+                        start: 0x266a,
+                        end: 0x266a,
+                    },
+                    UnicodeRange {
+                        start: 0x3000,
+                        end: 0x30ff,
+                    },
+                    UnicodeRange {
+                        start: 0x3400,
+                        end: 0x9fff,
+                    },
+                    UnicodeRange {
+                        start: 0xff00,
+                        end: 0xffef,
+                    },
+                ],
+                targets: vec!["astra-emu-minori".into()],
+                profiles: vec!["minori-v1".into()],
+                bytes,
+            }],
+            TextLayoutConfig::production_defaults(),
+        )
+        .map_err(|_| "ASTRA_EMU_MINORI_TEXT_PROVIDER_CREATE")?;
+        let identity = provider
+            .identity()
+            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_PROVIDER_IDENTITY")?;
+        if identity.fonts.len() != 1
+            || identity.fonts[0].asset_id != FONT_ASSET_ID
+            || identity.fonts[0].family != FONT_FAMILY
+        {
+            return Err("ASTRA_EMU_MINORI_TEXT_PROVIDER_IDENTITY");
+        }
+        let renderer = CpuRendererProvider
+            .create(RendererCreateRequest {
+                width,
+                height,
+                format: RenderTargetFormat::Rgba8Srgb,
+                profile: "astra.emu.minori.text_surface.v1".into(),
+            })
+            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RENDERER_CREATE")?;
+        Ok(Self {
+            provider,
+            renderer,
+            width,
+            height,
+        })
+    }
+
+    pub(super) fn render(
+        &mut self,
+        requests: &[TextSurfaceRequest],
+    ) -> Result<Vec<u8>, &'static str> {
+        if requests.is_empty() || requests.len() > 16 {
+            return Err("ASTRA_EMU_MINORI_TEXT_BATCH_BOUNDS");
+        }
+        let mut owner = TextRenderResourceOwner::default();
+        let mut commands = vec![SceneCommand::Clear { rgba: [0, 0, 0, 0] }];
+        for request in requests {
+            validate_region(request.body, self.width, self.height)?;
+            if let Some(region) = request.speaker_region {
+                validate_region(region, self.width, self.height)?;
+            }
+            append_text(
+                &self.provider,
+                &mut owner,
+                &mut commands,
+                &format!("{}.body", request.key),
+                &request.text,
+                request.body,
+                request.rgba,
+                request.outline,
+            )?;
+            if let (Some(speaker), Some(region)) =
+                (request.speaker.as_deref(), request.speaker_region)
+            {
+                append_text(
+                    &self.provider,
+                    &mut owner,
+                    &mut commands,
+                    &format!("{}.speaker", request.key),
+                    speaker,
+                    region,
+                    request.rgba,
+                    request.outline,
+                )?;
+            }
+        }
+        let mut frame = self
+            .renderer
+            .capture_frame(&commands)
+            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RENDER")?
+            .bytes;
+        for pixel in frame.chunks_exact_mut(4) {
+            let alpha = u16::from(pixel[3]);
+            for channel in &mut pixel[..3] {
+                *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+            }
+        }
+        Ok(frame)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_text(
+    provider: &CosmicTextLayoutProvider,
+    owner: &mut TextRenderResourceOwner,
+    commands: &mut Vec<SceneCommand>,
+    layout_id: &str,
+    text: &str,
+    region: TextRegion,
+    rgba: [u8; 4],
+    outline: Option<TextOutline>,
+) -> Result<(), &'static str> {
+    let layout = provider
+        .layout(&TextLayoutRequest {
+            key: layout_id.into(),
+            runs: vec![TextRun {
+                text: text.into(),
+                language: "ja-JP".into(),
+                script: Some("Jpan".into()),
+                direction: TextDirection::LeftToRight,
+                ruby: Vec::new(),
+                voice: None,
+            }],
+            constraint: LayoutConstraint {
+                max_width: region.width as f32,
+                max_height: Some(region.height as f32),
+                max_lines: Some(region.max_lines),
+                font_size: region.font_size,
+                line_height: region.line_height,
+                wrap: WrapPolicy::WordOrGlyph,
+                overflow: OverflowPolicy::Clip,
+            },
+            font_families: vec![FONT_FAMILY.into()],
+            features: Vec::new(),
+        })
+        .map_err(|_| "ASTRA_EMU_MINORI_TEXT_LAYOUT")?;
+    if layout.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.severity,
+            DiagnosticSeverity::Error | DiagnosticSeverity::Blocking
+        )
+    }) {
+        return Err("ASTRA_EMU_MINORI_TEXT_LAYOUT_DIAGNOSTIC");
+    }
+    let occupied = layout.width.ceil().min(region.width as f32) as i64;
+    let remaining = i64::from(region.width)
+        .checked_sub(occupied)
+        .ok_or("ASTRA_EMU_MINORI_TEXT_ALIGNMENT")?;
+    let offset = match region.alignment {
+        TextAlignment::Start => 0,
+        TextAlignment::Center => remaining / 2,
+    };
+    let origin_x = i64::from(region.x)
+        .checked_add(offset)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or("ASTRA_EMU_MINORI_TEXT_ALIGNMENT")?;
+    let mut layers = Vec::new();
+    if let Some(outline) = outline {
+        let radius =
+            i32::try_from(outline.radius).map_err(|_| "ASTRA_EMU_MINORI_TEXT_OUTLINE_BOUNDS")?;
+        for y in -radius..=radius {
+            for x in -radius..=radius {
+                if (x == 0 && y == 0) || x * x + y * y > radius * radius {
+                    continue;
+                }
+                layers.push((
+                    format!("{layout_id}.outline.{x}.{y}"),
+                    origin_x
+                        .checked_add(x)
+                        .ok_or("ASTRA_EMU_MINORI_TEXT_OUTLINE_BOUNDS")?,
+                    region
+                        .y
+                        .checked_add(y)
+                        .ok_or("ASTRA_EMU_MINORI_TEXT_OUTLINE_BOUNDS")?,
+                    outline.rgba,
+                ));
+            }
+        }
+    }
+    layers.push((layout_id.to_owned(), origin_x, region.y, rgba));
+    for (id, x, y, color) in layers {
+        let mut layout_commands = owner
+            .update_layout(&id, &layout, color)
+            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RESOURCE")?;
+        commands.push(SceneCommand::PushTransform {
+            transform: Transform2D::translation(x as f32, y as f32),
+        });
+        commands.append(&mut layout_commands);
+        commands.push(SceneCommand::PopTransform);
+    }
+    Ok(())
+}
+
+fn validate_region(region: TextRegion, width: u32, height: u32) -> Result<(), &'static str> {
+    let right = u64::try_from(region.x)
+        .ok()
+        .and_then(|x| x.checked_add(u64::from(region.width)));
+    let bottom = u64::try_from(region.y)
+        .ok()
+        .and_then(|y| y.checked_add(u64::from(region.height)));
+    if right.is_none_or(|right| right > u64::from(width))
+        || bottom.is_none_or(|bottom| bottom > u64::from(height))
+        || region.width == 0
+        || region.height == 0
+        || region.max_lines == 0
+        || !region.font_size.is_finite()
+        || !region.line_height.is_finite()
+        || region.font_size <= 0.0
+        || region.line_height < region.font_size
+    {
+        return Err("ASTRA_EMU_MINORI_TEXT_REGION_BOUNDS");
+    }
+    Ok(())
+}

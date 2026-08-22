@@ -6,17 +6,18 @@ use std::{
 
 use astra_byte_source::{ByteRange, OwnedByteBuffer};
 use astra_core::{Hash256, SchemaVersion};
+use astra_emu_extension_api::{translation_response, TRANSLATION_TEXT_HOOK_ID};
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
     LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta,
     LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyHostServicesV9,
-    LegacyFamilyPluginDescriptor, LegacyLayerBlendV9, LegacyLayerFilterV9, LegacyLayerOperationV9,
-    LegacyLayerStateV9, LegacyLayerTransactionV9, LegacyLayerTransformV9,
-    LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest, LegacyProbeReport,
-    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead,
-    LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced, LegacyShutdownReport,
-    LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput,
+    LegacyFamilyPluginDescriptor, LegacyHookInvocationV1, LegacyHookStatusV1, LegacyLayerBlendV9,
+    LegacyLayerFilterV9, LegacyLayerOperationV9, LegacyLayerStateV9, LegacyLayerTransactionV9,
+    LegacyLayerTransformV9, LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest,
+    LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1,
+    LegacyResourceRead, LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider,
+    LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced,
+    LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput,
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
     LegacySurfaceFormatV9, LegacyTextLease, LegacyTextureFilter, LegacyTextureFormat,
     LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader,
@@ -29,6 +30,9 @@ use astra_media_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::text_surface::{
+    MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
+};
 use crate::{
     parse_sc, MinoriAudioCommand, MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame,
     MinoriCharacterState, MinoriChoicePresentation, MinoriConfigAudioBus, MinoriConfigChange,
@@ -50,6 +54,9 @@ const MAX_LAYER_SURFACE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_WSCROLL2_SYNC_BYTES: u64 = 64 * 1024;
 const MAX_WSCROLL2_SYNC_VALUES: usize = 4096;
 const MAX_EPHEMERAL_TEXT_BYTES: usize = 64 * 1024;
+const MINORI_TEXT_SURFACE_ID: &str = "minori.surface.text";
+const MINORI_TEXT_LAYER_ID: &str = "minori.layer.text";
+const MINORI_TRANSLATION_TIMEOUT_MS: u32 = 2_000;
 const MINORI_CONTROL_KEY: &str = "control";
 const MINORI_POINTER_X: &str = "pointer.x";
 const MINORI_POINTER_Y: &str = "pointer.y";
@@ -323,6 +330,7 @@ struct MinoriSession {
     reported_gallery_unlock_count: Option<usize>,
     reported_choice_active: Option<bool>,
     global_progress: MinoriGlobalProgressSession,
+    text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
     poisoned: bool,
 }
@@ -592,6 +600,13 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     enabled: global_progress_enabled,
                     loaded: !global_progress_enabled,
                     persisted_unlocks: Vec::new(),
+                },
+                text_renderer: match stage_size {
+                    Some((width, height)) => Some(
+                        MinoriTextSurfaceRenderer::new(width, height)
+                            .map_err(|code| invalid(code, "Minori text renderer setup failed"))?,
+                    ),
+                    None => None,
                 },
                 published_layers: BTreeSet::new(),
                 poisoned: false,
@@ -5749,14 +5764,9 @@ fn publish_v9_output(
     session: &mut MinoriSession,
     staged: LegacyStepOutput,
 ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
-    if !staged.live.text_presentations.is_empty() || !staged.live.text.is_empty() {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED",
-            "Minori text requires the synchronous translation Hook and text surface publisher",
-        ));
-    }
-    let layers = if let Some(resource_scene) = staged.live.resource_scenes.last() {
-        let layer_sequence = next_layer_sequence(&staged)?;
+    let prepared_text = prepare_text_surface(services, session_id, fixed_step, session, &staged)?;
+    let layer_sequence = next_layer_sequence(&staged)?;
+    let mut layers = if let Some(resource_scene) = staged.live.resource_scenes.last() {
         let mount_set_id = session.mount_set_id.clone();
         publish_resource_scene(
             services,
@@ -5769,11 +5779,40 @@ fn publish_v9_output(
             &resource_scene.value,
         )?
     } else {
-        // Text has not crossed ABI v9 yet, so a text-only clear has no retained
-        // Host layer to mutate. A prior text publish cannot exist because that
-        // path blocks and poisons the session below.
         Vec::new()
     };
+    let text_operation = match prepared_text {
+        Some(prepared) => Some(publish_text_surface(
+            services, session_id, fixed_step, session, prepared,
+        )?),
+        None if staged.live.clear_text && session.published_layers.remove(MINORI_TEXT_LAYER_ID) => {
+            Some(LegacyLayerOperationV9::Destroy {
+                layer_id: MINORI_TEXT_LAYER_ID.into(),
+            })
+        }
+        None => None,
+    };
+    if let Some(operation) = text_operation {
+        if let Some(transaction) = layers.first_mut() {
+            transaction.operations.push(operation);
+            transaction.validate()?;
+        } else {
+            let (viewport_width, viewport_height) = session.stage_size.ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY",
+                    "text layer output requires the verified Minori stage",
+                )
+            })?;
+            let transaction = LegacyLayerTransactionV9 {
+                sequence: layer_sequence,
+                viewport_width,
+                viewport_height,
+                operations: vec![operation],
+            };
+            transaction.validate()?;
+            layers.push(transaction);
+        }
+    }
     let output = LegacyStepOutputV9 {
         status: staged.status,
         live: LegacyLiveOutputV9 {
@@ -5790,6 +5829,270 @@ fn publish_v9_output(
     };
     output.validate()?;
     Ok(output)
+}
+
+struct PreparedTextSurface {
+    rgba8_premultiplied: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+fn prepare_text_surface(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &LegacyRuntimeSessionId,
+    fixed_step: u64,
+    session: &mut MinoriSession,
+    staged: &LegacyStepOutput,
+) -> Result<Option<PreparedTextSurface>, LegacyProviderError> {
+    if staged.live.text.is_empty() && staged.live.text_presentations.is_empty() {
+        return Ok(None);
+    }
+    if staged.live.text.is_empty()
+        || staged.live.text.len() != staged.live.text_presentations.len()
+        || staged.live.text.len() > 16
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_BATCH_IDENTITY",
+            "text leases and presentation descriptors must form one bounded batch",
+        ));
+    }
+    let presentations = staged
+        .live
+        .text_presentations
+        .iter()
+        .map(|presentation| {
+            (
+                &presentation.value.lease_id,
+                &presentation.value.presentation,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if presentations.len() != staged.live.text_presentations.len() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_PRESENTATION_DUPLICATE",
+            "text presentation lease id is duplicated",
+        ));
+    }
+    let mut requests = Vec::with_capacity(staged.live.text.len());
+    let mut consumed = Vec::with_capacity(staged.live.text.len());
+    for (index, lease) in staged.live.text.iter().enumerate() {
+        let captured = session.ephemeral_text.get(&lease.lease_id).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_TEXT_LEASE_MISSING",
+                "text lease is missing from the family session",
+            )
+        })?;
+        if captured.lease_id != lease.lease_id
+            || captured.text.len() != lease.byte_len as usize
+            || captured.text.len() > MAX_EPHEMERAL_TEXT_BYTES
+        {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_TEXT_LEASE_IDENTITY",
+                "text lease metadata does not match its family-owned capture",
+            ));
+        }
+        let presentation = presentations.get(&lease.lease_id).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_TEXT_PRESENTATION_MISSING",
+                "text lease has no presentation descriptor",
+            )
+        })?;
+        let text = invoke_translation_hook(
+            services,
+            session_id,
+            session.case_fingerprint,
+            fixed_step,
+            index,
+            "body",
+            &captured.text,
+        )?;
+        let speaker = captured
+            .speaker
+            .as_deref()
+            .map(|speaker| {
+                invoke_translation_hook(
+                    services,
+                    session_id,
+                    session.case_fingerprint,
+                    fixed_step,
+                    index,
+                    "speaker",
+                    speaker,
+                )
+            })
+            .transpose()?;
+        requests.push(TextSurfaceRequest {
+            key: presentation.layout_id.clone(),
+            text,
+            speaker,
+            body: text_region(presentation.body),
+            speaker_region: presentation.speaker.map(text_region),
+            rgba: presentation.rgba,
+            outline: presentation.outline.map(|outline| TextOutline {
+                radius: outline.radius,
+                rgba: outline.rgba,
+            }),
+        });
+        consumed.push(lease.lease_id.clone());
+    }
+    let (width, height) = session.stage_size.ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY",
+            "text output requires the verified Minori stage",
+        )
+    })?;
+    let rgba8_premultiplied = session
+        .text_renderer
+        .as_mut()
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_TEXT_RENDERER_MISSING",
+                "text output has no family-owned CosmicText renderer",
+            )
+        })?
+        .render(&requests)
+        .map_err(|code| invalid(code, "Minori text rasterization failed"))?;
+    for lease_id in consumed {
+        session.ephemeral_text.remove(&lease_id).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_TEXT_LEASE_STATE",
+                "text lease disappeared before publication",
+            )
+        })?;
+    }
+    Ok(Some(PreparedTextSurface {
+        rgba8_premultiplied,
+        width,
+        height,
+    }))
+}
+
+fn invoke_translation_hook(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &LegacyRuntimeSessionId,
+    case_fingerprint: Hash256,
+    fixed_step: u64,
+    index: usize,
+    field: &str,
+    source: &str,
+) -> Result<String, LegacyProviderError> {
+    let invocation = LegacyHookInvocationV1 {
+        session_id: session_id.0.clone(),
+        invocation_id: format!("minori.translation.{fixed_step}.{index}.{field}"),
+        family_id: MINORI_FAMILY_ID.into(),
+        family_game_id: case_fingerprint.to_string(),
+        hook_id: TRANSLATION_TEXT_HOOK_ID.into(),
+        timeout_ms: MINORI_TRANSLATION_TIMEOUT_MS,
+        payload: source.as_bytes().to_vec().into(),
+    };
+    let result = services.hooks.invoke(invocation)?;
+    if !result.diagnostics.is_empty() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TRANSLATION_DIAGNOSTIC",
+            "translation Hook returned diagnostics",
+        ));
+    }
+    match result.status {
+        LegacyHookStatusV1::Unbound => Ok(source.to_owned()),
+        LegacyHookStatusV1::Completed => {
+            if result.payload.len() > MAX_EPHEMERAL_TEXT_BYTES {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_TRANSLATION_BOUNDS",
+                    "translation Hook output exceeds the text bound",
+                ));
+            }
+            translation_response(result.payload.as_slice())
+                .map(str::to_owned)
+                .map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_TRANSLATION_UTF8",
+                        "translation Hook output is not UTF-8",
+                    )
+                })
+        }
+        LegacyHookStatusV1::TimedOut => Err(invalid(
+            "ASTRA_EMU_MINORI_TRANSLATION_TIMEOUT",
+            "translation Hook exceeded its synchronous timeout",
+        )),
+        LegacyHookStatusV1::Failed => Err(invalid(
+            "ASTRA_EMU_MINORI_TRANSLATION_FAILED",
+            "translation Hook failed",
+        )),
+    }
+}
+
+fn text_region(region: LegacyTextRegionV1) -> TextRegion {
+    TextRegion {
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        font_size: region.font_size,
+        line_height: region.line_height,
+        max_lines: region.max_lines,
+        alignment: match region.horizontal_alignment {
+            LegacyTextHorizontalAlignmentV1::Start => TextAlignment::Start,
+            LegacyTextHorizontalAlignmentV1::Center => TextAlignment::Center,
+        },
+    }
+}
+
+fn publish_text_surface(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &LegacyRuntimeSessionId,
+    fixed_step: u64,
+    session: &mut MinoriSession,
+    prepared: PreparedTextSurface,
+) -> Result<LegacyLayerOperationV9, LegacyProviderError> {
+    let mut lease = services.surfaces.acquire(
+        &session_id.0,
+        fixed_step,
+        MINORI_TEXT_SURFACE_ID,
+        prepared.width,
+        prepared.height,
+        LegacySurfaceFormatV9::Rgba8SrgbPremultiplied,
+    )?;
+    write_surface_rows(&mut lease, &prepared.rgba8_premultiplied)?;
+    let state = LegacyLayerStateV9 {
+        layer_id: MINORI_TEXT_LAYER_ID.into(),
+        role: "text".into(),
+        z_index: 400,
+        surface_id: lease.surface_id.clone(),
+        generation: lease.generation,
+        width: lease.width,
+        height: lease.height,
+        stride: lease.stride,
+        format: lease.format,
+        damage: LegacySurfaceDamageV9::Full,
+        transform: LegacyLayerTransformV9 {
+            m11: 1.0,
+            m12: 0.0,
+            m21: 0.0,
+            m22: 1.0,
+            tx: 0.0,
+            ty: 0.0,
+        },
+        clip: None,
+        opacity: 1.0,
+        texture_filter: LegacyLayerFilterV9::Linear,
+        blend: LegacyLayerBlendV9::Alpha,
+        filter_graph: None,
+    };
+    services.surfaces.commit(
+        &session_id.0,
+        fixed_step,
+        LegacySurfaceCommitV9 {
+            lease,
+            damage: LegacySurfaceDamageV9::Full,
+        },
+    )?;
+    Ok(
+        if session.published_layers.insert(MINORI_TEXT_LAYER_ID.into()) {
+            LegacyLayerOperationV9::Create(state)
+        } else {
+            LegacyLayerOperationV9::Update(state)
+        },
+    )
 }
 
 fn next_layer_sequence(staged: &LegacyStepOutput) -> Result<u64, LegacyProviderError> {
@@ -6328,7 +6631,7 @@ mod tests {
             let script = self
                 .scripts
                 .get(uri)
-                .ok_or_else(|| invalid("TEST_VFS_NOT_FOUND", "fixture entry is missing"))?;
+                .ok_or_else(|| LegacyProviderError::invalid("TEST_VFS_NOT_FOUND", uri))?;
             let digest = Hash256::from_sha256(script);
             let revision = u64::from_le_bytes(digest.as_bytes()[..8].try_into().unwrap());
             Ok(ByteSourceStat {
@@ -6355,7 +6658,7 @@ mod tests {
             let script = self
                 .scripts
                 .get(uri)
-                .ok_or_else(|| invalid("TEST_VFS_NOT_FOUND", "fixture entry is missing"))?;
+                .ok_or_else(|| LegacyProviderError::invalid("TEST_VFS_NOT_FOUND", uri))?;
             let bytes = script[range.offset as usize..(range.offset + range.len) as usize].to_vec();
             Ok(RangeReadResult {
                 range,
@@ -6368,6 +6671,8 @@ mod tests {
     #[derive(Default)]
     struct RecordingSurfaceHost {
         commits: std::sync::Mutex<Vec<RecordedSurfaceCommit>>,
+        hook_count: Option<Arc<std::sync::atomic::AtomicUsize>>,
+        generations: std::sync::Mutex<BTreeMap<String, u64>>,
     }
 
     struct RecordedSurfaceCommit {
@@ -6387,15 +6692,24 @@ mod tests {
             height: u32,
             format: LegacySurfaceFormatV9,
         ) -> Result<astra_emu_family_api::LegacySurfaceLeaseV9, LegacyProviderError> {
+            if let Some(hook_count) = &self.hook_count {
+                assert!(hook_count.load(std::sync::atomic::Ordering::Acquire) > 0);
+            }
             assert_eq!(session_id, "session.surface");
-            assert_eq!(fixed_step, 1);
+            assert!(matches!(fixed_step, 1 | 2));
             assert_eq!(format, LegacySurfaceFormatV9::Rgba8SrgbPremultiplied);
             let stride = width.checked_mul(4).unwrap().checked_add(8).unwrap();
             let len = usize::try_from(u64::from(stride) * u64::from(height)).unwrap();
+            let generation = {
+                let mut generations = self.generations.lock().unwrap();
+                let generation = generations.entry(surface_id.into()).or_default();
+                *generation += 1;
+                *generation
+            };
             Ok(astra_emu_family_api::LegacySurfaceLeaseV9 {
                 lease_id: format!("lease.{surface_id}"),
                 surface_id: surface_id.into(),
-                generation: 1,
+                generation,
                 width,
                 height,
                 stride,
@@ -6411,7 +6725,7 @@ mod tests {
             commit: LegacySurfaceCommitV9,
         ) -> Result<(), LegacyProviderError> {
             assert_eq!(session_id, "session.surface");
-            assert_eq!(fixed_step, 1);
+            assert!(matches!(fixed_step, 1 | 2));
             commit.validate()?;
             assert_eq!(commit.damage, LegacySurfaceDamageV9::Full);
             self.commits.lock().unwrap().push(RecordedSurfaceCommit {
@@ -6434,6 +6748,27 @@ mod tests {
             Ok(astra_emu_family_api::LegacyHookResultV1 {
                 status: astra_emu_family_api::LegacyHookStatusV1::Unbound,
                 payload: Vec::new().into(),
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+
+    struct ReplacingHookHost {
+        count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl astra_emu_family_api::LegacyHookHostV1 for ReplacingHookHost {
+        fn invoke(
+            &self,
+            invocation: astra_emu_family_api::LegacyHookInvocationV1,
+        ) -> Result<astra_emu_family_api::LegacyHookResultV1, LegacyProviderError> {
+            assert_eq!(invocation.hook_id, TRANSLATION_TEXT_HOOK_ID);
+            assert!(std::str::from_utf8(invocation.payload.as_slice()).is_ok());
+            self.count
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
+            Ok(astra_emu_family_api::LegacyHookResultV1 {
+                status: astra_emu_family_api::LegacyHookStatusV1::Completed,
+                payload: "翻訳".as_bytes().to_vec().into(),
                 diagnostics: Vec::new(),
             })
         }
@@ -6524,6 +6859,106 @@ mod tests {
             assert_eq!(commit.stride, 16);
             assert!(commit.pixels.iter().all(|byte| *byte == 0));
         }
+    }
+
+    #[test]
+    fn v9_message_invokes_translation_before_acquiring_and_commits_text_surface() {
+        let script = b".message 42  speaker body\r\n.end\r\n".to_vec();
+        let mut panel = Vec::new();
+        PngEncoder::new(&mut panel)
+            .write_image(
+                &vec![0; 1280 * 263 * 4],
+                1280,
+                263,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let mut title = Vec::new();
+        PngEncoder::new(&mut title)
+            .write_image(
+                &vec![0; 1280 * 720 * 4],
+                1280,
+                720,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), script),
+                ("minori:/sys/msgPanel.png".into(), panel),
+                ("minori:/sys/topMenu0.png".into(), title),
+            ]),
+        });
+        let hook_count = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let surfaces = Arc::new(RecordingSurfaceHost {
+            commits: std::sync::Mutex::new(Vec::new()),
+            hook_count: Some(hook_count.clone()),
+            generations: std::sync::Mutex::new(BTreeMap::new()),
+        });
+        let services = LegacyFamilyHostServicesV9 {
+            vfs: Arc::clone(&vfs),
+            surfaces: surfaces.clone(),
+            hooks: Arc::new(ReplacingHookHost {
+                count: hook_count.clone(),
+            }),
+            writable_files: Arc::new(RejectWritableFiles),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.surface".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                        ("astra.launch_entry_explicit".into(), "false".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        LegacyRuntimeProvider::step(&mut provider, &ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        hook_count.store(0, std::sync::atomic::Ordering::Release);
+        let output = LegacyRuntimeProvider::step(
+            &mut provider,
+            &ctx,
+            &session,
+            LegacyStepInput {
+                input_edges: vec![LegacyInputEdge {
+                    control: "enter".into(),
+                    pressed: true,
+                    value: 1.0,
+                    sequence: 1,
+                }],
+                ..step_input(2, Vec::new())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(hook_count.load(std::sync::atomic::Ordering::Acquire), 2);
+        assert_eq!(output.live.layers.len(), 1);
+        assert!(output.live.layers[0].operations.iter().any(|operation| {
+            matches!(
+                operation,
+                LegacyLayerOperationV9::Create(layer)
+                    if layer.layer_id == MINORI_TEXT_LAYER_ID && layer.role == "text"
+            )
+        }));
+        let commits = surfaces.commits.lock().unwrap();
+        let text = commits
+            .iter()
+            .find(|commit| commit.surface_id == MINORI_TEXT_SURFACE_ID)
+            .unwrap();
+        assert!(text.pixels.iter().any(|byte| *byte != 0));
+        assert!(provider.sessions[&session.0].ephemeral_text.is_empty());
     }
 
     #[test]

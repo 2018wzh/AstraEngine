@@ -8,7 +8,7 @@ mod paz;
 mod provider;
 mod runtime;
 mod script;
-mod text_renderer;
+mod text_surface;
 
 pub use factory::*;
 #[cfg(feature = "dynamic-plugin-export")]

@@ -1,12 +1,12 @@
 # Implementation Coverage Matrix
 
-Current AstraEMU identity note: the active contract is Family ABI v9 with
-Product Runtime Provider ABI v4. Minori must use `Native + MultiLayer` through
-Host-owned surfaces, synchronous Hook and writable-file ports. Its ABI v8 E2
-reports are historical regression baselines; current E2 is reopened until the
-v9 consumer compiles and runs. The row remains `IN_PROGRESS` until clean
-Release performance, ten-minute audio underflow, and Windows E3 parity are
-bound to this identity.
+Current AstraEMU identity note: the active contract is Family ABI v9 at
+`e6bc3d960b87373160acd8507faeac4cc589975b` with Product Runtime Provider ABI
+v4. Minori uses `Native + MultiLayer`, Host-owned surfaces, synchronous Hook,
+typed `LegacyFilterGraphV9` and writable-file ports. CLI、Manager 和 Minori 的
+增量 consumer 已恢复编译，但 Manager typed filter graph、Windows 私有 ACL、
+Headless composition 与真实样本复验仍未闭合。ABI v8 E2 只作历史回归基线；
+本行保持 `IN_PROGRESS`，不能从 E1 提升为当前 E2。
 
 1999 原版补丁器已接入 workspace。公开测试覆盖 edition fingerprint、RIFX 资源图边界、唯一 CASt binding、script ID 大端读写、ProjectorRays hash/timeout、完整目录复制、原子清理、manifest 和发布包 hash。私有 `inspect → apply → verify` 已证明原安装目录保持只读，成品保留 `DATA/MENU.dxr` 原名，其余原文件逐项保持 hash。受控 launcher 已用 Locale Emulator Core 的 CP932/LCID `0x0411` 环境成功创建 32 位 projector，并把 Director 7 残留的 1 像素 outer frame 删除；实测 outer/client 同为 800×600，window style 为 borderless popup。标题第三按钮的完整视觉状态与路线跳转仍需形成同一轮 E3 报告，当前不计入 AstraVN Player 的 Windows E3 coverage。
 
@@ -14,9 +14,9 @@ TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary re
 
 RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁；`006` 仍是唯一允许绑定具名 `astra.headless_tolerance_approval.v2` 的色彩容差项。UI010 至 UI014 的系统窗几何偏差为 0 px，UI009 的选择菱形列偏差为 1 px。模型已查看全部五联图；30 张输入和 12 组稳定捕获契约均已闭合，权威 manifest 与 node map 已同步。Director movie 入口现按 Score snapshot 恢复初始可见 layer；source-bound package crypto、不透明授权目录、CLI build/bundle 与 Player bootstrap 已形成 contract/E2。商业明文、媒体签名和私有路径扫描均通过预检；最终同身份重跑和 formal signoff 尚未闭合。Windows E3 显式延期，不作为本轮 RC 门禁，状态保持 `IN_PROGRESS`。旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
-AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion 和安全相对路径 writable-file 已进入公共契约。Minori 尚未完成 v9 consumer 迁移；旧 scene、snapshot、ephemeral text 与 session resource 路径不能继续加载。下表旧 ABI 运行只保留为历史 E2 记录。
+AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file 与 typed filter graph 已进入公共契约。Minori resource/text surface、CLI layer consumer 和 Manager Hook/Layer2D consumer 已进入 v9 主路径；旧 scene、snapshot、ephemeral text 与 session resource 路径不能继续加载。Manager typed filter graph 和新的真实样本 E2 尚未完成，下表旧 ABI 运行只保留为历史记录。
 
-2026 年 8 月 23 日的 consumer 增量只形成 E1：动态 loader 已绑定四个 Host port，公共 surface store 的零拷贝 ownership、配额和错误绑定测试通过，Manager Core 恢复库级编译，Product host 会阻断 presentation lane 混用。CLI、Manager、Headless 与 FVP 仍未完成 v9 composition，Minori 也尚无新的真实样本 E2。
+2026 年 8 月 23 日的 consumer 增量仍只形成 E1：动态 loader、CLI 与 Manager 已绑定四个 Host port；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。support 25 项、CLI 38 项、Manager Hook 2 项和 Minori v9 2 项定向测试通过。Manager per-layer typed filter graph、Windows current-user ACL、Headless composition 与真实样本 E2 仍未完成。
 
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 

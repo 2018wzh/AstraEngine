@@ -391,6 +391,14 @@ python Tools/check_docs.py
 - 图像继续由 `image` 解码，四层栅格复用 `astra-media-core::CpuRendererProvider`。输出按 Host lease 的 stride 写入独占 `OwnedWritableByteBuffer`，提交 full damage 后生成 retained `LegacyLayerTransactionV9`；没有 Minori 私有 rasterizer、surface 镜像或 ABI payload copy。
 - 119 个既有 Minori library tests 已通过。旧 provider-result storage 用例已经删除，改为验证同步 writable-file 的原子写 round-trip。新增用例覆盖四个 exclusive Host surface、带 padding 的 stride、premultiplied RGBA、full damage 与四层 create transaction。同步 translation Hook 和 CosmicText text surface 尚未迁移；实际文字呈现会返回 `ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED`，随后毒化 session。因此，历史 ABI v8 Headless 路线只作行为回归基线，本轮不能声明新的 E2。
 
+### 2026-08-23 ABI v9 consumer 与文字 surface 后续
+
+- 当前基线更新到 `e6bc3d960b87373160acd8507faeac4cc589975b`。Layer2D 的滤镜字段使用 ABI-owned `LegacyFilterGraphV9`，consumer 不再接收字符串 binding，也不会按名称或 hash 解析 graph。RFVP 依赖固定为 `15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9`。
+- CLI 已组合 VFS、Host-owned surface、同步 Hook 和安全相对路径 writable-file 四个 port。Layer2D transaction 会校验 session、sequence、generation、damage、stride 和 typed filter graph，再交给 Astra Renderer2D；旧 scene、text lease 和 session-resource 路径只返回迁移错误。CLI library 38 项测试和严格 clippy 通过。
+- Manager 已绑定同一组四个 Host port，并增加显式 session Hook router。translation companion 现在同步返回 `Completed`、`Unbound`、`TimedOut` 或 `Failed`，避免在 framebuffer acquire 后等待翻译。Manager 的 retained Layer2D 可以读取已提交 surface、处理 BGRA/stride/premultiplied alpha 并提交 WGPU；per-layer typed filter graph 的 GPU 执行尚未完成，当前明确阻断，旧 Scene2D 内部实现也仍待删除。因此 Manager 只计迁移中的 E1，不计产品 E2。
+- Minori message path 已移除 `ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED`。speaker 与正文先进入同步 translation Hook，再由 family-owned CosmicText、打包的 Noto Sans JP 和 Astra CPU Renderer2D 生成 `minori.surface.text`，最终以 z=400 的 retained text layer 提交。定向测试确认 Hook 发生在首个 surface acquire 之前，并覆盖资源层与文字层的 exclusive lease/commit。
+- 公共 support 新增私有 writable-file Host 和 surface 像素规范化。Unix 权限、原子 replace、范围限制、路径穿越与 symlink 阻断已有测试；Windows 当前尚缺显式 current-user ACL 断言，不能把 writable-file 安全门禁写成完整。support 25 项、Manager Hook 2 项及 Minori v9 2 项定向测试通过。真实样本尚未在 ABI v9 下重跑，历史 v8 Headless 结果仍只作回归基线。
+
 ### 2026-08-22 Config 动作与状态层
 
 - 本轮 rebase 前后都确认 `origin/master` 已是当前分支祖先，没有产生冲突或改写既有提交。

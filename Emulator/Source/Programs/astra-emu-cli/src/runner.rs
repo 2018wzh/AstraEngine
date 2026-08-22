@@ -15,15 +15,13 @@ use astra_core::{
 #[cfg(test)]
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
-    validate_vfs_uri, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7,
-    LegacyProbeRequest, LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextOutlineV1,
-    LegacyTextPresentationV1, LegacyTextRegionV1, LegacyTextureFilter, LegacyTextureFormat,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
+    LegacyAwaitResult, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest, LegacyResourceRead,
+    LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::{
-    verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
-    LegacyVfsFamilyRegistry,
+    copy_surface_to_straight_rgba8, verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter,
+    LegacyRuntimeVfsByteSource, LegacyVfsFamilyRegistry,
 };
 use astra_emu_fvp::{
     fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
@@ -40,13 +38,9 @@ use astra_headless_protocol::{
     InputMessage, ObservationPredicate, PhysicalInput, PointerButton, RunReport, RunStatus,
     TouchPhase, HEADLESS_RUN_REPORT_SCHEMA as STANDARD_HEADLESS_RUN_REPORT_SCHEMA,
 };
-use astra_media::{
-    DecodeBindingContext, DecodeOutput as MediaDecodeOutput, DecodeProviderRegistry, DecodeRequest,
-    DecodedVideoFrame, ImageDecodeProvider, PlayerDecodedAudio,
-};
+use astra_media::{DecodedVideoFrame, PlayerDecodedAudio};
 use astra_media_core::{
-    BlendMode, GlyphBitmap, MeshDraw2D, MeshMaterial2D, MeshVertex2D, OwnedPixelBuffer, RectI,
-    SceneCommand, SceneCompositing2D, TextureFilter2D, TextureFrame,
+    BlendMode, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, TextureFilter2D, TextureFrame,
 };
 use astra_observability::{
     sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceSummary,
@@ -56,7 +50,7 @@ use astra_platform::{
     DecodeKind, DecodeOutput, GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy,
     HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy,
     HeadlessRenderPolicy, PlatformDecodeRequest, PlatformHostClient, PlatformHostFactory,
-    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowRequest,
+    SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowRequest,
 };
 #[cfg(windows)]
 use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
@@ -72,13 +66,11 @@ use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
     RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
-    RuntimeLiveAudioSampleFormat, RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLivePcmBuffer,
-    RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
-    RuntimeLiveTextPresentation, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat,
-    RuntimeLiveVideoCommand, RuntimeLiveVideoCommandKind, RuntimeLiveWait, RuntimeLiveWaitKind,
-    RuntimeOpenRequest, RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest,
-    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget,
-    RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
+    RuntimeLiveAudioSampleFormat, RuntimeLivePcmBuffer, RuntimeLiveVideoCommand,
+    RuntimeLiveVideoCommandKind, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest,
+    RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget, RuntimeStepInput,
+    RuntimeStepMode, RuntimeTickIntegrityMode,
 };
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use schemars::JsonSchema;
@@ -89,8 +81,6 @@ use crate::{
     avi_range::{AviRangeDecoder, AviRangeEvent, AviRangeTelemetry},
     family_host::CliFamilyHostConfig,
     input::{read_input_sequence, ValidatedInputSequence},
-    rasterizer::{CpuStageRasterizer, PreparedRenderFrame},
-    text_presentation::BoundTextPresenter,
 };
 
 fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
@@ -214,41 +204,6 @@ fn legacy_live_video_command(command: RuntimeLiveVideoCommand) -> LegacyVideoCom
         RuntimeLiveVideoCommandKind::Stop { playback_id } => {
             LegacyVideoCommandV1::Stop { playback_id }
         }
-    }
-}
-
-fn legacy_live_text_presentation(value: RuntimeLiveTextPresentation) -> LegacyTextPresentationV1 {
-    let convert = |region: astra_plugin_abi::RuntimeLiveTextRegion| LegacyTextRegionV1 {
-        x: region.x,
-        y: region.y,
-        width: region.width,
-        height: region.height,
-        font_size: region.font_size,
-        line_height: region.line_height,
-        max_lines: region.max_lines,
-        horizontal_alignment: match region.horizontal_alignment {
-            astra_plugin_abi::RuntimeLiveTextHorizontalAlignment::Start => {
-                astra_emu_family_api::LegacyTextHorizontalAlignmentV1::Start
-            }
-            astra_plugin_abi::RuntimeLiveTextHorizontalAlignment::Center => {
-                astra_emu_family_api::LegacyTextHorizontalAlignmentV1::Center
-            }
-            astra_plugin_abi::RuntimeLiveTextHorizontalAlignment::End => {
-                astra_emu_family_api::LegacyTextHorizontalAlignmentV1::End
-            }
-        },
-    };
-    LegacyTextPresentationV1 {
-        layout_id: value.layout_id,
-        language: value.language,
-        font_families: value.font_families,
-        body: convert(value.body),
-        speaker: value.speaker.map(convert),
-        rgba: value.rgba,
-        outline: value.outline.map(|outline| LegacyTextOutlineV1 {
-            radius: outline.radius,
-            rgba: outline.rgba,
-        }),
     }
 }
 
@@ -716,6 +671,55 @@ struct RuntimeVideoVfs {
     reader: Arc<dyn LegacyVfsReader>,
 }
 
+fn read_vfs_resource(
+    vfs: &RuntimeVideoVfs,
+    uri: &str,
+    max_bytes: u64,
+) -> Result<astra_byte_source::OwnedByteBuffer, String> {
+    astra_emu_family_core::validate_legacy_vfs_uri(&format!("{}:/", vfs.family_id), uri)
+        .map_err(|error| error.to_string())?;
+    let stat = vfs
+        .reader
+        .stat_file(&vfs.mount_set_id, uri)
+        .map_err(|error| error.to_string())?;
+    if stat.len > max_bytes {
+        return Err("ASTRA_EMU_VFS_RESOURCE_BOUNDS".into());
+    }
+    let read = vfs
+        .reader
+        .read_file_range(
+            &vfs.mount_set_id,
+            uri,
+            stat.revision,
+            astra_byte_source::ByteRange {
+                offset: 0,
+                len: stat.len,
+            },
+            max_bytes,
+        )
+        .map_err(|error| error.to_string())?;
+    if read.revision != stat.revision || read.bytes.len() as u64 != stat.len {
+        return Err("ASTRA_EMU_VFS_RESOURCE_SHORT_READ".into());
+    }
+    Ok(read.bytes)
+}
+
+fn spawn_vfs_resource_read(
+    vfs: RuntimeVideoVfs,
+    uri: String,
+    max_bytes: u64,
+) -> Result<LegacyResourceRead, String> {
+    LegacyResourceRead::spawn(move || {
+        read_vfs_resource(&vfs, &uri, max_bytes).map_err(|_| {
+            astra_emu_family_api::LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_RESOURCE_READ",
+                "bounded VFS resource read failed",
+            )
+        })
+    })
+    .map_err(|error| error.to_string())
+}
+
 impl PreparedFamilyCase {
     fn video_vfs(&self, mount_set_id: &str) -> RuntimeVideoVfs {
         RuntimeVideoVfs {
@@ -1074,8 +1078,11 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         _ => return Err("ASTRA_EMU_CLI_FAMILY_PATH_PAIR_REQUIRED".into()),
     };
     let phase_started = Instant::now();
-    let (family, family_binary_hash) =
-        family_config.create_provider_with_identity(prepared.reader.clone())?;
+    let loaded_family =
+        family_config.create_provider_with_identity(prepared.reader.clone(), &mount_set_id)?;
+    let family_binary_hash = loaded_family.binary_hash;
+    let family_surfaces = loaded_family.surfaces;
+    let family = loaded_family.provider;
     let family_provider_id = family.descriptor().provider_id.clone();
     record_native_launch_phase("family_load", phase_started, launch_started);
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
@@ -1186,20 +1193,15 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         open.session_id.clone(),
         &host.client,
         surface,
+        family_surfaces,
         RuntimeDriverConfig {
             seed,
             delta_ns: probe.runtime.fixed_delta_ns,
             audio_enabled: launch.enable_audio,
-            text: TextProviderBinding {
-                provider_id: "cosmic_text_cpu",
-                target: "windows",
-                profile: &format!("{}-v1", launch.family_id),
-            },
             resume: None,
             frame_sample_interval: 1,
             perfetto_trace: launch.perfetto_trace.clone(),
             capture_performance_samples: false,
-            presentation: PresentationPath::NativeGpu,
             presentation_substeps: 1,
             audio_pump: AudioPumpPolicy::Realtime {
                 target_latency_ms: 180,
@@ -1590,8 +1592,11 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV4,
         }
         _ => return Err("ASTRA_EMU_HEADLESS_FAMILY_PATH_PAIR".into()),
     };
-    let (family, family_binary_hash) =
-        family_config.create_provider_with_identity(prepared.reader.clone())?;
+    let loaded_family =
+        family_config.create_provider_with_identity(prepared.reader.clone(), &mount_set_id)?;
+    let family_binary_hash = loaded_family.binary_hash;
+    let family_surfaces = loaded_family.surfaces;
+    let family = loaded_family.provider;
     let family_provider_id = family.descriptor().provider_id.clone();
     let mut runtime = AstraEmuRuntimeProvider::new(family)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.headless.instance".into()))?;
@@ -1806,20 +1811,15 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV4,
         open.session_id.clone(),
         &host.client,
         surface,
+        family_surfaces,
         &input.messages,
         ExecutionConfig {
             seed,
             delta_ns: probe.runtime.fixed_delta_ns,
             verify_snapshot: launch.verify_snapshot,
-            text: TextProviderBinding {
-                provider_id: &host_profile.providers.text,
-                target: &host_profile.target,
-                profile: &host_profile.product_profile,
-            },
             resume_driver: resume.as_ref().map(|snapshot| snapshot.driver.clone()),
             export_snapshot: launch.snapshot_output.is_some(),
             frame_sample_interval: launch.frame_sample_interval,
-            presentation: PresentationPath::NativeGpu,
             presentation_substeps: (launch.presentation_rate_hz / 60) as u8,
             perfetto_trace: launch.perfetto_trace.clone(),
             capture_performance_samples: launch.performance.is_some(),
@@ -2606,7 +2606,7 @@ fn validate_driver_resume(driver: &HeadlessDriverResumeV1) -> Result<(), String>
     if driver.active_video.as_ref().is_some_and(|video| {
         video.playback_id.is_empty()
             || video.playback_id.len() > 256
-            || validate_vfs_uri(&video.resource_uri).is_err()
+            || validate_any_legacy_vfs_uri(&video.resource_uri).is_err()
             || video.stage_width == 0
             || video.stage_height == 0
             || video.started_step > driver.fixed_step
@@ -2614,6 +2614,21 @@ fn validate_driver_resume(driver: &HeadlessDriverResumeV1) -> Result<(), String>
         return Err("ASTRA_EMU_HEADLESS_RESUME_VIDEO_STATE".into());
     }
     Ok(())
+}
+
+fn validate_any_legacy_vfs_uri(uri: &str) -> Result<(), String> {
+    let (family, _) = uri
+        .split_once(":/")
+        .ok_or_else(|| "ASTRA_EMU_VFS_URI_INVALID".to_owned())?;
+    if family.is_empty()
+        || !family
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err("ASTRA_EMU_VFS_URI_INVALID".into());
+    }
+    astra_emu_family_core::validate_legacy_vfs_uri(&format!("{family}:/"), uri)
+        .map_err(|error| error.to_string())
 }
 
 fn validate_resume_input_ticks(
@@ -4086,7 +4101,7 @@ fn native_video_frame(frame: FvpMovieFrame, duration_us: u64) -> Result<DecodedV
         .checked_mul(1_000)
         .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
     let mut bgra8 = frame.rgba8;
-    for pixel in bgra8.as_chunks_mut::<4>().0.iter_mut() {
+    for pixel in bgra8.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
     Ok(DecodedVideoFrame {
@@ -4139,285 +4154,6 @@ impl ActiveVideoStream {
     }
 }
 
-/// Native-only bridge from the bounded family scene contract to the shared
-/// platform GPU scene.  It retains texture bytes solely to apply validated
-/// subresource updates; it never rasterizes a framebuffer on the CPU.
-#[derive(Default)]
-struct GpuSceneAdapter {
-    textures: BTreeMap<u32, GpuSceneTexture>,
-    width: u32,
-    height: u32,
-    draws: Vec<LegacyDrawV1>,
-    compositing: SceneCompositing2D,
-    last_live_sequence: u64,
-    resource_epoch: u64,
-}
-
-#[derive(Clone)]
-struct GpuSceneTexture {
-    width: u32,
-    height: u32,
-    format: LegacyTextureFormat,
-    revision: u64,
-    resource_id: String,
-}
-
-/// Per-transaction semantic resource accounting.  Values are recorded only
-/// after validation and local transaction preparation succeeds, which keeps
-/// Perfetto counters aligned with state that may be submitted to the platform.
-#[derive(Clone, Copy, Default)]
-struct GpuScenePrepareMetrics {
-    resource_operations: u64,
-    create_bytes: u64,
-    update_bytes: u64,
-    draw_count: u64,
-    live_textures: u64,
-    generation: u64,
-}
-
-impl GpuScenePrepareMetrics {
-    fn accumulate(&mut self, next: Self) -> Result<(), String> {
-        self.resource_operations = self
-            .resource_operations
-            .checked_add(next.resource_operations)
-            .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_RESOURCE_OPERATION_OVERFLOW".to_owned())?;
-        self.create_bytes = self
-            .create_bytes
-            .checked_add(next.create_bytes)
-            .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-        self.update_bytes = self
-            .update_bytes
-            .checked_add(next.update_bytes)
-            .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-        self.draw_count = next.draw_count;
-        self.live_textures = next.live_textures;
-        self.generation = next.generation;
-        Ok(())
-    }
-}
-
-impl GpuSceneAdapter {
-    fn begin_restore(&mut self) {
-        // Provider scene sequence is part of the restored family snapshot and
-        // may be lower than the live sequence being abandoned. Retain the old
-        // texture table until the required reset transaction arrives so that
-        // it can emit explicit platform resource releases.
-        self.last_live_sequence = 0;
-        self.draws.clear();
-        self.width = 0;
-        self.height = 0;
-    }
-
-    fn prepare_live(
-        &mut self,
-        transaction: RuntimeLiveSceneTransaction,
-    ) -> Result<(SceneFrame, GpuScenePrepareMetrics), String> {
-        transaction.validate().map_err(|error| error.to_string())?;
-        if transaction.sequence <= self.last_live_sequence {
-            return Err("ASTRA_EMU_NATIVE_GPU_LIVE_SEQUENCE_REWIND".into());
-        }
-        let reset_resources = transaction.reset_resources;
-        if reset_resources {
-            self.resource_epoch = self
-                .resource_epoch
-                .checked_add(1)
-                .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_RESOURCE_EPOCH_OVERFLOW".to_owned())?;
-        }
-        let mut mutations: BTreeMap<u32, Option<GpuSceneTexture>> = BTreeMap::new();
-        let mut commands = Vec::with_capacity(
-            transaction.resources.len().saturating_mul(2)
-                + transaction.draws.len().saturating_mul(3)
-                + self.textures.len(),
-        );
-        if reset_resources {
-            for texture in self.textures.values() {
-                commands.push(SceneCommand::ReleaseResource {
-                    resource_id: texture.resource_id.clone(),
-                });
-            }
-        }
-        let mut metrics = GpuScenePrepareMetrics {
-            resource_operations: transaction.resources.len() as u64,
-            draw_count: transaction.draws.len() as u64,
-            ..GpuScenePrepareMetrics::default()
-        };
-        for operation in transaction.resources {
-            match operation {
-                RuntimeLiveSceneResourceOperation::CreateTexture {
-                    texture_id,
-                    generation,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                } => {
-                    if resolve_gpu_texture(&self.textures, &mutations, reset_resources, texture_id)
-                        .is_some()
-                    {
-                        return Err("ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_EXISTS".into());
-                    }
-                    metrics.create_bytes = metrics
-                        .create_bytes
-                        .checked_add(pixels.len() as u64)
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-                    let format = runtime_live_texture_format(format);
-                    let rgba8 = gpu_rgba8_owned(width, height, format, pixels)?;
-                    let resource_id = gpu_resource_id(self.resource_epoch, texture_id, generation);
-                    let frame = TextureFrame::from_buffer(width, height, rgba8)
-                        .map_err(|error| error.to_string())?;
-                    commands.push(SceneCommand::UploadTexture {
-                        resource_id: resource_id.clone(),
-                        frame,
-                    });
-                    mutations.insert(
-                        texture_id,
-                        Some(GpuSceneTexture {
-                            width,
-                            height,
-                            format,
-                            revision: generation,
-                            resource_id,
-                        }),
-                    );
-                }
-                RuntimeLiveSceneResourceOperation::UpdateTexture {
-                    texture_id,
-                    generation,
-                    x,
-                    y,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                } => {
-                    metrics.update_bytes = metrics
-                        .update_bytes
-                        .checked_add(pixels.len() as u64)
-                        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_UPLOAD_BYTES_OVERFLOW".to_owned())?;
-                    let old = resolve_gpu_texture(
-                        &self.textures,
-                        &mutations,
-                        reset_resources,
-                        texture_id,
-                    )
-                    .cloned()
-                    .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_MISSING".to_owned())?;
-                    let format = runtime_live_texture_format(format);
-                    if old.format != format
-                        || generation <= old.revision
-                        || x.checked_add(width).is_none_or(|right| right > old.width)
-                        || y.checked_add(height)
-                            .is_none_or(|bottom| bottom > old.height)
-                    {
-                        return Err("ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_REGION".into());
-                    }
-                    let rgba8 = gpu_rgba8_owned(width, height, format, pixels)?;
-                    commands.push(SceneCommand::UpdateTextureRegion {
-                        resource_id: old.resource_id.clone(),
-                        x,
-                        y,
-                        width,
-                        height,
-                        rgba8,
-                    });
-                    mutations.insert(
-                        texture_id,
-                        Some(GpuSceneTexture {
-                            width: old.width,
-                            height: old.height,
-                            format: old.format,
-                            revision: generation,
-                            resource_id: old.resource_id,
-                        }),
-                    );
-                }
-                RuntimeLiveSceneResourceOperation::DestroyTexture {
-                    texture_id,
-                    generation,
-                } => {
-                    let texture = resolve_gpu_texture(
-                        &self.textures,
-                        &mutations,
-                        reset_resources,
-                        texture_id,
-                    )
-                    .cloned()
-                    .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_MISSING".to_owned())?;
-                    if generation <= texture.revision {
-                        return Err("ASTRA_EMU_NATIVE_GPU_LIVE_TEXTURE_GENERATION".into());
-                    }
-                    mutations.insert(texture_id, None);
-                    commands.push(SceneCommand::ReleaseResource {
-                        resource_id: texture.resource_id,
-                    });
-                }
-            }
-        }
-        let compositing = gpu_scene_compositing(transaction.compositing);
-        let draws = transaction
-            .draws
-            .into_iter()
-            .map(legacy_draw_from_live)
-            .collect::<Result<Vec<_>, String>>()?;
-        commands.extend(gpu_draw_commands(&draws, compositing, |texture_id| {
-            resolve_gpu_texture(&self.textures, &mutations, reset_resources, texture_id)
-                .map(|texture| texture.resource_id.clone())
-        })?);
-        if reset_resources {
-            self.textures.clear();
-        }
-        for (texture_id, mutation) in mutations {
-            match mutation {
-                Some(texture) => {
-                    self.textures.insert(texture_id, texture);
-                }
-                None => {
-                    self.textures.remove(&texture_id);
-                }
-            }
-        }
-        self.width = transaction.width;
-        self.height = transaction.height;
-        self.draws = draws;
-        self.compositing = compositing;
-        self.last_live_sequence = transaction.sequence;
-        metrics.live_textures = self.textures.len() as u64;
-        metrics.generation = self.last_live_sequence;
-        Ok((
-            SceneFrame {
-                sequence: 0,
-                width: self.width,
-                height: self.height,
-                clear_rgba: [0, 0, 0, 255],
-                commands,
-                semantics: None,
-            },
-            metrics,
-        ))
-    }
-
-    /// Replays the current retained draw state without re-uploading resources.
-    /// This is used only for a later presentation substep after the resource
-    /// transaction has completed successfully on the platform.
-    fn draw_scene(&self) -> Result<SceneFrame, String> {
-        if self.width == 0 || self.height == 0 {
-            return Err("ASTRA_EMU_NATIVE_GPU_DRAW_BEFORE_SCENE".into());
-        }
-        Ok(SceneFrame {
-            sequence: 0,
-            width: self.width,
-            height: self.height,
-            clear_rgba: [0, 0, 0, 255],
-            commands: gpu_draw_commands(&self.draws, self.compositing, |texture_id| {
-                self.textures
-                    .get(&texture_id)
-                    .map(|texture| texture.resource_id.clone())
-            })?,
-            semantics: None,
-        })
-    }
-}
-
 /// Combines two unsent semantic frames without duplicating the retained
 /// texture table.  Resource commands remain ordered exactly as emitted by the
 /// provider; only superseded draw-state commands are discarded.  The result
@@ -4451,11 +4187,34 @@ fn merge_scene_frames(mut queued: SceneFrame, latest: SceneFrame) -> Result<Scen
                 continue;
             }
         } else if let Some(resource_id) = scene_resource_id(&command) {
-            if commands
+            if let Some(index) = commands
                 .iter()
-                .any(|queued| scene_resource_id(queued) == Some(resource_id))
+                .position(|queued| scene_resource_id(queued) == Some(resource_id))
             {
-                return Err("ASTRA_EMU_NATIVE_GPU_SCENE_RESOURCE_COALESCE_CONFLICT".into());
+                match (&mut commands[index], command) {
+                    (
+                        SceneCommand::UploadTexture { frame, .. },
+                        SceneCommand::UpdateTextureRegion {
+                            x,
+                            y,
+                            width,
+                            height,
+                            rgba8,
+                            ..
+                        },
+                    ) if x == 0 && y == 0 && width == frame.width && height == frame.height => {
+                        frame.rgba8 = rgba8;
+                        continue;
+                    }
+                    (
+                        queued @ SceneCommand::UpdateTextureRegion { .. },
+                        latest @ SceneCommand::UpdateTextureRegion { .. },
+                    ) => {
+                        *queued = latest;
+                        continue;
+                    }
+                    _ => return Err("ASTRA_EMU_NATIVE_GPU_SCENE_RESOURCE_COALESCE_CONFLICT".into()),
+                }
             }
         }
         commands.push(command);
@@ -4488,237 +4247,6 @@ fn is_scene_resource_command(command: &SceneCommand) -> bool {
     )
 }
 
-fn retired_live_texture_operations(
-    retained: impl IntoIterator<Item = (u32, u64)>,
-    incoming_texture_ids: &BTreeSet<u32>,
-    generation: u64,
-) -> Result<Vec<RuntimeLiveSceneResourceOperation>, String> {
-    retained
-        .into_iter()
-        .filter(|(texture_id, _)| !incoming_texture_ids.contains(texture_id))
-        .map(|(texture_id, retained_generation)| {
-            if generation <= retained_generation {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_GENERATION".to_owned());
-            }
-            Ok(RuntimeLiveSceneResourceOperation::DestroyTexture {
-                texture_id,
-                generation,
-            })
-        })
-        .collect()
-}
-
-fn resolve_gpu_texture<'a>(
-    textures: &'a BTreeMap<u32, GpuSceneTexture>,
-    mutations: &'a BTreeMap<u32, Option<GpuSceneTexture>>,
-    reset_resources: bool,
-    texture_id: u32,
-) -> Option<&'a GpuSceneTexture> {
-    mutations
-        .get(&texture_id)
-        .map(Option::as_ref)
-        .unwrap_or_else(|| {
-            (!reset_resources)
-                .then(|| textures.get(&texture_id))
-                .flatten()
-        })
-}
-
-fn gpu_draw_commands(
-    draws: &[LegacyDrawV1],
-    compositing: SceneCompositing2D,
-    resolve_texture: impl Fn(u32) -> Option<String>,
-) -> Result<Vec<SceneCommand>, String> {
-    if draws.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut vertices = Vec::with_capacity(draws.len().saturating_mul(4));
-    let mut indices = Vec::with_capacity(draws.len().saturating_mul(6));
-    let mut mesh_draws = Vec::with_capacity(draws.len());
-    for draw in draws {
-        let scissor = draw
-            .scissor
-            .map(|scissor| {
-                if scissor.x < 0 || scissor.y < 0 || scissor.width <= 0 || scissor.height <= 0 {
-                    return Err("ASTRA_EMU_NATIVE_GPU_SCISSOR_INVALID".to_owned());
-                }
-                Ok(RectI::new(
-                    scissor.x,
-                    scissor.y,
-                    scissor.width as u32,
-                    scissor.height as u32,
-                ))
-            })
-            .transpose()?;
-        let (material, texture_id) = if draw.texture_id == u32::MAX {
-            (MeshMaterial2D::Solid, None)
-        } else {
-            let resource_id = resolve_texture(draw.texture_id)
-                .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_TEXTURE_MISSING".to_owned())?;
-            (MeshMaterial2D::ColorTexture, Some(resource_id))
-        };
-        let vertex_start = u32::try_from(vertices.len())
-            .map_err(|_| "ASTRA_EMU_NATIVE_GPU_VERTEX_BOUNDS".to_owned())?;
-        let index_start = u32::try_from(indices.len())
-            .map_err(|_| "ASTRA_EMU_NATIVE_GPU_INDEX_BOUNDS".to_owned())?;
-        vertices.extend(draw.vertices.map(gpu_vertex));
-        indices.extend_from_slice(&[0, 1, 2, 2, 1, 3]);
-        mesh_draws.push(MeshDraw2D {
-            vertex_start,
-            vertex_count: 4,
-            index_start,
-            index_count: 6,
-            material,
-            texture_id,
-            texture_filter: match draw.texture_filter {
-                LegacyTextureFilter::Nearest => TextureFilter2D::Nearest,
-                LegacyTextureFilter::Linear => TextureFilter2D::Linear,
-            },
-            opacity: 1.0,
-            blend: match draw.blend {
-                astra_emu_family_api::LegacyBlendMode::Alpha => BlendMode::Alpha,
-                astra_emu_family_api::LegacyBlendMode::Add => BlendMode::Add,
-                astra_emu_family_api::LegacyBlendMode::Opaque => BlendMode::Opaque,
-                astra_emu_family_api::LegacyBlendMode::Multiply => BlendMode::Multiply,
-                astra_emu_family_api::LegacyBlendMode::Screen => BlendMode::Screen,
-            },
-            scissor,
-        });
-    }
-    Ok(vec![SceneCommand::MeshBatch2D {
-        vertices: vertices.into(),
-        indices: indices.into(),
-        draws: mesh_draws.into(),
-        compositing,
-    }])
-}
-
-fn gpu_scene_compositing(
-    compositing: astra_plugin_abi::RuntimeLiveSceneCompositing,
-) -> SceneCompositing2D {
-    match compositing {
-        astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb => SceneCompositing2D::LinearSrgb,
-        astra_plugin_abi::RuntimeLiveSceneCompositing::EncodedSrgb => {
-            SceneCompositing2D::EncodedSrgb
-        }
-    }
-}
-
-fn gpu_resource_id(epoch: u64, texture_id: u32, generation: u64) -> String {
-    format!("astra-emu-texture-{epoch}-{texture_id}-{generation}")
-}
-
-fn runtime_live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextureFormat {
-    match format {
-        RuntimeLiveTextureFormat::Rgba8 => LegacyTextureFormat::Rgba8,
-        RuntimeLiveTextureFormat::LumaAlpha8 => LegacyTextureFormat::LumaAlpha8,
-    }
-}
-
-fn rgba8_to_luma_alpha8(rgba8: &[u8]) -> Vec<u8> {
-    let mut output = Vec::with_capacity(rgba8.len() / 2);
-    for pixel in rgba8.as_chunks::<4>().0.iter() {
-        let luma = ((u16::from(pixel[0]) * 77
-            + u16::from(pixel[1]) * 150
-            + u16::from(pixel[2]) * 29
-            + 128)
-            / 256) as u8;
-        output.push(luma);
-        output.push(pixel[3]);
-    }
-    output
-}
-
-fn legacy_draw_from_live(draw: astra_plugin_abi::RuntimeLiveDraw) -> Result<LegacyDrawV1, String> {
-    let scissor = draw
-        .scissor
-        .map(
-            |scissor| -> Result<astra_emu_family_api::LegacyScissorV1, String> {
-                Ok(astra_emu_family_api::LegacyScissorV1 {
-                    x: i32::try_from(scissor.x)
-                        .map_err(|_| "ASTRA_EMU_NATIVE_GPU_LIVE_SCISSOR_BOUNDS")?,
-                    y: i32::try_from(scissor.y)
-                        .map_err(|_| "ASTRA_EMU_NATIVE_GPU_LIVE_SCISSOR_BOUNDS")?,
-                    width: i32::try_from(scissor.width)
-                        .map_err(|_| "ASTRA_EMU_NATIVE_GPU_LIVE_SCISSOR_BOUNDS")?,
-                    height: i32::try_from(scissor.height)
-                        .map_err(|_| "ASTRA_EMU_NATIVE_GPU_LIVE_SCISSOR_BOUNDS")?,
-                })
-            },
-        )
-        .transpose()?;
-    Ok(LegacyDrawV1 {
-        texture_id: draw.texture_id,
-        vertices: draw
-            .vertices
-            .map(|vertex| astra_emu_family_api::LegacyVertexV1 {
-                position: [vertex.x, vertex.y],
-                tex_coord: [vertex.u, vertex.v],
-                color: vertex.color.map(|channel| f32::from(channel) / 255.0),
-            }),
-        blend: match draw.blend {
-            RuntimeLiveBlendMode::Alpha => astra_emu_family_api::LegacyBlendMode::Alpha,
-            RuntimeLiveBlendMode::Additive => astra_emu_family_api::LegacyBlendMode::Add,
-            RuntimeLiveBlendMode::Opaque => astra_emu_family_api::LegacyBlendMode::Opaque,
-            RuntimeLiveBlendMode::Multiply => astra_emu_family_api::LegacyBlendMode::Multiply,
-            RuntimeLiveBlendMode::Screen => astra_emu_family_api::LegacyBlendMode::Screen,
-        },
-        texture_filter: match draw.texture_filter {
-            RuntimeLiveTextureFilter::Nearest => LegacyTextureFilter::Nearest,
-            RuntimeLiveTextureFilter::Linear => LegacyTextureFilter::Linear,
-        },
-        scissor,
-    })
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn gpu_rgba8_owned(
-    width: u32,
-    height: u32,
-    format: LegacyTextureFormat,
-    pixels: astra_byte_source::OwnedByteBuffer,
-) -> Result<OwnedPixelBuffer, String> {
-    let channels = match format {
-        LegacyTextureFormat::Rgba8 => 4usize,
-        LegacyTextureFormat::LumaAlpha8 => 2usize,
-    };
-    let expected = usize::try_from(width)
-        .ok()
-        .and_then(|width| {
-            usize::try_from(height)
-                .ok()
-                .and_then(|height| width.checked_mul(height))
-        })
-        .and_then(|pixels| pixels.checked_mul(channels))
-        .ok_or_else(|| "ASTRA_EMU_NATIVE_GPU_TEXTURE_BOUNDS".to_owned())?;
-    if pixels.len() != expected {
-        return Err("ASTRA_EMU_NATIVE_GPU_TEXTURE_LENGTH".into());
-    }
-    Ok(match format {
-        LegacyTextureFormat::Rgba8 => OwnedPixelBuffer::from_owned(pixels),
-        LegacyTextureFormat::LumaAlpha8 => OwnedPixelBuffer::from_vec(
-            pixels
-                .as_slice()
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
-                .collect(),
-        ),
-    })
-}
-
-fn gpu_vertex(vertex: astra_emu_family_api::LegacyVertexV1) -> MeshVertex2D {
-    let alpha = (vertex.color[3].clamp(0.0, 1.0) * 255.0).round() as u8;
-    let channel =
-        |index: usize| (vertex.color[index].clamp(0.0, 1.0) * f32::from(alpha)).round() as u8;
-    MeshVertex2D {
-        position: vertex.position,
-        uv: vertex.tex_coord,
-        premultiplied_rgba: [channel(0), channel(1), channel(2), alpha],
-    }
-}
-
 struct RuntimeDriver<'a> {
     runtime: &'a mut AstraEmuRuntimeProvider,
     session_id: GameRuntimeSessionId,
@@ -4726,6 +4254,7 @@ struct RuntimeDriver<'a> {
     delta_ns: u64,
     platform: &'a PlatformHostClient,
     surface: SurfaceHandle,
+    family_surfaces: Arc<astra_emu_family_support::LegacySurfaceStoreV9>,
     fixed_step: u64,
     next_step_mode: RuntimeStepMode,
     input_sequence: u64,
@@ -4733,22 +4262,11 @@ struct RuntimeDriver<'a> {
     provider_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
     pending_waits: BTreeMap<String, PendingWait>,
-    rasterizer: CpuStageRasterizer,
-    gpu_scene: Option<GpuSceneAdapter>,
-    resource_source_revisions: BTreeMap<u32, u64>,
-    force_resource_reset: bool,
-    pending_scene_metrics: Option<GpuScenePrepareMetrics>,
-    pending_render_frame: Option<PreparedRenderFrame>,
+    family_layers: BTreeMap<String, astra_plugin_abi::RuntimeLiveLayerState>,
+    family_layer_generations: BTreeMap<String, u64>,
+    family_layer_sequence: Option<u64>,
+    family_layer_viewport: Option<(u32, u32)>,
     pending_scene_frame: Option<SceneFrame>,
-    visual_dirty: bool,
-    image_decoders: DecodeProviderRegistry,
-    text_presenter: BoundTextPresenter,
-    pending_text_resources: BTreeMap<String, Option<GlyphBitmap>>,
-    resident_text_resources: BTreeSet<String>,
-    text_overlay: Vec<SceneCommand>,
-    cpu_text_underlay: Option<(u32, u32, Vec<u8>)>,
-    underlay_frame: Option<(u32, u32, Vec<u8>)>,
-    base_frame: Option<(u32, u32, Vec<u8>)>,
     latest_frame: Option<(u32, u32, Hash256)>,
     present_sequence: u64,
     pending_scene_presents: VecDeque<PendingScenePresent>,
@@ -4800,35 +4318,17 @@ struct PendingScenePresent {
     receipt: ScenePresentReceipt,
 }
 
-#[derive(Clone, Copy)]
-struct TextProviderBinding<'a> {
-    provider_id: &'a str,
-    target: &'a str,
-    profile: &'a str,
-}
-
-struct RuntimeDriverConfig<'a> {
+struct RuntimeDriverConfig {
     seed: u64,
     delta_ns: u64,
     audio_enabled: bool,
-    text: TextProviderBinding<'a>,
     resume: Option<HeadlessDriverResumeV1>,
     frame_sample_interval: u64,
     perfetto_trace: Option<PathBuf>,
     capture_performance_samples: bool,
-    presentation: PresentationPath,
     presentation_substeps: u8,
     audio_pump: AudioPumpPolicy,
     video_vfs: RuntimeVideoVfs,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Kept for the explicit pixel-oracle test path, never performance mode.
-enum PresentationPath {
-    /// Deterministic CPU renderer used only by Headless evidence/capture.
-    CpuReference,
-    /// Retained semantic scene submitted to the platform WGPU compositor.
-    NativeGpu,
 }
 
 #[derive(Clone, Copy)]
@@ -4839,6 +4339,162 @@ enum AudioPumpPolicy {
         target_latency_ms: u32,
         refill_low_water_ms: u32,
     },
+}
+
+fn validate_runtime_layer(layer: &astra_plugin_abi::RuntimeLiveLayerState) -> Result<(), String> {
+    let safe = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 128
+            && value.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':')
+            })
+    };
+    let row = layer
+        .width
+        .checked_mul(4)
+        .ok_or_else(|| "ASTRA_EMU_CLI_LAYER_BOUNDS".to_owned())?;
+    if !safe(&layer.layer_id)
+        || !safe(&layer.role)
+        || !safe(&layer.surface_id)
+        || layer.generation == 0
+        || layer.width == 0
+        || layer.height == 0
+        || layer.stride < row
+        || !layer.opacity.is_finite()
+        || !(0.0..=1.0).contains(&layer.opacity)
+        || [
+            layer.transform.m11,
+            layer.transform.m12,
+            layer.transform.m21,
+            layer.transform.m22,
+            layer.transform.tx,
+            layer.transform.ty,
+        ]
+        .into_iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err("ASTRA_EMU_CLI_LAYER_STATE_INVALID".into());
+    }
+    Ok(())
+}
+
+fn layer_resource_id(surface_id: &str) -> String {
+    format!("astra.emu.surface.{surface_id}")
+}
+
+fn runtime_filter_graph(
+    graph: &astra_plugin_abi::RuntimeLiveFilterGraph,
+) -> Result<astra_media_core::FilterGraph, String> {
+    let mut nodes = Vec::with_capacity(graph.nodes.len());
+    for node in &graph.nodes {
+        let mut params = BTreeMap::new();
+        for param in &node.params {
+            let value = match &param.value {
+                astra_plugin_abi::RuntimeLiveFilterParam::Float(value) => {
+                    if !value.is_finite() {
+                        return Err("ASTRA_EMU_CLI_FILTER_PARAM".into());
+                    }
+                    astra_media_core::FilterParam::Float(*value)
+                }
+                astra_plugin_abi::RuntimeLiveFilterParam::Int(value) => {
+                    astra_media_core::FilterParam::Int(*value)
+                }
+                astra_plugin_abi::RuntimeLiveFilterParam::Bool(value) => {
+                    astra_media_core::FilterParam::Bool(*value)
+                }
+                astra_plugin_abi::RuntimeLiveFilterParam::Text(value) => {
+                    astra_media_core::FilterParam::Text(value.clone())
+                }
+            };
+            if params.insert(param.key.clone(), value).is_some() {
+                return Err("ASTRA_EMU_CLI_FILTER_PARAM_DUPLICATE".into());
+            }
+        }
+        nodes.push(astra_media_core::FilterNode {
+            id: node.id.clone(),
+            kind: node.kind.clone(),
+            input: runtime_filter_target(node.input),
+            output: runtime_filter_target(node.output),
+            params,
+            deterministic: node.deterministic,
+            allow_cpu_fallback: node.allow_cpu_fallback,
+        });
+    }
+    let graph = astra_media_core::FilterGraph {
+        schema: graph.schema.clone(),
+        nodes,
+    };
+    let validation = astra_media_core::FilterValidator.validate(&graph);
+    if !validation.blocking_diagnostics().is_empty() {
+        return Err("ASTRA_EMU_CLI_FILTER_GRAPH_INVALID".into());
+    }
+    Ok(graph)
+}
+
+fn runtime_filter_target(
+    target: astra_plugin_abi::RuntimeLiveFilterTarget,
+) -> astra_media_core::FilterTarget {
+    match target {
+        astra_plugin_abi::RuntimeLiveFilterTarget::Background => {
+            astra_media_core::FilterTarget::Background
+        }
+        astra_plugin_abi::RuntimeLiveFilterTarget::Character => {
+            astra_media_core::FilterTarget::Character
+        }
+        astra_plugin_abi::RuntimeLiveFilterTarget::Ui => astra_media_core::FilterTarget::Ui,
+        astra_plugin_abi::RuntimeLiveFilterTarget::Text => astra_media_core::FilterTarget::Text,
+        astra_plugin_abi::RuntimeLiveFilterTarget::Video => astra_media_core::FilterTarget::Video,
+        astra_plugin_abi::RuntimeLiveFilterTarget::Final => astra_media_core::FilterTarget::Final,
+    }
+}
+
+fn layer_mesh_command(
+    layer: &astra_plugin_abi::RuntimeLiveLayerState,
+    resource_id: String,
+) -> SceneCommand {
+    let width = layer.width as f32;
+    let height = layer.height as f32;
+    SceneCommand::Mesh2D {
+        id: layer.layer_id.clone(),
+        vertices: vec![
+            MeshVertex2D {
+                position: [0.0, 0.0],
+                uv: [0.0, 0.0],
+                premultiplied_rgba: [255; 4],
+            },
+            MeshVertex2D {
+                position: [width, 0.0],
+                uv: [1.0, 0.0],
+                premultiplied_rgba: [255; 4],
+            },
+            MeshVertex2D {
+                position: [0.0, height],
+                uv: [0.0, 1.0],
+                premultiplied_rgba: [255; 4],
+            },
+            MeshVertex2D {
+                position: [width, height],
+                uv: [1.0, 1.0],
+                premultiplied_rgba: [255; 4],
+            },
+        ]
+        .into(),
+        indices: vec![0, 1, 2, 2, 1, 3].into(),
+        material: MeshMaterial2D::ColorTexture,
+        texture_id: Some(resource_id),
+        texture_filter: match layer.texture_filter {
+            astra_plugin_abi::RuntimeLiveLayerFilter::Nearest => TextureFilter2D::Nearest,
+            astra_plugin_abi::RuntimeLiveLayerFilter::Linear => TextureFilter2D::Linear,
+        },
+        opacity: layer.opacity,
+        blend: match layer.blend {
+            astra_plugin_abi::RuntimeLiveLayerBlend::Opaque => BlendMode::Opaque,
+            astra_plugin_abi::RuntimeLiveLayerBlend::Alpha => BlendMode::Alpha,
+            astra_plugin_abi::RuntimeLiveLayerBlend::Add => BlendMode::Add,
+            astra_plugin_abi::RuntimeLiveLayerBlend::Multiply => BlendMode::Multiply,
+            astra_plugin_abi::RuntimeLiveLayerBlend::Screen => BlendMode::Screen,
+        },
+    }
 }
 
 impl AudioPumpPolicy {
@@ -5000,15 +4656,13 @@ fn perfetto_domain(name: &str) -> &'static str {
     }
 }
 
-struct ExecutionConfig<'a> {
+struct ExecutionConfig {
     seed: u64,
     delta_ns: u64,
     verify_snapshot: bool,
-    text: TextProviderBinding<'a>,
     resume_driver: Option<HeadlessDriverResumeV1>,
     export_snapshot: bool,
     frame_sample_interval: u64,
-    presentation: PresentationPath,
     presentation_substeps: u8,
     perfetto_trace: Option<PathBuf>,
     capture_performance_samples: bool,
@@ -5330,24 +4984,24 @@ async fn execute_sequence(
     session_id: GameRuntimeSessionId,
     platform: &PlatformHostClient,
     surface: SurfaceHandle,
+    family_surfaces: Arc<astra_emu_family_support::LegacySurfaceStoreV9>,
     messages: &[InputMessage],
-    config: ExecutionConfig<'_>,
+    config: ExecutionConfig,
 ) -> Result<ExecutionEvidence, String> {
     let mut driver = RuntimeDriver::new(
         runtime,
         session_id,
         platform,
         surface,
+        family_surfaces,
         RuntimeDriverConfig {
             seed: config.seed,
             delta_ns: config.delta_ns,
             audio_enabled: true,
-            text: config.text,
             resume: config.resume_driver,
             frame_sample_interval: config.frame_sample_interval,
             perfetto_trace: config.perfetto_trace,
             capture_performance_samples: config.capture_performance_samples,
-            presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
             audio_pump: AudioPumpPolicy::FixedTick,
             video_vfs: config.video_vfs,
@@ -5800,18 +5454,12 @@ impl<'a> RuntimeDriver<'a> {
         session_id: GameRuntimeSessionId,
         platform: &'a PlatformHostClient,
         surface: SurfaceHandle,
-        config: RuntimeDriverConfig<'_>,
+        family_surfaces: Arc<astra_emu_family_support::LegacySurfaceStoreV9>,
+        config: RuntimeDriverConfig,
     ) -> Result<RuntimeDriver<'a>, String> {
         if config.presentation_substeps == 0 || config.presentation_substeps > 2 {
             return Err("ASTRA_EMU_PRESENTATION_SUBSTEPS_INVALID".into());
         }
-        if config.presentation_substeps != 1 && config.presentation != PresentationPath::NativeGpu {
-            return Err("ASTRA_EMU_PRESENTATION_SUBSTEPS_REQUIRE_GPU".into());
-        }
-        let mut image_decoders = DecodeProviderRegistry::default();
-        image_decoders
-            .register(Box::new(ImageDecodeProvider))
-            .map_err(|error| error.to_string())?;
         let mut driver = RuntimeDriver {
             runtime,
             session_id,
@@ -5819,6 +5467,7 @@ impl<'a> RuntimeDriver<'a> {
             delta_ns: config.delta_ns,
             platform,
             surface,
+            family_surfaces,
             fixed_step: 0,
             next_step_mode: RuntimeStepMode::Live,
             input_sequence: 0,
@@ -5826,27 +5475,11 @@ impl<'a> RuntimeDriver<'a> {
             provider_sequence: 0,
             pending_inputs: Vec::new(),
             pending_waits: BTreeMap::new(),
-            rasterizer: CpuStageRasterizer::default(),
-            gpu_scene: (config.presentation == PresentationPath::NativeGpu)
-                .then(GpuSceneAdapter::default),
-            resource_source_revisions: BTreeMap::new(),
-            force_resource_reset: false,
-            pending_scene_metrics: None,
-            pending_render_frame: None,
+            family_layers: BTreeMap::new(),
+            family_layer_generations: BTreeMap::new(),
+            family_layer_sequence: None,
+            family_layer_viewport: None,
             pending_scene_frame: None,
-            visual_dirty: false,
-            image_decoders,
-            text_presenter: BoundTextPresenter::new(
-                config.text.provider_id,
-                config.text.target,
-                config.text.profile,
-            )?,
-            pending_text_resources: BTreeMap::new(),
-            resident_text_resources: BTreeSet::new(),
-            text_overlay: Vec::new(),
-            cpu_text_underlay: None,
-            underlay_frame: None,
-            base_frame: None,
             latest_frame: None,
             present_sequence: 0,
             pending_scene_presents: VecDeque::new(),
@@ -5928,41 +5561,11 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     async fn prepare_presentation_restore(&mut self) -> Result<(), String> {
-        // `GpuSceneAdapter` applies resource mutations when it prepares a
-        // transaction, before the sampled frame is necessarily submitted.
-        // Commit that pending transaction before restore so its retained
-        // resource table cannot get ahead of the platform compositor. The
-        // following reset transaction can then release exactly the resources
-        // that the platform actually owns.
         if let Some(scene) = self.pending_scene_frame.take() {
             self.submit_scene(scene).await?;
         }
         self.drain_pending_scene_presents().await?;
-        self.pending_render_frame = None;
-        self.pending_scene_metrics = None;
-        self.resource_source_revisions.clear();
-        self.force_resource_reset = true;
-        self.rasterizer = CpuStageRasterizer::default();
-        self.base_frame = None;
-        self.underlay_frame = None;
-        self.cpu_text_underlay = None;
         self.latest_frame = None;
-        self.visual_dirty = false;
-
-        let cleared = self.text_presenter.clear_overlays()?;
-        self.pending_text_resources.clear();
-        for command in cleared.lifecycle {
-            match command {
-                SceneCommand::ReleaseResource { resource_id } => {
-                    self.pending_text_resources.insert(resource_id, None);
-                }
-                _ => return Err("ASTRA_EMU_HEADLESS_TEXT_RESTORE_COMMAND".into()),
-            }
-        }
-        self.text_overlay.clear();
-        if let Some(scene) = self.gpu_scene.as_mut() {
-            scene.begin_restore();
-        }
         Ok(())
     }
 
@@ -6248,9 +5851,9 @@ impl<'a> RuntimeDriver<'a> {
                             _ => return Err("ASTRA_EMU_AUDIO_RESOURCE_COMMAND_INVALID".into()),
                         };
                         let read_started = Instant::now();
-                        read = Some(self.runtime.begin_session_resource_read(
-                            &self.session_id,
-                            resource_uri,
+                        read = Some(spawn_vfs_resource_read(
+                            self.video_vfs.clone(),
+                            resource_uri.clone(),
                             512 * 1024 * 1024,
                         )?);
                         self.begin_perfetto_phase("vfs.range_read", 8, read_started)?;
@@ -6458,7 +6061,14 @@ impl<'a> RuntimeDriver<'a> {
         self.record_perfetto_phase("runtime.provider_step", 6, runtime_started)?;
         let world_transaction_started = Instant::now();
         let live = output.live;
-        let clear_text = live.clear_text;
+        if live.clear_text
+            || !live.scenes.is_empty()
+            || !live.resource_scenes.is_empty()
+            || !live.text.is_empty()
+            || !live.text_presentations.is_empty()
+        {
+            return Err("ASTRA_EMU_CLI_V9_RETIRED_PRESENTATION".into());
+        }
         self.state_revision = live.state_revision;
         let coverage = live.coverage;
         self.next_step_mode = RuntimeStepMode::Live;
@@ -6474,19 +6084,11 @@ impl<'a> RuntimeDriver<'a> {
         self.record_perfetto_counter("rfvp.pcm_moved_bytes", coverage.pcm_moved_bytes)?;
         self.record_perfetto_counter("rfvp.pcm_copied_bytes", coverage.pcm_copied_bytes)?;
         let mut rendered = false;
-        let mut text_presentations = BTreeMap::new();
-        let mut text_leases = Vec::new();
         let effect_started = Instant::now();
         self.begin_perfetto_phase("runtime.live_output_routing", 2, effect_started)?;
-        for transaction in live.scenes {
+        for transaction in live.layers {
             let scene_started = Instant::now();
-            self.queue_scene_commit_live(transaction)?;
-            self.record_perfetto_phase("scene.transaction_enqueue", 7, scene_started)?;
-            rendered = true;
-        }
-        for scene in live.resource_scenes {
-            let scene_started = Instant::now();
-            self.queue_resource_scene_live(scene)?;
+            self.queue_layer_transaction(transaction)?;
             self.record_perfetto_phase("scene.transaction_enqueue", 7, scene_started)?;
             rendered = true;
         }
@@ -6520,13 +6122,9 @@ impl<'a> RuntimeDriver<'a> {
                     .await?;
             } else {
                 let resource = match &command {
-                    LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
-                        Some(self.runtime.read_session_resource(
-                            &self.session_id,
-                            resource_uri,
-                            512 * 1024 * 1024,
-                        )?)
-                    }
+                    LegacyAudioCommandV1::LoadResource { resource_uri, .. } => Some(
+                        read_vfs_resource(&self.video_vfs, resource_uri, 512 * 1024 * 1024)?,
+                    ),
                     _ => None,
                 };
                 self.audio.execute(command, resource, self.platform).await?;
@@ -6535,18 +6133,6 @@ impl<'a> RuntimeDriver<'a> {
         }
         if !live.audio_cues.is_empty() {
             return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
-        }
-        for lease in live.text {
-            text_leases.push(lease);
-        }
-        for presentation in live.text_presentations {
-            let lease_id = presentation.lease_id.clone();
-            if text_presentations
-                .insert(lease_id, legacy_live_text_presentation(presentation))
-                .is_some()
-            {
-                return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_DUPLICATE".into());
-            }
         }
         for command in live.video {
             let media_started = Instant::now();
@@ -6582,101 +6168,8 @@ impl<'a> RuntimeDriver<'a> {
             self.state_trace.extend_from_slice(&0_u64.to_le_bytes());
             self.state_trace.push(b'\n');
         }
-        let mut presented_text = Vec::new();
-        for lease in text_leases {
-            let text = self
-                .runtime
-                .take_ephemeral_text(&self.session_id, &lease.lease_id)?
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXT_LEASE_MISSING".to_owned())?;
-            if text.lease_id != lease.lease_id
-                || text.text.len() as u64 != u64::from(lease.byte_len)
-            {
-                return Err("ASTRA_EMU_HEADLESS_TEXT_LEASE_IDENTITY".into());
-            }
-            if let Some(presentation) = text_presentations.remove(&lease.lease_id) {
-                presented_text.push((text, presentation));
-            }
-        }
-        if !text_presentations.is_empty() {
-            return Err("ASTRA_EMU_HEADLESS_TEXT_PRESENTATION_ORPHANED".into());
-        }
-        if clear_text && presented_text.is_empty() {
-            let cleared = self.text_presenter.clear_overlays()?;
-            let had_lifecycle = !cleared.lifecycle.is_empty();
-            for command in cleared.lifecycle {
-                match command {
-                    SceneCommand::ReleaseResource { resource_id } => {
-                        self.pending_text_resources.insert(resource_id, None);
-                    }
-                    _ => return Err("ASTRA_EMU_HEADLESS_TEXT_CLEAR_COMMAND".into()),
-                }
-            }
-            let restored_cpu_underlay = self.cpu_text_underlay.take();
-            let had_cpu_underlay = restored_cpu_underlay.is_some();
-            if let Some(underlay) = restored_cpu_underlay {
-                self.base_frame = Some(underlay);
-            }
-            if !self.text_overlay.is_empty() || had_lifecycle || had_cpu_underlay {
-                self.text_overlay.clear();
-                self.visual_dirty = true;
-                rendered = true;
-            }
-        }
-        if !presented_text.is_empty() {
-            let text_started = Instant::now();
-            if let Some(scene) = self.gpu_scene.as_ref() {
-                let entries = presented_text
-                    .iter()
-                    .map(|(text, presentation)| (text, presentation))
-                    .collect::<Vec<_>>();
-                let presented =
-                    self.text_presenter
-                        .render_overlays(scene.width, scene.height, &entries)?;
-                for command in presented.lifecycle {
-                    match command {
-                        SceneCommand::UploadGlyph { resource_id, glyph } => {
-                            self.pending_text_resources.insert(resource_id, Some(glyph));
-                        }
-                        SceneCommand::ReleaseResource { resource_id } => {
-                            self.pending_text_resources.insert(resource_id, None);
-                        }
-                        _ => return Err("ASTRA_EMU_HEADLESS_TEXT_LIFECYCLE_COMMAND".into()),
-                    }
-                }
-                self.text_overlay = presented.draws;
-                self.visual_dirty = true;
-            } else {
-                let mut underlay = match self.cpu_text_underlay.as_ref() {
-                    Some(underlay) => underlay.clone(),
-                    None => {
-                        let underlay = self.resolve_text_underlay()?;
-                        self.cpu_text_underlay = Some(underlay.clone());
-                        underlay
-                    }
-                };
-                for (text, presentation) in &presented_text {
-                    let presented = self.text_presenter.render(&underlay, text, presentation)?;
-                    underlay = (underlay.0, underlay.1, presented.rgba8);
-                }
-                self.base_frame = Some(underlay);
-            }
-            self.raster_timings_ns.push(elapsed_ns(text_started)?);
-            self.record_perfetto_phase("astra.emu.adapter.text_raster", 4, text_started)?;
-            rendered = true;
-        }
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.end_perfetto_phase("runtime.live_output_routing", 2)?;
-        if let Some(metrics) = self.pending_scene_metrics.take() {
-            self.last_step_resource_activity |= metrics.resource_operations != 0
-                || metrics.create_bytes != 0
-                || metrics.update_bytes != 0;
-            self.record_perfetto_counter("scene.resource_operations", metrics.resource_operations)?;
-            self.record_perfetto_counter("allocation_bytes", metrics.create_bytes)?;
-            self.record_perfetto_counter("upload_bytes", metrics.update_bytes)?;
-            self.record_perfetto_counter("scene.draw_count", metrics.draw_count)?;
-            self.record_perfetto_counter("allocation_count", metrics.live_textures)?;
-            self.record_perfetto_counter("scene.generation", metrics.generation)?;
-        }
         let media_started = Instant::now();
         let audio_refill_started = Instant::now();
         let audio_telemetry = if self.audio_enabled {
@@ -6698,49 +6191,19 @@ impl<'a> RuntimeDriver<'a> {
         }
         let presentation_changed = rendered || video_changed;
         let sample_due = self.fixed_step.is_multiple_of(self.frame_sample_interval);
-        if sample_due
-            && self.gpu_scene.is_some()
-            && (self.pending_scene_frame.is_some()
-                || self
-                    .gpu_scene
-                    .as_ref()
-                    .is_some_and(|scene| scene.width != 0 && scene.height != 0))
-        {
+        if sample_due && (self.pending_scene_frame.is_some() || !self.family_layers.is_empty()) {
             let mut submitted = 0u8;
             if let Some(scene) = self.pending_scene_frame.take() {
                 self.submit_scene(scene).await?;
-                self.visual_dirty = false;
                 submitted = 1;
             }
             while submitted < self.presentation_substeps {
-                let scene = self
-                    .gpu_scene
-                    .as_ref()
-                    .expect("checked GPU presentation path")
-                    .draw_scene()?;
+                let scene = self.build_family_layer_scene(false, BTreeSet::new())?;
                 self.submit_scene(scene).await?;
                 submitted += 1;
             }
-        } else if sample_due && (self.visual_dirty || video_changed) {
-            if self.visual_dirty {
-                {
-                    let frame = self
-                        .pending_render_frame
-                        .as_ref()
-                        .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
-                    let (width, height) = frame.dimensions();
-                    let raster_started = Instant::now();
-                    let rgba8 = self.rasterizer.render_prepared(frame)?;
-                    self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-                    self.record_perfetto_phase("scene.cpu_oracle", 4, raster_started)?;
-                    self.set_underlay_frame(width, height, rgba8);
-                    self.visual_dirty = false;
-                }
-            }
-            let present_started = Instant::now();
-            self.present().await?;
-            self.present_timings_ns.push(elapsed_ns(present_started)?);
-            self.record_perfetto_phase("gpu.present", 5, present_started)?;
+        } else if sample_due && video_changed {
+            return Err("ASTRA_EMU_CLI_VIDEO_WITHOUT_LAYER_SCENE".into());
         }
         if presentation_changed {
             for wait in self.pending_waits.values_mut() {
@@ -6766,34 +6229,6 @@ impl<'a> RuntimeDriver<'a> {
         Ok(())
     }
 
-    fn resolve_text_underlay(&mut self) -> Result<(u32, u32, Vec<u8>), String> {
-        if let Some(underlay) = &self.underlay_frame {
-            return Ok(underlay.clone());
-        }
-        if !self.visual_dirty {
-            return Err("ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING".into());
-        }
-        let frame = self
-            .pending_render_frame
-            .as_ref()
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
-        let (width, height) = frame.dimensions();
-        let raster_started = Instant::now();
-        let rgba8 = self.rasterizer.render_prepared(frame)?;
-        self.raster_timings_ns.push(elapsed_ns(raster_started)?);
-        self.record_perfetto_phase("scene.cpu_oracle", 4, raster_started)?;
-        self.set_underlay_frame(width, height, rgba8);
-        self.visual_dirty = false;
-        self.underlay_frame
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXT_UNDERLAY_MISSING".to_owned())
-    }
-
-    fn set_underlay_frame(&mut self, width: u32, height: u32, rgba8: Vec<u8>) {
-        self.underlay_frame = Some((width, height, rgba8.clone()));
-        self.base_frame = Some((width, height, rgba8));
-    }
-
     async fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {
         // The platform command queue is intentionally bounded.  A fast
         // retained scene can produce presentations more quickly than the GPU
@@ -6808,30 +6243,12 @@ impl<'a> RuntimeDriver<'a> {
             self.await_oldest_scene_present().await?;
         }
         let video_command = self.current_video_scene_command()?;
-        for (resource_id, glyph) in std::mem::take(&mut self.pending_text_resources) {
-            match (self.resident_text_resources.contains(&resource_id), glyph) {
-                (false, Some(glyph)) => {
-                    self.resident_text_resources.insert(resource_id.clone());
-                    scene
-                        .commands
-                        .push(SceneCommand::UploadGlyph { resource_id, glyph });
-                }
-                (true, None) => {
-                    self.resident_text_resources.remove(&resource_id);
-                    scene
-                        .commands
-                        .push(SceneCommand::ReleaseResource { resource_id });
-                }
-                (true, Some(_)) | (false, None) => {}
-            }
-        }
         if matches!(
             self.video.as_ref().map(|video| video.mode),
             Some(LegacyVideoMode::LayerNoAudio)
         ) {
             scene.commands.extend(video_command.iter().cloned());
         }
-        scene.commands.extend(self.text_overlay.iter().cloned());
         if matches!(
             self.video.as_ref().map(|video| video.mode),
             Some(LegacyVideoMode::ModalWithAudio)
@@ -6911,35 +6328,13 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     async fn flush_checkpoint_presentation(&mut self) -> Result<(), String> {
-        if self.gpu_scene.is_some() {
+        if !self.family_layers.is_empty() || self.pending_scene_frame.is_some() {
             let scene = match self.pending_scene_frame.take() {
-                Some(scene) => Some(scene),
-                None => self
-                    .gpu_scene
-                    .as_ref()
-                    .filter(|scene| scene.width != 0 && scene.height != 0)
-                    .map(GpuSceneAdapter::draw_scene)
-                    .transpose()?,
+                Some(scene) => scene,
+                None => self.build_family_layer_scene(false, BTreeSet::new())?,
             };
-            if let Some(scene) = scene {
-                self.submit_scene(scene).await?;
-                self.visual_dirty = false;
-            }
+            self.submit_scene(scene).await?;
             self.drain_pending_scene_presents().await?;
-            return Ok(());
-        }
-        if self.visual_dirty {
-            let frame = self
-                .pending_render_frame
-                .as_ref()
-                .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
-            let (width, height) = frame.dimensions();
-            let rgba8 = self.rasterizer.render_prepared(frame)?;
-            self.set_underlay_frame(width, height, rgba8);
-            self.visual_dirty = false;
-        }
-        if self.base_frame.is_some() {
-            self.present().await?;
         }
         Ok(())
     }
@@ -7043,297 +6438,190 @@ impl<'a> RuntimeDriver<'a> {
         }
     }
 
-    fn queue_scene_commit_live(
+    fn queue_layer_transaction(
         &mut self,
-        transaction: RuntimeLiveSceneTransaction,
+        transaction: astra_plugin_abi::RuntimeLiveLayerTransaction,
     ) -> Result<(), String> {
-        if let Some(gpu_scene) = self.gpu_scene.as_mut() {
-            let (delta, metrics) = gpu_scene.prepare_live(transaction)?;
-            self.pending_scene_frame = Some(match self.pending_scene_frame.take() {
-                Some(queued) => merge_scene_frames(queued, delta)?,
-                None => delta,
-            });
-            if let Some(current) = self.pending_scene_metrics.as_mut() {
-                current.accumulate(metrics)?;
-            } else {
-                self.pending_scene_metrics = Some(metrics);
-            }
-            self.pending_render_frame = None;
-        } else {
-            self.pending_render_frame = Some(self.rasterizer.prepare_scene_live(transaction)?);
+        if transaction.viewport_width == 0
+            || transaction.viewport_height == 0
+            || self
+                .family_layer_sequence
+                .is_some_and(|sequence| transaction.sequence <= sequence)
+        {
+            return Err("ASTRA_EMU_CLI_LAYER_TRANSACTION_INVALID".into());
         }
-        self.visual_dirty = true;
-        Ok(())
-    }
-
-    fn queue_resource_scene_live(&mut self, scene: RuntimeLiveResourceScene) -> Result<(), String> {
-        if scene.width == 0 || scene.height == 0 || scene.width > 16_384 || scene.height > 16_384 {
-            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSIONS".into());
-        }
-        let mut incoming_texture_ids = BTreeSet::new();
-        for texture in &scene.textures {
-            if !incoming_texture_ids.insert(texture.texture_id) {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DUPLICATE_TEXTURE".into());
-            }
-            if texture.revision == 0 || texture.decoded_width == 0 || texture.decoded_height == 0 {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_METADATA".into());
-            }
-        }
-        let destroy_generation = scene
-            .sequence
-            .checked_mul(2)
-            .ok_or_else(|| "ASTRA_EMU_LIVE_RESOURCE_SCENE_GENERATION".to_owned())?;
-        let create_generation = destroy_generation
-            .checked_add(1)
-            .ok_or_else(|| "ASTRA_EMU_LIVE_RESOURCE_SCENE_GENERATION".to_owned())?;
-        let reset_resources = self.force_resource_reset
-            || self.gpu_scene.as_ref().is_some_and(|retained_scene| {
-                scene.textures.iter().any(|texture| {
-                    retained_scene
-                        .textures
-                        .get(&texture.texture_id)
-                        .is_some_and(|retained| {
-                            retained.width != texture.decoded_width
-                                || retained.height != texture.decoded_height
-                                || retained.format
-                                    != runtime_live_texture_format(texture.decoded_format)
-                        })
-                })
-            });
-        let source_revisions = scene
-            .textures
-            .iter()
-            .map(|texture| (texture.texture_id, texture.revision))
-            .collect::<BTreeMap<_, _>>();
-        let retired_texture_count = self
-            .gpu_scene
-            .as_ref()
-            .map_or(0, |retained_scene| retained_scene.textures.len());
-        let mut resources =
-            Vec::with_capacity(scene.textures.len().saturating_add(retired_texture_count));
-        if !reset_resources {
-            if let Some(retained_scene) = self.gpu_scene.as_ref() {
-                resources.extend(retired_live_texture_operations(
-                    retained_scene
-                        .textures
-                        .iter()
-                        .map(|(&texture_id, retained)| (texture_id, retained.revision)),
-                    &incoming_texture_ids,
-                    destroy_generation,
-                )?);
-            }
-        }
-        for texture in scene.textures {
-            let format = runtime_live_texture_format(texture.decoded_format);
-            let retained = (!reset_resources)
-                .then(|| {
-                    self.gpu_scene
-                        .as_ref()
-                        .and_then(|scene| scene.textures.get(&texture.texture_id))
-                })
-                .flatten();
-            if let Some(retained) = retained {
-                if self
-                    .resource_source_revisions
-                    .get(&texture.texture_id)
-                    .is_some_and(|revision| *revision == texture.revision)
-                    && retained.width == texture.decoded_width
-                    && retained.height == texture.decoded_height
-                    && retained.format == format
-                {
-                    continue;
-                }
-            }
-            let bytes = self.runtime.read_session_resource(
-                &self.session_id,
-                &texture.resource_uri,
-                1024 * 1024 * 1024,
-            )?;
-            let decoded = self
-                .image_decoders
-                .decode(
-                    &DecodeRequest {
-                        kind: astra_media::DecodeKind::Image,
-                        codec: texture.codec,
-                        bytes,
-                        profile: "emu-live-image-v1".into(),
-                    },
-                    &DecodeBindingContext::shipping(
-                        "astra.decode.image",
-                        "headless",
-                        "emu-live-image-v1",
-                    ),
-                )
-                .map_err(|error| error.to_string())?;
-            let MediaDecodeOutput::CpuBuffer {
-                bytes,
-                format: decoded_format,
-                ..
-            } = decoded.output
-            else {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_CPU_BUFFER_REQUIRED".into());
-            };
-            if decoded_format != "rgba8" {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".into());
-            }
-            let expected_rgba = usize::try_from(texture.decoded_width)
-                .ok()
-                .and_then(|width| {
-                    usize::try_from(texture.decoded_height)
-                        .ok()
-                        .and_then(|height| width.checked_mul(height))
-                })
-                .and_then(|pixels| pixels.checked_mul(4))
-                .ok_or_else(|| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_OVERFLOW".to_owned())?;
-            if bytes.len() != expected_rgba {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
-            }
-            let pixels = match format {
-                LegacyTextureFormat::Rgba8 => bytes,
-                LegacyTextureFormat::LumaAlpha8 => rgba8_to_luma_alpha8(&bytes).into(),
-            };
-            if let Some(retained) = retained {
-                if destroy_generation <= retained.revision {
-                    return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_GENERATION".into());
-                }
-                resources.push(RuntimeLiveSceneResourceOperation::DestroyTexture {
-                    texture_id: texture.texture_id,
-                    generation: destroy_generation,
-                });
-                resources.push(RuntimeLiveSceneResourceOperation::CreateTexture {
-                    texture_id: texture.texture_id,
-                    generation: create_generation,
-                    width: texture.decoded_width,
-                    height: texture.decoded_height,
-                    format: texture.decoded_format,
-                    pixels,
-                });
-                if retained.revision == 0 {
-                    // A resource emitted by the pre-v7 scene cache cannot be
-                    // silently reused by the typed resource contract.
-                    return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_REVISION_UNKNOWN".into());
-                }
-            } else {
-                resources.push(RuntimeLiveSceneResourceOperation::CreateTexture {
-                    texture_id: texture.texture_id,
-                    generation: create_generation,
-                    width: texture.decoded_width,
-                    height: texture.decoded_height,
-                    format: texture.decoded_format,
-                    pixels,
-                });
-            }
-        }
-        let draws = scene
-            .draws
-            .into_iter()
-            .map(legacy_draw_from_live)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|draw| RuntimeLiveDraw {
-                texture_id: draw.texture_id,
-                vertices: draw
-                    .vertices
-                    .map(|vertex| astra_plugin_abi::RuntimeLiveVertex {
-                        x: vertex.position[0],
-                        y: vertex.position[1],
-                        u: vertex.tex_coord[0],
-                        v: vertex.tex_coord[1],
-                        color: [
-                            (vertex.color[0].clamp(0.0, 1.0) * 255.0) as u8,
-                            (vertex.color[1].clamp(0.0, 1.0) * 255.0) as u8,
-                            (vertex.color[2].clamp(0.0, 1.0) * 255.0) as u8,
-                            (vertex.color[3].clamp(0.0, 1.0) * 255.0) as u8,
-                        ],
-                    }),
-                blend: match draw.blend {
-                    astra_emu_family_api::LegacyBlendMode::Alpha => RuntimeLiveBlendMode::Alpha,
-                    astra_emu_family_api::LegacyBlendMode::Add => RuntimeLiveBlendMode::Additive,
-                    astra_emu_family_api::LegacyBlendMode::Opaque => RuntimeLiveBlendMode::Opaque,
-                    astra_emu_family_api::LegacyBlendMode::Multiply => {
-                        RuntimeLiveBlendMode::Multiply
+        let mut touched = BTreeSet::new();
+        let mut released_surfaces = BTreeSet::new();
+        for operation in transaction.operations {
+            match operation {
+                astra_plugin_abi::RuntimeLiveLayerOperation::Create(layer) => {
+                    validate_runtime_layer(&layer)?;
+                    if !touched.insert(layer.layer_id.clone())
+                        || self.family_layers.contains_key(&layer.layer_id)
+                    {
+                        return Err("ASTRA_EMU_CLI_LAYER_CREATE_CONFLICT".into());
                     }
-                    astra_emu_family_api::LegacyBlendMode::Screen => RuntimeLiveBlendMode::Screen,
-                },
-                texture_filter: match draw.texture_filter {
-                    LegacyTextureFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
-                    LegacyTextureFilter::Linear => RuntimeLiveTextureFilter::Linear,
-                },
-                scissor: draw
-                    .scissor
-                    .map(|scissor| astra_plugin_abi::RuntimeLiveScissor {
-                        x: scissor.x.max(0) as u32,
-                        y: scissor.y.max(0) as u32,
-                        width: scissor.width.max(0) as u32,
-                        height: scissor.height.max(0) as u32,
-                    }),
-            })
-            .collect();
-        self.queue_scene_commit_live(RuntimeLiveSceneTransaction {
-            sequence: scene.sequence,
-            width: scene.width,
-            height: scene.height,
-            compositing: astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb,
-            resources,
-            draws,
-            reset_resources,
-        })?;
-        if reset_resources {
-            self.resource_source_revisions.clear();
-        } else {
-            self.resource_source_revisions
-                .retain(|texture_id, _| incoming_texture_ids.contains(texture_id));
+                    self.family_layers.insert(layer.layer_id.clone(), layer);
+                }
+                astra_plugin_abi::RuntimeLiveLayerOperation::Update(layer) => {
+                    validate_runtime_layer(&layer)?;
+                    if !touched.insert(layer.layer_id.clone())
+                        || !self.family_layers.contains_key(&layer.layer_id)
+                    {
+                        return Err("ASTRA_EMU_CLI_LAYER_UPDATE_CONFLICT".into());
+                    }
+                    if let Some(previous) = self.family_layers.insert(layer.layer_id.clone(), layer)
+                    {
+                        released_surfaces.insert(previous.surface_id);
+                    }
+                }
+                astra_plugin_abi::RuntimeLiveLayerOperation::Destroy { layer_id } => {
+                    if !touched.insert(layer_id.clone()) {
+                        return Err("ASTRA_EMU_CLI_LAYER_OPERATION_DUPLICATE".into());
+                    }
+                    let removed = self
+                        .family_layers
+                        .remove(&layer_id)
+                        .ok_or_else(|| "ASTRA_EMU_CLI_LAYER_DESTROY_MISSING".to_owned())?;
+                    released_surfaces.insert(removed.surface_id);
+                }
+            }
         }
-        self.resource_source_revisions.extend(source_revisions);
-        self.force_resource_reset = false;
+        released_surfaces.retain(|surface_id| {
+            !self
+                .family_layers
+                .values()
+                .any(|layer| &layer.surface_id == surface_id)
+        });
+        self.family_layer_sequence = Some(transaction.sequence);
+        self.family_layer_viewport =
+            Some((transaction.viewport_width, transaction.viewport_height));
+        let frame = self.build_family_layer_scene(true, released_surfaces)?;
+        self.pending_scene_frame = Some(match self.pending_scene_frame.take() {
+            Some(pending) => merge_scene_frames(pending, frame)?,
+            None => frame,
+        });
         Ok(())
     }
 
-    async fn present(&mut self) -> Result<(), String> {
-        let (width, height, mut rgba8) = self
-            .base_frame
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_BASE_FRAME_MISSING".to_owned())?;
-        if let Some(video) = &self.video {
-            let elapsed_us = self
-                .fixed_step
-                .saturating_sub(video.started_step)
-                .saturating_mul(self.delta_ns)
-                / 1_000;
-            if let Some(frame) = video.stream.frame_for_elapsed(elapsed_us) {
-                composite_bgra(&mut rgba8, width, height, frame)?;
+    fn build_family_layer_scene(
+        &mut self,
+        include_mutations: bool,
+        released_surfaces: BTreeSet<String>,
+    ) -> Result<SceneFrame, String> {
+        let (width, height) = self
+            .family_layer_viewport
+            .ok_or_else(|| "ASTRA_EMU_CLI_LAYER_VIEWPORT_MISSING".to_owned())?;
+        let mut commands = Vec::new();
+        if include_mutations {
+            for surface_id in released_surfaces {
+                if self.family_layer_generations.remove(&surface_id).is_some() {
+                    commands.push(SceneCommand::ReleaseResource {
+                        resource_id: layer_resource_id(&surface_id),
+                    });
+                }
             }
         }
-        self.present_sequence = self
-            .present_sequence
-            .checked_add(1)
-            .ok_or_else(|| "ASTRA_EMU_HEADLESS_PRESENT_SEQUENCE_OVERFLOW".to_owned())?;
-        let hash = Hash256::from_sha256(&rgba8);
-        let (difference_hash, mean_rgba) = frame_visual_signature(&rgba8, width, height)?;
-        self.platform
-            .present_rgba(
-                self.surface,
-                RgbaFrame {
-                    sequence: self.present_sequence,
-                    width,
-                    height,
-                    rgba8,
-                },
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        self.visual_trace
-            .extend_from_slice(hash.to_string().as_bytes());
-        self.visual_trace.push(b'\n');
-        self.frame_hashes.push(HeadlessFrameHashV1 {
-            sequence: self.present_sequence,
-            fixed_step: self.fixed_step,
-            frame_hash: hash,
-            difference_hash,
-            mean_rgba,
+        let mut layers = self.family_layers.values().cloned().collect::<Vec<_>>();
+        layers.sort_by(|left, right| {
+            left.z_index
+                .cmp(&right.z_index)
+                .then_with(|| left.layer_id.cmp(&right.layer_id))
         });
-        self.latest_frame = Some((width, height, hash));
-        Ok(())
+        for layer in layers {
+            let resource_id = layer_resource_id(&layer.surface_id);
+            if include_mutations
+                && self
+                    .family_layer_generations
+                    .get(&layer.surface_id)
+                    .copied()
+                    != Some(layer.generation)
+            {
+                let rgba8 = self
+                    .family_surfaces
+                    .with_committed_surface(
+                        &self.session_id.0,
+                        &layer.surface_id,
+                        layer.generation,
+                        |pixels, surface_width, surface_height, stride, format| {
+                            if surface_width != layer.width || surface_height != layer.height {
+                                return Err("ASTRA_EMU_CLI_LAYER_SURFACE_DIMENSIONS".to_owned());
+                            }
+                            copy_surface_to_straight_rgba8(
+                                pixels,
+                                surface_width,
+                                surface_height,
+                                stride,
+                                format,
+                            )
+                            .map_err(str::to_owned)
+                        },
+                    )
+                    .map_err(|error| error.to_string())??;
+                let frame = TextureFrame::from_vec(layer.width, layer.height, rgba8)
+                    .map_err(|error| error.to_string())?;
+                if self
+                    .family_layer_generations
+                    .contains_key(&layer.surface_id)
+                {
+                    commands.push(SceneCommand::UpdateTextureRegion {
+                        resource_id: resource_id.clone(),
+                        x: 0,
+                        y: 0,
+                        width: layer.width,
+                        height: layer.height,
+                        rgba8: frame.rgba8,
+                    });
+                } else {
+                    commands.push(SceneCommand::UploadTexture {
+                        resource_id: resource_id.clone(),
+                        frame,
+                    });
+                }
+                self.family_layer_generations
+                    .insert(layer.surface_id.clone(), layer.generation);
+            }
+            if let Some(graph) = &layer.filter_graph {
+                commands.push(SceneCommand::FilterGraph {
+                    graph: runtime_filter_graph(graph)?,
+                });
+            }
+            if let Some(clip) = layer.clip {
+                commands.push(SceneCommand::PushClip {
+                    rect: RectI::new(
+                        i32::try_from(clip.x)
+                            .map_err(|_| "ASTRA_EMU_CLI_LAYER_CLIP_BOUNDS".to_owned())?,
+                        i32::try_from(clip.y)
+                            .map_err(|_| "ASTRA_EMU_CLI_LAYER_CLIP_BOUNDS".to_owned())?,
+                        clip.width,
+                        clip.height,
+                    ),
+                });
+            }
+            commands.push(SceneCommand::PushTransform {
+                transform: astra_media_core::Transform2D {
+                    m11: layer.transform.m11,
+                    m12: layer.transform.m12,
+                    m21: layer.transform.m21,
+                    m22: layer.transform.m22,
+                    tx: layer.transform.tx,
+                    ty: layer.transform.ty,
+                },
+            });
+            commands.push(layer_mesh_command(&layer, resource_id));
+            commands.push(SceneCommand::PopTransform);
+            if layer.clip.is_some() {
+                commands.push(SceneCommand::PopClip);
+            }
+        }
+        Ok(SceneFrame {
+            sequence: 0,
+            width,
+            height,
+            clear_rgba: [0, 0, 0, 255],
+            commands,
+            semantics: None,
+        })
     }
 
     async fn execute_video(&mut self, command: LegacyVideoCommandV1) -> Result<(), String> {
@@ -7440,11 +6728,7 @@ impl<'a> RuntimeDriver<'a> {
                 None,
             )
         } else {
-            let bytes = self.runtime.read_session_resource(
-                &self.session_id,
-                &resource_uri,
-                512 * 1024 * 1024,
-            )?;
+            let bytes = read_vfs_resource(&self.video_vfs, &resource_uri, 512 * 1024 * 1024)?;
             match fvp_movie_compatibility(&extension) {
                 FvpMovieCompatibility::Native => {
                     let audio_stream_id =
@@ -7578,19 +6862,7 @@ impl<'a> RuntimeDriver<'a> {
         let Some(video) = self.video.as_ref() else {
             return Ok(false);
         };
-        if video.stage_width
-            != self
-                .base_frame
-                .as_ref()
-                .map(|frame| frame.0)
-                .unwrap_or(video.stage_width)
-            || video.stage_height
-                != self
-                    .base_frame
-                    .as_ref()
-                    .map(|frame| frame.1)
-                    .unwrap_or(video.stage_height)
-        {
+        if self.family_layer_viewport != Some((video.stage_width, video.stage_height)) {
             return Err("ASTRA_EMU_HEADLESS_VIDEO_STAGE_DIMENSIONS".into());
         }
         let elapsed_us = self
@@ -7918,7 +7190,7 @@ fn frame_visual_signature(rgba8: &[u8], width: u32, height: u32) -> Result<(u64,
         return Err("ASTRA_EMU_HEADLESS_FRAME_SIGNATURE_LENGTH".into());
     }
     let mut sums = [0_u64; 4];
-    for pixel in rgba8.as_chunks::<4>().0.iter() {
+    for pixel in rgba8.chunks_exact(4) {
         for channel in 0..4 {
             sums[channel] += u64::from(pixel[channel]);
         }
@@ -8120,39 +7392,6 @@ fn decoded_video_scene_command(
     })
 }
 
-fn composite_bgra(
-    target: &mut [u8],
-    target_width: u32,
-    target_height: u32,
-    frame: &astra_media::DecodedVideoFrame,
-) -> Result<(), String> {
-    let expected = usize::try_from(target_width)
-        .ok()
-        .and_then(|width| {
-            usize::try_from(target_height)
-                .ok()
-                .and_then(|height| width.checked_mul(height))
-        })
-        .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_FRAME_BOUNDS".to_owned())?;
-    if target.len() != expected {
-        return Err("ASTRA_EMU_HEADLESS_VIDEO_TARGET_LENGTH".into());
-    }
-    for y in 0..target_height {
-        let source_y = (u64::from(y) * u64::from(frame.height) / u64::from(target_height)) as u32;
-        for x in 0..target_width {
-            let source_x = (u64::from(x) * u64::from(frame.width) / u64::from(target_width)) as u32;
-            let source = ((source_y as usize * frame.width as usize) + source_x as usize) * 4;
-            let destination = ((y as usize * target_width as usize) + x as usize) * 4;
-            target[destination] = frame.bgra8[source + 2];
-            target[destination + 1] = frame.bgra8[source + 1];
-            target[destination + 2] = frame.bgra8[source];
-            target[destination + 3] = frame.bgra8[source + 3];
-        }
-    }
-    Ok(())
-}
-
 fn write_atomic_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|_| "ASTRA_EMU_HEADLESS_REPORT_ENCODE".to_owned())?;
@@ -8284,26 +7523,88 @@ mod native_tests {
     }
 
     #[test]
-    fn resource_scene_snapshot_retires_textures_absent_from_the_next_frame() {
-        let operations =
-            retired_live_texture_operations([(7, 12), (8, 3)], &BTreeSet::from([8]), 20)
-                .expect("retirement generations must remain monotonic");
+    fn coalesced_layer_surface_uses_latest_full_generation() {
+        let queued = SceneFrame {
+            sequence: 0,
+            width: 2,
+            height: 1,
+            clear_rgba: [0, 0, 0, 255],
+            commands: vec![SceneCommand::UploadTexture {
+                resource_id: "astra.emu.surface.text".into(),
+                frame: TextureFrame::from_vec(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap(),
+            }],
+            semantics: None,
+        };
+        let latest = SceneFrame {
+            sequence: 0,
+            width: 2,
+            height: 1,
+            clear_rgba: [0, 0, 0, 255],
+            commands: vec![
+                SceneCommand::UpdateTextureRegion {
+                    resource_id: "astra.emu.surface.text".into(),
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 1,
+                    rgba8: vec![9, 10, 11, 12, 13, 14, 15, 16].into(),
+                },
+                SceneCommand::Clear {
+                    rgba: [7, 8, 9, 255],
+                },
+            ],
+            semantics: None,
+        };
 
-        assert_eq!(operations.len(), 1);
+        let merged = merge_scene_frames(queued, latest).expect("full update must replace upload");
         assert!(matches!(
-            operations[0],
-            RuntimeLiveSceneResourceOperation::DestroyTexture {
-                texture_id: 7,
-                generation: 20
-            }
+            &merged.commands[0],
+            SceneCommand::UploadTexture { frame, .. }
+                if frame.rgba8.as_slice() == [9, 10, 11, 12, 13, 14, 15, 16]
         ));
     }
 
     #[test]
-    fn resource_scene_snapshot_blocks_retirement_generation_overflow() {
+    fn surface_copy_honors_stride_and_bgra_format() {
+        let pixels = [10, 20, 30, 40, 0, 0, 0, 0, 50, 60, 70, 80, 0, 0, 0, 0];
+        let rgba = copy_surface_to_straight_rgba8(
+            &pixels,
+            1,
+            2,
+            8,
+            astra_emu_family_api::LegacySurfaceFormatV9::Bgra8SrgbPremultiplied,
+        )
+        .unwrap();
+        assert_eq!(rgba, [191, 128, 64, 40, 223, 191, 159, 80]);
+    }
+
+    #[test]
+    fn typed_filter_graph_rejects_duplicate_parameters() {
+        let graph = astra_plugin_abi::RuntimeLiveFilterGraph {
+            schema: "astra.filter_graph.v1".into(),
+            nodes: vec![astra_plugin_abi::RuntimeLiveFilterNode {
+                id: "fade".into(),
+                kind: "opacity".into(),
+                input: astra_plugin_abi::RuntimeLiveFilterTarget::Final,
+                output: astra_plugin_abi::RuntimeLiveFilterTarget::Final,
+                params: vec![
+                    astra_plugin_abi::RuntimeLiveFilterParamEntry {
+                        key: "amount".into(),
+                        value: astra_plugin_abi::RuntimeLiveFilterParam::Float(0.5),
+                    },
+                    astra_plugin_abi::RuntimeLiveFilterParamEntry {
+                        key: "amount".into(),
+                        value: astra_plugin_abi::RuntimeLiveFilterParam::Float(0.75),
+                    },
+                ],
+                deterministic: true,
+                allow_cpu_fallback: false,
+            }],
+        };
+
         assert_eq!(
-            retired_live_texture_operations([(7, 12)], &BTreeSet::new(), 12).unwrap_err(),
-            "ASTRA_EMU_LIVE_RESOURCE_SCENE_GENERATION"
+            runtime_filter_graph(&graph).unwrap_err(),
+            "ASTRA_EMU_CLI_FILTER_PARAM_DUPLICATE"
         );
     }
 

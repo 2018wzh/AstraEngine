@@ -7,7 +7,7 @@ ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
 
-2026-08-23 focused v9 consumer evidence remains E1: the dynamic loader four-port bridge, retained writable surface store and Product presentation-lane validation pass their incremental checks. FVP、CLI、Manager、Headless composition 和 Minori v9 真实样本 E2 仍未完成。
+2026-08-23 focused v9 consumer evidence remains E1: dynamic loader、CLI 和 Manager 已组合四个 Host port；Minori resource/text surface 与同步 translation Hook 已有定向回归。support 25 项、CLI 38 项、Manager Hook 2 项、Minori v9 2 项测试及受影响 crate 严格 clippy 通过。Manager typed filter graph、Windows ACL、Headless composition 和 Minori v9 真实样本 E2 仍未完成。
 
 FVP 已删除退役 consumer，并通过动态签名 lifecycle 与 Manager adapter 定向测试；scene/text 仍以稳定 migration diagnostic 阻断。这不覆盖 presentation 或 Headless E2。
 
