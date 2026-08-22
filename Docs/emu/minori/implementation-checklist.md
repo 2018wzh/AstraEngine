@@ -86,4 +86,4 @@
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
 - [ ] 不包含 payload、截图、音频、视频、完整脚本或 key。
-- [ ] 完成 Minori clean Release 120 Hz GPU performance run。旧 run 没有实际 pacing，不能作为正式结果。修复后，clean Release 已按真实 120 Hz cadence 完成 1200 帧 warmup 和 72000 帧测量；runtime p99 为 0.3209 ms，presentation p99 为 0.90724 ms，内存、上传、readback、allocation、音频、trace 和 full-resync 均通过。仍有 8 次 deadline miss，最大 presentation 为 313.30186 ms，零容忍预算继续阻断放行。
+- [x] 完成 Minori clean Release 120 Hz GPU performance run。同一 build、package、profile、输入、adapter 与 driver identity 连续三次完成 1200 帧 warmup 和 72000 帧十分钟测量；deadline miss、audio underflow、full resync、trace dropped、稳定段 upload/readback/allocation 与 memory growth 均为 0，runtime p99 为 0.2725–0.2938 ms，presentation p99 为 0.81456–1.11064 ms。该静态标题负载不替代完整路线、影片/音频或 Windows E3。

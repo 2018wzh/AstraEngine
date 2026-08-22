@@ -1,6 +1,6 @@
 # AstraEMU Minori
 
-Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已接入 typed IR、已确认控制流、消息、选择、stage/character、音频、影片、系统页、save/restore 和可序列化状态；签名动态 provider 已用真实八包跑完首条路线并返回标题。`.char trans/.char vis` 的动态立绘合同已有合成 Headless GPU 视觉证据，但真实脚本没有这两类命令。完整鉴赏、Config 控件、正式音频听审和 Windows E3 仍未完成；120 Hz 正式采样已具备真实 cadence，当前被集显/驱动的偶发长帧阻断。
+Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已接入 typed IR、已确认控制流、消息、选择、stage/character、音频、影片、系统页、save/restore 和可序列化状态；签名动态 provider 已用真实八包跑完首条路线并返回标题。`.char trans/.char vis` 的动态立绘合同已有合成 Headless GPU 视觉证据，但真实脚本没有这两类命令。同一 clean Release identity 的三次十分钟 120 Hz GPU E2 已通过；完整鉴赏、Config 控件、正式音频听审和 Windows E3 仍未完成。
 
 ## 阅读顺序
 

@@ -323,3 +323,10 @@ python Tools/check_docs.py
 - 复核后发现上一轮 `EmuHeadlessGpuObserver::pace_gpu_frame` 是空实现，73200 个 presentation 没有按 120 Hz 墙钟节拍提交。该报告只保留为诊断数据，不再作为正式性能证据。observer 现按 presentation sequence 计算有理数 deadline；发生 authored idle 时从当前时间重建原点，不追赶已经错过的 presentation。
 - 修复 pacing 后，同源签名 clean Release 完成 1200 帧 warmup 和 72000 帧测量。runtime p99 为 320900 ns，presentation p99 为 907240 ns；内存、增长、上传/readback/allocation、音频 underflow、trace dropped 和 full resync 均通过。8 次 deadline miss 使报告保持 blocking，最大 presentation 为 313301860 ns。
 - 为排除 trace 扰动，高频 phase/counter 改为每 60 fixed tick 记录一次；完整逐帧性能 sample 和全部 GPU flow 仍保留。提前终止的下一轮在前几分钟已出现 6 次不可逆 miss。5 次来自 `scene_gpu_ns` 的 8.14 至 9.92 ms 抖动，另一次是 `cpu_submit_ns` 437.623 ms，而 scene build、atlas upload、filter、资源上传和 runtime tick 均正常。当前证据指向集显/驱动调度长帧，不支持继续修改 Minori VM 或放宽零 miss 门禁。
+
+### 2026-08-22 正式 GPU E2 收口
+
+- 独立 Scene2D 对照运行先在相同集显和驱动上完成 1200 帧 warmup、72000 帧测量，deadline miss 为 0，确认共享 WGPU renderer 与测试环境能够满足 120 Hz 预算。
+- 产品路径的长帧最终定位为过大的 timestamp query 在途窗口触发 `wgpu::Queue::submit` 周期性背压，而不是 Minori VM、scene build 或 GPU draw 超限。Headless performance observer 现在显式声明最多两个 GPU frame profile 在途，PlatformHost 会校验该值落在 query ring 的安全范围内；缺失或越界直接阻断。正式调度沿用平台公共 scheduling guard，renderer 与 driver identity 从 artifact manifest 读取，不再由 family 字段代填。
+- 同一 clean Release build、package、profile、物理输入、adapter 与 driver identity 连续完成三次正式运行。每次均执行 36600 fixed tick、73200 presentation，其中 1200 帧 warmup、72000 帧进入十分钟测量窗；deadline miss、audio underflow、scene full resync、trace dropped、稳定段 upload/readback/allocation 与 memory growth 都为 0，trace 未截断。三次 runtime p99 分别为 0.2841、0.2725、0.2938 ms，presentation p99 分别为 1.11064、0.97864、0.81456 ms，最大 presentation 分别为 6.8416、7.81664、3.51376 ms。正式 Minori GPU 性能 E2 至此通过。
+- 该负载使用真实八包、签名动态 provider、VFS、RuntimeWorld、retained gameplay scene 与七条序列化物理输入，但停留在静态标题场景，未到 terminal，音频为静音。它只关闭持续 GPU 提交与运行时预算，不替代完整路线、影片/音频、正式视觉 review 或 Windows E3。
