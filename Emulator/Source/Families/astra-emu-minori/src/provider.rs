@@ -9,13 +9,13 @@ use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyBlackboardMutation,
     LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta, LegacyDrawV1,
-    LegacyEphemeralText, LegacyEvent, LegacyFamilyPluginDescriptor, LegacyLiveOutput,
-    LegacyOpenRequest, LegacyProbeReport, LegacyProbeRequest, LegacyProviderError,
-    LegacyRenderResourceFrameV1, LegacyResourceRead, LegacyRestoreReport, LegacyRuntimeHostCtx,
-    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyScissorV1,
-    LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection,
-    LegacyStepInput, LegacyStepOutput, LegacyTextHorizontalAlignmentV1, LegacyTextLease,
-    LegacyTextOutlineV1, LegacyTextPresentationLeaseV1, LegacyTextPresentationV1,
+    LegacyEphemeralText, LegacyEvent, LegacyFamilyHostServicesV9, LegacyFamilyPluginDescriptor,
+    LegacyLiveOutput, LegacyOpenRequest, LegacyProbeReport, LegacyProbeRequest,
+    LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead, LegacyRestoreReport,
+    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
+    LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope,
+    LegacySnapshotSection, LegacyStepInput, LegacyStepOutput, LegacyTextHorizontalAlignmentV1,
+    LegacyTextLease, LegacyTextOutlineV1, LegacyTextPresentationLeaseV1, LegacyTextPresentationV1,
     LegacyTextRegionV1, LegacyTextureFilter, LegacyTextureFormat, LegacyTextureResourceV1,
     LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
     LegacyVmTraceRecord, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
@@ -191,6 +191,7 @@ struct MinoriSession {
 #[derive(Default)]
 pub struct MinoriRuntimeProvider {
     vfs: Option<Arc<dyn LegacyVfsReader>>,
+    host_services: Option<Arc<dyn LegacyFamilyHostServicesV9>>,
     sessions: BTreeMap<String, MinoriSession>,
 }
 
@@ -198,6 +199,18 @@ impl MinoriRuntimeProvider {
     pub fn with_vfs(vfs: Arc<dyn LegacyVfsReader>) -> Self {
         Self {
             vfs: Some(vfs),
+            host_services: None,
+            sessions: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_host_services(
+        vfs: Arc<dyn LegacyVfsReader>,
+        host_services: Arc<dyn LegacyFamilyHostServicesV9>,
+    ) -> Self {
+        Self {
+            vfs: Some(vfs),
+            host_services: Some(host_services),
             sessions: BTreeMap::new(),
         }
     }
@@ -214,12 +227,22 @@ impl MinoriRuntimeProvider {
             )
         })
     }
+
+    fn host_services(&self) -> Result<&Arc<dyn LegacyFamilyHostServicesV9>, LegacyProviderError> {
+        self.host_services.as_ref().ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                "Minori runtime has no explicitly bound ABI v9 host services",
+            )
+        })
+    }
 }
 
 pub fn create_static_minori_provider(
     vfs: Arc<dyn LegacyVfsReader>,
+    host_services: Arc<dyn LegacyFamilyHostServicesV9>,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError> {
-    let provider = MinoriRuntimeProvider::with_vfs(vfs);
+    let provider = MinoriRuntimeProvider::with_host_services(vfs, host_services);
     provider.descriptor().validate()?;
     Ok(Box::new(provider))
 }
@@ -244,8 +267,10 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             ],
             permissions: vec![
                 "vfs.read".into(),
+                "surface.write".into(),
+                "hook.invoke".into(),
                 "media.submit".into(),
-                "storage.request".into(),
+                "writable_file".into(),
             ],
             report_redaction: "astra.emu.redaction.v1".into(),
             license: "MPL-2.0".into(),

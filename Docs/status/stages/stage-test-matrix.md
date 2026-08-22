@@ -1,10 +1,11 @@
 # Stage Test Matrix
 
-`T-S5-FVP-01` current identity is `astra.emu.family_abi.v8`, with FVP and
-Minori runtime v7 sections and the Windows PlatformHost WMF cursor contract.
-Older v6 wording in this matrix is historical migration evidence, not an
-accepted runtime or snapshot identity. Clean Release and Windows E3 parity
-remain required before the row can leave `IN_PROGRESS`.
+`T-S5-FVP-01` current identity is `astra.emu.family_abi.v9` and Product Runtime
+Provider ABI v4. Minori is reopening its current E2 while migrating to
+`Native + MultiLayer`, Host-owned surfaces, synchronous Hook and writable-file
+ports. Older ABI v8 and snapshot wording is historical migration evidence, not
+an accepted runtime identity. Clean Release and Windows E3 parity remain
+required before the row can leave `IN_PROGRESS`.
 
 本矩阵把 Stage 1-8 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-6 仍包含未实现目标路径；Stage 7/8 是 AstraRPG planned extension，测试项先作为 `SPEC_READY` 迁移目标。
 

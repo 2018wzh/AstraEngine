@@ -5,17 +5,18 @@ use std::{
 
 use abi_stable::{
     prefix_type::PrefixTypeTrait,
-    std_types::{ROption, RResult, RString},
+    std_types::{RResult, RString},
 };
-use astra_byte_source::FfiOwnedByteBuffer;
 use astra_emu_family_api::{
     ffi_result, native_result, validate_symbol, AstraLegacyFamilyModule,
-    AstraLegacyFamilyModuleRef, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiLegacyHostServices,
-    FfiLegacyResult, FfiOpenCall, FfiProbeCall, FfiProbeReport, FfiProviderInstanceRequest,
-    FfiResourceReadCall, FfiRestoreCall, FfiRestoreReport, FfiSessionCall, FfiShutdownReport,
-    FfiSnapshotEnvelope, FfiStepCall, FfiStepOutput, FfiTextLeaseCall, FfiVfsEnumerateCall,
-    FfiVfsRangeCall, FfiVfsStatCall, LegacyProviderError, LegacyRuntimeProvider,
-    LegacyRuntimeSessionId, LegacyVfsListedFile, LegacyVfsReader,
+    AstraLegacyFamilyModuleRef, FfiAcquireSurfaceCallV9, FfiCommitSurfaceCallV9,
+    FfiFamilyPluginDescriptor, FfiHookInvocationV1, FfiLegacyHostServices, FfiLegacyResult,
+    FfiOpenCall, FfiProbeCall, FfiProbeReport, FfiProviderInstanceRequest, FfiSessionCall,
+    FfiShutdownReport, FfiStepCall, FfiStepOutput, FfiVfsEnumerateCall, FfiVfsRangeCall,
+    FfiVfsStatCall, FfiWritableFileCallV1, LegacyFamilyHostServicesV9, LegacyHookInvocationV1,
+    LegacyHookResultV1, LegacyProviderError, LegacyRuntimeProvider, LegacyRuntimeSessionId,
+    LegacySurfaceCommitV9, LegacySurfaceFormatV9, LegacySurfaceLeaseV9, LegacyVfsListedFile,
+    LegacyVfsReader, LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
 };
 
 use crate::MinoriRuntimeProvider;
@@ -25,11 +26,11 @@ type SharedProvider = Arc<Mutex<MinoriRuntimeProvider>>;
 static PROVIDERS: OnceLock<Mutex<BTreeMap<String, SharedProvider>>> = OnceLock::new();
 
 #[derive(Clone)]
-struct FfiVfsReader {
+struct FfiHostServices {
     services: FfiLegacyHostServices,
 }
 
-impl LegacyVfsReader for FfiVfsReader {
+impl LegacyVfsReader for FfiHostServices {
     fn stat_file(
         &self,
         mount_set_id: &str,
@@ -101,6 +102,76 @@ impl LegacyVfsReader for FfiVfsReader {
     }
 }
 
+impl LegacyFamilyHostServicesV9 for FfiHostServices {
+    fn acquire_surface(
+        &self,
+        session_id: &str,
+        fixed_step: u64,
+        surface_id: &str,
+        width: u32,
+        height: u32,
+        format: LegacySurfaceFormatV9,
+    ) -> Result<LegacySurfaceLeaseV9, LegacyProviderError> {
+        let lease = native_result((self.services.acquire_surface)(FfiAcquireSurfaceCallV9 {
+            host_token: self.services.host_token.clone(),
+            session_id: session_id.into(),
+            fixed_step,
+            surface_id: surface_id.into(),
+            width,
+            height,
+            format: format.into(),
+        }))?;
+        lease.try_into()
+    }
+
+    fn commit_surface(
+        &self,
+        session_id: &str,
+        fixed_step: u64,
+        commit: LegacySurfaceCommitV9,
+    ) -> Result<(), LegacyProviderError> {
+        commit.validate()?;
+        native_result((self.services.commit_surface)(FfiCommitSurfaceCallV9 {
+            host_token: self.services.host_token.clone(),
+            session_id: session_id.into(),
+            fixed_step,
+            lease: commit.lease.into(),
+            damage: commit.damage.into(),
+        }))
+    }
+
+    fn invoke_hook(
+        &self,
+        invocation: LegacyHookInvocationV1,
+    ) -> Result<LegacyHookResultV1, LegacyProviderError> {
+        native_result((self.services.invoke_hook)(FfiHookInvocationV1 {
+            host_token: self.services.host_token.clone(),
+            session_id: invocation.session_id.into(),
+            invocation_id: invocation.invocation_id.into(),
+            family_id: invocation.family_id.into(),
+            family_game_id: invocation.family_game_id.into(),
+            hook_id: invocation.hook_id.into(),
+            timeout_ms: invocation.timeout_ms,
+            payload: invocation.payload.into_ffi(),
+        }))
+        .map(Into::into)
+    }
+
+    fn writable_file(
+        &self,
+        session_id: &str,
+        request: LegacyWritableFileRequestV1,
+    ) -> Result<LegacyWritableFileResultV1, LegacyProviderError> {
+        request.validate()?;
+        native_result((self.services.writable_file)(FfiWritableFileCallV1 {
+            host_token: self.services.host_token.clone(),
+            session_id: session_id.into(),
+            request: request.into(),
+        }))
+        .map(Into::into)
+    }
+}
+
 fn providers() -> &'static Mutex<BTreeMap<String, SharedProvider>> {
     PROVIDERS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
@@ -132,11 +203,13 @@ extern "C" fn create_instance(
                 "provider instance id is already active",
             ));
         }
+        let services = Arc::new(FfiHostServices { services });
         providers.insert(
             instance_id,
-            Arc::new(Mutex::new(MinoriRuntimeProvider::with_vfs(Arc::new(
-                FfiVfsReader { services },
-            )))),
+            Arc::new(Mutex::new(MinoriRuntimeProvider::with_host_services(
+                services.clone(),
+                services,
+            ))),
         );
         Ok(())
     })())
@@ -197,61 +270,10 @@ extern "C" fn step(call: FfiStepCall) -> FfiLegacyResult<FfiStepOutput> {
     })())
 }
 
-extern "C" fn save(call: FfiSessionCall) -> FfiLegacyResult<FfiSnapshotEnvelope> {
-    ffi_result(with_session_mut(call, |provider, ctx, session| {
-        provider.save(&ctx, &session)
-    }))
-}
-
-extern "C" fn restore(call: FfiRestoreCall) -> FfiLegacyResult<FfiRestoreReport> {
-    ffi_result((|| {
-        let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider.restore(
-            &call.ctx.into(),
-            &LegacyRuntimeSessionId(call.session_id.to_string()),
-            &call.snapshot.into(),
-        )
-    })())
-}
-
 extern "C" fn shutdown(call: FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport> {
     ffi_result(with_session_mut(call, |provider, ctx, session| {
         provider.shutdown(&ctx, &session)
     }))
-}
-
-extern "C" fn take_ephemeral_text(
-    call: FfiTextLeaseCall,
-) -> FfiLegacyResult<ROption<FfiEphemeralText>> {
-    ffi_result::<ROption<FfiEphemeralText>, ROption<FfiEphemeralText>>((|| {
-        let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider
-            .take_ephemeral_text(
-                &call.ctx.into(),
-                &LegacyRuntimeSessionId(call.session_id.to_string()),
-                call.lease_id.as_str(),
-            )
-            .map(|value| value.map(FfiEphemeralText::from).into())
-    })())
-}
-
-extern "C" fn read_session_resource(
-    call: FfiResourceReadCall,
-) -> FfiLegacyResult<FfiOwnedByteBuffer> {
-    ffi_result((|| {
-        let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider
-            .read_session_resource(
-                &call.ctx.into(),
-                &LegacyRuntimeSessionId(call.session_id.to_string()),
-                call.resource_uri.as_str(),
-                call.max_bytes,
-            )
-            .map(astra_byte_source::OwnedByteBuffer::into_ffi)
-    })())
 }
 
 fn with_session_mut<T>(
@@ -298,10 +320,6 @@ pub fn astra_legacy_family_root_module() -> AstraLegacyFamilyModuleRef {
         probe,
         open,
         step,
-        save,
-        restore,
-        take_ephemeral_text,
-        read_session_resource,
         shutdown,
     }
     .leak_into_prefix()
