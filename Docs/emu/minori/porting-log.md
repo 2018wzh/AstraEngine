@@ -22,6 +22,12 @@
 - 第二次运行完全从原版 Config UI 选择 Skip 并 Apply，启动游戏后释放 Control，再用游戏菜单物理 pointer 启用持久 Skip。严格 play-mode observation 通过；正文阶段没有周期性 Enter，只在启动、choice active 和返回标题 Exit 处提交确认。运行完成 24901 fixed steps、24906 个提交/栅格帧和 52 条物理输入，terminal、snapshot round-trip、自然解锁、既有 coverage hash 与零 diagnostic 均成立。
 - 音频记录 19920384 frame，master peak 为 0.989507，output overload 与 underflow 均为 0；WAV 非静音且未 clipping。人工检查标题、Config 默认、Skip 单选、Skip 启用、路线和返回标题六个 checkpoint；单选标记、日文文字、人物、背景和层次均未见阻断。这关闭持久 Skip 首路线 Headless E2。正式音频听审、Config 其余行为、鉴赏与 Windows E3 仍开放。
 
+### backlog 多记录 retained text
+
+- 合成 VM 回归补齐三条 message 的 cursor 边界：backlog 从最新记录开始，向上滚动依次进入更早记录并在首条钳制；内部正向移动同样在末条钳制。正文仍只存在于 local-private state 和一次性 lease。
+- 首次真实多记录检查中，gauge ball 随 cursor 正确移动，但两个 idle 后 checkpoint 的正文为空。根因是 `system_ui_output` 在页面未变化时仍发送 `clear_text=true`，同时 retained scene 优化不会重发 lease。现在只有页面、cursor、输入或 restore 实际触发重画，以及 terminal 时才清除文字；未变化 tick 保留 Host retained text。单记录 provider 回归增加 idle tick 断言，要求不清除、不重复签发 lease。
+- 修复后的真实八包短程使用物理滚轮打开 backlog，再连续查看两条更早记录并关闭。运行完成 771 fixed steps、776 个提交/栅格帧、55 条物理输入、snapshot round-trip 和零 diagnostic；这是未到 terminal 的定向 E2。人工查看打开、两次上翻和关闭四张画面，gauge 位置逐次变化，三条记录文字不同且完整，关闭后恢复当前消息。backlog 多记录翻页的当前契约至此关闭；正式音频听审和完整产品门禁不由该短程结果替代。
+
 ## 2026-08-12
 
 ### message voice 资源绑定

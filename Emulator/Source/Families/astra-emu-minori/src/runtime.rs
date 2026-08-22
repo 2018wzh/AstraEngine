@@ -6838,6 +6838,53 @@ mod tests {
     }
 
     #[test]
+    fn backlog_cursor_moves_across_multiple_retained_messages_and_clamps() {
+        let source = b".message 1  speaker first\r\n.message 2  speaker second\r\n.message 3  speaker third\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        for tick in 1..=3 {
+            let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(tick, 4).unwrap() else {
+                panic!("expected retained message {tick}")
+            };
+            if tick < 3 {
+                let token_id = match wait {
+                    MinoriWaitState::Input { token_id } => token_id,
+                    _ => panic!("expected input wait"),
+                };
+                vm.resolve_wait(&token_id).unwrap();
+            }
+        }
+        assert_eq!(
+            vm.state()
+                .backlog
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second", "third"]
+        );
+
+        vm.open_backlog().unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(2));
+        vm.move_backlog(-1).unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(1));
+        vm.move_backlog(-1).unwrap();
+        vm.move_backlog(-1).unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(0));
+        vm.move_backlog(1).unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(1));
+        vm.move_backlog(1).unwrap();
+        vm.move_backlog(1).unwrap();
+        assert_eq!(vm.state().system_ui.backlog_cursor, Some(2));
+    }
+
+    #[test]
     fn message_voice_uses_the_verified_suffix_and_stops_the_previous_stream() {
         let source = b".message 1 first[25,-50] speaker one\r\n.message 2 second speaker two\r\n.message 3  speaker three\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();

@@ -4281,7 +4281,7 @@ fn system_ui_output(
         )
     })?;
     let mut live = LegacyLiveOutput {
-        clear_text: true,
+        clear_text: status == LegacyRuntimeStatus::Terminal,
         audio_commands,
         ..LegacyLiveOutput::default()
     };
@@ -4296,6 +4296,7 @@ fn system_ui_output(
         || !input.input_edges.is_empty()
         || session.restore_presentation_pending;
     if status != LegacyRuntimeStatus::Terminal && system_page_changed {
+        live.clear_text = true;
         let is_backlog = session.vm.state().system_ui.page == MinoriSystemPage::Backlog;
         let sequence = session
             .vm
@@ -6929,6 +6930,13 @@ mod tests {
             .unwrap();
         assert_eq!(backlog_text.text, "hello world");
         assert_eq!(backlog_text.speaker.as_deref(), Some("speaker"));
+        let retained = provider
+            .step(&ctx, &session, step_input(4, Vec::new()))
+            .unwrap();
+        assert!(!retained.live.clear_text);
+        assert!(retained.live.resource_scenes.is_empty());
+        assert!(retained.live.text_presentations.is_empty());
+        assert!(retained.live.text.is_empty());
         let wait_before_replay = provider.sessions[&session.0].vm.state().wait.clone();
         let replay = provider
             .step(
@@ -6941,7 +6949,7 @@ mod tests {
                         value: 1.0,
                         sequence: 2,
                     }],
-                    ..step_input(4, Vec::new())
+                    ..step_input(5, Vec::new())
                 },
             )
             .unwrap();
@@ -6986,7 +6994,7 @@ mod tests {
                         value: 120.0,
                         sequence: 3,
                     }],
-                    ..step_input(5, Vec::new())
+                    ..step_input(6, Vec::new())
                 },
             )
             .unwrap();

@@ -29,7 +29,7 @@ Any older snapshot is a migration-rejection input and is never restored.
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 0 分支不会加载 panel asset，因此 runtime 清除当前可见 panel 并重发同一演出层；mode 1 分支选择 `msgPanel.png`，并把它作为最上层 resource-frame 与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 
-backlog 复用当前 `CMessagePanel`，不会切换 panel mode。原程序进入该状态时重新显示 mode 1 面板，把当前 `CLog` 记录交给同一文本排版器；滚轮向上打开并移动到更早记录，滚轮向下关闭。runtime 因此在 message 执行时保留有界、无静默淘汰的历史记录，打开页面后只通过一次性 lease 提交当前记录。正文和 speaker 仅进入 local-private snapshot，不进入 evidence、report 或日志。历史上限为 16384 条、单字段 64 KiB、正文与 speaker 合计 16 MiB；越界、hash 不一致、cursor 损坏和冲突滚轮输入均阻断。Headless checkpoint 必须在关闭输入提交后的下一固定 tick 采样，避免把同 tick 的旧 surface 当成恢复结果。
+backlog 复用当前 `CMessagePanel`，不会切换 panel mode。原程序进入该状态时重新显示 mode 1 面板，把当前 `CLog` 记录交给同一文本排版器；滚轮向上打开并移动到更早记录，滚轮向下关闭。runtime 因此在 message 执行时保留有界、无静默淘汰的历史记录，打开页面后只通过一次性 lease 提交当前记录。游标或页面变化时 Host 先清除旧文字再接收新 lease；没有变化的 idle tick 不清除 retained text，也不重复签发 lease。正文和 speaker 仅进入 local-private snapshot，不进入 evidence、report 或日志。历史上限为 16384 条、单字段 64 KiB、正文与 speaker 合计 16 MiB；越界、hash 不一致、cursor 损坏和冲突滚轮输入均阻断。Headless checkpoint 必须在关闭输入提交后的下一固定 tick 采样，避免把同 tick 的旧 surface 当成恢复结果。
 
 Host restore 会丢弃 live presentation resource 和尚未消费的一次性文字 lease，因此 family 不能只恢复 VM bytes。Minori session 在 restore 后标记一次 presentation rebind：system page 在正常完整重画后清除标记；剧情 wait 则重建当前 stage、panel、message 或 choice，并重新签发新的 lease。旧 lease 在 restore 边界立即清空。rebind 失败会保留 pending 状态并返回 blocking diagnostic，不提交部分恢复画面。
 

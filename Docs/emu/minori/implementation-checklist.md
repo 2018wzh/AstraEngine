@@ -62,7 +62,7 @@
 ## Runtime
 
 - [x] boot 到首个 message；正文经一次性 lease、CosmicText 和 Renderer2D 形成真实 checkpoint，未进入 snapshot/report。
-- [x] 物理 Enter 推进与受 pragma 门控的 Control 快进可跑完首条剧情路线；Control 现在也会把已显示消息的同 token `Input` wait 重绑定为 10 ms `Time`，真实八包以 25496 fixed steps、25498 帧和 28 条输入跑完首路线，正文阶段没有周期性 Enter。backlog 的当前记录、滚轮导航、关闭恢复和当前记录 voice replay 已进入真实完整路线 E2。Auto/Skip 三态、原版菜单命中区和等待重绑定已完成定向测试；真实八包分别在最快 Auto 与持久 Skip 下跑完首路线。Skip 运行从 Config UI 选择并 Apply，随后用游戏菜单启用，共完成 24901 fixed steps、24906 帧和 52 条输入。backlog 多记录翻页仍开放。
+- [x] 物理 Enter 推进与受 pragma 门控的 Control 快进可跑完首条剧情路线；Control 现在也会把已显示消息的同 token `Input` wait 重绑定为 10 ms `Time`，真实八包以 25496 fixed steps、25498 帧和 28 条输入跑完首路线，正文阶段没有周期性 Enter。backlog 的当前记录、滚轮导航、关闭恢复和当前记录 voice replay 已进入真实完整路线 E2；额外短程以 771 fixed steps、776 帧和 55 条输入验证两次上翻显示不同历史记录，idle tick 不再清空 retained text。Auto/Skip 三态、原版菜单命中区和等待重绑定已完成定向测试；真实八包分别在最快 Auto 与持久 Skip 下跑完首路线。
 - [x] Config 的 29 类已确认 action、Apply/Cancel transaction、pointer drag、状态 overlay、WAV 试听、音量/静音映射和 snapshot round-trip 已完成 E1。
 - [x] 真实 Config 资源完成 Headless 物理 pointer、screen-effect checkmark、BGM knob、WAV 试听和视觉审查；短程运行自动通过，正式 review 因完整 WAV 未人工试听而按协议阻断。
 - [ ] 接通全屏 Host effect、消息逐字速度、视觉开关对剧情演出的实际影响和角色语音筛选；缺任一行为不得标完整 Config。
