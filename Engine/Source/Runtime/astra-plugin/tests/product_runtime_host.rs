@@ -16,7 +16,6 @@ use astra_plugin_abi::*;
 struct Provider {
     opened: bool,
     wrong_identity: bool,
-    layer_lane: bool,
 }
 
 struct CreateFailureProvider {
@@ -77,11 +76,7 @@ impl ProductRuntimeProvider for CreateFailureProvider {
 
 impl ProductRuntimeProvider for Provider {
     fn descriptor(&self) -> Result<ProductRuntimeDescriptor, String> {
-        let mut descriptor = provider_descriptor();
-        if self.layer_lane {
-            descriptor.presentation_lane = RuntimePresentationLane::Layer2D;
-        }
-        Ok(descriptor)
+        Ok(provider_descriptor())
     }
 
     fn create_instance(
@@ -146,21 +141,10 @@ impl ProductRuntimeProvider for Provider {
         if input.action == "slow" {
             std::thread::sleep(Duration::from_millis(50));
         }
-        let mut live = RuntimeLiveOutput::default();
-        if input.action == "emit_layer" {
-            live.layers.push(RuntimeLiveLayerTransaction {
-                sequence: 1,
-                viewport_width: 4,
-                viewport_height: 4,
-                operations: Vec::new(),
-            });
-        } else if input.action == "emit_text_clear" {
-            live.clear_text = true;
-        }
         Ok(RuntimeStepOutput {
             session_id: input.session_id,
             status: "blocked".into(),
-            live,
+            live: Default::default(),
             diagnostics: vec![],
         })
     }
@@ -205,64 +189,6 @@ impl ProductRuntimeProvider for Provider {
             diagnostics: vec![],
         })
     }
-}
-
-#[astra_headless_test::test]
-fn host_rejects_presentation_lane_mixing() {
-    let open_request = |seed| RuntimeOpenRequest {
-        target_id: "test".into(),
-        profile: "release".into(),
-        locale: "und".into(),
-        seed,
-        integrity_mode: RuntimeTickIntegrityMode::Evidence,
-        executor: RuntimeExecutorConfig::serial(),
-        package_hash: "sha256:test".into(),
-        sections: vec![],
-    };
-    let mut scene_host = ProductRuntimeHost::reference_in_process(
-        "scene-lane",
-        Provider::default(),
-        RuntimeHostLimits::new(),
-    )
-    .unwrap();
-    let scene_session = scene_host.open(open_request(1)).unwrap().session_id;
-    let error = scene_host
-        .step(RuntimeStepInput {
-            session_id: scene_session,
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            session_seed: 1,
-            mode: RuntimeStepMode::Live,
-            action: "emit_layer".into(),
-            ..RuntimeStepInput::default()
-        })
-        .unwrap_err();
-    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_PRESENTATION_LANE");
-    scene_host.cleanup_after_failure().unwrap();
-
-    let mut layer_host = ProductRuntimeHost::reference_in_process(
-        "layer-lane",
-        Provider {
-            layer_lane: true,
-            ..Provider::default()
-        },
-        RuntimeHostLimits::new(),
-    )
-    .unwrap();
-    let layer_session = layer_host.open(open_request(2)).unwrap().session_id;
-    let error = layer_host
-        .step(RuntimeStepInput {
-            session_id: layer_session,
-            fixed_step: 1,
-            delta_ns: 16_666_667,
-            session_seed: 2,
-            mode: RuntimeStepMode::Live,
-            action: "emit_text_clear".into(),
-            ..RuntimeStepInput::default()
-        })
-        .unwrap_err();
-    assert_eq!(error.code(), "ASTRA_RUNTIME_HOST_PRESENTATION_LANE");
-    layer_host.cleanup_after_failure().unwrap();
 }
 
 fn provider_descriptor() -> ProductRuntimeDescriptor {

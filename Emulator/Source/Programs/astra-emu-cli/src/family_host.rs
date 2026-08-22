@@ -7,53 +7,13 @@ use std::{
 
 use astra_core::Hash256;
 use astra_emu_family_api::{
-    LegacyFamilyHostServicesV9, LegacyHookHostV1, LegacyHookInvocationV1, LegacyHookResultV1,
-    LegacyHookStatusV1, LegacyProviderError, LegacyRuntimeProvider, LegacyVfsReader,
-    LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacyFamilyHostServicesV9, LegacyRuntimeProvider, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
-use astra_emu_family_support::{LegacySurfaceStoreV9, LocalPrivateWritableFileHostV1};
 use astra_emu_manager_core::{
     DynamicFamilyLoader, Ed25519FamilySignatureVerifier, FamilyPluginGate, FamilyPluginManifest,
 };
 
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
-const MAX_SURFACE_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_TOTAL_SURFACE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_HOOK_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
-
-pub struct CliLoadedFamily {
-    pub provider: Box<dyn LegacyRuntimeProvider>,
-    pub binary_hash: Hash256,
-    pub surfaces: Arc<LegacySurfaceStoreV9>,
-}
-
-struct UnboundCliHookHost;
-
-impl LegacyHookHostV1 for UnboundCliHookHost {
-    fn invoke(
-        &self,
-        invocation: LegacyHookInvocationV1,
-    ) -> Result<LegacyHookResultV1, LegacyProviderError> {
-        if invocation.session_id.is_empty()
-            || invocation.invocation_id.is_empty()
-            || invocation.family_id.is_empty()
-            || invocation.family_game_id.is_empty()
-            || invocation.hook_id.is_empty()
-            || invocation.timeout_ms == 0
-            || invocation.payload.len() > MAX_HOOK_PAYLOAD_BYTES
-        {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_HOOK_INVOCATION",
-                "hook invocation identity, timeout, or payload bound is invalid",
-            ));
-        }
-        Ok(LegacyHookResultV1 {
-            status: LegacyHookStatusV1::Unbound,
-            payload: Vec::new().into(),
-            diagnostics: Vec::new(),
-        })
-    }
-}
 
 pub struct CliFamilyHostConfig {
     family_id: String,
@@ -88,19 +48,16 @@ impl CliFamilyHostConfig {
 
     pub fn create_provider(
         &self,
-        vfs: Arc<dyn LegacyVfsReader>,
-        writable_scope: &str,
+        services: LegacyFamilyHostServicesV9,
     ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
-        self.create_provider_with_identity(vfs, writable_scope)
-            .map(|loaded| loaded.provider)
+        self.create_provider_with_identity(services)
+            .map(|(provider, _)| provider)
     }
 
     pub fn create_provider_with_identity(
         &self,
-        vfs: Arc<dyn LegacyVfsReader>,
-        writable_scope: &str,
-    ) -> Result<CliLoadedFamily, String> {
-        validate_writable_scope(writable_scope)?;
+        services: LegacyFamilyHostServicesV9,
+    ) -> Result<(Box<dyn LegacyRuntimeProvider>, Hash256), String> {
         let metadata =
             fs::metadata(&self.manifest_path).map_err(|_| "ASTRA_EMU_FAMILY_MANIFEST_READ")?;
         if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_MANIFEST_BYTES {
@@ -135,53 +92,21 @@ impl CliFamilyHostConfig {
             Arc::new(verifier),
         );
         let binary_hash = manifest.binary_hash;
-        let surfaces = Arc::new(
-            LegacySurfaceStoreV9::new(MAX_SURFACE_BYTES, MAX_TOTAL_SURFACE_BYTES)
-                .map_err(|error| error.to_string())?,
-        );
-        let project = directories::ProjectDirs::from("dev", "AstraEngine", "astra-emu-cli")
-            .ok_or_else(|| "ASTRA_EMU_WRITABLE_ROOT_UNAVAILABLE".to_owned())?;
-        let writable_files = Arc::new(
-            LocalPrivateWritableFileHostV1::new(
-                project
-                    .data_local_dir()
-                    .join("family-data")
-                    .join(writable_scope),
-            )
-            .map_err(|error| error.to_string())?,
-        );
-        let host_services = LegacyFamilyHostServicesV9 {
-            vfs,
-            surfaces: surfaces.clone(),
-            hooks: Arc::new(UnboundCliHookHost),
-            writable_files,
-        };
         loader
             .load(
                 &self.library_path,
                 manifest,
                 format!("astra.emu.cli.family.{}", self.family_id),
-                host_services,
+                services,
             )
-            .map(|provider| CliLoadedFamily {
-                provider: Box::new(provider) as Box<dyn LegacyRuntimeProvider>,
-                binary_hash,
-                surfaces,
+            .map(|provider| {
+                (
+                    Box::new(provider) as Box<dyn LegacyRuntimeProvider>,
+                    binary_hash,
+                )
             })
             .map_err(|error| error.to_string())
     }
-}
-
-fn validate_writable_scope(scope: &str) -> Result<(), String> {
-    if scope.is_empty()
-        || scope.len() > 128
-        || scope
-            .bytes()
-            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'.' | b'_' | b'-'))
-    {
-        return Err("ASTRA_EMU_WRITABLE_SCOPE_INVALID".into());
-    }
-    Ok(())
 }
 
 fn validate_family_id(family_id: &str) -> Result<(), String> {

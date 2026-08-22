@@ -49,6 +49,7 @@ pub(super) struct TextSurfaceRequest {
 pub(super) struct MinoriTextSurfaceRenderer {
     provider: CosmicTextLayoutProvider,
     renderer: HeadlessRenderer,
+    resources: TextRenderResourceOwner,
     width: u32,
     height: u32,
 }
@@ -124,6 +125,7 @@ impl MinoriTextSurfaceRenderer {
         Ok(Self {
             provider,
             renderer,
+            resources: TextRenderResourceOwner::default(),
             width,
             height,
         })
@@ -136,7 +138,6 @@ impl MinoriTextSurfaceRenderer {
         if requests.is_empty() || requests.len() > 16 {
             return Err("ASTRA_EMU_MINORI_TEXT_BATCH_BOUNDS");
         }
-        let mut owner = TextRenderResourceOwner::default();
         let mut commands = vec![SceneCommand::Clear { rgba: [0, 0, 0, 0] }];
         for request in requests {
             validate_region(request.body, self.width, self.height)?;
@@ -145,7 +146,7 @@ impl MinoriTextSurfaceRenderer {
             }
             append_text(
                 &self.provider,
-                &mut owner,
+                &mut self.resources,
                 &mut commands,
                 &format!("{}.body", request.key),
                 &request.text,
@@ -158,7 +159,7 @@ impl MinoriTextSurfaceRenderer {
             {
                 append_text(
                     &self.provider,
-                    &mut owner,
+                    &mut self.resources,
                     &mut commands,
                     &format!("{}.speaker", request.key),
                     speaker,
@@ -171,7 +172,16 @@ impl MinoriTextSurfaceRenderer {
         let mut frame = self
             .renderer
             .capture_frame(&commands)
-            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RENDER")?
+            .map_err(|error| {
+                tracing::error!(
+                    event = "astra_emu_minori_text_surface_render_failed",
+                    diagnostic_code = "ASTRA_EMU_MINORI_TEXT_RENDER",
+                    error = %error,
+                    command_count = commands.len(),
+                    "Minori text surface renderer rejected the typed command stream"
+                );
+                "ASTRA_EMU_MINORI_TEXT_RENDER"
+            })?
             .bytes;
         for pixel in frame.chunks_exact_mut(4) {
             let alpha = u16::from(pixel[3]);
@@ -295,4 +305,49 @@ fn validate_region(region: TextRegion, width: u32, height: u32) -> Result<(), &'
         return Err("ASTRA_EMU_MINORI_TEXT_REGION_BOUNDS");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_text_frames_reuse_retained_glyph_resources() {
+        let mut renderer = MinoriTextSurfaceRenderer::new(1280, 720).unwrap();
+        let request = TextSurfaceRequest {
+            key: "minori.test.message".into(),
+            text: "日本語テキスト".into(),
+            speaker: Some("話者".into()),
+            body: TextRegion {
+                x: 160,
+                y: 568,
+                width: 960,
+                height: 112,
+                font_size: 26.0,
+                line_height: 32.0,
+                max_lines: 3,
+                alignment: TextAlignment::Start,
+            },
+            speaker_region: Some(TextRegion {
+                x: 160,
+                y: 528,
+                width: 960,
+                height: 32,
+                font_size: 26.0,
+                line_height: 32.0,
+                max_lines: 1,
+                alignment: TextAlignment::Start,
+            }),
+            rgba: [255, 255, 255, 255],
+            outline: Some(TextOutline {
+                radius: 2,
+                rgba: [0, 0, 0, 192],
+            }),
+        };
+
+        let first = renderer.render(std::slice::from_ref(&request)).unwrap();
+        let second = renderer.render(&[request]).unwrap();
+        assert_eq!(first.len(), 1280 * 720 * 4);
+        assert_eq!(second.len(), first.len());
+    }
 }

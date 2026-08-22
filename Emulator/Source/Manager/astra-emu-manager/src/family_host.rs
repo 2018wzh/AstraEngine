@@ -2,15 +2,12 @@ use std::{
     collections::BTreeSet,
     env, fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use astra_emu_family_api::{
-    LegacyFamilyHostServicesV9, LegacyHookHostV1, LegacyHookInvocationV1, LegacyHookResultV1,
-    LegacyHookStatusV1, LegacyProviderError, LegacyRuntimeProvider, LegacyVfsReader,
-    LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacyFamilyHostServicesV9, LegacyRuntimeProvider, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
-use astra_emu_family_support::{LegacySurfaceStoreV9, LocalPrivateWritableFileHostV1};
 #[cfg(target_os = "android")]
 use astra_emu_manager_core::{family_base_identity_hash, AndroidNativePluginManifest};
 use astra_emu_manager_core::{
@@ -22,116 +19,6 @@ use astra_emu_manager_core::{
 };
 
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
-const MAX_SURFACE_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_TOTAL_SURFACE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_HOOK_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
-
-pub struct ManagerLoadedFamily {
-    pub provider: Box<dyn LegacyRuntimeProvider>,
-    pub surfaces: Arc<LegacySurfaceStoreV9>,
-    pub hooks: Arc<ManagerHookRouter>,
-}
-
-#[derive(Default)]
-pub struct ManagerHookRouter {
-    bound: Mutex<Option<Arc<dyn LegacyHookHostV1>>>,
-}
-
-impl ManagerHookRouter {
-    pub fn bind(&self, hook: Arc<dyn LegacyHookHostV1>) -> Result<(), String> {
-        let mut bound = self
-            .bound
-            .lock()
-            .map_err(|_| "ASTRA_EMU_HOOK_ROUTER_POISONED".to_owned())?;
-        if bound.is_some() {
-            return Err("ASTRA_EMU_HOOK_ROUTER_ALREADY_BOUND".into());
-        }
-        *bound = Some(hook);
-        Ok(())
-    }
-
-    pub fn unbind(&self) -> Result<(), String> {
-        *self
-            .bound
-            .lock()
-            .map_err(|_| "ASTRA_EMU_HOOK_ROUTER_POISONED".to_owned())? = None;
-        Ok(())
-    }
-}
-
-impl LegacyHookHostV1 for ManagerHookRouter {
-    fn invoke(
-        &self,
-        invocation: LegacyHookInvocationV1,
-    ) -> Result<LegacyHookResultV1, LegacyProviderError> {
-        if invocation.session_id.is_empty()
-            || invocation.invocation_id.is_empty()
-            || invocation.family_id.is_empty()
-            || invocation.family_game_id.is_empty()
-            || invocation.hook_id.is_empty()
-            || invocation.timeout_ms == 0
-            || invocation.payload.len() > MAX_HOOK_PAYLOAD_BYTES
-        {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_HOOK_INVOCATION",
-                "hook invocation identity, timeout, or payload bound is invalid",
-            ));
-        }
-        match self
-            .bound
-            .lock()
-            .map_err(|_| {
-                LegacyProviderError::invalid(
-                    "ASTRA_EMU_HOOK_ROUTER_POISONED",
-                    "Hook router state is poisoned",
-                )
-            })?
-            .clone()
-        {
-            Some(bound) => bound.invoke(invocation),
-            None => Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Unbound,
-                payload: Vec::new().into(),
-                diagnostics: Vec::new(),
-            }),
-        }
-    }
-}
-
-fn manager_host_services(
-    vfs: Arc<dyn LegacyVfsReader>,
-) -> Result<
-    (
-        LegacyFamilyHostServicesV9,
-        Arc<LegacySurfaceStoreV9>,
-        Arc<ManagerHookRouter>,
-    ),
-    String,
-> {
-    let surfaces = Arc::new(
-        LegacySurfaceStoreV9::new(MAX_SURFACE_BYTES, MAX_TOTAL_SURFACE_BYTES)
-            .map_err(|error| error.to_string())?,
-    );
-    let project = directories::ProjectDirs::from("dev", "AstraEngine", "AstraEMU")
-        .ok_or_else(|| "ASTRA_EMU_WRITABLE_ROOT_UNAVAILABLE".to_owned())?;
-    let writable_files = Arc::new(
-        LocalPrivateWritableFileHostV1::new(
-            project.data_local_dir().join("family-data").join("manager"),
-        )
-        .map_err(|error| error.to_string())?,
-    );
-    let hooks = Arc::new(ManagerHookRouter::default());
-    Ok((
-        LegacyFamilyHostServicesV9 {
-            vfs,
-            surfaces: surfaces.clone(),
-            hooks: hooks.clone(),
-            writable_files,
-        },
-        surfaces,
-        hooks,
-    ))
-}
 
 pub struct FamilyHostConfig {
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -207,26 +94,15 @@ impl FamilyHostConfig {
 
     pub fn create_provider(
         &self,
-        vfs: Arc<dyn LegacyVfsReader>,
-    ) -> Result<ManagerLoadedFamily, String> {
-        let (host_services, surfaces, hooks) = manager_host_services(vfs)?;
+        services: LegacyFamilyHostServicesV9,
+    ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
         #[cfg(target_os = "ios")]
         {
-            return create_static_ios_provider(host_services).map(|provider| ManagerLoadedFamily {
-                provider,
-                surfaces,
-                hooks,
-            });
+            return create_static_ios_provider(services);
         }
         #[cfg(target_os = "android")]
         {
-            return create_dynamic_android_provider(host_services).map(|provider| {
-                ManagerLoadedFamily {
-                    provider,
-                    surfaces,
-                    hooks,
-                }
-            });
+            return create_dynamic_android_provider(services);
         }
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
@@ -269,21 +145,17 @@ impl FamilyHostConfig {
                     &self.library_path,
                     manifest,
                     "astra.emu.manager.family.fvp".into(),
-                    host_services,
+                    services,
                 )
                 .map_err(|error| error.to_string())?;
-            Ok(ManagerLoadedFamily {
-                provider: Box::new(provider),
-                surfaces,
-                hooks,
-            })
+            Ok(Box::new(provider))
         }
     }
 }
 
 #[cfg(target_os = "android")]
 fn create_dynamic_android_provider(
-    host_services: LegacyFamilyHostServicesV9,
+    services: LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
     use astra_core::Hash256;
 
@@ -355,7 +227,7 @@ fn create_dynamic_android_provider(
             &library_path,
             family,
             "astra.emu.manager.family.fvp".into(),
-            host_services,
+            services,
         )
         .map(|provider| Box::new(provider) as Box<dyn LegacyRuntimeProvider>)
         .map_err(|error| error.to_string())
@@ -372,7 +244,7 @@ fn android_abi() -> Result<&'static str, String> {
 
 #[cfg(target_os = "ios")]
 fn create_static_ios_provider(
-    host_services: LegacyFamilyHostServicesV9,
+    services: LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
     use astra_core::Hash256;
 
@@ -413,7 +285,7 @@ fn create_static_ios_provider(
         })
         .map_err(|error| error.to_string())?;
     registry
-        .create("fvp", host_services)
+        .create("fvp", services)
         .map_err(|error| error.to_string())
 }
 
@@ -438,69 +310,5 @@ fn platform_library_name() -> &'static Path {
     )))]
     {
         Path::new("astra-emu-fvp.unsupported")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct CompletingHook;
-
-    impl LegacyHookHostV1 for CompletingHook {
-        fn invoke(
-            &self,
-            invocation: LegacyHookInvocationV1,
-        ) -> Result<LegacyHookResultV1, LegacyProviderError> {
-            Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Completed,
-                payload: invocation.payload,
-                diagnostics: Vec::new(),
-            })
-        }
-    }
-
-    fn invocation() -> LegacyHookInvocationV1 {
-        LegacyHookInvocationV1 {
-            session_id: "session".into(),
-            invocation_id: "invocation".into(),
-            family_id: "minori".into(),
-            family_game_id: "case".into(),
-            hook_id: "astra.emu.translation.text.v1".into(),
-            timeout_ms: 100,
-            payload: b"text".to_vec().into(),
-        }
-    }
-
-    #[test]
-    fn hook_router_is_explicitly_bound_and_unbound() {
-        let router = ManagerHookRouter::default();
-        assert_eq!(
-            router.invoke(invocation()).unwrap().status,
-            LegacyHookStatusV1::Unbound
-        );
-        router.bind(Arc::new(CompletingHook)).unwrap();
-        assert_eq!(
-            router.invoke(invocation()).unwrap().status,
-            LegacyHookStatusV1::Completed
-        );
-        assert_eq!(
-            router.bind(Arc::new(CompletingHook)).unwrap_err(),
-            "ASTRA_EMU_HOOK_ROUTER_ALREADY_BOUND"
-        );
-        router.unbind().unwrap();
-        assert_eq!(
-            router.invoke(invocation()).unwrap().status,
-            LegacyHookStatusV1::Unbound
-        );
-    }
-
-    #[test]
-    fn hook_router_rejects_invalid_invocations_before_dispatch() {
-        let router = ManagerHookRouter::default();
-        let mut value = invocation();
-        value.timeout_ms = 0;
-        let error = router.invoke(value).unwrap_err();
-        assert_eq!(error.code(), "ASTRA_EMU_HOOK_INVOCATION");
     }
 }

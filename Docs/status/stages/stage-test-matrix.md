@@ -7,11 +7,11 @@ ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
 
-2026-08-23 focused v9 consumer evidence remains E1: dynamic loader、CLI 和 Manager 已组合四个 Host port；Minori resource/text surface 与同步 translation Hook 已有定向回归。Manager typed filter graph 通过公共 validator 和 WGPU validation，未启用 CPU fallback，旧 Scene2D transaction consumer 已删除。support 25 项、CLI 38 项、Manager 主程序 13 项、Minori 121 项测试及受影响 crate 严格 clippy 通过。Windows current-user ACL 断言、Headless composition 和 Minori v9 真实样本 E2 仍未完成。
+2026-08-23 focused v9 consumer evidence: dynamic loader、CLI 和 Manager 已组合四个 Host port；Minori resource/text surface 与同步 translation Hook 已有定向回归。签名真实样本 slice 挂载 8 个 source、14502 个 entry，消费 42 条物理输入，提交 154 帧和 134144 个音频 frame，diagnostic 为 0。checkpoint 实际画面有变化，但首帧仍是黑色过渡，页面标签未完全对应，因此只计受限 E2 诊断，不关闭完整路线或视觉门禁。
 
 FVP 已删除退役 consumer，并通过动态签名 lifecycle 与 Manager adapter 定向测试；scene/text 仍以稳定 migration diagnostic 阻断。这不覆盖 presentation 或 Headless E2。
 
-Typed filter graph 修正基线为 `e6bc3d960b87373160acd8507faeac4cc589975b`。Family API round-trip、生成 schema、Manager typed mapping 和 RFVP 新 revision check 属于本轮最小验证集；不代替 CLI/Headless composition。
+Typed filter graph consumer implementation 基线为 `289b89f74a972f92f98bbd481f8b45b23d969200`，RFVP revision 为 `f4f64a5bb726c1759350a666a35e0a454b810f61`。Family API round-trip、生成 schema、Manager typed mapping 和 RFVP revision check 属于本轮最小验证集；不代替完整路线或平台 E3。
 
 本矩阵把 Stage 1-8 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-6 仍包含未实现目标路径；Stage 7/8 是 AstraRPG planned extension，测试项先作为 `SPEC_READY` 迁移目标。
 

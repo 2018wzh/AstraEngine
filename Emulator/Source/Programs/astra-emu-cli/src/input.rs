@@ -23,7 +23,7 @@ pub fn read_input_sequence(path: &Path) -> Result<ValidatedInputSequence, String
     let mut expected_session = None::<String>;
     let mut previous_sequence = 0_u64;
     let mut previous_tick = 0_u64;
-    for raw in bytes.split(|byte| *byte == b'\n') {
+    for (line_index, raw) in bytes.split(|byte| *byte == b'\n').enumerate() {
         let line = raw.strip_suffix(b"\r").unwrap_or(raw);
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
@@ -31,8 +31,13 @@ pub fn read_input_sequence(path: &Path) -> Result<ValidatedInputSequence, String
         if messages.len() >= MAX_INPUT_MESSAGES {
             return Err("ASTRA_EMU_HEADLESS_INPUT_MESSAGE_BOUNDS".into());
         }
-        let message: InputMessage = serde_json::from_slice(line)
-            .map_err(|_| "ASTRA_EMU_HEADLESS_INPUT_PARSE".to_owned())?;
+        let message: InputMessage = serde_json::from_slice(line).map_err(|error| {
+            format!(
+                "ASTRA_EMU_HEADLESS_INPUT_PARSE:line={};category={:?}",
+                line_index + 1,
+                error.classify()
+            )
+        })?;
         message
             .validate()
             .map_err(|_| "ASTRA_EMU_HEADLESS_INPUT_INVALID".to_owned())?;

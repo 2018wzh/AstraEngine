@@ -26,31 +26,27 @@ use std::{
     io::Cursor,
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use astra_core::{Hash256, SchemaVersion};
-use astra_emu_extension_api::{translation_response, TRANSLATION_TEXT_HOOK_ID};
 use astra_emu_family_api::{
     is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyHookHostV1, LegacyHookInvocationV1,
-    LegacyHookResultV1, LegacyHookStatusV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
-    LegacyProviderError, LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1,
+    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyInputEdge, LegacyPcmBufferV7,
+    LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1,
     LegacyVideoMode,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
-use astra_emu_fvp::FvpVfsFamilyFactory;
-use astra_emu_manager::family_host::{FamilyHostConfig, ManagerHookRouter};
+use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
-    evidence_terminal_hash, evidence_vm_coverage_hash, evidence_vm_coverage_ids,
-    AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord,
-    CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord,
-    GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord, MatchDecisionRecord,
-    MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader,
-    ProviderConsentRecord, QueuedPatchEffect, ScanLimits, SourceGrant, TranslationCacheRecord,
+    evidence_vm_coverage_ids, AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken,
+    CaseRuntimeProfileRecord, CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile,
+    ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
+    MatchDecisionRecord, MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction,
+    PatchVfsReader, ProviderConsentRecord, QueuedPatchEffect, ScanLimits, SourceGrant,
     TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
@@ -66,25 +62,26 @@ use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
+use astra_media_core::Layer2DTransaction;
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
     RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
     RuntimeLiveAudioSampleFormat, RuntimeLiveBlackboardMutation, RuntimeLiveDirtySection,
-    RuntimeLiveLayerTransaction, RuntimeLivePcmBuffer, RuntimeLiveVideoCommand,
+    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation,
+    RuntimeLiveSceneTransaction, RuntimeLiveTextureFormat, RuntimeLiveVideoCommand,
     RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind,
-    RuntimeOpenRequest, RuntimeProviderResult, RuntimeRestoreRequest, RuntimeSaveRequest,
-    RuntimeSaveSections, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget,
-    RuntimeStepInput, RuntimeStepMode,
+    RuntimeOpenRequest, RuntimeProviderResult, RuntimeSectionCodec, RuntimeSectionPayload,
+    RuntimeStepBudget, RuntimeStepInput, RuntimeStepMode,
 };
 use image::GenericImageView;
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
 use platform_source::{GrantedSource, VfsRegistry};
+use rfvp_astra_provider::FvpVfsFamilyFactory;
 use stage_renderer::ManagerStageRenderer;
 use translation_runtime::{
-    translation_profile_from_record, TranslationLaunchConfig, TranslationOverlayState,
-    TranslationRuntime,
+    translation_profile_from_record, TranslationLaunchConfig, TranslationRuntime,
 };
 use video_executor::{HostVideoExecutor, HostVideoFrame};
 
@@ -177,11 +174,9 @@ struct ActiveRuntimeSession {
     await_sequence: u64,
     input_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
-    saved_sections: Option<RuntimeSaveSections>,
     coverage_syscalls: u64,
     next_tick: Instant,
     next_step_mode: RuntimeStepMode,
-    mount_set_id: String,
 }
 
 enum PendingWait {
@@ -192,136 +187,17 @@ enum PendingWait {
     ProviderCompletion,
 }
 
-fn validate_live_layer_transaction(
-    transaction: &RuntimeLiveLayerTransaction,
-) -> Result<(), String> {
-    if transaction.sequence == 0
-        || transaction.viewport_width == 0
-        || transaction.viewport_height == 0
-        || transaction.operations.len() > 4_096
-    {
-        return Err("ASTRA_EMU_LIVE_LAYER_TRANSACTION_INVALID".into());
-    }
-    let mut touched = BTreeSet::new();
-    for operation in &transaction.operations {
-        let (layer_id, layer) = match operation {
-            astra_plugin_abi::RuntimeLiveLayerOperation::Create(layer)
-            | astra_plugin_abi::RuntimeLiveLayerOperation::Update(layer) => {
-                (&layer.layer_id, Some(layer))
-            }
-            astra_plugin_abi::RuntimeLiveLayerOperation::Destroy { layer_id } => (layer_id, None),
-        };
-        if layer_id.is_empty()
-            || layer_id.len() > 128
-            || !touched.insert(layer_id.as_str())
-            || layer_id.bytes().any(|byte| {
-                !byte.is_ascii_alphanumeric() && !matches!(byte, b'.' | b'_' | b'-' | b':')
-            })
-        {
-            return Err("ASTRA_EMU_LIVE_LAYER_ID_INVALID".into());
-        }
-        if let Some(layer) = layer {
-            let row_bytes = layer
-                .width
-                .checked_mul(4)
-                .ok_or_else(|| "ASTRA_EMU_LIVE_LAYER_BOUNDS".to_owned())?;
-            if layer.surface_id.is_empty()
-                || layer.surface_id.len() > 128
-                || layer.generation == 0
-                || layer.width == 0
-                || layer.height == 0
-                || layer.stride < row_bytes
-                || !layer.opacity.is_finite()
-                || !(0.0..=1.0).contains(&layer.opacity)
-            {
-                return Err("ASTRA_EMU_LIVE_LAYER_STATE_INVALID".into());
-            }
-        }
-    }
-    Ok(())
-}
-
-struct ManagerSessionHookHost {
-    translation: Arc<Mutex<TranslationRuntime>>,
-    text_hooks: BTreeMap<String, String>,
-}
-
-impl LegacyHookHostV1 for ManagerSessionHookHost {
-    fn invoke(
-        &self,
-        invocation: LegacyHookInvocationV1,
-    ) -> Result<LegacyHookResultV1, LegacyProviderError> {
-        if invocation.hook_id != TRANSLATION_TEXT_HOOK_ID {
-            return Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Unbound,
-                payload: Vec::new().into(),
-                diagnostics: Vec::new(),
-            });
-        }
-        let source = translation_response(invocation.payload.as_slice()).map_err(|_| {
-            LegacyProviderError::invalid(
-                "ASTRA_EMU_TRANSLATION_HOOK_UTF8",
-                "translation Hook input is not UTF-8",
-            )
-        })?;
-        let source_hash = Hash256::from_sha256(source.as_bytes()).to_string();
-        let patched = self
-            .text_hooks
-            .get(&source_hash)
-            .or_else(|| self.text_hooks.get("all"));
-        let input = patched.map_or_else(|| source.to_owned(), Clone::clone);
-        let translated = self
-            .translation
-            .lock()
-            .map_err(|_| {
-                LegacyProviderError::invalid(
-                    "ASTRA_EMU_TRANSLATION_HOOK_POISONED",
-                    "translation Hook state is poisoned",
-                )
-            })?
-            .translate_sync(input.clone(), invocation.timeout_ms);
-        match translated {
-            Ok(Some(translated)) => Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Completed,
-                payload: translated.into_bytes().into(),
-                diagnostics: Vec::new(),
-            }),
-            Ok(None) if patched.is_some() => Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Completed,
-                payload: input.into_bytes().into(),
-                diagnostics: Vec::new(),
-            }),
-            Ok(None) => Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Unbound,
-                payload: Vec::new().into(),
-                diagnostics: Vec::new(),
-            }),
-            Err(code) if code == "ASTRA_EMU_TRANSLATION_HOOK_TIMEOUT" => Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::TimedOut,
-                payload: Vec::new().into(),
-                diagnostics: Vec::new(),
-            }),
-            Err(_) => Ok(LegacyHookResultV1 {
-                status: LegacyHookStatusV1::Failed,
-                payload: Vec::new().into(),
-                diagnostics: Vec::new(),
-            }),
-        }
-    }
-}
-
 struct RuntimeBridge {
     provider: AstraEmuRuntimeProvider,
-    family_surfaces: Arc<astra_emu_family_support::LegacySurfaceStoreV9>,
-    family_hooks: Arc<ManagerHookRouter>,
-    vfs: Arc<VfsRegistry>,
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
     failed: bool,
-    live_layer_commits: VecDeque<RuntimeLiveLayerTransaction>,
+    live_scene_commits: VecDeque<RuntimeLiveSceneTransaction>,
+    live_layer_commits: VecDeque<Layer2DTransaction>,
+    resource_revisions: BTreeMap<u32, (u64, u32, u32, RuntimeLiveTextureFormat)>,
     audio: Option<HostAudioExecutor>,
     video: HostVideoExecutor,
-    translation: Option<Arc<Mutex<TranslationRuntime>>>,
+    translation: Option<TranslationRuntime>,
     media_hooks: BTreeMap<String, String>,
     filter_preset: String,
     suspended: bool,
@@ -329,55 +205,19 @@ struct RuntimeBridge {
 }
 
 impl RuntimeBridge {
-    fn read_active_resource(
-        &self,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<astra_byte_source::OwnedByteBuffer, String> {
-        let mount_set_id = &self
-            .active
-            .as_ref()
-            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?
-            .mount_set_id;
-        let stat = self
-            .vfs
-            .stat_file(mount_set_id, resource_uri)
-            .map_err(|error| error.to_string())?;
-        if stat.len > max_bytes {
-            return Err("ASTRA_EMU_VFS_RESOURCE_BOUNDS".into());
-        }
-        let read = self
-            .vfs
-            .read_file_range(
-                mount_set_id,
-                resource_uri,
-                stat.revision,
-                astra_byte_source::ByteRange {
-                    offset: 0,
-                    len: stat.len,
-                },
-                max_bytes,
-            )
-            .map_err(|error| error.to_string())?;
-        if read.revision != stat.revision || read.bytes.len() as u64 != stat.len {
-            return Err("ASTRA_EMU_VFS_RESOURCE_SHORT_READ".into());
-        }
-        Ok(read.bytes)
-    }
-
     fn new(vfs: Arc<VfsRegistry>) -> Result<Self, String> {
-        let family = FamilyHostConfig::from_process()?.create_provider(vfs.clone())?;
-        let mut provider = AstraEmuRuntimeProvider::new(family.provider)?;
+        let family_host = astra_emu_manager_core::AstraEmuFamilyHost::new(vfs.clone());
+        let family = FamilyHostConfig::from_process()?.create_provider(family_host.services())?;
+        let mut provider = AstraEmuRuntimeProvider::new(family, family_host)?;
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
         Ok(Self {
             provider,
-            family_surfaces: family.surfaces,
-            family_hooks: family.hooks,
-            vfs,
             active: None,
             terminal: false,
             failed: false,
+            live_scene_commits: VecDeque::new(),
             live_layer_commits: VecDeque::new(),
+            resource_revisions: BTreeMap::new(),
             audio: None,
             video: HostVideoExecutor::default(),
             translation: None,
@@ -406,8 +246,7 @@ impl RuntimeBridge {
         if profile.family_id != "fvp" || profile.case_identity != case.case_identity {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
         }
-        let (text_hooks, media_hooks, deterministic_effects) =
-            validate_patch_actions(patch_actions)?;
+        let (media_hooks, deterministic_effects) = validate_patch_actions(patch_actions)?;
         let package_hash: Hash256 = case
             .content_hash
             .parse()
@@ -443,13 +282,25 @@ impl RuntimeBridge {
             bytes,
         };
         let seed = u64::from_le_bytes(package_hash.as_bytes()[..8].try_into().unwrap());
+        self.provider.bind_writable_root_for_open(
+            "astra-emu-case",
+            seed,
+            script_fingerprint,
+            platform_data_dir()?
+                .join("SavedGames")
+                .join("fvp")
+                .join(package_hash.to_string()),
+        )?;
         let audio = HostAudioExecutor::open()?;
         self.video.bind_platform(audio.platform_client());
         let translation = TranslationRuntime::open(
             translation_config,
             Arc::new(ManagerSecretStore::open().map_err(|error| error.to_string())?),
         )?;
-        let translation = Arc::new(Mutex::new(translation));
+        if let Some((timeout_ms, hook_provider)) = translation.hook_provider() {
+            self.provider
+                .bind_hook_provider(script_fingerprint, timeout_ms, hook_provider)?;
+        }
         let open = self.provider.open(RuntimeOpenRequest {
             target_id: "astra-emu-case".into(),
             profile: "fvp-v1".into(),
@@ -471,18 +322,6 @@ impl RuntimeBridge {
                 };
             }
         }
-        if let Err(error) = self.family_hooks.bind(Arc::new(ManagerSessionHookHost {
-            translation: translation.clone(),
-            text_hooks,
-        })) {
-            let cleanup = self.provider.shutdown(open.session_id.clone());
-            return match cleanup {
-                Ok(_) => Err(error),
-                Err(cleanup_error) => Err(format!(
-                    "ASTRA_EMU_HOOK_BIND_AND_CLEANUP_FAILED:{error};{cleanup_error}"
-                )),
-            };
-        }
         self.active = Some(ActiveRuntimeSession {
             session_id: open.session_id.clone(),
             package_hash,
@@ -494,15 +333,12 @@ impl RuntimeBridge {
             await_sequence: 0,
             input_sequence: 0,
             pending_inputs: Vec::new(),
-            saved_sections: None,
             coverage_syscalls: 0,
             next_tick: Instant::now(),
             next_step_mode: RuntimeStepMode::Live,
-            mount_set_id,
         });
         tracing::info!(
             event = "astra.emu.manager.session_opened",
-            session_hash = %Hash256::from_sha256(open.session_id.0.as_bytes()),
             package_hash = %package_hash,
             profile_hash = %hash,
             profile_id = %"astra.emu.case_profile.v1"
@@ -512,7 +348,9 @@ impl RuntimeBridge {
         self.media_hooks = media_hooks;
         self.terminal = false;
         self.failed = false;
+        self.live_scene_commits.clear();
         self.live_layer_commits.clear();
+        self.resource_revisions.clear();
         Ok(())
     }
 
@@ -544,8 +382,6 @@ impl RuntimeBridge {
                 // installation. FVP returns the bounded HCB content identity here, so passing
                 // the former as a marker would deterministically reject every real game.
                 marker_hashes: Vec::new(),
-                max_entries: 1,
-                max_metadata_bytes: 512 * 1024 * 1024,
             },
         )?;
         tracing::info!(
@@ -616,7 +452,6 @@ impl RuntimeBridge {
             return Ok(false);
         }
         let next_step = active.fixed_step.saturating_add(1);
-        let session_seed = active.seed;
         let step_mode = active.next_step_mode;
         let completed_media = self.video.take_completed();
         for media_id in completed_media {
@@ -723,20 +558,14 @@ impl RuntimeBridge {
         let mut audio_commands = Vec::new();
         let mut video_commands = Vec::new();
         let mut waits = Vec::new();
-        if live.clear_text
-            || !live.scenes.is_empty()
-            || !live.resource_scenes.is_empty()
-            || !live.text.is_empty()
-            || !live.text_presentations.is_empty()
-        {
-            return Err("ASTRA_EMU_MANAGER_V9_RETIRED_PRESENTATION".into());
+        for transaction in live.scenes {
+            self.queue_live_scene(transaction)?;
         }
         for transaction in live.layers {
-            validate_live_layer_transaction(&transaction)?;
-            if self.live_layer_commits.len() >= 3 {
-                return Err("ASTRA_EMU_LIVE_LAYER_QUEUE_OVERFLOW".into());
-            }
-            self.live_layer_commits.push_back(transaction);
+            self.queue_live_layers(transaction)?;
+        }
+        for scene in live.resource_scenes {
+            self.queue_resource_scene_live(&session_id, scene)?;
         }
         for packet in live.audio {
             audio_packets.push(packet);
@@ -746,6 +575,9 @@ impl RuntimeBridge {
         }
         if !live.audio_cues.is_empty() {
             return Err("ASTRA_EMU_LIVE_PRODUCT_AUDIO_CUE_REJECTED".into());
+        }
+        if !live.text.is_empty() || !live.text_presentations.is_empty() {
+            return Err("ASTRA_EMU_LAYER_LANE_TEXT_CHANNEL_FORBIDDEN".into());
         }
         for command in live.video {
             video_commands.push(command);
@@ -774,7 +606,9 @@ impl RuntimeBridge {
                 .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
             for wait in waits {
                 let (token, condition) = live_wait_condition(wait, next_step, fixed_delta_ns);
-                install_pending_wait(&mut active.pending_waits, token, condition)?;
+                if active.pending_waits.insert(token, condition).is_some() {
+                    return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
+                }
             }
         }
 
@@ -783,9 +617,13 @@ impl RuntimeBridge {
             let mut command = legacy_live_audio_command(command);
             apply_audio_media_hook(&mut command, &self.media_hooks)?;
             let resource = match &command {
-                LegacyAudioCommandV1::LoadResource { resource_uri, .. } => Some(
-                    self.read_active_resource(resource_uri, audio_executor::MAX_RESOURCE_BYTES)?,
-                ),
+                LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
+                    Some(self.provider.read_vfs_resource(
+                        &session_id,
+                        resource_uri,
+                        audio_executor::MAX_RESOURCE_BYTES,
+                    )?)
+                }
                 _ => None,
             };
             resolved_audio.push((command, resource));
@@ -795,9 +633,13 @@ impl RuntimeBridge {
             let mut command = legacy_live_video_command(command);
             apply_video_media_hook(&mut command, &self.media_hooks)?;
             let resource = match &command {
-                LegacyVideoCommandV1::Play { resource_uri, .. } => Some(
-                    self.read_active_resource(resource_uri, video_executor::MAX_ENCODED_BYTES)?,
-                ),
+                LegacyVideoCommandV1::Play { resource_uri, .. } => {
+                    Some(self.provider.read_vfs_resource(
+                        &session_id,
+                        resource_uri,
+                        video_executor::MAX_ENCODED_BYTES,
+                    )?)
+                }
                 LegacyVideoCommandV1::Stop { .. } => None,
             };
             resolved_video.push((command, resource));
@@ -818,14 +660,10 @@ impl RuntimeBridge {
         self.video.advance(fixed_delta_ns, audio)?;
         self.terminal = output.status == "terminal";
         if self.terminal {
-            let terminal_hash =
-                evidence_terminal_hash("fvp", session_seed, next_step, live.state_revision);
             tracing::info!(
                 event = "astra.emu.manager.terminal_observed",
-                session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
                 fixed_step = next_step,
                 state_revision = live.state_revision,
-                terminal_hash = %terminal_hash
             );
         }
         Ok(true)
@@ -843,15 +681,9 @@ impl RuntimeBridge {
         }
         self.failed = true;
         let fixed_step = self.active.as_ref().map_or(0, |active| active.fixed_step);
-        let session_hash = self
-            .active
-            .as_ref()
-            .map(|active| Hash256::from_sha256(active.session_id.0.as_bytes()).to_string())
-            .unwrap_or_else(|| "none".into());
         tracing::error!(
             event = "astra.emu.manager.runtime_failed",
             diagnostic_code = error,
-            session_hash,
             fixed_step,
             "AstraEMU runtime session stopped at its first fatal error"
         );
@@ -862,137 +694,41 @@ impl RuntimeBridge {
             .active
             .take()
             .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
-        let session_hash = Hash256::from_sha256(active.session_id.0.as_bytes());
-        let session_id = active.session_id.clone();
         let (_, family_report) = self
             .provider
-            .shutdown_with_family_report(session_id.clone())?;
-        let hook_unbind = self.family_hooks.unbind();
-        let surface_cleanup = self
-            .family_surfaces
-            .remove_session(&session_id.0)
-            .map_err(|error| error.to_string());
-        let coverage_ids = evidence_vm_coverage_ids("fvp", &family_report.evidence_vm_trace);
-        let coverage_hash = evidence_vm_coverage_hash(&coverage_ids);
+            .shutdown_with_family_report(active.session_id)?;
+        let coverage_ids = evidence_vm_coverage_ids(&family_report.evidence_vm_trace);
+        let coverage_ids = coverage_ids.join(",");
         if let Some(mut audio) = self.audio.take() {
             let audio_telemetry = audio.telemetry();
             let audio_non_silent = audio.has_audible_output();
             self.video.reset(&mut audio)?;
-            let meter_trace = audio.shutdown()?;
-            let audio_meter_hash = Hash256::from_sha256(&meter_trace);
+            let _meter_trace = audio.shutdown()?;
             tracing::info!(
                 event = "astra.emu.manager.audio_meter_observed",
-                session_hash = %session_hash,
                 audio_non_silent,
                 submitted_frames = audio_telemetry.submitted_frames,
                 consumed_frames = audio_telemetry.consumed_frames,
                 underflow_count = audio_telemetry.underflow_count,
-                audio_meter_hash = %audio_meter_hash,
             );
         }
         self.terminal = false;
         self.failed = false;
+        self.live_scene_commits.clear();
         self.live_layer_commits.clear();
+        self.resource_revisions.clear();
         self.translation = None;
         self.media_hooks.clear();
         self.suspended = false;
-        hook_unbind?;
-        surface_cleanup?;
         tracing::info!(
             event = "astra.emu.manager.coverage_observed",
-            session_hash = %session_hash,
-            coverage_hash = %coverage_hash,
-            opcode_count = coverage_ids.len(),
+            coverage_ids,
             syscall_count = family_report.syscall_count.max(active.coverage_syscalls)
         );
         tracing::info!(
             event = "astra.emu.manager.shutdown_completed",
-            session_hash = %session_hash,
             package_hash = %active.package_hash,
             profile_id = %active.profile_id
-        );
-        Ok(())
-    }
-
-    fn save_game(&mut self) -> Result<(), String> {
-        let session_id = self
-            .active
-            .as_ref()
-            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?
-            .session_id
-            .clone();
-        let sections = self.provider.save(RuntimeSaveRequest {
-            session_id: session_id.clone(),
-            slot: "manager-user-slot".into(),
-        })?;
-        if sections.session_id != session_id
-            || sections.sections.is_empty()
-            || !sections.diagnostics.is_empty()
-        {
-            return Err("ASTRA_EMU_SAVE_EVIDENCE_INVALID".into());
-        }
-        let snapshot_hash = Hash256::from_sha256(
-            &postcard::to_allocvec(&sections)
-                .map_err(|_| "ASTRA_EMU_SAVE_OBSERVATION_SERIALIZE".to_owned())?,
-        );
-        self.active
-            .as_mut()
-            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?
-            .saved_sections = Some(sections);
-        tracing::info!(
-            event = "astra.emu.manager.snapshot_saved",
-            session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
-            snapshot_hash = %snapshot_hash
-        );
-        Ok(())
-    }
-
-    fn restore_game(&mut self) -> Result<(), String> {
-        let (session_id, sections) = {
-            let active = self
-                .active
-                .as_ref()
-                .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
-            (
-                active.session_id.clone(),
-                active
-                    .saved_sections
-                    .clone()
-                    .ok_or_else(|| "ASTRA_EMU_SAVE_SLOT_MISSING".to_owned())?,
-            )
-        };
-        let snapshot_hash = Hash256::from_sha256(
-            &postcard::to_allocvec(&sections)
-                .map_err(|_| "ASTRA_EMU_RESTORE_OBSERVATION_SERIALIZE".to_owned())?,
-        );
-        let restored = self.provider.restore(RuntimeRestoreRequest {
-            session_id: session_id.clone(),
-            sections: sections.sections,
-        })?;
-        if restored.session_id != session_id
-            || restored.status != "restored"
-            || !restored.diagnostics.is_empty()
-        {
-            return Err("ASTRA_EMU_RESTORE_EVIDENCE_INVALID".into());
-        }
-        let audio = self
-            .audio
-            .as_mut()
-            .ok_or_else(|| "ASTRA_EMU_AUDIO_EXECUTOR_MISSING".to_owned())?;
-        self.video.reset(audio)?;
-        audio.reset()?;
-        let active = self
-            .active
-            .as_mut()
-            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
-        active.fixed_step = restored.restored_fixed_step;
-        active.next_tick = Instant::now() + Duration::from_nanos(active.fixed_delta_ns);
-        active.next_step_mode = RuntimeStepMode::RestoreContinuation;
-        tracing::info!(
-            event = "astra.emu.manager.snapshot_restored",
-            session_hash = %Hash256::from_sha256(session_id.0.as_bytes()),
-            snapshot_hash = %snapshot_hash,
-            restored_step = restored.restored_fixed_step
         );
         Ok(())
     }
@@ -1045,16 +781,151 @@ impl RuntimeBridge {
         Ok(())
     }
 
-    fn take_next_live_layer(
+    fn queue_live_scene(&mut self, transaction: RuntimeLiveSceneTransaction) -> Result<(), String> {
+        transaction.validate().map_err(|error| error.to_string())?;
+        if self.live_scene_commits.len() >= 3 {
+            return Err("ASTRA_EMU_LIVE_SCENE_QUEUE_OVERFLOW".into());
+        }
+        self.live_scene_commits.push_back(transaction);
+        Ok(())
+    }
+
+    fn take_latest_live_scene(&mut self) -> Option<RuntimeLiveSceneTransaction> {
+        self.live_scene_commits.pop_front()
+    }
+
+    fn queue_live_layers(&mut self, transaction: Layer2DTransaction) -> Result<(), String> {
+        if self.live_layer_commits.len() >= 3 {
+            return Err("ASTRA_EMU_LIVE_LAYER_QUEUE_OVERFLOW".into());
+        }
+        self.live_layer_commits.push_back(transaction);
+        Ok(())
+    }
+
+    fn take_latest_live_layers(&mut self) -> Option<Layer2DTransaction> {
+        self.live_layer_commits.pop_front()
+    }
+
+    fn take_published_surface(
+        &self,
+        surface_id: &str,
+        generation: u64,
+    ) -> Result<astra_emu_manager_core::PublishedFamilySurface, String> {
+        let active = self
+            .active
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        self.provider
+            .take_published_surface(&active.session_id, surface_id, generation)
+    }
+
+    fn return_published_surface(
+        &self,
+        surface: astra_emu_manager_core::PublishedFamilySurface,
+    ) -> Result<(), String> {
+        self.provider.return_published_surface(surface)
+    }
+
+    fn queue_resource_scene_live(
         &mut self,
-    ) -> Option<(
-        String,
-        RuntimeLiveLayerTransaction,
-        Arc<astra_emu_family_support::LegacySurfaceStoreV9>,
-    )> {
-        let transaction = self.live_layer_commits.pop_front()?;
-        let session_id = self.active.as_ref()?.session_id.0.clone();
-        Some((session_id, transaction, self.family_surfaces.clone()))
+        session_id: &GameRuntimeSessionId,
+        scene: RuntimeLiveResourceScene,
+    ) -> Result<(), String> {
+        if scene.width == 0 || scene.height == 0 || scene.width > 16_384 || scene.height > 16_384 {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSIONS".into());
+        }
+        let mut resources = Vec::with_capacity(scene.textures.len());
+        let mut pending_ids = BTreeSet::new();
+        let mut pending_revisions = Vec::with_capacity(scene.textures.len());
+        for texture in scene.textures {
+            if !pending_ids.insert(texture.texture_id) {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DUPLICATE_TEXTURE".into());
+            }
+            if texture.revision == 0 || texture.decoded_width == 0 || texture.decoded_height == 0 {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_METADATA".into());
+            }
+            if let Some((revision, width, height, format)) =
+                self.resource_revisions.get(&texture.texture_id)
+            {
+                if *revision == texture.revision
+                    && *width == texture.decoded_width
+                    && *height == texture.decoded_height
+                    && *format == texture.decoded_format
+                {
+                    continue;
+                }
+                if *width != texture.decoded_width
+                    || *height != texture.decoded_height
+                    || *format != texture.decoded_format
+                {
+                    return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_CHANGE".into());
+                }
+            }
+            let encoded = self.provider.read_vfs_resource(
+                session_id,
+                &texture.resource_uri,
+                1024 * 1024 * 1024,
+            )?;
+            let decoded = image::load_from_memory(&encoded)
+                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE".to_owned())?;
+            if decoded.width() != texture.decoded_width
+                || decoded.height() != texture.decoded_height
+            {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
+            }
+            let rgba = decoded.to_rgba8().into_raw();
+            let pixels = match texture.decoded_format {
+                RuntimeLiveTextureFormat::Rgba8 => rgba,
+                RuntimeLiveTextureFormat::LumaAlpha8 => rgba
+                    .chunks_exact(4)
+                    .flat_map(|pixel| [pixel[0], pixel[3]])
+                    .collect(),
+            };
+            let operation = if self.resource_revisions.contains_key(&texture.texture_id) {
+                RuntimeLiveSceneResourceOperation::UpdateTexture {
+                    texture_id: texture.texture_id,
+                    generation: texture.revision,
+                    x: 0,
+                    y: 0,
+                    width: texture.decoded_width,
+                    height: texture.decoded_height,
+                    format: texture.decoded_format,
+                    pixels: pixels.into(),
+                }
+            } else {
+                RuntimeLiveSceneResourceOperation::CreateTexture {
+                    texture_id: texture.texture_id,
+                    generation: texture.revision,
+                    width: texture.decoded_width,
+                    height: texture.decoded_height,
+                    format: texture.decoded_format,
+                    pixels: pixels.into(),
+                }
+            };
+            resources.push(operation);
+            pending_revisions.push((
+                texture.texture_id,
+                (
+                    texture.revision,
+                    texture.decoded_width,
+                    texture.decoded_height,
+                    texture.decoded_format,
+                ),
+            ));
+        }
+        self.queue_live_scene(RuntimeLiveSceneTransaction {
+            sequence: scene.sequence,
+            width: scene.width,
+            height: scene.height,
+            compositing: astra_plugin_abi::RuntimeLiveSceneCompositing::LinearSrgb,
+            resources,
+            draws: scene.draws,
+            reset_resources: false,
+        })?;
+        for (texture_id, revision) in pending_revisions {
+            self.resource_revisions.insert(texture_id, revision);
+        }
+        Ok(())
     }
 
     fn current_video_frame(&self) -> Option<HostVideoFrame> {
@@ -1069,34 +940,6 @@ impl RuntimeBridge {
                 }
             }
         }
-    }
-
-    fn translation_overlay(&self) -> Option<TranslationOverlayState> {
-        self.translation
-            .as_ref()
-            .and_then(|translation| translation.lock().ok())
-            .map(|translation| translation.overlay().clone())
-    }
-
-    fn take_translation_writes(&mut self) -> Vec<TranslationCacheRecord> {
-        self.translation
-            .as_ref()
-            .and_then(|translation| translation.lock().ok())
-            .map(|mut translation| translation.take_pending_writes())
-            .unwrap_or_default()
-    }
-
-    fn drain_async_completions(&mut self) -> Result<bool, String> {
-        Ok(false)
-    }
-
-    fn reset_translation(&mut self) -> Result<(), String> {
-        self.translation
-            .as_ref()
-            .ok_or_else(|| "ASTRA_EMU_TRANSLATION_RUNTIME_NOT_ACTIVE".to_owned())?
-            .lock()
-            .map_err(|_| "ASTRA_EMU_TRANSLATION_RUNTIME_POISONED".to_owned())?
-            .reset_circuit()
     }
 
     fn set_filter_preset(&mut self, preset_id: &str) -> Result<(), String> {
@@ -1122,32 +965,14 @@ impl RuntimeBridge {
             "idle"
         };
         format!(
-            "runtime={state}; pending_layers={}; video_active={}; translation_active={}; filter={}",
+            "runtime={state}; pending_scenes={}; pending_layers={}; video_active={}; translation_active={}; filter={}",
+            self.live_scene_commits.len(),
             self.live_layer_commits.len(),
             self.video.is_active(),
             self.translation.is_some(),
             self.filter_preset
         )
     }
-}
-
-fn install_pending_wait(
-    waits: &mut BTreeMap<String, PendingWait>,
-    token: String,
-    condition: PendingWait,
-) -> Result<(), String> {
-    if let Some(current) = waits.get(&token) {
-        let modality_rebind = matches!(
-            (current, &condition),
-            (PendingWait::Input(_), PendingWait::DueStep(_))
-                | (PendingWait::DueStep(_), PendingWait::Input(_))
-        );
-        if !modality_rebind {
-            return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
-        }
-    }
-    waits.insert(token, condition);
-    Ok(())
 }
 
 /// Converts platform pixel/scroll coordinates to the integral legacy input contract.
@@ -1182,14 +1007,9 @@ impl Drop for RuntimeBridge {
     }
 }
 
-type PatchBindings = (
-    BTreeMap<String, String>,
-    BTreeMap<String, String>,
-    Vec<QueuedPatchEffect>,
-);
+type PatchBindings = (BTreeMap<String, String>, Vec<QueuedPatchEffect>);
 
 fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings, String> {
-    let mut text_hooks = BTreeMap::new();
     let mut media_hooks = BTreeMap::new();
     let mut effects = Vec::new();
     for action in actions {
@@ -1197,19 +1017,11 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
             PatchHostAction::DecodeTransform { .. } => {
                 return Err("ASTRA_EMU_PATCH_DECODE_TRANSFORM_NOT_INSTALLED".into());
             }
-            PatchHostAction::TextHook {
-                target_hash,
-                replacement,
-            } => {
-                if text_hooks.insert(target_hash, replacement).is_some() {
-                    return Err("ASTRA_EMU_PATCH_TEXT_HOOK_DUPLICATE".into());
-                }
-            }
             PatchHostAction::MediaHook {
-                target_hash,
+                resource_uri,
                 replacement_uri,
             } => {
-                if media_hooks.insert(target_hash, replacement_uri).is_some() {
+                if media_hooks.insert(resource_uri, replacement_uri).is_some() {
                     return Err("ASTRA_EMU_PATCH_MEDIA_HOOK_DUPLICATE".into());
                 }
             }
@@ -1230,7 +1042,7 @@ fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings
             }
         }
     }
-    Ok((text_hooks, media_hooks, effects))
+    Ok((media_hooks, effects))
 }
 
 fn apply_audio_media_hook(
@@ -1238,9 +1050,7 @@ fn apply_audio_media_hook(
     hooks: &BTreeMap<String, String>,
 ) -> Result<(), String> {
     if let LegacyAudioCommandV1::LoadResource { resource_uri, .. } = command {
-        if let Some(replacement) =
-            hooks.get(&Hash256::from_sha256(resource_uri.as_bytes()).to_string())
-        {
+        if let Some(replacement) = hooks.get(resource_uri) {
             resource_uri.clone_from(replacement);
         }
     }
@@ -1252,9 +1062,7 @@ fn apply_video_media_hook(
     hooks: &BTreeMap<String, String>,
 ) -> Result<(), String> {
     if let LegacyVideoCommandV1::Play { resource_uri, .. } = command {
-        if let Some(replacement) =
-            hooks.get(&Hash256::from_sha256(resource_uri.as_bytes()).to_string())
-        {
+        if let Some(replacement) = hooks.get(resource_uri) {
             resource_uri.clone_from(replacement);
         }
     }
@@ -2742,13 +2550,6 @@ impl ManagerController for AstraEmuManagerController {
             .flatten()
             .and_then(|profile| profile.family_options.get("fvp.nls").cloned())
             .unwrap_or_else(|| "Not configured".into());
-        let persistent_cache = self
-            .selected_case_id
-            .as_deref()
-            .map(|case_id| self.library.persistent_translation_cache_enabled(case_id))
-            .transpose()
-            .map_err(|error| error.to_string())?
-            .unwrap_or(false);
         let consent_present = self
             .library
             .translation_consent()
@@ -3051,7 +2852,6 @@ impl ManagerController for AstraEmuManagerController {
                 })
                 .unwrap_or_default(),
             translation_consent_present: consent_present,
-            translation_persistent_cache: persistent_cache,
             filter_preset: self
                 .runtime
                 .try_borrow()
@@ -3383,18 +3183,6 @@ impl ManagerController for AstraEmuManagerController {
                 model: profile.model,
                 granted_at_unix_ms,
             })
-            .map_err(|error| error.to_string())?;
-        self.diagnostic.clear();
-        self.model()
-    }
-
-    fn set_translation_cache(&mut self, enabled: bool) -> Result<ManagerViewModel, String> {
-        let case_identity = self
-            .selected_case_id
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
-        self.library
-            .set_persistent_translation_cache(&case_identity, enabled)
             .map_err(|error| error.to_string())?;
         self.diagnostic.clear();
         self.model()
@@ -3756,14 +3544,6 @@ impl ManagerController for AstraEmuManagerController {
                 .translation_consent()
                 .map_err(|error| error.to_string())?
                 .is_some(),
-            persistent_cache_enabled: self
-                .library
-                .persistent_translation_cache_enabled(&case.case_identity)
-                .map_err(|error| error.to_string())?,
-            cached: self
-                .library
-                .translations_for_case(&case.case_identity)
-                .map_err(|error| error.to_string())?,
         };
         self.vfs.bind(&mount_set_id, &grant.platform_token)?;
         let pack_paths =
@@ -3847,15 +3627,10 @@ impl ManagerController for AstraEmuManagerController {
     }
 
     fn leave_game(&mut self) -> Result<ManagerViewModel, String> {
-        let writes = {
-            let mut runtime = self
-                .runtime
-                .try_borrow_mut()
-                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?;
-            let writes = runtime.take_translation_writes();
-            runtime.shutdown()?;
-            writes
-        };
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .shutdown()?;
         if let Some(mount_set_id) = self.active_mount_set_id.take() {
             self.vfs.unbind(&mount_set_id);
         }
@@ -3863,11 +3638,6 @@ impl ManagerController for AstraEmuManagerController {
             if let Ok(now) = unix_time_ms() {
                 let _ = self.library.end_play_session(&session, now, "leave");
             }
-        }
-        for record in writes {
-            self.library
-                .store_translation(&record)
-                .map_err(|error| error.to_string())?;
         }
         #[cfg(target_os = "android")]
         android_platform::set_game_mode(false)?;
@@ -3878,11 +3648,6 @@ impl ManagerController for AstraEmuManagerController {
     #[cfg(target_os = "android")]
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
         let mut changed = self.poll_metadata()?;
-        changed |= self
-            .runtime
-            .try_borrow_mut()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .drain_async_completions()?;
         for state in android_platform::take_pending_lifecycle()? {
             let suspended = !matches!(state, android_platform::AndroidLifecycleState::Resumed);
             self.runtime
@@ -3904,12 +3669,7 @@ impl ManagerController for AstraEmuManagerController {
 
     #[cfg(not(target_os = "android"))]
     fn poll_platform(&mut self) -> Result<Option<ManagerViewModel>, String> {
-        let mut changed = self.poll_metadata()?;
-        changed |= self
-            .runtime
-            .try_borrow_mut()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .drain_async_completions()?;
+        let changed = self.poll_metadata()?;
         if changed {
             self.model().map(Some)
         } else {
@@ -3950,31 +3710,6 @@ impl ManagerController for AstraEmuManagerController {
             .try_borrow_mut()
             .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
             .queue_input(control, pressed, value)
-    }
-
-    fn save_game(&mut self) -> Result<ManagerViewModel, String> {
-        self.runtime
-            .try_borrow_mut()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .save_game()?;
-        self.diagnostic.clear();
-        self.model()
-    }
-
-    fn restore_game(&mut self) -> Result<ManagerViewModel, String> {
-        self.runtime
-            .try_borrow_mut()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .restore_game()?;
-        self.diagnostic.clear();
-        self.model()
-    }
-
-    fn reset_translation(&mut self) -> Result<(), String> {
-        self.runtime
-            .try_borrow_mut()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .reset_translation()
     }
 
     // ===== UI redesign: theme / appearance / input =====
@@ -4079,15 +3814,6 @@ impl Drop for AstraEmuManagerController {
     fn drop(&mut self) {
         if self.active_mount_set_id.is_some() {
             if let Ok(mut runtime) = self.runtime.try_borrow_mut() {
-                for record in runtime.take_translation_writes() {
-                    if let Err(error) = self.library.store_translation(&record) {
-                        tracing::error!(
-                            event = "astra.emu.translation.drop_persist_failed",
-                            diagnostic_code = "ASTRA_EMU_TRANSLATION_DROP_PERSIST_FAILED",
-                            error_kind = %error
-                        );
-                    }
-                }
                 let _ = runtime.shutdown();
             }
             if let Some(mount_set_id) = self.active_mount_set_id.take() {
@@ -4121,6 +3847,10 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
             texture_dirty: false,
             scene_initialized: false,
             scene_compositing: None,
+            layer_state: astra_media_core::RetainedLayer2DState::default(),
+            layer_texture_ids: BTreeMap::new(),
+            layer_filter_texture_ids: BTreeMap::new(),
+            next_layer_texture_id: 1,
         },
         quick_launch,
     )?;
@@ -4186,17 +3916,9 @@ use audio_executor::HostAudioExecutor;
 
 #[cfg(test)]
 mod manager_tests {
-    use std::{
-        collections::{BTreeMap, BTreeSet},
-        fs,
-        io::Cursor,
-        sync::Arc,
-    };
+    use std::{collections::BTreeMap, fs, io::Cursor, sync::Arc};
 
-    use crate::{
-        install_pending_wait, normalize_legacy_input_value, resolve_platform_data_dir_override,
-        PendingWait,
-    };
+    use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
 
     use astra_emu_manager_core::{
         CancellationToken, DesktopVfsRegistry, GrantedSourceEntry, GrantedSourceReader, Library,
@@ -4335,14 +4057,9 @@ mod manager_tests {
     #[test]
     fn patch_host_bindings_are_unique_and_media_rewrites_are_revalidated() {
         let original = "audio/original.ogg";
-        let target_hash = astra_core::Hash256::from_sha256(original.as_bytes()).to_string();
-        let (text, media, effects) = validate_patch_actions(vec![
-            PatchHostAction::TextHook {
-                target_hash: "all".into(),
-                replacement: "replacement".into(),
-            },
+        let (media, effects) = validate_patch_actions(vec![
             PatchHostAction::MediaHook {
-                target_hash: target_hash.clone(),
+                resource_uri: original.into(),
                 replacement_uri: "audio/replacement.ogg".into(),
             },
             PatchHostAction::DeterministicEffect {
@@ -4351,8 +4068,7 @@ mod manager_tests {
             },
         ])
         .unwrap();
-        assert_eq!(text["all"], "replacement");
-        assert_eq!(media[&target_hash], "audio/replacement.ogg");
+        assert_eq!(media[original], "audio/replacement.ogg");
         assert!(matches!(
             &effects[0],
             QueuedPatchEffect::RuntimeEvent { event, value }
@@ -4372,37 +4088,15 @@ mod manager_tests {
         ));
 
         assert!(validate_patch_actions(vec![
-            PatchHostAction::TextHook {
-                target_hash: "all".into(),
-                replacement: "a".into(),
+            PatchHostAction::MediaHook {
+                resource_uri: original.into(),
+                replacement_uri: "audio/a.ogg".into(),
             },
-            PatchHostAction::TextHook {
-                target_hash: "all".into(),
-                replacement: "b".into(),
+            PatchHostAction::MediaHook {
+                resource_uri: original.into(),
+                replacement_uri: "audio/b.ogg".into(),
             },
         ])
-        .is_err());
-    }
-
-    #[test]
-    fn pending_wait_registration_only_allows_same_token_input_time_rebinding() {
-        let mut waits = BTreeMap::from([(
-            "message".to_owned(),
-            PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
-        )]);
-        install_pending_wait(&mut waits, "message".to_owned(), PendingWait::DueStep(42)).unwrap();
-        assert!(matches!(waits["message"], PendingWait::DueStep(42)));
-        install_pending_wait(
-            &mut waits,
-            "message".to_owned(),
-            PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
-        )
-        .unwrap();
-        assert!(install_pending_wait(
-            &mut waits,
-            "message".to_owned(),
-            PendingWait::Input(BTreeSet::from(["space".to_owned()])),
-        )
         .is_err());
     }
 }

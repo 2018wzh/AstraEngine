@@ -1,13 +1,13 @@
 # Implementation Coverage Matrix
 
 Current AstraEMU identity note: the active contract is Family ABI v9 at
-`e6bc3d960b87373160acd8507faeac4cc589975b` with Product Runtime Provider ABI
+`289b89f74a972f92f98bbd481f8b45b23d969200` with Product Runtime Provider ABI
 v4. Minori uses `Native + MultiLayer`, Host-owned surfaces, synchronous Hook,
 typed `LegacyFilterGraphV9` and writable-file ports. CLI、Manager 和 Minori 的
 增量 consumer 已恢复编译，Manager typed filter graph 已走 WGPU，旧 Scene2D
-transaction consumer 已删除；Windows 私有 ACL、Headless composition 与真实样本复验
-仍未闭合。ABI v8 E2 只作历史回归基线；
-本行保持 `IN_PROGRESS`，不能从 E1 提升为当前 E2。
+transaction consumer 已删除。Minori 签名真实样本已通过一轮 v9 Headless lifecycle，
+但 checkpoint 阶段标签与完整路线视觉门禁尚未闭合。ABI v8 E2 只作历史回归基线；
+本行保持 `IN_PROGRESS`。
 
 1999 原版补丁器已接入 workspace。公开测试覆盖 edition fingerprint、RIFX 资源图边界、唯一 CASt binding、script ID 大端读写、ProjectorRays hash/timeout、完整目录复制、原子清理、manifest 和发布包 hash。私有 `inspect → apply → verify` 已证明原安装目录保持只读，成品保留 `DATA/MENU.dxr` 原名，其余原文件逐项保持 hash。受控 launcher 已用 Locale Emulator Core 的 CP932/LCID `0x0411` 环境成功创建 32 位 projector，并把 Director 7 残留的 1 像素 outer frame 删除；实测 outer/client 同为 800×600，window style 为 borderless popup。标题第三按钮的完整视觉状态与路线跳转仍需形成同一轮 E3 报告，当前不计入 AstraVN Player 的 Windows E3 coverage。
 
@@ -15,13 +15,13 @@ TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary re
 
 RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁；`006` 仍是唯一允许绑定具名 `astra.headless_tolerance_approval.v2` 的色彩容差项。UI010 至 UI014 的系统窗几何偏差为 0 px，UI009 的选择菱形列偏差为 1 px。模型已查看全部五联图；30 张输入和 12 组稳定捕获契约均已闭合，权威 manifest 与 node map 已同步。Director movie 入口现按 Score snapshot 恢复初始可见 layer；source-bound package crypto、不透明授权目录、CLI build/bundle 与 Player bootstrap 已形成 contract/E2。商业明文、媒体签名和私有路径扫描均通过预检；最终同身份重跑和 formal signoff 尚未闭合。Windows E3 显式延期，不作为本轮 RC 门禁，状态保持 `IN_PROGRESS`。旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
-AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file 与 typed filter graph 已进入公共契约。Minori resource/text surface、CLI layer consumer 和 Manager Hook/Layer2D consumer 已进入 v9 主路径；旧 scene、snapshot、ephemeral text 与 session resource 路径不能继续加载。Manager typed filter graph 和新的真实样本 E2 尚未完成，下表旧 ABI 运行只保留为历史记录。
+AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file 与 typed filter graph 已进入公共契约。Minori resource/text surface、CLI layer consumer 和 Manager Hook/Layer2D consumer 已进入 v9 主路径；旧 scene、snapshot、ephemeral text 与 session resource 路径不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
 
-2026 年 8 月 23 日的 consumer 增量仍只形成 E1：动态 loader、CLI 与 Manager 已绑定四个 Host port；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。support 25 项、CLI 38 项、Manager 主程序 13 项、Minori 121 项测试和受影响 crate 严格 clippy 通过。Windows current-user ACL 断言、Headless composition 与真实样本 E2 仍未完成。
+2026 年 8 月 23 日的 consumer 增量已完成动态 loader、CLI 与 Manager 四个 Host port 组合；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。当前签名样本 slice 消费 42 条物理输入，提交 154 帧并输出 134144 个音频 frame，diagnostic 为 0。模型检查确认画面有标题、系统背景、正文与场景变化，也确认首个 checkpoint 是黑色过渡帧、页面标签存在错位，因此仍是受限 E2 诊断，不是完整视觉通过。
 
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 
-ABI 修正基线已更新到 `e6bc3d960b87373160acd8507faeac4cc589975b`。Filter graph 现在以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9` 并绑定唯一 workspace ABI source。
+ABI consumer implementation 基线已更新到 `289b89f74a972f92f98bbd481f8b45b23d969200`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `f4f64a5bb726c1759350a666a35e0a454b810f61` 并绑定唯一 workspace ABI source。
 
 2026-08-03 的 Windows native 诊断另确认 PlatformHost command queue 未唤醒 Winit 是 present backlog 的直接根因。当前 command submit 和 HTTPS completion 已通过 `EventLoopProxy` 事件驱动，800-step signed Release 复跑无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms；该短跑不替代 hover 动画语义、Family ABI scene bulk 零拷贝、10 分钟 audio soak 或 Manager E3。
 

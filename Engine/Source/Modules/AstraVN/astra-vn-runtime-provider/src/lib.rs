@@ -32,10 +32,10 @@ use astra_plugin_abi::{
     FfiRuntimeSceneResourceOperation, FfiRuntimeSceneTextureCreate, FfiRuntimeSceneTextureUpdate,
     FfiRuntimeScissor, FfiRuntimeSection, FfiRuntimeSectionCodec, FfiRuntimeSectionResult,
     FfiRuntimeShutdownRequest, FfiRuntimeShutdownResult, FfiRuntimeStepMode, FfiRuntimeStepRequest,
-    FfiRuntimeStepResult, FfiRuntimeTextLease, FfiRuntimeTextOutline, FfiRuntimeTextPresentation,
-    FfiRuntimeTextRegion, FfiRuntimeTextureFilter, FfiRuntimeTextureFormat, FfiRuntimeVertex,
-    FfiRuntimeVideoCommand, FfiRuntimeVideoMode, FfiRuntimeWait, FfiRuntimeWaitKind,
-    PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA, PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
+    FfiRuntimeStepResult, FfiRuntimeTextLease, FfiRuntimeTextPresentation, FfiRuntimeTextRegion,
+    FfiRuntimeTextureFilter, FfiRuntimeTextureFormat, FfiRuntimeVertex, FfiRuntimeVideoCommand,
+    FfiRuntimeVideoMode, FfiRuntimeWait, FfiRuntimeWaitKind, PRODUCT_RUNTIME_DESCRIPTOR_SCHEMA,
+    PRODUCT_RUNTIME_PROVIDER_ABI_VERSION,
 };
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ReleaseCheckDescriptor, RuntimeEditorMetadata,
@@ -2838,7 +2838,7 @@ fn ffi_step_input(request: FfiRuntimeStepRequest) -> Result<RuntimeStepInput, St
                 request_id: result.request_id.to_string(),
                 provider_id: result.provider_id.to_string(),
                 status: result.status.to_string(),
-                payload: result.payload.into_iter().collect(),
+                payload_len: result.payload_len,
                 sequence: result.sequence,
             })
             .collect(),
@@ -2992,13 +2992,6 @@ fn ffi_live_output(
                 body: ffi_live_text_region(presentation.body),
                 speaker: presentation.speaker.map(ffi_live_text_region).into(),
                 rgba: presentation.rgba,
-                outline: presentation
-                    .outline
-                    .map(|outline| FfiRuntimeTextOutline {
-                        radius: outline.radius,
-                        rgba: outline.rgba,
-                    })
-                    .into(),
             })
         }
     }
@@ -3042,19 +3035,11 @@ fn ffi_live_output(
                     fence_id: fence_id.into(),
                 }
             }
-            RuntimeLiveWaitKind::ProviderCompletion {
-                request_id,
-                provider_id,
-                operation,
-                key,
-                payload,
-            } => FfiRuntimeWaitKind::ProviderCompletion {
-                request_id: request_id.into(),
-                provider_id: provider_id.into(),
-                operation: operation.into(),
-                key: key.into(),
-                payload: payload.into(),
-            },
+            RuntimeLiveWaitKind::ProviderCompletion { request_id } => {
+                FfiRuntimeWaitKind::ProviderCompletion {
+                    request_id: request_id.into(),
+                }
+            }
         };
         waits.push(FfiRuntimeWait {
             sequence: wait.sequence,
@@ -3093,7 +3078,7 @@ fn ffi_live_output(
     }
     Ok((
         FfiRuntimeLiveOutput {
-            clear_text: value.clear_text,
+            layers: RVec::new(),
             scenes: RVec::from(scenes),
             resource_scenes: RVec::from(resource_scenes),
             audio: RVec::from(audio),
@@ -3296,17 +3281,6 @@ fn ffi_live_text_region(region: astra_plugin_abi::RuntimeLiveTextRegion) -> FfiR
         font_size: region.font_size,
         line_height: region.line_height,
         max_lines: region.max_lines,
-        horizontal_alignment: match region.horizontal_alignment {
-            astra_plugin_abi::RuntimeLiveTextHorizontalAlignment::Start => {
-                astra_plugin_abi::FfiRuntimeTextHorizontalAlignment::Start
-            }
-            astra_plugin_abi::RuntimeLiveTextHorizontalAlignment::Center => {
-                astra_plugin_abi::FfiRuntimeTextHorizontalAlignment::Center
-            }
-            astra_plugin_abi::RuntimeLiveTextHorizontalAlignment::End => {
-                astra_plugin_abi::FfiRuntimeTextHorizontalAlignment::End
-            }
-        },
     }
 }
 

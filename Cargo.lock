@@ -808,9 +808,10 @@ dependencies = [
  "hex",
  "image 0.25.10",
  "libc",
- "na_mpeg2_decoder",
+ "na_mpeg2_decoder 0.1.0",
  "postcard",
  "rayon",
+ "rfvp-astra-provider",
  "schemars",
  "serde",
  "serde_json",
@@ -819,7 +820,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "wmv-decoder",
+ "wmv-decoder 0.2.0",
 ]
 
 [[package]]
@@ -950,25 +951,11 @@ name = "astra-emu-fvp"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
- "anyhow",
- "astra-byte-source",
- "astra-core",
  "astra-emu-family-api",
- "astra-emu-family-core",
- "bincode 1.3.3",
- "encoding_rs",
- "na_mpeg2_decoder",
- "postcard",
- "proptest",
- "rfvp",
- "schemars",
- "serde",
+ "rfvp-astra-provider",
  "serde_json",
  "sha2 0.10.9",
- "tempfile",
- "thiserror 1.0.69",
  "tracing",
- "wmv-decoder",
 ]
 
 [[package]]
@@ -988,6 +975,7 @@ dependencies = [
  "astra-emu-minori",
  "astra-emu-translation-openai-compatible",
  "astra-media",
+ "astra-media-core",
  "astra-observability",
  "astra-platform",
  "astra-plugin",
@@ -1001,6 +989,7 @@ dependencies = [
  "pollster",
  "postcard",
  "rfd",
+ "rfvp-astra-provider",
  "serde_json",
  "sha2 0.10.9",
  "slint",
@@ -1019,12 +1008,13 @@ dependencies = [
  "abi_stable",
  "astra-byte-source",
  "astra-core",
+ "astra-emu-extension-api",
  "astra-emu-family-api",
  "astra-emu-fvp",
+ "astra-media-core",
  "astra-plugin",
  "astra-plugin-abi",
  "astra-runtime",
- "blake3",
  "ed25519-dalek",
  "hex",
  "libloading 0.8.9",
@@ -1038,6 +1028,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1687,6 +1678,7 @@ dependencies = [
  "astra-byte-source",
  "astra-core",
  "astra-headless-test",
+ "astra-media-core",
  "astra-plugin-abi",
  "astra-runtime",
  "astra-worker-budget",
@@ -1709,6 +1701,7 @@ dependencies = [
  "astra-byte-source",
  "astra-core",
  "astra-headless-test",
+ "astra-media-core",
  "postcard",
  "schemars",
  "serde",
@@ -6726,6 +6719,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "na_mpeg2_decoder"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+dependencies = [
+ "byteorder",
+ "log",
+ "symphonia 0.5.5",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "naga"
 version = "29.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8776,7 +8780,7 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9#15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -8804,6 +8808,32 @@ dependencies = [
  "sha2 0.10.9",
  "spin",
  "twofloat",
+]
+
+[[package]]
+name = "rfvp-astra-provider"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+dependencies = [
+ "abi_stable",
+ "anyhow",
+ "astra-byte-source",
+ "astra-core",
+ "astra-emu-extension-api",
+ "astra-emu-family-api",
+ "astra-emu-family-core",
+ "bincode 1.3.3",
+ "encoding_rs",
+ "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61)",
+ "postcard",
+ "rfvp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+ "tracing",
+ "wmv-decoder 0.2.0 (git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61)",
 ]
 
 [[package]]
@@ -12438,6 +12468,16 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wmv-decoder"
 version = "0.2.0"
+dependencies = [
+ "byteorder",
+ "log",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "wmv-decoder"
+version = "0.2.0"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
 dependencies = [
  "byteorder",
  "log",

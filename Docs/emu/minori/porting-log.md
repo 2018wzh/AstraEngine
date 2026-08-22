@@ -4,12 +4,14 @@
 
 ### Family ABI v9 hard cut
 
-- 当前分支已 rebase 到 Family ABI v9 typed filter graph 修正提交 `e6bc3d960b87373160acd8507faeac4cc589975b`。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合改为 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
+- 当前分支已 rebase 到 Family ABI v9 consumer implementation 提交 `289b89f74a972f92f98bbd481f8b45b23d969200`；其中包含 writable zero-copy surface 与 typed filter graph 两次 ABI 修正。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合是 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
 - v9 删除了旧 scene transaction、family snapshot、ephemeral text、session resource presentation 和 step budget。旧接口不保留兼容层，也不会在缺少 surface、Hook、字体、decode 或 writable-file provider 时回退。
 - Minori dylib 已改用公共 `FfiLegacyFamilyHostAdapter`，不再维护私有 FFI host adapter；surface lease 采用独占、可写、零拷贝 owner，禁止 immutable buffer、复制回写和 const-cast。旧 save/restore/text/resource 导出已从 root module 删除。
-- 定向 `cargo check -p astra-emu-minori` 已通过。全局进度已迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。resource image surface 与 MultiLayer transaction 已在后续 slice 接通；同步 Hook、font/shaping 与 text surface 仍会明确阻断，不能据此恢复 E2 状态。
-- 下文所有 ABI v8 真实样本结果只保留为迁移前行为与回归基线，不能证明 v9 plugin 可加载、可运行或通过 E2。迁移期间不得把旧报告重标为当前证据。
-- 相邻的 FVP consumer 已删除退役的 snapshot、text lease、session resource 与 step budget 路径，并通过动态签名 lifecycle 定向测试；RFVP scene/text 仍返回明确 migration blocker。该修复减少了 Manager 的旧接口依赖，但不构成 Minori 或 FVP 的 v9 E2。
+- 全局进度已迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。Windows 复验发现 writable root 曾直接使用带 `sha256:` 前缀的显示字符串，冒号会生成非法目录名；现在目录组件固定为原始 digest 的 64 位小写十六进制。Runtime control action 同时补齐实际 Blackboard 写入的 `ActionAccess` 声明，两个问题都有定向回归。
+- 当前签名 v9 plugin 已重新挂载 8 个逻辑 archive、14502 个 entry，并完成一次 42 条物理输入的 Headless slice：154 个提交/栅格帧、134144 个音频 frame、零 runtime diagnostic。该运行未到 terminal；6 个 checkpoint 的标签与实际画面阶段没有完全对齐，首张是黑色过渡帧，后续能看到标题、Config 背景、正文和场景变化。因此自动 lifecycle 通过，但视觉审查仍为阻断，不能把它写成完整路线 E2。
+- 该复验还暴露了两个 retained-state 根因：Layer2D transaction sequence 过去只看单 tick effect，跨 tick 会重复；文字 surface 每帧重建 glyph resource owner，第二次渲染会重复创建 retained texture。现在 session 持有单调 layer sequence 与长期 `TextRenderResourceOwner`，并增加跨 tick 和重复日文帧回归。Headless 标准报告也改为保存每个 checkpoint 的实际 RGBA observation hash，不再给所有 checkpoint 复用 artifact manifest hash。
+- 下文所有 ABI v8 真实样本结果只保留为迁移前行为与回归基线，不能直接证明 v9 完整路线、性能或平台 E3。
+- 相邻的 FVP consumer 已按 `f4f64a5bb726c1759350a666a35e0a454b810f61` 删除退役 facade，FVP 固定为 `Ported + SingleLayer`。这不构成 Minori 的性能 E2 或 Windows Manager E3。
 - Layer filter 已从 string binding 硬切为 ABI-owned typed graph，并在 Family API、Manager Product boundary 与生成 schema 中保持 node、target、parameter 结构。Minori 当前不提交 filter graph；Host 不会按字符串或 hash 隐式选择图。
 
 ## 2026-08-22

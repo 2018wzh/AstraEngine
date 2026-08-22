@@ -5,24 +5,24 @@ use std::{
 };
 
 use astra_byte_source::{ByteRange, OwnedByteBuffer};
-use astra_core::{Hash256, SchemaVersion};
+use astra_core::Hash256;
+#[cfg(test)]
+use astra_core::SchemaVersion;
 use astra_emu_extension_api::{translation_response, TRANSLATION_TEXT_HOOK_ID};
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
     LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta,
-    LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyHostServicesV9,
-    LegacyFamilyPluginDescriptor, LegacyHookInvocationV1, LegacyHookStatusV1, LegacyLayerBlendV9,
-    LegacyLayerFilterV9, LegacyLayerOperationV9, LegacyLayerStateV9, LegacyLayerTransactionV9,
-    LegacyLayerTransformV9, LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest,
-    LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1,
-    LegacyResourceRead, LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider,
-    LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced,
-    LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput,
+    LegacyDrawV1, LegacyEvent, LegacyFamilyHostServicesV9, LegacyFamilyPluginDescriptor,
+    LegacyHookInvocationV1, LegacyHookStatusV1, LegacyLayerBlendV9, LegacyLayerFilterV9,
+    LegacyLayerOperationV9, LegacyLayerStateV9, LegacyLayerTransactionV9, LegacyLayerTransformV9,
+    LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest, LegacyProbeReport,
+    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead,
+    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
+    LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacyStepInput,
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
-    LegacySurfaceFormatV9, LegacyTextLease, LegacyTextureFilter, LegacyTextureFormat,
-    LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
-    LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacySurfaceFormatV9, LegacyTextureFilter, LegacyTextureFormat, LegacyTextureResourceV1,
+    LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyVmTraceRecord, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 use astra_media_core::{
     BlendMode, CpuRendererProvider, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
@@ -41,7 +41,6 @@ use crate::{
     MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand,
     MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent,
     MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
-    MINORI_RUNTIME_STATE_SCHEMA,
 };
 
 pub const MINORI_FAMILY_ID: &str = "minori";
@@ -180,6 +179,21 @@ struct LegacyTextPresentationLeaseV1 {
     presentation: LegacyTextPresentationV1,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StagedEphemeralText {
+    lease_id: String,
+    text: String,
+    speaker: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StagedTextLease {
+    sequence: u64,
+    lease_id: String,
+    byte_len: u32,
+    source_ref: String,
+}
+
 impl LegacyTextPresentationLeaseV1 {
     fn validate(&self) -> Result<(), LegacyProviderError> {
         validate_symbol("text_presentation_lease_id", &self.lease_id)?;
@@ -192,7 +206,7 @@ struct LegacyLiveOutput {
     clear_text: bool,
     resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
     text_presentations: Vec<LegacySequenced<LegacyTextPresentationLeaseV1>>,
-    text: Vec<LegacyTextLease>,
+    text: Vec<StagedTextLease>,
     audio: Vec<LegacyAudioPacketV7>,
     audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
     video: Vec<LegacySequenced<LegacyVideoCommandV1>>,
@@ -242,6 +256,18 @@ struct MinoriGlobalProgressSnapshotV1 {
     enabled: bool,
     loaded: bool,
     persisted_unlocks: Vec<Hash256>,
+}
+
+#[cfg(test)]
+struct TestCheckpointSection {
+    version: SchemaVersion,
+    bytes: Vec<u8>,
+}
+
+#[cfg(test)]
+struct TestProviderCheckpoint {
+    family_sections: Vec<TestCheckpointSection>,
+    global_progress: MinoriGlobalProgressSnapshotV1,
 }
 
 #[derive(Debug, Clone)]
@@ -319,7 +345,7 @@ struct MinoriSession {
     session_seed: u64,
     stage_size: Option<(u32, u32)>,
     vm: MinoriVm,
-    ephemeral_text: BTreeMap<String, LegacyEphemeralText>,
+    ephemeral_text: BTreeMap<String, StagedEphemeralText>,
     collect_evidence_vm_trace: bool,
     evidence_contexts: BTreeMap<u32, Hash256>,
     evidence_vm_trace: BTreeSet<(u32, u32, u8)>,
@@ -332,6 +358,7 @@ struct MinoriSession {
     global_progress: MinoriGlobalProgressSession,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
+    last_layer_sequence: u64,
     poisoned: bool,
 }
 
@@ -426,16 +453,9 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         request: LegacyProbeRequest,
     ) -> Result<LegacyProbeReport, LegacyProviderError> {
         ctx.validate()?;
-        if request.max_entries == 0 || request.max_metadata_bytes == 0 {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_PROBE_BUDGET",
-                "Minori probe budget is empty",
-            ));
-        }
         let candidates = request
             .candidate_uris
             .iter()
-            .take(request.max_entries as usize)
             .filter(|uri| uri.starts_with("minori:/scr/") && uri.ends_with(".sc"))
             .collect::<Vec<_>>();
         let candidate = candidates
@@ -449,11 +469,9 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "probe requires one unambiguous Minori entry script",
                 )
             })?;
-        let bytes = self.vfs()?.read_file(
-            &request.root_mount_id,
-            candidate,
-            request.max_metadata_bytes.min(MAX_SCRIPT_BYTES),
-        )?;
+        let bytes = self
+            .vfs()?
+            .read_file(&request.root_mount_id, candidate, MAX_SCRIPT_BYTES)?;
         parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
         let identity = Hash256::from_sha256(&bytes);
         let marker_match =
@@ -609,6 +627,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     None => None,
                 },
                 published_layers: BTreeSet::new(),
+                last_layer_sequence: 0,
                 poisoned: false,
             },
         );
@@ -1442,7 +1461,7 @@ impl MinoriRuntimeProvider {
                 .ephemeral_text
                 .insert(
                     lease_id.clone(),
-                    LegacyEphemeralText {
+                    StagedEphemeralText {
                         lease_id: lease_id.clone(),
                         text: text.clone(),
                         speaker: speaker.clone(),
@@ -1460,7 +1479,7 @@ impl MinoriRuntimeProvider {
                 sequence: *presentation_sequence,
                 value: presentation,
             });
-            live.text.push(LegacyTextLease {
+            live.text.push(StagedTextLease {
                 sequence: *capture_sequence,
                 lease_id,
                 byte_len: text.len().try_into().map_err(|_| {
@@ -1890,12 +1909,12 @@ impl MinoriRuntimeProvider {
         Ok(output)
     }
 
-    #[allow(dead_code)]
-    fn save(
-        &mut self,
+    #[cfg(test)]
+    fn test_checkpoint(
+        &self,
         ctx: &LegacyRuntimeHostCtx,
         session_id: &LegacyRuntimeSessionId,
-    ) -> Result<LegacySnapshotEnvelope, LegacyProviderError> {
+    ) -> Result<TestProviderCheckpoint, LegacyProviderError> {
         ctx.validate()?;
         let session = self
             .sessions
@@ -1905,130 +1924,71 @@ impl MinoriRuntimeProvider {
         if session.poisoned {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_SESSION_POISONED",
-                "poisoned session cannot be saved",
+                "poisoned session cannot produce a test checkpoint",
             ));
         }
-        let bytes = session.vm.snapshot_bytes().map_err(runtime_error)?;
-        let global_progress = postcard::to_allocvec(&MinoriGlobalProgressSnapshotV1 {
-            schema: MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA.into(),
-            enabled: session.global_progress.enabled,
-            loaded: session.global_progress.loaded,
-            persisted_unlocks: session.global_progress.persisted_unlocks.clone(),
+        Ok(TestProviderCheckpoint {
+            family_sections: vec![TestCheckpointSection {
+                version: SchemaVersion::new(23, 0, 0),
+                bytes: session.vm.snapshot_bytes().map_err(runtime_error)?,
+            }],
+            global_progress: MinoriGlobalProgressSnapshotV1 {
+                schema: MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA.into(),
+                enabled: session.global_progress.enabled,
+                loaded: session.global_progress.loaded,
+                persisted_unlocks: session.global_progress.persisted_unlocks.clone(),
+            },
         })
-        .map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_SNAPSHOT_ENCODE",
-                "global progress snapshot could not be encoded",
-            )
-        })?;
-        let envelope = LegacySnapshotEnvelope {
-            family_id: FamilyId(MINORI_FAMILY_ID.into()),
-            session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(6, 0, 0),
-            case_fingerprint: session.case_fingerprint,
-            fixed_step: session.vm.state().fixed_tick,
-            session_seed: session.session_seed,
-            runtime_cursor: session.vm.state().instruction_count,
-            family_sections: vec![
-                LegacySnapshotSection {
-                    section_id: "minori.runtime".into(),
-                    schema: MINORI_RUNTIME_STATE_SCHEMA.into(),
-                    version: SchemaVersion::new(23, 0, 0),
-                    bytes,
-                },
-                LegacySnapshotSection {
-                    section_id: "minori.global_progress".into(),
-                    schema: MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA.into(),
-                    version: SchemaVersion::new(1, 0, 0),
-                    bytes: global_progress,
-                },
-            ],
-            redaction_status: "passed".into(),
-        };
-        envelope.validate()?;
-        Ok(envelope)
     }
 
-    #[allow(dead_code)]
-    fn restore(
+    #[cfg(test)]
+    fn restore_test_checkpoint(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
         session_id: &LegacyRuntimeSessionId,
-        snapshot: &LegacySnapshotEnvelope,
-    ) -> Result<LegacyRestoreReport, LegacyProviderError> {
+        checkpoint: &TestProviderCheckpoint,
+    ) -> Result<(), LegacyProviderError> {
         ctx.validate()?;
-        snapshot.validate()?;
         let vfs = Arc::clone(self.vfs()?);
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(session_missing)?;
-        validate_session_binding(ctx, session)?;
-        if snapshot.family_id.0 != MINORI_FAMILY_ID
-            || snapshot.session_id != *session_id
-            || snapshot.case_fingerprint != session.case_fingerprint
-            || snapshot.session_seed != session.session_seed
-            || snapshot.family_sections.len() != 2
+        let section = checkpoint.family_sections.first().ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_TEST_CHECKPOINT_SECTION",
+                "test checkpoint runtime section is missing",
+            )
+        })?;
+        if checkpoint.family_sections.len() != 1
+            || section.version != SchemaVersion::new(23, 0, 0)
+            || checkpoint.global_progress.schema != MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA
         {
             return Err(invalid(
-                "ASTRA_EMU_MINORI_SNAPSHOT_IDENTITY",
-                "snapshot identity does not match the open session",
+                "ASTRA_EMU_MINORI_TEST_CHECKPOINT_IDENTITY",
+                "test checkpoint identity is invalid",
             ));
         }
-        let runtime_section = &snapshot.family_sections[0];
-        let progress_section = &snapshot.family_sections[1];
-        if runtime_section.section_id != "minori.runtime"
-            || runtime_section.schema != MINORI_RUNTIME_STATE_SCHEMA
-            || runtime_section.version != SchemaVersion::new(23, 0, 0)
-            || progress_section.section_id != "minori.global_progress"
-            || progress_section.schema != MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA
-            || progress_section.version != SchemaVersion::new(1, 0, 0)
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_SNAPSHOT_SECTION",
-                "snapshot runtime section identity is invalid",
-            ));
-        }
-        let restored = MinoriVm::decode_snapshot(&runtime_section.bytes).map_err(runtime_error)?;
-        let restored_progress: MinoriGlobalProgressSnapshotV1 =
-            postcard::from_bytes(&progress_section.bytes).map_err(|_| {
-                invalid(
-                    "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_SNAPSHOT_DECODE",
-                    "global progress snapshot could not be decoded",
-                )
-            })?;
-        if restored_progress.schema != MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA
-            || restored_progress.enabled != session.global_progress.enabled
-            || (!restored_progress.loaded && !restored_progress.persisted_unlocks.is_empty())
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_SNAPSHOT_IDENTITY",
-                "global progress snapshot identity or state is invalid",
-            ));
-        }
+        let restored = MinoriVm::decode_snapshot(&section.bytes).map_err(runtime_error)?;
         validate_script_uri(&restored.script_uri)?;
         let bytes = vfs.read_file(&ctx.mount_set_id, &restored.script_uri, MAX_SCRIPT_BYTES)?;
         let script_hash = Hash256::from_sha256(&bytes);
         if script_hash != restored.script_hash {
             return Err(invalid(
-                "ASTRA_EMU_MINORI_SNAPSHOT_SCRIPT_IDENTITY",
-                "snapshot script hash does not match the mounted VFS",
+                "ASTRA_EMU_MINORI_TEST_CHECKPOINT_SCRIPT_IDENTITY",
+                "test checkpoint script does not match the mounted VFS",
             ));
         }
         let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
+        let session = self
+            .sessions
+            .get_mut(&session_id.0)
+            .ok_or_else(session_missing)?;
+        validate_session_binding(ctx, session)?;
         session
             .vm
             .replace_script(restored.script_uri, script_hash, script)
-            .and_then(|_| session.vm.restore_state(&runtime_section.bytes))
+            .and_then(|_| session.vm.restore_state(&section.bytes))
             .map_err(runtime_error)?;
-        session.global_progress.loaded = restored_progress.loaded;
-        session.global_progress.persisted_unlocks = restored_progress.persisted_unlocks;
-        if session.global_progress.enabled && session.global_progress.loaded {
-            session
-                .vm
-                .merge_verified_gallery_unlocks(&session.global_progress.persisted_unlocks)
-                .map_err(runtime_error)?;
-        }
+        session.global_progress.loaded = checkpoint.global_progress.loaded;
+        session.global_progress.persisted_unlocks =
+            checkpoint.global_progress.persisted_unlocks.clone();
         session.ephemeral_text.clear();
         session.restore_audio_pending = true;
         session.restore_presentation_pending = true;
@@ -2037,21 +1997,16 @@ impl MinoriRuntimeProvider {
         session.reported_gallery_unlock_count = None;
         session.reported_choice_active = None;
         session.poisoned = false;
-        Ok(LegacyRestoreReport {
-            restored_fixed_step: session.vm.state().fixed_tick,
-            session_seed: session.session_seed,
-            state_revision: session.vm.state().fixed_tick,
-            diagnostics: Vec::new(),
-        })
+        Ok(())
     }
 
-    #[allow(dead_code)]
-    fn take_ephemeral_text(
+    #[cfg(test)]
+    fn take_staged_text(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
         session_id: &LegacyRuntimeSessionId,
         lease_id: &str,
-    ) -> Result<Option<astra_emu_family_api::LegacyEphemeralText>, LegacyProviderError> {
+    ) -> Result<Option<StagedEphemeralText>, LegacyProviderError> {
         ctx.validate()?;
         let session = self
             .sessions
@@ -4770,7 +4725,7 @@ fn append_resumed_message_text(
         .ephemeral_text
         .insert(
             lease_id.clone(),
-            LegacyEphemeralText {
+            StagedEphemeralText {
                 lease_id: lease_id.clone(),
                 text: text.clone(),
                 speaker,
@@ -4787,7 +4742,7 @@ fn append_resumed_message_text(
         sequence: presentation_sequence,
         value: presentation,
     });
-    live.text.push(LegacyTextLease {
+    live.text.push(StagedTextLease {
         sequence: capture_sequence,
         lease_id,
         byte_len: text.len().try_into().map_err(|_| {
@@ -4864,7 +4819,7 @@ fn append_backlog_text(
         .ephemeral_text
         .insert(
             lease_id.clone(),
-            LegacyEphemeralText {
+            StagedEphemeralText {
                 lease_id: lease_id.clone(),
                 text: entry.text.clone(),
                 speaker: entry.speaker,
@@ -4881,7 +4836,7 @@ fn append_backlog_text(
         sequence: presentation_sequence,
         value: presentation,
     });
-    live.text.push(LegacyTextLease {
+    live.text.push(StagedTextLease {
         sequence: capture_sequence,
         lease_id,
         byte_len: entry.text.len().try_into().map_err(|_| {
@@ -5375,7 +5330,7 @@ fn append_choice_live_output(
             .ephemeral_text
             .insert(
                 lease_id.clone(),
-                LegacyEphemeralText {
+                StagedEphemeralText {
                     lease_id: lease_id.clone(),
                     text: option.clone(),
                     speaker: None,
@@ -5392,7 +5347,7 @@ fn append_choice_live_output(
             sequence: presentation_sequence,
             value: presentation,
         });
-        live.text.push(LegacyTextLease {
+        live.text.push(StagedTextLease {
             sequence: capture_sequence,
             lease_id,
             byte_len: option.len().try_into().map_err(|_| {
@@ -5765,7 +5720,7 @@ fn publish_v9_output(
     staged: LegacyStepOutput,
 ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
     let prepared_text = prepare_text_surface(services, session_id, fixed_step, session, &staged)?;
-    let layer_sequence = next_layer_sequence(&staged)?;
+    let layer_sequence = next_layer_sequence(&staged, session.last_layer_sequence)?;
     let mut layers = if let Some(resource_scene) = staged.live.resource_scenes.last() {
         let mount_set_id = session.mount_set_id.clone();
         publish_resource_scene(
@@ -5812,6 +5767,9 @@ fn publish_v9_output(
             transaction.validate()?;
             layers.push(transaction);
         }
+    }
+    if !layers.is_empty() {
+        session.last_layer_sequence = layer_sequence;
     }
     let output = LegacyStepOutputV9 {
         status: staged.status,
@@ -6095,8 +6053,11 @@ fn publish_text_surface(
     )
 }
 
-fn next_layer_sequence(staged: &LegacyStepOutput) -> Result<u64, LegacyProviderError> {
-    staged
+fn next_layer_sequence(
+    staged: &LegacyStepOutput,
+    last_layer_sequence: u64,
+) -> Result<u64, LegacyProviderError> {
+    let current_step_sequence = staged
         .live
         .resource_scenes
         .iter()
@@ -6112,15 +6073,10 @@ fn next_layer_sequence(staged: &LegacyStepOutput) -> Result<u64, LegacyProviderE
         .chain(staged.live.video.iter().map(|value| value.sequence))
         .chain(staged.control.events.iter().map(|value| value.sequence))
         .chain(staged.control.blackboard.iter().map(|value| value.sequence))
-        .chain(
-            staged
-                .control
-                .dirty_sections
-                .iter()
-                .map(|value| value.sequence),
-        )
         .max()
-        .unwrap_or(0)
+        .unwrap_or(0);
+    current_step_sequence
+        .max(last_layer_sequence)
         .checked_add(1)
         .ok_or_else(|| {
             invalid(
@@ -6615,6 +6571,23 @@ mod tests {
     use super::*;
     use crate::MinoriPlayMode;
 
+    #[test]
+    fn v9_layer_sequence_advances_across_runtime_ticks() {
+        let staged = LegacyStepOutput {
+            status: LegacyRuntimeStatus::Active,
+            live: LegacyLiveOutput::default(),
+            control: LegacyControlTransaction::default(),
+            trace: Vec::new(),
+            diagnostics: Vec::new(),
+            coverage: LegacyCoverageDelta::default(),
+            state_revision: 1,
+        };
+
+        let first = next_layer_sequence(&staged, 0).unwrap();
+        let second = next_layer_sequence(&staged, first).unwrap();
+        assert_eq!((first, second), (1, 2));
+    }
+
     struct MemoryReader {
         scripts: BTreeMap<String, Vec<u8>>,
     }
@@ -7003,12 +6976,14 @@ mod tests {
             }
             _ => panic!("expected time wait"),
         };
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         let waiting = provider
             .step(&ctx, &session, step_input(2, Vec::new()))
             .unwrap();
         assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         let completed = provider
             .step(
                 &ctx,
@@ -7193,14 +7168,16 @@ mod tests {
         assert_eq!(decode_global_progress(&payload).unwrap(), [unlock]);
         writable.assert_consumed();
 
-        let snapshot = provider.save(&ctx, &session_id).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session_id).unwrap();
         provider
             .sessions
             .get_mut(&session_id.0)
             .unwrap()
             .global_progress
             .loaded = false;
-        provider.restore(&ctx, &session_id, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session_id, &snapshot)
+            .unwrap();
         assert!(provider.sessions[&session_id.0].global_progress.loaded);
         assert_eq!(
             provider.sessions[&session_id.0]
@@ -7298,7 +7275,7 @@ mod tests {
             .unwrap();
         assert!(retained_title.live.resource_scenes.is_empty());
         assert!(retained_title.control.blackboard.is_empty());
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         let title_revision = title.live.resource_scenes[0].value.texture_resources[0].revision;
         assert_eq!(
             snapshot.family_sections[0].version,
@@ -7436,7 +7413,9 @@ mod tests {
             "minori:/sys/topMenu0.png"
         );
 
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         let returned_to_title = provider
             .step(
                 &ctx,
@@ -7899,8 +7878,10 @@ mod tests {
             .step(&ctx, &session, step_input(2, Vec::new()))
             .unwrap();
         assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
@@ -7950,13 +7931,13 @@ mod tests {
         assert_eq!(presentation.body.font_size, 26.0);
         assert_eq!(presentation.body.max_lines, 3);
         let text = provider
-            .take_ephemeral_text(&ctx, &session, &lease.lease_id)
+            .take_staged_text(&ctx, &session, &lease.lease_id)
             .unwrap()
             .unwrap();
         assert_eq!(text.text, "hello world");
         assert_eq!(text.speaker.as_deref(), Some("speaker"));
         assert!(provider
-            .take_ephemeral_text(&ctx, &session, &lease.lease_id)
+            .take_staged_text(&ctx, &session, &lease.lease_id)
             .unwrap()
             .is_none());
         assert!(matches!(
@@ -7968,8 +7949,10 @@ mod tests {
             _ => unreachable!("message output was already verified as an input wait"),
         };
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         let restored = provider
             .step(&ctx, &session, step_input(2, Vec::new()))
             .unwrap();
@@ -7979,13 +7962,15 @@ mod tests {
         assert_eq!(restored.live.text.len(), 1);
         assert_eq!(restored.live.text[0].source_ref, "minori.sc.message.resume");
         let restored_text = provider
-            .take_ephemeral_text(&ctx, &session, &restored.live.text[0].lease_id)
+            .take_staged_text(&ctx, &session, &restored.live.text[0].lease_id)
             .unwrap()
             .unwrap();
         assert_eq!(restored_text.text, "hello world");
         assert_eq!(restored_text.speaker.as_deref(), Some("speaker"));
 
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         let continued = provider
             .step(
                 &ctx,
@@ -8262,7 +8247,7 @@ mod tests {
         assert_eq!(backlog.live.text.len(), 1);
         assert_eq!(backlog.live.text[0].source_ref, "minori.sc.backlog");
         let backlog_text = provider
-            .take_ephemeral_text(&ctx, &session, &backlog.live.text[0].lease_id)
+            .take_staged_text(&ctx, &session, &backlog.live.text[0].lease_id)
             .unwrap()
             .unwrap();
         assert_eq!(backlog_text.text, "hello world");
@@ -8313,12 +8298,14 @@ mod tests {
             provider.sessions[&session.0].vm.state().wait,
             wait_before_replay
         );
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
         );
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
 
         let resumed = provider
             .step(
@@ -8473,8 +8460,10 @@ mod tests {
             .horizontal_alignment
             == LegacyTextHorizontalAlignmentV1::Center));
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         let restored = provider
             .step(&ctx, &session, step_input(3, Vec::new()))
             .unwrap();
@@ -8760,12 +8749,14 @@ mod tests {
             }
         );
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         let terminal = provider
             .step(&ctx, &session, step_input(2, Vec::new()))
             .unwrap();
         assert_eq!(terminal.status, LegacyRuntimeStatus::Terminal);
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
         let restored = provider
             .step(&ctx, &session, step_input(2, Vec::new()))
             .unwrap();
@@ -8896,7 +8887,7 @@ mod tests {
             .value;
         assert_eq!(frame.draws[0].vertices[0].position, [445.0, 0.0]);
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
@@ -8974,12 +8965,14 @@ mod tests {
         assert_eq!(frame.draws[1].vertices[0].position, [126.0, -53.0]);
         assert_eq!(frame.draws[1].vertices[3].position, [1329.0, 720.0]);
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
         );
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
     }
 
     #[test]
@@ -9060,12 +9053,14 @@ mod tests {
             })
         );
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
         );
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
     }
 
     #[test]
@@ -9446,12 +9441,14 @@ mod tests {
                 scissor.x == 0 && scissor.y == 0 && scissor.width == 1280 && scissor.height == 720
             }) && draw.blend == LegacyBlendMode::Alpha
         }));
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
         );
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
     }
 
     #[test]
@@ -9535,12 +9532,14 @@ mod tests {
                     })
         }));
 
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
         );
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
     }
 
     #[test]
@@ -9605,12 +9604,14 @@ mod tests {
                 height: 720,
             })
         );
-        let snapshot = provider.save(&ctx, &session).unwrap();
+        let snapshot = provider.test_checkpoint(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
             SchemaVersion::new(23, 0, 0)
         );
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+        provider
+            .restore_test_checkpoint(&ctx, &session, &snapshot)
+            .unwrap();
     }
 
     #[test]
