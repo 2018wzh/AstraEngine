@@ -10,6 +10,12 @@
 - 当前签名 Release plugin 已在真实八包上用持久 Auto 跑完攻略首条路线。输入序列先把 Auto 速度调到 `0`，再用原版菜单物理 pointer 开启 Auto；正文阶段没有周期性 Enter，只在严格观察到 choice active 后提交一次确认。运行推进 25552 fixed steps，提交并栅格化 25557 个 GPU frame，消费 50 条物理输入，最终到达 terminal；snapshot round-trip 成立，coverage hash 与既有完整路线一致，diagnostic 为空。
 - 自动音频记录 20441600 frame，master peak 为 0.989444，output overload 与 underflow 均为 0；完整 WAV 非静音且未发现 clipping。人工查看标题、Config、最快 Auto、Auto 正文、路线构图和结局返回标题六个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。这关闭持久 Auto 首路线的 Headless E2，不替代正式完整音频听审、Skip 整路线、Config 剩余行为、第四条 clear route 后鉴赏或 Windows E3。
 
+### Control 快进的活动消息语义
+
+- Control 按键状态原本只让后续脚本 `wait` 在 command 执行时跳过；若按键在一条已显示消息上按下，旧 `Input` wait 仍会阻塞。VM 现在统一从 `skip_enabled`、`control_enabled`、Control pressed 和互斥 play mode 推导消息等待：有效快进把活动消息同 token 重绑定为 10 ms `Time`，释放 Control 后若尚未完成则恢复为 `Input`。movie/presentation/provider fence 不进入这条规则。
+- Minori VM 与 provider 定向测试分别覆盖 gate、按下、释放和双向重绑定。真实八包 Headless 运行从标题前按住物理 Control，正文阶段不发送周期性 Enter，只在启动游戏、choice active 和返回标题 Exit 处提交必要确认。运行完成 25496 fixed steps、25498 个提交/栅格帧和 28 条物理输入，terminal、snapshot round-trip、自然解锁、既有完整路线 coverage hash 与零 diagnostic 均成立。
+- 音频记录 20396544 frame，master peak 为 0.989372，output overload 与 underflow 均为 0；WAV 非静音且未 clipping。人工检查标题、路线和结局返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。这关闭按住 Control 的首路线 Headless E2；它不等同于持久 Skip 菜单路线，也不替代正式完整音频听审或 Windows E3。
+
 ## 2026-08-12
 
 ### message voice 资源绑定

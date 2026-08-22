@@ -17,7 +17,7 @@ Any older snapshot is a migration-rejection input and is never restored.
 
 同一 effect batch 先用 `astra.emu.text_presentation.v1` 提交不含正文的 `LegacyTextPresentationV1`，再按 lease id 与 `TextCapture` 关联。这个结构保留现有 `LegacyEffect` v1 wire layout，避免在 ABI fingerprint 不变时偷偷改变 postcard 数据。Minori 只声明语言、字体 family、文字区域、字号、行高、最大行数与颜色，Host 必须用显式绑定的 `cosmic_text_cpu` 和仓库内 Noto Sans JP 完成 shaping，再交给 Astra `Renderer2D` 合成。缺 provider、字体绑定不一致、stage 不是 1280×720、区域越界、重复或悬空 layout、shaping diagnostic 都会阻断；没有系统字体或字符宽度估算 fallback。消息提交后建立非零物理输入 mask 的 await，等待 confirm、space 或主指针输入。
 
-活动消息中切换 Auto 不会创建第二个等待。VM 保留同一 token，并把等待 modality 从 `Input` 重绑定为 `Time`；切回 Normal 时执行反向重绑定。Host 只允许这两种同 token 互换，重复的同类等待或其他 kind 仍直接阻断。Config 的 Auto 速度值 `0` 映射为一个 10 ms timing unit，避免制造零时长公共等待；设置值本身不被改写。该契约保证持久 Auto 可以推进当前消息，同时不放宽 Await 的唯一性和正时长约束。
+活动消息中切换 Auto 或进入有效快进不会创建第二个等待。VM 保留同一 token，并把等待 modality 从 `Input` 重绑定为 `Time`；切回 Normal 或在尚未完成前释放 Control 时执行反向重绑定。Host 只允许这两种同 token 互换，重复的同类等待或其他 kind 仍直接阻断。Config 的 Auto 速度值 `0` 和 Skip/Control 消息快进都映射为一个 10 ms timing unit，避免制造零时长公共等待；设置值本身不被改写。movie、presentation 和 provider fence 不参与重绑定。该契约让持久 Auto 与受 gate 约束的 Control 快进可以推进当前消息，同时不放宽 Await 的唯一性和正时长约束。
 
 音频资源后缀按原程序的 `resource[volume,pan]` 规则解析。普通 BGM/SE 引用生成稳定 `minori:/...` URI，并在发出公共 `LegacyAudioCommandV1` 前由绑定 VFS `stat` 核对存在性和大小；host 后续仍通过 session resource channel 读取，商业字节不进入 effect。BGM 使用固定 loop stream，三个 SE command 使用独立 bus；非循环 SE 使用确定性 stream id。`*` 停止对应固定 stream，并保留原程序的 fade-out 参数。
 

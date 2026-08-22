@@ -1600,9 +1600,14 @@ impl MinoriVm {
         };
         self.state.system_ui.play_mode = next_mode;
 
+        self.rebind_active_message_wait()
+    }
+
+    pub fn rebind_active_message_wait(&mut self) -> Result<bool, MinoriRuntimeError> {
         let Some(wait) = self.state.wait.clone() else {
             return Ok(false);
         };
+
         let token_id = match &wait {
             MinoriWaitState::Input { token_id } | MinoriWaitState::Time { token_id, .. }
                 if token_id.starts_with("minori.message.") =>
@@ -1611,13 +1616,7 @@ impl MinoriVm {
             }
             _ => return Ok(false),
         };
-        let rebound = match next_mode {
-            MinoriPlayMode::Auto => message_auto_wait(
-                token_id,
-                self.state.system_ui.config.message_speed_auto_play,
-            )?,
-            MinoriPlayMode::Normal | MinoriPlayMode::Skip => MinoriWaitState::Input { token_id },
-        };
+        let rebound = message_wait_for_current_mode(&self.state, token_id)?;
         if rebound == wait {
             return Ok(false);
         }
@@ -4868,11 +4867,7 @@ fn execute_message(
     let presentation_sequence = next_effect_sequence(state)?;
     let capture_sequence = next_effect_sequence(state)?;
     let token_id = format!("minori.message.{}", state.instruction_count);
-    let wait = if state.system_ui.play_mode == MinoriPlayMode::Auto {
-        message_auto_wait(token_id, state.system_ui.config.message_speed_auto_play)?
-    } else {
-        MinoriWaitState::Input { token_id }
-    };
+    let wait = message_wait_for_current_mode(state, token_id)?;
     state.wait = Some(wait.clone());
     Ok(Some(MinoriVmEvent::Message {
         presentation_sequence,
@@ -4896,6 +4891,22 @@ fn message_auto_wait(
             .checked_mul(10)
             .ok_or(MinoriRuntimeError::Overflow)?,
     })
+}
+
+fn message_wait_for_current_mode(
+    state: &MinoriRuntimeState,
+    token_id: String,
+) -> Result<MinoriWaitState, MinoriRuntimeError> {
+    if state.system_ui.skip_enabled
+        && (state.system_ui.play_mode == MinoriPlayMode::Skip
+            || (state.system_ui.control_enabled && state.system_ui.control_pressed))
+    {
+        return message_auto_wait(token_id, 0);
+    }
+    if state.system_ui.play_mode == MinoriPlayMode::Auto {
+        return message_auto_wait(token_id, state.system_ui.config.message_speed_auto_play);
+    }
+    Ok(MinoriWaitState::Input { token_id })
 }
 
 const VOICE_STREAM_ID: u32 = 4;
@@ -5603,9 +5614,17 @@ mod tests {
             Some(MinoriWaitState::Input { .. })
         ));
         vm.state.system_ui.config.preferred_play_mode = MinoriPlayMode::Skip;
-        assert!(!vm.toggle_preferred_play_mode().unwrap());
+        assert!(vm.toggle_preferred_play_mode().unwrap());
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
         assert!(vm.fast_forward_active());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Time {
+                timer_ticks: 1,
+                milliseconds: 10,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -5617,6 +5636,40 @@ mod tests {
                 milliseconds: 10,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn held_control_rebinds_only_an_active_message_wait_while_the_gates_are_open() {
+        let source = b".pragma enable_control\r\n.message 1 voice speaker first\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(1, 16).unwrap() else {
+            panic!("expected message")
+        };
+        assert!(matches!(wait, MinoriWaitState::Input { .. }));
+        vm.set_control_pressed(true);
+        assert!(vm.rebind_active_message_wait().unwrap());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Time {
+                timer_ticks: 1,
+                milliseconds: 10,
+                ..
+            })
+        ));
+        vm.set_control_pressed(false);
+        assert!(vm.rebind_active_message_wait().unwrap());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Input { .. })
         ));
     }
 
