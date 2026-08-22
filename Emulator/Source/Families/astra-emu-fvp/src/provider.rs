@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use astra_core::{Hash256, SchemaVersion};
+use astra_core::Hash256;
 use astra_emu_family_api::*;
 use rfvp_hosted::{
     host_api::{InputModifiers, KeyCode, PointerButton, RfvpEvent, RfvpLogLevel},
@@ -32,24 +32,19 @@ pub struct FvpCaseImage {
 }
 
 struct FvpSession {
-    case_fingerprint: Hash256,
     runtime: Arc<HostedFvpSession>,
     last_step: u64,
     seed: u64,
     fixed_delta_ns: u64,
-    compatibility_profile: String,
     instruction_count: u64,
     syscall_count: u64,
     pointer_x: i32,
     pointer_y: i32,
     pointer_in_screen: bool,
-    stage_width: u32,
-    stage_height: u32,
     state_revision: u64,
     next_live_sequence: u64,
     poisoned: bool,
     pending_movie: Option<PendingMovieV1>,
-    ephemeral_text: BTreeMap<String, LegacyEphemeralText>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,37 +57,17 @@ struct PendingMovieV1 {
     stage_height: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FvpSessionSnapshotV1 {
-    case_fingerprint: Hash256,
-    runtime_bytes: Vec<u8>,
-    last_step: u64,
-    seed: u64,
-    fixed_delta_ns: u64,
-    compatibility_profile: String,
-    instruction_count: u64,
-    syscall_count: u64,
-    pointer_x: i32,
-    pointer_y: i32,
-    pointer_in_screen: bool,
-    stage_width: u32,
-    stage_height: u32,
-    state_revision: u64,
-    next_live_sequence: u64,
-    pending_movie: Option<PendingMovieV1>,
-}
-
 #[derive(Default)]
 pub struct FvpRuntimeProvider {
     cases: BTreeMap<Hash256, FvpCaseImage>,
     sessions: BTreeMap<String, FvpSession>,
-    host_vfs: Option<Arc<dyn LegacyVfsReader>>,
+    host_services: Option<LegacyFamilyHostServicesV9>,
 }
 
 impl FvpRuntimeProvider {
-    pub fn with_vfs(host_vfs: Arc<dyn LegacyVfsReader>) -> Self {
+    pub fn with_host_services(host_services: LegacyFamilyHostServicesV9) -> Self {
         Self {
-            host_vfs: Some(host_vfs),
+            host_services: Some(host_services),
             ..Self::default()
         }
     }
@@ -179,12 +154,24 @@ impl FvpRuntimeProvider {
         }
         Ok(case)
     }
+
+    fn host_vfs(&self) -> Result<&Arc<dyn LegacyVfsReader>, LegacyProviderError> {
+        self.host_services
+            .as_ref()
+            .map(|services| &services.vfs)
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_FVP_HOST_SERVICES",
+                    "FVP runtime has no explicitly bound ABI v9 host services",
+                )
+            })
+    }
 }
 
 pub fn create_static_fvp_provider(
     host_services: astra_emu_family_api::LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError> {
-    let provider = FvpRuntimeProvider::with_vfs(host_services.vfs);
+    let provider = FvpRuntimeProvider::with_host_services(host_services);
     provider.descriptor().validate()?;
     Ok(Box::new(provider))
 }
@@ -234,7 +221,7 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
                 image.nls,
             )
         } else {
-            let host = self.host_vfs.as_ref().ok_or_else(|| {
+            let host = self.host_vfs().map_err(|_| {
                 invalid(
                     "ASTRA_FVP_PROBE_SOURCE",
                     "probe root mount is not registered and no host VFS is bound",
@@ -356,9 +343,8 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             .map_err(|error| invalid("ASTRA_FVP_OPEN", error.to_string()))?
         } else {
             let host = self
-                .host_vfs
-                .as_ref()
-                .ok_or_else(|| {
+                .host_vfs()
+                .map_err(|_| {
                     invalid(
                         "ASTRA_FVP_CASE_MISSING",
                         "case is not registered and no host VFS is bound",
@@ -388,24 +374,19 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             .map_err(|error| invalid("ASTRA_FVP_OPEN", error.to_string()))?
         };
         let session = FvpSession {
-            case_fingerprint: request.case_fingerprint,
             runtime: Arc::new(runtime),
             last_step: 0,
             seed: request.session_seed,
             fixed_delta_ns: request.fixed_delta_ns,
-            compatibility_profile: request.compatibility_profile,
             instruction_count: 0,
             syscall_count: 0,
             pointer_x: 0,
             pointer_y: 0,
             pointer_in_screen: false,
-            stage_width,
-            stage_height,
             state_revision: 0,
             next_live_sequence: 1,
             poisoned: false,
             pending_movie: None,
-            ephemeral_text: BTreeMap::new(),
         };
         self.sessions
             .insert(request.requested_session_id.0.clone(), session);
@@ -507,41 +488,19 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             pcm_copied_bytes: delta.copy_telemetry.pcm_copied_bytes,
             ..LegacyCoverageDelta::default()
         };
-        if let Some(transaction) = live_scene {
-            let mut transaction = transaction;
-            transaction.sequence = next_sequence;
-            next_sequence = next_sequence.saturating_add(1);
-            tracing::trace!(
-                event = "astra.emu.fvp.hosted_step_timing",
-                fixed_step = input.tick_index,
-                hosted_duration_ns,
-                scene_encode_duration_ns = 0_u64,
-                scene_bytes = transaction
-                    .resources
-                    .iter()
-                    .map(|operation| match operation {
-                        LegacySceneResourceOperationV7::CreateTexture { pixels, .. }
-                        | LegacySceneResourceOperationV7::UpdateTexture { pixels, .. } => {
-                            pixels.len()
-                        }
-                        LegacySceneResourceOperationV7::DestroyTexture { .. } => 0,
-                    })
-                    .sum::<usize>(),
-                scene_operation_count = delta.scene.len(),
-                "measured hosted RFVP and scene bulk phases"
-            );
-            live.scenes.push(transaction);
-            coverage.presentation_commands = coverage.presentation_commands.saturating_add(1);
-        } else {
-            tracing::trace!(
-                event = "astra.emu.fvp.hosted_step_timing",
-                fixed_step = input.tick_index,
-                hosted_duration_ns,
-                scene_encode_duration_ns = 0_u64,
-                scene_bytes = 0_u64,
-                scene_operation_count = delta.scene.len(),
-                "measured hosted RFVP step without a scene bulk"
-            );
+        tracing::trace!(
+            event = "astra.emu.fvp.hosted_step_timing",
+            fixed_step = input.tick_index,
+            hosted_duration_ns,
+            scene_operation_count = delta.scene.len(),
+            "measured hosted RFVP step"
+        );
+        if live_scene.is_some() {
+            session.poisoned = true;
+            return Err(invalid(
+                "ASTRA_FVP_V9_SCENE_NOT_MIGRATED",
+                "RFVP scene output has not been migrated to the ABI v9 single Layer2D surface",
+            ));
         }
         for command in audio_commands_from_delta(audio_operations)
             .map_err(|error| invalid("ASTRA_FVP_AUDIO_DELTA", error.to_string()))?
@@ -600,38 +559,12 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             }
             coverage.audio_commands = coverage.audio_commands.saturating_add(1);
         }
-        for (text_index, text) in text_operations.into_iter().enumerate() {
-            let byte_len = u32::try_from(text.text.len()).map_err(|_| {
-                session.poisoned = true;
-                invalid(
-                    "ASTRA_FVP_TEXT_CAPTURE_BOUNDS",
-                    "hosted text length cannot be represented by the ABI",
-                )
-            })?;
-            let lease_id = format!("fvp.text.{}.{}", input.tick_index, text_index);
-            let ephemeral = LegacyEphemeralText {
-                lease_id: lease_id.clone(),
-                text: text.text,
-                speaker: None,
-            };
-            if session
-                .ephemeral_text
-                .insert(lease_id.clone(), ephemeral)
-                .is_some()
-            {
-                session.poisoned = true;
-                return Err(invalid(
-                    "ASTRA_FVP_TEXT_LEASE_DUPLICATE",
-                    "hosted text lease id collided inside one session",
-                ));
-            }
-            live.text.push(LegacyTextLease {
-                sequence: next_sequence,
-                lease_id,
-                byte_len,
-                source_ref: format!("rfvp.text.slot.{}", text.slot),
-            });
-            next_sequence = next_sequence.saturating_add(1);
+        if !text_operations.is_empty() {
+            session.poisoned = true;
+            return Err(invalid(
+                "ASTRA_FVP_V9_TEXT_NOT_MIGRATED",
+                "RFVP text output has not been migrated to its ABI v9 text surface",
+            ));
         }
         for command in video_commands_from_delta(frame_index, video_operations)
             .map_err(|error| invalid("ASTRA_FVP_VIDEO_DELTA", error.to_string()))?
@@ -683,17 +616,6 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             });
             coverage.presentation_commands = coverage.presentation_commands.saturating_add(1);
         }
-        if live.len() > input.budget.max_effects as usize {
-            session.poisoned = true;
-            return Err(invalid(
-                "ASTRA_FVP_EFFECT_BUDGET",
-                format!(
-                    "rfvp emitted {} effects; negotiated maximum is {}",
-                    live.len(),
-                    input.budget.max_effects
-                ),
-            ));
-        }
         let status = if session.runtime.is_terminal().map_err(|error| {
             session.poisoned = true;
             invalid("ASTRA_FVP_STATE", error.to_string())
@@ -720,154 +642,9 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             coverage,
             state_revision: session.state_revision,
         };
-        output.validate(&input.budget)?;
+        output.validate()?;
         session.next_live_sequence = next_sequence;
         Ok(output)
-    }
-
-    fn save(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-    ) -> Result<LegacySnapshotEnvelope, LegacyProviderError> {
-        ctx.validate()?;
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
-        if session.poisoned {
-            return Err(invalid(
-                "ASTRA_FVP_SESSION_POISONED",
-                "poisoned sessions cannot be saved",
-            ));
-        }
-        let payload = FvpSessionSnapshotV1 {
-            case_fingerprint: session.case_fingerprint,
-            runtime_bytes: session
-                .runtime
-                .snapshot_bytes()
-                .map_err(|error| invalid("ASTRA_FVP_SNAPSHOT_CAPTURE", error.to_string()))?,
-            last_step: session.last_step,
-            seed: session.seed,
-            fixed_delta_ns: session.fixed_delta_ns,
-            compatibility_profile: session.compatibility_profile.clone(),
-            instruction_count: session.instruction_count,
-            syscall_count: session.syscall_count,
-            pointer_x: session.pointer_x,
-            pointer_y: session.pointer_y,
-            pointer_in_screen: session.pointer_in_screen,
-            stage_width: session.stage_width,
-            stage_height: session.stage_height,
-            state_revision: session.state_revision,
-            next_live_sequence: session.next_live_sequence,
-            pending_movie: session.pending_movie.clone(),
-        };
-        let bytes = postcard::to_allocvec(&payload)
-            .map_err(|error| invalid("ASTRA_FVP_SNAPSHOT_ENCODE", error.to_string()))?;
-        let envelope = LegacySnapshotEnvelope {
-            family_id: FamilyId(FVP_FAMILY_ID.into()),
-            session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(7, 0, 0),
-            case_fingerprint: session.case_fingerprint,
-            fixed_step: session.last_step,
-            session_seed: session.seed,
-            runtime_cursor: session.instruction_count,
-            family_sections: vec![LegacySnapshotSection {
-                section_id: "fvp.runtime".into(),
-                schema: "astra.emu.fvp.runtime.v7".into(),
-                version: SchemaVersion::new(7, 0, 0),
-                bytes,
-            }],
-            redaction_status: "passed".into(),
-        };
-        envelope.validate()?;
-        tracing::debug!(
-            event = "astra.emu.fvp.snapshot_captured",
-            state_revision = session.state_revision,
-            fixed_step = session.last_step
-        );
-        Ok(envelope)
-    }
-
-    fn restore(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        snapshot: &LegacySnapshotEnvelope,
-    ) -> Result<LegacyRestoreReport, LegacyProviderError> {
-        ctx.validate()?;
-        snapshot.validate()?;
-        if snapshot.family_id.0 != FVP_FAMILY_ID || snapshot.session_id != *session_id {
-            return Err(invalid(
-                "ASTRA_FVP_SNAPSHOT_IDENTITY",
-                "snapshot family or session identity does not match",
-            ));
-        }
-        if snapshot.schema_version != SchemaVersion::new(7, 0, 0) {
-            return Err(invalid(
-                "ASTRA_FVP_SNAPSHOT_VERSION",
-                "FVP runtime snapshots require schema v7",
-            ));
-        }
-        if snapshot.family_sections.len() != 1 {
-            return Err(invalid(
-                "ASTRA_FVP_SNAPSHOT_SECTION",
-                "FVP snapshot must contain exactly one runtime section",
-            ));
-        }
-        let section = &snapshot.family_sections[0];
-        if section.section_id != "fvp.runtime"
-            || section.schema != "astra.emu.fvp.runtime.v7"
-            || section.version != SchemaVersion::new(7, 0, 0)
-        {
-            return Err(invalid(
-                "ASTRA_FVP_SNAPSHOT_SECTION",
-                "FVP runtime section identity is invalid",
-            ));
-        }
-        let payload: FvpSessionSnapshotV1 = postcard::from_bytes(&section.bytes)
-            .map_err(|error| invalid("ASTRA_FVP_SNAPSHOT_DECODE", error.to_string()))?;
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
-        if payload.case_fingerprint != session.case_fingerprint
-            || payload.seed != session.seed
-            || payload.fixed_delta_ns != session.fixed_delta_ns
-            || payload.stage_width != session.stage_width
-            || payload.stage_height != session.stage_height
-            || payload.next_live_sequence == 0
-        {
-            return Err(invalid(
-                "ASTRA_FVP_SNAPSHOT_BINDING",
-                "snapshot payload binding does not match the open session",
-            ));
-        }
-        session
-            .runtime
-            .restore_bytes(payload.runtime_bytes.clone())
-            .map_err(|error| invalid("ASTRA_FVP_SNAPSHOT_RESTORE", error.to_string()))?;
-        session.last_step = payload.last_step;
-        session.instruction_count = payload.instruction_count;
-        session.syscall_count = payload.syscall_count;
-        session.pointer_x = payload.pointer_x;
-        session.pointer_y = payload.pointer_y;
-        session.pointer_in_screen = payload.pointer_in_screen;
-        session.stage_width = payload.stage_width;
-        session.stage_height = payload.stage_height;
-        session.state_revision = payload.state_revision;
-        session.next_live_sequence = payload.next_live_sequence;
-        session.pending_movie = payload.pending_movie.clone();
-        // Leases are deliberately not replayed. A restore starts a fresh host
-        // observation epoch, so pre-restore plaintext can never be fetched.
-        session.ephemeral_text.clear();
-        session.poisoned = false;
-        Ok(LegacyRestoreReport {
-            restored_fixed_step: session.last_step,
-            session_seed: session.seed,
-            state_revision: session.state_revision,
-            diagnostics: Vec::new(),
-        })
     }
 
     fn shutdown(
@@ -897,109 +674,6 @@ impl LegacyRuntimeProvider for FvpRuntimeProvider {
             syscall_count: session.syscall_count,
             evidence_vm_trace,
             diagnostics: Vec::new(),
-        })
-    }
-
-    fn take_ephemeral_text(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        lease_id: &str,
-    ) -> Result<Option<LegacyEphemeralText>, LegacyProviderError> {
-        ctx.validate()?;
-        validate_symbol("text_lease_id", lease_id)?;
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
-        if session.poisoned {
-            return Err(invalid(
-                "ASTRA_FVP_SESSION_POISONED",
-                "poisoned session cannot expose ephemeral text",
-            ));
-        }
-        Ok(session.ephemeral_text.remove(lease_id))
-    }
-
-    fn read_session_resource(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
-        ctx.validate()?;
-        if max_bytes == 0 || max_bytes > MAX_FILE_BYTES as u64 {
-            return Err(invalid(
-                "ASTRA_FVP_RESOURCE_READ_BOUNDS",
-                "session resource read limit is outside supported bounds",
-            ));
-        }
-        let resource_uri = normalize_vfs_path(resource_uri)
-            .map_err(|_| invalid("ASTRA_FVP_RESOURCE_URI", "resource URI is invalid"))?;
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
-        if session.poisoned {
-            return Err(invalid(
-                "ASTRA_FVP_SESSION_POISONED",
-                "poisoned session cannot expose resources",
-            ));
-        }
-        let bytes = session
-            .runtime
-            .read_resource(resource_uri, max_bytes as usize)
-            .map_err(|_| invalid("ASTRA_FVP_RESOURCE_READ", "session resource is unavailable"))?;
-        if bytes.len() as u64 > max_bytes {
-            return Err(invalid(
-                "ASTRA_FVP_RESOURCE_READ_BOUNDS",
-                "session resource exceeds the requested byte limit",
-            ));
-        }
-        Ok(bytes.into())
-    }
-
-    fn begin_session_resource_read(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<LegacyResourceRead, LegacyProviderError> {
-        ctx.validate()?;
-        if max_bytes == 0 || max_bytes > MAX_FILE_BYTES as u64 {
-            return Err(invalid(
-                "ASTRA_FVP_RESOURCE_READ_BOUNDS",
-                "session resource read limit is outside supported bounds",
-            ));
-        }
-        let resource_uri = normalize_vfs_path(resource_uri)
-            .map_err(|_| invalid("ASTRA_FVP_RESOURCE_URI", "resource URI is invalid"))?;
-        let session = self
-            .sessions
-            .get(&session_id.0)
-            .ok_or_else(|| invalid("ASTRA_FVP_SESSION_MISSING", "session is not active"))?;
-        if session.poisoned {
-            return Err(invalid(
-                "ASTRA_FVP_SESSION_POISONED",
-                "poisoned session cannot expose resources",
-            ));
-        }
-        let runtime = Arc::clone(&session.runtime);
-        LegacyResourceRead::spawn(move || {
-            let bytes = runtime
-                .read_resource(resource_uri, max_bytes as usize)
-                .map_err(|_| {
-                    invalid("ASTRA_FVP_RESOURCE_READ", "session resource is unavailable")
-                })?;
-            if bytes.len() as u64 > max_bytes {
-                return Err(invalid(
-                    "ASTRA_FVP_RESOURCE_READ_BOUNDS",
-                    "session resource exceeds the requested byte limit",
-                ));
-            }
-            Ok(bytes.into())
         })
     }
 }
@@ -1363,7 +1037,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_v7_session_emits_one_semantic_commit_and_restores() {
+    fn hosted_v9_session_blocks_until_single_layer_surface_is_migrated() {
         let script = terminal_hcb();
         let fingerprint = Hash256::from_sha256(&script);
         let mut provider = FvpRuntimeProvider::default();
@@ -1379,69 +1053,12 @@ mod tests {
             })
             .expect("registered case must be valid");
         let ctx = host_ctx();
-        let session_id = LegacyRuntimeSessionId("session.hosted.v7".into());
+        let session_id = LegacyRuntimeSessionId("session.hosted.v9".into());
         open_fixture(&mut provider, &ctx, &session_id, fingerprint);
-        let output = provider
+        let error = provider
             .step(&ctx, &session_id, step_input(1, Vec::new()))
-            .expect("hosted step must succeed");
-        let transaction = output
-            .live
-            .scenes
-            .first()
-            .expect("hosted step must emit a typed scene transaction");
-        transaction
-            .validate()
-            .expect("typed scene transaction must validate");
-        assert_eq!(transaction.sequence, 1);
-        assert!(
-            output.trace.is_empty(),
-            "shipping profile must not format opcode trace"
-        );
-        let snapshot = provider.save(&ctx, &session_id).expect("save must succeed");
-        let saved_next_live_sequence = provider.sessions[&session_id.0].next_live_sequence;
-        assert!(saved_next_live_sequence > transaction.sequence);
-        assert_eq!(snapshot.schema_version, SchemaVersion::new(7, 0, 0));
-        assert_eq!(
-            snapshot.family_sections[0].schema,
-            "astra.emu.fvp.runtime.v7"
-        );
-        let before = output.state_revision;
-        let before_components = provider
-            .sessions
-            .get(&session_id.0)
-            .expect("session must remain open")
-            .runtime
-            .canonical_state_component_hashes()
-            .expect("canonical state must be available");
-        let mut rejected_v5 = snapshot.clone();
-        rejected_v5.schema_version = SchemaVersion::new(5, 0, 0);
-        rejected_v5.family_sections[0].schema = "astra.emu.fvp.runtime.v5".into();
-        rejected_v5.family_sections[0].version = SchemaVersion::new(5, 0, 0);
-        assert_eq!(
-            provider
-                .restore(&ctx, &session_id, &rejected_v5)
-                .expect_err("v5 snapshot must fail fast")
-                .code(),
-            "ASTRA_FVP_SNAPSHOT_VERSION"
-        );
-        let restored = provider
-            .restore(&ctx, &session_id, &snapshot)
-            .expect("v7 snapshot must restore");
-        let restored_components = provider
-            .sessions
-            .get(&session_id.0)
-            .expect("session must remain open")
-            .runtime
-            .canonical_state_component_hashes()
-            .expect("canonical state must be available");
-        assert_eq!(
-            restored.state_revision, before,
-            "canonical component mismatch: before={before_components:?} restored={restored_components:?}"
-        );
-        assert_eq!(
-            provider.sessions[&session_id.0].next_live_sequence,
-            saved_next_live_sequence
-        );
+            .expect_err("v7 scene output must not cross the ABI v9 boundary");
+        assert_eq!(error.code(), "ASTRA_FVP_V9_SCENE_NOT_MIGRATED");
         provider
             .shutdown(&ctx, &session_id)
             .expect("hosted session must shut down");
@@ -1483,11 +1100,6 @@ mod tests {
             input_edges,
             await_results: Vec::new(),
             provider_results: Vec::new(),
-            budget: LegacyStepBudget {
-                max_instructions: 64,
-                max_effects: 64,
-                max_trace_entries: 64,
-            },
         }
     }
 

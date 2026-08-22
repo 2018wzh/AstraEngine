@@ -22,3 +22,5 @@ Minori 固定使用 `Native + MultiLayer`，把 background、foreground/stand、
 ABI milestone 只要求 ABI crates、schema generator、loader rejection、文档与格式检查通过。consumer 尚未迁移时，完整 workspace 失败是已知迁移状态，不能伪装成兼容实现。完成条件还包括 RFVP 独立构建、唯一 ABI package identity、FVP/Minori/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。
 
 2026 年 8 月 23 日，动态 loader 已改为一次绑定 VFS、surface、Hook 和 writable-file 四个 Host port，注册表不再保留 VFS-only 入口。公共 support 层新增有界 surface store：acquire 会转移唯一可写 allocation，commit 收回同一 allocation，并校验 session、fixed step、generation、geometry 和总内存预算。Product host 同时开始按 descriptor 强制唯一 presentation lane。当前只通过 Manager Core 库级检查、surface 定向测试与 Product host 增量测试；FVP、CLI、Manager 和 Headless composition 尚未全部迁移，不能据此恢复 E2 状态。
+
+同日的 FVP consumer 清理删除了 v9 已移除的 family snapshot、text lease、session resource 和 step budget 调用，动态签名 lifecycle 已重新通过。RFVP scene 与 text 尚未改写为 Host surface 和 family-owned shaping；对应入口返回稳定 migration blocker，不会退回旧 scene 或宿主文字路径。这只解除 workspace consumer 的编译阻断，不代表 FVP 产品运行恢复。

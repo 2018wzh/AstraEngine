@@ -9,6 +9,7 @@
 - Minori dylib 已改用公共 `FfiLegacyFamilyHostAdapter`，不再维护私有 FFI host adapter；surface lease 采用独占、可写、零拷贝 owner，禁止 immutable buffer、复制回写和 const-cast。旧 save/restore/text/resource 导出已从 root module 删除。
 - 定向 `cargo check -p astra-emu-minori` 已通过。全局进度已迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。resource image surface 与 MultiLayer transaction 已在后续 slice 接通；同步 Hook、font/shaping 与 text surface 仍会明确阻断，不能据此恢复 E2 状态。
 - 下文所有 ABI v8 真实样本结果只保留为迁移前行为与回归基线，不能证明 v9 plugin 可加载、可运行或通过 E2。迁移期间不得把旧报告重标为当前证据。
+- 相邻的 FVP consumer 已删除退役的 snapshot、text lease、session resource 与 step budget 路径，并通过动态签名 lifecycle 定向测试；RFVP scene/text 仍返回明确 migration blocker。该修复减少了 Manager 的旧接口依赖，但不构成 Minori 或 FVP 的 v9 E2。
 
 ## 2026-08-22
 

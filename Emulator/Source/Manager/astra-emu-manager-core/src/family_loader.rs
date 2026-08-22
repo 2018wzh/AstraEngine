@@ -1067,13 +1067,13 @@ mod tests {
                 &binary_path,
                 manifest,
                 "dynamic.test.instance".into(),
-                Arc::new(DynamicMemoryVfs {
+                test_host_services(Arc::new(DynamicMemoryVfs {
                     script,
                     default_font: include_bytes!(
                         "../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf"
                     )
                     .to_vec(),
-                }),
+                })),
             )
             .unwrap();
         let ctx = dynamic_host_ctx();
@@ -1110,51 +1110,74 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut resource = provider
-            .begin_session_resource_read(&ctx, &session, "default.ttf", 4 * 1024 * 1024)
-            .unwrap();
-        assert_eq!(
-            resource.complete().unwrap_err().code(),
-            "ASTRA_FVP_RESOURCE_READ"
-        );
-        let mut output = None;
-        for tick_index in 1..=4 {
-            let step = provider
-                .step(
-                    &ctx,
-                    &session,
-                    LegacyStepInput {
-                        tick_index,
-                        delta_ns: 16_666_667,
-                        session_seed: 31,
-                        mode: LegacyReplayMode::Live,
-                        input_edges: Vec::new(),
-                        await_results: Vec::new(),
-                        provider_results: Vec::new(),
-                        budget: LegacyStepBudget {
-                            max_instructions: 32,
-                            max_effects: 32,
-                            max_trace_entries: 32,
-                        },
-                    },
-                )
-                .unwrap();
-            let terminal = step.status == LegacyRuntimeStatus::Terminal;
-            output = Some(step);
-            if terminal {
-                break;
-            }
-        }
-        let output = output.expect("at least one step must run");
-        assert!(matches!(
-            output.status,
-            LegacyRuntimeStatus::Active | LegacyRuntimeStatus::Terminal
-        ));
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        let restore = provider.restore(&ctx, &session, &snapshot).unwrap();
-        assert!((1..=4).contains(&restore.restored_fixed_step));
         let shutdown = provider.shutdown(&ctx, &session).unwrap();
-        assert_eq!(shutdown.final_state_revision, output.state_revision);
+        assert_eq!(shutdown.final_state_revision, 0);
+    }
+
+    struct RejectNonVfsHost;
+
+    impl LegacySurfaceHostV9 for RejectNonVfsHost {
+        fn acquire(
+            &self,
+            _session_id: &str,
+            _fixed_step: u64,
+            _surface_id: &str,
+            _width: u32,
+            _height: u32,
+            _format: LegacySurfaceFormatV9,
+        ) -> Result<LegacySurfaceLeaseV9, LegacyProviderError> {
+            Err(LegacyProviderError::invalid(
+                "TEST_SURFACE_UNEXPECTED",
+                "dynamic lifecycle test must not acquire a surface",
+            ))
+        }
+
+        fn commit(
+            &self,
+            _session_id: &str,
+            _fixed_step: u64,
+            _commit: LegacySurfaceCommitV9,
+        ) -> Result<(), LegacyProviderError> {
+            Err(LegacyProviderError::invalid(
+                "TEST_SURFACE_UNEXPECTED",
+                "dynamic lifecycle test must not commit a surface",
+            ))
+        }
+    }
+
+    impl LegacyHookHostV1 for RejectNonVfsHost {
+        fn invoke(
+            &self,
+            _invocation: LegacyHookInvocationV1,
+        ) -> Result<LegacyHookResultV1, LegacyProviderError> {
+            Err(LegacyProviderError::invalid(
+                "TEST_HOOK_UNEXPECTED",
+                "dynamic lifecycle test must not invoke a Hook",
+            ))
+        }
+    }
+
+    impl LegacyWritableFileHostV1 for RejectNonVfsHost {
+        fn execute(
+            &self,
+            _session_id: &str,
+            _request: LegacyWritableFileRequestV1,
+        ) -> Result<LegacyWritableFileResultV1, LegacyProviderError> {
+            Err(LegacyProviderError::invalid(
+                "TEST_WRITABLE_UNEXPECTED",
+                "dynamic lifecycle test must not access writable files",
+            ))
+        }
+    }
+
+    fn test_host_services(vfs: Arc<dyn LegacyVfsReader>) -> LegacyFamilyHostServicesV9 {
+        let rejected = Arc::new(RejectNonVfsHost);
+        LegacyFamilyHostServicesV9 {
+            vfs,
+            surfaces: rejected.clone(),
+            hooks: rejected.clone(),
+            writable_files: rejected,
+        }
     }
 
     struct DynamicMemoryVfs {

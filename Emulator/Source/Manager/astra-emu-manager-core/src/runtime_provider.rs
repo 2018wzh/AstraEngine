@@ -1463,10 +1463,7 @@ fn parse_package_hash(value: &str) -> Result<Hash256, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astra_emu_family_api::{
-        LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader, LegacyVmTraceRecord,
-    };
-    use astra_emu_fvp::create_static_fvp_provider;
+    use astra_emu_family_api::LegacyVmTraceRecord;
 
     #[test]
     fn evidence_identity_is_family_scoped_and_deduplicated() {
@@ -1492,117 +1489,40 @@ mod tests {
         );
     }
 
-    struct MemoryVfs {
-        script: Vec<u8>,
-        default_font: Vec<u8>,
-    }
-
-    impl MemoryVfs {
-        fn file(&self, mount_set_id: &str, uri: &str) -> Result<&[u8], LegacyProviderError> {
-            if mount_set_id != "mount.test" {
-                return Err(LegacyProviderError::invalid(
-                    "TEST_VFS_NOT_FOUND",
-                    "synthetic fixture mount is missing",
-                ));
-            }
-            match uri {
-                "script.hcb" => Ok(&self.script),
-                "default.ttf" => Ok(&self.default_font),
-                _ => Err(LegacyProviderError::invalid(
-                    "TEST_VFS_NOT_FOUND",
-                    "synthetic fixture path is missing",
-                )),
-            }
-        }
-    }
-
-    impl LegacyVfsReader for MemoryVfs {
-        fn stat_file(
-            &self,
-            mount_set_id: &str,
-            uri: &str,
-        ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
-            let bytes = self.file(mount_set_id, uri)?;
-            Ok(astra_byte_source::ByteSourceStat {
-                len: bytes.len() as u64,
-                revision: astra_byte_source::SourceRevision(1),
-            })
-        }
-
-        fn read_file_range(
-            &self,
-            mount_set_id: &str,
-            uri: &str,
-            expected_revision: astra_byte_source::SourceRevision,
-            range: astra_byte_source::ByteRange,
-            max_bytes: u64,
-        ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
-            let stat = self.stat_file(mount_set_id, uri)?;
-            range.validate(stat.len, max_bytes).map_err(|error| {
-                LegacyProviderError::invalid("TEST_VFS_BOUNDS", error.to_string())
-            })?;
-            if stat.revision != expected_revision {
-                return Err(LegacyProviderError::invalid(
-                    "TEST_VFS_REVISION",
-                    "synthetic fixture revision changed",
-                ));
-            }
-            let bytes = self.file(mount_set_id, uri)?;
-            let bytes = bytes[range.offset as usize..(range.offset + range.len) as usize].to_vec();
-            Ok(astra_byte_source::RangeReadResult {
-                range,
-                revision: stat.revision,
-                bytes: bytes.into(),
-            })
-        }
-
-        fn enumerate_by_extension(
-            &self,
-            mount_set_id: &str,
-            root: &str,
-            extension_without_dot: &str,
-            max_entries: u32,
-        ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
-            if !root.is_empty() || max_entries == 0 {
-                return Err(LegacyProviderError::invalid(
-                    "TEST_VFS_ENUMERATE",
-                    "synthetic fixture enumeration is invalid",
-                ));
-            }
-            match extension_without_dot {
-                "hcb" => Ok(vec![LegacyVfsListedFile {
-                    uri: "script.hcb".into(),
-                    stat: self.stat_file(mount_set_id, "script.hcb")?,
-                }]),
-                "bin" => Ok(Vec::new()),
-                _ => Err(LegacyProviderError::invalid(
-                    "TEST_VFS_ENUMERATE",
-                    "synthetic fixture extension is unsupported",
-                )),
-            }
-        }
-    }
-
     #[test]
-    fn typed_live_output_keeps_scene_pixels_outside_runtime_world_control() {
-        let pixels = vec![1_u8, 2, 3, 4];
-        let allocation = pixels.as_ptr();
+    fn typed_live_output_keeps_layer_surface_references_outside_runtime_world_control() {
         let live = LegacyLiveOutput {
-            scenes: vec![LegacySceneTransactionV7 {
+            layers: vec![astra_emu_family_api::LegacyLayerTransactionV9 {
                 sequence: 0,
-                width: 1,
-                height: 1,
-                compositing: astra_emu_family_api::LegacySceneCompositingV1::LinearSrgb,
-                resources: vec![LegacySceneResourceOperationV7::CreateTexture {
-                    texture_id: 1,
-                    generation: 1,
-                    width: 1,
-                    height: 1,
-                    format: LegacyTextureFormat::Rgba8,
-                    pixels: pixels.into(),
-                }],
-                draws: Vec::new(),
-                reset_resources: false,
+                viewport_width: 1,
+                viewport_height: 1,
+                operations: vec![astra_emu_family_api::LegacyLayerOperationV9::Create(
+                    astra_emu_family_api::LegacyLayerStateV9 {
+                        layer_id: "layer.stage".into(),
+                        role: "stage".into(),
+                        z_index: 0,
+                        surface_id: "surface.stage".into(),
+                        generation: 1,
+                        width: 1,
+                        height: 1,
+                        stride: 4,
+                        format: astra_emu_family_api::LegacySurfaceFormatV9::Rgba8SrgbPremultiplied,
+                        damage: astra_emu_family_api::LegacySurfaceDamageV9::Full,
+                        transform: astra_emu_family_api::LegacyLayerTransformV9 {
+                            m11: 1.0,
+                            m12: 0.0,
+                            m21: 0.0,
+                            m22: 1.0,
+                            tx: 0.0,
+                            ty: 0.0,
+                        },
+                        clip: None,
+                        opacity: 1.0,
+                        texture_filter: astra_emu_family_api::LegacyLayerFilterV9::Linear,
+                        blend: astra_emu_family_api::LegacyLayerBlendV9::Alpha,
+                        filter_graph_binding: None,
+                    },
+                )],
             }],
             ..LegacyLiveOutput::default()
         };
@@ -1616,171 +1536,6 @@ mod tests {
         };
         assert_eq!(control.len(), 1);
         assert_eq!(live.len(), 1);
-        let transaction = &live.scenes[0];
-        let LegacySceneResourceOperationV7::CreateTexture { pixels, .. } =
-            &transaction.resources[0]
-        else {
-            panic!("typed texture create is required");
-        };
-        assert_eq!(pixels.as_ptr(), allocation);
-    }
-
-    #[test]
-    fn fvp_product_provider_full_lifecycle_and_repeated_run_are_deterministic() {
-        let script = terminal_hcb();
-        let fingerprint = Hash256::from_sha256(&script);
-        let family = create_static_fvp_provider(Arc::new(MemoryVfs {
-            script,
-            default_font: include_bytes!(
-                "../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf"
-            )
-            .to_vec(),
-        }))
-        .unwrap();
-        let mut provider = AstraEmuRuntimeProvider::new(family).unwrap();
-        let instance = ProviderInstanceId("emu.test.instance".into());
-        provider.create_instance(instance.clone()).unwrap();
-
-        let first = run_once(&mut provider, fingerprint);
-        let second = run_once(&mut provider, fingerprint);
-        assert_eq!(
-            first, second,
-            "same package/input identity must replay identically"
-        );
-
-        provider.destroy_instance(instance).unwrap();
-    }
-
-    fn run_once(
-        provider: &mut AstraEmuRuntimeProvider,
-        fingerprint: Hash256,
-    ) -> Vec<(u64, Vec<u64>)> {
-        let profile = EmuCaseProfile {
-            schema: "astra.emu.case_profile.v1".into(),
-            family_id: "fvp".into(),
-            case_fingerprint: fingerprint,
-            script_uri: "script.hcb".into(),
-            fixed_delta_ns: 16_666_667,
-            compatibility_profile: "rfvp-v1".into(),
-            mount_set_id: "mount.test".into(),
-            permission_policy_id: "permission.test".into(),
-            family_options: [
-                ("fvp.nls".into(), "utf8".into()),
-                ("fvp.pack_paths".into(), "[]".into()),
-            ]
-            .into_iter()
-            .collect(),
-        };
-        let bytes = postcard::to_allocvec(&profile).unwrap();
-        let package_hash = Hash256::from_sha256(b"package.test").to_string();
-        let open = provider
-            .open(RuntimeOpenRequest {
-                target_id: "windows".into(),
-                profile: "fvp-v1".into(),
-                locale: "und".into(),
-                seed: 17,
-                integrity_mode: RuntimeTickIntegrityMode::Evidence,
-                executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
-                package_hash,
-                sections: vec![RuntimeSectionPayload {
-                    section_id: "emu.case_profile".into(),
-                    schema: "astra.emu.case_profile.v1".into(),
-                    version: SchemaVersion::new(1, 0, 0),
-                    codec: RuntimeSectionCodec::Postcard,
-                    hash: Hash256::from_sha256(&bytes),
-                    bytes,
-                }],
-            })
-            .unwrap();
-        provider
-            .queue_patch_effect(
-                &open.session_id,
-                QueuedPatchEffect::RuntimeEvent {
-                    event: "patch.synthetic".into(),
-                    value: "typed-value".into(),
-                },
-            )
-            .unwrap();
-        let output = provider
-            .step(RuntimeStepInput {
-                session_id: open.session_id.clone(),
-                fixed_step: 1,
-                delta_ns: 16_666_667,
-                session_seed: 17,
-                mode: RuntimeStepMode::Live,
-                action: "emu.step".into(),
-                budget: astra_plugin_abi::RuntimeStepBudget {
-                    max_instructions: 32,
-                    max_effects: 32,
-                    max_trace_entries: 32,
-                },
-                ..RuntimeStepInput::default()
-            })
-            .unwrap();
-        assert_eq!(output.status, "active");
-        let live = output.live;
-        assert!(live
-            .events
-            .iter()
-            .any(|event| event.event == "patch.synthetic" && event.value == "typed-value"));
-        let mut output_observations = vec![(
-            live.state_revision,
-            live.events
-                .iter()
-                .map(|event| event.sequence)
-                .collect::<Vec<_>>(),
-        )];
-        let second = provider
-            .step(RuntimeStepInput {
-                session_id: open.session_id.clone(),
-                fixed_step: 2,
-                delta_ns: 16_666_667,
-                session_seed: 17,
-                mode: RuntimeStepMode::Live,
-                action: "emu.step".into(),
-                budget: astra_plugin_abi::RuntimeStepBudget {
-                    max_instructions: 32,
-                    max_effects: 32,
-                    max_trace_entries: 32,
-                },
-                ..RuntimeStepInput::default()
-            })
-            .unwrap();
-        assert_eq!(second.status, "active");
-        let live = second.live;
-        output_observations.push((
-            live.state_revision,
-            live.events
-                .iter()
-                .map(|event| event.sequence)
-                .collect::<Vec<_>>(),
-        ));
-        let saved = provider
-            .save(RuntimeSaveRequest {
-                session_id: open.session_id.clone(),
-                slot: "test".into(),
-            })
-            .unwrap();
-        let restored = provider
-            .restore(RuntimeRestoreRequest {
-                session_id: open.session_id.clone(),
-                sections: saved.sections,
-            })
-            .unwrap();
-        assert_eq!(restored.restored_fixed_step, 2);
-        provider.shutdown(open.session_id).unwrap();
-        output_observations
-    }
-
-    fn terminal_hcb() -> Vec<u8> {
-        let mut bytes = 8u32.to_le_bytes().to_vec();
-        bytes.extend_from_slice(&[0x04, 0, 0, 0]);
-        bytes.extend_from_slice(&4u32.to_le_bytes());
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes.extend_from_slice(&[8, 0, 2, b'X', 0]);
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes
+        assert_eq!(live.layers[0].operations.len(), 1);
     }
 }
