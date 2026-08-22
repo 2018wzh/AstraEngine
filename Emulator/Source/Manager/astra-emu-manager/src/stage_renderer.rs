@@ -14,8 +14,10 @@ use astra_emu_family_api::{
 };
 use astra_emu_family_support::copy_surface_to_straight_rgba8;
 use astra_emu_manager::{AstraUnderlayRenderer, TranslationOverlayView, WgpuFrameContext};
+use astra_media::{FilterGraph, FilterNode, FilterParam, FilterTarget, FilterValidator};
 use astra_plugin_abi::{
-    RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLiveLayerBlend, RuntimeLiveLayerFilter,
+    RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLiveFilterGraph, RuntimeLiveFilterParam,
+    RuntimeLiveFilterTarget, RuntimeLiveLayerBlend, RuntimeLiveLayerFilter,
     RuntimeLiveLayerOperation, RuntimeLiveLayerState, RuntimeLiveLayerTransaction,
     RuntimeLiveSceneCompositing, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
     RuntimeLiveScissor, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat, RuntimeLiveVertex,
@@ -59,6 +61,8 @@ pub(crate) struct StageGpu {
     textures: BTreeMap<u32, TextureResource>,
     layer_states: BTreeMap<String, RuntimeLiveLayerState>,
     layer_surface_ids: BTreeMap<String, u32>,
+    layer_filtered_ids: BTreeMap<String, u32>,
+    layer_filter_graphs: BTreeMap<String, RuntimeLiveFilterGraph>,
     layer_sequence: Option<u64>,
     layer_session_id: Option<String>,
     next_layer_texture_id: u32,
@@ -346,6 +350,8 @@ impl StageGpu {
             textures: BTreeMap::new(),
             layer_states: BTreeMap::new(),
             layer_surface_ids: BTreeMap::new(),
+            layer_filtered_ids: BTreeMap::new(),
+            layer_filter_graphs: BTreeMap::new(),
             layer_sequence: None,
             layer_session_id: None,
             next_layer_texture_id: 1,
@@ -368,11 +374,7 @@ impl StageGpu {
             "warm" => 3,
             _ => return Err("ASTRA_EMU_FILTER_PRESET_UNSUPPORTED".into()),
         };
-        let mut params = Vec::with_capacity(16);
-        params.extend_from_slice(&mode.to_ne_bytes());
-        params.extend_from_slice(&0_u32.to_ne_bytes());
-        params.extend_from_slice(&(source.width() as f32).to_ne_bytes());
-        params.extend_from_slice(&(source.height() as f32).to_ne_bytes());
+        let params = filter_uniform_bytes(mode, source.width(), source.height(), [0.0; 4]);
         let uniform = context
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -452,8 +454,13 @@ impl StageGpu {
             for texture_id in self.layer_surface_ids.values() {
                 self.textures.remove(texture_id);
             }
+            for texture_id in self.layer_filtered_ids.values() {
+                self.textures.remove(texture_id);
+            }
             self.layer_states.clear();
             self.layer_surface_ids.clear();
+            self.layer_filtered_ids.clear();
+            self.layer_filter_graphs.clear();
             self.layer_sequence = None;
             self.layer_session_id = Some(session_id.to_owned());
         }
@@ -490,6 +497,10 @@ impl StageGpu {
                     {
                         return Err("ASTRA_EMU_STAGE_LAYER_DESTROY_CONFLICT".into());
                     }
+                    if let Some(texture_id) = self.layer_filtered_ids.remove(&layer_id) {
+                        self.textures.remove(&texture_id);
+                    }
+                    self.layer_filter_graphs.remove(&layer_id);
                 }
             }
         }
@@ -520,9 +531,6 @@ impl StageGpu {
         });
         let mut draws = Vec::with_capacity(layers.len());
         for layer in layers {
-            if layer.filter_graph.is_some() {
-                return Err("ASTRA_EMU_STAGE_TYPED_FILTER_GRAPH_NOT_IMPLEMENTED".into());
-            }
             let texture_id = match self.layer_surface_ids.get(&layer.surface_id).copied() {
                 Some(texture_id) => texture_id,
                 None => {
@@ -610,7 +618,39 @@ impl StageGpu {
                     )?,
                 }
             }
-            draws.push(layer_draw(&layer, texture_id)?);
+            let draw_texture_id = match &layer.filter_graph {
+                Some(graph) if graph.nodes.is_empty() => {
+                    validate_runtime_filter_graph(graph)?;
+                    self.remove_layer_filter_texture(&layer.layer_id);
+                    texture_id
+                }
+                Some(graph) => {
+                    let graph_changed =
+                        self.layer_filter_graphs.get(&layer.layer_id) != Some(graph);
+                    let filtered_id = self.layer_filtered_texture_id(&layer.layer_id)?;
+                    let filtered_generation = self
+                        .textures
+                        .get(&filtered_id)
+                        .map(|resource| resource.generation);
+                    if graph_changed || filtered_generation != Some(layer.generation) {
+                        self.apply_layer_filter_graph(
+                            context,
+                            texture_id,
+                            filtered_id,
+                            layer.generation,
+                            graph,
+                        )?;
+                        self.layer_filter_graphs
+                            .insert(layer.layer_id.clone(), graph.clone());
+                    }
+                    filtered_id
+                }
+                None => {
+                    self.remove_layer_filter_texture(&layer.layer_id);
+                    texture_id
+                }
+            };
+            draws.push(layer_draw(&layer, draw_texture_id)?);
         }
 
         let width = transaction.viewport_width;
@@ -664,6 +704,171 @@ impl StageGpu {
         }
         context.queue.submit([encoder.finish()]);
         Ok(())
+    }
+
+    fn layer_filtered_texture_id(&mut self, layer_id: &str) -> Result<u32, String> {
+        if let Some(texture_id) = self.layer_filtered_ids.get(layer_id) {
+            return Ok(*texture_id);
+        }
+        let texture_id = self.next_layer_texture_id;
+        if texture_id >= VIDEO_TEXTURE_ID {
+            return Err("ASTRA_EMU_STAGE_LAYER_TEXTURE_ID_EXHAUSTED".into());
+        }
+        self.next_layer_texture_id = texture_id
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_STAGE_LAYER_TEXTURE_ID_EXHAUSTED".to_owned())?;
+        self.layer_filtered_ids
+            .insert(layer_id.to_owned(), texture_id);
+        Ok(texture_id)
+    }
+
+    fn remove_layer_filter_texture(&mut self, layer_id: &str) {
+        if let Some(texture_id) = self.layer_filtered_ids.remove(layer_id) {
+            self.textures.remove(&texture_id);
+        }
+        self.layer_filter_graphs.remove(layer_id);
+    }
+
+    fn apply_layer_filter_graph(
+        &mut self,
+        context: &WgpuFrameContext<'_>,
+        source_texture_id: u32,
+        target_texture_id: u32,
+        generation: u64,
+        graph: &RuntimeLiveFilterGraph,
+    ) -> Result<(), String> {
+        let graph = validate_runtime_filter_graph(graph)?;
+        let source = self
+            .textures
+            .get(&source_texture_id)
+            .ok_or_else(|| "ASTRA_EMU_STAGE_FILTER_SOURCE_MISSING".to_owned())?;
+        if source.format != LegacyTextureFormat::Rgba8
+            || source.compositing != RuntimeLiveSceneCompositing::LinearSrgb
+        {
+            return Err("ASTRA_EMU_STAGE_FILTER_SOURCE_FORMAT".into());
+        }
+        let width = source.width;
+        let height = source.height;
+        let mut current: Option<wgpu::Texture> = None;
+        for node in &graph.nodes {
+            let source_view = match &current {
+                Some(texture) => texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                None => source
+                    ._texture
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+            };
+            let target = create_filter_target_texture(context.device, width, height);
+            let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+            let (mode, values) = filter_node_uniform(node)?;
+            self.run_filter_pass(
+                context,
+                &source_view,
+                &target_view,
+                width,
+                height,
+                mode,
+                values,
+            );
+            current = Some(target);
+        }
+        let texture = current.ok_or_else(|| "ASTRA_EMU_STAGE_FILTER_GRAPH_EMPTY".to_owned())?;
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let linear_bind_group = texture_bind_group(
+            context.device,
+            &self.bind_group_layout,
+            &view,
+            &self.linear_sampler,
+            "astra.emu.stage.filtered-resource-linear-bind-group",
+        );
+        let nearest_bind_group = texture_bind_group(
+            context.device,
+            &self.bind_group_layout,
+            &view,
+            &self.nearest_sampler,
+            "astra.emu.stage.filtered-resource-nearest-bind-group",
+        );
+        self.textures.insert(
+            target_texture_id,
+            TextureResource {
+                _texture: texture,
+                linear_bind_group,
+                nearest_bind_group,
+                generation,
+                width,
+                height,
+                format: LegacyTextureFormat::Rgba8,
+                compositing: RuntimeLiveSceneCompositing::LinearSrgb,
+            },
+        );
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_filter_pass(
+        &self,
+        context: &WgpuFrameContext<'_>,
+        source_view: &wgpu::TextureView,
+        target_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        mode: u32,
+        values: [f32; 4],
+    ) {
+        let uniform_bytes = filter_uniform_bytes(mode, width, height, values);
+        let uniform = context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("astra.emu.layer-filter.params"),
+                contents: &uniform_bytes,
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let bind_group = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("astra.emu.layer-filter.bind-group"),
+                layout: &self.filter_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(source_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.linear_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform.as_entire_binding(),
+                    },
+                ],
+            });
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("astra.emu.layer-filter.encoder"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("astra.emu.layer-filter.pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.filter_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        context.queue.submit([encoder.finish()]);
     }
 
     #[allow(dead_code)]
@@ -1287,6 +1492,105 @@ fn texture_bind_group(
     })
 }
 
+fn validate_runtime_filter_graph(graph: &RuntimeLiveFilterGraph) -> Result<FilterGraph, String> {
+    let mut nodes = Vec::with_capacity(graph.nodes.len());
+    for node in &graph.nodes {
+        let mut params = BTreeMap::new();
+        for param in &node.params {
+            let value = match &param.value {
+                RuntimeLiveFilterParam::Float(value) => {
+                    if !value.is_finite() {
+                        return Err("ASTRA_EMU_STAGE_FILTER_PARAM".into());
+                    }
+                    FilterParam::Float(*value)
+                }
+                RuntimeLiveFilterParam::Int(value) => FilterParam::Int(*value),
+                RuntimeLiveFilterParam::Bool(value) => FilterParam::Bool(*value),
+                RuntimeLiveFilterParam::Text(value) => FilterParam::Text(value.clone()),
+            };
+            if params.insert(param.key.clone(), value).is_some() {
+                return Err("ASTRA_EMU_STAGE_FILTER_PARAM_DUPLICATE".into());
+            }
+        }
+        nodes.push(FilterNode {
+            id: node.id.clone(),
+            kind: node.kind.clone(),
+            input: runtime_filter_target(node.input),
+            output: runtime_filter_target(node.output),
+            params,
+            deterministic: node.deterministic,
+            allow_cpu_fallback: node.allow_cpu_fallback,
+        });
+    }
+    let graph = FilterGraph {
+        schema: graph.schema.clone(),
+        nodes,
+    };
+    if !FilterValidator
+        .validate(&graph)
+        .blocking_diagnostics()
+        .is_empty()
+    {
+        return Err("ASTRA_EMU_STAGE_FILTER_GRAPH_INVALID".into());
+    }
+    Ok(graph)
+}
+
+fn runtime_filter_target(target: RuntimeLiveFilterTarget) -> FilterTarget {
+    match target {
+        RuntimeLiveFilterTarget::Background => FilterTarget::Background,
+        RuntimeLiveFilterTarget::Character => FilterTarget::Character,
+        RuntimeLiveFilterTarget::Ui => FilterTarget::Ui,
+        RuntimeLiveFilterTarget::Text => FilterTarget::Text,
+        RuntimeLiveFilterTarget::Video => FilterTarget::Video,
+        RuntimeLiveFilterTarget::Final => FilterTarget::Final,
+    }
+}
+
+fn filter_node_uniform(node: &FilterNode) -> Result<(u32, [f32; 4]), String> {
+    let float = |name: &str| match node.params.get(name) {
+        Some(FilterParam::Float(value)) => Ok(*value),
+        _ => Err("ASTRA_EMU_STAGE_FILTER_PARAM_TYPE".to_owned()),
+    };
+    match node.kind.as_str() {
+        "astra.filter.bloom" => Ok((4, [float("intensity")?, 0.0, 0.0, 0.0])),
+        "astra.filter.color_matrix" => {
+            Ok((5, [float("r")?, float("g")?, float("b")?, float("a")?]))
+        }
+        "astra.filter.fade" => Ok((4 + 2, [float("amount")?, 0.0, 0.0, 0.0])),
+        _ => Err("ASTRA_EMU_STAGE_FILTER_KIND_UNSUPPORTED".into()),
+    }
+}
+
+fn filter_uniform_bytes(mode: u32, width: u32, height: u32, values: [f32; 4]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(32);
+    bytes.extend_from_slice(&mode.to_ne_bytes());
+    bytes.extend_from_slice(&0_u32.to_ne_bytes());
+    bytes.extend_from_slice(&(width as f32).to_ne_bytes());
+    bytes.extend_from_slice(&(height as f32).to_ne_bytes());
+    for value in values {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
+fn create_filter_target_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("astra.emu.stage.filtered-resource"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
 fn layer_draw(layer: &RuntimeLiveLayerState, texture_id: u32) -> Result<RuntimeLiveDraw, String> {
     let point = |x: f32, y: f32| RuntimeLiveVertex {
         x: layer.transform.m11 * x + layer.transform.m21 * y + layer.transform.tx,
@@ -1681,6 +1985,7 @@ struct FilterParams {
     mode: u32,
     _padding: u32,
     dimensions: vec2<f32>,
+    values: vec4<f32>,
 };
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -1719,6 +2024,12 @@ struct VertexOut {
         color = vec4<f32>(color.rgb * scanline * mix(0.82, 1.0, edge), color.a);
     } else if params.mode == 3u {
         color = vec4<f32>(color.rgb * vec3<f32>(1.06, 1.0, 0.91), color.a);
+    } else if params.mode == 4u {
+        color = vec4<f32>(min(color.rgb + vec3<f32>(params.values.x), vec3<f32>(1.0)), color.a);
+    } else if params.mode == 5u {
+        color = color * params.values;
+    } else if params.mode == 6u {
+        color = vec4<f32>(color.rgb * params.values.x, color.a);
     }
     return color;
 }
@@ -1728,6 +2039,48 @@ struct VertexOut {
 mod tests {
     use super::*;
     use astra_emu_family_api::{LegacyScissorV1, LegacyVertexV1};
+    use astra_plugin_abi::{RuntimeLiveFilterNode, RuntimeLiveFilterParamEntry};
+
+    fn filter_node(id: &str, kind: &str, params: Vec<(&str, f32)>) -> RuntimeLiveFilterNode {
+        RuntimeLiveFilterNode {
+            id: id.into(),
+            kind: kind.into(),
+            input: RuntimeLiveFilterTarget::Final,
+            output: RuntimeLiveFilterTarget::Final,
+            params: params
+                .into_iter()
+                .map(|(key, value)| RuntimeLiveFilterParamEntry {
+                    key: key.into(),
+                    value: RuntimeLiveFilterParam::Float(value),
+                })
+                .collect(),
+            deterministic: true,
+            allow_cpu_fallback: false,
+        }
+    }
+
+    #[test]
+    fn typed_filter_graph_is_validated_without_string_resolution() {
+        let graph = RuntimeLiveFilterGraph {
+            schema: "astra.filter_graph.v1".into(),
+            nodes: vec![filter_node(
+                "fade",
+                "astra.filter.fade",
+                vec![("amount", 0.5)],
+            )],
+        };
+        let graph = validate_runtime_filter_graph(&graph).unwrap();
+        assert_eq!(filter_node_uniform(&graph.nodes[0]).unwrap().0, 6);
+
+        let mut invalid = graph.clone();
+        invalid.nodes[0]
+            .params
+            .insert("unexpected".into(), FilterParam::Float(1.0));
+        assert!(!FilterValidator
+            .validate(&invalid)
+            .blocking_diagnostics()
+            .is_empty());
+    }
 
     #[test]
     fn vertex_projection_uses_runtime_stage_dimensions() {
@@ -1806,6 +2159,32 @@ mod tests {
             )
             .unwrap();
         }
+        gpu.upload_live(
+            &context,
+            7,
+            1,
+            64,
+            48,
+            RuntimeLiveTextureFormat::Rgba8,
+            vec![128_u8; 64 * 48 * 4].into(),
+            RuntimeLiveSceneCompositing::LinearSrgb,
+        )
+        .unwrap();
+        let graph = RuntimeLiveFilterGraph {
+            schema: "astra.filter_graph.v1".into(),
+            nodes: vec![
+                filter_node("bloom", "astra.filter.bloom", vec![("intensity", 0.25)]),
+                filter_node(
+                    "matrix",
+                    "astra.filter.color_matrix",
+                    vec![("r", 1.0), ("g", 0.8), ("b", 0.6), ("a", 1.0)],
+                ),
+                filter_node("fade", "astra.filter.fade", vec![("amount", 0.75)]),
+            ],
+        };
+        gpu.apply_layer_filter_graph(&context, 7, 8, 1, &graph)
+            .unwrap();
+        assert_eq!(gpu.textures.get(&8).unwrap().generation, 1);
         device
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("ASTRA_EMU_FILTER_TEST_POLL");

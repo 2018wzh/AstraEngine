@@ -308,7 +308,17 @@ fn set_private_directory_permissions(path: &Path) -> Result<(), LegacyProviderEr
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(io_error)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn set_private_directory_permissions(path: &Path) -> Result<(), LegacyProviderError> {
+    crate::enforce_private_directory_permissions(path).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_WRITABLE_PERMISSION",
+            "private writable directory permission enforcement failed",
+        )
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
 fn set_private_directory_permissions(_path: &Path) -> Result<(), LegacyProviderError> {
     Ok(())
 }
@@ -328,7 +338,17 @@ fn set_private_file_permissions(path: &Path) -> Result<(), LegacyProviderError> 
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(io_error)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn set_private_file_permissions(path: &Path) -> Result<(), LegacyProviderError> {
+    crate::enforce_private_file_permissions(path).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_WRITABLE_PERMISSION",
+            "private writable file permission enforcement failed",
+        )
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
 fn set_private_file_permissions(_path: &Path) -> Result<(), LegacyProviderError> {
     Ok(())
 }
