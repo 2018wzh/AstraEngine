@@ -16,6 +16,7 @@ use thiserror::Error;
 
 mod owned_buffer;
 mod owned_pcm;
+mod owned_writable_buffer;
 
 #[cfg(feature = "ffi")]
 pub use owned_buffer::FfiOwnedByteBuffer;
@@ -23,6 +24,9 @@ pub use owned_buffer::OwnedByteBuffer;
 #[cfg(feature = "ffi")]
 pub use owned_pcm::{FfiOwnedF32Buffer, FfiOwnedI16Buffer};
 pub use owned_pcm::{OwnedF32Buffer, OwnedI16Buffer};
+#[cfg(feature = "ffi")]
+pub use owned_writable_buffer::FfiOwnedWritableByteBuffer;
+pub use owned_writable_buffer::OwnedWritableByteBuffer;
 
 pub const DEFAULT_MAX_RANGE_BYTES: u64 = 16 * 1024 * 1024;
 pub const AUDIT_CHUNK_BYTES: usize = 1024 * 1024;

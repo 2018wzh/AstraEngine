@@ -11,6 +11,8 @@ Family ABI v9、Product Runtime Provider ABI v4 与 Extension ABI v1 是一次�
 5. Family 自行完成 decode、字体 fallback、shaping、换行、光栅化和原生存档格式。Host 只验证 ABI 所有权、surface geometry、transaction、路径隔离和系统错误。
 6. 删除 AstraEMU runtime state/text/frame/audio/route/session/input 与 RFVP live hash。package、binary、source/archive entry、schema、build、profile 和 artifact-file 完整性 hash 不变。
 
+Surface lease 使用独占、不可复制的 `OwnedWritableByteBuffer`。它在 FFI 上保留同一分配的可写指针与唯一 owner，acquire、family 写入、commit 全程不复制；只读 `OwnedByteBuffer` 不能用于 surface，也禁止通过 `const` 强转恢复写权限。`FfiLegacyFamilyHostAdapter` 是动态 family 绑定 VFS、surface、Hook 与 writable-file ports 的唯一公共适配入口。
+
 FVP 固定使用 `Ported + SingleLayer`。RFVP hosted feature 直接依赖固定 AstraEngine ABI commit；AstraEngine workspace 通过精确 Git source `[patch]` 映射到当前 path crate，并以 `cargo tree` 阻断双 package identity。`astra-emu-fvp` 只保留 dylib/root-module、build identity、descriptor、provider 构造与 shutdown、panic containment、最终错误映射和 observability 边界。
 
 Minori 固定使用 `Native + MultiLayer`，把 background、foreground/stand、effect、panel/text 映射为独立 retained layer。Siglus v8 不属于本迁移分支，必须单独迁移到 v9 后才能合并。

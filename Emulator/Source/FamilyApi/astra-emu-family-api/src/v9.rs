@@ -2,11 +2,56 @@ use abi_stable::{
     std_types::{ROption, RString, RVec},
     StableAbi,
 };
-use astra_byte_source::{FfiOwnedByteBuffer, OwnedByteBuffer};
+use astra_byte_source::{
+    FfiOwnedByteBuffer, FfiOwnedWritableByteBuffer, OwnedByteBuffer, OwnedWritableByteBuffer,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::{FfiLegacyResult, LegacyProviderError};
+
+pub trait LegacySurfaceHostV9: Send + Sync {
+    fn acquire(
+        &self,
+        session_id: &str,
+        fixed_step: u64,
+        surface_id: &str,
+        width: u32,
+        height: u32,
+        format: LegacySurfaceFormatV9,
+    ) -> Result<LegacySurfaceLeaseV9, LegacyProviderError>;
+
+    fn commit(
+        &self,
+        session_id: &str,
+        fixed_step: u64,
+        commit: LegacySurfaceCommitV9,
+    ) -> Result<(), LegacyProviderError>;
+}
+
+pub trait LegacyHookHostV1: Send + Sync {
+    fn invoke(
+        &self,
+        invocation: LegacyHookInvocationV1,
+    ) -> Result<LegacyHookResultV1, LegacyProviderError>;
+}
+
+pub trait LegacyWritableFileHostV1: Send + Sync {
+    fn execute(
+        &self,
+        session_id: &str,
+        request: LegacyWritableFileRequestV1,
+    ) -> Result<LegacyWritableFileResultV1, LegacyProviderError>;
+}
+
+#[derive(Clone)]
+pub struct LegacyFamilyHostServicesV9 {
+    pub vfs: Arc<dyn crate::LegacyVfsReader>,
+    pub surfaces: Arc<dyn LegacySurfaceHostV9>,
+    pub hooks: Arc<dyn LegacyHookHostV1>,
+    pub writable_files: Arc<dyn LegacyWritableFileHostV1>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -40,7 +85,7 @@ pub struct LegacySurfaceLeaseV9 {
     pub height: u32,
     pub stride: u32,
     pub format: LegacySurfaceFormatV9,
-    pub pixels: OwnedByteBuffer,
+    pub pixels: OwnedWritableByteBuffer,
 }
 
 #[derive(Debug, PartialEq)]
@@ -404,7 +449,7 @@ pub struct FfiSurfaceLeaseV9 {
     pub height: u32,
     pub stride: u32,
     pub format: FfiSurfaceFormatV9,
-    pub pixels: FfiOwnedByteBuffer,
+    pub pixels: FfiOwnedWritableByteBuffer,
 }
 
 #[repr(C)]
@@ -527,6 +572,48 @@ pub type FfiCommitSurfaceV9 = extern "C" fn(FfiCommitSurfaceCallV9) -> FfiLegacy
 pub type FfiInvokeHookV1 = extern "C" fn(FfiHookInvocationV1) -> FfiLegacyResult<FfiHookResultV1>;
 pub type FfiWritableFileV1 =
     extern "C" fn(FfiWritableFileCallV1) -> FfiLegacyResult<FfiWritableFileResultV1>;
+
+impl From<LegacySurfaceDamageV9> for FfiSurfaceDamageV9 {
+    fn from(value: LegacySurfaceDamageV9) -> Self {
+        ffi_damage(value)
+    }
+}
+
+impl From<FfiSurfaceDamageV9> for LegacySurfaceDamageV9 {
+    fn from(value: FfiSurfaceDamageV9) -> Self {
+        legacy_damage(value)
+    }
+}
+
+impl From<LegacySurfaceLeaseV9> for FfiSurfaceLeaseV9 {
+    fn from(value: LegacySurfaceLeaseV9) -> Self {
+        Self {
+            lease_id: value.lease_id.into(),
+            surface_id: value.surface_id.into(),
+            generation: value.generation,
+            width: value.width,
+            height: value.height,
+            stride: value.stride,
+            format: ffi_surface_format(value.format),
+            pixels: value.pixels.into_ffi(),
+        }
+    }
+}
+
+impl From<FfiSurfaceLeaseV9> for LegacySurfaceLeaseV9 {
+    fn from(value: FfiSurfaceLeaseV9) -> Self {
+        Self {
+            lease_id: value.lease_id.to_string(),
+            surface_id: value.surface_id.to_string(),
+            generation: value.generation,
+            width: value.width,
+            height: value.height,
+            stride: value.stride,
+            format: legacy_surface_format(value.format),
+            pixels: OwnedWritableByteBuffer::from_ffi(value.pixels),
+        }
+    }
+}
 
 impl LegacySurfaceLeaseV9 {
     pub fn validate(&self) -> Result<(), LegacyProviderError> {
