@@ -23,13 +23,14 @@ use astra_emu_family_api::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    parse_sc, MinoriAudioCommand, MinoriAxisScrollFrame, MinoriCharacterFrame,
-    MinoriCharacterState, MinoriChoicePresentation, MinoriEffectFrame, MinoriExecutedCommand,
-    MinoriLinearScrollFrame, MinoriMovieState, MinoriPlayMode, MinoriRuntimeError,
-    MinoriRuntimeState, MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame,
-    MinoriStageCommand, MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm,
-    MinoriVmEvent, MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog,
-    MINORI_CHOICE_PRESENTATION_SCHEMA, MINORI_RUNTIME_STATE_SCHEMA,
+    parse_sc, MinoriAudioCommand, MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame,
+    MinoriCharacterState, MinoriChoicePresentation, MinoriConfigAudioBus, MinoriConfigChange,
+    MinoriConfigControl, MinoriEffectFrame, MinoriExecutedCommand, MinoriLinearScrollFrame,
+    MinoriMovieState, MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState,
+    MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand,
+    MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent,
+    MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
+    MINORI_RUNTIME_STATE_SCHEMA,
 };
 
 pub const MINORI_FAMILY_ID: &str = "minori";
@@ -59,6 +60,9 @@ const MINORI_CHARACTER_TEXTURE_BASE: u32 = 10_000;
 const MINORI_SYSTEM_TEXTURE_ID: u32 = 20_000;
 const MINORI_BACKLOG_GAUGE_TEXTURE_ID: u32 = 20_001;
 const MINORI_BACKLOG_BALL_TEXTURE_ID: u32 = 20_002;
+const MINORI_CONFIG_KNOB_TEXTURE_ID: u32 = 20_010;
+const MINORI_CONFIG_CHECKMARK_TEXTURE_ID: u32 = 20_011;
+const MINORI_CONFIG_CIRCLE_TEXTURE_ID: u32 = 20_012;
 const MINORI_TITLE_BASE_ITEM_COUNT: u32 = 4;
 const MINORI_TITLE_MEMORIES_ITEM_COUNT: u32 = 5;
 const MINORI_MEMORIES_ITEM_COUNT: u32 = 5;
@@ -484,6 +488,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     .vm
                     .set_pointer_axis('y', edge.value)
                     .map_err(runtime_error)?;
+            } else if edge.control == MINORI_POINTER_PRIMARY {
+                session.vm.set_pointer_primary_pressed(edge.pressed);
             }
         }
         if session.global_progress.pending.is_some() {
@@ -570,12 +576,30 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 "applied bounded system UI input"
             );
             if action != MinoriSystemUiAction::StartGame {
-                if action == MinoriSystemUiAction::ReplayBacklogVoice {
-                    let commands = session.vm.replay_backlog_voice().map_err(runtime_error)?;
+                let commands = match action {
+                    MinoriSystemUiAction::ReplayBacklogVoice => {
+                        session.vm.replay_backlog_voice().map_err(runtime_error)?
+                    }
+                    MinoriSystemUiAction::PresentWithAudioRefresh => session
+                        .vm
+                        .config_audio_param_commands()
+                        .map_err(runtime_error)?,
+                    MinoriSystemUiAction::PresentAfterConfigClose => session
+                        .vm
+                        .close_config_audio_commands()
+                        .map_err(runtime_error)?,
+                    MinoriSystemUiAction::PresentWithAudioTest(bus) => session
+                        .vm
+                        .config_test_audio_commands(bus)
+                        .map_err(runtime_error)?,
+                    _ => Vec::new(),
+                };
+                if !commands.is_empty() {
                     append_validated_audio_commands(
                         &vfs,
                         &session.mount_set_id,
                         commands.iter(),
+                        session.vm.state(),
                         &mut restore_audio,
                     )?;
                 }
@@ -1439,7 +1463,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         };
         if let Some(commands) = event_audio_commands {
             for command in commands {
-                let (sequence, command) = map_audio_command(command);
+                let (sequence, command) = map_audio_command(command, session.vm.state())?;
                 if let LegacyAudioCommandV1::LoadResource { resource_uri, .. } = &command {
                     let stat = match vfs.stat_file(&session.mount_set_id, resource_uri) {
                         Ok(stat) if stat.len > 0 && stat.len <= MAX_RESOURCE_BYTES => stat,
@@ -1662,7 +1686,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 LegacySnapshotSection {
                     section_id: "minori.runtime".into(),
                     schema: MINORI_RUNTIME_STATE_SCHEMA.into(),
-                    version: SchemaVersion::new(21, 0, 0),
+                    version: SchemaVersion::new(23, 0, 0),
                     bytes,
                 },
                 LegacySnapshotSection {
@@ -1713,7 +1737,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         let progress_section = &snapshot.family_sections[1];
         if runtime_section.section_id != "minori.runtime"
             || runtime_section.schema != MINORI_RUNTIME_STATE_SCHEMA
-            || runtime_section.version != SchemaVersion::new(21, 0, 0)
+            || runtime_section.version != SchemaVersion::new(23, 0, 0)
             || progress_section.section_id != "minori.global_progress"
             || progress_section.schema != MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA
             || progress_section.version != SchemaVersion::new(1, 0, 0)
@@ -1982,20 +2006,24 @@ fn minori_evidence_opcode(opcode: &str) -> Option<u8> {
     })
 }
 
-fn map_audio_command(command: &MinoriAudioCommand) -> (u64, LegacyAudioCommandV1) {
+fn map_audio_command(
+    command: &MinoriAudioCommand,
+    state: &MinoriRuntimeState,
+) -> Result<(u64, LegacyAudioCommandV1), LegacyProviderError> {
     match command {
         MinoriAudioCommand::LoadResource {
             sequence,
             stream_id,
+            encoding,
             resource_uri,
-        } => (
+        } => Ok((
             *sequence,
             LegacyAudioCommandV1::LoadResource {
                 stream_id: *stream_id,
-                encoding: LegacyAudioEncoding::Ogg,
+                encoding: map_audio_encoding(*encoding),
                 resource_uri: resource_uri.clone(),
             },
-        ),
+        )),
         MinoriAudioCommand::Play {
             sequence,
             stream_id,
@@ -2003,43 +2031,90 @@ fn map_audio_command(command: &MinoriAudioCommand) -> (u64, LegacyAudioCommandV1
             pan,
             repeat,
             fade_in_ms,
-        } => (
+        } => Ok((
             *sequence,
             LegacyAudioCommandV1::Play {
                 stream_id: *stream_id,
-                volume: *volume,
+                volume: effective_audio_volume(state, *stream_id, *volume)?,
                 pan: *pan,
                 repeat: *repeat,
                 fade_in_ms: *fade_in_ms,
             },
-        ),
+        )),
         MinoriAudioCommand::Stop {
             sequence,
             stream_id,
             fade_ms,
-        } => (
+        } => Ok((
             *sequence,
             LegacyAudioCommandV1::Stop {
                 stream_id: *stream_id,
                 fade_ms: *fade_ms,
             },
-        ),
+        )),
         MinoriAudioCommand::SetParams {
             sequence,
             stream_id,
             volume,
             pan,
             repeat,
-        } => (
+        } => Ok((
             *sequence,
             LegacyAudioCommandV1::SetParams {
                 stream_id: *stream_id,
-                volume: *volume,
+                volume: effective_audio_volume(state, *stream_id, *volume)?,
                 pan: *pan,
                 repeat: *repeat,
             },
-        ),
+        )),
     }
+}
+
+fn map_audio_encoding(encoding: MinoriAudioEncoding) -> LegacyAudioEncoding {
+    match encoding {
+        MinoriAudioEncoding::Ogg => LegacyAudioEncoding::Ogg,
+        MinoriAudioEncoding::Wav => LegacyAudioEncoding::Wav,
+    }
+}
+
+fn effective_audio_volume(
+    state: &MinoriRuntimeState,
+    stream_id: u32,
+    base_volume: f32,
+) -> Result<f32, LegacyProviderError> {
+    if !base_volume.is_finite() || !(0.0..=1.0).contains(&base_volume) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_AUDIO_VOLUME",
+            "audio volume is outside the verified normalized range",
+        ));
+    }
+    let audio = state.audio.get(&stream_id).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_AUDIO_STREAM_STATE",
+            "audio command has no matching runtime stream state",
+        )
+    })?;
+    let config = state
+        .system_ui
+        .config_draft
+        .as_ref()
+        .unwrap_or(&state.system_ui.config);
+    let (volume, muted) = match audio.bus.as_str() {
+        "bgm" => (config.bgm_volume, config.bgm_muted),
+        "voice" => (config.voice_volume, config.voice_muted),
+        "se" => (config.se_volume, config.se_muted),
+        _ => {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_AUDIO_BUS",
+                "audio stream has an unsupported bus identity",
+            ));
+        }
+    };
+    Ok(if muted {
+        0.0
+    } else {
+        base_volume * (f32::from(volume) / 100.0)
+    })
 }
 
 fn take_restore_audio_commands(
@@ -2079,7 +2154,7 @@ fn take_restore_audio_commands(
             sequence: load_sequence,
             value: LegacyAudioCommandV1::LoadResource {
                 stream_id,
-                encoding: LegacyAudioEncoding::Ogg,
+                encoding: map_audio_encoding(state.encoding),
                 resource_uri: state.resource_uri,
             },
         });
@@ -2091,7 +2166,11 @@ fn take_restore_audio_commands(
             sequence: play_sequence,
             value: LegacyAudioCommandV1::Play {
                 stream_id,
-                volume: f32::from(state.volume_milli) / 1000.0,
+                volume: effective_audio_volume(
+                    session.vm.state(),
+                    stream_id,
+                    f32::from(state.volume_milli) / 1000.0,
+                )?,
                 pan: f32::from(state.pan_milli) / 1000.0,
                 repeat: state.looped,
                 fade_in_ms: 0,
@@ -3566,6 +3645,9 @@ fn validate_script_uri(script_uri: &str) -> Result<(), LegacyProviderError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MinoriSystemUiAction {
     Present,
+    PresentWithAudioRefresh,
+    PresentAfterConfigClose,
+    PresentWithAudioTest(MinoriConfigAudioBus),
     StartGame,
     CloseBacklog,
     ReplayBacklogVoice,
@@ -3575,6 +3657,9 @@ enum MinoriSystemUiAction {
 fn system_ui_action_name(action: MinoriSystemUiAction) -> &'static str {
     match action {
         MinoriSystemUiAction::Present => "present",
+        MinoriSystemUiAction::PresentWithAudioRefresh => "present_with_audio_refresh",
+        MinoriSystemUiAction::PresentAfterConfigClose => "present_after_config_close",
+        MinoriSystemUiAction::PresentWithAudioTest(_) => "present_with_audio_test",
         MinoriSystemUiAction::StartGame => "start_game",
         MinoriSystemUiAction::CloseBacklog => "close_backlog",
         MinoriSystemUiAction::ReplayBacklogVoice => "replay_backlog_voice",
@@ -3878,6 +3963,9 @@ fn apply_system_ui_input(
     vm: &mut MinoriVm,
     input: &LegacyStepInput,
 ) -> Result<MinoriSystemUiAction, LegacyProviderError> {
+    if vm.state().system_ui.page == MinoriSystemPage::Config {
+        return apply_config_input(vm, input);
+    }
     if vm.state().system_ui.page == MinoriSystemPage::Backlog {
         let wheel = backlog_wheel_direction(input)?;
         let replay = input
@@ -3929,8 +4017,7 @@ fn apply_system_ui_input(
                         MinoriSystemUiAction::Present
                     }
                     (_, 2) => {
-                        vm.set_system_page(MinoriSystemPage::Config, 0)
-                            .map_err(runtime_error)?;
+                        vm.open_config().map_err(runtime_error)?;
                         MinoriSystemUiAction::Present
                     }
                     (2, 3) => {
@@ -3983,7 +4070,7 @@ fn apply_system_ui_input(
                 vm.set_system_page(MinoriSystemPage::Memories, 0)
                     .map_err(runtime_error)?;
             }
-            (MinoriSystemPage::Load | MinoriSystemPage::Config, "escape") => {
+            (MinoriSystemPage::Load, "escape") => {
                 vm.set_system_page(MinoriSystemPage::Title, 0)
                     .map_err(runtime_error)?;
             }
@@ -3993,14 +4080,6 @@ fn apply_system_ui_input(
                     "load confirmation requires a verified populated slot",
                 ));
             }
-            (MinoriSystemPage::Config, "enter" | "space") => {
-                // The native config page treats Enter as apply-and-close and
-                // Escape as restore-and-close. Until a verified setting has
-                // changed, both return to the owning title page without
-                // inventing a keyboard mapping for its mouse-only controls.
-                vm.set_system_page(MinoriSystemPage::Title, 0)
-                    .map_err(runtime_error)?;
-            }
             _ => {}
         }
         if action != MinoriSystemUiAction::Present {
@@ -4008,6 +4087,142 @@ fn apply_system_ui_input(
         }
     }
     Ok(action)
+}
+
+fn apply_config_input(
+    vm: &mut MinoriVm,
+    input: &LegacyStepInput,
+) -> Result<MinoriSystemUiAction, LegacyProviderError> {
+    let apply = input
+        .input_edges
+        .iter()
+        .any(|edge| edge.pressed && matches!(edge.control.as_str(), "enter" | "space"));
+    let cancel = input
+        .input_edges
+        .iter()
+        .any(|edge| edge.pressed && edge.control == "escape");
+    let pointer_pressed = input
+        .input_edges
+        .iter()
+        .any(|edge| edge.pressed && edge.control == MINORI_POINTER_PRIMARY);
+    let pointer_moved = input
+        .input_edges
+        .iter()
+        .any(|edge| matches!(edge.control.as_str(), MINORI_POINTER_X | MINORI_POINTER_Y));
+    let pointer_action =
+        pointer_pressed || (pointer_moved && vm.state().system_ui.pointer_primary_pressed);
+    let action_count = usize::from(apply) + usize::from(cancel) + usize::from(pointer_action);
+    if action_count > 1 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_INPUT_AMBIGUOUS",
+            "config apply, cancel, and pointer controls cannot share one fixed tick",
+        ));
+    }
+    let control = if apply {
+        Some(MinoriConfigControl::Apply)
+    } else if cancel {
+        Some(MinoriConfigControl::Cancel)
+    } else if pointer_action {
+        config_control_at(
+            vm.state().system_ui.pointer_x,
+            vm.state().system_ui.pointer_y,
+        )
+    } else {
+        None
+    };
+    let Some(control) = control else {
+        return Ok(MinoriSystemUiAction::Present);
+    };
+    match vm.apply_config_control(control).map_err(runtime_error)? {
+        MinoriConfigChange::Present => Ok(MinoriSystemUiAction::Present),
+        MinoriConfigChange::AudioParamsChanged => Ok(MinoriSystemUiAction::PresentWithAudioRefresh),
+        MinoriConfigChange::Applied | MinoriConfigChange::Cancelled => {
+            Ok(MinoriSystemUiAction::PresentAfterConfigClose)
+        }
+        MinoriConfigChange::TestAudio(bus) => Ok(MinoriSystemUiAction::PresentWithAudioTest(bus)),
+    }
+}
+
+fn config_control_at(x: i32, y: i32) -> Option<MinoriConfigControl> {
+    let slider_value = |track_left: i32| {
+        let position = (x - track_left - 11).clamp(0, 200);
+        u8::try_from(position * 100 / 200).expect("clamped config slider fits u8")
+    };
+    if (40..260).contains(&x) {
+        return match y {
+            152..192 => Some(MinoriConfigControl::MessageSpeedUnread(slider_value(40))),
+            228..268 => Some(MinoriConfigControl::MessageSpeedRead(slider_value(40))),
+            304..340 => Some(MinoriConfigControl::MessageSpeedAutoPlay(slider_value(40))),
+            _ => None,
+        };
+    }
+    if (576..796).contains(&x) {
+        return match y {
+            148..188 => Some(MinoriConfigControl::BgmVolume(slider_value(576))),
+            224..264 => Some(MinoriConfigControl::VoiceVolume(slider_value(576))),
+            300..336 => Some(MinoriConfigControl::SeVolume(slider_value(576))),
+            _ => config_non_slider_control_at(x, y),
+        };
+    }
+    config_non_slider_control_at(x, y)
+}
+
+fn config_non_slider_control_at(x: i32, y: i32) -> Option<MinoriConfigControl> {
+    let hit = |left, top, right, bottom| (left..right).contains(&x) && (top..bottom).contains(&y);
+    let control = if hit(248, 492, 276, 512) {
+        MinoriConfigControl::FontPrevious
+    } else if hit(248, 524, 276, 548) {
+        MinoriConfigControl::FontNext
+    } else if hit(36, 592, 132, 616) {
+        MinoriConfigControl::PreferredPlayMode(MinoriPlayMode::Auto)
+    } else if hit(148, 592, 268, 616) {
+        MinoriConfigControl::PreferredPlayMode(MinoriPlayMode::Skip)
+    } else if hit(312, 120, 456, 152) {
+        MinoriConfigControl::Fullscreen(true)
+    } else if hit(312, 164, 456, 196) {
+        MinoriConfigControl::Fullscreen(false)
+    } else if hit(312, 248, 544, 280) {
+        MinoriConfigControl::ToggleScreenEffect
+    } else if hit(312, 292, 544, 320) {
+        MinoriConfigControl::ToggleTextShadow
+    } else if hit(312, 336, 544, 364) {
+        MinoriConfigControl::ToggleAnimation
+    } else if hit(312, 424, 512, 472) {
+        MinoriConfigControl::ToggleBacklogVoicePlayback
+    } else if hit(312, 476, 512, 524) {
+        MinoriConfigControl::ToggleStopVoiceAtNextMessage
+    } else if hit(312, 572, 512, 620) {
+        MinoriConfigControl::ToggleProgressInBackground
+    } else if hit(680, 120, 740, 144) {
+        MinoriConfigControl::ToggleBgmMute
+    } else if hit(680, 196, 740, 220) {
+        MinoriConfigControl::ToggleVoiceMute
+    } else if hit(680, 268, 740, 292) {
+        MinoriConfigControl::ToggleSeMute
+    } else if hit(744, 120, 780, 144) {
+        MinoriConfigControl::TestAudio(MinoriConfigAudioBus::Bgm)
+    } else if hit(744, 196, 780, 220) {
+        MinoriConfigControl::TestAudio(MinoriConfigAudioBus::Voice)
+    } else if hit(744, 268, 780, 292) {
+        MinoriConfigControl::TestAudio(MinoriConfigAudioBus::Se)
+    } else if hit(578, 433, 688, 465) {
+        MinoriConfigControl::ToggleCharacterVoice(0)
+    } else if hit(578, 470, 688, 502) {
+        MinoriConfigControl::ToggleCharacterVoice(1)
+    } else if hit(578, 508, 688, 540) {
+        MinoriConfigControl::ToggleCharacterVoice(2)
+    } else if hit(578, 545, 688, 577) {
+        MinoriConfigControl::ToggleCharacterVoice(3)
+    } else if hit(699, 433, 776, 465) {
+        MinoriConfigControl::ToggleCharacterVoice(4)
+    } else if hit(592, 600, 648, 640) {
+        MinoriConfigControl::Apply
+    } else if hit(701, 600, 775, 640) {
+        MinoriConfigControl::Cancel
+    } else {
+        return None;
+    };
+    Some(control)
 }
 
 fn backlog_wheel_direction(input: &LegacyStepInput) -> Result<Option<i32>, LegacyProviderError> {
@@ -4144,10 +4359,11 @@ fn append_validated_audio_commands<'a>(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
     commands: impl IntoIterator<Item = &'a MinoriAudioCommand>,
+    state: &MinoriRuntimeState,
     output: &mut Vec<LegacySequenced<LegacyAudioCommandV1>>,
 ) -> Result<(), LegacyProviderError> {
     for command in commands {
-        let (sequence, command) = map_audio_command(command);
+        let (sequence, command) = map_audio_command(command, state)?;
         if let LegacyAudioCommandV1::LoadResource { resource_uri, .. } = &command {
             let stat = vfs.stat_file(mount_set_id, resource_uri)?;
             if stat.len == 0 || stat.len > MAX_RESOURCE_BYTES {
@@ -4577,6 +4793,9 @@ fn describe_system_page(
             "verified Minori system pages require the 1280x720 reference stage",
         ));
     }
+    if vm.state().system_ui.page == MinoriSystemPage::Config {
+        return describe_config_page(vfs, mount_set_id, width, height, vm);
+    }
     let resource_uri = match vm.state().system_ui.page {
         MinoriSystemPage::Title => match vm.title_variant() {
             0 => "minori:/sys/topMenu0.png",
@@ -4590,7 +4809,7 @@ fn describe_system_page(
             }
         },
         MinoriSystemPage::Load => "minori:/sys/saveloadBase.png",
-        MinoriSystemPage::Config => "minori:/sys/configBase.png",
+        MinoriSystemPage::Config => unreachable!("config uses its stateful presentation path"),
         MinoriSystemPage::Memories => "minori:/sys/memories.png",
         MinoriSystemPage::GalleryCg => "minori:/sys/cgmode0.png",
         MinoriSystemPage::GalleryBgm => "minori:/sys/musicPage1.png",
@@ -4628,6 +4847,129 @@ fn describe_system_page(
         width,
         height,
         texture_resources: vec![resource],
+        draws,
+    };
+    frame.validate()?;
+    Ok(frame)
+}
+
+fn describe_config_page(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+    vm: &MinoriVm,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    let base = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/configBase.png",
+        MINORI_SYSTEM_TEXTURE_ID,
+    )?;
+    let knob = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/knob.png",
+        MINORI_CONFIG_KNOB_TEXTURE_ID,
+    )?;
+    let checkmark = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/checkmark.png",
+        MINORI_CONFIG_CHECKMARK_TEXTURE_ID,
+    )?;
+    let circle = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/circle.png",
+        MINORI_CONFIG_CIRCLE_TEXTURE_ID,
+    )?;
+    if (base.decoded_width, base.decoded_height) != (width, height)
+        || (knob.decoded_width, knob.decoded_height) != (15, 25)
+        || (checkmark.decoded_width, checkmark.decoded_height) != (21, 32)
+        || (circle.decoded_width, circle.decoded_height) != (74, 74)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_RESOURCE_DIMENSIONS",
+            "config resources do not match the verified dimensions",
+        ));
+    }
+    let config = vm.config_for_presentation().map_err(runtime_error)?;
+    let mut draws = Vec::with_capacity(24);
+    append_texture_draw(&base, 0, 0, 1.0, &mut draws)?;
+    for (value, left, top) in [
+        (config.message_speed_unread, 42, 159),
+        (config.message_speed_read, 42, 235),
+        (config.message_speed_auto_play, 42, 310),
+        (config.bgm_volume, 578, 156),
+        (config.voice_volume, 578, 231),
+        (config.se_volume, 578, 305),
+    ] {
+        append_texture_draw(&knob, left + i32::from(value) * 2, top, 1.0, &mut draws)?;
+    }
+    let mut checks = Vec::with_capacity(15);
+    checks.push(match config.preferred_play_mode {
+        MinoriPlayMode::Auto => (40, 588),
+        MinoriPlayMode::Skip => (153, 588),
+        MinoriPlayMode::Normal => {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_CONFIG_PLAY_MODE",
+                "config preferred play mode is not verified",
+            ));
+        }
+    });
+    checks.push(if config.fullscreen {
+        (319, 120)
+    } else {
+        (319, 164)
+    });
+    for (enabled, position) in [
+        (config.screen_effect, (319, 248)),
+        (config.text_shadow, (319, 292)),
+        (config.animation, (319, 336)),
+        (config.backlog_voice_playback, (319, 424)),
+        (config.stop_voice_at_next_message, (319, 476)),
+        (config.progress_in_background, (319, 572)),
+        (config.bgm_muted, (684, 117)),
+        (config.voice_muted, (684, 193)),
+        (config.se_muted, (684, 265)),
+    ] {
+        if enabled {
+            checks.push(position);
+        }
+    }
+    for (enabled, position) in config.character_voice_enabled.iter().copied().zip([
+        (575, 424),
+        (575, 461),
+        (575, 499),
+        (575, 536),
+        (696, 424),
+    ]) {
+        if enabled {
+            checks.push(position);
+        }
+    }
+    for (left, top) in checks {
+        append_texture_draw(&checkmark, left, top, 1.0, &mut draws)?;
+    }
+    let pointer = (
+        vm.state().system_ui.pointer_x,
+        vm.state().system_ui.pointer_y,
+    );
+    let hover_circle = if (592..648).contains(&pointer.0) && (600..640).contains(&pointer.1) {
+        Some((584, 584))
+    } else if (701..775).contains(&pointer.0) && (600..640).contains(&pointer.1) {
+        Some((701, 584))
+    } else {
+        None
+    };
+    if let Some((left, top)) = hover_circle {
+        append_texture_draw(&circle, left, top, 1.0, &mut draws)?;
+    }
+    let frame = LegacyRenderResourceFrameV1 {
+        width,
+        height,
+        texture_resources: vec![base, knob, checkmark, circle],
         draws,
     };
     frame.validate()?;
@@ -5541,11 +5883,30 @@ mod tests {
                 ExtendedColorType::Rgba8,
             )
             .unwrap();
+        let encode_rgba = |width: u32, height: u32| {
+            let mut png = Vec::new();
+            PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![0; usize::try_from(width * height * 4).unwrap()],
+                    width,
+                    height,
+                    ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
         let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
             scripts: BTreeMap::from([
                 ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
                 ("minori:/sys/topMenu0.png".into(), page_png.clone()),
                 ("minori:/sys/configBase.png".into(), page_png.clone()),
+                ("minori:/sys/knob.png".into(), encode_rgba(15, 25)),
+                ("minori:/sys/checkmark.png".into(), encode_rgba(21, 32)),
+                ("minori:/sys/circle.png".into(), encode_rgba(74, 74)),
+                (
+                    "minori:/sys/BGMtest.wav".into(),
+                    b"RIFF\x04\0\0\0WAVE".to_vec(),
+                ),
                 ("minori:/sys/saveloadBase.png".into(), page_png),
             ]),
         }));
@@ -5603,7 +5964,7 @@ mod tests {
         let title_revision = title.live.resource_scenes[0].value.texture_resources[0].revision;
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
 
         let config = provider
@@ -5639,12 +6000,78 @@ mod tests {
             config.live.resource_scenes[0].value.texture_resources[0].resource_uri,
             "minori:/sys/configBase.png"
         );
+        assert_eq!(
+            config.live.resource_scenes[0].value.texture_resources.len(),
+            4
+        );
+        assert_eq!(config.live.resource_scenes[0].value.draws.len(), 18);
         assert_eq!(config.control.blackboard.len(), 1);
         assert_eq!(config.control.blackboard[0].value, "config");
         assert_ne!(
             config.live.resource_scenes[0].value.texture_resources[0].revision,
             title_revision
         );
+        let audio_test = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_X.into(),
+                            pressed: false,
+                            value: 750.0,
+                            sequence: 1,
+                        },
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_Y.into(),
+                            pressed: false,
+                            value: 130.0,
+                            sequence: 2,
+                        },
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_PRIMARY.into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 3,
+                        },
+                    ],
+                    ..step_input(4, Vec::new())
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            audio_test.live.audio_commands.as_slice(),
+            [
+                LegacySequenced {
+                    value: LegacyAudioCommandV1::LoadResource {
+                        encoding: LegacyAudioEncoding::Wav,
+                        resource_uri,
+                        ..
+                    },
+                    ..
+                },
+                LegacySequenced {
+                    value: LegacyAudioCommandV1::Play { repeat: false, .. },
+                    ..
+                }
+            ] if resource_uri == "minori:/sys/BGMtest.wav"
+        ));
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: MINORI_POINTER_PRIMARY.into(),
+                        pressed: false,
+                        value: 0.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(5, Vec::new())
+                },
+            )
+            .unwrap();
         let title_after_config = provider
             .step(
                 &ctx,
@@ -5656,7 +6083,7 @@ mod tests {
                         value: 1.0,
                         sequence: 1,
                     }],
-                    ..step_input(4, Vec::new())
+                    ..step_input(6, Vec::new())
                 },
             )
             .unwrap();
@@ -5716,6 +6143,84 @@ mod tests {
                 .resource_uri,
             "minori:/sys/topMenu0.png"
         );
+    }
+
+    #[test]
+    fn config_hit_map_clamps_sliders_and_preserves_original_action_regions() {
+        assert_eq!(
+            config_control_at(40, 160),
+            Some(MinoriConfigControl::MessageSpeedUnread(0))
+        );
+        assert_eq!(
+            config_control_at(151, 160),
+            Some(MinoriConfigControl::MessageSpeedUnread(50))
+        );
+        assert_eq!(
+            config_control_at(259, 160),
+            Some(MinoriConfigControl::MessageSpeedUnread(100))
+        );
+        assert_eq!(
+            config_control_at(700, 130),
+            Some(MinoriConfigControl::ToggleBgmMute)
+        );
+        assert_eq!(
+            config_control_at(750, 205),
+            Some(MinoriConfigControl::TestAudio(MinoriConfigAudioBus::Voice))
+        );
+        assert_eq!(
+            config_control_at(610, 620),
+            Some(MinoriConfigControl::Apply)
+        );
+        assert_eq!(config_control_at(0, 0), None);
+    }
+
+    #[test]
+    fn config_volume_and_mute_are_applied_at_the_shared_audio_boundary() {
+        let source = b".end\r\n";
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap(),
+            7,
+        )
+        .unwrap();
+        let mut state = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        state.system_ui.config.bgm_volume = 40;
+        state.audio.insert(
+            0,
+            crate::MinoriAudioState {
+                bus: "bgm".into(),
+                encoding: MinoriAudioEncoding::Ogg,
+                resource_uri: "minori:/bgm/test.ogg".into(),
+                looped: true,
+                volume_milli: 500,
+                pan_milli: 0,
+                playing: true,
+                continuation_pts: 0,
+            },
+        );
+        vm.restore_state(&postcard::to_allocvec(&state).unwrap())
+            .unwrap();
+        let (_, mapped) = map_audio_command(
+            &MinoriAudioCommand::SetParams {
+                sequence: 1,
+                stream_id: 0,
+                volume: 0.5,
+                pan: 0.0,
+                repeat: true,
+            },
+            vm.state(),
+        )
+        .unwrap();
+        assert!(matches!(
+            mapped,
+            LegacyAudioCommandV1::SetParams { volume, .. } if (volume - 0.2).abs() < f32::EPSILON
+        ));
+        let mut state = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        state.system_ui.config.bgm_muted = true;
+        vm.restore_state(&postcard::to_allocvec(&state).unwrap())
+            .unwrap();
+        assert_eq!(effective_audio_volume(vm.state(), 0, 0.5).unwrap(), 0.0);
     }
 
     #[test]
@@ -5913,7 +6418,7 @@ mod tests {
         provider.restore(&ctx, &session, &snapshot).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
     }
 
@@ -6230,7 +6735,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         provider.restore(&ctx, &session, &snapshot).unwrap();
 
@@ -6813,7 +7318,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         let terminal = provider
             .step(
@@ -6891,7 +7396,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         provider.restore(&ctx, &session, &snapshot).unwrap();
     }
@@ -6977,7 +7482,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         provider.restore(&ctx, &session, &snapshot).unwrap();
     }
@@ -7363,7 +7868,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         provider.restore(&ctx, &session, &snapshot).unwrap();
     }
@@ -7452,7 +7957,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         provider.restore(&ctx, &session, &snapshot).unwrap();
     }
@@ -7522,7 +8027,7 @@ mod tests {
         let snapshot = provider.save(&ctx, &session).unwrap();
         assert_eq!(
             snapshot.family_sections[0].version,
-            SchemaVersion::new(21, 0, 0)
+            SchemaVersion::new(23, 0, 0)
         );
         provider.restore(&ctx, &session, &snapshot).unwrap();
     }

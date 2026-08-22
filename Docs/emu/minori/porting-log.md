@@ -330,3 +330,10 @@ python Tools/check_docs.py
 - 产品路径的长帧最终定位为过大的 timestamp query 在途窗口触发 `wgpu::Queue::submit` 周期性背压，而不是 Minori VM、scene build 或 GPU draw 超限。Headless performance observer 现在显式声明最多两个 GPU frame profile 在途，PlatformHost 会校验该值落在 query ring 的安全范围内；缺失或越界直接阻断。正式调度沿用平台公共 scheduling guard，renderer 与 driver identity 从 artifact manifest 读取，不再由 family 字段代填。
 - 同一 clean Release build、package、profile、物理输入、adapter 与 driver identity 连续完成三次正式运行。每次均执行 36600 fixed tick、73200 presentation，其中 1200 帧 warmup、72000 帧进入十分钟测量窗；deadline miss、audio underflow、scene full resync、trace dropped、稳定段 upload/readback/allocation 与 memory growth 都为 0，trace 未截断。三次 runtime p99 分别为 0.2841、0.2725、0.2938 ms，presentation p99 分别为 1.11064、0.97864、0.81456 ms，最大 presentation 分别为 6.8416、7.81664、3.51376 ms。正式 Minori GPU 性能 E2 至此通过。
 - 该负载使用真实八包、签名动态 provider、VFS、RuntimeWorld、retained gameplay scene 与七条序列化物理输入，但停留在静态标题场景，未到 terminal，音频为静音。它只关闭持续 GPU 提交与运行时预算，不替代完整路线、影片/音频、正式视觉 review 或 Windows E3。
+
+### 2026-08-22 Config 动作与状态层
+
+- 本轮 rebase 前后都确认 `origin/master` 已是当前分支祖先，没有产生冲突或改写既有提交。
+- IDA 复核 `SystemMenuConfig` 构造、命中函数和 action dispatcher，确认 29 类动作、六条滑块公式、Apply/Cancel 语义和 `configBase.png`、`knob.png`、`checkmark.png`、`circle.png` 四类资源。研究记录只保存函数地址、字段语义和尺寸，不保存商业图片或私有路径。
+- runtime state 硬切到 v23。Config 使用独立 draft，Apply 原子提交，Cancel 丢弃修改；页面内 snapshot/restore 保留 draft 和指针状态。provider 只接受物理 pointer/Enter/Escape，使用原坐标命中区，不提供方向键替代。四类资源经 retained Scene2D 组合，尺寸漂移直接阻断。
+- BGM/Voice/SE 音量与静音在公共 audio command 边界计算；试听资源显式标为 WAV，离开 Config 时停止专用试听 stream，不把一次性试听带进 restore continuation。114 个 library tests 和目标 crate clippy 通过。这是 E1：真实资源 Headless 视觉、全屏 Host effect、逐字速度、视觉开关和角色语音筛选仍开放。

@@ -41,6 +41,8 @@ event loop owner。开发复用 Release 分发包已通过签名、ABI、FVP pro
 
 正式 review contract 随后硬切到 v3。bundle 已要求完整 WAV，但旧 review 没有把 verdict 绑定到音频文件；v3 同时绑定 run report、review bundle 和 selected audio role/path/hash，CLI validator 还会复算实际 artifact hash。protocol、Python platform acceptance 和 release preflight 都会阻断缺失、额外、失败或 identity drift。v193 的 27260416 个 audio frame 已按连续区间生成 10 段 local-private 听审输入，catalog coverage 与源文件完全相等且 hash 匹配 bundle。具名逐段听审尚未完成，因此 Stage 5 状态不变。
 
+2026 年 8 月 22 日，Minori Config 从静态 base 页面推进到 v23 状态层。原程序 29 类 action、鼠标命中区和滑块换算已经进入 draft transaction；`knob`、`checkmark`、`circle` 作为 retained overlay 与 base 合成。公共音频边界应用 BGM/Voice/SE 音量和静音，试听使用显式 WAV encoding，退出页面会停止专用 stream。定向测试和该 crate 的 114 项 library tests 通过；真实 Headless Config checkpoint、全屏 Host effect、逐字速度、视觉开关、角色语音筛选和 Windows E3 仍开放，Stage 5 保持 `IN_PROGRESS`。
+
 后续 Headless 修正了按采样间隔保留 surface 导致的 stale checkpoint：每个显式 checkpoint 都会先提交待处理 Scene2D 并排空 receipt，Config 与 backlog 的真实短程截图现能分别证明页面打开和关闭。decoded video 通过公共 `SceneCommand::VideoFrame` 合成；脚本未标为 skippable 的首轮 movie 不接受 Control 跳过。真实影片 checkpoint 进一步修正了 transient draw blend 和公共 WGPU atlas 连续帧 placement 生命周期；人工查看确认 decoded frame 非空、比例正确，剧情层文字合成无裁剪或旧帧残留。公共 Kira main track 使用成熟 Compressor 组成显式 peak limiter，并在前后各保留 meter。完整路线记录约 2.71 的 pre-master peak，但 master output peak 约 0.990、overload 为 0、underflow 为 0，完整 WAV 非静音且低于 i16 full scale；blocked machine report 写完后返回非零退出码。标题启动路线完成 28814 fixed steps、2480 个呈现帧、20058 条物理输入、30 个 checkpoint、snapshot、用户 save/restore 和 terminal。该证据仍缺自然鉴赏解锁和 Windows E3，Stage 5 继续保持 `IN_PROGRESS`。
 
 clear flag 的处理现已收紧到原程序确认的四个精确名称。runtime 只保存对应的脱敏 unlock identity，snapshot restore 会校验集合边界；provider 只报告 session 内 unlock count。任意未知 `CLEAR` 名称都会被忽略。平台 global progress 的原子提交、新 session 恢复和标题资源切换尚未实现，因此这项局部证据不会提升自然鉴赏或 Windows E3 状态。

@@ -10,7 +10,7 @@ use crate::{
     SourceSpan,
 };
 
-pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v22";
+pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v23";
 
 const MINORI_BACKLOG_MAX_ENTRIES: usize = 16_384;
 const MINORI_BACKLOG_MAX_ENTRY_BYTES: usize = 64 * 1024;
@@ -46,6 +46,9 @@ const MINORI_CHARACTER_MAX_COORDINATE: i32 = 65_536;
 const MINORI_CHARACTER_MAX_TRANSITION_MS: u32 = 60_000;
 const MINORI_AXIS_SCROLL_MAX_COORDINATE: i32 = 65_536;
 const MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS: i32 = 10_000;
+const MINORI_CONFIG_TEST_BGM_STREAM_ID: u32 = 0xffff_ff00;
+const MINORI_CONFIG_TEST_VOICE_STREAM_ID: u32 = 0xffff_ff01;
+const MINORI_CONFIG_TEST_SE_STREAM_ID: u32 = 0xffff_ff02;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriRuntimeState {
@@ -436,12 +439,20 @@ pub struct MinoriWScroll2Frame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriAudioState {
     pub bus: String,
+    pub encoding: MinoriAudioEncoding,
     pub resource_uri: String,
     pub looped: bool,
     pub volume_milli: u16,
     pub pan_milli: i16,
     pub playing: bool,
     pub continuation_pts: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MinoriAudioEncoding {
+    Ogg,
+    Wav,
 }
 
 /// Resource token accepted by the original BGM/SE path. The bracket suffix is
@@ -503,9 +514,8 @@ pub struct MinoriSystemUiState {
     pub page: MinoriSystemPage,
     pub focus_index: u32,
     pub play_mode: MinoriPlayMode,
-    pub preferred_play_mode: MinoriPlayMode,
-    /// Original `messageSpeedAutoPlay` setting in 10 ms units.
-    pub auto_wait_ticks: u32,
+    pub config: MinoriConfigState,
+    pub config_draft: Option<MinoriConfigState>,
     /// Script-owned permission corresponding to the original
     /// `skip_enable`/`skip_disable` pragma state. It defaults to enabled at
     /// scene construction and remains independent from Control input gating.
@@ -517,6 +527,7 @@ pub struct MinoriSystemUiState {
     pub control_pressed: bool,
     pub pointer_x: i32,
     pub pointer_y: i32,
+    pub pointer_primary_pressed: bool,
     pub backlog_cursor: Option<u32>,
     pub pending_save_slot: Option<u32>,
     pub pending_load_slot: Option<u32>,
@@ -528,18 +539,113 @@ impl Default for MinoriSystemUiState {
             page: MinoriSystemPage::None,
             focus_index: 0,
             play_mode: MinoriPlayMode::Normal,
-            preferred_play_mode: MinoriPlayMode::Auto,
-            auto_wait_ticks: 50,
+            config: MinoriConfigState::default(),
+            config_draft: None,
             skip_enabled: true,
             control_enabled: false,
             control_pressed: false,
             pointer_x: 0,
             pointer_y: 0,
+            pointer_primary_pressed: false,
             backlog_cursor: None,
             pending_save_slot: None,
             pending_load_slot: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriConfigState {
+    pub message_speed_unread: u8,
+    pub message_speed_read: u8,
+    /// Original `messageSpeedAutoPlay` setting in 10 ms units.
+    pub message_speed_auto_play: u8,
+    pub font_index: u32,
+    pub preferred_play_mode: MinoriPlayMode,
+    pub fullscreen: bool,
+    pub screen_effect: bool,
+    pub animation: bool,
+    pub text_shadow: bool,
+    pub backlog_voice_playback: bool,
+    pub stop_voice_at_next_message: bool,
+    pub progress_in_background: bool,
+    pub bgm_volume: u8,
+    pub voice_volume: u8,
+    pub se_volume: u8,
+    pub bgm_muted: bool,
+    pub voice_muted: bool,
+    pub se_muted: bool,
+    /// Original order: ren, sui, aya, tou, etc.
+    pub character_voice_enabled: [bool; 5],
+}
+
+impl Default for MinoriConfigState {
+    fn default() -> Self {
+        Self {
+            message_speed_unread: 50,
+            message_speed_read: 50,
+            message_speed_auto_play: 50,
+            font_index: 0,
+            preferred_play_mode: MinoriPlayMode::Auto,
+            fullscreen: false,
+            screen_effect: true,
+            animation: true,
+            text_shadow: true,
+            backlog_voice_playback: true,
+            stop_voice_at_next_message: false,
+            progress_in_background: false,
+            bgm_volume: 100,
+            voice_volume: 100,
+            se_volume: 100,
+            bgm_muted: false,
+            voice_muted: false,
+            se_muted: false,
+            character_voice_enabled: [true; 5],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinoriConfigAudioBus {
+    Bgm,
+    Voice,
+    Se,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinoriConfigControl {
+    MessageSpeedUnread(u8),
+    MessageSpeedRead(u8),
+    MessageSpeedAutoPlay(u8),
+    FontPrevious,
+    FontNext,
+    PreferredPlayMode(MinoriPlayMode),
+    Fullscreen(bool),
+    ToggleScreenEffect,
+    ToggleTextShadow,
+    ToggleAnimation,
+    ToggleBacklogVoicePlayback,
+    ToggleStopVoiceAtNextMessage,
+    ToggleProgressInBackground,
+    BgmVolume(u8),
+    VoiceVolume(u8),
+    SeVolume(u8),
+    ToggleBgmMute,
+    ToggleVoiceMute,
+    ToggleSeMute,
+    TestAudio(MinoriConfigAudioBus),
+    ToggleCharacterVoice(usize),
+    Apply,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinoriConfigChange {
+    Present,
+    AudioParamsChanged,
+    TestAudio(MinoriConfigAudioBus),
+    Applied,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -595,6 +701,7 @@ pub enum MinoriAudioCommand {
     LoadResource {
         sequence: u64,
         stream_id: u32,
+        encoding: MinoriAudioEncoding,
         resource_uri: String,
     },
     Play {
@@ -878,6 +985,7 @@ impl MinoriVm {
         self.state.launch_mode = MinoriLaunchMode::Title;
         self.state.system_ui.page = MinoriSystemPage::Title;
         self.state.system_ui.focus_index = 0;
+        self.state.system_ui.config_draft = None;
         Ok(())
     }
 
@@ -977,6 +1085,7 @@ impl MinoriVm {
                 VOICE_STREAM_ID,
                 MinoriAudioState {
                     bus: "voice".into(),
+                    encoding: MinoriAudioEncoding::Ogg,
                     resource_uri: voice.resource_uri,
                     looped: false,
                     volume_milli: voice.volume_milli,
@@ -1009,12 +1118,310 @@ impl MinoriVm {
         page: MinoriSystemPage,
         focus_index: u32,
     ) -> Result<(), MinoriRuntimeError> {
-        if self.state.launch_mode != MinoriLaunchMode::Title || self.state.terminal {
+        if self.state.launch_mode != MinoriLaunchMode::Title
+            || self.state.terminal
+            || page == MinoriSystemPage::Config
+            || self.state.system_ui.page == MinoriSystemPage::Config
+        {
             return Err(MinoriRuntimeError::State);
         }
         self.state.system_ui.page = page;
         self.state.system_ui.focus_index = focus_index;
         Ok(())
+    }
+
+    pub fn open_config(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.launch_mode != MinoriLaunchMode::Title
+            || self.state.system_ui.page != MinoriSystemPage::Title
+            || self.state.system_ui.config_draft.is_some()
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.config_draft = Some(self.state.system_ui.config.clone());
+        self.state.system_ui.page = MinoriSystemPage::Config;
+        self.state.system_ui.focus_index = 0;
+        Ok(())
+    }
+
+    pub fn config_for_presentation(&self) -> Result<&MinoriConfigState, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Config {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state
+            .system_ui
+            .config_draft
+            .as_ref()
+            .ok_or(MinoriRuntimeError::State)
+    }
+
+    pub fn apply_config_control(
+        &mut self,
+        control: MinoriConfigControl,
+    ) -> Result<MinoriConfigChange, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Config
+            || self.state.system_ui.config_draft.is_none()
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        if control == MinoriConfigControl::Apply {
+            validate_config_state(
+                self.state
+                    .system_ui
+                    .config_draft
+                    .as_ref()
+                    .ok_or(MinoriRuntimeError::State)?,
+            )?;
+            let draft = self
+                .state
+                .system_ui
+                .config_draft
+                .take()
+                .ok_or(MinoriRuntimeError::State)?;
+            self.state.system_ui.config = draft;
+            self.state.system_ui.page = MinoriSystemPage::Title;
+            self.state.system_ui.focus_index = 0;
+            return Ok(MinoriConfigChange::Applied);
+        }
+        if control == MinoriConfigControl::Cancel {
+            self.state.system_ui.config_draft = None;
+            self.state.system_ui.page = MinoriSystemPage::Title;
+            self.state.system_ui.focus_index = 0;
+            return Ok(MinoriConfigChange::Cancelled);
+        }
+        let draft = self
+            .state
+            .system_ui
+            .config_draft
+            .as_mut()
+            .ok_or(MinoriRuntimeError::State)?;
+        let change = match control {
+            MinoriConfigControl::MessageSpeedUnread(value) => {
+                draft.message_speed_unread = value;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::MessageSpeedRead(value) => {
+                draft.message_speed_read = value;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::MessageSpeedAutoPlay(value) => {
+                draft.message_speed_auto_play = value;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::FontPrevious => {
+                draft.font_index = 0;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::FontNext => {
+                draft.font_index = 0;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::PreferredPlayMode(mode) => {
+                if mode == MinoriPlayMode::Normal {
+                    return Err(MinoriRuntimeError::State);
+                }
+                draft.preferred_play_mode = mode;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::Fullscreen(value) => {
+                draft.fullscreen = value;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::ToggleScreenEffect => {
+                draft.screen_effect = !draft.screen_effect;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::ToggleTextShadow => {
+                draft.text_shadow = !draft.text_shadow;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::ToggleAnimation => {
+                draft.animation = !draft.animation;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::ToggleBacklogVoicePlayback => {
+                draft.backlog_voice_playback = !draft.backlog_voice_playback;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::ToggleStopVoiceAtNextMessage => {
+                draft.stop_voice_at_next_message = !draft.stop_voice_at_next_message;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::ToggleProgressInBackground => {
+                draft.progress_in_background = !draft.progress_in_background;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::BgmVolume(value) => {
+                draft.bgm_volume = value;
+                MinoriConfigChange::AudioParamsChanged
+            }
+            MinoriConfigControl::VoiceVolume(value) => {
+                draft.voice_volume = value;
+                MinoriConfigChange::AudioParamsChanged
+            }
+            MinoriConfigControl::SeVolume(value) => {
+                draft.se_volume = value;
+                MinoriConfigChange::AudioParamsChanged
+            }
+            MinoriConfigControl::ToggleBgmMute => {
+                draft.bgm_muted = !draft.bgm_muted;
+                MinoriConfigChange::AudioParamsChanged
+            }
+            MinoriConfigControl::ToggleVoiceMute => {
+                draft.voice_muted = !draft.voice_muted;
+                MinoriConfigChange::AudioParamsChanged
+            }
+            MinoriConfigControl::ToggleSeMute => {
+                draft.se_muted = !draft.se_muted;
+                MinoriConfigChange::AudioParamsChanged
+            }
+            MinoriConfigControl::TestAudio(bus) => MinoriConfigChange::TestAudio(bus),
+            MinoriConfigControl::ToggleCharacterVoice(index) => {
+                let enabled = draft
+                    .character_voice_enabled
+                    .get_mut(index)
+                    .ok_or(MinoriRuntimeError::State)?;
+                *enabled = !*enabled;
+                MinoriConfigChange::Present
+            }
+            MinoriConfigControl::Apply | MinoriConfigControl::Cancel => unreachable!(),
+        };
+        validate_config_state(draft)?;
+        Ok(change)
+    }
+
+    pub fn config_audio_param_commands(
+        &mut self,
+    ) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Config
+            && self.state.system_ui.page != MinoriSystemPage::Title
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        let active = self
+            .state
+            .audio
+            .iter()
+            .filter(|(_, state)| state.playing)
+            .map(|(stream_id, state)| (*stream_id, state.clone()))
+            .collect::<Vec<_>>();
+        let mut commands = Vec::with_capacity(active.len());
+        for (stream_id, state) in active {
+            commands.push(MinoriAudioCommand::SetParams {
+                sequence: next_effect_sequence(&mut self.state)?,
+                stream_id,
+                volume: f32::from(state.volume_milli) / 1000.0,
+                pan: f32::from(state.pan_milli) / 1000.0,
+                repeat: state.looped,
+            });
+        }
+        Ok(commands)
+    }
+
+    pub fn close_config_audio_commands(
+        &mut self,
+    ) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Title
+            || self.state.system_ui.config_draft.is_some()
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        let mut commands = Vec::new();
+        for stream_id in [
+            MINORI_CONFIG_TEST_BGM_STREAM_ID,
+            MINORI_CONFIG_TEST_VOICE_STREAM_ID,
+            MINORI_CONFIG_TEST_SE_STREAM_ID,
+        ] {
+            if self
+                .state
+                .audio
+                .get(&stream_id)
+                .is_some_and(|current| current.playing)
+            {
+                commands.push(MinoriAudioCommand::Stop {
+                    sequence: next_effect_sequence(&mut self.state)?,
+                    stream_id,
+                    fade_ms: 0,
+                });
+                self.state
+                    .audio
+                    .get_mut(&stream_id)
+                    .ok_or(MinoriRuntimeError::State)?
+                    .playing = false;
+            }
+        }
+        commands.extend(self.config_audio_param_commands()?);
+        Ok(commands)
+    }
+
+    pub fn config_test_audio_commands(
+        &mut self,
+        bus: MinoriConfigAudioBus,
+    ) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::Config
+            || self.state.system_ui.config_draft.is_none()
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        let (stream_id, bus_name, resource_uri) = match bus {
+            MinoriConfigAudioBus::Bgm => (
+                MINORI_CONFIG_TEST_BGM_STREAM_ID,
+                "bgm",
+                "minori:/sys/BGMtest.wav",
+            ),
+            MinoriConfigAudioBus::Voice => (
+                MINORI_CONFIG_TEST_VOICE_STREAM_ID,
+                "voice",
+                "minori:/sys/VOICEtest.wav",
+            ),
+            MinoriConfigAudioBus::Se => (
+                MINORI_CONFIG_TEST_SE_STREAM_ID,
+                "se",
+                "minori:/sys/SEtest.wav",
+            ),
+        };
+        let mut commands = Vec::with_capacity(3);
+        if self
+            .state
+            .audio
+            .get(&stream_id)
+            .is_some_and(|current| current.playing)
+        {
+            commands.push(MinoriAudioCommand::Stop {
+                sequence: next_effect_sequence(&mut self.state)?,
+                stream_id,
+                fade_ms: 0,
+            });
+        }
+        commands.push(MinoriAudioCommand::LoadResource {
+            sequence: next_effect_sequence(&mut self.state)?,
+            stream_id,
+            encoding: MinoriAudioEncoding::Wav,
+            resource_uri: resource_uri.into(),
+        });
+        commands.push(MinoriAudioCommand::Play {
+            sequence: next_effect_sequence(&mut self.state)?,
+            stream_id,
+            volume: 1.0,
+            pan: 0.0,
+            repeat: false,
+            fade_in_ms: 0,
+        });
+        self.state.audio.insert(
+            stream_id,
+            MinoriAudioState {
+                bus: bus_name.into(),
+                encoding: MinoriAudioEncoding::Wav,
+                resource_uri: resource_uri.into(),
+                looped: false,
+                volume_milli: 1000,
+                pan_milli: 0,
+                playing: true,
+                continuation_pts: 0,
+            },
+        );
+        Ok(commands)
     }
 
     pub fn move_system_focus(
@@ -1177,8 +1584,12 @@ impl MinoriVm {
         Ok(())
     }
 
+    pub fn set_pointer_primary_pressed(&mut self, pressed: bool) {
+        self.state.system_ui.pointer_primary_pressed = pressed;
+    }
+
     pub fn toggle_preferred_play_mode(&mut self) -> Result<(), MinoriRuntimeError> {
-        let target = self.state.system_ui.preferred_play_mode;
+        let target = self.state.system_ui.config.preferred_play_mode;
         if target == MinoriPlayMode::Normal {
             return Err(MinoriRuntimeError::State);
         }
@@ -1825,6 +2236,7 @@ fn execute_control(
                 state.system_ui.page = MinoriSystemPage::Title;
                 state.system_ui.focus_index = 0;
                 state.system_ui.backlog_cursor = None;
+                state.system_ui.config_draft = None;
             } else {
                 state.terminal = true;
             }
@@ -2716,8 +3128,11 @@ fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
             validate_message_voice(voice)?;
         }
     }
-    if state.system_ui.auto_wait_ticks > 10_000
-        || state.system_ui.preferred_play_mode == MinoriPlayMode::Normal
+    validate_config_state(&state.system_ui.config)?;
+    if let Some(draft) = state.system_ui.config_draft.as_ref() {
+        validate_config_state(draft)?;
+    }
+    if (state.system_ui.page == MinoriSystemPage::Config) != state.system_ui.config_draft.is_some()
         || !(0..=1280).contains(&state.system_ui.pointer_x)
         || !(0..=720).contains(&state.system_ui.pointer_y)
     {
@@ -2862,6 +3277,21 @@ fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
         {
             return Err(MinoriRuntimeError::Firefly);
         }
+    }
+    Ok(())
+}
+
+fn validate_config_state(config: &MinoriConfigState) -> Result<(), MinoriRuntimeError> {
+    if config.message_speed_unread > 100
+        || config.message_speed_read > 100
+        || config.message_speed_auto_play > 100
+        || config.font_index != 0
+        || config.preferred_play_mode == MinoriPlayMode::Normal
+        || config.bgm_volume > 100
+        || config.voice_volume > 100
+        || config.se_volume > 100
+    {
+        return Err(MinoriRuntimeError::State);
     }
     Ok(())
 }
@@ -4105,6 +4535,7 @@ fn execute_play_se(
         stream_id,
         MinoriAudioState {
             bus: bus.into(),
+            encoding: MinoriAudioEncoding::Ogg,
             resource_uri,
             looped: repeat,
             volume_milli,
@@ -4130,6 +4561,7 @@ fn append_audio_load_and_play(
     commands.push(MinoriAudioCommand::LoadResource {
         sequence: next_effect_sequence(state)?,
         stream_id,
+        encoding: MinoriAudioEncoding::Ogg,
         resource_uri: resource_uri.into(),
     });
     commands.push(MinoriAudioCommand::Play {
@@ -4192,6 +4624,7 @@ fn execute_play_bgm(
             commands.push(MinoriAudioCommand::LoadResource {
                 sequence: next_effect_sequence(state)?,
                 stream_id: BGM_STREAM_ID,
+                encoding: MinoriAudioEncoding::Ogg,
                 resource_uri: resource_uri.clone(),
             });
             commands.push(MinoriAudioCommand::Play {
@@ -4207,6 +4640,7 @@ fn execute_play_bgm(
             commands.push(MinoriAudioCommand::LoadResource {
                 sequence: next_effect_sequence(state)?,
                 stream_id: BGM_STREAM_ID,
+                encoding: MinoriAudioEncoding::Ogg,
                 resource_uri: resource_uri.clone(),
             });
             commands.push(MinoriAudioCommand::Play {
@@ -4223,6 +4657,7 @@ fn execute_play_bgm(
         BGM_STREAM_ID,
         MinoriAudioState {
             bus: "bgm".into(),
+            encoding: MinoriAudioEncoding::Ogg,
             resource_uri,
             looped: true,
             volume_milli,
@@ -4373,6 +4808,7 @@ fn execute_message(
             VOICE_STREAM_ID,
             MinoriAudioState {
                 bus: "voice".into(),
+                encoding: MinoriAudioEncoding::Ogg,
                 resource_uri: voice.resource_uri.clone(),
                 looped: false,
                 volume_milli: voice.volume_milli,
@@ -4411,10 +4847,8 @@ fn execute_message(
     let wait = if state.system_ui.play_mode == MinoriPlayMode::Auto {
         MinoriWaitState::Time {
             token_id,
-            timer_ticks: state.system_ui.auto_wait_ticks,
-            milliseconds: state
-                .system_ui
-                .auto_wait_ticks
+            timer_ticks: u32::from(state.system_ui.config.message_speed_auto_play),
+            milliseconds: u32::from(state.system_ui.config.message_speed_auto_play)
                 .checked_mul(10)
                 .ok_or(MinoriRuntimeError::Overflow)?,
         }
@@ -4953,6 +5387,111 @@ mod tests {
     }
 
     #[test]
+    fn config_draft_applies_or_cancels_atomically_and_round_trips() {
+        let mut vm = firefly_vm(b".end\r\n", 7);
+        vm.begin_title_launch().unwrap();
+        vm.open_config().unwrap();
+        assert_eq!(
+            vm.apply_config_control(MinoriConfigControl::MessageSpeedAutoPlay(7)),
+            Ok(MinoriConfigChange::Present)
+        );
+        assert_eq!(
+            vm.apply_config_control(MinoriConfigControl::BgmVolume(35)),
+            Ok(MinoriConfigChange::AudioParamsChanged)
+        );
+        vm.apply_config_control(MinoriConfigControl::ToggleBgmMute)
+            .unwrap();
+        vm.apply_config_control(MinoriConfigControl::PreferredPlayMode(MinoriPlayMode::Skip))
+            .unwrap();
+        vm.apply_config_control(MinoriConfigControl::ToggleCharacterVoice(3))
+            .unwrap();
+        assert_eq!(vm.state().system_ui.config.bgm_volume, 100);
+        assert_eq!(vm.config_for_presentation().unwrap().bgm_volume, 35);
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(
+            vm.config_for_presentation()
+                .unwrap()
+                .message_speed_auto_play,
+            7
+        );
+        assert_eq!(
+            vm.apply_config_control(MinoriConfigControl::Cancel),
+            Ok(MinoriConfigChange::Cancelled)
+        );
+        assert_eq!(vm.state().system_ui.page, MinoriSystemPage::Title);
+        assert_eq!(vm.state().system_ui.config, MinoriConfigState::default());
+
+        vm.open_config().unwrap();
+        vm.apply_config_control(MinoriConfigControl::BgmVolume(35))
+            .unwrap();
+        vm.apply_config_control(MinoriConfigControl::PreferredPlayMode(MinoriPlayMode::Skip))
+            .unwrap();
+        assert_eq!(
+            vm.apply_config_control(MinoriConfigControl::Apply),
+            Ok(MinoriConfigChange::Applied)
+        );
+        assert_eq!(vm.state().system_ui.config.bgm_volume, 35);
+        assert_eq!(
+            vm.state().system_ui.config.preferred_play_mode,
+            MinoriPlayMode::Skip
+        );
+        assert!(vm.state().system_ui.config_draft.is_none());
+    }
+
+    #[test]
+    fn config_test_audio_is_explicit_wav_and_uses_a_dedicated_bus_stream() {
+        let mut vm = firefly_vm(b".end\r\n", 7);
+        vm.begin_title_launch().unwrap();
+        vm.open_config().unwrap();
+        let commands = vm
+            .config_test_audio_commands(MinoriConfigAudioBus::Voice)
+            .unwrap();
+        assert!(matches!(
+            commands.as_slice(),
+            [
+                MinoriAudioCommand::LoadResource {
+                    stream_id: MINORI_CONFIG_TEST_VOICE_STREAM_ID,
+                    encoding: MinoriAudioEncoding::Wav,
+                    resource_uri,
+                    ..
+                },
+                MinoriAudioCommand::Play {
+                    stream_id: MINORI_CONFIG_TEST_VOICE_STREAM_ID,
+                    repeat: false,
+                    ..
+                }
+            ] if resource_uri == "minori:/sys/VOICEtest.wav"
+        ));
+        let audio = vm
+            .state()
+            .audio
+            .get(&MINORI_CONFIG_TEST_VOICE_STREAM_ID)
+            .unwrap();
+        assert_eq!(audio.bus, "voice");
+        assert_eq!(audio.encoding, MinoriAudioEncoding::Wav);
+        vm.apply_config_control(MinoriConfigControl::Cancel)
+            .unwrap();
+        let close = vm.close_config_audio_commands().unwrap();
+        assert!(matches!(
+            close.as_slice(),
+            [MinoriAudioCommand::Stop {
+                stream_id: MINORI_CONFIG_TEST_VOICE_STREAM_ID,
+                fade_ms: 0,
+                ..
+            }]
+        ));
+        assert!(
+            !vm.state()
+                .audio
+                .get(&MINORI_CONFIG_TEST_VOICE_STREAM_ID)
+                .unwrap()
+                .playing
+        );
+    }
+
+    #[test]
     fn control_pragma_enables_only_the_held_key_fast_path() {
         let source = b".pragma enable_control\r\n.wait 500\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -5019,7 +5558,7 @@ mod tests {
 
         vm.toggle_preferred_play_mode().unwrap();
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Normal);
-        vm.state.system_ui.preferred_play_mode = MinoriPlayMode::Skip;
+        vm.state.system_ui.config.preferred_play_mode = MinoriPlayMode::Skip;
         vm.toggle_preferred_play_mode().unwrap();
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
         assert!(vm.fast_forward_active());
@@ -6332,6 +6871,7 @@ mod tests {
             MinoriAudioCommand::LoadResource {
                 sequence: 1,
                 stream_id: 0,
+                encoding: MinoriAudioEncoding::Ogg,
                 resource_uri: "minori:/bgm/theme.ogg".into(),
             }
         );
@@ -6419,6 +6959,7 @@ mod tests {
             MinoriAudioCommand::LoadResource {
                 sequence: 1,
                 stream_id: 1,
+                encoding: MinoriAudioEncoding::Ogg,
                 resource_uri: "minori:/se/click.ogg".into(),
             }
         );
