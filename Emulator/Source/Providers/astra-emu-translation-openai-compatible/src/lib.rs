@@ -101,9 +101,9 @@ impl TranslationProfile {
                 "body_limit_bytes must be within 1..=16384".into(),
             ));
         }
-        if !(1_000..=120_000).contains(&self.timeout_ms) {
+        if self.timeout_ms > u64::from(u32::MAX) {
             return Err(TranslationError::Profile(
-                "timeout_ms must be within 1000..=120000".into(),
+                "timeout_ms must fit the Family Hook u32 representation".into(),
             ));
         }
         if self.secret_reference.trim().is_empty() {

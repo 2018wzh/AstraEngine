@@ -11,10 +11,10 @@ use astra_emu_family_support::{
     enforce_private_file_permissions, extract_vfs, verify_vfs, ExtractSelection,
     LegacyVfsFamilyRegistry,
 };
-use astra_emu_fvp::FvpVfsFamilyFactory;
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use clap::{Args, Subcommand, ValueEnum};
 use encoding_rs::Encoding;
+use rfvp_astra_provider::FvpVfsFamilyFactory;
 use serde::Serialize;
 
 const STDOUT_PAYLOAD_LIMIT: u64 = 64 * 1024;

@@ -6,7 +6,7 @@
     "capability_ids",
     "commercial_payload_present",
     "denied_capability_ids",
-    "deterministic_effect_hash",
+    "deterministic_effect_count",
     "evaluated_script_hashes",
     "local_path_present",
     "policy_id",
@@ -30,8 +30,10 @@
         "type": "string"
       }
     },
-    "deterministic_effect_hash": {
-      "$ref": "#/definitions/Hash256"
+    "deterministic_effect_count": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
     "evaluated_script_hashes": {
       "type": "array",

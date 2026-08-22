@@ -11,6 +11,7 @@ dynamic-abi = ["dep:abi_stable", "dep:libloading", "astra-plugin-abi/ffi"]
 [dependencies]
 abi_stable = { workspace = true, optional = true }
 astra-core = { path = "../astra-core" }
+astra-media-core = { path = "../astra-media-core" }
 astra-plugin-abi = { path = "../astra-plugin-abi", default-features = false }
 astra-runtime = { path = "../astra-runtime" }
 astra-worker-budget = { path = "../astra-worker-budget" }

@@ -88,12 +88,6 @@ export component ManagerWindow inherits Window {
     in property <string> patch-mode: "no_patch";
 
     // ===== Translation =====
-    in property <string> translation-source;
-    in property <string> translation-output;
-    in property <string> translation-status;
-    in property <string> translation-endpoint;
-    in property <string> translation-model;
-    in property <string> translation-scope;
     in-out property <string> translation-endpoint-kind: "ecnu";
     in-out property <string> translation-profile-endpoint;
     in-out property <string> translation-profile-protocol: "responses";
@@ -106,7 +100,6 @@ export component ManagerWindow inherits Window {
     in-out property <string> translation-glossary;
     in-out property <string> translation-secret-input;
     in property <bool> translation-consent-present;
-    in-out property <bool> translation-persistent-cache;
 
     // ===== Metadata =====
     in property <[MatchReview]> match-reviews;
@@ -155,8 +148,6 @@ export component ManagerWindow inherits Window {
     callback search(string);
     callback configure-nls(string);
     callback game-input(string, bool, float);
-    callback save-game();
-    callback restore-game();
     callback leave-game();
     callback open-diagnostics();
     callback open-translation();
@@ -171,8 +162,6 @@ export component ManagerWindow inherits Window {
     callback pin-release(string);
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
-    callback set-translation-cache(bool);
-    callback reset-translation();
     callback set-filter-preset(string);
     callback set-patch-mode(string);
     callback refresh-metadata(string);
@@ -212,8 +201,6 @@ export component ManagerWindow inherits Window {
         stage-native-width <=> root.stage-native-width;
         stage-native-height <=> root.stage-native-height;
         game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
-        save-game => { root.save-game(); }
-        restore-game => { root.restore-game(); }
         leave-game => { root.leave-game(); }
 
         translation-overlay-active <=> root.translation-overlay-active;
@@ -227,13 +214,6 @@ export component ManagerWindow inherits Window {
         set-patch-mode(mode) => { root.set-patch-mode(mode); }
         set-filter-preset(preset) => { root.set-filter-preset(preset); }
 
-        translation-source: root.translation-source;
-        translation-output: root.translation-output;
-        translation-status: root.translation-status;
-        translation-endpoint: root.translation-endpoint;
-        translation-model: root.translation-model;
-        translation-scope: root.translation-scope;
-        reset-translation => { root.reset-translation(); }
     }
 
     // ===== Manager shell (hidden while game is active) =====
@@ -322,6 +302,7 @@ export component ManagerWindow inherits Window {
                 if root.current-page == "settings" : SettingsPage {
                     category <=> root.settings-category;
                     desktop-mode: root.desktop-mode;
+                    has-selected-case: root.selected-case-id != "";
 
                     // Translation
                     endpoint-kind <=> root.translation-endpoint-kind;
@@ -336,13 +317,10 @@ export component ManagerWindow inherits Window {
                     glossary <=> root.translation-glossary;
                     secret-input <=> root.translation-secret-input;
                     consent-present: root.translation-consent-present;
-                    persistent-cache <=> root.translation-persistent-cache;
-                    has-selected-case: root.selected-case-id != "";
                     save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
                         root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
                     }
                     grant-translation-consent => { root.grant-translation-consent(); }
-                    set-translation-cache(enabled) => { root.set-translation-cache(enabled); }
 
                     // Metadata
                     match-reviews: root.match-reviews;

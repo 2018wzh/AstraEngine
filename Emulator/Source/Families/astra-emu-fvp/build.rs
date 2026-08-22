@@ -49,12 +49,14 @@ fn main() {
         "family_id": "fvp",
         "plugin_id": "astra.emu.fvp",
         "provider_id": "astra.emu.family.fvp",
+        "core_kind": "ported",
+        "presentation_mode": "single_layer",
         "engine_version": env::var("CARGO_PKG_VERSION").expect("ASTRA_FVP_VERSION_MISSING"),
         "rustc_fingerprint": rustc_fingerprint,
         "feature_fingerprint": feature_fingerprint,
         "abi_fingerprint": LEGACY_FAMILY_ABI_FINGERPRINT,
         "supported_formats": ["fvp.hcb", "fvp.bin", "fvp.nvsg", "fvp.hzc1"],
-        "permissions": ["vfs.read", "media.submit"],
+        "permissions": ["vfs.read", "surface.write", "hook.invoke", "writable_file", "media.submit"],
         "report_redaction": "astra.emu.redaction.v1",
         "license": "MPL-2.0"
     });

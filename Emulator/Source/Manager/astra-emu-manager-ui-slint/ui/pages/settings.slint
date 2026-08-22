@@ -39,6 +39,7 @@ export component SettingsPage inherits Rectangle {
     // Navigation
     in-out property <string> category: "translation";
     in property <bool> desktop-mode: true;
+    in property <bool> has-selected-case;
 
     // Translation
     in-out property <string> endpoint-kind;
@@ -53,11 +54,8 @@ export component SettingsPage inherits Rectangle {
     in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
-    in-out property <bool> persistent-cache;
-    in property <bool> has-selected-case;
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
-    callback set-translation-cache(bool);
 
     // Metadata
     in property <[MatchReview]> match-reviews;
@@ -207,13 +205,10 @@ export component SettingsPage inherits Rectangle {
                 glossary <=> root.glossary;
                 secret-input <=> root.secret-input;
                 consent-present: root.consent-present;
-                persistent-cache <=> root.persistent-cache;
-                has-selected-case: root.has-selected-case;
                 save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
                     root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
                 }
                 grant-consent => { root.grant-translation-consent(); }
-                set-cache(enabled) => { root.set-translation-cache(enabled); }
             }
 
             if root.category == "metadata" : MetadataSettingsPage {
@@ -327,13 +322,10 @@ export component SettingsPage inherits Rectangle {
                 glossary <=> root.glossary;
                 secret-input <=> root.secret-input;
                 consent-present: root.consent-present;
-                persistent-cache <=> root.persistent-cache;
-                has-selected-case: root.has-selected-case;
                 save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
                     root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
                 }
                 grant-consent => { root.grant-translation-consent(); }
-                set-cache(enabled) => { root.set-translation-cache(enabled); }
             }
 
             if root.category == "metadata" : MetadataSettingsPage {

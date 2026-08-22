@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use astra_emu_cli::{
-    run_headless, run_native, HeadlessLaunch, HeadlessPerformanceArtifacts, NativeLaunch,
-    NativeLaunchMode,
+    run_headless, run_native, ExtensionBinding, HeadlessLaunch, HeadlessPerformanceArtifacts,
+    NativeLaunch, NativeLaunchMode,
 };
 use clap::{Parser, Subcommand};
 
@@ -18,6 +18,16 @@ fn parse_presentation_rate(value: &str) -> Result<u32, String> {
         "120" => Ok(120),
         _ => Err("presentation rate must be 60 or 120".into()),
     }
+}
+
+fn extension_binding(
+    library: Option<PathBuf>,
+    timeout_ms: Option<u32>,
+) -> Option<ExtensionBinding> {
+    library.map(|library| ExtensionBinding {
+        library,
+        timeout_ms: timeout_ms.unwrap_or(2_000),
+    })
 }
 
 #[derive(Debug, Parser)]
@@ -51,6 +61,10 @@ enum CliCommand {
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
+        #[arg(long)]
+        extension_library: Option<PathBuf>,
+        #[arg(long, requires = "extension_library")]
+        extension_timeout_ms: Option<u32>,
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
@@ -82,6 +96,10 @@ enum CliCommand {
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
         #[arg(long)]
+        extension_library: Option<PathBuf>,
+        #[arg(long, requires = "extension_library")]
+        extension_timeout_ms: Option<u32>,
+        #[arg(long)]
         input: PathBuf,
         #[arg(long)]
         artifacts: PathBuf,
@@ -108,14 +126,16 @@ enum CliCommand {
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
         family_library: Option<PathBuf>,
+        #[arg(long)]
+        extension_library: Option<PathBuf>,
+        #[arg(long, requires = "extension_library")]
+        extension_timeout_ms: Option<u32>,
         #[arg(long, default_value_t = 1280)]
         viewport_width: u32,
         #[arg(long, default_value_t = 720)]
         viewport_height: u32,
         #[arg(long, default_value = "disabled", value_parser = ["disabled", "ffmpeg-vcpkg"])]
         video_provider: String,
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        verify_snapshot: bool,
         #[arg(
             long,
             default_value = "checkpoints",
@@ -146,12 +166,6 @@ enum CliCommand {
         /// Stream and hash every visible resource after the gameplay run.
         #[arg(long, default_value_t = false)]
         audit_all_resources: bool,
-        /// Restore an identity-bound local-private Headless continuation snapshot.
-        #[arg(long)]
-        resume_snapshot: Option<PathBuf>,
-        /// Atomically export an identity-bound local-private continuation snapshot.
-        #[arg(long)]
-        snapshot_output: Option<PathBuf>,
     },
 }
 
@@ -170,6 +184,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry,
             family_manifest,
             family_library,
+            extension_library,
+            extension_timeout_ms,
             enable_audio,
             perfetto_trace,
             input,
@@ -186,6 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 entry,
                 family_manifest,
                 family_library,
+                extension: extension_binding(extension_library, extension_timeout_ms),
                 enable_audio,
                 perfetto_trace,
                 input_path: input,
@@ -205,6 +222,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry,
             family_manifest,
             family_library,
+            extension_library,
+            extension_timeout_ms,
             input,
             artifacts,
             enable_audio,
@@ -221,6 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 entry,
                 family_manifest,
                 family_library,
+                extension: extension_binding(extension_library, extension_timeout_ms),
                 enable_audio,
                 perfetto_trace,
                 input_path: Some(input),
@@ -244,10 +264,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifacts,
             family_manifest,
             family_library,
+            extension_library,
+            extension_timeout_ms,
             viewport_width,
             viewport_height,
             video_provider,
-            verify_snapshot,
             artifact_retention,
             frame_sample_interval,
             presentation_rate_hz,
@@ -257,8 +278,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             performance_trace_manifest,
             performance_warmup_presentations,
             audit_all_resources,
-            resume_snapshot,
-            snapshot_output,
         } => {
             tracing::info!(
                 event = "astra_emu_cli_headless_started",
@@ -289,18 +308,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 artifact_root: artifacts,
                 family_manifest,
                 family_library,
+                extension: extension_binding(extension_library, extension_timeout_ms),
                 viewport_width,
                 viewport_height,
                 video_provider,
-                verify_snapshot,
                 artifact_retention,
                 frame_sample_interval,
                 presentation_rate_hz,
                 perfetto_trace,
                 performance,
                 audit_all_resources,
-                resume_snapshot,
-                snapshot_output,
             })
             .await?;
             tracing::info!(

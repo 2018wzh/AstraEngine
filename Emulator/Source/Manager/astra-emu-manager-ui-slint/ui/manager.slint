@@ -89,12 +89,9 @@ component TranslationSettings inherits Rectangle {
     in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
-    in-out property <bool> persistent-cache;
-    in property <bool> has-selected-case;
     callback back();
     callback save(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-consent();
-    callback set-cache(bool);
 
     background: Tokens.background;
     VerticalLayout {
@@ -158,15 +155,6 @@ component TranslationSettings inherits Rectangle {
                     wrap: word-wrap;
                 }
                 if !root.consent-present: Button { text: "Grant global translation consent"; clicked => { root.grant-consent(); } }
-                Rectangle { height: 1px; background: #455064; }
-                Text { text: "Per-game persistence"; color: Tokens.text; font-size: 17px; font-weight: 700; }
-                CheckBox {
-                    enabled: root.has-selected-case;
-                    checked <=> root.persistent-cache;
-                    text: root.has-selected-case ? "Store source and translation in local SQLite for the selected game" : "Select a game to configure persistent cache";
-                    toggled => { root.set-cache(self.checked); }
-                }
-                Text { text: "Session cache remains enabled even when persistence is off."; color: Tokens.text-muted; font-size: 11px; wrap: word-wrap; }
             }
         }
     }
@@ -203,18 +191,12 @@ export component ManagerWindow inherits Window {
     in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
     in-out property <bool> vfs-overlay-active: false;
-    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active || root.vfs-overlay-active;
+    property <bool> overlay-active: root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active || root.vfs-overlay-active;
     in-out property <string> filter-preset: "none";
     in property <string> diagnostics-summary;
     in property <string> patches-summary;
     in property <string> vfs-summary;
     in property <string> vfs-preview;
-    in property <string> translation-source;
-    in property <string> translation-output;
-    in property <string> translation-status;
-    in property <string> translation-endpoint;
-    in property <string> translation-model;
-    in property <string> translation-scope;
     in-out property <string> translation-endpoint-kind: "ecnu";
     in-out property <string> translation-profile-endpoint;
     in-out property <string> translation-profile-protocol: "responses";
@@ -227,7 +209,6 @@ export component ManagerWindow inherits Window {
     in-out property <string> translation-glossary;
     in-out property <string> translation-secret-input;
     in property <bool> translation-consent-present;
-    in-out property <bool> translation-persistent-cache;
     in-out property <bool> vndb-consent;
     in-out property <bool> bangumi-consent;
     in-out property <bool> sensitive-covers;
@@ -243,8 +224,6 @@ export component ManagerWindow inherits Window {
     callback search(string);
     callback configure-nls(string);
     callback game-input(string, bool, float);
-    callback save-game();
-    callback restore-game();
     callback leave-game();
     callback open-diagnostics();
     callback open-translation();
@@ -254,8 +233,6 @@ export component ManagerWindow inherits Window {
     callback open-settings();
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
-    callback set-translation-cache(bool);
-    callback reset-translation();
     callback set-filter-preset(string);
     callback set-patch-mode(string);
     callback refresh-metadata(string);
@@ -310,8 +287,6 @@ export component ManagerWindow inherits Window {
                 if event.text == Key.LeftArrow { root.game-input("arrow_left", true, 1); return accept; }
                 if event.text == Key.RightArrow { root.game-input("arrow_right", true, 1); return accept; }
                 if event.text == " " { root.game-input("space", true, 1); return accept; }
-                if event.text == Key.F5 { root.save-game(); return accept; }
-                if event.text == Key.F9 { root.restore-game(); return accept; }
                 return reject;
             }
             key-released(event) => {
@@ -363,30 +338,6 @@ export component ManagerWindow inherits Window {
                 Button { text: "Patches"; clicked => { root.open-patches(); } }
                 Button { text: "Files"; clicked => { root.vfs-overlay-active = true; } }
                 Button { text: "Filters"; clicked => { root.open-filters(); } }
-            }
-        }
-        if root.translation-overlay-active: Rectangle {
-            x: root.usable-width >= 840px ? root.usable-x + root.usable-width - self.width - 12px : root.usable-x + 12px;
-            y: root.usable-width >= 840px ? root.usable-y + 76px : root.usable-y + root.usable-height - self.height - 12px;
-            width: root.usable-width >= 840px ? 420px : root.usable-width - 24px;
-            max-height: root.usable-height - 88px;
-            min-height: 210px;
-            background: #ee1a1d24;
-            border-radius: Tokens.radius;
-            VerticalLayout {
-                padding: 12px;
-                spacing: 8px;
-                HorizontalLayout {
-                    Text { text: "Translation"; color: Tokens.text; font-size: 17px; font-weight: 700; horizontal-stretch: 1; }
-                    Button { text: "Close"; clicked => { root.translation-overlay-active = false; } }
-                }
-                Text { text: root.translation-endpoint + " · " + root.translation-model; color: Tokens.text-muted; font-size: 11px; overflow: elide; }
-                Text { text: root.translation-scope; color: Tokens.text-muted; font-size: 11px; wrap: word-wrap; }
-                Text { text: root.translation-source == "" ? "Waiting for dialogue…" : root.translation-source; color: Tokens.text; wrap: word-wrap; }
-                Rectangle { height: 1px; background: #455064; }
-                Text { text: root.translation-output; color: Tokens.primary; wrap: word-wrap; vertical-stretch: 1; }
-                Text { text: root.translation-status; color: Tokens.text-muted; font-size: 11px; wrap: word-wrap; }
-                Button { text: "Resume translation"; clicked => { root.reset-translation(); } }
             }
         }
         if root.diagnostics-overlay-active: Rectangle {
@@ -507,14 +458,11 @@ export component ManagerWindow inherits Window {
         glossary <=> root.translation-glossary;
         secret-input <=> root.translation-secret-input;
         consent-present: root.translation-consent-present;
-        persistent-cache <=> root.translation-persistent-cache;
-        has-selected-case: root.selected-case-id != "";
         back => { root.settings-active = false; }
         save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
             root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
         }
         grant-consent => { root.grant-translation-consent(); }
-        set-cache(enabled) => { root.set-translation-cache(enabled); }
     }
 
     if !root.game-active && root.metadata-active: Rectangle {

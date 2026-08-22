@@ -11,7 +11,6 @@
     "program_target_id",
     "renderer_adapter_hash",
     "schema",
-    "session_id_hash",
     "shared_device_queue",
     "slint_license_mode",
     "slint_version",
@@ -42,9 +41,6 @@
     },
     "schema": {
       "type": "string"
-    },
-    "session_id_hash": {
-      "$ref": "#/definitions/Hash256"
     },
     "shared_device_queue": {
       "type": "boolean"

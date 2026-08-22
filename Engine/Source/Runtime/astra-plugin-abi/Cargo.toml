@@ -12,6 +12,7 @@ ffi = ["dep:abi_stable", "astra-byte-source/ffi"]
 abi_stable = { workspace = true, optional = true }
 astra-byte-source = { path = "../astra-byte-source" }
 astra-core = { path = "../astra-core" }
+astra-media-core = { path = "../astra-media-core" }
 postcard.workspace = true
 schemars.workspace = true
 serde.workspace = true

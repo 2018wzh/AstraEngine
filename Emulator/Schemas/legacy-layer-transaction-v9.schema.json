@@ -63,6 +63,166 @@
         }
       }
     },
+    "LegacyFilterGraphV9": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "schema"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LegacyFilterNodeV9"
+          }
+        },
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "LegacyFilterNodeV9": {
+      "type": "object",
+      "required": [
+        "allow_cpu_fallback",
+        "deterministic",
+        "id",
+        "input",
+        "kind",
+        "output",
+        "params"
+      ],
+      "properties": {
+        "allow_cpu_fallback": {
+          "type": "boolean"
+        },
+        "deterministic": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/definitions/LegacyFilterTargetV9"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/definitions/LegacyFilterTargetV9"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LegacyFilterParamEntryV9"
+          }
+        }
+      }
+    },
+    "LegacyFilterParamEntryV9": {
+      "type": "object",
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/LegacyFilterParamV9"
+        }
+      }
+    },
+    "LegacyFilterParamV9": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "float"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "format": "float"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "int"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "bool"
+              ]
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "LegacyFilterTargetV9": {
+      "type": "string",
+      "enum": [
+        "background",
+        "character",
+        "ui",
+        "text",
+        "video",
+        "final"
+      ]
+    },
     "LegacyLayerBlendV9": {
       "type": "string",
       "enum": [
@@ -181,11 +341,14 @@
         "damage": {
           "$ref": "#/definitions/LegacySurfaceDamageV9"
         },
-        "filter_graph_binding": {
-          "description": "Explicit binding to a host-registered typed FilterGraph. The Family ABI never transports JSON, postcard, shader source, or an implicit preset.",
-          "type": [
-            "string",
-            "null"
+        "filter_graph": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LegacyFilterGraphV9"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "format": {

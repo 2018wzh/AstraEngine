@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
 use schemars::JsonSchema;
@@ -274,14 +274,14 @@ pub enum MinoriRuntimeError {
         "ASTRA_EMU_MINORI_RUNTIME_OPCODE: command `{opcode}` at ordinal {ordinal} is not verified"
     )]
     UnsupportedOpcode { opcode: String, ordinal: u32 },
-    #[error("ASTRA_EMU_MINORI_RUNTIME_BUDGET: instruction budget is exhausted")]
-    Budget,
+    #[error("ASTRA_EMU_MINORI_RUNTIME_NON_YIELDING_CYCLE: command execution repeated a control state without yielding")]
+    NonYieldingCycle,
     #[error("ASTRA_EMU_MINORI_RUNTIME_WAIT: runtime is awaiting an unresolved token")]
     Waiting,
     #[error("ASTRA_EMU_MINORI_RUNTIME_OVERFLOW: deterministic counter overflowed")]
     Overflow,
-    #[error("ASTRA_EMU_MINORI_RUNTIME_SNAPSHOT: runtime snapshot is malformed")]
-    Snapshot,
+    #[error("ASTRA_EMU_MINORI_NATIVE_SAVE_FORMAT: native save data is malformed")]
+    NativeSaveFormat,
     #[error("ASTRA_EMU_MINORI_RUNTIME_CHAIN: chain target is outside the script mount")]
     ChainTarget,
     #[error("ASTRA_EMU_MINORI_RUNTIME_AUDIO_RESOURCE: audio resource specification is invalid")]
@@ -396,13 +396,13 @@ impl MinoriVm {
         &self.state
     }
 
-    pub fn snapshot_bytes(&self) -> Result<Vec<u8>, MinoriRuntimeError> {
-        postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::Snapshot)
+    pub fn encode_native_save(&self) -> Result<Vec<u8>, MinoriRuntimeError> {
+        postcard::to_allocvec(&self.state).map_err(|_| MinoriRuntimeError::NativeSaveFormat)
     }
 
-    pub fn decode_snapshot(bytes: &[u8]) -> Result<MinoriRuntimeState, MinoriRuntimeError> {
+    pub fn decode_native_save(bytes: &[u8]) -> Result<MinoriRuntimeState, MinoriRuntimeError> {
         let state: MinoriRuntimeState =
-            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::Snapshot)?;
+            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::NativeSaveFormat)?;
         if state.schema != MINORI_RUNTIME_STATE_SCHEMA {
             return Err(MinoriRuntimeError::State);
         }
@@ -429,9 +429,13 @@ impl MinoriVm {
         Ok(())
     }
 
-    pub fn restore_state(&mut self, bytes: &[u8]) -> Result<(), MinoriRuntimeError> {
+    pub fn restore_native_save(
+        &mut self,
+        bytes: &[u8],
+        next_fixed_tick: u64,
+    ) -> Result<(), MinoriRuntimeError> {
         let restored: MinoriRuntimeState =
-            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::Snapshot)?;
+            postcard::from_bytes(bytes).map_err(|_| MinoriRuntimeError::NativeSaveFormat)?;
         if restored.schema != MINORI_RUNTIME_STATE_SCHEMA
             || restored.script_uri != self.state.script_uri
             || restored.script_hash != self.state.script_hash
@@ -441,6 +445,9 @@ impl MinoriVm {
             return Err(MinoriRuntimeError::State);
         }
         self.state = restored;
+        self.state.fixed_tick = next_fixed_tick
+            .checked_sub(1)
+            .ok_or(MinoriRuntimeError::State)?;
         Ok(())
     }
 
@@ -510,11 +517,7 @@ impl MinoriVm {
         Ok(Some(frame))
     }
 
-    pub fn step(
-        &mut self,
-        fixed_tick: u64,
-        max_instructions: u32,
-    ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
+    pub fn step(&mut self, fixed_tick: u64) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
         if fixed_tick == 0 || fixed_tick != self.state.fixed_tick + 1 {
             return Err(MinoriRuntimeError::State);
         }
@@ -525,7 +528,16 @@ impl MinoriVm {
             return Ok(Some(MinoriVmEvent::Terminal));
         }
         self.state.fixed_tick = fixed_tick;
-        for _ in 0..max_instructions {
+        let mut visited = BTreeSet::new();
+        loop {
+            let control_state = (
+                self.state.pc_line,
+                self.state.variables.clone(),
+                self.state.global_variables.clone(),
+            );
+            if !visited.insert(control_state) {
+                return Err(MinoriRuntimeError::NonYieldingCycle);
+            }
             let line_index = self.state.pc_line as usize;
             let line = self
                 .script
@@ -549,7 +561,6 @@ impl MinoriVm {
                 return Ok(Some(event));
             }
         }
-        Err(MinoriRuntimeError::Budget)
     }
 }
 
@@ -1391,7 +1402,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deterministic_control_flow_wait_and_restore_round_trip() {
+    fn deterministic_control_flow_wait_and_native_save_round_trip() {
         let source = b".setglobal route = 1\r\n.label loop\r\n.set count = count + 1\r\n.if count < 3 loop\r\n.wait 20\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let mut vm = MinoriVm::new(
@@ -1401,7 +1412,7 @@ mod tests {
             7,
         )
         .unwrap();
-        let event = vm.step(1, 32).unwrap().unwrap();
+        let event = vm.step(1).unwrap().unwrap();
         let MinoriVmEvent::Wait(MinoriWaitState::Time {
             token_id,
             timer_ticks,
@@ -1413,11 +1424,11 @@ mod tests {
         assert_eq!(timer_ticks, 20);
         assert_eq!(milliseconds, 200);
         assert_eq!(vm.state().variables.get("count"), Some(&3));
-        let snapshot = vm.snapshot_bytes().unwrap();
+        let save = vm.encode_native_save().unwrap();
         let state = vm.state().clone();
         vm.resolve_wait(&token_id).unwrap();
-        assert_eq!(vm.step(2, 4).unwrap(), Some(MinoriVmEvent::Terminal));
-        vm.restore_state(&snapshot).unwrap();
+        assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
+        vm.restore_native_save(&save, 2).unwrap();
         assert_eq!(vm.state(), &state);
     }
 
@@ -1433,7 +1444,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1, 4).unwrap_err(),
+            vm.step(1).unwrap_err(),
             MinoriRuntimeError::UnsupportedOpcode {
                 opcode: "char".into(),
                 ordinal: 0,
@@ -1452,7 +1463,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Panel { sequence }) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Panel { sequence }) = vm.step(1).unwrap() else {
             panic!("expected panel event")
         };
         assert_eq!(sequence, 1);
@@ -1463,9 +1474,9 @@ mod tests {
                 resource_uri: "minori:/sys/msgPanel.png".into(),
             })
         );
-        let snapshot = vm.snapshot_bytes().unwrap();
+        let save = vm.encode_native_save().unwrap();
         assert_eq!(
-            MinoriVm::decode_snapshot(&snapshot).unwrap().panel,
+            MinoriVm::decode_native_save(&save).unwrap().panel,
             vm.state().panel
         );
 
@@ -1478,7 +1489,7 @@ mod tests {
                 1,
             )
             .unwrap();
-            assert_eq!(vm.step(1, 4).unwrap_err(), MinoriRuntimeError::Panel);
+            assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::Panel);
         }
     }
 
@@ -1493,7 +1504,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Effect(frame)) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Effect(frame)) = vm.step(1).unwrap() else {
             panic!("expected effect frame")
         };
         assert_eq!(
@@ -1525,8 +1536,8 @@ mod tests {
         assert_eq!(effect.visible_current_index, 1);
         assert_eq!(effect.visible_next_index, 2);
         assert_eq!(effect.visible_alpha_255, 0);
-        let snapshot = vm.snapshot_bytes().unwrap();
-        let restored = MinoriVm::decode_snapshot(&snapshot).unwrap();
+        let save = vm.encode_native_save().unwrap();
+        let restored = MinoriVm::decode_native_save(&save).unwrap();
         assert_eq!(restored.effect, vm.state().effect);
         assert_eq!(restored.effect_sequence, vm.state().effect_sequence);
     }
@@ -1547,7 +1558,7 @@ mod tests {
                 1,
             )
             .unwrap();
-            assert_eq!(vm.step(1, 4).unwrap_err(), MinoriRuntimeError::Effect);
+            assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::Effect);
         }
     }
 
@@ -1562,7 +1573,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1).unwrap() else {
             panic!("expected stage event")
         };
         assert_eq!(stage.foreground, None);
@@ -1596,7 +1607,7 @@ mod tests {
             text,
             speaker,
             wait: MinoriWaitState::Input { token_id },
-        }) = vm.step(1, 4).unwrap()
+        }) = vm.step(1).unwrap()
         else {
             panic!("expected message input wait")
         };
@@ -1621,7 +1632,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1).unwrap() else {
             panic!("expected message input wait")
         };
         assert_eq!(text, "body words");
@@ -1641,7 +1652,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1).unwrap() else {
             panic!("expected message input wait")
         };
         assert_eq!(text, "body");
@@ -1660,7 +1671,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1, 1).unwrap() else {
+        let Some(MinoriVmEvent::Message { text, speaker, .. }) = vm.step(1).unwrap() else {
             panic!("expected empty message update")
         };
         assert!(text.is_empty());
@@ -1711,7 +1722,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1).unwrap() else {
             panic!("expected BGM commands")
         };
         assert_eq!(commands.len(), 2);
@@ -1751,10 +1762,10 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            vm.step(1, 1).unwrap(),
+            vm.step(1).unwrap(),
             Some(MinoriVmEvent::Audio { .. })
         ));
-        let Some(MinoriVmEvent::Audio { commands }) = vm.step(2, 1).unwrap() else {
+        let Some(MinoriVmEvent::Audio { commands }) = vm.step(2).unwrap() else {
             panic!("expected BGM stop command")
         };
         assert_eq!(
@@ -1780,7 +1791,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1, 1).unwrap(),
+            vm.step(1).unwrap(),
             Some(MinoriVmEvent::Audio {
                 commands: Vec::new()
             })
@@ -1798,7 +1809,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1, 4).unwrap() else {
+        let Some(MinoriVmEvent::Audio { commands }) = vm.step(1).unwrap() else {
             panic!("expected SE commands")
         };
         assert_eq!(commands.len(), 2);
@@ -1838,7 +1849,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            vm.step(1, 4).unwrap(),
+            vm.step(1).unwrap(),
             Some(MinoriVmEvent::Chain {
                 target: "K01.sc".into()
             })
@@ -1852,7 +1863,7 @@ mod tests {
         )
         .unwrap();
         assert!(vm.state().variables.is_empty());
-        assert_eq!(vm.step(2, 2).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert_eq!(vm.step(2).unwrap(), Some(MinoriVmEvent::Terminal));
     }
 
     #[test]
@@ -1866,7 +1877,7 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1, 1).unwrap_err(), MinoriRuntimeError::ChainTarget);
+        assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::ChainTarget);
     }
 
     #[test]
@@ -1880,7 +1891,7 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1, 8).unwrap(), Some(MinoriVmEvent::Terminal));
+        assert_eq!(vm.step(1).unwrap(), Some(MinoriVmEvent::Terminal));
         assert_eq!(vm.state().variables.get("sum"), Some(&10));
         assert_eq!(vm.state().variables.get("bits"), Some(&11));
         assert_eq!(vm.state().variables.get("rem"), Some(&2));
@@ -1894,6 +1905,6 @@ mod tests {
             1,
         )
         .unwrap();
-        assert_eq!(vm.step(1, 1).unwrap_err(), MinoriRuntimeError::Operand);
+        assert_eq!(vm.step(1).unwrap_err(), MinoriRuntimeError::Operand);
     }
 }

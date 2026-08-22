@@ -136,7 +136,6 @@ pub struct ManagerViewModel {
     pub translation_background: String,
     pub translation_glossary: String,
     pub translation_consent_present: bool,
-    pub translation_persistent_cache: bool,
     pub filter_preset: String,
     pub diagnostics_summary: String,
     pub patches_summary: String,
@@ -368,8 +367,6 @@ impl SlintManagerAdapter {
             .set_translation_glossary(model.translation_glossary.as_str().into());
         self.window
             .set_translation_consent_present(model.translation_consent_present);
-        self.window
-            .set_translation_persistent_cache(model.translation_persistent_cache);
         self.window
             .set_filter_preset(model.filter_preset.as_str().into());
         self.window

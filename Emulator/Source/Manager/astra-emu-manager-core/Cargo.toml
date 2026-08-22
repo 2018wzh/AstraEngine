@@ -12,10 +12,11 @@ abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-extension-api = { path = "../../FamilyApi/astra-emu-extension-api" }
+astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
 astra-runtime = { path = "../../../../Engine/Source/Runtime/astra-runtime" }
-blake3.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
 libloading.workspace = true
@@ -28,6 +29,9 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile.workspace = true

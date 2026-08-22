@@ -1,6 +1,6 @@
 // Translation settings sub-page - migrated from legacy TranslationSettings.
 
-import { Button, CheckBox, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
 
@@ -17,11 +17,8 @@ export component TranslationSettingsPage inherits Rectangle {
     in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
-    in-out property <bool> persistent-cache;
-    in property <bool> has-selected-case;
     callback save(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-consent();
-    callback set-cache(bool);
 
     background: Theme.background;
 
@@ -110,23 +107,6 @@ export component TranslationSettingsPage inherits Rectangle {
                 clicked => { root.grant-consent(); }
             }
 
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "Per-game persistence"; }
-
-            CheckBox {
-                enabled: root.has-selected-case;
-                checked <=> root.persistent-cache;
-                text: root.has-selected-case ? "Store source and translation in local SQLite for the selected game" : "Select a game to configure persistent cache";
-                toggled => { root.set-cache(self.checked); }
-            }
-
-            Text {
-                text: "Session cache remains enabled even when persistence is off.";
-                color: Theme.text-muted;
-                font-size: 11px;
-                wrap: word-wrap;
-            }
         }
     }
 }

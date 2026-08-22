@@ -3,24 +3,28 @@
   "title": "FvpParityEvidence",
   "type": "object",
   "required": [
-    "astra_trace_hash",
+    "audio_match",
     "compared_event_count",
+    "control_match",
     "diagnostic_codes",
     "fixture_hash",
     "fixture_id",
-    "reference_trace_hash",
+    "pixel_match",
     "rfvp_revision",
     "schema",
     "status"
   ],
   "properties": {
-    "astra_trace_hash": {
-      "$ref": "#/definitions/Hash256"
+    "audio_match": {
+      "type": "boolean"
     },
     "compared_event_count": {
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
+    },
+    "control_match": {
+      "type": "boolean"
     },
     "diagnostic_codes": {
       "type": "array",
@@ -42,8 +46,8 @@
     "fixture_id": {
       "type": "string"
     },
-    "reference_trace_hash": {
-      "$ref": "#/definitions/Hash256"
+    "pixel_match": {
+      "type": "boolean"
     },
     "rfvp_revision": {
       "type": "string"

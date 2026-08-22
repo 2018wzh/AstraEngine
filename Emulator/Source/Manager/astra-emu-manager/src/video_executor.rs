@@ -10,13 +10,13 @@ use std::{
 
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
-use astra_emu_fvp::{
-    fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
-    FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
-};
 use astra_media::PlayerDecodedAudio;
 use astra_platform::{
     DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
+};
+use rfvp_astra_provider::{
+    fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
+    FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
 };
 
 use crate::audio_executor::HostAudioExecutor;

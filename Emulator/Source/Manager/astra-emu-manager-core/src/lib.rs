@@ -1,8 +1,10 @@
 mod compatibility_cache;
 mod desktop_source;
 mod evidence;
+mod extension_loader;
 mod family_loader;
 mod filter;
+mod host_services;
 mod identity;
 mod input_mapping;
 mod library;
@@ -20,8 +22,10 @@ pub use desktop_source::{
     DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary, VfsResourceInfo,
 };
 pub use evidence::*;
+pub use extension_loader::*;
 pub use family_loader::*;
 pub use filter::{FilterBinding, FilterGraph, FilterLayer, FilterValidation};
+pub use host_services::*;
 pub use identity::{
     BangumiPlayStateRecord, DisplayTitle, ExternalIdentityRecord, InstallationRecord,
     MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord, ProviderConsentRecord,
@@ -31,7 +35,7 @@ pub use input_mapping::{default_vn_preset, GamepadDeadzone, GamepadInput, InputM
 pub use library::{
     CancellationToken, CaseRecord, CaseRuntimeProfileRecord, CoverCacheRecord, Library,
     LibraryError, ScanCandidate, ScanReport, SourceDiagnosticRecord, SourceGrant,
-    TranslationCacheRecord, TranslationConsent, TranslationProfileRecord,
+    TranslationConsent, TranslationProfileRecord,
 };
 pub use patch::{
     PatchContext, PatchDiagnostic, PatchEffectIntent, PatchExecution, PatchHostAction,
@@ -40,8 +44,8 @@ pub use patch::{
 pub use play_record::{PlaySessionRecord, PlayStats, RecentWorkRecord};
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
 pub use runtime_provider::{
-    evidence_terminal_hash, evidence_vm_coverage_hash, evidence_vm_coverage_ids,
-    AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory, EmuCaseProfile, QueuedPatchEffect,
+    evidence_vm_coverage_ids, AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory,
+    EmuCaseProfile, QueuedPatchEffect,
 };
 pub use scanner::{
     DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,

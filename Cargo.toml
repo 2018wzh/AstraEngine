@@ -229,3 +229,10 @@ yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f
 zstd = "0.13"
 ndk-sys = "0.6.0"
 oboe = "0.6.1"
+
+[patch."https://github.com/2018wzh/AstraEngine.git"]
+astra-byte-source = { path = "Engine/Source/Runtime/astra-byte-source" }
+astra-core = { path = "Engine/Source/Runtime/astra-core" }
+astra-emu-extension-api = { path = "Emulator/Source/FamilyApi/astra-emu-extension-api" }
+astra-emu-family-api = { path = "Emulator/Source/FamilyApi/astra-emu-family-api" }
+astra-emu-family-core = { path = "Emulator/Source/FamilyCore/astra-emu-family-core" }

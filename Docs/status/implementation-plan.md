@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026-08-22 ABI v9 migration：AstraEMU 已重开为 `IN_PROGRESS`。当前分支完成 Product Runtime Provider ABI v4 的唯一 presentation lane、Family ABI v9 descriptor/surface/Layer2D/Hook/writable-file contract、Extension ABI v1 与 schema；v7 scene transaction、family snapshot/save/restore、text lease、session resource presentation 和 step budget 已从新 ABI 主入口删除。FVP、Minori、Manager、CLI、Headless、renderer 与 RFVP fork 仍需迁移，完整 workspace 目前不是通过证据。旧 v7 E2/E3、snapshot/hash/budget 记录只保留为历史诊断，不能代表 v9 可运行或可合入。
+2026-08-23 ABI v9 migration：AstraEMU 保持 `IN_PROGRESS`。Product Runtime Provider ABI v4、Family ABI v9 与 Extension ABI v1 已完成破坏性切换；FVP/RFVP 使用 `Ported + SingleLayer`，Minori 使用 `Native + MultiLayer`，Manager、CLI、Headless 和 WGPU renderer 已消费 retained Layer2D。surface lease 使用独占可写 buffer，family 直接写入 Host allocation；Hook 在 acquire 前同步执行，原生存档只走安全相对路径 writable-file port。旧 scene transaction、family snapshot/save/restore、text lease、session resource presentation、step budget 与 AstraEMU runtime semantic hash 已从主路径删除。聚焦测试仍需与最终 workspace gate、Performance E2 和 Windows Manager E3 分开记录；旧 v7 E2/E3 只保留为历史诊断。
 
 2026-07-30 增量：Runtime、Action/Plugin ABI、Product Runtime Provider ABI 已一次性切到 v3/v2 breaking contract。Runtime 使用 inverse journal/overlay transaction、增量状态根、强制 Action access/StableId 声明、只编译一次的 transition/event dispatch 和 deterministic conflict-DAG；NativeVN 使用 hot/cold history、mutation journal、四 presentation region 与统一 worker budget。Provider factory/session、opaque FFI session、ordered mailbox 和 Headless `astra.headless_session_batch.v2` 已落地。测试不再依赖调用方用环境变量指定 Headless binary，同一测试进程复用有界 multi-session server。clean Release code commit `669a98a5` 的集显 DX12 1920×1080、120 Hz、72,000 帧产品运行通过：CPU p95 603,900 ns、GPU p95 208,640 ns、e2e p99 913,840 ns、deadline miss 为零、private memory max 299,180,032 bytes、增长 max 22,257,664 bytes，稳定段 allocation/upload/readback 均为零。相同 build/package/profile 的两 Session performance batch 串行基线 126,024,916 us、并发 63,124,857 us，逐 Session output identity 一致；全局预算 8，并发度 2，每 Session 配额 4，总容量 8。1k/10k/100k backlog 后的真实普通推进均为 cache hit、历史物化 0、追加 1、hot-state 不超过 4 KiB。文档、fmt、workspace clippy、`astra-headless` build、workspace test 与动态导出预算均在该代码提交通过。
 
@@ -23,6 +23,8 @@
 
 ## 当前代码快照
 
+下表中 Stage 5 的旧 v7 长段仅保留迁移前诊断。当前权威状态是 v9 consumer 已收束到 Layer2D/Hook/writable-file 主路径，正式 Performance E2、Windows E3 和完整 workspace gate 尚未关闭。
+
 | Area | Code status | Evidence |
 | --- | --- | --- |
 | Stage 1 EngineCore | `IN_PROGRESS` | Product Runtime Provider ABI 已 hard cut 到 v4，并加入唯一 `PresentationLane`；AstraVN 声明 `Scene2D`，AstraEMU 声明 `Layer2D`。ABI crate 聚焦验证完成后仍需随 v9 consumer 迁移执行完整 workspace gate，旧 Provider ABI v3 全量证据不能直接沿用 |
@@ -31,7 +33,7 @@
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
 | Stage 6 Platform Completion | `IN_PROGRESS` | Linux、macOS host 和 packaged Player 已进入静态实现；Android 的真实 Runtime/provider Player、Vulkan/AAudio/MediaCodec/save/package/accessibility/input host services 已接通，bundle、Gradle 和 build driver 同步落地；Linux/macOS Headless portability、真实 host smoke/decode/save/resume/release evidence，以及 Android API 28/36 emulator、arm64 真机和正式同 run E3 仍 blocking；iOS 保持 `SPEC_READY` |
 | Stage 5 AstraEMU | `IN_PROGRESS` | FVP 已从 vendor RFVP 迁至 pinned thin fork hosted-core；当前 active Family ABI hard cut 为 v7（v5/v6 仅作拒绝迁移输入），FVP adapter 完成单 delta wire，CLI CPU reference 与 Manager/WGPU 都能消费经复验的增量 `ScenePacket`。fork 的 named audio 仅传 source URI，adapter 通过 session-bound host VFS 读取并按 policy 执行，避免 RFVP 内部/进程 VFS 绕过。公开 Painter sample 的 signed dynamic FVP v7 已通过 120 step、6 条 host-consumed physical input、4 frame、实际 PNG checkpoint 与 snapshot round-trip；input 未形成可见笔划，只证明 transport，不得视为交互 route。另一个公开生成 input case 的 3 step E2 将 primary edge 送入 VM，令 64×64 tile 从黑变红；snapshot、PNG、terminal 与 shutdown 均通过，人工检查画面符合该唯一可见变化，证明 input → VM → ScenePacket 的语义链。公开 audio case 的 62 step E2 经 named-audio URI、session resource read 和 Headless decoder 输出 49,600 audio frame、两个 WAV artifact 与非空 meter hash；它只证明该媒体子链，不等同于真实游戏音频、视频/PTS 或 route。2026-08-02 的授权本机安装 signed dynamic Headless E2 已通过 300 step、170 scene/raster frame、两个 PNG checkpoint、snapshot round-trip 与 shutdown；人工查看后一个 checkpoint 的标题画面完整，14 个 VFS 资源/55,011 次受限读取/41,648,158 bytes 且无 blocking diagnostic。该 run 没有路线输入、terminal、音频或视频，CPU reference step p95 58.08 ms 只作 Evidence profile 本机趋势。轻量 scene identity 以已验证资源 hash 去重，避免把纹理像素再次序列化；本地 CPU reference 的 step p95 11.22 ms、4 次 raster 中位数 248.12 ms 仅说明该去重生效，不构成 GPU、原版 RFVP 或性能放行结论。2026-08-03 的 clean Release 授权样本 GPU Headless formal E2 使用同一物理输入，在 DX12 集显完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation：Runtime p99 2.80 ms、presentation p99 0.65 ms、deadline miss 为零，稳态 upload/readback/renderer allocation p95 与 memory growth 均为零，CPU raster sample 为零，并绑定 v3 report、shared performance report 与 trace manifest hash；183,000 条 Perfetto event 可解析且无丢失/截断。snapshot/restore correctness 已由同一输入的独立预跑验证，不在性能采样窗口执行。该单轮 baseline 通过。新增的原生受控输入与 Perfetto 复跑完成 4,201 step：核心 provider p99 2.88 ms、音频 underflow 为零，但 adapter media queue p99 为 21.95 ms，尚未满足 60 Hz 原生门槛；trace 已保留用于继续定位，不能计作原生 soak 或修复结论。三轮 release-reference、原生 10 分钟音频 soak、route/media PTS parity 与 Windows Manager E3 仍是阻断项。另一个公开无资源脚本的 2 step lifecycle case 已到达 hosted terminal 并通过 snapshot/PNG/shutdown，但其空黑 frame 只证明 `ExitMode(3)` 生命周期传播。Painter 的人工检查画面可见且完整；这些局部案例不能替代真实 media/route/soak 或 Windows/Android E3。既有 RuntimeWorld、Slint/WGPU host 和历史 E2 证据不能证明本轮迁移。本轮其他 Library v7 work/installation 分层、七 family discovery descriptor、VNDB/Bangumi provider、可解释 matcher、Scan Review、受限封面缓存、Bangumi 游玩状态同步、本地游玩时间/历史统计与社区中央兼容性库（`astra.emu.compatibility.v2` 五级分级（VNDB 唯一权威源，按 `(vID, rID)` 键控、精确到具体版本，含逐版本 release 发布缓存与安装钉选、ISSUE_TEMPLATE 结构化 vID/rID 报告入口）、HTTPS-only 拉取、SHA-256 增量同步、本地缓存与 UI 徽章/筛选/设置）保持原状态。离线 HTTP contract fixture、中央兼容性数据仓、正式商业 VNDB license gate、完整 UI 自动化、Windows/Android E3、完整 media parity 和正式签名仍开放，Stage 5 不得标记 `DONE` |
-> 当前身份修正：上表 Stage 5 长段中的 family ABI v5/v6、signed dynamic v5/v6 与 snapshot v5/v6 只描述迁移前历史 evidence，不能代表当前可加载 contract。当前实现仅接受 family ABI v7 与 snapshot v7；正式结论以下方 hot-path 重构记录和最终 clean Release 复跑为准。
+> 当前身份修正：上表 Stage 5 长段以及下方 2026-08-03 至 2026-08-09 的 v5/v7、snapshot、scene delta 和 semantic hash 内容只描述迁移前历史 evidence。当前实现只接受 Family ABI v9；Family snapshot 不再存在。正式结论以 v9 Layer2D、Hook、writable-file 聚焦测试和最终 clean Release 复跑为准。
 
 > 2026-08-03 native update：同一授权输入的 4,201-step 复跑，在移除 submit 后冗余 query 后将 `media_queue` p99 从 21.95 ms 降至 16.36 ms，音频 underflow 为零。完整 `fixed_tick` Perfetto span p99 仍为 18.52 ms；原生 60 Hz gate 未通过，不能代替 10 分钟 soak 或作为修复结论。
 
@@ -280,9 +282,10 @@ Expected output: docs check reports checked markdown files；fmt/clippy/workspac
 
 ## 2026-08-04 RFVP PlatformHost stream update
 
-The active Family ABI is v7 (`astra.emu.family_abi.v7`); v5/v6 manifests,
-binaries, runtime sections, and snapshots are rejection-only migration inputs.
-FVP and Minori runtime sections now use v7 identities. Windows WMF exposes
+This section records the superseded v7 implementation and is not an active
+runtime contract. The active Family ABI is v9 (`astra.emu.family_abi.v9`);
+v7/v8 modules and all Family snapshots are rejection-only migration inputs.
+Windows WMF exposes
 bounded PlatformHost video/audio cursors (`Start -> Next* -> CloseDecode`) for
 the FVP WMV/ASF/MPEG/MP4 family, with hardware-transform requests and stable
 EOS diagnostics. Manager and native CLI consume bounded worker output without

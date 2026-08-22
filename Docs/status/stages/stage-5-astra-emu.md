@@ -1,485 +1,159 @@
 # Stage 5 AstraEMU Work
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 仍是 Program target；legacy case 通过 `AstraEmuRuntimeProvider` 运行，每个 session 持有独立 `RuntimeWorld`。family 只注册 `LegacyRuntimeProvider` facade，私有 VM、只读 VFS、媒体状态、原生存档和诊断留在 provider session 内。
+Status: `IN_PROGRESS`
 
-2026 年 8 月 22 日的 v9 迁移把本 Stage 重开为 `IN_PROGRESS`。Product Runtime Provider ABI v4 已增加唯一 presentation lane；Family ABI v9 已加入 Host-owned writable surface、retained Layer2D transaction、同步 Hook 和 per-game writable-file contract；Extension ABI v1 提供 opaque Hook lifecycle 与 UTF-8 translation companion。FVP 固定为 `Ported + SingleLayer`，Minori 固定为 `Native + MultiLayer`。v7 scene transaction、family snapshot/save/restore、text lease、session resource presentation 与 step budget 不再属于当前 ABI，旧 v7 module 和 v8 迁移分支都必须拒绝。当前只有 contract/schema 层证据；FVP、Minori、Manager、CLI、Headless、平台 renderer 与 RFVP fork 尚未完成 v9 consumer 迁移，因此完整 workspace、Performance E2 和 Windows E3 均未通过。
+2026 年 8 月 23 日，AstraEMU 已硬切到 Product Runtime Provider ABI v4、Family ABI v9 和 Extension ABI v1。当前分支不提供 v7/v8 compatibility shim。FVP 固定为 `Ported + SingleLayer`，Minori 固定为 `Native + MultiLayer`；错误组合在 descriptor 校验阶段直接阻断。
 
-下文 2026 年 8 月 3 日至 9 日的 v7 运行记录仅保留为根因分析和历史基线。snapshot/hash/budget、scene translator、text lease 与 session resource 相关结论不能用来证明 v9 能力；迁移完成后必须用同一 v9 build/profile/package/input 重新形成证据。
+本页只记录 v9 当前状态。旧 scene transaction、family snapshot/save/restore、text lease、session resource presentation、step budget 以及 frame/audio/route/session/input 等运行时语义 hash 已退出当前契约，历史报告不能再用于关闭 v9 验收。
 
-2026 年 8 月 3 日的真实安装原生 10 分钟 mixed-run 未通过性能与音频门禁。35,578 个 fixed tick 中，RFVP core p99 为 2.923 ms，完整 tick p99 为 16.690 ms、最大值为 5.892 s，device underflow 累计 656 次。第 651 step 的 effect dispatch 阻塞 3.940 s，而同 step 的 RFVP core 只用 2.696 ms。与 RFVP `0.5.0` 的 native renderer 对照后，根因边界已经收窄：原版按 `GraphBuff generation` 对同尺寸动态纹理执行原位 GPU 更新；hosted 路径仍把像素复制、序列化到 family ABI，随后分配新 scene resource generation，并至少完整重传变化纹理。通用 WGPU atlas 能增量复用空闲槽，只有容量不足或碎片化时才 repack；当前 trace 还不能把所有长帧归因于全 atlas rebuild。音频 producer 仍依赖 fixed tick 补充 120–180 ms device queue，所以图形长帧会直接造成撕裂。稳定 subresource update、独立 audio producer 和复跑通过前，本 Stage 的 FVP 性能、native audio 与 Windows E3 状态保持 `IN_PROGRESS`。
+已完成的实现包括：
 
-后续 clean Release 诊断已确认动态 VFS 小读放大是开屏等待的独立根因：加入 1 MiB 有界分页后，同一授权样本的 `runtime_open` 从 50,789 ms 降到约 220–400 ms；页尾跨页读取 panic 已修复并有真实越界形状回归。RFVP hosted 的脱敏 log record 也已改为通过 Family ABI v7 diagnostic DTO 到达可执行宿主，再由 `astra-observability` 输出；宿主消费后会清空 diagnostic，避免进入 Runtime output、save/replay/report 或状态 hash。修复后的 trace 进一步证明 present backlog 不是 RFVP core 或 WGPU draw 成本，而是 Windows PlatformHost 的 Tokio command queue 没有唤醒 Winit：单次 WGPU present 很短，命令却受 `about_to_wait` fixed polling 和 Windows timer 粒度支配。现在成功入队会经 `EventLoopProxy` 立即唤醒并由 `user_event` 排空，HTTPS completion 同样显式唤醒；Manager gamepad/metadata/translation completion 也改为 worker wake + UI-thread drain。800-step signed Release 已无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms。标题 hover 动画、Family ABI scene bulk 零拷贝、10 分钟 CLI/Manager audio soak 与正式 E3 仍开放。
+- `astra-media-core` retained `Layer2D`、三态 damage、typed `FilterGraph`、事务回滚与稳定排序。
+- Host-owned writable surface lease；RGBA8/BGRA8 sRGB 均使用 premultiplied alpha，generation 在 step 成功后原子发布。
+- 同步 Hook 与 UTF-8 translation companion；正文、payload、secret 和文本 hash 不进入日志、SQLite、report 或 package。
+- per-game writable root 与安全相对路径文件 API；FVP、Minori 的原生存档由 core 自己组织。
+- RFVP fork 直接实现 Family ABI v9，AstraEngine 的 `astra-emu-fvp` 只保留 dylib、身份、构造、shutdown、panic containment 和错误边界。
+- Manager、CLI、Headless 消费公共 `Layer2D`。Manager GPU 路径按层执行 bloom、fade、color-matrix，并复用双缓冲纹理和 uniform；静态 generation 不重复执行。
+- AstraEMU 自定义 E2/E3 报告改用计数、明确状态、coverage ID 和真实 artifact；只保留 package、plugin binary、schema、build、profile、artifact-file 等完整性 hash。
 
-2026 年 8 月 8 日的颜色差异审计确认 texture filter 在 Family/Provider ABI 间丢失，同时证明 RFVP 上游原版渲染必须保持为视觉权威。此前改变 premultiplied-alpha 行为的尝试已撤销；hosted fork revision `a1d9abd201e6a0baf6259309543da5166a814c1c` 保留 typed ownership，并恢复上游原版 renderer。nearest/linear 现在逐层显式传递，FVP adapter 只把 NVSG bytes、vertex color、blend 与 filter 映射到 Astra 通用 draw state，不改写 Astra、Yakui 或 Minori 的 renderer。600 tick 同物理输入 Headless GPU 已通过，稳定标题帧相对上游 software oracle 的平均 RGBA MAE 为 2.211、最大 2.389，背景特效完整可见。相同 build/input 的第二次运行得到一致的 scene、raster 与 audio stream hash；Headless Kira 已改为 fixed tick 驱动，消除了 wall-clock 补水造成的 audio artifact overflow。Windows native GPU parity、Windowed E3 和同 revision Perfetto 尚未形成，因此不提升 Stage 状态。
-
-2026 年 8 月 9 日的首线路复核把 hosted fork 更新到
-`ce921717f043a8a035eadff1f41fc060c7de7c3c`。RFVP 的四个固定字体由 hosted fork 自己持有，
-Astra 不再注入替代字体。上游 RFVP Headless oracle 与 AstraEMU Headless 使用同一物理输入，
-均完成 33,682 帧。按 oracle 零基帧 `N` 对 Astra 一基 fixed step `N+1` 比较，dHash
-p50/p95/p99/max 为 1/4/5/26，平均通道差异为 0/1/1/1，512 帧 RGBA SHA 完全一致。
-原第 8,606 帧偏移的根因是 hosted core 漏掉上游在 dissolve 完成边沿、正常帧 tick 之前执行的
-同步零时长 VM tick；修复留在 RFVP adapter，并持久化前一帧 dissolve 状态。完整线路已无语义
-帧边界偏移，但软件栅格器仍有小幅像素差异，不能声明逐像素完全一致。最终 hosted revision 的
-dirty 900 帧 Perfetto trace 实测 scene/PCM copied bytes 为零；I16 必要格式转换直接写入最终
-Kira mix chunk，避免额外 F32 source buffer。Headless 未打开物理音频端点，确定性 Kira
-mixer/service 的 underflow 为零。clean Release Windowed Perfetto 和人工 E3 仍是 Stage 门禁。
-
-人工 E3 启动检查另行修复了 Manager auto-probe 未声明 `fvp.pack_paths` 的问题。Manager 只从
-已绑定 VFS 中选择与 HCB 同目录的 `.bin`，生成唯一有序列表并注入本次 provider open；该列表
-不写入 symbol-only runtime profile，也不会误收 save 子目录。Windows Kira worker 同时改用
-无窗口、无 Winit event loop 的 media-service host 承载 audio/decode，Slint 保持进程内唯一窗口
-event loop owner。开发复用 Release 分发包已通过签名、ABI、FVP probe、Runtime/Kira open，
-真实 Manager 窗口保持响应；人工视觉、输入、音频、save/restore 和正常 shutdown 尚待确认。
-
-Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspace。它只从 ignored 本地 manifest 读取授权 source、entry、`astra.user_input_sequence.v1` JSONL 和私有输出目录，启动实际 Manager 可执行文件，以 Win32 `SendInput` 重放键盘、鼠标和滚轮，并对窗口、焦点、客户区、逐事件捕获与超时严格失败。harness 使用独立 Manager 数据目录，不污染日常资料库；可提交摘要只保留 schema、hash、计数、生命周期和 diagnostic。Manager 现记录已消费输入、terminal、输出音频 meter、session/package/profile identity 与正常 shutdown 的脱敏事件；游戏页提供真实用户可用的 F5 save、F9 restore，且只调用 RuntimeWorld/provider 的 save/restore lifecycle。harness 在真实关闭路径后读取这些事件，不把进程 kill 当作 shutdown。FVP coverage 与同 run build identity 的完整外部证据仍未形成，任一缺失继续 blocking，不能输出成功 E3。因此仍为 `IN_PROGRESS`；授权样本尚未运行时，不产生 Windows E3 证据。
+尚未关闭的门禁是 Performance E2、真实 Windows Manager E3、完整 workspace clippy/test、Android target 修复后的全量构建，以及授权游戏的长流程、音频、视频和冷启动原生存档复跑。因此本 Stage 仍为 `IN_PROGRESS`，不得宣称可合入或发布。
 
 ## S5-GAME-RUNTIME-01 AstraEmuRuntimeProvider gameplay runtime
 
-**ID:** `S5-GAME-RUNTIME-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** AstraEMU 作为 `AstraEmuRuntimeProvider` 与 `NativeVnRuntimeProvider`、后续 `AstraRpgRuntimeProvider` 同级接入，不直接替换 `RuntimeWorld`。
-
-**Depends On:** `S2-VFS-01`、`S3-RUNTIME-PROVIDER-01`、[Game Runtime Provider Contract](../../contracts/game-runtime-provider.md)、[Game Runtime Provider Blueprint](../../implementation/game-runtime-provider.md)
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`
-
-**Steps:**
-
-1. 定义 `AstraEmuRuntimeProvider` descriptor、prepare/probe/open/step/save/restore/shutdown、package section plan、release checks 和 editor metadata。
-2. 让 case target 显式绑定 `astra_emu` runtime provider；Manager 只负责 program shell、profile、UI 和 local operator workflow。
-3. `open` 创建 RuntimeWorld lifecycle StateMachine，并选择 family `LegacyRuntimeProvider` session。
-4. `step` 调用 family provider，原子提交轻量 `LegacyControlTransaction`，再把 typed scene、PCM、text、video、wait、trace 和 diagnostic 移动给 host owner。
-5. Release Gate 校验 `emu.game_runtime_provider`、provider fingerprint、package sections、save/replay hash 和 report redaction。
-
-**Done Evidence:** `cargo test -p astra-emu-manager game_runtime_provider` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.game_runtime_provider`，且 family plugin 仍不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
-
-**Linked Test IDs:** `T-S5-GAME-RUNTIME-01`
+`AstraEmuRuntimeProvider` 声明唯一 `Layer2D` presentation lane。共享 Product Runtime save/restore 对 AstraEMU 返回 unsupported；Manager 不再提供 F5/F9，CLI 不再提供 checkpoint/resume。Family output 通过 step-scoped surface、Layer2D、audio、wait、input 和 control DTO 进入 RuntimeWorld。
 
 ## S5-EMUCORE-SM-01 EmulatorCore VM state-machine mapping
 
-**ID:** `S5-EMUCORE-SM-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** Family 内部把旧 VM 映射为私有 scheduler、context、basic-block 和 action 状态机，公共 Runtime 只接收 typed control transaction，host 直接接收 owned live output。
-
-**Depends On:** `S5-GAME-RUNTIME-01`、`S5-FAMILY-01`、[EmulatorCore StateMachine Mapping](../../implementation/emulator-core-state-machine.md)
-
-**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、pinned `rfvp` hosted fork、`Emulator/Source/Families/astra-emu-fvp/src/provider.rs`
-
-**Steps:**
-
-1. 定义 family-private scheduler trace、context id、sequence、budget、wait/yield/fault/terminal 状态和 snapshot cursor。
-2. 多线程、多 fiber 或多 context VM 使用 child state machine，并按固定 `(priority, context_id, sequence)` 推进。
-3. Basic block 执行到 syscall、branch、wait、fault 或预算耗尽时停止，并输出 action trace。
-4. Syscall/action bridge 只输出 typed scene、PCM、text、video、wait、control transaction 和 diagnostic。
-5. 编写 scheduler ordering、await boundary、snapshot/replay hash、fault isolation 和 FVP detailed mapping 测试。
-
-**Done Evidence:** `cargo test -p astra-emu-family-api family_scheduler` 和 `cargo test -p astra-emu-fvp state_machine_mapping` 通过；report 输出 `emu.vm_state_machine_trace`、context coverage、await boundary 和 replay hash。
-
-**Linked Test IDs:** `T-S5-EMUCORE-SM-01`
+RuntimeWorld 继续负责 Actor/Component、StateMachine、ordered ingress 与 typed action。family-private VM 状态不再包装成 Host snapshot，也不生成逐 tick state hash。FVP/Minori 在自己的 session 内持有执行状态，并通过 typed output 提交可观察结果。
 
 ## S5-LEGACY-VFS-01 Legacy pack VFS mounts
 
-**ID:** `S5-LEGACY-VFS-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** 所有 family pack reader 复用 Asset VFS，旧引擎 pack 只作为 `legacy_pack` mount source，不能替代 `.astrapkg`。
-
-**Depends On:** `S2-VFS-01`、`S5-GAME-RUNTIME-01`、[Asset VFS Contract](../../contracts/asset-vfs.md)
-
-**Target Paths:** `Emulator/Source/FamilyCore/astra-emu-family-core/`、`Emulator/Source/FamilySupport/astra-emu-family-support/`、`Emulator/Source/Families/astra-emu-fvp/src/archive.rs`、`Emulator/Source/Families/astra-emu-minori/`、`Emulator/Source/Programs/astra-emu-cli/src/vfs.rs`、`Emulator/Source/Programs/astra-emu-minori-cli/`
-
-**Steps:**
-
-1. 为 Artemis PFS、FVP `.bin`、KrKr XP3、BGI PackFile、Siglus Scene.pck、SoftPAL PAC/DAT 和 Minori PAZ 定义 `vfs_provider` capability 和 legacy prefix，例如 `fvp:/...`。
-2. Pack reader 输出 entry table hash、`VfsUri`、entry id、offset、size、hash、media kind、compression support 和 diagnostic。
-3. Overlay mount 只允许 profile 声明的 key pattern；同 key 多命中没有 allowlist 时 blocking。
-4. `.astrapkg` 保存 case profile、reader identity/hash、release report 和 sanitized scenario refs，不保存商业 payload。
-5. Release Gate 校验 entry bounds、hash、unsupported compression、reader identity、path/payload redaction 和 package/source consistency。
-
-**Done Evidence:** `cargo test -p astra-emu-family-api legacy_pack_vfs` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.legacy_pack_vfs`，且不写本地 root、payload、完整脚本或 bytecode。
-
-**Current Evidence:** in-process VFS 已从 ABI API 硬迁移到 `astra-emu-family-core`，公共 profile/Luau/cache/viewer/verify/extract/FUSE 实现进入 `astra-emu-family-support`。通用 CLI 固定为 `vfs --family`，GARbro import 与 census 位于独立 Minori CLI。Minori 只使用纯 Rust decrypt provider；Luau 只注册 data-only private profile，不存在逐 entry callback 或 fallback。重新递归扫描后确认 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive，其中 `bg` 由主包和 A–J 分卷组成，全目录共 18 个物理 PAZ 文件。合成测试覆盖 manifest v2、opaque transport、八 role、v0/v1/v2、分卷跨界、archive XOR、随机读取、源文件突变、cache identity/corruption/LRU、NRBF、ANI/SQZ 和 provider lifecycle。真实 no-cache full verify 覆盖 8 source、14502 entry、43818 range read 与 6624958365 decoded bytes；source/entry hash 合并为一次有界顺序流后，真实 mount 由约 466 秒降至约 367–403 秒。4665 个 `bg/bgm` entry 完成 media census。89 个 CP932 脚本、33728 行、33695 command、29 token 的 payload-free census 通过，unknown opcode 为 0。IDA 已闭合连续分隔符的空 positional operand、`message` 字段、音频 `*` stop、transition 配置、stage 前景/背景字段、`CrossFade2` timeline、`CMessagePanel` mode 1 和 panel 坐标公式。stage/effect/panel 只携带 VFS URI、编码 hash、尺寸和绘制指令，Host 通过 session resource channel 与唯一显式绑定的纯 Rust `ImageDecodeProvider` 解码；message 正文通过一次性 lease、显式 Noto Sans JP、CosmicText 和 Renderer2D 合成，不走 fallback，商业正文和 RGBA 都不进入 snapshot 或 report。snapshot v7 保存 CrossFade2 accumulator、最后可见 frame 和 message panel；旧 v5/v6 只作 fail-fast rejection。Await request 只在等待创建时提交，持续等待不会重发同一 token，用于完成 input await 的 edge 由 Host 消费。迁移后，签名动态 Minori plugin 经通用 `--family`/`--mount-profile` composition 完成真实八包 Headless 373 tick，形成黑场、竖排标题、可见 CrossFade2、底部 panel 与前两条 message 共 6 个 checkpoint、9 个实际呈现帧、BGM/SE artifact 与 snapshot round-trip，diagnostic 为 0。两条日文正文无缺字、横向裁剪、拉伸或旧文本残留。runner 生成与专用 report 同 identity 的公共 `astra.headless_run_report.v2` sidecar；真实 `prepare-review`、bundle 模型检查和 `validate-review` 已通过当前 slice。cache identity、完整 effect 周期、stand、transition 动画、select、普通 voice、Linux FUSE、macOS extract 和 Manager media preview 仍缺完整证据，因此本项保持 `IN_PROGRESS`。
-
-FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP factory 覆盖 profile 明列的 root `.bin`、manifest v2、NLS、目录/stat、有界 range、按需 stream、source revision、重复 range 账本和正式全源审计；损坏包、重叠 range 与不受支持的 private patch 均会阻断。同一授权样本已完成 12 archive、18166 entry 的单遍有界 mount/list；这是 local-private VFS evidence，不替代 Release 性能与全资源 verify。
-
-**Linked Test IDs:** `T-S5-LEGACY-VFS-01`
+只保留显式 mount、stat/range read、source revision 与安全边界。probe 已删除 entry/metadata 策略预算；整数溢出、越界、所有权和系统分配错误仍 fail-fast。源文件、archive entry、schema 和 artifact 完整性 hash 保留，不恢复 per-read content hash。
 
 ## S5-MANAGER-01 Manager RuntimeWorld bridge
 
-**ID:** `S5-MANAGER-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** Manager 能启动 `AstraEmuRuntimeProvider`，由 provider 创建 RuntimeWorld、启用 family plugin、打开 `LegacyRuntimeProvider` session、驱动生命周期 StateMachine，并输出 local case report。
+Manager 已接入 v9 surface pool、原子 staged generation、Hook binding、writable-file 单写 session 和 Layer2D GPU compositor。pool 暂时耗尽时重试同一 generation并节流告警，不丢帧、不临时分配、不切换 presentation mode。
 
-**Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`Docs/contracts/astraemu-ipc.md`、`S1-CORE-01`、`S1-PLUGIN-01`
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/runtime_provider.rs`、`Emulator/Source/Manager/astra-emu-manager/src/family_host.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`、`Emulator/Source/Programs/astra-emu-cli/`
-
-**Steps:**
-
-1. 定义 case launch request、profile、runtime provider binding、family selection、`LegacyRuntimeHostCtx` binding 和 report destination。
-2. 启动 `AstraEmuRuntimeProvider`，加载项目 package 或 synthetic fixture，启用 selected family plugin。
-3. 通过 `AstraEmuRuntimeProvider::open` 建立 RuntimeWorld 和 family session，并让生命周期 StateMachine 在固定 tick 调用 `emu.step`。
-4. 建立 input、overlay、diagnostics、TextCaptureEvent 和 presentation/audio command 采集路径。
-5. 编写 plugin disabled、permission denied、missing provider、session fault 和 report redaction 测试。
-6. 提供显式 family/game directory 的 quick launch，以及只消费物理输入 JSONL、复用 `astra-platform-headless` 的自动化入口；不得旁路 RuntimeWorld 或 family lifecycle。
-
-**Done Evidence:** Manager 不解析 family 私有 VM 内存，不持有 family 文件系统、renderer/audio handle 或 Actor 指针；所有玩家可见输出都来自 `AstraEmuRuntimeProvider` 输出到 RuntimeWorld 的 event/presentation/audio/report。
-
-**Linked Test IDs:** `T-S5-MANAGER-01`、`T-S5-EMU-CLI-01`
+E3 现在直接检查输入消费计数、画面变化、非静音音频、terminal 事件、coverage ID 和有序 shutdown；不再使用 session/input/frame/audio/route hash。
 
 ## S5-MANAGER-UI-01 Slint Manager 与 runtime overlay
 
-**ID:** `S5-MANAGER-UI-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** AstraEMU Manager、diagnostic/translation/filter overlay 使用 Slint 1.17.1；host 统一持有 winit 0.30 event loop、surface 与 wgpu 29.0.4 device/queue，并复用 shared UI input、semantic、resource 和 render contract。
+Slint 继续持有窗口、事件循环和共享 wgpu device/queue。游戏 underlay 与 overlay 不做 CPU 整帧回读或跨设备复制。翻译设置只保存显式启用状态、唯一 provider 配置和 `u32 timeout_ms`；缓存与正文持久化已删除。
 
-**Depends On:** `S5-MANAGER-01`、`S2-UI-BACKEND-01`、[ADR 0015](../../adr/0015-ui-backend-provider-split.md)
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-ui-slint/`、`Emulator/Source/Manager/astra-emu-manager/`
-
-**Steps:**
-
-1. 使用 Astra design tokens 和 Slint 组件实现桌面三栏、手机双列/bottom sheet/bottom navigation、移动大屏桌面式布局和游戏 overlay，不让 Slint 类型进入 Manager Core 或 family API。
-2. Slint rendering notifier 取得同一套 wgpu 29 `Device`/`Queue`，Astra renderer 直接提供 GPU stage texture；禁止 CPU 整帧回读和跨设备复制。
-3. 完成 keyboard/gamepad/touch/IME、focus、screen reader semantics、safe area、overlay input consumption、surface rebuild 和 device loss。
-4. Windows 与 Android GPU emulator 形成 E3；Linux、macOS、iOS 关闭 package/provider/host compile E2；Web 对 native family plugin 返回稳定不支持诊断。
-5. About 显示 Slint Royalty-free 2.0 规定归因并随包维护第三方 notices。
-
-**Done Evidence:** Windows/Android Manager workflow、同设备 WGPU identity、响应布局、overlay input isolation、report redaction、accessibility 和 provider identity 通过真实程序证据；不能用静态面板、compile-only 或 emulator 结果外推未验证硬件。
-
-**Current Evidence:** 当前 active family ABI 为 v7；v5/v6 仅作为 fail-fast rejection 输入。v7 保留规范键名输入契约（废弃语义动作），手柄/键盘重映射作为 Manager 层通用能力落地：`InputMapping`（schemars 导出）+ 通用 VN 预设 + 开关/死区 + 逐按键绑定 UI，Library v9 `input_settings`/`work_settings` 支持全局与逐游戏输入映射覆盖（启动生效、离开恢复）。该部分为 crate check 与 unit/集成测试级证据；Windows/Android 真实手柄 E3 仍未闭合。
-
-**Linked Test IDs:** `T-S5-MANAGER-UI-01`
+真实 Windows 输入、画面、音频和 shutdown 仍需独立 E3。
 
 ## S5-FAMILY-01 LegacyRuntimeProvider facade
 
-**ID:** `S5-FAMILY-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** 定义并实现 `LegacyFamilyPluginDescriptor`、`LegacyRuntimeProvider`、`LegacyRuntimeSessionId`、`LegacyRuntimeHostCtx`、`LegacyStepInput`、`LegacyStepOutput`、`LegacyLiveOutput`、`LegacyControlTransaction`、`LegacyWaitRequest` 和 `LegacySnapshotEnvelope`。
-
-**Depends On:** `S5-GAME-RUNTIME-01`、`S5-EMUCORE-SM-01`、`S5-LEGACY-VFS-01`、`S5-MANAGER-01`、`Docs/contracts/astraemu-ipc.md`、`Docs/implementation/astraemu-legacy-runtime-framework.md`、`Docs/implementation/provider-plugin-api.md`
-
-**Target Paths:** `Emulator/Source/FamilyApi/astra-emu-family-api/src/lib.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/family_loader.rs`
-
-**Steps:**
-
-1. 定义 family descriptor、runtime provider id、format capability、permission、failure classification 和 redaction policy。
-2. 定义 lifecycle API：`probe`、`open`、`step`、`save`、`restore`、`shutdown`；`open` 返回 session id，provider 负责区分并行 case。
-3. 定义 provider DTO，稳定 ID、revision、section ref、source span、capability diagnostic 和 typed ABI-owned bulk 分离；实时 scene/PCM 不携带 content hash 或 postcard payload。
-4. 让 `step` 返回 typed owned live output 与轻量 control transaction；host 先原子提交 control，再消费式移动 scene/PCM，不建立完整镜像。
-5. 编写 provider registration、session lifecycle、typed live ownership、snapshot envelope、restore compatibility 和 redaction 测试。
-
-**Done Evidence:** family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks，family VM state 只存在于 provider session。
-
-**Linked Test IDs:** `T-S5-FAMILY-01`
+Family ABI v9 descriptor、writable surface、Layer2D transaction、Hook 和 writable-file ports 已落地。v7/v8 module、错误 core-kind/mode 和旧 ABI fingerprint 必须拒绝。Git/path 双份 `astra-emu-family-api` package identity 视为构建阻断。
 
 ## S5-AUTOPROBE-01 Manager auto probe
 
-**ID:** `S5-AUTOPROBE-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** Manager 能按固定 family 优先级自动 probe case，并允许用户用 profile 手动覆盖。
+显式 case profile 始终优先，默认 probe 顺序不变。probe 使用表示安全的文件上限，不再接受调用方策略预算。真实多 family 冲突、坏 manifest 与大目录诊断仍需复跑。
 
 ## S5-METADATA-01 作品识别、元数据、游玩记录与兼容性库
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** 本地扫描与 family probe 保持独立，同时建立作品级身份、VNDB/Bangumi metadata provider、可解释确认队列、Bangumi 收藏状态同步、本地游玩时间/历史统计与社区中央兼容性库匹配。
-
-**Target Paths:** `Emulator/Source/Providers/astra-emu-metadata/`、`Emulator/Source/Providers/astra-emu-metadata/src/compatibility.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/identity.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/play_record.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/compatibility_cache.rs`、`Emulator/Source/Manager/astra-emu-manager/src/metadata_runtime.rs`、`Emulator/Source/Manager/astra-emu-manager-ui-slint/`
-
-**Current Evidence:** Library v10 在 v6 work/installation/external identity/snapshot/candidate/decision/scan run/consent/Bangumi state 基础上新增 `play_session`、`compatibility_entry_cache`、`compatibility_sync_state`、`vn_release`、`case_release` 等表；`play_record.rs` 提供会话开启/结算/崩溃残留结算与 SQL 聚合统计，`compatibility_cache.rs` 提供缓存替换、同步状态、VNDB 发布（rID）缓存与逐版本匹配。`astra-emu-metadata/src/compatibility.rs` 定义五级 `astra.emu.compatibility.v2` schema——**VNDB 是唯一权威源**，条目按 `(vID, rID)` 键控，兼容性精确到特定游戏版本；Rust 类型为真源，`schemars` 导出 JSON Schema，HTTPS-only 拉取客户端与 SHA-256 增量同步。Manager 在 launch/leave_game/shutdown 埋点计时，经 `MetadataRuntime` worker 刷新兼容性并 materialize 到本地缓存；VNDB provider 可拉取某 work 的 release（rID）列表，用户可把本地安装钉到具体版本，UI 在 inspector 显示 vID/rID 与逐版本分级；Slint UI 提供封面卡适配徽章、按分级筛选、inspector 兼容性详情与 Settings → Compatibility 子页。社区通过 `.github/ISSUE_TEMPLATE/vndb-game-compatibility.yml` 提交结构化 vID/rID 报告，维护者合并进数据仓。迁移、play session 聚合、崩溃结算、逐版本匹配 join、serde 往返与 JSON Schema 导出的 unit/跨模块测试属于 E1/E2；真实网络拉取、中央数据仓、完整 Manager UI 自动化、正式 release license gate 和 Windows/Android E3 仍未闭合，因此不能标记 `DONE`。
-
-**Done Evidence:** v5 回滚迁移、离线 provider contract fixture、取消与恢复、冲突确认、拒绝记忆、手动 ID、封面边界、Bangumi 收藏更新、桌面/窄屏 UI、商业 VNDB license gate 和 observability redaction 全部通过；在线或 UI fixture 最高只计 E2。
-
-**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/probe.rs`、`Emulator/Source/Manager/astra-emu-manager/src/main.rs`
-
-**Steps:**
-
-1. 定义 `FamilyAutoProbePolicy`，默认顺序为 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。
-2. 让 Manager 逐个调用 family `probe`，收集 marker、confidence、blocker 和 skipped reason。
-3. 支持 case profile 显式指定 family/profile，并在 report 中记录 override reason。
-4. 无命中或全部 blocker 时进入手动选择，不尝试执行商业脚本。
-5. 编写 synthetic multi-family marker、manual override 和 no-match report 测试。
-
-**Done Evidence:** 自动选择结果可复现，report 能解释命中、跳过、覆盖和最终 family。
-
-**Linked Test IDs:** `T-S5-AUTOPROBE-01`
+本次 ABI 迁移未改变 metadata 的 HTTPS、license、consent 和隐私边界。metadata payload/cache 的完整性 hash 属于内容与 artifact 校验，不是 Runtime 语义 hash。真实网络、商业许可和 UI 自动化仍开放。
 
 ## S5-SCRIPT-01 Trusted Luau patch/decode runtime
 
-**ID:** `S5-SCRIPT-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** AstraEMU 支持用户 Luau 脚本在 Trusted Project Profile 下执行 patch、decode、text/media hook 和 deterministic effect injection。
-
-**Depends On:** `S5-FAMILY-01`、`S3-LUAU-01`、`Docs/contracts/script-vn.md`
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/patch.rs`、`Emulator/Source/Manager/astra-emu-manager/src/desktop_source.rs`、Manager launch orchestration
-
-**Steps:**
-
-1. 定义 `TrustedEmuScriptProfile`，统一使用 Luau，不把 Lua/TJS 作为用户脚本语言。
-2. 暴露 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent host API。
-3. 状态注入只能提交 typed Blackboard、input、tag 或 media intent，并在 fixed tick 边界应用。
-4. 禁止 native handle、Actor 指针、raw filesystem、raw network、system call、未授权 key 提取和访问控制规避。
-5. 脚本触发禁止能力时隔离禁用该脚本并写入 redacted diagnostic；只有 case profile 明确允许无补丁模式时继续，否则阻断启动。
-
-**Current Evidence:** 每次执行创建 fresh isolated Luau VM；source、memory、instruction、VFS read、intent、overlay count/bytes 均有界，overlay 只在当前 mount memory 中生效并在 unbind 销毁。Manager 只有 profile 显式选择 `trusted` 才读取固定相对 URI `astraemu.patch.luau`；违规或缺文件直接阻断启动，`no_patch` 也必须显式记录。decode transform 会生成 mount-scoped overlay；text/media hook 会在 host 应用前重新校验 replacement 与 VFS URI；deterministic effect 只在 fixed tick 进入 Runtime。正式 release evidence 尚未生成，所以本项仍为 `IN_PROGRESS`。
-
-**Linked Test IDs:** `T-S5-SCRIPT-01`
+Trusted Luau 不再提供 `text_hook`。翻译只能通过 Extension/Family Hook。媒体替换使用安全相对 URI 显式匹配；patch intent 只记录 kind 与 payload 字节数，不记录正文、路径、payload 或替代 hash。sandbox 的内存、指令和输出边界继续作为安全约束保留。
 
 ## S5-TEXT-01 Text dump and translation provider
 
-**ID:** `S5-TEXT-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** `TextCaptureEvent` 进入 Manager 文本管线；首发 translation provider 通过 ECNU Open API 的显式 Responses/SSE 或 Chat Completions profile 更新非权威 overlay，并执行 consent、预算、缓存、secret 与 report redaction policy。
+独立文本 lease、Host overlay、翻译 cache 和文本 hash 已删除。FVP/Minori 在 framebuffer acquire 前同步调用 `astra.emu.translation.text.v1`，未绑定、timeout、认证、限流、网络、协议、缺字或布局失败时保留原文并返回 typed diagnostic。成功结果由 family core 自行完成 fallback、shaping、换行和绘制。
 
-**Depends On:** `S5-MANAGER-01`、`S5-FAMILY-01`、`S4-AI-01`、`S4-AI-04`
-
-**Target Paths:** `Emulator/Source/Providers/astra-emu-translation-openai-compatible/`、`Emulator/Source/Manager/astra-emu-manager-core/src/library.rs`
-
-**Steps:**
-
-1. Profile 必须显式填写 endpoint、protocol、model、目标语言、上下文 0–32、正文预算和 secret reference；代码不硬编码默认 model，也不在失败后切换 endpoint/protocol/model。
-2. 默认最近 10 句，总正文上限 16 KiB；背景、术语表和上下文超限时在句边界确定性截断。
-3. 全局一次授权永不自动失效；UI 始终显示 endpoint、model 和发送范围。默认只有 session cache，用户按游戏 opt-in 后才写 SQLite。
-4. timeout、限流、transport 和协议错误不阻塞 Runtime；保留原文、记录稳定 diagnostic、有限退避后熔断，只允许用户手动恢复。
-5. shipping credential 只存平台 secret store；SQLite、日志、report、save/replay 和 package 只保存 secret reference 或 hash/count/latency/error code。
-
-**Done Evidence:** Responses SSE、显式 Chat adapter、截断、consent、cache、timeout/rate-limit/circuit breaker 与 redaction 测试通过；另有 ignored live test 使用 ignored env，并证明凭据未进入输出。overlay 不改变 runtime replay hash。
-
-**Linked Test IDs:** `T-S5-TEXT-01`
+Extension ABI v1 已提供 descriptor、instance/session lifecycle、同步 invoke 与 loader fail-fast。CLI/Headless 可通过 `--extension-library` 和可选 `--extension-timeout-ms` 显式绑定预配置 extension；默认 timeout 为 2000 ms，0 表示立即超时。
 
 ## S5-FILTER-01 AstraEMU FilterGraph presets
 
-**ID:** `S5-FILTER-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** AstraEMU 复用引擎 `FilterGraph`，为旧 VN case 绑定 final-frame 和 per-layer filter preset。
+Layer state 可携带 typed `FilterGraph`。Manager GPU compositor 支持 bloom、fade 和 color-matrix，按层使用可复用双缓冲输出；无 CPU fallback、无 runtime hash、无逐帧资源创建。最终画面 preset 仍保留 none、grayscale、crt-soft、warm。
 
-**Depends On:** `S2-MEDIA-04`、`S5-MANAGER-01`
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/filter.rs`、`Emulator/Source/Manager/astra-emu-manager/src/stage_renderer.rs`
-
-**Steps:**
-
-1. 定义 `EmuFilterPresetBinding`，包含 final-frame preset 和可选 per-layer role preset。
-2. final-frame preset 对 RuntimeWorld 合成后的画面做后处理。
-3. per-layer preset 绑定 `PresentationCommand` 的 layer id 或 role；family 缺少 layer metadata 时只启用 final-frame。
-4. 输出 missing layer metadata diagnostic，不新增 family 专属 shader/filter API。
-5. 编写 final-frame、per-layer、metadata 缺失和 headless hash 测试。
-
-**Done Evidence:** filter preset 使用同一 `FilterGraph` contract；family plugin 不直接持有 renderer handle 或 shader object。
-
-**Linked Test IDs:** `T-S5-FILTER-01`
+filter visual golden 和正式 GPU 性能证据尚未形成。
 
 ## S5-ARTEMIS-01 Artemis family plugin
 
-**ID:** `S5-ARTEMIS-01`
+**Status:** `PLANNED`
 
-**Goal:** Artemis family plugin 支持 PFS/PF6/PF8 probe、boot keys、`.iet` tag、legacy Lua call/filter、presentation/media command、snapshot 和 report。
-
-**Depends On:** `S5-FAMILY-01`、`Docs/emu/artemis/implementation-checklist.md`
-
-**Target Paths:** `Emulator/Source/Families/astra-emu-artemis/`、`Emulator/Tests/artemis/`、`scenarios/emu/artemis_full_flow.yaml` planned target
-
-**Steps:**
-
-1. 实现 PF6/PF8 header、index、entry bounds check、PF8 XOR 和 patch chain resolver。
-2. 读取 `system.ini` boot keys，选择 platform section 和 BOOT entry。
-3. 解析 `.iet` text/tag、legacy Lua block hash、`.ast` table row 和 ASB classification。
-4. 接入 tag filter、enqueueTag、presentation/media command、AwaitToken 和 serializable snapshot allowlist。
-5. 编写 synthetic PFS、boot metadata、tag parser、snapshot replay 和 full-flow scenario 测试。
-
-**Done Evidence:** Artemis report 不含商业 payload、私有绝对路径、未授权截图、音频采样或完整脚本。
-
-**Linked Test IDs:** `T-S5-ARTEMIS-01`
+必须直接迁移 Family ABI v9；不得从旧 snapshot、scene transaction 或 text lease 恢复兼容路径。
 
 ## S5-KRKR-01 KrKr family alpha profile
 
-**ID:** `S5-KRKR-01`
+**Status:** `PLANNED`
 
-**Goal:** KrKr family 输出 alpha probe profile，验证 XP3 probe、virtual storage、script classifier、KAG boot trace、media bridge 和 release report。
-
-**Depends On:** `S5-FAMILY-01`、`Docs/emu/krkr/implementation-checklist.md`
-
-**Target Paths:** `Emulator/Source/Families/astra-emu-krkr/`、`Emulator/Tests/krkr/`、`scenarios/emu/krkr_probe.yaml` planned target
-
-**Steps:**
-
-1. 实现 XP3 index、patch layering 和 virtual storage resolver。
-2. 识别 KAG source、TJS bytecode、`.ks.scn`/PSB binary scenario，并为 unsupported branch 输出 diagnostic。
-3. 输出 image、voice、BGM、movie command probe 和 boot trace hash。
-4. 编写 synthetic fixture、metadata smoke 和 probe scenario 测试。
-
-**Done Evidence:** KrKr alpha report 不含商业 payload、私有绝对路径、未授权截图或音频采样。
-
-**Linked Test IDs:** `T-S5-KRKR-01`
+后续接入必须选择 `Native + MultiLayer` 或 `Ported + SingleLayer`，并使用 v9 Host ports。
 
 ## S5-BGI-01 BGI family plugin
 
-**ID:** `S5-BGI-01`
+**Status:** `PLANNED`
 
-**Goal:** BGI family plugin 支持 PackFile/BURIKO ARC20、DSC decode、BCS/BP probe、VM memory、host dispatch、media probe 和 report。
-
-**Depends On:** `S5-FAMILY-01`、`Docs/emu/bgi/implementation-checklist.md`
-
-**Target Paths:** `Emulator/Source/Families/astra-emu-bgi/`、`Emulator/Tests/bgi/`、`scenarios/emu/bgi_full_flow.yaml` planned target
-
-**Steps:**
-
-1. 实现 archive index、bounds check、name normalization 和 DSC decode。
-2. 实现 BCS、BP、headerless scenario 检测顺序和 parser。
-3. 实现 VM memory、stack、PC、program table 和 source map。
-4. 实现 Host dispatch diagnostic、AwaitToken、Presentation、Image/Audio/Movie probe。
-5. 编写 archive fixture、script fixture、VM dispatch 和 full-flow scenario 测试。
-
-**Done Evidence:** BGI local report 只输出 hash、offset、entry count、opcode histogram 和脱敏 metadata。
-
-**Linked Test IDs:** `T-S5-BGI-01`
+后续接入必须直接实现 v9，不接受 v7/v8 shim。
 
 ## S5-SOFTPAL-01 SoftPAL 接入门槛
 
-**ID:** `S5-SOFTPAL-01`
+**Status:** `PLANNED`
 
-**Goal:** SoftPAL 在首批 family 稳定后接入，先完成 probe、resource catalog、script VM、extcall diagnostics 和 release gate。
-
-**Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/softpal/implementation-checklist.md`
-
-**Target Paths:** `Emulator/Source/Families/astra-emu-softpal/`、`Emulator/Tests/softpal/`、`scenarios/emu/softpal_full_flow.yaml` planned target
-
-**Steps:**
-
-1. 复用 `LegacyRuntimeProvider` facade，不新增 Manager 私有通道。
-2. 实现 PAC/DAT probe、resource catalog 和 script VM alpha route。
-3. Unknown extcall 默认输出 diagnostic；presentation/audio/save/control-flow side effect 缺失时 release gate 不算通过。
-4. 编写 fixture smoke、extcall report 和 full-flow scenario 测试。
-
-**Done Evidence:** SoftPAL gate 能区分 recoverable diagnostic 和阻断玩家流程的 missing extcall。
-
-**Linked Test IDs:** `T-S5-SOFTPAL-01`
+保持在 probe/research 阶段，不阻塞 FVP 首发门禁。
 
 ## S5-FVP-01 FVP 接入门槛
 
-**ID:** `S5-FVP-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** FVP 作为 v1 首发 family，以固定 rfvp revision 为行为基线，覆盖 probe、archive/media resolver、完整 HCB VM/syscall、presentation/audio/movie/input 与 save/load/snapshot/replay。
+RFVP fork 固定 revision `f4f64a5bb726c1759350a666a35e0a454b810f61`，直接依赖 Family ABI v9，并实现 `Ported + SingleLayer`。正常像素路径只有“RFVP 写 Host lease → Host 上传”。fork 已删除 hosted texture/draw capture、GraphBuff/runtime texture hash、snapshot、ephemeral text storage 和旧 probe budget；局部变化提交 rect damage，无变化提交 `Unchanged`。
 
-**Depends On:** `S5-FAMILY-01`、`S5-GAME-RUNTIME-01`、`S5-LEGACY-VFS-01`、`Docs/emu/fvp/implementation-checklist.md`
-
-**Target Paths:** `Emulator/Source/Families/astra-emu-fvp/`、pinned `rfvp` hosted fork、`Tools/verify_fvp_parity.py`
-
-**Steps:**
-
-1. 固定并记录 rfvp revision、MPL-2.0 notice、修改记录与 source offer；合法输入逐字节对齐 parser、0x00..0x27 opcode、Variant、stack/call frame、context/thread request、read-state 和 syscall 可观察行为。
-2. 实现 `.bin` VFS、HZC1/NVSG、Ogg/RIFF、WMV/MP4 compatibility probe、cursor、graph/prim/text/audio/movie/input/save/load；路径逃逸、损坏输入、越界和预算失控确定性 fail-fast。
-3. 把 HCB basic block 映射为 family-private action sequence，把有序 effect/wait/trace/coverage/snapshot hint 交给 `AstraEmuRuntimeProvider`。
-4. 覆盖 148 个 release syscall；任何未实现分支、软失败临时代码或 unknown dispatch 都让 coverage gate blocking，不能返回 `Nil` 隐藏缺失行为。
-5. 提交 synthetic fixture 与 sanitized golden；商业样本只生成 ignored local parity report，不进入仓库。
-
-**Current Evidence:** 148 个 release syscall 均有显式 handler，并通过 catalog identity 与 panic-free neutral probe。fixed-step 已补齐 time、timer、输入边沿锁存、bounded VM、VM 后 scene/motion/text/dissolve/wait 更新和状态捕获；snapshot v5 保存 frame index、输入前后态、timer、time、script-visible global state、runtime flags、deferred thread requests 和全部进行中 motion，逐帧 canonical state 使用 generation-cached texture SHA 与有序 associative state，完整 save 以逐 graph 有界压缩保存精确 RGBA。FVP archive 启动只读取 header 和 bounded metadata，entry 通过 ABI v4 range callback 分块读取，不再整包驻留；每次读取进入 session ledger，正式审计另以 4 MiB chunk 读取全部可见资源。ignored 本机授权样本已通过 188 tick/188 frame、输入边沿、snapshot/restore continuation 和流式 OGG 重建，恢复前后 188 帧 CPU RGBA 均与 RFVP 参考逐像素一致；同一签名构建连续两次运行的 visual/state trace 一致。独立审计覆盖 58 个资源、约 8.18 GB，没有 revision/hash 漂移，正常场景只访问 3 个资源、约 22.6 MB，最大单次 range 约 5.0 MB。Headless 默认只落盘 checkpoint，全部帧仍绑定 frame-stream hash。CPU raster 五次 release 运行时间中位数为 14.553 秒，相对 RFVP 13.063 秒为 1.114 倍；时间门禁通过，working set 的五次正式复测与 snapshot 内存门禁仍开放。`Tools/verify_fvp_parity.py` 固定 RFVP 0.5.0 commit，只用于本地 detached worktree 对照；CI 不再联网执行。完整 media parity、正式性能报告和 Windows Manager E3 尚未形成，因此不能标记 `DONE`。
-
-**Linked Test IDs:** `T-S5-FVP-01`
+`astra-emu-fvp` 已收缩为 dylib/export、build identity、provider 构造/shutdown、panic containment 和最终错误映射。fork provider 聚焦测试已通过；fork 全量测试、真实游戏 oracle、翻译布局、冷启动存档和 Performance E2 仍开放。
 
 ## S5-SIGLUS-01 Siglus 接入门槛
 
-**ID:** `S5-SIGLUS-01`
+**Status:** `PLANNED`
 
-**Goal:** Siglus 在首批 family 稳定后接入，覆盖 root probe、Scene.pck、Gameexe、`.ss` script、G00/media 和 report policy。
-
-**Depends On:** `S5-KRKR-01`、`S5-ARTEMIS-01`、`S5-BGI-01`、`Docs/emu/siglus/implementation-checklist.md`
-
-**Target Paths:** `Emulator/Source/Families/astra-emu-siglus/`、`Emulator/Tests/siglus/`、`scenarios/emu/siglus_full_flow.yaml` planned target
-
-**Steps:**
-
-1. 复用 `LegacyRuntimeProvider` facade 和 failure classification。
-2. 实现 Siglus root、Scene.pck、Gameexe header 和授权 material 缺失 diagnostic。
-3. 实现 `.ss` header、string table、label、operand decoder 和 basic stack model。
-4. 实现 G00/Ogg/OVK/NWA/OMV probe，受保护 stream 只消费用户合法提供的材料。
-5. 编写 probe-only report、script fixture 和 full-flow scenario 测试。
-
-**Done Evidence:** Siglus report 不包含 key、payload transform、未授权截图或私有 stream。
-
-**Linked Test IDs:** `T-S5-SIGLUS-01`
+Siglus v8 不属于本分支，必须先迁移到 Family ABI v9，不能直接合并旧实现。
 
 ## S5-GATE-01 AstraEMU release gate
 
-**ID:** `S5-GATE-01`
-
 **Status:** `IN_PROGRESS`
 
-**Goal:** Release Gate 检查 FVP full-flow、`LegacyRuntimeProvider` facade、显式 runtime/family/UI binding、Slint/WGPU/toolchain/license identity、Trusted Luau、ECNU translation policy、filter、snapshot/replay、host identity 与 report redaction。
+唯一预算型阻断门禁是 Performance E2。800×600 local/static damage 与 1920×1080 full damage 都要求 1200 warmup、72000 samples、presentation p99 不超过 8.33 ms、零 deadline miss；前者还要求无变化零 upload、稳态零 allocation。Runtime 保持 60 Hz，presentation 为 120 Hz，在线翻译 latency 单独报告。
 
-**Depends On:** `S5-FAMILY-01`、`S5-AUTOPROBE-01`、`S5-SCRIPT-01`、`S5-TEXT-01`、`S5-FILTER-01`、`S5-FVP-01`、`S5-MANAGER-UI-01`
-
-**Target Paths:** `Engine/Source/Developer/astra-release/src/emu.rs`、`Emulator/Source/Manager/astra-emu-manager-core/src/evidence.rs`、`Emulator/Source/Programs/astra-emu-evidence/`
-
-**Steps:**
-
-1. 增加 explicit runtime/family/UI binding、Slint/wgpu/toolchain/license identity、FVP full-flow/syscall/parity/snapshot/replay、Trusted Luau 与 translation consent/provider/cache checks。
-2. 校验 plugin ABI/engine/rustc/feature fingerprint、binary hash、package eligibility、官方签名、Android APK/native manifest 或 iOS static registration binding。
-3. 校验 Windows/Android run identity 绑定同一 build/profile/package/session/input sequence，以及视觉、音频、输入消费、route/terminal 和 surface lifecycle evidence。
-4. 所有 report 只允许 alias/hash/offset/size/count/diagnostic；绝对路径、URI、商业 payload、secret、未授权截图/音频或访问控制规避材料必须 blocking。
-5. 编写 missing/conflicting provider、missing syscall、signature mismatch、denied script、translation consent/cache 和 payload redaction 失败测试。
-
-**Current Evidence:** release gate 已有 14 项 fail-closed check，并以完整 passing fixture 验证 provider/UI/FVP/Luau/translation/六平台 continuity。`astra-emu-evidence` 会在写入 package sections 前拒绝 unknown field、payload-like field、绝对路径、identity drift 和不完整 E2/E3 lifecycle。真实平台 evidence 尚未生成，不能把 passing fixture 当作发布证据。
-
-**Linked Test IDs:** `T-S5-GATE-01`
+Headless 只形成 E2。Windows Manager 的真实输入、画面、音频与 shutdown 必须另做 E3。
 
 ## S5-PROGRAM-TARGET-01 AstraEMU Manager 与 CLI Program target
 
-**ID:** `S5-PROGRAM-TARGET-01`
+**Status:** `IN_PROGRESS`
 
-**Goal:** AstraEMU Manager 与 `astra-emu-cli` 以 `Program` target 运行；被启动的 case 通过 `AstraEmuRuntimeProvider` 作为 `Game` runtime session 运行，family plugin 仍通过 `LegacyRuntimeProvider` 注册，不升级成独立 Game target。CLI native path 绕过 Manager/Slint，使用 Windows platform host 提供 overlay-free 核心视觉验收；Headless path 复用 `astra-platform-headless` 与物理输入协议。
+Manager、CLI 与 Headless 已使用相同 v9 family host services、Layer2D 和 writable-file contract。CLI 不再暴露 checkpoint/resume；Windowed/Headless 自定义报告不生成 runtime semantic hash。共享 Headless v3 artifact contract 中的 package/profile/build/artifact-file hash 继续作为完整性绑定。
 
-**Depends On:** `S1-TARGET-01`、`S5-MANAGER-01`、`S5-FAMILY-01`
+## 验证状态
 
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager/src/main.rs`、`Emulator/Source/Manager/astra-emu-manager/Cargo.toml`、`Emulator/Source/Programs/astra-emu-cli/`、`Emulator/Platforms/`
+已通过的聚焦验证包括 Family API、Extension API、FVP provider、Minori provider、Manager/CLI/E3 的增量 check/test，以及 schema 生成。提交前仍必须运行：
 
-**Steps:**
+```bash
+python Tools/check_docs.py
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build -p astra-headless
+cargo test --workspace
+```
 
-1. 定义 `astra-emu-manager` Target，kind 为 `program`，绑定 desktop platforms。
-2. Manager 启动时校验 Program target 和 platform capability。
-3. `AstraEmuRuntimeProvider` 的 case target 与 Manager Program target 分开校验。
-4. family plugin descriptor 只进入 plugin registry，不写成独立 Target。
-5. 编写 Manager target validation、case runtime provider handoff、family plugin isolation 和 local case report 测试。
-6. `astra-emu-cli run` 直接创建 provider/session/window/surface，按舞台宽高比路由物理输入；默认静音，显式启用音频，不得隐式启动 Manager 或退回 Headless。
-
-**Done Evidence:** Manager report 包含 Program target id，family report 仍只记录 provider id 和 session id。
-
-**Linked Test IDs:** `T-S5-PROGRAM-TARGET-01`
-
-## 2026-08-04 RFVP stream and ABI identity update
-
-The current Family ABI hard cut is v7. The FVP/Minori runtime snapshot
-sections reject v5/v6 and use v7 schemas. Windows PlatformHost now owns the
-Media Foundation incremental video/audio sessions, including sequence and
-budget validation, bounded prefetch, stable EOS diagnostics, and cleanup on
-stop/error/shutdown. Native CLI WGPU playback consumes lazy video frames from
-that service; Manager already uses the same service for video and movie PCM.
-WMF hardware transforms are requested, but the public boundary remains CPU
-BGRA/i16 followed by the required WGPU/device transfer. This implementation
-slice is still `IN_PROGRESS`: no clean Release ten-minute mixed-run or formal
-Windows E3 parity claim is made here.
+本机 Android target 组件尚未完成修复。在全量门禁、Performance E2 和 Windows E3 完成前，本分支不得标记为可合入。

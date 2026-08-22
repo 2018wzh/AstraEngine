@@ -3074,6 +3074,7 @@ fn ffi_live_output(
     }
     Ok((
         FfiRuntimeLiveOutput {
+            layers: RVec::new(),
             scenes: RVec::from(scenes),
             resource_scenes: RVec::from(resource_scenes),
             audio: RVec::from(audio),

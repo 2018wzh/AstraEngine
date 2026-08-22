@@ -6,7 +6,9 @@ use std::{
 };
 
 use astra_core::Hash256;
-use astra_emu_family_api::{LegacyRuntimeProvider, LegacyVfsReader, LEGACY_FAMILY_ABI_FINGERPRINT};
+use astra_emu_family_api::{
+    LegacyFamilyHostServicesV9, LegacyRuntimeProvider, LEGACY_FAMILY_ABI_FINGERPRINT,
+};
 use astra_emu_manager_core::{
     DynamicFamilyLoader, Ed25519FamilySignatureVerifier, FamilyPluginGate, FamilyPluginManifest,
 };
@@ -46,15 +48,15 @@ impl CliFamilyHostConfig {
 
     pub fn create_provider(
         &self,
-        vfs: Arc<dyn LegacyVfsReader>,
+        services: LegacyFamilyHostServicesV9,
     ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
-        self.create_provider_with_identity(vfs)
+        self.create_provider_with_identity(services)
             .map(|(provider, _)| provider)
     }
 
     pub fn create_provider_with_identity(
         &self,
-        vfs: Arc<dyn LegacyVfsReader>,
+        services: LegacyFamilyHostServicesV9,
     ) -> Result<(Box<dyn LegacyRuntimeProvider>, Hash256), String> {
         let metadata =
             fs::metadata(&self.manifest_path).map_err(|_| "ASTRA_EMU_FAMILY_MANIFEST_READ")?;
@@ -95,7 +97,7 @@ impl CliFamilyHostConfig {
                 &self.library_path,
                 manifest,
                 format!("astra.emu.cli.family.{}", self.family_id),
-                vfs,
+                services,
             )
             .map(|provider| {
                 (

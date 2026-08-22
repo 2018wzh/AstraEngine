@@ -1,36 +1,42 @@
-# RFVP hosted fork record
+# RFVP Astra Family ABI v9 fork record
 
-`astra-emu-fvp` consumes the thin `astra-hosted` fork at the exact revision
-recorded in its `Cargo.toml`. Its upstream is
-[`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp), fixed to
-`3b5ea6c96a925c12f95aef8554905e8fecbc77c3` (0.5.0). Upstream and the forked
-source are MPL-2.0; package release binds this record, the MPL-2.0 text, the
-source-offer identity, fork revision and family binary identity. Revision
-`eff7c42f63c3476b1a331a99dc2e72fbcb6d0df0` restores the upstream standard
-RFVP dependency closure after hosted GraphBuff hashing made `sha2` mandatory
-for that existing module.
+`astra-emu-fvp` consumes the RFVP fork at the exact Git revision recorded in
+`Cargo.toml`. The root workspace applies that Git source to the local
+`astra-emu-family-api` path crate, so an AstraEngine build has one Family ABI
+package identity. A standalone RFVP build resolves the same API from the pinned
+AstraEngine ABI commit and does not depend on a local absolute path or an
+environment override.
 
-The fork retains RFVP's file layout and platform applications. Its small,
-replayable patch stack starts at `0.5.0`, then retains the reviewed unmodified
-upstream portability patch `a94fa18` for bounded text-surface ownership before
-adding host-neutral `hosted` capability beside upstream modules:
+The fork is based on upstream [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp)
+0.5.0 and keeps the upstream MPL-2.0 licensing and source-offer obligations.
+The Astra hosted feature is fixed at RFVP revision
+`f4f64a5bb726c1759350a666a35e0a454b810f61`.
 
-- `HostedSession` owns VM globals and transient text per session, accepts one
-  bounded input batch, and returns one bounded semantic delta. It never sees
-  Astra types, formats, paths, error codes, or platform GPU/audio handles.
-- Hosted output carries scene resource/draw mutations, audio resource refs,
-  video resource metadata and text print operations. Shipping has no opcode
-  trace; Evidence uses a fixed crash ring.
-- Snapshot/restore and canonical state identity remain opaque, bounded RFVP
-  contracts. Resource reads stay behind the boot-bound RFVP VFS port.
+RFVP directly owns the `Ported + SingleLayer` Family ABI v9 provider:
 
-The Astra adapter alone converts that delta to `ScenePacket`, media commands,
-local single-use text leases and `PreparedCommit`. It validates the whole
-transaction before committing; a malformed delta, resource-policy failure,
-restore failure or panic poisons only the affected session. Media bytes and
-plaintext never enter public reports.
+- it acquires the Host-owned writable surface before rendering and writes the
+  software renderer output into that lease without a second framebuffer path;
+- it commits `Unchanged`, rectangle, or full damage with the matching surface
+  generation;
+- it invokes the synchronous Hook at the logical text presentation point and
+  retains the original text when the Hook returns a typed failure;
+- it performs game-native persistence through the relative-path writable-file
+  Host port;
+- it produces input, wait, audio, control, and diagnostic DTOs itself.
 
-Fork maintenance starts from the recorded upstream base, keeps each patch
-small and module-local, runs upstream hosted checks plus Astra provider tests,
-then rebases and records the new exact revision. No Astra product type may be
-introduced into the fork.
+Family ABI v9 has no snapshot/restore, text lease, scene draw transaction,
+runtime content hash, or step-budget contract. The fork therefore contains no
+hosted draw capture, GraphBuff hash, ephemeral text lease, or save envelope for
+the Astra path.
+
+The AstraEngine `astra-emu-fvp` crate is only the dynamic-library boundary. It
+injects build identity and package metadata, constructs and shuts down the RFVP
+provider, contains panics, maps the final error, and emits boundary
+observability. It must not translate scenes, compose or copy pixels, infer
+texture generations, shape text, cache translations, implement save formats,
+or repair RFVP business state.
+
+Fork updates start from the recorded upstream base, keep changes reviewable,
+run the RFVP Astra provider tests and the AstraEngine consumer tests, and pin a
+new immutable revision. The normal full-damage pixel path remains exactly
+RFVP writing the Host lease followed by the Host upload.

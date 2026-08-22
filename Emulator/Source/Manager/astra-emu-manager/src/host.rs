@@ -26,25 +26,12 @@ pub struct WgpuFrameContext<'a> {
     pub queue: &'a wgpu::Queue,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TranslationOverlayView {
-    pub source: String,
-    pub translated: String,
-    pub status: String,
-    pub endpoint: String,
-    pub model: String,
-    pub sent_scope: String,
-}
-
 pub trait AstraUnderlayRenderer: 'static {
     fn setup(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
     fn stage_texture(&self) -> Option<wgpu::Texture> {
         None
     }
     fn take_stage_texture_update(&mut self) -> Option<(wgpu::Texture, u32, u32)> {
-        None
-    }
-    fn translation_overlay(&self) -> Option<TranslationOverlayView> {
         None
     }
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
@@ -72,13 +59,9 @@ pub trait ManagerController: 'static {
         secret: &str,
     ) -> Result<ManagerViewModel, String>;
     fn grant_translation_consent(&mut self) -> Result<ManagerViewModel, String>;
-    fn set_translation_cache(&mut self, enabled: bool) -> Result<ManagerViewModel, String>;
     fn set_filter_preset(&mut self, preset_id: &str) -> Result<ManagerViewModel, String>;
     fn set_patch_mode(&mut self, mode: &str) -> Result<ManagerViewModel, String>;
-    fn reset_translation(&mut self) -> Result<(), String>;
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String>;
-    fn save_game(&mut self) -> Result<ManagerViewModel, String>;
-    fn restore_game(&mut self) -> Result<ManagerViewModel, String>;
     fn rescan(&mut self) -> Result<ManagerViewModel, String>;
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
     fn leave_game(&mut self) -> Result<ManagerViewModel, String>;
@@ -377,30 +360,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             Err(error) => window.set_global_diagnostic(error.into()),
         }
     });
-    let save_weak = adapter.window().as_weak();
-    let save_controller = controller.clone();
-    let save_adapter = adapter.clone();
-    adapter.window().on_save_game(move || {
-        let Some(window) = save_weak.upgrade() else {
-            return;
-        };
-        match save_controller.borrow_mut().save_game() {
-            Ok(model) => save_adapter.apply(&model),
-            Err(error) => window.set_global_diagnostic(error.into()),
-        }
-    });
-    let restore_weak = adapter.window().as_weak();
-    let restore_controller = controller.clone();
-    let restore_adapter = adapter.clone();
-    adapter.window().on_restore_game(move || {
-        let Some(window) = restore_weak.upgrade() else {
-            return;
-        };
-        match restore_controller.borrow_mut().restore_game() {
-            Ok(model) => restore_adapter.apply(&model),
-            Err(error) => window.set_global_diagnostic(error.into()),
-        }
-    });
     let select_weak = adapter.window().as_weak();
     let select_controller = controller.clone();
     let select_adapter = adapter.clone();
@@ -523,27 +482,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             }
         }
     });
-    let cache_weak = adapter.window().as_weak();
-    let cache_controller = controller.clone();
-    let cache_adapter = adapter.clone();
-    adapter.window().on_set_translation_cache(move |enabled| {
-        let result = cache_controller.borrow_mut().set_translation_cache(enabled);
-        if let Some(window) = cache_weak.upgrade() {
-            match result {
-                Ok(model) => cache_adapter.apply(&model),
-                Err(error) => window.set_global_diagnostic(error.into()),
-            }
-        }
-    });
-    let translation_weak = adapter.window().as_weak();
-    adapter.window().on_open_translation(move || {
-        if let Some(window) = translation_weak.upgrade() {
-            window.set_diagnostics_overlay_active(false);
-            window.set_patches_overlay_active(false);
-            window.set_filters_overlay_active(false);
-            window.set_translation_overlay_active(!window.get_translation_overlay_active());
-        }
-    });
     let diagnostics_weak = adapter.window().as_weak();
     adapter.window().on_open_diagnostics(move || {
         if let Some(window) = diagnostics_weak.upgrade() {
@@ -596,18 +534,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             match result {
                 Ok(model) => filter_adapter.apply(&model),
                 Err(error) => window.set_global_diagnostic(error.into()),
-            }
-        }
-    });
-    let reset_translation_weak = adapter.window().as_weak();
-    let reset_translation_controller = controller.clone();
-    adapter.window().on_reset_translation(move || {
-        if let Err(error) = reset_translation_controller
-            .borrow_mut()
-            .reset_translation()
-        {
-            if let Some(window) = reset_translation_weak.upgrade() {
-                window.set_global_diagnostic(error.into());
             }
         }
     });
@@ -1011,16 +937,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                     window.set_stage_frame(image);
                     window.set_stage_native_width(width as f32);
                     window.set_stage_native_height(height as f32);
-                }
-                if let Some(overlay) = renderer.translation_overlay() {
-                    if let Some(window) = window_weak.upgrade() {
-                        window.set_translation_source(overlay.source.into());
-                        window.set_translation_output(overlay.translated.into());
-                        window.set_translation_status(overlay.status.into());
-                        window.set_translation_endpoint(overlay.endpoint.into());
-                        window.set_translation_model(overlay.model.into());
-                        window.set_translation_scope(overlay.sent_scope.into());
-                    }
                 }
                 Ok(())
             },

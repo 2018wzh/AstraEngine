@@ -1376,6 +1376,11 @@ fn runtime_live_audio_command(
 
 #[cfg(feature = "dynamic-abi")]
 fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput, String> {
+    let layers = value
+        .layers
+        .into_iter()
+        .map(runtime_layer_transaction)
+        .collect::<Result<Vec<_>, _>>()?;
     let scenes = value
         .scenes
         .into_iter()
@@ -1594,6 +1599,7 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
         .map(|state| state.into_runtime());
     let vn_step = value.vn_step.into_option().map(|step| step.into_runtime());
     Ok(RuntimeLiveOutput {
+        layers,
         scenes,
         resource_scenes,
         audio,
@@ -1625,6 +1631,174 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
             pcm_copied_bytes: value.pcm_copied_bytes,
         },
         diagnostics: Vec::new(),
+    })
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn runtime_layer_transaction(
+    value: astra_plugin_abi::FfiRuntimeLayer2DTransaction,
+) -> Result<astra_media_core::Layer2DTransaction, String> {
+    use astra_media_core::{Layer2DId, Layer2DOperation};
+    let operations = value
+        .operations
+        .into_iter()
+        .map(|operation| match operation {
+            astra_plugin_abi::FfiRuntimeLayer2DOperation::Create(layer) => {
+                runtime_layer_state(layer).map(Layer2DOperation::Create)
+            }
+            astra_plugin_abi::FfiRuntimeLayer2DOperation::Update(layer) => {
+                runtime_layer_state(layer).map(Layer2DOperation::Update)
+            }
+            astra_plugin_abi::FfiRuntimeLayer2DOperation::Destroy(id) => {
+                Ok(Layer2DOperation::Destroy(Layer2DId(id.to_string())))
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(astra_media_core::Layer2DTransaction {
+        sequence: value.sequence,
+        viewport_width: value.viewport_width,
+        viewport_height: value.viewport_height,
+        operations,
+    })
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn runtime_layer_state(
+    value: astra_plugin_abi::FfiRuntimeLayer2DState,
+) -> Result<astra_media_core::Layer2DState, String> {
+    use astra_media_core::*;
+    let rect = |rect: astra_plugin_abi::FfiRuntimeRectI| RectI {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    };
+    let content = match value.content {
+        astra_plugin_abi::FfiRuntimeLayer2DContent::WritableSurface {
+            surface_id,
+            generation,
+            width,
+            height,
+            stride,
+            format,
+            damage,
+        } => Layer2DContent::WritableSurface(WritableSurface2DRef {
+            surface_id: Surface2DId(surface_id.to_string()),
+            generation,
+            width,
+            height,
+            stride,
+            format: match format {
+                astra_plugin_abi::FfiRuntimeSurface2DFormat::Rgba8SrgbPremultiplied => {
+                    Surface2DFormat::Rgba8SrgbPremultiplied
+                }
+                astra_plugin_abi::FfiRuntimeSurface2DFormat::Bgra8SrgbPremultiplied => {
+                    Surface2DFormat::Bgra8SrgbPremultiplied
+                }
+            },
+            damage: match damage {
+                astra_plugin_abi::FfiRuntimeLayer2DDamage::Unchanged => Layer2DDamage::Unchanged,
+                astra_plugin_abi::FfiRuntimeLayer2DDamage::Full => Layer2DDamage::Full,
+                astra_plugin_abi::FfiRuntimeLayer2DDamage::Rects(rects) => {
+                    Layer2DDamage::Rects(rects.into_iter().map(rect).collect())
+                }
+            },
+        }),
+        astra_plugin_abi::FfiRuntimeLayer2DContent::TextureResource {
+            resource_id,
+            generation,
+            width,
+            height,
+        } => Layer2DContent::TextureResource(TextureResource2DRef {
+            resource_id: resource_id.to_string(),
+            generation,
+            width,
+            height,
+        }),
+    };
+    Ok(Layer2DState {
+        id: Layer2DId(value.id.to_string()),
+        role: Layer2DRole(value.role.to_string()),
+        z_index: value.z_index,
+        content,
+        transform: Transform2D {
+            m11: value.transform.m11,
+            m12: value.transform.m12,
+            m21: value.transform.m21,
+            m22: value.transform.m22,
+            tx: value.transform.tx,
+            ty: value.transform.ty,
+        },
+        clip: value.clip.into_option().map(rect),
+        opacity: value.opacity,
+        texture_filter: match value.texture_filter {
+            astra_plugin_abi::FfiRuntimeTextureFilter2D::Nearest => TextureFilter2D::Nearest,
+            astra_plugin_abi::FfiRuntimeTextureFilter2D::Linear => TextureFilter2D::Linear,
+        },
+        blend: match value.blend {
+            astra_plugin_abi::FfiRuntimeLayerBlend2D::Alpha => BlendMode::Alpha,
+            astra_plugin_abi::FfiRuntimeLayerBlend2D::Add => BlendMode::Add,
+            astra_plugin_abi::FfiRuntimeLayerBlend2D::Opaque => BlendMode::Opaque,
+            astra_plugin_abi::FfiRuntimeLayerBlend2D::Multiply => BlendMode::Multiply,
+            astra_plugin_abi::FfiRuntimeLayerBlend2D::Screen => BlendMode::Screen,
+        },
+        filter_graph: value
+            .filter_graph
+            .into_option()
+            .map(runtime_filter_graph)
+            .transpose()?,
+    })
+}
+
+#[cfg(feature = "dynamic-abi")]
+fn runtime_filter_graph(
+    value: astra_plugin_abi::FfiRuntimeFilterGraph,
+) -> Result<astra_media_core::FilterGraph, String> {
+    use astra_media_core::{FilterNode, FilterParam, FilterTarget};
+    let target = |value| match value {
+        astra_plugin_abi::FfiRuntimeFilterTarget::Background => FilterTarget::Background,
+        astra_plugin_abi::FfiRuntimeFilterTarget::Character => FilterTarget::Character,
+        astra_plugin_abi::FfiRuntimeFilterTarget::Ui => FilterTarget::Ui,
+        astra_plugin_abi::FfiRuntimeFilterTarget::Text => FilterTarget::Text,
+        astra_plugin_abi::FfiRuntimeFilterTarget::Video => FilterTarget::Video,
+        astra_plugin_abi::FfiRuntimeFilterTarget::Final => FilterTarget::Final,
+    };
+    let nodes = value
+        .nodes
+        .into_iter()
+        .map(|node| {
+            let mut params = BTreeMap::new();
+            for entry in node.params {
+                let value = match entry.value {
+                    astra_plugin_abi::FfiRuntimeFilterParam::Float(value) => {
+                        FilterParam::Float(value)
+                    }
+                    astra_plugin_abi::FfiRuntimeFilterParam::Int(value) => FilterParam::Int(value),
+                    astra_plugin_abi::FfiRuntimeFilterParam::Bool(value) => {
+                        FilterParam::Bool(value)
+                    }
+                    astra_plugin_abi::FfiRuntimeFilterParam::Text(value) => {
+                        FilterParam::Text(value.to_string())
+                    }
+                };
+                if params.insert(entry.key.to_string(), value).is_some() {
+                    return Err("RUNTIME_LAYER_FILTER_PARAM_DUPLICATE".to_owned());
+                }
+            }
+            Ok(FilterNode {
+                id: node.id.to_string(),
+                kind: node.kind.to_string(),
+                input: target(node.input),
+                output: target(node.output),
+                params,
+                deterministic: node.deterministic,
+                allow_cpu_fallback: node.allow_cpu_fallback,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(astra_media_core::FilterGraph {
+        schema: value.schema.to_string(),
+        nodes,
     })
 }
 

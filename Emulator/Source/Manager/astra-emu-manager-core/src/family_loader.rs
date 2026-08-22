@@ -7,7 +7,7 @@ use std::{
 
 use abi_stable::{
     library::{AbiHeaderRef, ROOT_MODULE_LOADER_NAME_WITH_NUL},
-    std_types::{ROption, RResult, RString, RVec},
+    std_types::{RResult, RString, RVec},
 };
 use astra_core::Hash256;
 use astra_emu_family_api::*;
@@ -17,7 +17,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-static VFS_READERS: OnceLock<Mutex<BTreeMap<String, Arc<dyn LegacyVfsReader>>>> = OnceLock::new();
+static HOST_SERVICES: OnceLock<Mutex<BTreeMap<String, LegacyFamilyHostServicesV9>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -181,7 +182,7 @@ pub trait StaticFamilyRegistrationVerifier: Send + Sync {
 }
 
 pub type StaticFamilyFactory =
-    fn(Arc<dyn LegacyVfsReader>) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError>;
+    fn(LegacyFamilyHostServicesV9) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError>;
 
 #[derive(Clone)]
 pub struct StaticFamilyRegistration {
@@ -230,12 +231,12 @@ impl StaticFamilyRegistry {
     pub fn create(
         &self,
         family_id: &str,
-        vfs: Arc<dyn LegacyVfsReader>,
+        services: LegacyFamilyHostServicesV9,
     ) -> Result<Box<dyn LegacyRuntimeProvider>, FamilyPluginLoadError> {
         let registration = self.registrations.get(family_id).ok_or_else(|| {
             FamilyPluginLoadError::Manifest("explicit static family binding is missing".into())
         })?;
-        let provider = (registration.factory)(vfs).map_err(provider_error)?;
+        let provider = (registration.factory)(services).map_err(provider_error)?;
         let descriptor = provider.descriptor();
         descriptor.validate().map_err(provider_error)?;
         validate_descriptor_binding(&registration.manifest, &descriptor)?;
@@ -278,7 +279,7 @@ impl DynamicFamilyLoader {
         path: impl AsRef<Path>,
         manifest: FamilyPluginManifest,
         instance_id: String,
-        vfs: Arc<dyn LegacyVfsReader>,
+        services: LegacyFamilyHostServicesV9,
     ) -> Result<DynamicLegacyRuntimeProvider, FamilyPluginLoadError> {
         validate_manifest(&manifest, &self.gate)?;
         validate_symbol("instance_id", &instance_id)
@@ -301,16 +302,16 @@ impl DynamicFamilyLoader {
         descriptor.validate().map_err(provider_error)?;
         validate_descriptor_binding(&manifest, &descriptor)?;
 
-        let host_token = format!("emu.vfs.{}", Hash256::from_sha256(instance_id.as_bytes()));
-        let mut readers = vfs_readers()
+        let host_token = format!("emu.host.{instance_id}");
+        let mut hosts = host_services()
             .lock()
-            .map_err(|_| FamilyPluginLoadError::AbiLoad("vfs_registry"))?;
-        if readers.insert(host_token.clone(), vfs).is_some() {
+            .map_err(|_| FamilyPluginLoadError::AbiLoad("host_registry"))?;
+        if hosts.insert(host_token.clone(), services).is_some() {
             return Err(FamilyPluginLoadError::Manifest(
-                "host VFS token collision".into(),
+                "host services token collision".into(),
             ));
         }
-        drop(readers);
+        drop(hosts);
         let request = FfiProviderInstanceRequest {
             instance_id: instance_id.clone().into(),
         };
@@ -319,9 +320,13 @@ impl DynamicFamilyLoader {
             stat_vfs: ffi_stat_vfs,
             read_vfs_range: ffi_read_vfs_range,
             enumerate_vfs: ffi_enumerate_vfs,
+            acquire_surface: ffi_acquire_surface,
+            commit_surface: ffi_commit_surface,
+            invoke_hook: ffi_invoke_hook,
+            writable_file: ffi_writable_file,
         };
         if let Err(error) = native_result::<_, ()>((module.create_instance())(services, request)) {
-            remove_vfs_reader(&host_token);
+            remove_host_services(&host_token);
             return Err(provider_error(error));
         }
         Ok(DynamicLegacyRuntimeProvider {
@@ -404,30 +409,6 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
         }
     }
 
-    fn save(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-    ) -> Result<LegacySnapshotEnvelope, LegacyProviderError> {
-        self.validate_session(ctx, session)?;
-        native_result((self.module.save())(self.session_call(ctx, session)))
-    }
-
-    fn restore(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        snapshot: &LegacySnapshotEnvelope,
-    ) -> Result<LegacyRestoreReport, LegacyProviderError> {
-        self.validate_session(ctx, session)?;
-        native_result((self.module.restore())(FfiRestoreCall {
-            instance_id: self.instance_id.clone().into(),
-            ctx: ctx.clone().into(),
-            session_id: session.0.clone().into(),
-            snapshot: snapshot.clone().into(),
-        }))
-    }
-
     fn shutdown(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -437,86 +418,6 @@ impl LegacyRuntimeProvider for DynamicLegacyRuntimeProvider {
         let report = native_result((self.module.shutdown())(self.session_call(ctx, session)))?;
         self.sessions.remove(&session.0);
         Ok(report)
-    }
-
-    fn take_ephemeral_text(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        lease_id: &str,
-    ) -> Result<Option<LegacyEphemeralText>, LegacyProviderError> {
-        self.validate_session(ctx, session)?;
-        validate_symbol("text_lease_id", lease_id)?;
-        let value =
-            native_result::<_, ROption<FfiEphemeralText>>((self.module.take_ephemeral_text())(
-                FfiTextLeaseCall {
-                    instance_id: self.instance_id.clone().into(),
-                    ctx: ctx.clone().into(),
-                    session_id: session.0.clone().into(),
-                    lease_id: lease_id.into(),
-                },
-            ))?;
-        Ok(value.into_option().map(Into::into))
-    }
-
-    fn read_session_resource(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
-        self.validate_session(ctx, session)?;
-        let bytes = match (self.module.read_session_resource())(FfiResourceReadCall {
-            instance_id: self.instance_id.clone().into(),
-            ctx: ctx.clone().into(),
-            session_id: session.0.clone().into(),
-            resource_uri: resource_uri.into(),
-            max_bytes,
-        }) {
-            RResult::ROk(bytes) => bytes,
-            RResult::RErr(error) => return Err(error.into()),
-        };
-        if bytes.len() as u64 > max_bytes {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_FFI_RESOURCE_BOUNDS",
-                "family resource exceeds the requested byte bound",
-            ));
-        }
-        Ok(bytes.into_owned())
-    }
-
-    fn begin_session_resource_read(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<LegacyResourceRead, LegacyProviderError> {
-        self.validate_session(ctx, session)?;
-        let module = self.module;
-        let _library = Arc::clone(&self._library);
-        let call = FfiResourceReadCall {
-            instance_id: self.instance_id.clone().into(),
-            ctx: ctx.clone().into(),
-            session_id: session.0.clone().into(),
-            resource_uri: resource_uri.into(),
-            max_bytes,
-        };
-        LegacyResourceRead::spawn(move || {
-            let _library = _library;
-            let bytes = match (module.read_session_resource())(call) {
-                RResult::ROk(bytes) => bytes,
-                RResult::RErr(error) => return Err(error.into()),
-            };
-            if bytes.len() as u64 > max_bytes {
-                return Err(LegacyProviderError::invalid(
-                    "ASTRA_EMU_FFI_RESOURCE_BOUNDS",
-                    "family resource exceeds the requested byte bound",
-                ));
-            }
-            Ok(bytes.into_owned())
-        })
     }
 }
 
@@ -564,7 +465,7 @@ impl Drop for DynamicLegacyRuntimeProvider {
         let _ = (self.module.destroy_instance())(FfiProviderInstanceRequest {
             instance_id: self.instance_id.clone().into(),
         });
-        remove_vfs_reader(&self.host_token);
+        remove_host_services(&self.host_token);
     }
 }
 
@@ -573,16 +474,17 @@ extern "C" fn ffi_stat_vfs(
     call: FfiVfsStatCall,
 ) -> FfiLegacyResult<FfiByteSourceStat> {
     let result = (|| {
-        let readers = vfs_readers().lock().map_err(|_| {
+        let hosts = host_services().lock().map_err(|_| {
             LegacyProviderError::invalid(
                 "ASTRA_EMU_VFS_LOCK_POISONED",
                 "host VFS registry lock is poisoned",
             )
         })?;
-        let reader = readers.get(host_token.as_str()).ok_or_else(|| {
+        let host = hosts.get(host_token.as_str()).ok_or_else(|| {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_HOST_TOKEN", "host VFS token is not active")
         })?;
-        reader.stat_file(call.mount_set_id.as_str(), call.uri.as_str())
+        host.vfs
+            .stat_file(call.mount_set_id.as_str(), call.uri.as_str())
     })();
     ffi_result(result)
 }
@@ -592,16 +494,16 @@ extern "C" fn ffi_read_vfs_range(
     call: FfiVfsRangeCall,
 ) -> FfiLegacyResult<FfiRangeReadResult> {
     let result = (|| {
-        let readers = vfs_readers().lock().map_err(|_| {
+        let hosts = host_services().lock().map_err(|_| {
             LegacyProviderError::invalid(
                 "ASTRA_EMU_VFS_LOCK_POISONED",
                 "host VFS registry lock is poisoned",
             )
         })?;
-        let reader = readers.get(host_token.as_str()).ok_or_else(|| {
+        let host = hosts.get(host_token.as_str()).ok_or_else(|| {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_HOST_TOKEN", "host VFS token is not active")
         })?;
-        reader.read_file_range(
+        host.vfs.read_file_range(
             call.mount_set_id.as_str(),
             call.uri.as_str(),
             astra_byte_source::SourceRevision(call.expected_revision),
@@ -617,16 +519,16 @@ extern "C" fn ffi_enumerate_vfs(
     call: FfiVfsEnumerateCall,
 ) -> FfiLegacyResult<RVec<FfiVfsListedFile>> {
     let result = (|| {
-        let readers = vfs_readers().lock().map_err(|_| {
+        let hosts = host_services().lock().map_err(|_| {
             LegacyProviderError::invalid(
                 "ASTRA_EMU_VFS_LOCK_POISONED",
                 "host VFS registry lock is poisoned",
             )
         })?;
-        let reader = readers.get(host_token.as_str()).ok_or_else(|| {
+        let host = hosts.get(host_token.as_str()).ok_or_else(|| {
             LegacyProviderError::invalid("ASTRA_EMU_VFS_HOST_TOKEN", "host VFS token is not active")
         })?;
-        reader
+        host.vfs
             .enumerate_by_extension(
                 call.mount_set_id.as_str(),
                 call.root.as_str(),
@@ -642,6 +544,172 @@ extern "C" fn ffi_enumerate_vfs(
             })
     })();
     ffi_result::<RVec<FfiVfsListedFile>, RVec<FfiVfsListedFile>>(result)
+}
+
+extern "C" fn ffi_acquire_surface(
+    call: FfiAcquireSurfaceCallV9,
+) -> FfiLegacyResult<FfiSurfaceLeaseV9> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        host.surfaces.acquire(
+            call.session_id.as_str(),
+            call.fixed_step,
+            call.surface_id.as_str(),
+            call.width,
+            call.height,
+            match call.format {
+                FfiSurfaceFormatV9::Rgba8SrgbPremultiplied => {
+                    LegacySurfaceFormatV9::Rgba8SrgbPremultiplied
+                }
+                FfiSurfaceFormatV9::Bgra8SrgbPremultiplied => {
+                    LegacySurfaceFormatV9::Bgra8SrgbPremultiplied
+                }
+            },
+        )
+    })();
+    ffi_result(result)
+}
+
+extern "C" fn ffi_commit_surface(call: FfiCommitSurfaceCallV9) -> FfiLegacyResult<()> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        host.surfaces.commit(
+            call.session_id.as_str(),
+            call.fixed_step,
+            LegacySurfaceCommitV9 {
+                lease: call.lease.into(),
+                damage: call.damage.into(),
+            },
+        )
+    })();
+    ffi_result(result)
+}
+
+extern "C" fn ffi_invoke_hook(call: FfiHookInvocationV1) -> FfiLegacyResult<FfiHookResultV1> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        let result = host.hooks.invoke(LegacyHookInvocationV1 {
+            session_id: call.session_id.to_string(),
+            invocation_id: call.invocation_id.to_string(),
+            family_id: call.family_id.to_string(),
+            family_game_id: call.family_game_id.to_string(),
+            hook_id: call.hook_id.to_string(),
+            timeout_ms: call.timeout_ms,
+            payload: call.payload.into_owned(),
+        })?;
+        Ok(FfiHookResultV1 {
+            status: match result.status {
+                LegacyHookStatusV1::Completed => FfiHookStatusV1::Completed,
+                LegacyHookStatusV1::Unbound => FfiHookStatusV1::Unbound,
+                LegacyHookStatusV1::TimedOut => FfiHookStatusV1::TimedOut,
+                LegacyHookStatusV1::Failed => FfiHookStatusV1::Failed,
+            },
+            payload: result.payload.into_ffi(),
+            diagnostics: result
+                .diagnostics
+                .into_iter()
+                .map(FfiDiagnostic::from)
+                .collect::<Vec<_>>()
+                .into(),
+        })
+    })();
+    ffi_result::<FfiHookResultV1, FfiHookResultV1>(result)
+}
+
+extern "C" fn ffi_writable_file(
+    call: FfiWritableFileCallV1,
+) -> FfiLegacyResult<FfiWritableFileResultV1> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        let request = match call.request {
+            FfiWritableFileRequestV1::Stat { path } => LegacyWritableFileRequestV1::Stat {
+                path: path.to_string(),
+            },
+            FfiWritableFileRequestV1::List { path } => LegacyWritableFileRequestV1::List {
+                path: path.to_string(),
+            },
+            FfiWritableFileRequestV1::CreateDir { path } => {
+                LegacyWritableFileRequestV1::CreateDir {
+                    path: path.to_string(),
+                }
+            }
+            FfiWritableFileRequestV1::ReadRange {
+                path,
+                offset,
+                length,
+            } => LegacyWritableFileRequestV1::ReadRange {
+                path: path.to_string(),
+                offset,
+                length,
+            },
+            FfiWritableFileRequestV1::WriteRange {
+                path,
+                offset,
+                bytes,
+            } => LegacyWritableFileRequestV1::WriteRange {
+                path: path.to_string(),
+                offset,
+                bytes: bytes.as_slice().to_vec(),
+            },
+            FfiWritableFileRequestV1::SetLength { path, length } => {
+                LegacyWritableFileRequestV1::SetLength {
+                    path: path.to_string(),
+                    length,
+                }
+            }
+            FfiWritableFileRequestV1::Remove { path } => LegacyWritableFileRequestV1::Remove {
+                path: path.to_string(),
+            },
+            FfiWritableFileRequestV1::AtomicReplace {
+                temporary_path,
+                destination_path,
+            } => LegacyWritableFileRequestV1::AtomicReplace {
+                temporary_path: temporary_path.to_string(),
+                destination_path: destination_path.to_string(),
+            },
+        };
+        request.validate()?;
+        let result = host
+            .writable_files
+            .execute(call.session_id.as_str(), request)?;
+        Ok(FfiWritableFileResultV1 {
+            exists: result.exists,
+            is_file: result.is_file,
+            length: result.length,
+            entries: result
+                .entries
+                .into_iter()
+                .map(|entry| FfiWritableFileEntryV1 {
+                    name: entry.name.into(),
+                    is_file: entry.is_file,
+                    length: entry.length,
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            bytes: result.bytes.into_ffi(),
+            written: result.written,
+        })
+    })();
+    ffi_result::<FfiWritableFileResultV1, FfiWritableFileResultV1>(result)
+}
+
+fn registered_host(token: &str) -> Result<LegacyFamilyHostServicesV9, LegacyProviderError> {
+    host_services()
+        .lock()
+        .map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_HOST_LOCK_POISONED",
+                "family Host services registry lock is poisoned",
+            )
+        })?
+        .get(token)
+        .cloned()
+        .ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_HOST_TOKEN",
+                "family Host services token is not active",
+            )
+        })
 }
 
 fn validate_manifest(
@@ -773,13 +841,13 @@ unsafe fn root_module(
         .map_err(|_| FamilyPluginLoadError::AbiLoad("root_init"))
 }
 
-fn vfs_readers() -> &'static Mutex<BTreeMap<String, Arc<dyn LegacyVfsReader>>> {
-    VFS_READERS.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn host_services() -> &'static Mutex<BTreeMap<String, LegacyFamilyHostServicesV9>> {
+    HOST_SERVICES.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn remove_vfs_reader(token: &str) {
-    if let Ok(mut readers) = vfs_readers().lock() {
-        readers.remove(token);
+fn remove_host_services(token: &str) {
+    if let Ok(mut hosts) = host_services().lock() {
+        hosts.remove(token);
     }
 }
 
@@ -991,21 +1059,32 @@ mod tests {
         );
         let script = terminal_hcb();
         let fingerprint = Hash256::from_sha256(&script);
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(DynamicMemoryVfs {
+            script,
+            default_font: include_bytes!(
+                "../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf"
+            )
+            .to_vec(),
+        });
+        let host = crate::AstraEmuFamilyHost::new(vfs);
         let mut provider = loader
             .load(
                 &binary_path,
                 manifest,
                 "dynamic.test.instance".into(),
-                Arc::new(DynamicMemoryVfs {
-                    script,
-                    default_font: include_bytes!(
-                        "../../../../../Engine/Fixtures/PublicDomainFonts/NotoSansSC-Variable.ttf"
-                    )
-                    .to_vec(),
-                }),
+                host.services(),
             )
             .unwrap();
         let ctx = dynamic_host_ctx();
+        let writable_root = tempfile::tempdir().unwrap();
+        host.writable_files
+            .bind_session(
+                "dynamic.test.session",
+                "fvp",
+                ctx.case_id.clone(),
+                writable_root.path(),
+            )
+            .unwrap();
         let probe = provider
             .probe(
                 &ctx,
@@ -1013,8 +1092,6 @@ mod tests {
                     root_mount_id: "mount.test".into(),
                     candidate_uris: vec!["script.hcb".into()],
                     marker_hashes: vec![fingerprint],
-                    max_entries: 1,
-                    max_metadata_bytes: 4096,
                 },
             )
             .unwrap();
@@ -1039,13 +1116,6 @@ mod tests {
                 },
             )
             .unwrap();
-        let mut resource = provider
-            .begin_session_resource_read(&ctx, &session, "default.ttf", 4 * 1024 * 1024)
-            .unwrap();
-        assert_eq!(
-            resource.complete().unwrap_err().code(),
-            "ASTRA_FVP_RESOURCE_READ"
-        );
         let mut output = None;
         for tick_index in 1..=4 {
             let step = provider
@@ -1060,11 +1130,6 @@ mod tests {
                         input_edges: Vec::new(),
                         await_results: Vec::new(),
                         provider_results: Vec::new(),
-                        budget: LegacyStepBudget {
-                            max_instructions: 32,
-                            max_effects: 32,
-                            max_trace_entries: 32,
-                        },
                     },
                 )
                 .unwrap();
@@ -1079,9 +1144,6 @@ mod tests {
             output.status,
             LegacyRuntimeStatus::Active | LegacyRuntimeStatus::Terminal
         ));
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        let restore = provider.restore(&ctx, &session, &snapshot).unwrap();
-        assert!((1..=4).contains(&restore.restored_fixed_step));
         let shutdown = provider.shutdown(&ctx, &session).unwrap();
         assert_eq!(shutdown.final_state_revision, output.state_revision);
     }

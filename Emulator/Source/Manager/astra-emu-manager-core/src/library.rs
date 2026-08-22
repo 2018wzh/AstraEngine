@@ -16,7 +16,7 @@ use thiserror::Error;
 use crate::input_mapping::InputMapping;
 use crate::work_settings::WorkSettings;
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 11;
 
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
@@ -77,15 +77,6 @@ pub struct TranslationConsent {
     pub endpoint: String,
     pub model: String,
     pub granted_at_unix_ms: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TranslationCacheRecord {
-    pub case_identity: String,
-    pub source_hash: String,
-    pub source_text: String,
-    pub translated_text: String,
-    pub provider_identity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -235,18 +226,7 @@ impl Library {
                     model TEXT NOT NULL,
                     granted_at_unix_ms INTEGER NOT NULL
                  );
-                 CREATE TABLE translation_cache_policy (
-                    case_identity TEXT PRIMARY KEY NOT NULL REFERENCES library_case(case_identity) ON DELETE CASCADE,
-                    persistent INTEGER NOT NULL CHECK(persistent IN (0, 1))
-                 );
-                 CREATE TABLE translation_cache (
-                    case_identity TEXT NOT NULL REFERENCES library_case(case_identity) ON DELETE CASCADE,
-                    source_hash TEXT NOT NULL,
-                    source_text TEXT NOT NULL,
-                    translated_text TEXT NOT NULL,
-                    provider_identity TEXT NOT NULL,
-                    PRIMARY KEY(case_identity, source_hash, provider_identity)
-                 );",
+                 ",
             )?;
             tx.pragma_update(None, "user_version", 1)?;
             version = 1;
@@ -340,14 +320,6 @@ impl Library {
                     return Err(LibraryError::DuplicateCaseIdentity(new_identity));
                 }
                 tx.execute(
-                    "UPDATE translation_cache_policy SET case_identity=?1 WHERE case_identity=?2",
-                    params![new_identity, old_identity],
-                )?;
-                tx.execute(
-                    "UPDATE translation_cache SET case_identity=?1 WHERE case_identity=?2",
-                    params![new_identity, old_identity],
-                )?;
-                tx.execute(
                     "UPDATE case_runtime_profile SET case_identity=?1 WHERE case_identity=?2",
                     params![new_identity, old_identity],
                 )?;
@@ -423,6 +395,14 @@ impl Library {
         if version == 9 {
             crate::identity::migrate_v10(&tx)?;
             tx.pragma_update(None, "user_version", 10)?;
+            version = 10;
+        }
+        if version == 10 {
+            tx.execute_batch(
+                "DROP TABLE IF EXISTS translation_cache;
+                 DROP TABLE IF EXISTS translation_cache_policy;",
+            )?;
+            tx.pragma_update(None, "user_version", 11)?;
         }
         tx.commit()?;
         Ok(())
@@ -1083,119 +1063,6 @@ impl Library {
         )
         .transpose()
     }
-
-    pub fn set_persistent_translation_cache(
-        &mut self,
-        case_identity: &str,
-        enabled: bool,
-    ) -> Result<(), LibraryError> {
-        validate_symbol(case_identity)?;
-        self.connection.execute(
-            "INSERT INTO translation_cache_policy(case_identity, persistent) VALUES(?1, ?2)
-             ON CONFLICT(case_identity) DO UPDATE SET persistent=excluded.persistent",
-            params![case_identity, enabled],
-        )?;
-        if !enabled {
-            self.connection.execute(
-                "DELETE FROM translation_cache WHERE case_identity=?1",
-                [case_identity],
-            )?;
-        }
-        Ok(())
-    }
-
-    pub fn persistent_translation_cache_enabled(
-        &self,
-        case_identity: &str,
-    ) -> Result<bool, LibraryError> {
-        validate_symbol(case_identity)?;
-        self.connection
-            .query_row(
-                "SELECT persistent FROM translation_cache_policy WHERE case_identity=?1",
-                [case_identity],
-                |row| row.get(0),
-            )
-            .optional()
-            .map(|value| value == Some(true))
-            .map_err(Into::into)
-    }
-
-    pub fn store_translation(
-        &mut self,
-        record: &TranslationCacheRecord,
-    ) -> Result<bool, LibraryError> {
-        validate_symbol(&record.case_identity)?;
-        validate_symbol(&record.source_hash)?;
-        validate_symbol(&record.provider_identity)?;
-        let enabled: Option<bool> = self
-            .connection
-            .query_row(
-                "SELECT persistent FROM translation_cache_policy WHERE case_identity=?1",
-                [&record.case_identity],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if enabled != Some(true) {
-            return Ok(false);
-        }
-        self.connection.execute(
-            "INSERT INTO translation_cache(case_identity, source_hash, source_text, translated_text, provider_identity)
-             VALUES(?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(case_identity, source_hash, provider_identity) DO UPDATE SET
-               source_text=excluded.source_text, translated_text=excluded.translated_text",
-            params![record.case_identity, record.source_hash, record.source_text, record.translated_text, record.provider_identity],
-        )?;
-        Ok(true)
-    }
-
-    pub fn translation(
-        &self,
-        case_identity: &str,
-        source_hash: &str,
-        provider_identity: &str,
-    ) -> Result<Option<TranslationCacheRecord>, LibraryError> {
-        validate_symbol(case_identity)?;
-        validate_symbol(source_hash)?;
-        validate_symbol(provider_identity)?;
-        self.connection
-            .query_row(
-                "SELECT source_text, translated_text FROM translation_cache
-                 WHERE case_identity=?1 AND source_hash=?2 AND provider_identity=?3",
-                params![case_identity, source_hash, provider_identity],
-                |row| {
-                    Ok(TranslationCacheRecord {
-                        case_identity: case_identity.to_owned(),
-                        source_hash: source_hash.to_owned(),
-                        source_text: row.get(0)?,
-                        translated_text: row.get(1)?,
-                        provider_identity: provider_identity.to_owned(),
-                    })
-                },
-            )
-            .optional()
-            .map_err(Into::into)
-    }
-
-    pub fn translations_for_case(
-        &self,
-        case_identity: &str,
-    ) -> Result<Vec<TranslationCacheRecord>, LibraryError> {
-        validate_symbol(case_identity)?;
-        let mut statement = self.connection.prepare(
-            "SELECT source_hash, source_text, translated_text, provider_identity
-             FROM translation_cache WHERE case_identity=?1 ORDER BY source_hash, provider_identity",
-        )?;
-        let rows = statement.query_map([case_identity], |row| {
-            Ok(TranslationCacheRecord {
-                case_identity: case_identity.to_owned(),
-                source_hash: row.get(0)?,
-                source_text: row.get(1)?,
-                translated_text: row.get(2)?,
-                provider_identity: row.get(3)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
 }
 
 fn case_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CaseRecord> {
@@ -1418,7 +1285,7 @@ mod tests {
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
         let table_count: i64 = library
             .connection
             .query_row(
@@ -1487,13 +1354,7 @@ mod tests {
                 &CancellationToken::default(),
             )
             .unwrap();
-        library
-            .set_persistent_translation_cache(&expected, true)
-            .unwrap();
         assert_eq!(library.list_cases().unwrap()[0].case_identity, expected);
-        assert!(library
-            .persistent_translation_cache_enabled(&expected)
-            .unwrap());
     }
 
     #[test]

@@ -11,8 +11,6 @@ export component GameViewPage inherits Rectangle {
     in-out property <float> stage-native-width: 1024;
     in-out property <float> stage-native-height: 768;
     callback game-input(string, bool, float);
-    callback save-game();
-    callback restore-game();
     callback leave-game();
 
     // Overlay panel visibility
@@ -20,7 +18,7 @@ export component GameViewPage inherits Rectangle {
     in-out property <bool> diagnostics-overlay-active: false;
     in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.translation-overlay-active || root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
+    property <bool> overlay-active: root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
 
     // Toolbar auto-hide: visible while pointer is near the top edge
     property <length> last-pointer-y: 0px;
@@ -30,18 +28,6 @@ export component GameViewPage inherits Rectangle {
     property <length> stage-height: root.width / root.height > root.stage-aspect ? root.height : root.width / root.stage-aspect;
     property <length> stage-x: (root.width - root.stage-width) / 2;
     property <length> stage-y: (root.height - root.stage-height) / 2;
-
-    // Translation panel state
-    in-out property <length> translation-x: 20px;
-    in-out property <length> translation-y: 80px;
-    in-out property <bool> translation-collapsed: false;
-    in property <string> translation-source;
-    in property <string> translation-output;
-    in property <string> translation-status;
-    in property <string> translation-endpoint;
-    in property <string> translation-model;
-    in property <string> translation-scope;
-    callback reset-translation();
 
     // Diagnostics panel state
     in-out property <length> diagnostics-x: 40px;
@@ -90,8 +76,6 @@ export component GameViewPage inherits Rectangle {
             if event.text == Key.RightArrow { root.game-input("arrow_right", true, 1); return accept; }
             if event.text == Key.Control { root.game-input("control", true, 1); return accept; }
             if event.text == " " { root.game-input("space", true, 1); return accept; }
-            if event.text == Key.F5 { root.save-game(); return accept; }
-            if event.text == Key.F9 { root.restore-game(); return accept; }
             return reject;
         }
         key-released(event) => {
@@ -159,16 +143,6 @@ export component GameViewPage inherits Rectangle {
                 Rectangle { horizontal-stretch: 1; }
 
                 CheckButton {
-                    label: "Translation";
-                    checked: root.translation-overlay-active;
-                    clicked => {
-                        root.diagnostics-overlay-active = false;
-                        root.patches-overlay-active = false;
-                        root.filters-overlay-active = false;
-                        root.translation-overlay-active = !root.translation-overlay-active;
-                    }
-                }
-                CheckButton {
                     label: "Diagnostics";
                     checked: root.diagnostics-overlay-active;
                     clicked => {
@@ -203,59 +177,6 @@ export component GameViewPage inherits Rectangle {
     }
 
     // Floating panels
-    if root.translation-overlay-active : FloatingPanel {
-        panel-title: "Translation";
-        panel-x <=> root.translation-x;
-        panel-y <=> root.translation-y;
-        collapsed <=> root.translation-collapsed;
-        panel-width: 400px;
-        panel-height: 340px;
-        z: 60;
-        close => { root.translation-overlay-active = false; }
-
-        VerticalLayout {
-            padding: 12px;
-            spacing: 8px;
-
-            Text {
-                text: root.translation-endpoint + " · " + root.translation-model;
-                color: Theme.text-muted;
-                font-size: 11px;
-                overflow: elide;
-            }
-            Text {
-                text: root.translation-scope;
-                color: Theme.text-muted;
-                font-size: 11px;
-                wrap: word-wrap;
-            }
-            Text {
-                text: root.translation-source == "" ? "Waiting for dialogue…" : root.translation-source;
-                color: Theme.text;
-                wrap: word-wrap;
-                font-size: 13px;
-            }
-            Rectangle { height: 1px; background: Theme.divider; }
-            Text {
-                text: root.translation-output;
-                color: Theme.primary;
-                wrap: word-wrap;
-                vertical-stretch: 1;
-                font-size: 14px;
-            }
-            Text {
-                text: root.translation-status;
-                color: Theme.text-muted;
-                font-size: 11px;
-                wrap: word-wrap;
-            }
-            Button {
-                text: "Resume translation";
-                clicked => { root.reset-translation(); }
-            }
-        }
-    }
-
     if root.diagnostics-overlay-active : FloatingPanel {
         panel-title: "Runtime diagnostics";
         panel-x <=> root.diagnostics-x;

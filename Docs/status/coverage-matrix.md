@@ -1,11 +1,12 @@
 # Implementation Coverage Matrix
 
-Current AstraEMU identity note: the active contract migration targets Product
-Runtime Provider ABI v4, Family ABI v9 and Extension ABI v1. The v9 contract and
-schemas exist, but FVP, Minori, Manager, CLI, Headless, platform renderer and the
-RFVP fork are not yet converged. All AstraEMU product coverage therefore remains
-`IN_PROGRESS`; v7 runtime, snapshot, hash and budget evidence below is historical
-and cannot satisfy v9 acceptance.
+Current AstraEMU identity note: Product Runtime Provider ABI v4, Family ABI v9
+and Extension ABI v1 are active. FVP/RFVP, Minori, Manager, CLI, Headless and the
+WGPU renderer now converge on retained Layer2D, synchronous Hook and relative
+writable-file ports. Product coverage remains `IN_PROGRESS` because Performance
+E2, Windows Manager E3 and the final workspace gate are open. All v7 runtime,
+snapshot, hash and budget evidence below is historical and cannot satisfy v9
+acceptance.
 
 1999 原版补丁器已接入 workspace。公开测试覆盖 edition fingerprint、RIFX 资源图边界、唯一 CASt binding、script ID 大端读写、ProjectorRays hash/timeout、完整目录复制、原子清理、manifest 和发布包 hash。私有 `inspect → apply → verify` 已证明原安装目录保持只读，成品保留 `DATA/MENU.dxr` 原名，其余原文件逐项保持 hash。受控 launcher 已用 Locale Emulator Core 的 CP932/LCID `0x0411` 环境成功创建 32 位 projector，并把 Director 7 残留的 1 像素 outer frame 删除；实测 outer/client 同为 800×600，window style 为 borderless popup。标题第三按钮的完整视觉状态与路线跳转仍需形成同一轮 E3 报告，当前不计入 AstraVN Player 的 Windows E3 coverage。
 
@@ -13,7 +14,7 @@ TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary re
 
 RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁；`006` 仍是唯一允许绑定具名 `astra.headless_tolerance_approval.v2` 的色彩容差项。UI010 至 UI014 的系统窗几何偏差为 0 px，UI009 的选择菱形列偏差为 1 px。模型已查看全部五联图；30 张输入和 12 组稳定捕获契约均已闭合，权威 manifest 与 node map 已同步。Director movie 入口现按 Score snapshot 恢复初始可见 layer；source-bound package crypto、不透明授权目录、CLI build/bundle 与 Player bootstrap 已形成 contract/E2。商业明文、媒体签名和私有路径扫描均通过预检；最终同身份重跑和 formal signoff 尚未闭合。Windows E3 显式延期，不作为本轮 RC 门禁，状态保持 `IN_PROGRESS`。旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
-AstraEMU v9 的当前 contract coverage 包括唯一 Provider presentation lane、`Native + MultiLayer`/`Ported + SingleLayer` descriptor 约束、Host-owned writable surface、retained Layer2D transaction、同步 Hook、UTF-8 translation companion 和安全相对路径 writable-file DTO。v7 scene transaction、family snapshot/save/restore、text lease、session resource presentation 与 step budget 已从新 ABI 主入口删除。consumer、RFVP、Performance E2 与 Windows E3 仍开放，不能把 contract/schema E1 写成产品覆盖。
+AstraEMU v9 的当前 coverage 包括唯一 Provider presentation lane、`Native + MultiLayer`/`Ported + SingleLayer` descriptor 约束、Host-owned writable surface、retained Layer2D transaction、同步 Hook、UTF-8 translation companion 和安全相对路径 writable-file DTO。FVP/RFVP 已走单 layer 直接写入，Minori 已按语义拆分多 layer；Manager、CLI、Headless 与 WGPU host 已迁移。v7 scene transaction、family snapshot/save/restore、text lease、session resource presentation 与 step budget 已删除。Performance E2、Windows E3 和完整 workspace gate 仍开放，聚焦测试不能外推为产品验收。
 
 2026-08-03 的 Windows native 诊断另确认 PlatformHost command queue 未唤醒 Winit 是 present backlog 的直接根因。当前 command submit 和 HTTPS completion 已通过 `EventLoopProxy` 事件驱动，800-step signed Release 复跑无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms；该短跑不替代 hover 动画语义、Family ABI scene bulk 零拷贝、10 分钟 audio soak 或 Manager E3。
 

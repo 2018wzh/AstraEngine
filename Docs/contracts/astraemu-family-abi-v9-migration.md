@@ -19,4 +19,4 @@ Minori 固定使用 `Native + MultiLayer`，把 background、foreground/stand、
 
 ## 验收边界
 
-ABI milestone 只要求 ABI crates、schema generator、loader rejection、文档与格式检查通过。consumer 尚未迁移时，完整 workspace 失败是已知迁移状态，不能伪装成兼容实现。完成条件还包括 RFVP 独立构建、唯一 ABI package identity、FVP/Minori/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。
+ABI milestone 已通过 ABI crates、schema generator、loader rejection、文档与格式聚焦验证。FVP/RFVP、Minori、Manager、CLI、Headless 和 WGPU renderer 已迁移；动态 Extension loader 与 CLI/Headless 显式 binding 已接入。完成条件仍包括唯一 ABI package identity复验、FVP/Minori/Host product tests、Performance E2 和最终 workspace gate。Headless 只形成 E2；Windows Manager 的真实输入、画面、音频与 shutdown 仍需独立 E3。

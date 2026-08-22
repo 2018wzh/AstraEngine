@@ -137,8 +137,7 @@
     "LegacyReplayMode": {
       "type": "string",
       "enum": [
-        "live",
-        "restore_continuation"
+        "live"
       ]
     }
   }

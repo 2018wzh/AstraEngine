@@ -241,6 +241,10 @@
       "status": "not_applicable",
       "reason": "pure ABI-safe descriptor, session, effect and redaction DTO contract"
     },
+    "astra-emu-extension-api": {
+      "status": "not_applicable",
+      "reason": "pure ABI-safe extension lifecycle, opaque Hook and translation companion schema contract"
+    },
     "astra-emu-family-core": {
       "status": "not_applicable",
       "reason": "pure in-process VFS, decrypt transport and family factory contract"

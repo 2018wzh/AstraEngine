@@ -1,60 +1,12 @@
-//! FVP legacy family provider. This crate is licensed under MPL-2.0.
+//! Thin dylib boundary for RFVP's Astra Family ABI v9 provider.
 
-mod archive;
-mod factory;
 #[cfg(feature = "dynamic-plugin-export")]
 mod ffi;
-mod hcb;
-mod hosted;
-pub mod hosted_host;
-pub mod hosted_runtime;
-pub mod hosted_worker;
-mod media_decode;
-mod provider;
-mod vfs_audit;
 
-pub use archive::*;
-pub use factory::*;
-pub use hcb::*;
-pub use hosted::*;
-pub use media_decode::*;
-pub use provider::*;
+pub use rfvp_astra_provider::{
+    create_static_fvp_provider, release_opcode_ids, release_syscall_catalog_hash,
+    release_syscall_ids,
+};
 
-pub const RFVP_REFERENCE_REVISION: &str = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3";
-pub const RFVP_HOSTED_FORK_REVISION: &str = "754605114f359b8e7f6ec4b4c62168cc9df7c8f8";
-pub const FVP_FAMILY_ID: &str = "fvp";
-pub const FVP_PROVIDER_ID: &str = "astra.emu.family.fvp";
-
-pub fn release_syscall_ids() -> Vec<String> {
-    let mut ids = rfvp_hosted::subsystem::components::syscalls::generated::SYSCALL_SPECS
-        .iter()
-        .filter(|spec| spec.name != "BREAKPOINT")
-        .map(|spec| spec.name.to_owned())
-        .collect::<Vec<_>>();
-    ids.sort_unstable();
-    ids
-}
-
-pub fn release_syscall_catalog_hash() -> astra_core::Hash256 {
-    let ids = release_syscall_ids();
-    astra_core::Hash256::from_sha256(format!("{}\n", ids.join("\n")).as_bytes())
-}
-
-pub fn release_opcode_ids() -> Vec<String> {
-    (0_u8..=0x27)
-        .map(|opcode| format!("0x{opcode:02x}"))
-        .collect()
-}
-
-#[cfg(test)]
-mod catalog_tests {
-    #[test]
-    fn release_catalog_identity_is_fixed_to_the_reviewed_rfvp_surface() {
-        assert_eq!(super::release_syscall_ids().len(), 148);
-        assert_eq!(
-            super::release_syscall_catalog_hash().to_string(),
-            "sha256:c53cb15a5a1fe29d11c8cf8b0cf14a20c2dab7d85dace74f3b35345d5aa97d6a"
-        );
-        assert_eq!(super::release_opcode_ids().len(), 0x28);
-    }
-}
+pub const RFVP_REFERENCE_REVISION: &str = rfvp_astra_provider::RFVP_REFERENCE_REVISION;
+pub const RFVP_HOSTED_FORK_REVISION: &str = "44be68c92a4b7c8c42837a32197ddeffc7160411";

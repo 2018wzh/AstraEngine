@@ -8,6 +8,7 @@ mod paz;
 mod provider;
 mod runtime;
 mod script;
+mod text_renderer;
 
 pub use factory::*;
 pub use image_container::*;

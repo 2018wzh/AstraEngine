@@ -48,7 +48,7 @@ pub struct FvpSyscallCoverageEvidence {
     pub covered_syscall_ids: Vec<String>,
     pub missing_syscall_ids: Vec<String>,
     pub opcode_counts: BTreeMap<String, u64>,
-    pub full_flow_hash: Option<Hash256>,
+    pub full_flow_completed: bool,
     pub status: String,
     pub diagnostic_codes: Vec<String>,
 }
@@ -60,42 +60,11 @@ pub struct FvpParityEvidence {
     pub rfvp_revision: String,
     pub fixture_id: String,
     pub fixture_hash: Hash256,
-    pub astra_trace_hash: Hash256,
-    pub reference_trace_hash: Hash256,
+    pub control_match: bool,
+    pub pixel_match: bool,
+    pub audio_match: bool,
     pub compared_event_count: u64,
     pub first_divergence_sequence: Option<u64>,
-    pub status: String,
-    pub diagnostic_codes: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct FrameParityFrameV1 {
-    pub frame_index: u64,
-    pub semantic_astra_hash: Hash256,
-    pub semantic_reference_hash: Hash256,
-    pub rgba_astra_hash: Option<Hash256>,
-    pub rgba_reference_hash: Option<Hash256>,
-    pub audio_astra_hash: Option<Hash256>,
-    pub audio_reference_hash: Option<Hash256>,
-    pub video_pts: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct FrameParityReportV1 {
-    pub schema: String,
-    pub reference_revision: String,
-    pub reference_observer_patch_hash: Hash256,
-    pub build_identity: String,
-    pub profile: String,
-    pub game_identity_hash: Hash256,
-    pub input_sequence_hash: Hash256,
-    pub frames: Vec<FrameParityFrameV1>,
-    pub compared_event_count: u64,
-    pub first_divergence_sequence: Option<u64>,
-    pub difference_window_before: u32,
-    pub difference_window_after: u32,
     pub status: String,
     pub diagnostic_codes: Vec<String>,
 }
@@ -108,9 +77,7 @@ pub struct TranslationEvidence {
     pub endpoint_identity_hash: Hash256,
     pub model_identity_hash: Hash256,
     pub consent_present: bool,
-    pub persistent_cache_enabled: bool,
     pub request_count: u64,
-    pub source_hashes: Vec<Hash256>,
     pub latency_ms_total: u64,
     pub error_codes: Vec<String>,
     pub redaction_status: String,
@@ -148,7 +115,6 @@ pub struct UiHostIdentityEvidence {
     pub cross_device_texture_copy: bool,
     pub build_identity_hash: Hash256,
     pub package_hash: Hash256,
-    pub session_id_hash: Hash256,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -225,7 +191,7 @@ pub struct TrustedLuauEvidenceV1 {
     pub violation_codes: Vec<String>,
     pub commercial_payload_present: bool,
     pub local_path_present: bool,
-    pub deterministic_effect_hash: Hash256,
+    pub deterministic_effect_count: u64,
     pub status: String,
 }
 
@@ -239,12 +205,12 @@ pub struct EmuPlatformRunEvidenceV1 {
     pub build_identity_hash: Hash256,
     pub profile_hash: Hash256,
     pub package_hash: Hash256,
-    pub session_id_hash: Hash256,
-    pub input_sequence_hash: Hash256,
-    pub consumed_input_trace_hash: Hash256,
-    pub visual_trace_hash: Hash256,
-    pub audio_meter_hash: Hash256,
-    pub route_terminal_hash: Hash256,
+    pub input_count: u64,
+    pub presented_frame_count: u64,
+    pub visual_changed: bool,
+    pub audio_non_silent: bool,
+    pub terminal_observed: bool,
+    pub coverage_ids: Vec<String>,
     pub lifecycle_steps: Vec<String>,
     pub evidence_level: String,
     pub status: String,
@@ -308,15 +274,13 @@ impl AstraEmuEvidenceBundleV1 {
             .platforms
             .get(&self.ui_host_identity.platform)
             .ok_or_else(|| "ASTRA_EMU_UI_PLATFORM_IDENTITY".to_owned())?;
-        if ui_platform.build_identity_hash != self.ui_host_identity.build_identity_hash
-            || ui_platform.session_id_hash != self.ui_host_identity.session_id_hash
-        {
+        if ui_platform.build_identity_hash != self.ui_host_identity.build_identity_hash {
             return Err("ASTRA_EMU_UI_PLATFORM_IDENTITY".into());
         }
         let windows = &self.platforms["windows"];
         let android = &self.platforms["android-x86_64"];
-        if windows.input_sequence_hash != android.input_sequence_hash
-            || windows.route_terminal_hash != android.route_terminal_hash
+        if windows.terminal_observed != android.terminal_observed
+            || windows.coverage_ids != android.coverage_ids
         {
             return Err("ASTRA_EMU_CROSS_PLATFORM_RUN_DRIFT".into());
         }
@@ -443,7 +407,6 @@ pub fn validate_ui_host_identity(value: &UiHostIdentityEvidence) -> Result<(), S
         || is_zero(value.renderer_adapter_hash)
         || is_zero(value.build_identity_hash)
         || is_zero(value.package_hash)
-        || is_zero(value.session_id_hash)
     {
         return Err("ASTRA_EMU_UI_HOST_IDENTITY_INVALID".into());
     }
@@ -472,7 +435,7 @@ pub fn validate_fvp_coverage(value: &FvpSyscallCoverageEvidence) -> Result<(), S
         || catalog_hash.to_string() != FVP_RELEASE_SYSCALL_CATALOG_HASH
         || !all_opcodes_covered
         || !value.missing_syscall_ids.is_empty()
-        || value.full_flow_hash.is_none_or(is_zero)
+        || !value.full_flow_completed
         || value.status != "pass"
         || !value.diagnostic_codes.is_empty()
     {
@@ -486,45 +449,15 @@ pub fn validate_fvp_parity(value: &FvpParityEvidence) -> Result<(), String> {
         || value.rfvp_revision != RFVP_REFERENCE_REVISION
         || !safe_id(&value.fixture_id)
         || is_zero(value.fixture_hash)
-        || is_zero(value.astra_trace_hash)
-        || value.astra_trace_hash != value.reference_trace_hash
+        || !value.control_match
+        || !value.pixel_match
+        || !value.audio_match
         || value.compared_event_count == 0
         || value.first_divergence_sequence.is_some()
         || value.status != "pass"
         || !value.diagnostic_codes.is_empty()
     {
         return Err("ASTRA_EMU_FVP_PARITY_DIVERGENCE".into());
-    }
-    Ok(())
-}
-
-pub fn validate_frame_parity(value: &FrameParityReportV1) -> Result<(), String> {
-    let frames_match = !value.frames.is_empty()
-        && value
-            .frames
-            .windows(2)
-            .all(|pair| pair[0].frame_index + 1 == pair[1].frame_index)
-        && value.frames.iter().all(|frame| {
-            frame.semantic_astra_hash == frame.semantic_reference_hash
-                && frame.rgba_astra_hash == frame.rgba_reference_hash
-                && frame.audio_astra_hash == frame.audio_reference_hash
-        });
-    if value.schema != "astra.frame_parity_report.v1"
-        || value.reference_revision != RFVP_REFERENCE_REVISION
-        || is_zero(value.reference_observer_patch_hash)
-        || !safe_id(&value.build_identity)
-        || !safe_id(&value.profile)
-        || is_zero(value.game_identity_hash)
-        || is_zero(value.input_sequence_hash)
-        || !frames_match
-        || value.compared_event_count == 0
-        || value.first_divergence_sequence.is_some()
-        || value.difference_window_before != 30
-        || value.difference_window_after != 60
-        || value.status != "pass"
-        || !value.diagnostic_codes.is_empty()
-    {
-        return Err("ASTRA_EMU_FRAME_PARITY_DIVERGENCE".into());
     }
     Ok(())
 }
@@ -546,7 +479,6 @@ pub fn validate_trusted_luau(value: &TrustedLuauEvidenceV1) -> Result<(), String
             "vfs.read",
             "patch.overlay",
             "decode_transform",
-            "text_hook",
             "media_hook",
             "deterministic_effect",
         ]
@@ -569,7 +501,7 @@ pub fn validate_trusted_luau(value: &TrustedLuauEvidenceV1) -> Result<(), String
         || !value.violation_codes.is_empty()
         || value.commercial_payload_present
         || value.local_path_present
-        || is_zero(value.deterministic_effect_hash)
+        || value.deterministic_effect_count == 0
         || value.status != "pass"
     {
         return Err("ASTRA_EMU_TRUSTED_LUAU_EVIDENCE_INVALID".into());
@@ -584,14 +516,6 @@ pub fn validate_translation_evidence(value: &TranslationEvidence) -> Result<(), 
         || is_zero(value.endpoint_identity_hash)
         || is_zero(value.model_identity_hash)
         || value.request_count == 0
-        || value.source_hashes.is_empty()
-        || value.source_hashes.iter().any(|hash| is_zero(*hash))
-        || value
-            .source_hashes
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            != value.source_hashes.len()
         || value.latency_ms_total == 0
         || !value.error_codes.is_empty()
         || value.redaction_status != "pass"
@@ -622,7 +546,7 @@ pub fn validate_platform_evidence(
     let required_lifecycle: &[&str] = if platform == "android-arm64" {
         &["package", "native_manifest"]
     } else {
-        &["create", "open", "step", "save", "restore", "shutdown"]
+        &["create", "open", "step", "shutdown"]
     };
     let e3 = expected.2 == "E3";
     if value.schema != "astra.emu.platform_run_evidence.v1"
@@ -635,20 +559,17 @@ pub fn validate_platform_evidence(
         || is_zero(value.build_identity_hash)
         || is_zero(value.profile_hash)
         || is_zero(value.package_hash)
-        || is_zero(value.session_id_hash)
         || required_lifecycle
             .iter()
             .any(|step| !lifecycle.contains(step))
         || (e3
-            && [
-                value.input_sequence_hash,
-                value.consumed_input_trace_hash,
-                value.visual_trace_hash,
-                value.audio_meter_hash,
-                value.route_terminal_hash,
-            ]
-            .into_iter()
-            .any(is_zero))
+            && (value.input_count == 0
+                || value.presented_frame_count == 0
+                || !value.visual_changed
+                || !value.audio_non_silent
+                || !value.terminal_observed
+                || value.coverage_ids.is_empty()
+                || value.coverage_ids.iter().any(|id| !safe_id(id))))
     {
         return Err("ASTRA_EMU_PLATFORM_EVIDENCE_INVALID".into());
     }

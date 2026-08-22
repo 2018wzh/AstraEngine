@@ -1022,7 +1022,9 @@ fn ffi_filter_graph(value: LegacyFilterGraphV9) -> FfiFilterGraphV9 {
                             LegacyFilterParamV9::Float(value) => FfiFilterParamV9::Float(value),
                             LegacyFilterParamV9::Int(value) => FfiFilterParamV9::Int(value),
                             LegacyFilterParamV9::Bool(value) => FfiFilterParamV9::Bool(value),
-                            LegacyFilterParamV9::Text(value) => FfiFilterParamV9::Text(value.into()),
+                            LegacyFilterParamV9::Text(value) => {
+                                FfiFilterParamV9::Text(value.into())
+                            }
                         },
                     })
                     .collect(),

@@ -5,7 +5,7 @@ use std::{
 };
 
 use astra_byte_source::{OwnedByteBuffer, OwnedF32Buffer, OwnedI16Buffer};
-use astra_core::{Hash256, SchemaVersion};
+use astra_core::Hash256;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -13,8 +13,6 @@ use thiserror::Error;
 use crate::is_valid_input_control;
 
 const MAX_SYMBOL_BYTES: usize = 128;
-const MAX_SNAPSHOT_SECTIONS: usize = 128;
-const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_RENDER_DRAWS: usize = 262_144;
 const MAX_RENDER_TEXTURE_UPDATES: usize = 4096;
 const MAX_AUDIO_SAMPLES_PER_COMMAND: usize = 4_194_304;
@@ -139,8 +137,6 @@ pub struct LegacyProbeRequest {
     pub root_mount_id: String,
     pub candidate_uris: Vec<String>,
     pub marker_hashes: Vec<Hash256>,
-    pub max_entries: u32,
-    pub max_metadata_bytes: u64,
 }
 
 pub trait LegacyVfsReader: Send + Sync {
@@ -244,7 +240,6 @@ pub struct LegacyOpenRequest {
 #[serde(rename_all = "snake_case")]
 pub enum LegacyReplayMode {
     Live,
-    RestoreContinuation,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -430,10 +425,6 @@ impl LegacyStepOutput {
             validate_symbol("blackboard_key", &mutation.key)?;
             add_payload(mutation.value.len())?;
         }
-        for dirty in &self.control.dirty_sections {
-            add_sequence(dirty.sequence)?;
-            validate_symbol("snapshot_section", &dirty.section_id)?;
-        }
         let mut wait_tokens = BTreeSet::new();
         for wait in &self.control.waits {
             let token_id = match wait {
@@ -509,14 +500,6 @@ pub struct LegacySequenced<T> {
     pub value: T,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LegacyTextLease {
-    pub sequence: u64,
-    pub lease_id: String,
-    pub byte_len: u32,
-    pub source_ref: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegacyEvent {
     pub sequence: u64,
@@ -529,12 +512,6 @@ pub struct LegacyBlackboardMutation {
     pub sequence: u64,
     pub key: String,
     pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LegacyDirtySection {
-    pub sequence: u64,
-    pub section_id: String,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -569,13 +546,12 @@ impl LegacyLiveOutput {
 pub struct LegacyControlTransaction {
     pub events: Vec<LegacyEvent>,
     pub blackboard: Vec<LegacyBlackboardMutation>,
-    pub dirty_sections: Vec<LegacyDirtySection>,
     pub waits: Vec<LegacyWaitRequest>,
 }
 
 impl LegacyControlTransaction {
     pub fn len(&self) -> usize {
-        self.events.len() + self.blackboard.len() + self.dirty_sections.len()
+        self.events.len() + self.blackboard.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -587,7 +563,6 @@ impl LegacyControlTransaction {
             .iter()
             .map(|value| value.sequence)
             .chain(self.blackboard.iter().map(|value| value.sequence))
-            .chain(self.dirty_sections.iter().map(|value| value.sequence))
             .max()
     }
 }
@@ -1545,71 +1520,6 @@ pub struct LegacyCoverageDelta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacySnapshotSection {
-    pub section_id: String,
-    pub schema: String,
-    pub version: SchemaVersion,
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacySnapshotEnvelope {
-    pub family_id: FamilyId,
-    pub session_id: LegacyRuntimeSessionId,
-    pub schema_version: SchemaVersion,
-    pub case_fingerprint: Hash256,
-    pub fixed_step: u64,
-    pub session_seed: u64,
-    pub runtime_cursor: u64,
-    pub family_sections: Vec<LegacySnapshotSection>,
-    pub redaction_status: String,
-}
-
-impl LegacySnapshotEnvelope {
-    pub fn validate(&self) -> Result<(), LegacyProviderError> {
-        if self.family_sections.len() > MAX_SNAPSHOT_SECTIONS {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_SNAPSHOT_SECTION_COUNT",
-                "snapshot section count exceeds the supported bound",
-            ));
-        }
-        let mut ids = BTreeSet::new();
-        let mut total = 0usize;
-        for section in &self.family_sections {
-            validate_symbol("snapshot.section_id", &section.section_id)?;
-            validate_symbol("snapshot.schema", &section.schema)?;
-            if !ids.insert(section.section_id.as_str()) {
-                return Err(LegacyProviderError::invalid(
-                    "ASTRA_EMU_SNAPSHOT_SECTION_DUPLICATE",
-                    "snapshot section id is duplicated",
-                ));
-            }
-            total = total.checked_add(section.bytes.len()).ok_or_else(|| {
-                LegacyProviderError::invalid(
-                    "ASTRA_EMU_SNAPSHOT_SIZE_OVERFLOW",
-                    "snapshot byte count overflowed",
-                )
-            })?;
-        }
-        if total > MAX_SNAPSHOT_BYTES {
-            return Err(LegacyProviderError::invalid(
-                "ASTRA_EMU_SNAPSHOT_SIZE",
-                "snapshot exceeds the supported byte bound",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct LegacyRestoreReport {
-    pub restored_fixed_step: u64,
-    pub session_seed: u64,
-    pub state_revision: u64,
-    pub diagnostics: Vec<LegacyDiagnostic>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyVmTraceRecord {
     pub context_id: u32,
     pub program_counter: u32,
@@ -1746,13 +1656,6 @@ mod resource_read_tests {
         .unwrap();
         assert_eq!(read.complete().unwrap_err().code(), "TEST_RESOURCE_FAILURE");
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LegacyEphemeralText {
-    pub lease_id: String,
-    pub text: String,
-    pub speaker: Option<String>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

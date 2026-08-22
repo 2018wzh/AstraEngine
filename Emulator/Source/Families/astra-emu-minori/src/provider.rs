@@ -1,30 +1,38 @@
 use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 
-use astra_core::{Hash256, SchemaVersion};
+use astra_byte_source::OwnedByteBuffer;
+use astra_core::Hash256;
+use astra_emu_extension_api::{
+    TranslationTextRequestV1, TranslationTextResponseV1, TRANSLATION_TEXT_HOOK_ID,
+};
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyBlendMode,
-    LegacyControlTransaction, LegacyCoverageDelta, LegacyDrawV1, LegacyEphemeralText,
-    LegacyFamilyPluginDescriptor, LegacyLiveOutput, LegacyOpenRequest, LegacyProbeReport,
-    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead,
-    LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope,
-    LegacySnapshotSection, LegacyStepInput, LegacyStepOutput, LegacyTextLease,
-    LegacyTextPresentationLeaseV1, LegacyTextPresentationV1, LegacyTextRegionV1,
-    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
-    LegacyVfsReader, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacyControlTransaction, LegacyCoverageDelta, LegacyDiagnostic, LegacyDrawV1,
+    LegacyFamilyHostServicesV9, LegacyFamilyPluginDescriptor, LegacyHookInvocationV1,
+    LegacyHookStatusV1, LegacyLayerBlendV9, LegacyLayerFilterV9, LegacyLayerOperationV9,
+    LegacyLayerStateV9, LegacyLayerTransactionV9, LegacyLayerTransformV9, LegacyLiveOutput,
+    LegacyOpenRequest, LegacyProbeReport, LegacyProbeRequest, LegacyProviderError,
+    LegacyRenderResourceFrameV1, LegacyRuntimeHostCtx, LegacyRuntimeProvider,
+    LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport,
+    LegacyStepInput, LegacyStepOutput, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
+    LegacySurfaceFormatV9, LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry,
+    LegacyVertexV1, LegacyVfsReader, LegacyWaitRequest, LegacyWritableFileHostV1,
+    LegacyWritableFileRequestV1, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 
 use crate::{
     parse_sc, MinoriAudioCommand, MinoriEffectFrame, MinoriRuntimeError, MinoriRuntimeState,
     MinoriStageCommand, MinoriStageLayer, MinoriVm, MinoriVmEvent, MinoriWaitState,
-    ScOpcodeCatalog, MINORI_RUNTIME_STATE_SCHEMA,
+    ScOpcodeCatalog,
 };
 
 pub const MINORI_FAMILY_ID: &str = "minori";
 pub const MINORI_RUNTIME_PROVIDER_ID: &str = "astra.emu.family.minori";
 const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024;
-const MAX_EPHEMERAL_TEXT_BYTES: usize = 64 * 1024;
+const MAX_TEXT_BYTES: usize = 64 * 1024;
+const MAX_NATIVE_SAVE_BYTES: u64 = 16 * 1024 * 1024;
+const NATIVE_SAVE_PATH: &str = "save/minori-slot-000.asav";
 fn message_input_keys() -> Vec<String> {
     ["enter", "space", "pointer.primary"]
         .iter()
@@ -32,64 +40,31 @@ fn message_input_keys() -> Vec<String> {
         .collect()
 }
 
-fn minori_message_presentation(
-    stage_size: Option<(u32, u32)>,
-) -> Result<LegacyTextPresentationV1, LegacyProviderError> {
-    if stage_size != Some((1280, 720)) {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY",
-            "the verified Minori message layout requires the 1280x720 reference stage",
-        ));
-    }
-    let presentation = LegacyTextPresentationV1 {
-        layout_id: "minori.message".into(),
-        language: "ja-JP".into(),
-        font_families: vec!["Noto Sans JP".into()],
-        body: LegacyTextRegionV1 {
-            x: 160,
-            y: 568,
-            width: 960,
-            height: 112,
-            font_size: 26.0,
-            line_height: 32.0,
-            max_lines: 3,
-        },
-        speaker: Some(LegacyTextRegionV1 {
-            x: 160,
-            y: 528,
-            width: 960,
-            height: 32,
-            font_size: 26.0,
-            line_height: 32.0,
-            max_lines: 1,
-        }),
-        rgba: [255, 255, 255, 255],
-    };
-    presentation.validate()?;
-    Ok(presentation)
-}
-
 struct MinoriSession {
-    case_fingerprint: Hash256,
     mount_set_id: String,
     fixed_delta_ns: u64,
     session_seed: u64,
     stage_size: Option<(u32, u32)>,
     vm: MinoriVm,
-    ephemeral_text: BTreeMap<String, LegacyEphemeralText>,
+    surface_generations: BTreeMap<String, u64>,
+    active_layers: BTreeMap<String, LegacyLayerStateV9>,
+    layer_sources: BTreeMap<String, String>,
+    next_layer_sequence: u64,
+    text_renderer: crate::text_renderer::MinoriTextRenderer,
+    last_text: Option<(String, Option<String>)>,
+    hook_timeout_ms: u32,
     poisoned: bool,
 }
 
-#[derive(Default)]
 pub struct MinoriRuntimeProvider {
-    vfs: Option<Arc<dyn LegacyVfsReader>>,
+    services: LegacyFamilyHostServicesV9,
     sessions: BTreeMap<String, MinoriSession>,
 }
 
 impl MinoriRuntimeProvider {
-    pub fn with_vfs(vfs: Arc<dyn LegacyVfsReader>) -> Self {
+    pub fn new(services: LegacyFamilyHostServicesV9) -> Self {
         Self {
-            vfs: Some(vfs),
+            services,
             sessions: BTreeMap::new(),
         }
     }
@@ -98,50 +73,51 @@ impl MinoriRuntimeProvider {
         !self.sessions.is_empty()
     }
 
-    fn vfs(&self) -> Result<&Arc<dyn LegacyVfsReader>, LegacyProviderError> {
-        self.vfs.as_ref().ok_or_else(|| {
-            invalid(
-                "ASTRA_EMU_MINORI_RUNTIME_VFS",
-                "Minori runtime has no explicitly bound VFS reader",
-            )
-        })
+    fn vfs(&self) -> &Arc<dyn LegacyVfsReader> {
+        &self.services.vfs
     }
 }
 
 pub fn create_static_minori_provider(
-    vfs: Arc<dyn LegacyVfsReader>,
+    services: LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError> {
-    let provider = MinoriRuntimeProvider::with_vfs(vfs);
+    let provider = MinoriRuntimeProvider::new(services);
     provider.descriptor().validate()?;
     Ok(Box::new(provider))
 }
 
+pub fn minori_descriptor() -> LegacyFamilyPluginDescriptor {
+    LegacyFamilyPluginDescriptor {
+        family_id: FamilyId(MINORI_FAMILY_ID.into()),
+        plugin_id: "astra.emu.minori".into(),
+        provider_id: MINORI_RUNTIME_PROVIDER_ID.into(),
+        core_kind: astra_emu_family_api::LegacyFamilyCoreKind::Native,
+        presentation_mode: astra_emu_family_api::LegacyFamilyPresentationMode::MultiLayer,
+        engine_version: env!("CARGO_PKG_VERSION").into(),
+        rustc_fingerprint: env!("ASTRA_MINORI_RUSTC_FINGERPRINT").into(),
+        feature_fingerprint: env!("ASTRA_MINORI_FEATURE_FINGERPRINT").into(),
+        abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
+        supported_formats: vec![
+            "minori.sc".into(),
+            "minori.paz".into(),
+            "minori.ani".into(),
+            "minori.sqz".into(),
+        ],
+        permissions: vec![
+            "vfs.read".into(),
+            "surface.write".into(),
+            "hook.invoke".into(),
+            "writable_file".into(),
+            "media.submit".into(),
+        ],
+        report_redaction: "astra.emu.redaction.v1".into(),
+        license: "MPL-2.0".into(),
+    }
+}
+
 impl LegacyRuntimeProvider for MinoriRuntimeProvider {
     fn descriptor(&self) -> LegacyFamilyPluginDescriptor {
-        LegacyFamilyPluginDescriptor {
-            family_id: FamilyId(MINORI_FAMILY_ID.into()),
-            plugin_id: "astra.emu.minori".into(),
-            provider_id: MINORI_RUNTIME_PROVIDER_ID.into(),
-            core_kind: astra_emu_family_api::LegacyFamilyCoreKind::Native,
-            presentation_mode: astra_emu_family_api::LegacyFamilyPresentationMode::MultiLayer,
-            engine_version: env!("CARGO_PKG_VERSION").into(),
-            rustc_fingerprint: env!("ASTRA_MINORI_RUSTC_FINGERPRINT").into(),
-            feature_fingerprint: env!("ASTRA_MINORI_FEATURE_FINGERPRINT").into(),
-            abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
-            supported_formats: vec![
-                "minori.sc".into(),
-                "minori.paz".into(),
-                "minori.ani".into(),
-                "minori.sqz".into(),
-            ],
-            permissions: vec![
-                "vfs.read".into(),
-                "media.submit".into(),
-                "storage.request".into(),
-            ],
-            report_redaction: "astra.emu.redaction.v1".into(),
-            license: "MPL-2.0".into(),
-        }
+        minori_descriptor()
     }
 
     fn probe(
@@ -150,16 +126,9 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         request: LegacyProbeRequest,
     ) -> Result<LegacyProbeReport, LegacyProviderError> {
         ctx.validate()?;
-        if request.max_entries == 0 || request.max_metadata_bytes == 0 {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_PROBE_BUDGET",
-                "Minori probe budget is empty",
-            ));
-        }
         let candidates = request
             .candidate_uris
             .iter()
-            .take(request.max_entries as usize)
             .filter(|uri| uri.starts_with("minori:/scr/") && uri.ends_with(".sc"))
             .collect::<Vec<_>>();
         let candidate = candidates
@@ -173,11 +142,9 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "probe requires one unambiguous Minori entry script",
                 )
             })?;
-        let bytes = self.vfs()?.read_file(
-            &request.root_mount_id,
-            candidate,
-            request.max_metadata_bytes.min(MAX_SCRIPT_BYTES),
-        )?;
+        let bytes = self
+            .vfs()
+            .read_file(&request.root_mount_id, candidate, MAX_SCRIPT_BYTES)?;
         parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
         let identity = Hash256::from_sha256(&bytes);
         let marker_match =
@@ -217,7 +184,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         }
         validate_script_uri(&request.script_uri)?;
         let bytes =
-            self.vfs()?
+            self.vfs()
                 .read_file(&ctx.mount_set_id, &request.script_uri, MAX_SCRIPT_BYTES)?;
         let script_hash = Hash256::from_sha256(&bytes);
         let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
@@ -259,13 +226,19 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         self.sessions.insert(
             id.0.clone(),
             MinoriSession {
-                case_fingerprint: request.case_fingerprint,
                 mount_set_id: ctx.mount_set_id.clone(),
                 fixed_delta_ns: request.fixed_delta_ns,
                 session_seed: request.session_seed,
                 stage_size,
                 vm,
-                ephemeral_text: BTreeMap::new(),
+                surface_generations: BTreeMap::new(),
+                active_layers: BTreeMap::new(),
+                layer_sources: BTreeMap::new(),
+                next_layer_sequence: 1,
+                text_renderer: crate::text_renderer::MinoriTextRenderer::new()
+                    .map_err(|code| invalid("ASTRA_EMU_MINORI_TEXT_RENDERER", code))?,
+                last_text: None,
+                hook_timeout_ms: parse_hook_timeout(&request.family_options)?,
                 poisoned: false,
             },
         );
@@ -280,7 +253,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
     ) -> Result<LegacyStepOutput, LegacyProviderError> {
         ctx.validate()?;
         input.validate()?;
-        let vfs = Arc::clone(self.vfs()?);
+        let vfs = Arc::clone(self.vfs());
+        let services = self.services.clone();
         let session = self
             .sessions
             .get_mut(&session_id.0)
@@ -308,11 +282,29 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             session.poisoned = true;
             return Err(runtime_error(MinoriRuntimeError::State));
         }
-        if !input.input_edges.is_empty() || !input.provider_results.is_empty() {
+        if !input.provider_results.is_empty() {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_STEP_CHANNEL",
-                "input or provider result semantics are not yet verified",
+                "provider result semantics are not supported",
             ));
+        }
+        let native_save_action = native_save_action(&input.input_edges)?;
+        if matches!(native_save_action, Some(NativeSaveAction::Load)) {
+            if !input.await_results.is_empty() {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_NATIVE_LOAD_AWAIT",
+                    "native load cannot consume a completion from the discarded state",
+                ));
+            }
+            let bytes = read_native_save(
+                services.writable_files.as_ref(),
+                &session_id.0,
+                NATIVE_SAVE_PATH,
+            )?;
+            session
+                .vm
+                .restore_native_save(&bytes, input.tick_index)
+                .map_err(runtime_error)?;
         }
         let animated_effect = session
             .vm
@@ -324,7 +316,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     .vm
                     .advance_waiting_tick(input.tick_index)
                     .map_err(runtime_error)?;
-                let effects = animated_effect
+                let effect = animated_effect
                     .as_ref()
                     .map(|frame| {
                         effect_presentation(
@@ -335,10 +327,29 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                             frame,
                         )
                     })
+                    .transpose()?;
+                let layers = effect
+                    .map(|frame| {
+                        publish_resource_frame(
+                            &services,
+                            session,
+                            &session_id.0,
+                            input.tick_index,
+                            frame.value,
+                        )
+                    })
                     .transpose()?
                     .into_iter()
                     .collect();
-                return waiting_output(&session.vm, wait, effects, &input);
+                if matches!(native_save_action, Some(NativeSaveAction::Save)) {
+                    write_native_save(
+                        services.writable_files.as_ref(),
+                        &session_id.0,
+                        NATIVE_SAVE_PATH,
+                        &session.vm.encode_native_save().map_err(runtime_error)?,
+                    )?;
+                }
+                return waiting_output(&session.vm, wait, layers);
             }
             let expected = wait_token(&wait);
             if input.await_results.len() != 1
@@ -358,10 +369,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             ));
         }
         let before = session.vm.state().instruction_count;
-        let event = match session
-            .vm
-            .step(input.tick_index, input.budget.max_instructions)
-        {
+        let event = match session.vm.step(input.tick_index) {
             Ok(event) => event,
             Err(error) => {
                 session.poisoned = true;
@@ -388,6 +396,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         }
         let after = session.vm.state().instruction_count;
         let mut live = LegacyLiveOutput::default();
+        let mut diagnostics = Vec::new();
         if let Some(frame) = &animated_effect {
             if !matches!(
                 event,
@@ -397,81 +406,52 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                         | MinoriVmEvent::Panel { .. }
                 )
             ) {
-                live.resource_scenes.push(effect_presentation(
+                let frame = effect_presentation(
                     &vfs,
                     &session.mount_set_id,
                     session.stage_size,
                     session.vm.state(),
                     frame,
+                )?;
+                live.layers.push(publish_resource_frame(
+                    &services,
+                    session,
+                    &session_id.0,
+                    input.tick_index,
+                    frame.value,
                 )?);
             }
         }
         if let Some(MinoriVmEvent::Message {
-            presentation_sequence,
+            presentation_sequence: _,
             capture_sequence,
             text,
             speaker,
             wait: _,
         }) = &event
         {
-            if text.len() > MAX_EPHEMERAL_TEXT_BYTES
+            if text.len() > MAX_TEXT_BYTES
                 || speaker
                     .as_ref()
-                    .is_some_and(|value| value.len() > MAX_EPHEMERAL_TEXT_BYTES)
+                    .is_some_and(|value| value.len() > MAX_TEXT_BYTES)
             {
                 session.poisoned = true;
                 return Err(invalid(
                     "ASTRA_EMU_MINORI_TEXT_CAPTURE_BOUNDS",
-                    "message or speaker exceeds the ephemeral text channel bound",
+                    "message or speaker exceeds the text render bound",
                 ));
             }
-            let lease_id = format!("minori.text.{}.{}", input.tick_index, capture_sequence);
-            let presentation = LegacyTextPresentationLeaseV1 {
-                lease_id: lease_id.clone(),
-                presentation: match minori_message_presentation(session.stage_size) {
-                    Ok(presentation) => presentation,
-                    Err(error) => {
-                        session.poisoned = true;
-                        return Err(error);
-                    }
-                },
-            };
-            presentation.validate().inspect_err(|_| {
-                session.poisoned = true;
-            })?;
-            if session
-                .ephemeral_text
-                .insert(
-                    lease_id.clone(),
-                    LegacyEphemeralText {
-                        lease_id: lease_id.clone(),
-                        text: text.clone(),
-                        speaker: speaker.clone(),
-                    },
-                )
-                .is_some()
-            {
-                session.poisoned = true;
-                return Err(invalid(
-                    "ASTRA_EMU_MINORI_TEXT_LEASE_DUPLICATE",
-                    "ephemeral text lease id is duplicated",
-                ));
-            }
-            live.text_presentations.push(LegacySequenced {
-                sequence: *presentation_sequence,
-                value: presentation,
-            });
-            live.text.push(LegacyTextLease {
-                sequence: *capture_sequence,
-                lease_id,
-                byte_len: text.len().try_into().map_err(|_| {
-                    invalid(
-                        "ASTRA_EMU_MINORI_TEXT_CAPTURE_BOUNDS",
-                        "message length cannot be represented by the ABI",
-                    )
-                })?,
-                source_ref: "minori.sc.message".into(),
-            });
+            live.layers.push(publish_text_layer(
+                &services,
+                session,
+                &session_id.0,
+                &ctx.case_id,
+                input.tick_index,
+                *capture_sequence,
+                text,
+                speaker.as_deref(),
+                &mut diagnostics,
+            )?);
         }
         if let Some(MinoriVmEvent::Stage(stage)) = &event {
             let stage_size = session.stage_size.ok_or_else(|| {
@@ -488,10 +468,14 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     return Err(error);
                 }
             };
-            live.resource_scenes.push(LegacySequenced {
-                sequence,
-                value: frame,
-            });
+            let _ = sequence;
+            live.layers.push(publish_resource_frame(
+                &services,
+                session,
+                &session_id.0,
+                input.tick_index,
+                frame,
+            )?);
         }
         if let Some(MinoriVmEvent::Effect(frame)) = &event {
             let effect = match effect_presentation(
@@ -507,7 +491,13 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     return Err(error);
                 }
             };
-            live.resource_scenes.push(effect);
+            live.layers.push(publish_resource_frame(
+                &services,
+                session,
+                &session_id.0,
+                input.tick_index,
+                effect.value,
+            )?);
         }
         if let Some(MinoriVmEvent::Panel { sequence }) = &event {
             let panel = match panel_presentation(
@@ -523,7 +513,13 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     return Err(error);
                 }
             };
-            live.resource_scenes.push(panel);
+            live.layers.push(publish_resource_frame(
+                &services,
+                session,
+                &session_id.0,
+                input.tick_index,
+                panel.value,
+            )?);
         }
         let mut audio_command_count = 0u64;
         if let Some(MinoriVmEvent::Audio { commands }) = &event {
@@ -601,7 +597,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 ..LegacyControlTransaction::default()
             },
             trace,
-            diagnostics: Vec::new(),
+            diagnostics,
             coverage: LegacyCoverageDelta {
                 instructions: after - before,
                 contexts: vec![0],
@@ -610,171 +606,16 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             },
             state_revision: session.vm.state().fixed_tick,
         };
-        output.validate(&input.budget)?;
+        if matches!(native_save_action, Some(NativeSaveAction::Save)) {
+            write_native_save(
+                services.writable_files.as_ref(),
+                &session_id.0,
+                NATIVE_SAVE_PATH,
+                &session.vm.encode_native_save().map_err(runtime_error)?,
+            )?;
+        }
+        output.validate()?;
         Ok(output)
-    }
-
-    fn save(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-    ) -> Result<LegacySnapshotEnvelope, LegacyProviderError> {
-        ctx.validate()?;
-        let session = self
-            .sessions
-            .get(session_id.0.as_str())
-            .ok_or_else(session_missing)?;
-        validate_session_binding(ctx, session)?;
-        if session.poisoned {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_SESSION_POISONED",
-                "poisoned session cannot be saved",
-            ));
-        }
-        let bytes = session.vm.snapshot_bytes().map_err(runtime_error)?;
-        let envelope = LegacySnapshotEnvelope {
-            family_id: FamilyId(MINORI_FAMILY_ID.into()),
-            session_id: session_id.clone(),
-            schema_version: SchemaVersion::new(7, 0, 0),
-            case_fingerprint: session.case_fingerprint,
-            fixed_step: session.vm.state().fixed_tick,
-            session_seed: session.session_seed,
-            runtime_cursor: session.vm.state().instruction_count,
-            family_sections: vec![LegacySnapshotSection {
-                section_id: "minori.runtime".into(),
-                schema: MINORI_RUNTIME_STATE_SCHEMA.into(),
-                version: SchemaVersion::new(7, 0, 0),
-                bytes,
-            }],
-            redaction_status: "passed".into(),
-        };
-        envelope.validate()?;
-        Ok(envelope)
-    }
-
-    fn restore(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        snapshot: &LegacySnapshotEnvelope,
-    ) -> Result<LegacyRestoreReport, LegacyProviderError> {
-        ctx.validate()?;
-        snapshot.validate()?;
-        let vfs = Arc::clone(self.vfs()?);
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(session_missing)?;
-        validate_session_binding(ctx, session)?;
-        if snapshot.family_id.0 != MINORI_FAMILY_ID
-            || snapshot.session_id != *session_id
-            || snapshot.case_fingerprint != session.case_fingerprint
-            || snapshot.session_seed != session.session_seed
-            || snapshot.family_sections.len() != 1
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_SNAPSHOT_IDENTITY",
-                "snapshot identity does not match the open session",
-            ));
-        }
-        let section = &snapshot.family_sections[0];
-        if section.section_id != "minori.runtime"
-            || section.schema != MINORI_RUNTIME_STATE_SCHEMA
-            || section.version != SchemaVersion::new(7, 0, 0)
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_SNAPSHOT_SECTION",
-                "snapshot runtime section identity is invalid",
-            ));
-        }
-        let restored = MinoriVm::decode_snapshot(&section.bytes).map_err(runtime_error)?;
-        validate_script_uri(&restored.script_uri)?;
-        let bytes = vfs.read_file(&ctx.mount_set_id, &restored.script_uri, MAX_SCRIPT_BYTES)?;
-        let script_hash = Hash256::from_sha256(&bytes);
-        if script_hash != restored.script_hash {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_SNAPSHOT_SCRIPT_IDENTITY",
-                "snapshot script hash does not match the mounted VFS",
-            ));
-        }
-        let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
-        session
-            .vm
-            .replace_script(restored.script_uri, script_hash, script)
-            .and_then(|_| session.vm.restore_state(&section.bytes))
-            .map_err(runtime_error)?;
-        session.poisoned = false;
-        Ok(LegacyRestoreReport {
-            restored_fixed_step: session.vm.state().fixed_tick,
-            session_seed: session.session_seed,
-            state_revision: session.vm.state().fixed_tick,
-            diagnostics: Vec::new(),
-        })
-    }
-
-    fn take_ephemeral_text(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        lease_id: &str,
-    ) -> Result<Option<astra_emu_family_api::LegacyEphemeralText>, LegacyProviderError> {
-        ctx.validate()?;
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(session_missing)?;
-        validate_session_binding(ctx, session)?;
-        Ok(session.ephemeral_text.remove(lease_id))
-    }
-
-    fn read_session_resource(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<astra_byte_source::OwnedByteBuffer, LegacyProviderError> {
-        ctx.validate()?;
-        let session = self
-            .sessions
-            .get(&session_id.0)
-            .ok_or_else(session_missing)?;
-        validate_session_binding(ctx, session)?;
-        if max_bytes == 0 || max_bytes > MAX_RESOURCE_BYTES || !resource_uri.starts_with("minori:/")
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_RESOURCE_BOUNDS",
-                "resource request is outside the session VFS or byte budget",
-            ));
-        }
-        self.vfs()?
-            .read_file(&ctx.mount_set_id, resource_uri, max_bytes)
-    }
-
-    fn begin_session_resource_read(
-        &mut self,
-        ctx: &LegacyRuntimeHostCtx,
-        session_id: &LegacyRuntimeSessionId,
-        resource_uri: &str,
-        max_bytes: u64,
-    ) -> Result<LegacyResourceRead, LegacyProviderError> {
-        ctx.validate()?;
-        let session = self
-            .sessions
-            .get(&session_id.0)
-            .ok_or_else(session_missing)?;
-        validate_session_binding(ctx, session)?;
-        if max_bytes == 0 || max_bytes > MAX_RESOURCE_BYTES || !resource_uri.starts_with("minori:/")
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_RESOURCE_BOUNDS",
-                "resource request is outside the session VFS or byte budget",
-            ));
-        }
-        let vfs = Arc::clone(self.vfs()?);
-        let mount_set_id = ctx.mount_set_id.clone();
-        let resource_uri = resource_uri.to_owned();
-        LegacyResourceRead::spawn(move || vfs.read_file(&mount_set_id, &resource_uri, max_bytes))
     }
 
     fn shutdown(
@@ -1295,16 +1136,508 @@ fn validate_script_uri(script_uri: &str) -> Result<(), LegacyProviderError> {
     Ok(())
 }
 
+fn publish_resource_frame(
+    services: &LegacyFamilyHostServicesV9,
+    session: &mut MinoriSession,
+    session_id: &str,
+    fixed_step: u64,
+    frame: LegacyRenderResourceFrameV1,
+) -> Result<LegacyLayerTransactionV9, LegacyProviderError> {
+    frame.validate()?;
+    let resources = frame
+        .texture_resources
+        .iter()
+        .map(|resource| (resource.texture_id, resource))
+        .collect::<BTreeMap<_, _>>();
+    let mut operations = Vec::new();
+    let mut next_visual_layers = BTreeMap::new();
+    for draw in &frame.draws {
+        let resource = resources.get(&draw.texture_id).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_RESOURCE",
+                "draw references a texture resource that is not present",
+            )
+        })?;
+        let layer_id = format!("minori.visual.{:08}", draw.texture_id);
+        let surface_id = format!("minori.surface.{:08}", draw.texture_id);
+        let source_changed = session
+            .layer_sources
+            .get(&layer_id)
+            .is_none_or(|uri| uri != &resource.resource_uri);
+        let (generation, stride, damage) = if source_changed {
+            let bytes = services.vfs.read_file(
+                &session.mount_set_id,
+                &resource.resource_uri,
+                MAX_RESOURCE_BYTES,
+            )?;
+            let decoded = image::load_from_memory(bytes.as_slice())
+                .map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_LAYER_DECODE",
+                        "Minori image resource could not be decoded",
+                    )
+                })?
+                .into_rgba8();
+            if decoded.width() != resource.decoded_width
+                || decoded.height() != resource.decoded_height
+            {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_LAYER_DIMENSIONS",
+                    "decoded image dimensions changed after metadata validation",
+                ));
+            }
+            let generation = upload_rgba_surface(
+                services,
+                session,
+                session_id,
+                fixed_step,
+                &surface_id,
+                decoded.width(),
+                decoded.height(),
+                decoded.as_raw(),
+            )?;
+            session
+                .layer_sources
+                .insert(layer_id.clone(), resource.resource_uri.clone());
+            (
+                generation,
+                decoded.width().checked_mul(4).ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_SURFACE_STRIDE",
+                        "surface stride overflowed",
+                    )
+                })?,
+                LegacySurfaceDamageV9::Full,
+            )
+        } else {
+            let previous = session.active_layers.get(&layer_id).ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_LAYER_STATE",
+                    "retained layer source exists without retained layer state",
+                )
+            })?;
+            (
+                previous.generation,
+                previous.stride,
+                LegacySurfaceDamageV9::Unchanged,
+            )
+        };
+        let left = draw.vertices[0].position[0];
+        let top = draw.vertices[0].position[1];
+        let opacity = draw.vertices[0].color[3];
+        let layer = LegacyLayerStateV9 {
+            layer_id: layer_id.clone(),
+            role: minori_layer_role(draw.texture_id).into(),
+            z_index: i32::try_from(draw.texture_id).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_LAYER_Z",
+                    "texture id does not fit layer z order",
+                )
+            })?,
+            surface_id,
+            generation,
+            width: resource.decoded_width,
+            height: resource.decoded_height,
+            stride,
+            format: LegacySurfaceFormatV9::Rgba8SrgbPremultiplied,
+            damage,
+            transform: LegacyLayerTransformV9 {
+                m11: 1.0,
+                m12: 0.0,
+                m21: 0.0,
+                m22: 1.0,
+                tx: left,
+                ty: top,
+            },
+            clip: None,
+            opacity,
+            texture_filter: LegacyLayerFilterV9::Linear,
+            blend: if draw.texture_id == 1 {
+                LegacyLayerBlendV9::Opaque
+            } else {
+                LegacyLayerBlendV9::Alpha
+            },
+            filter_graph: None,
+        };
+        operations.push(if session.active_layers.contains_key(&layer_id) {
+            LegacyLayerOperationV9::Update(layer.clone())
+        } else {
+            LegacyLayerOperationV9::Create(layer.clone())
+        });
+        next_visual_layers.insert(layer_id, layer);
+    }
+    let removed = session
+        .active_layers
+        .keys()
+        .filter(|layer_id| layer_id.starts_with("minori.visual."))
+        .filter(|layer_id| !next_visual_layers.contains_key(*layer_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    for layer_id in removed {
+        operations.push(LegacyLayerOperationV9::Destroy {
+            layer_id: layer_id.clone(),
+        });
+        session.active_layers.remove(&layer_id);
+        session.layer_sources.remove(&layer_id);
+    }
+    session.active_layers.extend(next_visual_layers);
+    layer_transaction(session, frame.width, frame.height, operations)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_text_layer(
+    services: &LegacyFamilyHostServicesV9,
+    session: &mut MinoriSession,
+    session_id: &str,
+    family_game_id: &str,
+    fixed_step: u64,
+    capture_sequence: u64,
+    original_text: &str,
+    speaker: Option<&str>,
+    diagnostics: &mut Vec<LegacyDiagnostic>,
+) -> Result<LegacyLayerTransactionV9, LegacyProviderError> {
+    let (width, height) = session.stage_size.ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY",
+            "Minori text rendering requires explicit stage dimensions",
+        )
+    })?;
+    let translated = translate_text(
+        services,
+        session_id,
+        family_game_id,
+        fixed_step,
+        capture_sequence,
+        original_text,
+        session.hook_timeout_ms,
+        diagnostics,
+    );
+    let text_identity = (translated.clone(), speaker.map(str::to_owned));
+    let surface_id = "minori.surface.text";
+    let (generation, damage) = if session.last_text.as_ref() == Some(&text_identity) {
+        (
+            *session.surface_generations.get(surface_id).ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_TEXT_STATE",
+                    "text identity exists without a committed surface generation",
+                )
+            })?,
+            LegacySurfaceDamageV9::Unchanged,
+        )
+    } else {
+        let pixels = match session
+            .text_renderer
+            .render(width, height, &translated, speaker)
+        {
+            Ok(pixels) => pixels,
+            Err(code) if translated != original_text => {
+                diagnostics.push(LegacyDiagnostic {
+                    code: code.clone(),
+                    severity: "warn".into(),
+                    subject: "minori.translation".into(),
+                    message: "translated text layout failed; Minori retained the original text"
+                        .into(),
+                });
+                session
+                    .text_renderer
+                    .render(width, height, original_text, speaker)
+                    .map_err(|fallback| invalid("ASTRA_EMU_MINORI_TEXT_LAYOUT", fallback))?
+            }
+            Err(code) => return Err(invalid("ASTRA_EMU_MINORI_TEXT_LAYOUT", code)),
+        };
+        let generation = upload_rgba_surface(
+            services, session, session_id, fixed_step, surface_id, width, height, &pixels,
+        )?;
+        session.last_text = Some(text_identity);
+        (generation, LegacySurfaceDamageV9::Full)
+    };
+    let layer_id = "minori.text".to_owned();
+    let layer = LegacyLayerStateV9 {
+        layer_id: layer_id.clone(),
+        role: "text".into(),
+        z_index: 1_000,
+        surface_id: surface_id.into(),
+        generation,
+        width,
+        height,
+        stride: width.checked_mul(4).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_TEXT_STRIDE",
+                "text surface stride overflowed",
+            )
+        })?,
+        format: LegacySurfaceFormatV9::Rgba8SrgbPremultiplied,
+        damage,
+        transform: LegacyLayerTransformV9 {
+            m11: 1.0,
+            m12: 0.0,
+            m21: 0.0,
+            m22: 1.0,
+            tx: 0.0,
+            ty: 0.0,
+        },
+        clip: None,
+        opacity: 1.0,
+        texture_filter: LegacyLayerFilterV9::Linear,
+        blend: LegacyLayerBlendV9::Alpha,
+        filter_graph: None,
+    };
+    let operation = if session.active_layers.contains_key(&layer_id) {
+        LegacyLayerOperationV9::Update(layer.clone())
+    } else {
+        LegacyLayerOperationV9::Create(layer.clone())
+    };
+    session.active_layers.insert(layer_id, layer);
+    layer_transaction(session, width, height, vec![operation])
+}
+
+fn translate_text(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &str,
+    family_game_id: &str,
+    fixed_step: u64,
+    capture_sequence: u64,
+    original: &str,
+    timeout_ms: u32,
+    diagnostics: &mut Vec<LegacyDiagnostic>,
+) -> String {
+    let payload = match postcard::to_allocvec(&TranslationTextRequestV1 {
+        utf8: original.as_bytes().to_vec(),
+    }) {
+        Ok(payload) => payload,
+        Err(_) => return original.to_owned(),
+    };
+    let result = services.hooks.invoke(LegacyHookInvocationV1 {
+        session_id: session_id.into(),
+        invocation_id: format!("minori.translation.{fixed_step}.{capture_sequence}"),
+        family_id: MINORI_FAMILY_ID.into(),
+        family_game_id: family_game_id.into(),
+        hook_id: TRANSLATION_TEXT_HOOK_ID.into(),
+        timeout_ms,
+        payload: OwnedByteBuffer::from_vec(payload),
+    });
+    match result {
+        Ok(result) => {
+            diagnostics.extend(result.diagnostics);
+            if result.status != LegacyHookStatusV1::Completed {
+                return original.to_owned();
+            }
+            match postcard::from_bytes::<TranslationTextResponseV1>(result.payload.as_slice())
+                .ok()
+                .and_then(|response| response.validate().ok().map(str::to_owned))
+            {
+                Some(text) => text,
+                None => {
+                    diagnostics.push(LegacyDiagnostic {
+                        code: "ASTRA_EMU_MINORI_HOOK_PROTOCOL".into(),
+                        severity: "warn".into(),
+                        subject: "minori.translation".into(),
+                        message:
+                            "translation response was invalid; Minori retained the original text"
+                                .into(),
+                    });
+                    original.to_owned()
+                }
+            }
+        }
+        Err(error) => {
+            diagnostics.push(LegacyDiagnostic {
+                code: error.code().to_owned(),
+                severity: "warn".into(),
+                subject: "minori.translation".into(),
+                message: "translation Hook failed; Minori retained the original text".into(),
+            });
+            original.to_owned()
+        }
+    }
+}
+
+fn upload_rgba_surface(
+    services: &LegacyFamilyHostServicesV9,
+    session: &mut MinoriSession,
+    session_id: &str,
+    fixed_step: u64,
+    surface_id: &str,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Result<u64, LegacyProviderError> {
+    let row_bytes = width.checked_mul(4).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_SURFACE_STRIDE",
+            "surface row size overflowed",
+        )
+    })?;
+    let expected_len = usize::try_from(row_bytes)
+        .ok()
+        .and_then(|row| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| row.checked_mul(height))
+        })
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SURFACE_SIZE",
+                "surface byte size overflowed",
+            )
+        })?;
+    if rgba.len() != expected_len {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SURFACE_SIZE",
+            "decoded surface byte count does not match its dimensions",
+        ));
+    }
+    let generation = session
+        .surface_generations
+        .get(surface_id)
+        .copied()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SURFACE_GENERATION",
+                "surface generation overflowed",
+            )
+        })?;
+    let mut lease = services.surfaces.acquire(
+        session_id,
+        fixed_step,
+        surface_id,
+        width,
+        height,
+        LegacySurfaceFormatV9::Rgba8SrgbPremultiplied,
+    )?;
+    lease.validate()?;
+    if lease.surface_id != surface_id
+        || lease.generation != generation
+        || lease.width != width
+        || lease.height != height
+        || lease.format != LegacySurfaceFormatV9::Rgba8SrgbPremultiplied
+        || lease.stride < row_bytes
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SURFACE_LEASE",
+            "Host returned a surface lease with mismatched identity or geometry",
+        ));
+    }
+    let stride = usize::try_from(lease.stride).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SURFACE_STRIDE",
+            "surface stride does not fit memory",
+        )
+    })?;
+    let row_bytes = usize::try_from(row_bytes).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SURFACE_STRIDE",
+            "surface row size does not fit memory",
+        )
+    })?;
+    copy_premultiplied_rows(rgba, row_bytes, lease.pixels.as_mut_slice(), stride)?;
+    services.surfaces.commit(
+        session_id,
+        fixed_step,
+        LegacySurfaceCommitV9 {
+            lease,
+            damage: LegacySurfaceDamageV9::Full,
+        },
+    )?;
+    session
+        .surface_generations
+        .insert(surface_id.to_owned(), generation);
+    Ok(generation)
+}
+
+fn copy_premultiplied_rows(
+    source: &[u8],
+    row_bytes: usize,
+    target: &mut [u8],
+    stride: usize,
+) -> Result<(), LegacyProviderError> {
+    if row_bytes == 0
+        || !row_bytes.is_multiple_of(4)
+        || stride < row_bytes
+        || !source.len().is_multiple_of(row_bytes)
+        || target.len() != source.len() / row_bytes * stride
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SURFACE_COPY",
+            "surface row layout is inconsistent",
+        ));
+    }
+    for (source, target) in source
+        .chunks_exact(row_bytes)
+        .zip(target.chunks_exact_mut(stride))
+    {
+        for (source_pixel, target_pixel) in source
+            .chunks_exact(4)
+            .zip(target[..row_bytes].chunks_exact_mut(4))
+        {
+            let alpha = u16::from(source_pixel[3]);
+            target_pixel[0] = ((u16::from(source_pixel[0]) * alpha + 127) / 255) as u8;
+            target_pixel[1] = ((u16::from(source_pixel[1]) * alpha + 127) / 255) as u8;
+            target_pixel[2] = ((u16::from(source_pixel[2]) * alpha + 127) / 255) as u8;
+            target_pixel[3] = source_pixel[3];
+        }
+    }
+    Ok(())
+}
+
+fn layer_transaction(
+    session: &mut MinoriSession,
+    width: u32,
+    height: u32,
+    operations: Vec<LegacyLayerOperationV9>,
+) -> Result<LegacyLayerTransactionV9, LegacyProviderError> {
+    let transaction = LegacyLayerTransactionV9 {
+        sequence: session.next_layer_sequence,
+        viewport_width: width,
+        viewport_height: height,
+        operations,
+    };
+    transaction.validate()?;
+    session.next_layer_sequence = session.next_layer_sequence.checked_add(1).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_LAYER_SEQUENCE",
+            "layer transaction sequence overflowed",
+        )
+    })?;
+    Ok(transaction)
+}
+
+fn minori_layer_role(texture_id: u32) -> &'static str {
+    match texture_id {
+        1 => "background",
+        2 => "foreground",
+        100 | 101 => "effect",
+        200 => "panel",
+        _ => "stand",
+    }
+}
+
+fn parse_hook_timeout(options: &BTreeMap<String, String>) -> Result<u32, LegacyProviderError> {
+    options
+        .get("astra.translation.timeout_ms")
+        .map(|value| {
+            value.parse::<u32>().map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_HOOK_TIMEOUT",
+                    "translation timeout must be represented as u32 milliseconds",
+                )
+            })
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(2_000))
+}
+
 fn waiting_output(
     vm: &MinoriVm,
     _wait: MinoriWaitState,
-    resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
-    input: &LegacyStepInput,
+    layers: Vec<LegacyLayerTransactionV9>,
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
     let output = LegacyStepOutput {
         status: LegacyRuntimeStatus::Awaiting,
         live: LegacyLiveOutput {
-            resource_scenes,
+            layers,
             ..LegacyLiveOutput::default()
         },
         // A wait request is edge-triggered: it is published only by the
@@ -1316,7 +1649,7 @@ fn waiting_output(
         coverage: LegacyCoverageDelta::default(),
         state_revision: vm.state().fixed_tick,
     };
-    output.validate(&input.budget)?;
+    output.validate()?;
     Ok(output)
 }
 
@@ -1364,6 +1697,116 @@ fn wait_token(wait: &MinoriWaitState) -> &str {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeSaveAction {
+    Save,
+    Load,
+}
+
+fn native_save_action(
+    input_edges: &[astra_emu_family_api::LegacyInputEdge],
+) -> Result<Option<NativeSaveAction>, LegacyProviderError> {
+    let mut action = None;
+    for edge in input_edges.iter().filter(|edge| edge.pressed) {
+        let candidate = match edge.control.as_str() {
+            "function:5" => Some(NativeSaveAction::Save),
+            "function:9" => Some(NativeSaveAction::Load),
+            _ => None,
+        };
+        if let Some(candidate) = candidate {
+            if action.replace(candidate).is_some() {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_NATIVE_SAVE_CONFLICT",
+                    "a step may request exactly one native save or load action",
+                ));
+            }
+        }
+    }
+    Ok(action)
+}
+
+fn read_native_save(
+    files: &dyn LegacyWritableFileHostV1,
+    session_id: &str,
+    path: &str,
+) -> Result<Vec<u8>, LegacyProviderError> {
+    let stat = files.execute(
+        session_id,
+        LegacyWritableFileRequestV1::Stat { path: path.into() },
+    )?;
+    if !stat.exists || !stat.is_file || stat.length == 0 || stat.length > MAX_NATIVE_SAVE_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_NATIVE_SAVE_STAT",
+            "native save is missing, empty, not a file, or exceeds the size bound",
+        ));
+    }
+    let read = files.execute(
+        session_id,
+        LegacyWritableFileRequestV1::ReadRange {
+            path: path.into(),
+            offset: 0,
+            length: stat.length,
+        },
+    )?;
+    if read.bytes.len() as u64 != stat.length {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_NATIVE_SAVE_READ",
+            "native save read returned a truncated payload",
+        ));
+    }
+    Ok(read.bytes.as_slice().to_vec())
+}
+
+fn write_native_save(
+    files: &dyn LegacyWritableFileHostV1,
+    session_id: &str,
+    path: &str,
+    bytes: &[u8],
+) -> Result<(), LegacyProviderError> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_NATIVE_SAVE_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_NATIVE_SAVE_SIZE",
+            "native save payload is empty or exceeds the size bound",
+        ));
+    }
+    files.execute(
+        session_id,
+        LegacyWritableFileRequestV1::CreateDir {
+            path: "save".into(),
+        },
+    )?;
+    let temporary_path = format!("save/.minori-slot-000-{session_id}.tmp");
+    let write = files.execute(
+        session_id,
+        LegacyWritableFileRequestV1::WriteRange {
+            path: temporary_path.clone(),
+            offset: 0,
+            bytes: bytes.to_vec(),
+        },
+    )?;
+    if write.written != bytes.len() as u64 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_NATIVE_SAVE_WRITE",
+            "native save host reported a short write",
+        ));
+    }
+    files.execute(
+        session_id,
+        LegacyWritableFileRequestV1::SetLength {
+            path: temporary_path.clone(),
+            length: bytes.len() as u64,
+        },
+    )?;
+    files.execute(
+        session_id,
+        LegacyWritableFileRequestV1::AtomicReplace {
+            temporary_path,
+            destination_path: path.into(),
+        },
+    )?;
+    Ok(())
+}
+
 fn validate_session_binding(
     ctx: &LegacyRuntimeHostCtx,
     session: &MinoriSession,
@@ -1391,10 +1834,10 @@ fn runtime_error(error: MinoriRuntimeError) -> LegacyProviderError {
         MinoriRuntimeError::Label => "ASTRA_EMU_MINORI_RUNTIME_LABEL",
         MinoriRuntimeError::Operand => "ASTRA_EMU_MINORI_RUNTIME_OPERAND",
         MinoriRuntimeError::UnsupportedOpcode { .. } => "ASTRA_EMU_MINORI_RUNTIME_OPCODE",
-        MinoriRuntimeError::Budget => "ASTRA_EMU_MINORI_RUNTIME_BUDGET",
+        MinoriRuntimeError::NonYieldingCycle => "ASTRA_EMU_MINORI_RUNTIME_NON_YIELDING_CYCLE",
         MinoriRuntimeError::Waiting => "ASTRA_EMU_MINORI_RUNTIME_WAIT",
         MinoriRuntimeError::Overflow => "ASTRA_EMU_MINORI_RUNTIME_OVERFLOW",
-        MinoriRuntimeError::Snapshot => "ASTRA_EMU_MINORI_RUNTIME_SNAPSHOT",
+        MinoriRuntimeError::NativeSaveFormat => "ASTRA_EMU_MINORI_NATIVE_SAVE_FORMAT",
         MinoriRuntimeError::ChainTarget => "ASTRA_EMU_MINORI_RUNTIME_CHAIN",
         MinoriRuntimeError::AudioResource => "ASTRA_EMU_MINORI_RUNTIME_AUDIO_RESOURCE",
         MinoriRuntimeError::Effect => "ASTRA_EMU_MINORI_RUNTIME_EFFECT",
@@ -1407,532 +1850,149 @@ fn session_missing() -> LegacyProviderError {
     invalid("ASTRA_EMU_MINORI_SESSION_MISSING", "session is not active")
 }
 
-fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
+fn invalid(code: &'static str, message: impl Into<String>) -> LegacyProviderError {
     LegacyProviderError::invalid(code, message)
 }
 
 #[cfg(test)]
 mod tests {
-    use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
-    use astra_emu_family_api::{LegacyAwaitResult, LegacyReplayMode, LegacyStepBudget};
-    use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
-
     use super::*;
+    use astra_emu_family_api::LegacyWritableFileResultV1;
+    use std::sync::Mutex;
 
-    struct MemoryReader {
-        scripts: BTreeMap<String, Vec<u8>>,
+    #[derive(Default)]
+    struct RecordingWritableFiles {
+        requests: Mutex<Vec<LegacyWritableFileRequestV1>>,
+        bytes: Mutex<Vec<u8>>,
     }
 
-    impl LegacyVfsReader for MemoryReader {
-        fn stat_file(
+    impl LegacyWritableFileHostV1 for RecordingWritableFiles {
+        fn execute(
             &self,
-            mount_set_id: &str,
-            uri: &str,
-        ) -> Result<ByteSourceStat, LegacyProviderError> {
-            if mount_set_id != "mount.test" {
-                return Err(invalid("TEST_VFS_NOT_FOUND", "fixture entry is missing"));
+            _session_id: &str,
+            request: LegacyWritableFileRequestV1,
+        ) -> Result<LegacyWritableFileResultV1, LegacyProviderError> {
+            self.requests.lock().unwrap().push(request.clone());
+            let mut result = LegacyWritableFileResultV1 {
+                exists: false,
+                is_file: false,
+                length: 0,
+                entries: Vec::new(),
+                bytes: OwnedByteBuffer::from_vec(Vec::new()),
+                written: 0,
+            };
+            match request {
+                LegacyWritableFileRequestV1::Stat { .. } => {
+                    let bytes = self.bytes.lock().unwrap();
+                    result.exists = !bytes.is_empty();
+                    result.is_file = result.exists;
+                    result.length = bytes.len() as u64;
+                }
+                LegacyWritableFileRequestV1::ReadRange { offset, length, .. } => {
+                    let bytes = self.bytes.lock().unwrap();
+                    let start = usize::try_from(offset).unwrap();
+                    let end = start.checked_add(usize::try_from(length).unwrap()).unwrap();
+                    result.bytes = OwnedByteBuffer::from_vec(bytes[start..end].to_vec());
+                }
+                LegacyWritableFileRequestV1::WriteRange { offset, bytes, .. } => {
+                    assert_eq!(offset, 0);
+                    result.written = bytes.len() as u64;
+                    *self.bytes.lock().unwrap() = bytes;
+                }
+                LegacyWritableFileRequestV1::SetLength { length, .. } => {
+                    self.bytes
+                        .lock()
+                        .unwrap()
+                        .truncate(usize::try_from(length).unwrap());
+                }
+                LegacyWritableFileRequestV1::CreateDir { .. }
+                | LegacyWritableFileRequestV1::AtomicReplace { .. }
+                | LegacyWritableFileRequestV1::List { .. }
+                | LegacyWritableFileRequestV1::Remove { .. } => {}
             }
-            let script = self
-                .scripts
-                .get(uri)
-                .ok_or_else(|| invalid("TEST_VFS_NOT_FOUND", "fixture entry is missing"))?;
-            Ok(ByteSourceStat {
-                len: script.len() as u64,
-                revision: SourceRevision(1),
-            })
-        }
-
-        fn read_file_range(
-            &self,
-            mount_set_id: &str,
-            uri: &str,
-            expected_revision: SourceRevision,
-            range: ByteRange,
-            max_bytes: u64,
-        ) -> Result<RangeReadResult, LegacyProviderError> {
-            let stat = self.stat_file(mount_set_id, uri)?;
-            range
-                .validate(stat.len, max_bytes)
-                .map_err(|_| invalid("TEST_VFS_BOUNDS", "fixture range is invalid"))?;
-            if expected_revision != stat.revision {
-                return Err(invalid("TEST_VFS_REVISION", "fixture revision changed"));
-            }
-            let script = self
-                .scripts
-                .get(uri)
-                .ok_or_else(|| invalid("TEST_VFS_NOT_FOUND", "fixture entry is missing"))?;
-            let bytes = script[range.offset as usize..(range.offset + range.len) as usize].to_vec();
-            Ok(RangeReadResult {
-                range,
-                revision: stat.revision,
-                bytes: bytes.into(),
-            })
+            Ok(result)
         }
     }
 
     #[test]
-    fn provider_lifecycle_wait_snapshot_restore_and_shutdown() {
-        let script = b".setglobal route = 1\r\n.wait 20\r\n.end\r\n".to_vec();
-        let case_fingerprint = Hash256::from_sha256(b"case");
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.test".into()),
-                    case_fingerprint,
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::new(),
-                },
-            )
-            .unwrap();
-        let first = provider
-            .step(&ctx, &session, step_input(1, Vec::new()))
-            .unwrap();
-        assert_eq!(first.status, LegacyRuntimeStatus::Awaiting);
-        let token = match &first.control.waits[0] {
-            LegacyWaitRequest::Time {
-                token_id,
-                milliseconds,
-            } => {
-                assert_eq!(milliseconds, &200);
-                token_id.clone()
-            }
-            _ => panic!("expected time wait"),
-        };
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        let waiting = provider
-            .step(&ctx, &session, step_input(2, Vec::new()))
-            .unwrap();
-        assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
-        provider.restore(&ctx, &session, &snapshot).unwrap();
-        let completed = provider
-            .step(
-                &ctx,
-                &session,
-                step_input(
-                    2,
-                    vec![LegacyAwaitResult {
-                        token_id: token,
-                        status: "completed".into(),
-                        payload_len: 0,
-                        sequence: 1,
-                    }],
-                ),
-            )
-            .unwrap();
-        assert_eq!(completed.status, LegacyRuntimeStatus::Terminal);
-        let shutdown = provider.shutdown(&ctx, &session).unwrap();
-        assert_eq!(shutdown.instruction_count, 3);
-        assert!(!provider.has_active_sessions());
-    }
-
-    #[test]
-    fn provider_tail_chains_and_restores_the_active_script_identity() {
-        let entry = b".set local = 1\r\n.chain K01.sc\r\n".to_vec();
-        let next = b".wait 20\r\n.end\r\n".to_vec();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([
-                ("minori:/scr/test.sc".into(), entry),
-                ("minori:/scr/K01.sc".into(), next),
-            ]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.chain".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::new(),
-                },
-            )
-            .unwrap();
-        let chained = provider
-            .step(&ctx, &session, step_input(1, Vec::new()))
-            .unwrap();
-        assert_eq!(chained.status, LegacyRuntimeStatus::Active);
-        assert_eq!(chained.trace[0].action.as_deref(), Some("chain"));
-
-        let waiting = provider
-            .step(&ctx, &session, step_input(2, Vec::new()))
-            .unwrap();
-        assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        provider.restore(&ctx, &session, &snapshot).unwrap();
+    fn descriptor_requires_native_multilayer_v9() {
+        let descriptor = minori_descriptor();
+        descriptor.validate().unwrap();
         assert_eq!(
-            snapshot.family_sections[0].version,
-            SchemaVersion::new(7, 0, 0)
+            descriptor.core_kind,
+            astra_emu_family_api::LegacyFamilyCoreKind::Native
         );
+        assert_eq!(
+            descriptor.presentation_mode,
+            astra_emu_family_api::LegacyFamilyPresentationMode::MultiLayer
+        );
+        assert_eq!(descriptor.abi_fingerprint, LEGACY_FAMILY_ABI_FINGERPRINT);
     }
 
     #[test]
-    fn provider_exposes_message_plaintext_only_through_a_one_shot_lease() {
-        let script = b".message 42 voice speaker hello world\r\n.end\r\n".to_vec();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.message".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::from([
-                        ("astra.stage_width".into(), "1280".into()),
-                        ("astra.stage_height".into(), "720".into()),
-                    ]),
-                },
-            )
-            .unwrap();
-        let output = provider
-            .step(&ctx, &session, step_input(1, Vec::new()))
-            .unwrap();
-        assert_eq!(output.status, LegacyRuntimeStatus::Awaiting);
-        let binding = &output.live.text_presentations[0];
-        assert_eq!(binding.sequence, 1);
-        let presentation = &binding.value.presentation;
-        let lease = &output.live.text[0];
-        assert_eq!(lease.sequence, 2);
-        assert_eq!(&binding.value.lease_id, &lease.lease_id);
-        assert_eq!(presentation.layout_id, "minori.message");
-        assert_eq!(presentation.language, "ja-JP");
-        assert_eq!(presentation.font_families, ["Noto Sans JP"]);
-        assert_eq!(presentation.body.font_size, 26.0);
-        assert_eq!(presentation.body.max_lines, 3);
-        let text = provider
-            .take_ephemeral_text(&ctx, &session, &lease.lease_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(text.text, "hello world");
-        assert_eq!(text.speaker.as_deref(), Some("speaker"));
-        assert!(provider
-            .take_ephemeral_text(&ctx, &session, &lease.lease_id)
-            .unwrap()
-            .is_none());
+    fn rgba_copy_is_premultiplied_and_preserves_stride_padding() {
+        let source = [200, 100, 50, 128, 20, 40, 60, 255];
+        let mut target = [0_u8; 12];
+        copy_premultiplied_rows(&source, 8, &mut target, 12).unwrap();
+        assert_eq!(&target[..8], &[100, 50, 25, 128, 20, 40, 60, 255]);
+        assert_eq!(&target[8..], &[0; 4]);
+    }
+
+    #[test]
+    fn rgba_copy_rejects_inconsistent_layout() {
+        let error = copy_premultiplied_rows(&[0; 8], 8, &mut [0; 7], 7).unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_MINORI_SURFACE_COPY");
+    }
+
+    #[test]
+    fn native_save_uses_temporary_file_and_atomic_replace() {
+        let files = RecordingWritableFiles::default();
+        write_native_save(&files, "session-a", NATIVE_SAVE_PATH, b"native-save").unwrap();
+        assert_eq!(
+            read_native_save(&files, "session-a", NATIVE_SAVE_PATH).unwrap(),
+            b"native-save"
+        );
+        let requests = files.requests.lock().unwrap();
         assert!(matches!(
-            output.control.waits.as_slice(),
-            [LegacyWaitRequest::Input { keys, .. }] if *keys == message_input_keys()
+            requests[0],
+            LegacyWritableFileRequestV1::CreateDir { .. }
+        ));
+        assert!(matches!(
+            requests[1],
+            LegacyWritableFileRequestV1::WriteRange { .. }
+        ));
+        assert!(matches!(
+            requests[2],
+            LegacyWritableFileRequestV1::SetLength { .. }
+        ));
+        assert!(matches!(
+            requests[3],
+            LegacyWritableFileRequestV1::AtomicReplace { .. }
         ));
     }
 
     #[test]
-    fn provider_blocks_message_without_the_verified_reference_stage() {
-        let script = b".message 42 voice speaker body\r\n.end\r\n".to_vec();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId(
-                        "session.message.invalid-stage".into(),
-                    ),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::new(),
-                },
-            )
-            .unwrap();
+    fn native_save_shortcuts_are_core_owned_and_conflicts_fail() {
+        let edge = |control: &str, sequence| astra_emu_family_api::LegacyInputEdge {
+            control: control.into(),
+            pressed: true,
+            value: 1.0,
+            sequence,
+        };
         assert_eq!(
-            provider
-                .step(&ctx, &session, step_input(1, Vec::new()))
+            native_save_action(&[edge("function:5", 1)]).unwrap(),
+            Some(NativeSaveAction::Save)
+        );
+        assert_eq!(
+            native_save_action(&[edge("function:9", 1)]).unwrap(),
+            Some(NativeSaveAction::Load)
+        );
+        assert_eq!(native_save_action(&[edge("enter", 1)]).unwrap(), None);
+        assert_eq!(
+            native_save_action(&[edge("function:5", 1), edge("function:9", 2)])
                 .unwrap_err()
                 .code(),
-            "ASTRA_EMU_MINORI_TEXT_STAGE_IDENTITY"
+            "ASTRA_EMU_MINORI_NATIVE_SAVE_CONFLICT"
         );
-    }
-
-    #[test]
-    fn provider_validates_and_emits_bgm_through_the_shared_audio_contract() {
-        let script = b".playBGM theme.ogg * * 80\r\n.end\r\n".to_vec();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([
-                ("minori:/scr/test.sc".into(), script),
-                ("minori:/bgm/theme.ogg".into(), b"OggSfixture".to_vec()),
-            ]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.bgm".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::new(),
-                },
-            )
-            .unwrap();
-        let output = provider
-            .step(&ctx, &session, step_input(1, Vec::new()))
-            .unwrap();
-        assert_eq!(output.status, LegacyRuntimeStatus::Active);
-        assert_eq!(output.coverage.audio_commands, 2);
-        assert_eq!(output.live.audio_commands.len(), 2);
-        let commands = output
-            .live
-            .audio_commands
-            .iter()
-            .map(|command| command.value.clone())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            commands[0],
-            LegacyAudioCommandV1::LoadResource {
-                stream_id: 0,
-                encoding: LegacyAudioEncoding::Ogg,
-                resource_uri: "minori:/bgm/theme.ogg".into(),
-            }
-        );
-        assert_eq!(
-            commands[1],
-            LegacyAudioCommandV1::Play {
-                stream_id: 0,
-                volume: 0.8,
-                pan: 0.0,
-                repeat: true,
-                fade_in_ms: 2,
-            }
-        );
-    }
-
-    #[test]
-    fn provider_emits_a_resource_bound_stage_frame_without_decoded_pixels() {
-        let script = b".transition 0 * 10\r\n.stage * BLACK.png 0 0\r\n.end\r\n".to_vec();
-        let mut png = Vec::new();
-        PngEncoder::new(&mut png)
-            .write_image(&[0, 0, 0, 255], 1, 1, ExtendedColorType::Rgba8)
-            .unwrap();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([
-                ("minori:/scr/test.sc".into(), script),
-                ("minori:/bg/BLACK.png".into(), png),
-            ]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.stage".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::from([
-                        ("astra.stage_width".into(), "1280".into()),
-                        ("astra.stage_height".into(), "720".into()),
-                    ]),
-                },
-            )
-            .unwrap();
-        let output = provider
-            .step(&ctx, &session, step_input(1, Vec::new()))
-            .unwrap();
-        let frame = &output.live.resource_scenes[0].value;
-        assert_eq!((frame.width, frame.height), (1280, 720));
-        assert_eq!(frame.texture_resources.len(), 1);
-        assert_eq!(frame.draws.len(), 1);
-        assert_eq!(
-            frame.texture_resources[0].resource_uri,
-            "minori:/bg/BLACK.png"
-        );
-        assert_eq!(frame.texture_resources[0].decoded_width, 1);
-        assert_eq!(frame.texture_resources[0].decoded_height, 1);
-    }
-
-    #[test]
-    fn provider_emits_crossfade2_frames_from_vfs_resources_while_waiting() {
-        let script =
-            b".effect CrossFade2 first.png:second.png:*:* 320 100\r\n.wait 20\r\n.end\r\n".to_vec();
-        let mut first = Vec::new();
-        PngEncoder::new(&mut first)
-            .write_image(&[255, 0, 0, 255], 1, 1, ExtendedColorType::Rgba8)
-            .unwrap();
-        let mut second = Vec::new();
-        PngEncoder::new(&mut second)
-            .write_image(&[0, 255, 0, 255], 1, 1, ExtendedColorType::Rgba8)
-            .unwrap();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([
-                ("minori:/scr/test.sc".into(), script),
-                ("minori:/bg/first.png".into(), first),
-                ("minori:/bg/second.png".into(), second),
-            ]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.effect".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 20_000_000,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::from([
-                        ("astra.stage_width".into(), "1280".into()),
-                        ("astra.stage_height".into(), "720".into()),
-                    ]),
-                },
-            )
-            .unwrap();
-        let created = provider
-            .step(&ctx, &session, step_input_with_delta(1, 20_000_000))
-            .unwrap();
-        let initial = &created.live.resource_scenes[0].value;
-        assert_eq!(initial.texture_resources.len(), 2);
-        assert_eq!(initial.draws[1].vertices[0].color[3], 0.0);
-
-        let waiting = provider
-            .step(&ctx, &session, step_input_with_delta(2, 20_000_000))
-            .unwrap();
-        assert_eq!(waiting.status, LegacyRuntimeStatus::Awaiting);
-        assert_eq!(waiting.control.waits.len(), 1);
-        for tick in 3..6 {
-            let unchanged = provider
-                .step(&ctx, &session, step_input_with_delta(tick, 20_000_000))
-                .unwrap();
-            assert!(unchanged.live.is_empty());
-            assert!(unchanged.control.waits.is_empty());
-        }
-        let advanced = provider
-            .step(&ctx, &session, step_input_with_delta(6, 20_000_000))
-            .unwrap();
-        let frame = &advanced.live.resource_scenes[0].value;
-        assert_eq!(frame.texture_resources.len(), 1);
-        assert_eq!(
-            frame.texture_resources[0].resource_uri,
-            "minori:/bg/second.png"
-        );
-    }
-
-    #[test]
-    fn provider_composes_verified_message_panel_over_the_visible_effect_frame() {
-        let script =
-            b".effect CrossFade2 first.png:second.png 320 100\r\n.panel 1\r\n.end\r\n".to_vec();
-        let encode = |rgba: [u8; 4]| {
-            let mut png = Vec::new();
-            PngEncoder::new(&mut png)
-                .write_image(&rgba, 1, 1, ExtendedColorType::Rgba8)
-                .unwrap();
-            png
-        };
-        let mut panel_png = Vec::new();
-        PngEncoder::new(&mut panel_png)
-            .write_image(&vec![255; 4 * 263], 1, 263, ExtendedColorType::Rgba8)
-            .unwrap();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([
-                ("minori:/scr/test.sc".into(), script),
-                ("minori:/bg/first.png".into(), encode([255, 0, 0, 255])),
-                ("minori:/bg/second.png".into(), encode([0, 255, 0, 255])),
-                ("minori:/sys/msgPanel.png".into(), panel_png),
-            ]),
-        }));
-        let ctx = context();
-        let session = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.panel".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 20_000_000,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::from([
-                        ("astra.stage_width".into(), "1280".into()),
-                        ("astra.stage_height".into(), "720".into()),
-                    ]),
-                },
-            )
-            .unwrap();
-        provider
-            .step(&ctx, &session, step_input_with_delta(1, 20_000_000))
-            .unwrap();
-        let panel = provider
-            .step(&ctx, &session, step_input_with_delta(2, 20_000_000))
-            .unwrap();
-        let frame = &panel.live.resource_scenes[0].value;
-        assert_eq!(frame.texture_resources.len(), 3);
-        assert_eq!(frame.draws.len(), 3);
-        assert_eq!(frame.draws[1].vertices[0].color[3], 0.0);
-        assert_eq!(
-            frame.texture_resources[2].resource_uri,
-            "minori:/sys/msgPanel.png"
-        );
-        assert_eq!(frame.texture_resources[2].texture_id, 200);
-        assert_eq!(frame.texture_resources[2].decoded_height, 263);
-        assert_eq!(frame.draws[2].vertices[0].position[1], 521.0);
-        assert_eq!(frame.draws[2].vertices[2].position[1], 784.0);
-    }
-
-    fn context() -> LegacyRuntimeHostCtx {
-        LegacyRuntimeHostCtx {
-            case_id: "case.test".into(),
-            package_id: "package.test".into(),
-            package_hash: Hash256::from_sha256(b"package"),
-            mount_set_id: "mount.test".into(),
-            media_service_ids: vec!["media.test".into()],
-            permission_policy_id: "policy.test".into(),
-            report_sink_id: "report.test".into(),
-            target: "headless".into(),
-            profile: "test".into(),
-        }
-    }
-
-    fn step_input(tick_index: u64, await_results: Vec<LegacyAwaitResult>) -> LegacyStepInput {
-        step_input_with_delta_and_await(tick_index, 16_666_667, await_results)
-    }
-
-    fn step_input_with_delta(tick_index: u64, delta_ns: u64) -> LegacyStepInput {
-        step_input_with_delta_and_await(tick_index, delta_ns, Vec::new())
-    }
-
-    fn step_input_with_delta_and_await(
-        tick_index: u64,
-        delta_ns: u64,
-        await_results: Vec<LegacyAwaitResult>,
-    ) -> LegacyStepInput {
-        LegacyStepInput {
-            tick_index,
-            delta_ns,
-            session_seed: 7,
-            mode: LegacyReplayMode::Live,
-            input_edges: Vec::new(),
-            await_results,
-            provider_results: Vec::new(),
-            budget: LegacyStepBudget {
-                max_instructions: 64,
-                max_effects: 64,
-                max_trace_entries: 64,
-            },
-        }
     }
 }

@@ -5,7 +5,9 @@ use std::{
     sync::Arc,
 };
 
-use astra_emu_family_api::{LegacyRuntimeProvider, LegacyVfsReader, LEGACY_FAMILY_ABI_FINGERPRINT};
+use astra_emu_family_api::{
+    LegacyFamilyHostServicesV9, LegacyRuntimeProvider, LEGACY_FAMILY_ABI_FINGERPRINT,
+};
 #[cfg(target_os = "android")]
 use astra_emu_manager_core::{family_base_identity_hash, AndroidNativePluginManifest};
 use astra_emu_manager_core::{
@@ -92,15 +94,15 @@ impl FamilyHostConfig {
 
     pub fn create_provider(
         &self,
-        vfs: Arc<dyn LegacyVfsReader>,
+        services: LegacyFamilyHostServicesV9,
     ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
         #[cfg(target_os = "ios")]
         {
-            return create_static_ios_provider(vfs);
+            return create_static_ios_provider(services);
         }
         #[cfg(target_os = "android")]
         {
-            return create_dynamic_android_provider(vfs);
+            return create_dynamic_android_provider(services);
         }
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
@@ -143,7 +145,7 @@ impl FamilyHostConfig {
                     &self.library_path,
                     manifest,
                     "astra.emu.manager.family.fvp".into(),
-                    vfs,
+                    services,
                 )
                 .map_err(|error| error.to_string())?;
             Ok(Box::new(provider))
@@ -153,7 +155,7 @@ impl FamilyHostConfig {
 
 #[cfg(target_os = "android")]
 fn create_dynamic_android_provider(
-    vfs: Arc<dyn LegacyVfsReader>,
+    services: LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
     use astra_core::Hash256;
 
@@ -225,7 +227,7 @@ fn create_dynamic_android_provider(
             &library_path,
             family,
             "astra.emu.manager.family.fvp".into(),
-            vfs,
+            services,
         )
         .map(|provider| Box::new(provider) as Box<dyn LegacyRuntimeProvider>)
         .map_err(|error| error.to_string())
@@ -242,7 +244,7 @@ fn android_abi() -> Result<&'static str, String> {
 
 #[cfg(target_os = "ios")]
 fn create_static_ios_provider(
-    vfs: Arc<dyn LegacyVfsReader>,
+    services: LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, String> {
     use astra_core::Hash256;
 
@@ -283,7 +285,7 @@ fn create_static_ios_provider(
         })
         .map_err(|error| error.to_string())?;
     registry
-        .create("fvp", vfs)
+        .create("fvp", services)
         .map_err(|error| error.to_string())
 }
 

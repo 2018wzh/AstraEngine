@@ -10,12 +10,11 @@ use astra_core::{Hash256, SchemaVersion};
 use crate::{
     FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
     LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation, LegacyControlTransaction,
-    LegacyCoverageDelta, LegacyDiagnostic, LegacyDirtySection, LegacyEphemeralText, LegacyEvent,
-    LegacyFamilyCoreKind, LegacyFamilyPluginDescriptor, LegacyFamilyPresentationMode,
-    LegacyInputEdge, LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport,
-    LegacyProbeRequest, LegacyProviderError, LegacyProviderResult, LegacyReplayMode,
-    LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeSessionId, LegacyRuntimeStatus,
-    LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection,
+    LegacyCoverageDelta, LegacyDiagnostic, LegacyEvent, LegacyFamilyCoreKind,
+    LegacyFamilyPluginDescriptor, LegacyFamilyPresentationMode, LegacyInputEdge, LegacyLiveOutput,
+    LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
+    LegacyProviderError, LegacyProviderResult, LegacyReplayMode, LegacyRuntimeHostCtx,
+    LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport,
     LegacyStepInput, LegacyStepOutput, LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1,
     LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
 };
@@ -266,8 +265,6 @@ pub struct FfiProbeRequest {
     pub root_mount_id: RString,
     pub candidate_uris: RVec<RString>,
     pub marker_hashes: RVec<FfiHash256>,
-    pub max_entries: u32,
-    pub max_metadata_bytes: u64,
 }
 
 impl From<LegacyProbeRequest> for FfiProbeRequest {
@@ -281,8 +278,6 @@ impl From<LegacyProbeRequest> for FfiProbeRequest {
                 .map(Into::into)
                 .collect::<Vec<_>>()
                 .into(),
-            max_entries: value.max_entries,
-            max_metadata_bytes: value.max_metadata_bytes,
         }
     }
 }
@@ -298,8 +293,6 @@ impl From<FfiProbeRequest> for LegacyProbeRequest {
                 .copied()
                 .map(Into::into)
                 .collect(),
-            max_entries: value.max_entries,
-            max_metadata_bytes: value.max_metadata_bytes,
         }
     }
 }
@@ -420,14 +413,12 @@ impl TryFrom<FfiOpenRequest> for LegacyOpenRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub enum FfiReplayMode {
     Live,
-    RestoreContinuation,
 }
 
 impl From<LegacyReplayMode> for FfiReplayMode {
     fn from(value: LegacyReplayMode) -> Self {
         match value {
             LegacyReplayMode::Live => Self::Live,
-            LegacyReplayMode::RestoreContinuation => Self::RestoreContinuation,
         }
     }
 }
@@ -436,7 +427,6 @@ impl From<FfiReplayMode> for LegacyReplayMode {
     fn from(value: FfiReplayMode) -> Self {
         match value {
             FfiReplayMode::Live => Self::Live,
-            FfiReplayMode::RestoreContinuation => Self::RestoreContinuation,
         }
     }
 }
@@ -1092,15 +1082,6 @@ pub struct FfiLiveEvent {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, StableAbi)]
-pub struct FfiLiveTextLease {
-    pub sequence: u64,
-    pub lease_id: RString,
-    pub byte_len: u32,
-    pub source_ref: RString,
-}
-
-#[repr(C)]
 #[derive(Debug, StableAbi)]
 pub struct FfiLiveOutput {
     pub layers: RVec<crate::FfiLayerTransactionV9>,
@@ -1459,17 +1440,9 @@ pub struct FfiBlackboardMutation {
 
 #[repr(C)]
 #[derive(Debug, Clone, StableAbi)]
-pub struct FfiDirtySection {
-    pub sequence: u64,
-    pub section_id: RString,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, StableAbi)]
 pub struct FfiControlTransaction {
     pub events: RVec<FfiLiveEvent>,
     pub blackboard: RVec<FfiBlackboardMutation>,
-    pub dirty_sections: RVec<FfiDirtySection>,
     pub waits: RVec<FfiWaitRequest>,
 }
 
@@ -1512,16 +1485,6 @@ impl TryFrom<LegacyStepOutput> for FfiStepOutput {
                         sequence: mutation.sequence,
                         key: mutation.key.into(),
                         value: mutation.value.into(),
-                    })
-                    .collect::<Vec<_>>()
-                    .into(),
-                dirty_sections: value
-                    .control
-                    .dirty_sections
-                    .into_iter()
-                    .map(|dirty| FfiDirtySection {
-                        sequence: dirty.sequence,
-                        section_id: dirty.section_id.into(),
                     })
                     .collect::<Vec<_>>()
                     .into(),
@@ -1583,14 +1546,6 @@ impl TryFrom<FfiStepOutput> for LegacyStepOutput {
                         sequence: mutation.sequence,
                         key: mutation.key.to_string(),
                         value: mutation.value.to_string(),
-                    })
-                    .collect(),
-                dirty_sections: control
-                    .dirty_sections
-                    .into_iter()
-                    .map(|dirty| LegacyDirtySection {
-                        sequence: dirty.sequence,
-                        section_id: dirty.section_id.to_string(),
                     })
                     .collect(),
                 waits: control
@@ -1686,125 +1641,6 @@ mod live_zero_copy_tests {
 
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiSnapshotSection {
-    pub section_id: RString,
-    pub schema: RString,
-    pub version: FfiSchemaVersion,
-    pub bytes: FfiOwnedBytes,
-}
-
-impl From<LegacySnapshotSection> for FfiSnapshotSection {
-    fn from(value: LegacySnapshotSection) -> Self {
-        Self {
-            section_id: value.section_id.into(),
-            schema: value.schema.into(),
-            version: value.version.into(),
-            bytes: FfiOwnedBytes::new(value.bytes),
-        }
-    }
-}
-impl From<FfiSnapshotSection> for LegacySnapshotSection {
-    fn from(value: FfiSnapshotSection) -> Self {
-        Self {
-            section_id: value.section_id.to_string(),
-            schema: value.schema.to_string(),
-            version: value.version.into(),
-            bytes: value.bytes.into_bytes(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiSnapshotEnvelope {
-    pub family_id: RString,
-    pub session_id: RString,
-    pub schema_version: FfiSchemaVersion,
-    pub case_fingerprint: FfiHash256,
-    pub fixed_step: u64,
-    pub session_seed: u64,
-    pub runtime_cursor: u64,
-    pub family_sections: RVec<FfiSnapshotSection>,
-    pub redaction_status: RString,
-}
-
-impl From<LegacySnapshotEnvelope> for FfiSnapshotEnvelope {
-    fn from(value: LegacySnapshotEnvelope) -> Self {
-        Self {
-            family_id: value.family_id.0.into(),
-            session_id: value.session_id.0.into(),
-            schema_version: value.schema_version.into(),
-            case_fingerprint: value.case_fingerprint.into(),
-            fixed_step: value.fixed_step,
-            session_seed: value.session_seed,
-            runtime_cursor: value.runtime_cursor,
-            family_sections: value
-                .family_sections
-                .into_iter()
-                .map(Into::into)
-                .collect::<Vec<_>>()
-                .into(),
-            redaction_status: value.redaction_status.into(),
-        }
-    }
-}
-impl From<FfiSnapshotEnvelope> for LegacySnapshotEnvelope {
-    fn from(value: FfiSnapshotEnvelope) -> Self {
-        Self {
-            family_id: FamilyId(value.family_id.to_string()),
-            session_id: LegacyRuntimeSessionId(value.session_id.to_string()),
-            schema_version: value.schema_version.into(),
-            case_fingerprint: value.case_fingerprint.into(),
-            fixed_step: value.fixed_step,
-            session_seed: value.session_seed,
-            runtime_cursor: value.runtime_cursor,
-            family_sections: value
-                .family_sections
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect(),
-            redaction_status: value.redaction_status.to_string(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiRestoreReport {
-    pub restored_fixed_step: u64,
-    pub session_seed: u64,
-    pub state_revision: u64,
-    pub diagnostics: RVec<FfiDiagnostic>,
-}
-impl From<LegacyRestoreReport> for FfiRestoreReport {
-    fn from(value: LegacyRestoreReport) -> Self {
-        Self {
-            restored_fixed_step: value.restored_fixed_step,
-            session_seed: value.session_seed,
-            state_revision: value.state_revision,
-            diagnostics: value
-                .diagnostics
-                .into_iter()
-                .map(Into::into)
-                .collect::<Vec<_>>()
-                .into(),
-        }
-    }
-}
-impl From<FfiRestoreReport> for LegacyRestoreReport {
-    fn from(value: FfiRestoreReport) -> Self {
-        Self {
-            restored_fixed_step: value.restored_fixed_step,
-            session_seed: value.session_seed,
-            state_revision: value.state_revision,
-            diagnostics: value.diagnostics.iter().cloned().map(Into::into).collect(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub struct FfiShutdownReport {
     pub final_state_revision: u64,
     pub instruction_count: u64,
@@ -1874,32 +1710,6 @@ impl From<FfiShutdownReport> for LegacyShutdownReport {
                 .map(Into::into)
                 .collect::<Vec<_>>(),
             diagnostics: value.diagnostics.iter().cloned().map(Into::into).collect(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
-pub struct FfiEphemeralText {
-    pub lease_id: RString,
-    pub text: RString,
-    pub speaker: ROption<RString>,
-}
-impl From<LegacyEphemeralText> for FfiEphemeralText {
-    fn from(value: LegacyEphemeralText) -> Self {
-        Self {
-            lease_id: value.lease_id.into(),
-            text: value.text.into(),
-            speaker: value.speaker.map(Into::into).into(),
-        }
-    }
-}
-impl From<FfiEphemeralText> for LegacyEphemeralText {
-    fn from(value: FfiEphemeralText) -> Self {
-        Self {
-            lease_id: value.lease_id.to_string(),
-            text: value.text.to_string(),
-            speaker: value.speaker.into_option().map(|v| v.to_string()),
         }
     }
 }

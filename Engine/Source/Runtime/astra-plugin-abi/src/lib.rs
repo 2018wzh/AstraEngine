@@ -826,6 +826,7 @@ pub enum RuntimeStepMode {
 /// into the selected renderer/audio queue.
 #[derive(Debug, PartialEq, Default)]
 pub struct RuntimeLiveOutput {
+    pub layers: Vec<astra_media_core::Layer2DTransaction>,
     pub scenes: Vec<RuntimeLiveSceneTransaction>,
     pub resource_scenes: Vec<RuntimeLiveResourceScene>,
     pub audio: Vec<RuntimeLiveAudioPacket>,
@@ -2014,7 +2015,173 @@ pub struct FfiRuntimeTextPresentation {
 #[repr(C)]
 #[cfg(feature = "ffi")]
 #[derive(Debug, StableAbi)]
+pub enum FfiRuntimeSurface2DFormat {
+    Rgba8SrgbPremultiplied,
+    Bgra8SrgbPremultiplied,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeRectI {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeLayer2DDamage {
+    Unchanged,
+    Full,
+    Rects(RVec<FfiRuntimeRectI>),
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeLayer2DContent {
+    WritableSurface {
+        surface_id: RString,
+        generation: u64,
+        width: u32,
+        height: u32,
+        stride: u32,
+        format: FfiRuntimeSurface2DFormat,
+        damage: FfiRuntimeLayer2DDamage,
+    },
+    TextureResource {
+        resource_id: RString,
+        generation: u64,
+        width: u32,
+        height: u32,
+    },
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeTransform2D {
+    pub m11: f32,
+    pub m12: f32,
+    pub m21: f32,
+    pub m22: f32,
+    pub tx: f32,
+    pub ty: f32,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeTextureFilter2D {
+    Nearest,
+    Linear,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeLayerBlend2D {
+    Alpha,
+    Add,
+    Opaque,
+    Multiply,
+    Screen,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeFilterTarget {
+    Background,
+    Character,
+    Ui,
+    Text,
+    Video,
+    Final,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeFilterParam {
+    Float(f32),
+    Int(i64),
+    Bool(bool),
+    Text(RString),
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeFilterParamEntry {
+    pub key: RString,
+    pub value: FfiRuntimeFilterParam,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeFilterNode {
+    pub id: RString,
+    pub kind: RString,
+    pub input: FfiRuntimeFilterTarget,
+    pub output: FfiRuntimeFilterTarget,
+    pub params: RVec<FfiRuntimeFilterParamEntry>,
+    pub deterministic: bool,
+    pub allow_cpu_fallback: bool,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeFilterGraph {
+    pub schema: RString,
+    pub nodes: RVec<FfiRuntimeFilterNode>,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeLayer2DState {
+    pub id: RString,
+    pub role: RString,
+    pub z_index: i32,
+    pub content: FfiRuntimeLayer2DContent,
+    pub transform: FfiRuntimeTransform2D,
+    pub clip: ROption<FfiRuntimeRectI>,
+    pub opacity: f32,
+    pub texture_filter: FfiRuntimeTextureFilter2D,
+    pub blend: FfiRuntimeLayerBlend2D,
+    pub filter_graph: ROption<FfiRuntimeFilterGraph>,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub enum FfiRuntimeLayer2DOperation {
+    Create(FfiRuntimeLayer2DState),
+    Update(FfiRuntimeLayer2DState),
+    Destroy(RString),
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
+pub struct FfiRuntimeLayer2DTransaction {
+    pub sequence: u64,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub operations: RVec<FfiRuntimeLayer2DOperation>,
+}
+
+#[repr(C)]
+#[cfg(feature = "ffi")]
+#[derive(Debug, StableAbi)]
 pub struct FfiRuntimeLiveOutput {
+    pub layers: RVec<FfiRuntimeLayer2DTransaction>,
     pub scenes: RVec<FfiRuntimeSceneTransaction>,
     pub resource_scenes: RVec<FfiRuntimeResourceScene>,
     pub audio: RVec<FfiRuntimeAudioPacket>,
@@ -2049,6 +2216,7 @@ pub struct FfiRuntimeLiveOutput {
 impl FfiRuntimeLiveOutput {
     pub fn empty() -> Self {
         Self {
+            layers: RVec::new(),
             scenes: RVec::new(),
             resource_scenes: RVec::new(),
             audio: RVec::new(),

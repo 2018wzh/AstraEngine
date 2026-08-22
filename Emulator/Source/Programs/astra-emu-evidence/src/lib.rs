@@ -497,7 +497,6 @@ mod tests {
                 cross_device_texture_copy: false,
                 build_identity_hash: hash("build-windows"),
                 package_hash: hash("package"),
-                session_id_hash: hash("session-windows"),
             },
         );
         write_json(
@@ -513,12 +512,11 @@ mod tests {
                     .into_iter()
                     .map(|id| (id, 1))
                     .collect(),
-                full_flow_hash: Some(hash("full-flow")),
+                full_flow_completed: true,
                 status: "pass".into(),
                 diagnostic_codes: Vec::new(),
             },
         );
-        let parity_hash = hash("parity-trace");
         write_json(
             input,
             "fvp-parity.json",
@@ -527,8 +525,9 @@ mod tests {
                 rfvp_revision: astra_emu_manager_core::RFVP_REFERENCE_REVISION.into(),
                 fixture_id: "fvp.synthetic.vm.reference.v1".into(),
                 fixture_hash: hash("fixture"),
-                astra_trace_hash: parity_hash,
-                reference_trace_hash: parity_hash,
+                control_match: true,
+                pixel_match: true,
+                audio_match: true,
                 compared_event_count: 1,
                 first_divergence_sequence: None,
                 status: "pass".into(),
@@ -545,7 +544,6 @@ mod tests {
                     "vfs.read",
                     "patch.overlay",
                     "decode_transform",
-                    "text_hook",
                     "media_hook",
                     "deterministic_effect",
                 ]
@@ -560,7 +558,7 @@ mod tests {
                 violation_codes: Vec::new(),
                 commercial_payload_present: false,
                 local_path_present: false,
-                deterministic_effect_hash: hash("effects"),
+                deterministic_effect_count: 1,
                 status: "pass".into(),
             },
         );
@@ -573,9 +571,7 @@ mod tests {
                 endpoint_identity_hash: hash("endpoint"),
                 model_identity_hash: hash("model"),
                 consent_present: true,
-                persistent_cache_enabled: false,
                 request_count: 1,
-                source_hashes: vec![hash("source")],
                 latency_ms_total: 1,
                 error_codes: Vec::new(),
                 redaction_status: "pass".into(),
@@ -608,7 +604,6 @@ mod tests {
             ("ios", "arm64", "ios-static-registry", "E2"),
         ];
         for (platform, architecture, host_kind, evidence_level) in platforms {
-            let shared_e3 = matches!(platform, "windows" | "android-x86_64");
             write_json(
                 input,
                 &format!("platform-{platform}.json"),
@@ -620,16 +615,16 @@ mod tests {
                     build_identity_hash: hash(&format!("build-{platform}")),
                     profile_hash: hash(&format!("profile-{platform}")),
                     package_hash: hash("package"),
-                    session_id_hash: hash(&format!("session-{platform}")),
-                    input_sequence_hash: hash(if shared_e3 { "shared-input" } else { platform }),
-                    consumed_input_trace_hash: hash(&format!("consumed-{platform}")),
-                    visual_trace_hash: hash(&format!("visual-{platform}")),
-                    audio_meter_hash: hash(&format!("audio-{platform}")),
-                    route_terminal_hash: hash(if shared_e3 { "shared-route" } else { platform }),
+                    input_count: 1,
+                    presented_frame_count: 1,
+                    visual_changed: true,
+                    audio_non_silent: true,
+                    terminal_observed: true,
+                    coverage_ids: vec!["syscall.one".into()],
                     lifecycle_steps: if platform == "android-arm64" {
                         vec!["package".into(), "native_manifest".into()]
                     } else {
-                        ["create", "open", "step", "save", "restore", "shutdown"]
+                        ["create", "open", "step", "shutdown"]
                             .into_iter()
                             .map(str::to_owned)
                             .collect()

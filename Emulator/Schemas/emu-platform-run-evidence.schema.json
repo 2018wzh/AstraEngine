@@ -4,35 +4,38 @@
   "type": "object",
   "required": [
     "architecture",
-    "audio_meter_hash",
+    "audio_non_silent",
     "build_identity_hash",
-    "consumed_input_trace_hash",
+    "coverage_ids",
     "diagnostic_codes",
     "evidence_level",
     "host_kind",
-    "input_sequence_hash",
+    "input_count",
     "lifecycle_steps",
     "package_hash",
     "platform",
+    "presented_frame_count",
     "profile_hash",
-    "route_terminal_hash",
     "schema",
-    "session_id_hash",
     "status",
-    "visual_trace_hash"
+    "terminal_observed",
+    "visual_changed"
   ],
   "properties": {
     "architecture": {
       "type": "string"
     },
-    "audio_meter_hash": {
-      "$ref": "#/definitions/Hash256"
+    "audio_non_silent": {
+      "type": "boolean"
     },
     "build_identity_hash": {
       "$ref": "#/definitions/Hash256"
     },
-    "consumed_input_trace_hash": {
-      "$ref": "#/definitions/Hash256"
+    "coverage_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "diagnostic_codes": {
       "type": "array",
@@ -46,8 +49,10 @@
     "host_kind": {
       "type": "string"
     },
-    "input_sequence_hash": {
-      "$ref": "#/definitions/Hash256"
+    "input_count": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
     "lifecycle_steps": {
       "type": "array",
@@ -61,23 +66,25 @@
     "platform": {
       "type": "string"
     },
-    "profile_hash": {
-      "$ref": "#/definitions/Hash256"
+    "presented_frame_count": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
-    "route_terminal_hash": {
+    "profile_hash": {
       "$ref": "#/definitions/Hash256"
     },
     "schema": {
       "type": "string"
     },
-    "session_id_hash": {
-      "$ref": "#/definitions/Hash256"
-    },
     "status": {
       "type": "string"
     },
-    "visual_trace_hash": {
-      "$ref": "#/definitions/Hash256"
+    "terminal_observed": {
+      "type": "boolean"
+    },
+    "visual_changed": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false,

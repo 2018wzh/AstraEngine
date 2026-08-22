@@ -1,103 +1,39 @@
 use std::{
     collections::BTreeMap,
+    panic::{catch_unwind, AssertUnwindSafe},
     sync::{Arc, Mutex, OnceLock},
 };
 
-use abi_stable::{
-    prefix_type::PrefixTypeTrait,
-    std_types::{ROption, RResult, RString},
-};
-use astra_byte_source::FfiOwnedByteBuffer;
+use abi_stable::{prefix_type::PrefixTypeTrait, std_types::RString};
 use astra_emu_family_api::{
-    ffi_result, native_result, validate_symbol, AstraLegacyFamilyModule,
-    AstraLegacyFamilyModuleRef, FfiEphemeralText, FfiFamilyPluginDescriptor, FfiLegacyHostServices,
-    FfiLegacyResult, FfiOpenCall, FfiOwnedBytes, FfiProbeCall, FfiProbeReport,
-    FfiProviderInstanceRequest, FfiResourceReadCall, FfiRestoreCall, FfiRestoreReport,
-    FfiSessionCall, FfiShutdownReport, FfiSnapshotEnvelope, FfiStepCall, FfiStepOutput,
-    FfiTextLeaseCall, FfiVfsEnumerateCall, FfiVfsRangeCall, FfiVfsStatCall, LegacyProviderError,
-    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyVfsListedFile, LegacyVfsReader,
+    ffi_result, validate_symbol, AstraLegacyFamilyModule, AstraLegacyFamilyModuleRef,
+    FfiFamilyPluginDescriptor, FfiLegacyFamilyHostAdapter, FfiLegacyHostServices, FfiLegacyResult,
+    FfiOpenCall, FfiProbeCall, FfiProbeReport, FfiProviderInstanceRequest, FfiSessionCall,
+    FfiShutdownReport, FfiStepCall, FfiStepOutput, LegacyProviderError, LegacyRuntimeProvider,
+    LegacyRuntimeSessionId,
 };
 
-use crate::MinoriRuntimeProvider;
+use crate::{minori_descriptor, MinoriRuntimeProvider};
 
 type SharedProvider = Arc<Mutex<MinoriRuntimeProvider>>;
-
 static PROVIDERS: OnceLock<Mutex<BTreeMap<String, SharedProvider>>> = OnceLock::new();
 
-#[derive(Clone)]
-struct FfiVfsReader {
-    services: FfiLegacyHostServices,
-}
-
-impl LegacyVfsReader for FfiVfsReader {
-    fn stat_file(
-        &self,
-        mount_set_id: &str,
-        uri: &str,
-    ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
-        native_result((self.services.stat_vfs)(
-            self.services.host_token.clone(),
-            FfiVfsStatCall {
-                mount_set_id: mount_set_id.into(),
-                uri: uri.into(),
-            },
-        ))
-    }
-
-    fn read_file_range(
-        &self,
-        mount_set_id: &str,
-        uri: &str,
-        expected_revision: astra_byte_source::SourceRevision,
-        range: astra_byte_source::ByteRange,
-        max_bytes: u64,
-    ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
-        let result: astra_byte_source::RangeReadResult =
-            native_result((self.services.read_vfs_range)(
-                self.services.host_token.clone(),
-                FfiVfsRangeCall {
-                    mount_set_id: mount_set_id.into(),
-                    uri: uri.into(),
-                    expected_revision: expected_revision.0,
-                    range: range.into(),
-                    max_bytes,
-                },
-            ))?;
-        if result.bytes.len() as u64 != range.len || result.bytes.len() as u64 > max_bytes {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_FFI_VFS_BOUNDS",
-                "host VFS range length is invalid",
-            ));
+fn boundary<T, U>(
+    event: &'static str,
+    action: impl FnOnce() -> Result<T, LegacyProviderError>,
+) -> FfiLegacyResult<U>
+where
+    T: Into<U>,
+{
+    match catch_unwind(AssertUnwindSafe(action)) {
+        Ok(result) => ffi_result(result),
+        Err(_) => {
+            tracing::error!(event, "Minori provider panicked at the dylib boundary");
+            ffi_result::<T, U>(Err(invalid(
+                "ASTRA_EMU_MINORI_DYLIB_PANIC",
+                "Minori provider panicked at the dylib boundary",
+            )))
         }
-        Ok(result)
-    }
-
-    fn enumerate_by_extension(
-        &self,
-        mount_set_id: &str,
-        root: &str,
-        extension_without_dot: &str,
-        max_entries: u32,
-    ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
-        let entries = match (self.services.enumerate_vfs)(
-            self.services.host_token.clone(),
-            FfiVfsEnumerateCall {
-                mount_set_id: mount_set_id.into(),
-                root: root.into(),
-                extension_without_dot: extension_without_dot.into(),
-                max_entries,
-            },
-        ) {
-            RResult::ROk(entries) => entries.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-            RResult::RErr(error) => return Err(error.into()),
-        };
-        if entries.len() > max_entries as usize {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_FFI_VFS_ENUM_BOUNDS",
-                "host VFS enumeration exceeded the requested bound",
-            ));
-        }
-        Ok(entries)
     }
 }
 
@@ -115,14 +51,18 @@ fn provider(instance_id: &str) -> Result<SharedProvider, LegacyProviderError> {
 }
 
 extern "C" fn descriptor() -> FfiLegacyResult<FfiFamilyPluginDescriptor> {
-    RResult::ROk(MinoriRuntimeProvider::default().descriptor().into())
+    boundary("astra.emu.minori.descriptor", || {
+        let descriptor = minori_descriptor();
+        descriptor.validate()?;
+        Ok(descriptor)
+    })
 }
 
 extern "C" fn create_instance(
     services: FfiLegacyHostServices,
     request: FfiProviderInstanceRequest,
 ) -> FfiLegacyResult<()> {
-    ffi_result((|| {
+    boundary("astra.emu.minori.create_instance", || {
         let instance_id = request.instance_id.to_string();
         validate_symbol("instance_id", &instance_id)?;
         let mut providers = providers().lock().map_err(|_| lock_error())?;
@@ -132,18 +72,17 @@ extern "C" fn create_instance(
                 "provider instance id is already active",
             ));
         }
+        let services = FfiLegacyFamilyHostAdapter::new(services).into_host_services();
         providers.insert(
             instance_id,
-            Arc::new(Mutex::new(MinoriRuntimeProvider::with_vfs(Arc::new(
-                FfiVfsReader { services },
-            )))),
+            Arc::new(Mutex::new(MinoriRuntimeProvider::new(services))),
         );
         Ok(())
-    })())
+    })
 }
 
 extern "C" fn destroy_instance(request: FfiProviderInstanceRequest) -> FfiLegacyResult<()> {
-    ffi_result((|| {
+    boundary("astra.emu.minori.destroy_instance", || {
         let instance_id = request.instance_id.to_string();
         let mut providers = providers().lock().map_err(|_| lock_error())?;
         let provider = providers
@@ -162,113 +101,52 @@ extern "C" fn destroy_instance(request: FfiProviderInstanceRequest) -> FfiLegacy
         }
         providers.remove(&instance_id);
         Ok(())
-    })())
+    })
 }
 
 extern "C" fn probe(call: FfiProbeCall) -> FfiLegacyResult<FfiProbeReport> {
-    ffi_result((|| {
+    boundary("astra.emu.minori.probe", || {
         let provider = provider(call.instance_id.as_str())?;
-        let provider = provider.lock().map_err(|_| lock_error())?;
-        provider.probe(&call.ctx.into(), call.request.into())
-    })())
+        let result = provider
+            .lock()
+            .map_err(|_| lock_error())?
+            .probe(&call.ctx.into(), call.request.into())?;
+        Ok(FfiProbeReport::from(result))
+    })
 }
 
 extern "C" fn open(call: FfiOpenCall) -> FfiLegacyResult<RString> {
-    ffi_result((|| {
+    boundary("astra.emu.minori.open", || {
         let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider
-            .open(&call.ctx.into(), call.request.try_into()?)
-            .map(|session| session.0)
-    })())
+        let result = provider
+            .lock()
+            .map_err(|_| lock_error())?
+            .open(&call.ctx.into(), call.request.try_into()?)?;
+        Ok(RString::from(result.0))
+    })
 }
 
 extern "C" fn step(call: FfiStepCall) -> FfiLegacyResult<FfiStepOutput> {
-    ffi_result((|| {
+    boundary("astra.emu.minori.step", || {
         let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider
-            .step(
-                &call.ctx.into(),
-                &LegacyRuntimeSessionId(call.session_id.to_string()),
-                call.input.into(),
-            )
-            .and_then(FfiStepOutput::try_from)
-    })())
-}
-
-extern "C" fn save(call: FfiSessionCall) -> FfiLegacyResult<FfiSnapshotEnvelope> {
-    ffi_result(with_session_mut(call, |provider, ctx, session| {
-        provider.save(&ctx, &session)
-    }))
-}
-
-extern "C" fn restore(call: FfiRestoreCall) -> FfiLegacyResult<FfiRestoreReport> {
-    ffi_result((|| {
-        let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider.restore(
+        let output = provider.lock().map_err(|_| lock_error())?.step(
             &call.ctx.into(),
             &LegacyRuntimeSessionId(call.session_id.to_string()),
-            &call.snapshot.into(),
-        )
-    })())
+            call.input.into(),
+        )?;
+        FfiStepOutput::try_from(output)
+    })
 }
 
 extern "C" fn shutdown(call: FfiSessionCall) -> FfiLegacyResult<FfiShutdownReport> {
-    ffi_result(with_session_mut(call, |provider, ctx, session| {
-        provider.shutdown(&ctx, &session)
-    }))
-}
-
-extern "C" fn take_ephemeral_text(
-    call: FfiTextLeaseCall,
-) -> FfiLegacyResult<ROption<FfiEphemeralText>> {
-    ffi_result::<ROption<FfiEphemeralText>, ROption<FfiEphemeralText>>((|| {
+    boundary("astra.emu.minori.shutdown", || {
         let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider
-            .take_ephemeral_text(
-                &call.ctx.into(),
-                &LegacyRuntimeSessionId(call.session_id.to_string()),
-                call.lease_id.as_str(),
-            )
-            .map(|value| value.map(FfiEphemeralText::from).into())
-    })())
-}
-
-extern "C" fn read_session_resource(
-    call: FfiResourceReadCall,
-) -> FfiLegacyResult<FfiOwnedByteBuffer> {
-    ffi_result((|| {
-        let provider = provider(call.instance_id.as_str())?;
-        let mut provider = provider.lock().map_err(|_| lock_error())?;
-        provider
-            .read_session_resource(
-                &call.ctx.into(),
-                &LegacyRuntimeSessionId(call.session_id.to_string()),
-                call.resource_uri.as_str(),
-                call.max_bytes,
-            )
-            .map(astra_byte_source::OwnedByteBuffer::into_ffi)
-    })())
-}
-
-fn with_session_mut<T>(
-    call: FfiSessionCall,
-    action: impl FnOnce(
-        &mut MinoriRuntimeProvider,
-        astra_emu_family_api::LegacyRuntimeHostCtx,
-        LegacyRuntimeSessionId,
-    ) -> Result<T, LegacyProviderError>,
-) -> Result<T, LegacyProviderError> {
-    let provider = provider(call.instance_id.as_str())?;
-    let mut provider = provider.lock().map_err(|_| lock_error())?;
-    action(
-        &mut provider,
-        call.ctx.into(),
-        LegacyRuntimeSessionId(call.session_id.to_string()),
-    )
+        let result = provider.lock().map_err(|_| lock_error())?.shutdown(
+            &call.ctx.into(),
+            &LegacyRuntimeSessionId(call.session_id.to_string()),
+        )?;
+        Ok(FfiShutdownReport::from(result))
+    })
 }
 
 fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
@@ -298,10 +176,6 @@ pub fn astra_legacy_family_root_module() -> AstraLegacyFamilyModuleRef {
         probe,
         open,
         step,
-        save,
-        restore,
-        take_ephemeral_text,
-        read_session_resource,
         shutdown,
     }
     .leak_into_prefix()

@@ -410,7 +410,6 @@ mod tests {
                 cross_device_texture_copy: false,
                 build_identity_hash: hash(b"build-windows"),
                 package_hash: hash(b"package"),
-                session_id_hash: hash(b"session-windows"),
             },
         ));
         sections.push(postcard_section(
@@ -426,12 +425,11 @@ mod tests {
                     .into_iter()
                     .map(|id| (id, 1))
                     .collect(),
-                full_flow_hash: Some(hash(b"full-flow")),
+                full_flow_completed: true,
                 status: "pass".into(),
                 diagnostic_codes: Vec::new(),
             },
         ));
-        let trace = hash(b"trace");
         sections.push(postcard_section(
             "emu.evidence.parity",
             "astra.emu.fvp_parity.v1",
@@ -440,8 +438,9 @@ mod tests {
                 rfvp_revision: RFVP_REFERENCE_REVISION.into(),
                 fixture_id: "sanitized.full-flow".into(),
                 fixture_hash: hash(b"fixture"),
-                astra_trace_hash: trace,
-                reference_trace_hash: trace,
+                control_match: true,
+                pixel_match: true,
+                audio_match: true,
                 compared_event_count: 1,
                 first_divergence_sequence: None,
                 status: "pass".into(),
@@ -458,7 +457,6 @@ mod tests {
                     "vfs.read",
                     "patch.overlay",
                     "decode_transform",
-                    "text_hook",
                     "media_hook",
                     "deterministic_effect",
                 ]
@@ -473,7 +471,7 @@ mod tests {
                 violation_codes: Vec::new(),
                 commercial_payload_present: false,
                 local_path_present: false,
-                deterministic_effect_hash: hash(b"effects"),
+                deterministic_effect_count: 1,
                 status: "pass".into(),
             },
         ));
@@ -486,9 +484,7 @@ mod tests {
                 endpoint_identity_hash: hash(b"endpoint"),
                 model_identity_hash: hash(b"model"),
                 consent_present: true,
-                persistent_cache_enabled: false,
                 request_count: 1,
-                source_hashes: vec![hash(b"source")],
                 latency_ms_total: 1,
                 error_codes: Vec::new(),
                 redaction_status: "pass".into(),
@@ -526,20 +522,12 @@ mod tests {
                     build_identity_hash: hash(format!("build-{platform}").as_bytes()),
                     profile_hash: hash(format!("profile-{platform}").as_bytes()),
                     package_hash: hash(b"package"),
-                    session_id_hash: hash(format!("session-{platform}").as_bytes()),
-                    input_sequence_hash: if matches!(platform, "windows" | "android-x86_64") {
-                        hash(b"shared-e3-input")
-                    } else {
-                        hash(format!("input-{platform}").as_bytes())
-                    },
-                    consumed_input_trace_hash: hash(format!("consumed-{platform}").as_bytes()),
-                    visual_trace_hash: hash(format!("visual-{platform}").as_bytes()),
-                    audio_meter_hash: hash(format!("audio-{platform}").as_bytes()),
-                    route_terminal_hash: if matches!(platform, "windows" | "android-x86_64") {
-                        hash(b"shared-e3-route")
-                    } else {
-                        hash(format!("route-{platform}").as_bytes())
-                    },
+                    input_count: 1,
+                    presented_frame_count: 1,
+                    visual_changed: true,
+                    audio_non_silent: true,
+                    terminal_observed: true,
+                    coverage_ids: vec!["route.main".into()],
                     lifecycle_steps: if platform == "android-arm64" {
                         vec!["package".into(), "native_manifest".into()]
                     } else {

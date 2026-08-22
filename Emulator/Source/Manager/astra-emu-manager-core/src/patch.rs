@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PatchEffectIntent {
     pub kind: String,
-    pub target: String,
-    pub payload_hash: String,
+    pub payload_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -33,12 +32,8 @@ pub enum PatchHostAction {
         path: String,
         bytes: Vec<u8>,
     },
-    TextHook {
-        target_hash: String,
-        replacement: String,
-    },
     MediaHook {
-        target_hash: String,
+        resource_uri: String,
         replacement_uri: String,
     },
     DeterministicEffect {
@@ -128,12 +123,12 @@ impl TrustedPatchRuntime {
                 "emit",
                 lua.create_function(
                     move |_lua, (kind, target, payload): (String, String, Vec<u8>)| {
-                        if !is_safe_symbol(&kind) || !is_safe_symbol(&target) {
+                        if !is_safe_symbol(&kind) {
                             return Err(mlua::Error::runtime("ASTRA_EMU_PATCH_INTENT_SYMBOL"));
                         }
                         if !matches!(
                             kind.as_str(),
-                            "text_hook" | "media_hook" | "trace" | "deterministic_effect"
+                            "media_hook" | "trace" | "deterministic_effect"
                         ) {
                             return Err(mlua::Error::runtime("ASTRA_EMU_PATCH_INTENT_KIND"));
                         }
@@ -147,34 +142,10 @@ impl TrustedPatchRuntime {
                             return Err(mlua::Error::runtime("ASTRA_EMU_PATCH_INTENT_COUNT"));
                         }
                         reserve_output_bytes(&emitted_bytes, payload.len())?;
-                        let target_hash = blake3::hash(target.as_bytes()).to_hex().to_string();
                         let action = match kind.as_str() {
-                            "text_hook" => {
-                                if target != "all" && !is_hash(&target) {
-                                    return Err(mlua::Error::runtime(
-                                        "ASTRA_EMU_PATCH_TEXT_HOOK_TARGET",
-                                    ));
-                                }
-                                let replacement =
-                                    String::from_utf8(payload.clone()).map_err(|_| {
-                                        mlua::Error::runtime("ASTRA_EMU_PATCH_TEXT_HOOK_UTF8")
-                                    })?;
-                                if replacement.len() > 64 * 1024 {
-                                    return Err(mlua::Error::runtime(
-                                        "ASTRA_EMU_PATCH_TEXT_HOOK_BOUNDS",
-                                    ));
-                                }
-                                Some(PatchHostAction::TextHook {
-                                    target_hash: target,
-                                    replacement,
-                                })
-                            }
                             "media_hook" => {
-                                if !is_hash(&target) {
-                                    return Err(mlua::Error::runtime(
-                                        "ASTRA_EMU_PATCH_MEDIA_HOOK_TARGET",
-                                    ));
-                                }
+                                let resource_uri =
+                                    safe_patch_path(&target).map_err(mlua::Error::runtime)?;
                                 let replacement_uri =
                                     String::from_utf8(payload.clone()).map_err(|_| {
                                         mlua::Error::runtime("ASTRA_EMU_PATCH_MEDIA_HOOK_UTF8")
@@ -182,11 +153,16 @@ impl TrustedPatchRuntime {
                                 let replacement_uri = safe_patch_path(&replacement_uri)
                                     .map_err(mlua::Error::runtime)?;
                                 Some(PatchHostAction::MediaHook {
-                                    target_hash: target,
+                                    resource_uri,
                                     replacement_uri,
                                 })
                             }
                             "deterministic_effect" => {
+                                if !is_safe_symbol(&target) {
+                                    return Err(mlua::Error::runtime(
+                                        "ASTRA_EMU_PATCH_INTENT_SYMBOL",
+                                    ));
+                                }
                                 if payload.len() > 1024 * 1024 {
                                     return Err(mlua::Error::runtime(
                                         "ASTRA_EMU_PATCH_EFFECT_BOUNDS",
@@ -197,7 +173,14 @@ impl TrustedPatchRuntime {
                                     payload: payload.clone(),
                                 })
                             }
-                            "trace" => None,
+                            "trace" => {
+                                if !is_safe_symbol(&target) {
+                                    return Err(mlua::Error::runtime(
+                                        "ASTRA_EMU_PATCH_INTENT_SYMBOL",
+                                    ));
+                                }
+                                None
+                            }
                             _ => unreachable!(),
                         };
                         if let Some(action) = action {
@@ -211,8 +194,7 @@ impl TrustedPatchRuntime {
                         }
                         guard.push(PatchEffectIntent {
                             kind,
-                            target: target_hash,
-                            payload_hash: blake3::hash(&payload).to_hex().to_string(),
+                            payload_bytes: payload.len() as u64,
                         });
                         Ok(())
                     },
@@ -232,7 +214,7 @@ impl TrustedPatchRuntime {
                         return Err(mlua::Error::runtime("ASTRA_EMU_PATCH_OVERLAY_BOUNDS"));
                     }
                     reserve_output_bytes(&overlay_bytes, payload.len())?;
-                    let payload_hash = blake3::hash(&payload).to_hex().to_string();
+                    let payload_bytes = payload.len() as u64;
                     let mut output = overlay_output
                         .lock()
                         .map_err(|_| mlua::Error::runtime("ASTRA_EMU_PATCH_OVERLAY_LOCK"))?;
@@ -247,8 +229,7 @@ impl TrustedPatchRuntime {
                         .map_err(|_| mlua::Error::runtime("ASTRA_EMU_PATCH_INTENT_LOCK"))?
                         .push(PatchEffectIntent {
                             kind: "overlay".into(),
-                            target: path,
-                            payload_hash,
+                            payload_bytes,
                         });
                     Ok(())
                 })
@@ -269,8 +250,7 @@ impl TrustedPatchRuntime {
                         ));
                     }
                     reserve_output_bytes(&decode_bytes, payload.len())?;
-                    let path_hash = blake3::hash(path.as_bytes()).to_hex().to_string();
-                    let payload_hash = blake3::hash(&payload).to_hex().to_string();
+                    let payload_bytes = payload.len() as u64;
                     let mut actions = decode_actions
                         .lock()
                         .map_err(|_| mlua::Error::runtime("ASTRA_EMU_PATCH_ACTION_LOCK"))?;
@@ -292,8 +272,7 @@ impl TrustedPatchRuntime {
                         .map_err(|_| mlua::Error::runtime("ASTRA_EMU_PATCH_INTENT_LOCK"))?
                         .push(PatchEffectIntent {
                             kind: "decode_transform".into(),
-                            target: path_hash,
-                            payload_hash,
+                            payload_bytes,
                         });
                     Ok(())
                 })
@@ -370,10 +349,6 @@ fn reserve_output_bytes(total: &Mutex<usize>, additional: usize) -> mlua::Result
     }
     *total = next;
     Ok(())
-}
-
-fn is_hash(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn create_sandbox(memory_budget_bytes: usize) -> Result<Lua, PatchDiagnostic> {
@@ -481,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_bytes_are_ephemeral_while_trace_only_exposes_hash() {
+    fn overlay_bytes_are_ephemeral_while_trace_only_exposes_counts() {
         let runtime = TrustedPatchRuntime::new(10_000).unwrap();
         let execution = runtime
             .evaluate(
@@ -492,22 +467,17 @@ mod tests {
         assert_eq!(execution.overlays["script.bin"], [1, 2, 3, 4]);
         assert_eq!(execution.intents.len(), 1);
         assert_eq!(execution.intents[0].kind, "overlay");
-        assert!(!execution.intents[0].payload_hash.is_empty());
-        assert!(!execution.intents[0].payload_hash.contains("1, 2, 3, 4"));
+        assert_eq!(execution.intents[0].payload_bytes, 4);
     }
 
     #[test]
-    fn decode_text_media_and_deterministic_actions_remain_private_and_typed() {
+    fn decode_media_and_deterministic_actions_remain_private_and_typed() {
         let runtime = TrustedPatchRuntime::new(100_000).unwrap();
-        let target_hash = "a".repeat(64);
-        let source = format!(
-            "astra.decode_transform('script.bin', {{1,2,3}}); \
-             astra.emit('text_hook', 'all', {{82,101,112,108,97,99,101,100}}); \
-             astra.emit('media_hook', '{target_hash}', {{97,117,100,105,111,47,110,101,119,46,111,103,103}}); \
-             astra.emit('deterministic_effect', 'event.patch_ready', {{9,8,7}}); return nil"
-        );
+        let source = "astra.decode_transform('script.bin', {1,2,3}); \
+             astra.emit('media_hook', 'audio/original.ogg', {97,117,100,105,111,47,110,101,119,46,111,103,103}); \
+             astra.emit('deterministic_effect', 'event.patch_ready', {9,8,7}); return nil";
         let execution = runtime.evaluate(&source, &PatchContext::default()).unwrap();
-        assert_eq!(execution.host_actions.len(), 4);
+        assert_eq!(execution.host_actions.len(), 3);
         assert!(matches!(
             &execution.host_actions[0],
             PatchHostAction::DecodeTransform { path, bytes }
@@ -515,26 +485,20 @@ mod tests {
         ));
         assert!(matches!(
             &execution.host_actions[1],
-            PatchHostAction::TextHook { target_hash, replacement }
-                if target_hash == "all" && replacement == "Replaced"
+            PatchHostAction::MediaHook { resource_uri, replacement_uri }
+                if resource_uri == "audio/original.ogg" && replacement_uri == "audio/new.ogg"
         ));
         assert!(matches!(
             &execution.host_actions[2],
-            PatchHostAction::MediaHook { target_hash: actual, replacement_uri }
-                if actual == &target_hash && replacement_uri == "audio/new.ogg"
-        ));
-        assert!(matches!(
-            &execution.host_actions[3],
             PatchHostAction::DeterministicEffect { target, payload }
                 if target == "event.patch_ready" && payload == &[9, 8, 7]
         ));
         assert!(execution
             .intents
             .iter()
-            .all(|intent| intent.target == "all" || is_hash(&intent.target)));
+            .all(|intent| intent.payload_bytes > 0));
         let debug = format!("{:?}", execution.intents);
         assert!(!debug.contains("script.bin"));
         assert!(!debug.contains("audio/new.ogg"));
-        assert!(!debug.contains("Replaced"));
     }
 }

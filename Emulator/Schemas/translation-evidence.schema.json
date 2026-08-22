@@ -8,12 +8,10 @@
     "error_codes",
     "latency_ms_total",
     "model_identity_hash",
-    "persistent_cache_enabled",
     "provider_identity",
     "redaction_status",
     "request_count",
-    "schema",
-    "source_hashes"
+    "schema"
   ],
   "properties": {
     "consent_present": {
@@ -36,9 +34,6 @@
     "model_identity_hash": {
       "$ref": "#/definitions/Hash256"
     },
-    "persistent_cache_enabled": {
-      "type": "boolean"
-    },
     "provider_identity": {
       "type": "string"
     },
@@ -52,12 +47,6 @@
     },
     "schema": {
       "type": "string"
-    },
-    "source_hashes": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Hash256"
-      }
     }
   },
   "additionalProperties": false,

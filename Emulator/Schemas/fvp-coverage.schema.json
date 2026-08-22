@@ -5,6 +5,7 @@
   "required": [
     "covered_syscall_ids",
     "diagnostic_codes",
+    "full_flow_completed",
     "missing_syscall_ids",
     "opcode_counts",
     "release_syscall_total",
@@ -25,15 +26,8 @@
         "type": "string"
       }
     },
-    "full_flow_hash": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Hash256"
-        },
-        {
-          "type": "null"
-        }
-      ]
+    "full_flow_completed": {
+      "type": "boolean"
     },
     "missing_syscall_ids": {
       "type": "array",
@@ -64,17 +58,5 @@
       "type": "string"
     }
   },
-  "additionalProperties": false,
-  "definitions": {
-    "Hash256": {
-      "type": "array",
-      "items": {
-        "type": "integer",
-        "format": "uint8",
-        "minimum": 0.0
-      },
-      "maxItems": 32,
-      "minItems": 32
-    }
-  }
+  "additionalProperties": false
 }
