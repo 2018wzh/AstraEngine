@@ -10,15 +10,22 @@ use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
     LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta,
     LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyHostServicesV9,
-    LegacyFamilyPluginDescriptor, LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest,
-    LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1,
-    LegacyResourceRead, LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider,
-    LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced,
-    LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput,
-    LegacyStepOutput as LegacyStepOutputV9, LegacyTextLease, LegacyTextureFilter,
-    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacyFamilyPluginDescriptor, LegacyLayerBlendV9, LegacyLayerFilterV9, LegacyLayerOperationV9,
+    LegacyLayerStateV9, LegacyLayerTransactionV9, LegacyLayerTransformV9,
+    LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest, LegacyProbeReport,
+    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead,
+    LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
+    LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced, LegacyShutdownReport,
+    LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput,
+    LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
+    LegacySurfaceFormatV9, LegacyTextLease, LegacyTextureFilter, LegacyTextureFormat,
+    LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
     LEGACY_FAMILY_ABI_FINGERPRINT,
+};
+use astra_media_core::{
+    BlendMode, CpuRendererProvider, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
+    Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFilter2D, TextureFrame,
 };
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +45,8 @@ pub const MINORI_RUNTIME_PROVIDER_ID: &str = "astra.emu.family.minori";
 const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_INSTRUCTIONS_PER_STEP: u32 = 100_000;
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_DECODED_TEXTURE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_LAYER_SURFACE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_WSCROLL2_SYNC_BYTES: u64 = 64 * 1024;
 const MAX_WSCROLL2_SYNC_VALUES: usize = 4096;
 const MAX_EPHEMERAL_TEXT_BYTES: usize = 64 * 1024;
@@ -314,6 +323,7 @@ struct MinoriSession {
     reported_gallery_unlock_count: Option<usize>,
     reported_choice_active: Option<bool>,
     global_progress: MinoriGlobalProgressSession,
+    published_layers: BTreeSet<String>,
     poisoned: bool,
 }
 
@@ -583,6 +593,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     loaded: !global_progress_enabled,
                     persisted_unlocks: Vec::new(),
                 },
+                published_layers: BTreeSet::new(),
                 poisoned: false,
             },
         );
@@ -595,8 +606,16 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         session_id: &LegacyRuntimeSessionId,
         input: LegacyStepInput,
     ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
+        let fixed_step = input.tick_index;
+        let services = self.host_services()?.clone();
+        let vfs = Arc::clone(self.vfs()?);
         let staged = self.step_staged(ctx, session_id, input)?;
-        publish_v9_output(staged)
+        let session = self
+            .sessions
+            .get_mut(&session_id.0)
+            .ok_or_else(session_missing)?;
+        publish_v9_output(&services, &vfs, session_id, fixed_step, session, staged)
+            .inspect_err(|_| session.poisoned = true)
     }
 
     fn shutdown(
@@ -618,7 +637,7 @@ impl MinoriRuntimeProvider {
         ctx.validate()?;
         input.validate()?;
         let vfs = Arc::clone(self.vfs()?);
-        let host_services = self.host_services()?.clone();
+        let host_services = self.host_services.clone();
         let session = self
             .sessions
             .get_mut(&session_id.0)
@@ -671,7 +690,17 @@ impl MinoriRuntimeProvider {
             ));
         }
         if session.global_progress.enabled && !session.global_progress.loaded {
-            load_global_progress(host_services.writable_files.as_ref(), session_id, session)?;
+            let writable_files = host_services
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                        "global progress requires ABI v9 Host services",
+                    )
+                })?
+                .writable_files
+                .as_ref();
+            load_global_progress(writable_files, session_id, session)?;
         }
         let mut restore_audio = match take_restore_audio_commands(session, &vfs) {
             Ok(commands) => commands,
@@ -1802,12 +1831,19 @@ impl MinoriRuntimeProvider {
                 value: "true".into(),
             });
         }
-        store_global_progress_if_changed(
-            host_services.writable_files.as_ref(),
-            session_id,
-            session,
-            &mut output,
-        )?;
+        if session.global_progress.enabled {
+            let writable_files = host_services
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                        "global progress requires ABI v9 Host services",
+                    )
+                })?
+                .writable_files
+                .as_ref();
+            store_global_progress_if_changed(writable_files, session_id, session, &mut output)?;
+        }
         let restored_presentation =
             append_restored_gameplay_scene(session, &vfs, &mut output.live)?;
         output.validate()?;
@@ -5642,21 +5678,96 @@ fn wait_token(wait: &MinoriWaitState) -> &str {
     }
 }
 
-fn publish_v9_output(staged: LegacyStepOutput) -> Result<LegacyStepOutputV9, LegacyProviderError> {
-    if staged.live.clear_text
-        || !staged.live.resource_scenes.is_empty()
-        || !staged.live.text_presentations.is_empty()
-        || !staged.live.text.is_empty()
-    {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MinoriLayerRole {
+    Background,
+    Foreground,
+    Effect,
+    Panel,
+}
+
+impl MinoriLayerRole {
+    const ALL: [Self; 4] = [
+        Self::Background,
+        Self::Foreground,
+        Self::Effect,
+        Self::Panel,
+    ];
+
+    const fn symbol(self) -> &'static str {
+        match self {
+            Self::Background => "background",
+            Self::Foreground => "foreground",
+            Self::Effect => "effect",
+            Self::Panel => "panel",
+        }
+    }
+
+    const fn z_index(self) -> i32 {
+        match self {
+            Self::Background => 0,
+            Self::Foreground => 100,
+            Self::Effect => 200,
+            Self::Panel => 300,
+        }
+    }
+
+    fn classify(texture_id: u32) -> Result<Self, LegacyProviderError> {
+        match texture_id {
+            1 => Ok(Self::Background),
+            16..=99 | MINORI_CHARACTER_TEXTURE_BASE..=19_999 => Ok(Self::Foreground),
+            100 | 101 | 300..=302 | 600..=602 => Ok(Self::Effect),
+            200 | MINORI_CHOICE_TEXTURE_BASE..=502 | MINORI_SYSTEM_TEXTURE_ID.. => Ok(Self::Panel),
+            _ => Err(invalid(
+                "ASTRA_EMU_MINORI_LAYER_CLASSIFICATION",
+                "render texture id has no verified Minori layer role",
+            )),
+        }
+    }
+}
+
+struct PreparedMinoriLayer {
+    role: MinoriLayerRole,
+    rgba8_premultiplied: Vec<u8>,
+}
+
+fn publish_v9_output(
+    services: &LegacyFamilyHostServicesV9,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    session_id: &LegacyRuntimeSessionId,
+    fixed_step: u64,
+    session: &mut MinoriSession,
+    staged: LegacyStepOutput,
+) -> Result<LegacyStepOutputV9, LegacyProviderError> {
+    if !staged.live.text_presentations.is_empty() || !staged.live.text.is_empty() {
         return Err(invalid(
-            "ASTRA_EMU_MINORI_V9_PRESENTATION_NOT_MIGRATED",
-            "Minori presentation requires the ABI v9 Host surface and MultiLayer renderer",
+            "ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED",
+            "Minori text requires the synchronous translation Hook and text surface publisher",
         ));
     }
+    let layers = if let Some(resource_scene) = staged.live.resource_scenes.last() {
+        let layer_sequence = next_layer_sequence(&staged)?;
+        let mount_set_id = session.mount_set_id.clone();
+        publish_resource_scene(
+            services,
+            vfs,
+            session_id,
+            &mount_set_id,
+            fixed_step,
+            layer_sequence,
+            session,
+            &resource_scene.value,
+        )?
+    } else {
+        // Text has not crossed ABI v9 yet, so a text-only clear has no retained
+        // Host layer to mutate. A prior text publish cannot exist because that
+        // path blocks and poisons the session below.
+        Vec::new()
+    };
     let output = LegacyStepOutputV9 {
         status: staged.status,
         live: LegacyLiveOutputV9 {
-            layers: Vec::new(),
+            layers,
             audio: staged.live.audio,
             audio_commands: staged.live.audio_commands,
             video: staged.live.video,
@@ -5669,6 +5780,455 @@ fn publish_v9_output(staged: LegacyStepOutput) -> Result<LegacyStepOutputV9, Leg
     };
     output.validate()?;
     Ok(output)
+}
+
+fn next_layer_sequence(staged: &LegacyStepOutput) -> Result<u64, LegacyProviderError> {
+    staged
+        .live
+        .resource_scenes
+        .iter()
+        .map(|value| value.sequence)
+        .chain(staged.live.audio.iter().map(|value| value.sequence))
+        .chain(
+            staged
+                .live
+                .audio_commands
+                .iter()
+                .map(|value| value.sequence),
+        )
+        .chain(staged.live.video.iter().map(|value| value.sequence))
+        .chain(staged.control.events.iter().map(|value| value.sequence))
+        .chain(staged.control.blackboard.iter().map(|value| value.sequence))
+        .chain(
+            staged
+                .control
+                .dirty_sections
+                .iter()
+                .map(|value| value.sequence),
+        )
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_SEQUENCE",
+                "layer transaction sequence overflowed",
+            )
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_resource_scene(
+    services: &LegacyFamilyHostServicesV9,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    session_id: &LegacyRuntimeSessionId,
+    mount_set_id: &str,
+    fixed_step: u64,
+    sequence: u64,
+    session: &mut MinoriSession,
+    frame: &LegacyRenderResourceFrameV1,
+) -> Result<Vec<LegacyLayerTransactionV9>, LegacyProviderError> {
+    frame.validate()?;
+    let prepared = prepare_resource_layers(vfs, mount_set_id, frame)?;
+    let mut leases = Vec::with_capacity(prepared.len());
+    for layer in prepared {
+        let surface_id = format!("minori.surface.{}", layer.role.symbol());
+        let mut lease = services.surfaces.acquire(
+            &session_id.0,
+            fixed_step,
+            &surface_id,
+            frame.width,
+            frame.height,
+            LegacySurfaceFormatV9::Rgba8SrgbPremultiplied,
+        )?;
+        lease.validate()?;
+        write_surface_rows(&mut lease, &layer.rgba8_premultiplied)?;
+        leases.push((layer.role, lease));
+    }
+
+    let mut operations = Vec::with_capacity(leases.len());
+    for (role, lease) in leases {
+        let layer_id = format!("minori.layer.{}", role.symbol());
+        let state = LegacyLayerStateV9 {
+            layer_id: layer_id.clone(),
+            role: role.symbol().to_owned(),
+            z_index: role.z_index(),
+            surface_id: lease.surface_id.clone(),
+            generation: lease.generation,
+            width: lease.width,
+            height: lease.height,
+            stride: lease.stride,
+            format: lease.format,
+            damage: LegacySurfaceDamageV9::Full,
+            transform: LegacyLayerTransformV9 {
+                m11: 1.0,
+                m12: 0.0,
+                m21: 0.0,
+                m22: 1.0,
+                tx: 0.0,
+                ty: 0.0,
+            },
+            clip: None,
+            opacity: 1.0,
+            texture_filter: LegacyLayerFilterV9::Linear,
+            blend: LegacyLayerBlendV9::Alpha,
+            filter_graph_binding: None,
+        };
+        services.surfaces.commit(
+            &session_id.0,
+            fixed_step,
+            LegacySurfaceCommitV9 {
+                lease,
+                damage: LegacySurfaceDamageV9::Full,
+            },
+        )?;
+        let operation = if session.published_layers.insert(layer_id) {
+            LegacyLayerOperationV9::Create(state)
+        } else {
+            LegacyLayerOperationV9::Update(state)
+        };
+        operations.push(operation);
+    }
+    let transaction = LegacyLayerTransactionV9 {
+        sequence,
+        viewport_width: frame.width,
+        viewport_height: frame.height,
+        operations,
+    };
+    transaction.validate()?;
+    Ok(vec![transaction])
+}
+
+fn prepare_resource_layers(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    frame: &LegacyRenderResourceFrameV1,
+) -> Result<Vec<PreparedMinoriLayer>, LegacyProviderError> {
+    let layer_bytes = u64::from(frame.width)
+        .checked_mul(u64::from(frame.height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .and_then(|bytes| bytes.checked_mul(MinoriLayerRole::ALL.len() as u64))
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_BOUNDS",
+                "Minori layer surface size overflowed",
+            )
+        })?;
+    if layer_bytes > MAX_LAYER_SURFACE_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_BOUNDS",
+            "Minori layer surfaces exceed the decoded byte budget",
+        ));
+    }
+    let resources = frame
+        .texture_resources
+        .iter()
+        .map(|resource| (resource.texture_id, resource))
+        .collect::<BTreeMap<_, _>>();
+    let mut draws = BTreeMap::<MinoriLayerRole, Vec<&LegacyDrawV1>>::new();
+    for draw in &frame.draws {
+        draws
+            .entry(MinoriLayerRole::classify(draw.texture_id)?)
+            .or_default()
+            .push(draw);
+    }
+    MinoriLayerRole::ALL
+        .into_iter()
+        .map(|role| {
+            render_resource_layer(
+                vfs,
+                mount_set_id,
+                frame.width,
+                frame.height,
+                &resources,
+                draws.remove(&role).unwrap_or_default(),
+            )
+            .map(|rgba8_premultiplied| PreparedMinoriLayer {
+                role,
+                rgba8_premultiplied,
+            })
+        })
+        .collect()
+}
+
+fn render_resource_layer(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+    resources: &BTreeMap<u32, &LegacyTextureResourceV1>,
+    draws: Vec<&LegacyDrawV1>,
+) -> Result<Vec<u8>, LegacyProviderError> {
+    let mut renderer = CpuRendererProvider
+        .create(RendererCreateRequest {
+            width,
+            height,
+            format: RenderTargetFormat::Rgba8Srgb,
+            profile: "astra.emu.minori.layer.v1".into(),
+        })
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_RENDERER",
+                "Astra Renderer2D rejected the Minori layer target",
+            )
+        })?;
+    let mut commands = vec![SceneCommand::Clear { rgba: [0, 0, 0, 0] }];
+    let mut uploaded = BTreeSet::new();
+    for (draw_index, draw) in draws.into_iter().enumerate() {
+        let resource = resources.get(&draw.texture_id).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_RESOURCE",
+                "layer draw references an unknown texture resource",
+            )
+        })?;
+        let texture_symbol = format!("minori.texture.{}", draw.texture_id);
+        if uploaded.insert(draw.texture_id) {
+            commands.push(SceneCommand::UploadTexture {
+                resource_id: texture_symbol.clone(),
+                frame: decode_texture(vfs, mount_set_id, resource)?,
+            });
+        }
+        let vertices = draw
+            .vertices
+            .iter()
+            .map(convert_vertex)
+            .collect::<Result<Vec<_>, _>>()?;
+        let scissor = draw.scissor.map(convert_scissor).transpose()?;
+        if let Some(rect) = scissor {
+            commands.push(SceneCommand::PushClip { rect });
+        }
+        commands.push(SceneCommand::Mesh2D {
+            id: format!("minori.draw.{draw_index}"),
+            vertices: vertices.into(),
+            indices: Arc::from([0_u32, 2, 1, 1, 2, 3]),
+            material: MeshMaterial2D::ColorTexture,
+            texture_id: Some(texture_symbol),
+            texture_filter: match draw.texture_filter {
+                LegacyTextureFilter::Nearest => TextureFilter2D::Nearest,
+                LegacyTextureFilter::Linear => TextureFilter2D::Linear,
+            },
+            opacity: 1.0,
+            blend: match draw.blend {
+                LegacyBlendMode::Alpha => BlendMode::Alpha,
+                LegacyBlendMode::Add => BlendMode::Add,
+                LegacyBlendMode::Opaque => BlendMode::Opaque,
+                LegacyBlendMode::Multiply => BlendMode::Multiply,
+                LegacyBlendMode::Screen => BlendMode::Screen,
+            },
+        });
+        if scissor.is_some() {
+            commands.push(SceneCommand::PopClip);
+        }
+    }
+    let mut rgba8 = renderer
+        .capture_frame(&commands)
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_RENDER",
+                "Astra Renderer2D failed the bounded Minori layer render",
+            )
+        })?
+        .bytes;
+    premultiply_rgba8(&mut rgba8);
+    Ok(rgba8)
+}
+
+fn decode_texture(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    resource: &LegacyTextureResourceV1,
+) -> Result<TextureFrame, LegacyProviderError> {
+    if resource.decoded_format != LegacyTextureFormat::Rgba8 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_FORMAT",
+            "Minori layer texture is not RGBA8",
+        ));
+    }
+    let decoded_bytes = u64::from(resource.decoded_width)
+        .checked_mul(u64::from(resource.decoded_height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_BOUNDS",
+                "decoded texture byte size overflowed",
+            )
+        })?;
+    if decoded_bytes > MAX_DECODED_TEXTURE_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_BOUNDS",
+            "decoded texture exceeds the byte budget",
+        ));
+    }
+    let stat = vfs.stat_file(mount_set_id, &resource.resource_uri)?;
+    if texture_binding_revision(&resource.resource_uri, stat.revision.0) != resource.revision {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_REVISION",
+            "texture source changed after the resource scene was staged",
+        ));
+    }
+    if stat.len == 0 || stat.len > MAX_RESOURCE_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_BOUNDS",
+            "encoded texture is empty or exceeds the byte budget",
+        ));
+    }
+    let encoded = vfs
+        .read_file_range(
+            mount_set_id,
+            &resource.resource_uri,
+            stat.revision,
+            ByteRange {
+                offset: 0,
+                len: stat.len,
+            },
+            MAX_RESOURCE_BYTES,
+        )?
+        .bytes;
+    let reader = image::ImageReader::new(Cursor::new(encoded.as_slice()))
+        .with_guessed_format()
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                "image provider could not identify the Minori layer texture",
+            )
+        })?;
+    let expected_format = match resource.codec.as_str() {
+        "png" => image::ImageFormat::Png,
+        "bmp" => image::ImageFormat::Bmp,
+        "jpg" | "jpeg" => image::ImageFormat::Jpeg,
+        "webp" => image::ImageFormat::WebP,
+        _ => {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                "staged texture codec has no image provider binding",
+            ));
+        }
+    };
+    if reader.format() != Some(expected_format) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+            "texture content does not match the staged codec identity",
+        ));
+    }
+    let image = reader.decode().map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_DECODE",
+            "image provider failed to decode the Minori layer texture",
+        )
+    })?;
+    if image.width() != resource.decoded_width || image.height() != resource.decoded_height {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_IDENTITY",
+            "decoded texture dimensions differ from the staged resource identity",
+        ));
+    }
+    let mut rgba8 = image.into_rgba8().into_raw();
+    premultiply_rgba8(&mut rgba8);
+    TextureFrame::from_vec(resource.decoded_width, resource.decoded_height, rgba8).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_BOUNDS",
+            "decoded texture violates the Renderer2D texture contract",
+        )
+    })
+}
+
+fn convert_vertex(vertex: &LegacyVertexV1) -> Result<MeshVertex2D, LegacyProviderError> {
+    if vertex
+        .position
+        .iter()
+        .chain(vertex.tex_coord.iter())
+        .any(|v| !v.is_finite())
+        || vertex
+            .color
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_VERTEX",
+            "Minori layer vertex is outside the Renderer2D contract",
+        ));
+    }
+    let alpha = (vertex.color[3] * 255.0).round() as u8;
+    let channel = |value: f32| ((value * vertex.color[3]) * 255.0).round() as u8;
+    Ok(MeshVertex2D {
+        position: vertex.position,
+        uv: vertex.tex_coord,
+        premultiplied_rgba: [
+            channel(vertex.color[0]),
+            channel(vertex.color[1]),
+            channel(vertex.color[2]),
+            alpha,
+        ],
+    })
+}
+
+fn convert_scissor(scissor: LegacyScissorV1) -> Result<RectI, LegacyProviderError> {
+    let width = u32::try_from(scissor.width).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_LAYER_SCISSOR",
+            "Minori layer scissor width is invalid",
+        )
+    })?;
+    let height = u32::try_from(scissor.height).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_LAYER_SCISSOR",
+            "Minori layer scissor height is invalid",
+        )
+    })?;
+    if width == 0 || height == 0 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_SCISSOR",
+            "Minori layer scissor is empty",
+        ));
+    }
+    Ok(RectI::new(scissor.x, scissor.y, width, height))
+}
+
+fn premultiply_rgba8(bytes: &mut [u8]) {
+    for pixel in bytes.chunks_exact_mut(4) {
+        let alpha = u16::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+}
+
+fn write_surface_rows(
+    lease: &mut astra_emu_family_api::LegacySurfaceLeaseV9,
+    rgba8: &[u8],
+) -> Result<(), LegacyProviderError> {
+    let row_bytes = usize::try_from(lease.width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or_else(|| invalid("ASTRA_EMU_MINORI_SURFACE_BOUNDS", "surface row overflowed"))?;
+    let expected = row_bytes
+        .checked_mul(usize::try_from(lease.height).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_SURFACE_BOUNDS",
+                "surface height cannot be represented",
+            )
+        })?)
+        .ok_or_else(|| invalid("ASTRA_EMU_MINORI_SURFACE_BOUNDS", "surface size overflowed"))?;
+    if rgba8.len() != expected {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SURFACE_BOUNDS",
+            "rendered layer size differs from the acquired surface",
+        ));
+    }
+    let stride = usize::try_from(lease.stride).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SURFACE_BOUNDS",
+            "surface stride cannot be represented",
+        )
+    })?;
+    for (source, destination) in rgba8
+        .chunks_exact(row_bytes)
+        .zip(lease.pixels.as_mut_slice().chunks_exact_mut(stride))
+    {
+        destination.fill(0);
+        destination[..row_bytes].copy_from_slice(source);
+    }
+    Ok(())
 }
 
 fn validate_session_binding(

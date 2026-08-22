@@ -374,6 +374,13 @@ python Tools/check_docs.py
 - 同一 clean Release build、package、profile、物理输入、adapter 与 driver identity 连续完成三次正式运行。每次均执行 36600 fixed tick、73200 presentation，其中 1200 帧 warmup、72000 帧进入十分钟测量窗；deadline miss、audio underflow、scene full resync、trace dropped、稳定段 upload/readback/allocation 与 memory growth 都为 0，trace 未截断。三次 runtime p99 分别为 0.2841、0.2725、0.2938 ms，presentation p99 分别为 1.11064、0.97864、0.81456 ms，最大 presentation 分别为 6.8416、7.81664、3.51376 ms。正式 Minori GPU 性能 E2 至此通过。
 - 该负载使用真实八包、签名动态 provider、VFS、RuntimeWorld、retained gameplay scene 与七条序列化物理输入，但停留在静态标题场景，未到 terminal，音频为静音。它只关闭持续 GPU 提交与运行时预算，不替代完整路线、影片/音频、正式视觉 review 或 Windows E3。
 
+### 2026-08-23 Family ABI v9 可写 surface 迁移
+
+- 分支已基于 ABI v9 可写 surface 修正 `3f9a771ac`。Minori 使用共享 `FfiLegacyFamilyHostAdapter` 获取 VFS、surface、Hook 和 writable-file 四个 Host port；不存在 immutable surface、复制回退或 const-cast。
+- resource scene 已进入 ABI v9 的 `Native + MultiLayer` 主路径。family 按已确认的 texture id 域拆分 background、foreground、effect、panel 四层；未知 id 直接返回 `ASTRA_EMU_MINORI_LAYER_CLASSIFICATION`，不按资源名猜测。
+- 图像继续由 `image` 解码，四层栅格复用 `astra-media-core::CpuRendererProvider`。输出按 Host lease 的 stride 写入独占 `OwnedWritableByteBuffer`，提交 full damage 后生成 retained `LegacyLayerTransactionV9`；没有 Minori 私有 rasterizer、surface 镜像或 ABI payload copy。
+- 当前 slice 的 library clippy 已通过。同步 translation Hook 和 CosmicText text surface 尚未迁移；遇到实际文字呈现会以 `ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED` 阻断并毒化 session。因此历史 ABI v8 Headless 路线仅作行为回归基线，本轮不能声明新的 E2。
+
 ### 2026-08-22 Config 动作与状态层
 
 - 本轮 rebase 前后都确认 `origin/master` 已是当前分支祖先，没有产生冲突或改写既有提交。

@@ -437,7 +437,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -448,7 +448,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -496,7 +496,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
 dependencies = [
  "clipboard-win",
- "image 0.25.10",
+ "image",
  "log",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -712,7 +712,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "hex",
- "image 0.25.10",
+ "image",
  "postcard",
  "schemars",
  "serde",
@@ -733,7 +733,7 @@ dependencies = [
  "astra-headless-test",
  "astra-package",
  "camino",
- "image 0.25.10",
+ "image",
  "postcard",
  "schemars",
  "serde",
@@ -806,12 +806,11 @@ dependencies = [
  "fuser",
  "globset",
  "hex",
- "image 0.25.10",
+ "image",
  "libc",
  "na_mpeg2_decoder",
  "postcard",
  "rayon",
- "rfvp-astra-provider",
  "schemars",
  "serde",
  "serde_json",
@@ -951,11 +950,25 @@ name = "astra-emu-fvp"
 version = "0.1.0"
 dependencies = [
  "abi_stable",
+ "anyhow",
+ "astra-byte-source",
+ "astra-core",
  "astra-emu-family-api",
- "rfvp-astra-provider",
+ "astra-emu-family-core",
+ "bincode 1.3.3",
+ "encoding_rs",
+ "na_mpeg2_decoder",
+ "postcard",
+ "proptest",
+ "rfvp",
+ "schemars",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
+ "thiserror 1.0.69",
  "tracing",
+ "wmv-decoder",
 ]
 
 [[package]]
@@ -965,7 +978,6 @@ dependencies = [
  "android-activity 0.6.1",
  "astra-byte-source",
  "astra-core",
- "astra-emu-extension-api",
  "astra-emu-family-api",
  "astra-emu-family-support",
  "astra-emu-fvp",
@@ -975,7 +987,6 @@ dependencies = [
  "astra-emu-minori",
  "astra-emu-translation-openai-compatible",
  "astra-media",
- "astra-media-core",
  "astra-observability",
  "astra-platform",
  "astra-plugin",
@@ -983,13 +994,12 @@ dependencies = [
  "directories",
  "gilrs",
  "hex",
- "image 0.25.10",
+ "image",
  "jni 0.21.1",
  "ndk 0.9.0",
  "pollster",
  "postcard",
  "rfd",
- "rfvp-astra-provider",
  "serde_json",
  "sha2 0.10.9",
  "slint",
@@ -1008,13 +1018,12 @@ dependencies = [
  "abi_stable",
  "astra-byte-source",
  "astra-core",
- "astra-emu-extension-api",
  "astra-emu-family-api",
  "astra-emu-fvp",
- "astra-media-core",
  "astra-plugin",
  "astra-plugin-abi",
  "astra-runtime",
+ "blake3",
  "ed25519-dalek",
  "hex",
  "libloading 0.8.9",
@@ -1028,7 +1037,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1046,7 +1054,7 @@ version = "0.1.0"
 dependencies = [
  "bangumi-api",
  "hex",
- "image 0.25.10",
+ "image",
  "reqwest 0.12.28",
  "reqwest 0.13.4",
  "schemars",
@@ -1069,18 +1077,16 @@ dependencies = [
  "abi_stable",
  "astra-byte-source",
  "astra-core",
- "astra-emu-extension-api",
  "astra-emu-family-api",
  "astra-emu-family-core",
  "astra-emu-family-support",
- "astra-media",
  "astra-media-core",
  "blowfish",
  "crc32fast",
  "directories",
  "encoding_rs",
  "flate2",
- "image 0.25.10",
+ "image",
  "lru",
  "postcard",
  "rc4",
@@ -1104,7 +1110,7 @@ dependencies = [
  "astra-observability",
  "clap",
  "flate2",
- "image 0.25.10",
+ "image",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1171,7 +1177,7 @@ dependencies = [
  "astra-product-host",
  "clap",
  "hound",
- "image 0.25.10",
+ "image",
  "rustfft",
  "serde",
  "serde_json",
@@ -1251,7 +1257,7 @@ dependencies = [
  "astra-worker-budget",
  "cosmic-text",
  "ffmpeg-next",
- "image 0.25.10",
+ "image",
  "js-sys",
  "postcard",
  "rubato",
@@ -1411,7 +1417,7 @@ dependencies = [
  "astra-platform-common",
  "astra-ui-core",
  "hound",
- "image 0.25.10",
+ "image",
  "postcard",
  "rcgen",
  "reqwest 0.13.4",
@@ -1636,7 +1642,7 @@ dependencies = [
  "astra-vn-runtime-provider",
  "astra-vn-system",
  "astra-vn-ui",
- "image 0.25.10",
+ "image",
  "postcard",
  "serde",
  "serde_json",
@@ -1678,7 +1684,6 @@ dependencies = [
  "astra-byte-source",
  "astra-core",
  "astra-headless-test",
- "astra-media-core",
  "astra-plugin-abi",
  "astra-runtime",
  "astra-worker-budget",
@@ -1701,7 +1706,6 @@ dependencies = [
  "astra-byte-source",
  "astra-core",
  "astra-headless-test",
- "astra-media-core",
  "postcard",
  "schemars",
  "serde",
@@ -3658,7 +3662,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3929,7 +3933,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4560,7 +4564,7 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5342,7 +5346,7 @@ dependencies = [
  "derive_more",
  "i-slint-common",
  "icu_normalizer",
- "image 0.25.10",
+ "image",
  "itertools 0.14.0",
  "linked_hash_set",
  "lyon_extra",
@@ -5380,7 +5384,7 @@ dependencies = [
  "i-slint-common",
  "i-slint-core-macros",
  "icu_normalizer",
- "image 0.25.10",
+ "image",
  "lyon_algorithms",
  "lyon_extra",
  "lyon_geom",
@@ -5729,18 +5733,6 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
-]
-
-[[package]]
-name = "image"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
-dependencies = [
- "bytemuck",
- "byteorder",
- "color_quant",
- "num-traits",
 ]
 
 [[package]]
@@ -6699,7 +6691,7 @@ dependencies = [
  "once_cell",
  "png",
  "thiserror 2.0.18",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6711,7 +6703,6 @@ checksum = "956787520e75e9bd233246045d19f42fb73242759cc57fba9611d940ae96d4b0"
 [[package]]
 name = "na_mpeg2_decoder"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
 dependencies = [
  "byteorder",
  "log",
@@ -6904,7 +6895,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8232,7 +8223,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8770,12 +8761,10 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=ce921717f043a8a035eadff1f41fc060c7de7c3c#ce921717f043a8a035eadff1f41fc060c7de7c3c"
 dependencies = [
  "ab_glyph",
  "anyhow",
- "astra-byte-source",
- "astra-emu-family-api",
  "atomic_refcell",
  "bincode 1.3.3",
  "bitflags 2.13.1",
@@ -8788,7 +8777,6 @@ dependencies = [
  "glam 0.27.0",
  "hashbrown 0.14.5",
  "hecs",
- "image 0.24.9",
  "itertools 0.12.1",
  "lazy_static",
  "log",
@@ -8798,32 +8786,6 @@ dependencies = [
  "sha2 0.10.9",
  "spin",
  "twofloat",
-]
-
-[[package]]
-name = "rfvp-astra-provider"
-version = "0.1.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
-dependencies = [
- "abi_stable",
- "anyhow",
- "astra-byte-source",
- "astra-core",
- "astra-emu-extension-api",
- "astra-emu-family-api",
- "astra-emu-family-core",
- "bincode 1.3.3",
- "encoding_rs",
- "na_mpeg2_decoder",
- "postcard",
- "rfvp",
- "schemars",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 1.0.69",
- "tracing",
- "wmv-decoder",
 ]
 
 [[package]]
@@ -8997,7 +8959,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9056,7 +9018,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9725,7 +9687,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9803,7 +9765,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10379,7 +10341,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10398,7 +10360,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11031,7 +10993,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11914,7 +11876,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12458,7 +12420,6 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wmv-decoder"
 version = "0.2.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
 dependencies = [
  "byteorder",
  "log",
