@@ -121,6 +121,49 @@ pub enum LegacyLayerFilterV9 {
     Linear,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyFilterTargetV9 {
+    Background,
+    Character,
+    Ui,
+    Text,
+    Video,
+    Final,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum LegacyFilterParamV9 {
+    Float(f32),
+    Int(i64),
+    Bool(bool),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyFilterParamEntryV9 {
+    pub key: String,
+    pub value: LegacyFilterParamV9,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyFilterNodeV9 {
+    pub id: String,
+    pub kind: String,
+    pub input: LegacyFilterTargetV9,
+    pub output: LegacyFilterTargetV9,
+    pub params: Vec<LegacyFilterParamEntryV9>,
+    pub deterministic: bool,
+    pub allow_cpu_fallback: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyFilterGraphV9 {
+    pub schema: String,
+    pub nodes: Vec<LegacyFilterNodeV9>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyLayerStateV9 {
     pub layer_id: String,
@@ -138,9 +181,7 @@ pub struct LegacyLayerStateV9 {
     pub opacity: f32,
     pub texture_filter: LegacyLayerFilterV9,
     pub blend: LegacyLayerBlendV9,
-    /// Explicit binding to a host-registered typed FilterGraph. The Family ABI
-    /// never transports JSON, postcard, shader source, or an implicit preset.
-    pub filter_graph_binding: Option<String>,
+    pub filter_graph: Option<LegacyFilterGraphV9>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -213,12 +254,45 @@ impl LegacyLayerTransactionV9 {
                 ));
             }
             validate_damage_v9(&layer.damage, layer.width, layer.height)?;
-            if let Some(binding) = &layer.filter_graph_binding {
-                validate_symbol_v9("filter_graph_binding", binding)?;
+            if let Some(graph) = &layer.filter_graph {
+                validate_filter_graph_v9(graph)?;
             }
         }
         Ok(())
     }
+}
+
+fn validate_filter_graph_v9(graph: &LegacyFilterGraphV9) -> Result<(), LegacyProviderError> {
+    if graph.schema != "astra.filter_graph.v1" {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_LAYER_FILTER_SCHEMA",
+            "filter graph schema must be astra.filter_graph.v1",
+        ));
+    }
+    let mut nodes = std::collections::BTreeSet::new();
+    for node in &graph.nodes {
+        validate_symbol_v9("filter_node_id", &node.id)?;
+        validate_symbol_v9("filter_node_kind", &node.kind)?;
+        if !nodes.insert(node.id.as_str()) || !node.deterministic {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_LAYER_FILTER_NODE",
+                "filter nodes must have unique ids and deterministic execution",
+            ));
+        }
+        let mut params = std::collections::BTreeSet::new();
+        for param in &node.params {
+            validate_symbol_v9("filter_param", &param.key)?;
+            if !params.insert(param.key.as_str())
+                || matches!(param.value, LegacyFilterParamV9::Float(value) if !value.is_finite())
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_LAYER_FILTER_PARAM",
+                    "filter parameters must be unique and finite",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_damage_v9(
@@ -300,6 +374,52 @@ pub enum FfiLayerFilterV9 {
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiFilterTargetV9 {
+    Background,
+    Character,
+    Ui,
+    Text,
+    Video,
+    Final,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub enum FfiFilterParamV9 {
+    Float(f32),
+    Int(i64),
+    Bool(bool),
+    Text(RString),
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiFilterParamEntryV9 {
+    pub key: RString,
+    pub value: FfiFilterParamV9,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiFilterNodeV9 {
+    pub id: RString,
+    pub kind: RString,
+    pub input: FfiFilterTargetV9,
+    pub output: FfiFilterTargetV9,
+    pub params: RVec<FfiFilterParamEntryV9>,
+    pub deterministic: bool,
+    pub allow_cpu_fallback: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, StableAbi)]
+pub struct FfiFilterGraphV9 {
+    pub schema: RString,
+    pub nodes: RVec<FfiFilterNodeV9>,
+}
+
+#[repr(C)]
 #[derive(Debug, Clone, PartialEq, StableAbi)]
 pub struct FfiLayerStateV9 {
     pub layer_id: RString,
@@ -317,7 +437,7 @@ pub struct FfiLayerStateV9 {
     pub opacity: f32,
     pub texture_filter: FfiLayerFilterV9,
     pub blend: FfiLayerBlendV9,
-    pub filter_graph_binding: ROption<RString>,
+    pub filter_graph: ROption<FfiFilterGraphV9>,
 }
 
 #[repr(C)]
@@ -819,7 +939,7 @@ fn ffi_layer_state(value: LegacyLayerStateV9) -> FfiLayerStateV9 {
             LegacyLayerBlendV9::Multiply => FfiLayerBlendV9::Multiply,
             LegacyLayerBlendV9::Screen => FfiLayerBlendV9::Screen,
         },
-        filter_graph_binding: value.filter_graph_binding.map(Into::into).into(),
+        filter_graph: value.filter_graph.map(ffi_filter_graph).into(),
     }
 }
 
@@ -856,10 +976,93 @@ fn legacy_layer_state(value: FfiLayerStateV9) -> LegacyLayerStateV9 {
             FfiLayerBlendV9::Multiply => LegacyLayerBlendV9::Multiply,
             FfiLayerBlendV9::Screen => LegacyLayerBlendV9::Screen,
         },
-        filter_graph_binding: value
-            .filter_graph_binding
-            .into_option()
-            .map(|value| value.to_string()),
+        filter_graph: value.filter_graph.into_option().map(legacy_filter_graph),
+    }
+}
+
+fn ffi_filter_target(value: LegacyFilterTargetV9) -> FfiFilterTargetV9 {
+    match value {
+        LegacyFilterTargetV9::Background => FfiFilterTargetV9::Background,
+        LegacyFilterTargetV9::Character => FfiFilterTargetV9::Character,
+        LegacyFilterTargetV9::Ui => FfiFilterTargetV9::Ui,
+        LegacyFilterTargetV9::Text => FfiFilterTargetV9::Text,
+        LegacyFilterTargetV9::Video => FfiFilterTargetV9::Video,
+        LegacyFilterTargetV9::Final => FfiFilterTargetV9::Final,
+    }
+}
+
+fn legacy_filter_target(value: FfiFilterTargetV9) -> LegacyFilterTargetV9 {
+    match value {
+        FfiFilterTargetV9::Background => LegacyFilterTargetV9::Background,
+        FfiFilterTargetV9::Character => LegacyFilterTargetV9::Character,
+        FfiFilterTargetV9::Ui => LegacyFilterTargetV9::Ui,
+        FfiFilterTargetV9::Text => LegacyFilterTargetV9::Text,
+        FfiFilterTargetV9::Video => LegacyFilterTargetV9::Video,
+        FfiFilterTargetV9::Final => LegacyFilterTargetV9::Final,
+    }
+}
+
+fn ffi_filter_graph(value: LegacyFilterGraphV9) -> FfiFilterGraphV9 {
+    FfiFilterGraphV9 {
+        schema: value.schema.into(),
+        nodes: value
+            .nodes
+            .into_iter()
+            .map(|node| FfiFilterNodeV9 {
+                id: node.id.into(),
+                kind: node.kind.into(),
+                input: ffi_filter_target(node.input),
+                output: ffi_filter_target(node.output),
+                params: node
+                    .params
+                    .into_iter()
+                    .map(|param| FfiFilterParamEntryV9 {
+                        key: param.key.into(),
+                        value: match param.value {
+                            LegacyFilterParamV9::Float(value) => FfiFilterParamV9::Float(value),
+                            LegacyFilterParamV9::Int(value) => FfiFilterParamV9::Int(value),
+                            LegacyFilterParamV9::Bool(value) => FfiFilterParamV9::Bool(value),
+                            LegacyFilterParamV9::Text(value) => FfiFilterParamV9::Text(value.into()),
+                        },
+                    })
+                    .collect(),
+                deterministic: node.deterministic,
+                allow_cpu_fallback: node.allow_cpu_fallback,
+            })
+            .collect(),
+    }
+}
+
+fn legacy_filter_graph(value: FfiFilterGraphV9) -> LegacyFilterGraphV9 {
+    LegacyFilterGraphV9 {
+        schema: value.schema.to_string(),
+        nodes: value
+            .nodes
+            .into_iter()
+            .map(|node| LegacyFilterNodeV9 {
+                id: node.id.to_string(),
+                kind: node.kind.to_string(),
+                input: legacy_filter_target(node.input),
+                output: legacy_filter_target(node.output),
+                params: node
+                    .params
+                    .into_iter()
+                    .map(|param| LegacyFilterParamEntryV9 {
+                        key: param.key.to_string(),
+                        value: match param.value {
+                            FfiFilterParamV9::Float(value) => LegacyFilterParamV9::Float(value),
+                            FfiFilterParamV9::Int(value) => LegacyFilterParamV9::Int(value),
+                            FfiFilterParamV9::Bool(value) => LegacyFilterParamV9::Bool(value),
+                            FfiFilterParamV9::Text(value) => {
+                                LegacyFilterParamV9::Text(value.to_string())
+                            }
+                        },
+                    })
+                    .collect(),
+                deterministic: node.deterministic,
+                allow_cpu_fallback: node.allow_cpu_fallback,
+            })
+            .collect(),
     }
 }
 
@@ -938,7 +1141,18 @@ mod tests {
             opacity: 1.0,
             texture_filter: LegacyLayerFilterV9::Nearest,
             blend: LegacyLayerBlendV9::Alpha,
-            filter_graph_binding: Some("filter.main".into()),
+            filter_graph: Some(LegacyFilterGraphV9 {
+                schema: "astra.filter_graph.v1".into(),
+                nodes: vec![LegacyFilterNodeV9 {
+                    id: "filter.main".into(),
+                    kind: "grayscale".into(),
+                    input: LegacyFilterTargetV9::Final,
+                    output: LegacyFilterTargetV9::Final,
+                    params: Vec::new(),
+                    deterministic: true,
+                    allow_cpu_fallback: false,
+                }],
+            }),
         }
     }
 
