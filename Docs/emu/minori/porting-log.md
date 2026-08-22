@@ -28,6 +28,11 @@
 - 首次真实多记录检查中，gauge ball 随 cursor 正确移动，但两个 idle 后 checkpoint 的正文为空。根因是 `system_ui_output` 在页面未变化时仍发送 `clear_text=true`，同时 retained scene 优化不会重发 lease。现在只有页面、cursor、输入或 restore 实际触发重画，以及 terminal 时才清除文字；未变化 tick 保留 Host retained text。单记录 provider 回归增加 idle tick 断言，要求不清除、不重复签发 lease。
 - 修复后的真实八包短程使用物理滚轮打开 backlog，再连续查看两条更早记录并关闭。运行完成 771 fixed steps、776 个提交/栅格帧、55 条物理输入、snapshot round-trip 和零 diagnostic；这是未到 terminal 的定向 E2。人工查看打开、两次上翻和关闭四张画面，gauge 位置逐次变化，三条记录文字不同且完整，关闭后恢复当前消息。backlog 多记录翻页的当前契约至此关闭；正式音频听审和完整产品门禁不由该短程结果替代。
 
+### Config 文字阴影
+
+- 原程序 Config 的文字阴影状态现在直接控制既有 typed text presentation：启用时使用已经验证的 2 px 黑色 outline，关闭时提交 `outline=None`。字形 shaping、换行、裁剪和字体绑定仍由公共 CosmicText/Renderer2D 路径负责；Minori 没有新增私有文字渲染器、位图文字或失败 fallback。定向测试覆盖开关两态。
+- 真实八包短程从标题进入 Config，以物理 pointer 关闭该选项并 Apply，再启动剧情直至首条真实消息。运行完成 384 fixed steps、388 个提交/栅格帧、34 条物理输入、snapshot round-trip 和零 diagnostic；该短程按计划未到 terminal。人工查看 Config 开关前后与首条消息，勾选状态正确变化，关闭阴影后的日文字形完整，未见裁剪、错层或残影。这只关闭文字阴影的定向 Headless E2，不代表完整 Config、正式音频 review 或 Windows E3 已完成。
+
 ## 2026-08-12
 
 ### message voice 资源绑定

@@ -32,6 +32,8 @@ AstraEMU FVP 当前实现边界以 Family ABI v8 为准：显式 `StableAbi` lif
 
 同日 backlog 增量：三记录 VM cursor 边界和 provider idle retention 回归通过。首次真实视觉检查发现 idle tick 清除 retained text，修复后 `clear_text` 只随实际 system page/cursor/input/restore 变化或 terminal 提交。真实八包短程完成 771 fixed steps、776 帧、55 条输入、snapshot round-trip 和零 diagnostic；打开、两次上翻与关闭的四个 checkpoint 显示 gauge 位置和三条不同历史文字同步变化，关闭后恢复当前消息。该运行未到 terminal，只关闭 backlog 多记录翻页的定向 E2。
 
+同日 Config 文字阴影增量：应用后的选项直接控制公共 typed text presentation 的既有 2 px 黑色 outline，关闭时提交 `None`，不改变 shaping、字体、layout 或 Renderer2D 主路径。真实八包短程完成 384 fixed steps、388 帧、34 条物理输入、snapshot round-trip 和零 diagnostic；Config 开关前后及首条剧情消息的视觉检查通过。该运行未到 terminal，只关闭文字阴影定向 E2。
+
 立绘动态 coverage 另行记录：IDA 已确认 `.char trans` 的阻塞式线性透明度合同和 `.char vis` 布尔规则。v22 runtime/provider 测试覆盖等待、线性中间帧、完成和 snapshot；合成 256→128→0 序列又通过 Headless WGPU capture 与人工视觉检查。真实脚本 census 未出现 `trans/vis`，所以这项只计合成动态立绘 E2，不计入真实路线。同一 clean Release build、package、profile、物理输入、adapter 与 driver identity 连续三次完成十分钟 120 Hz GPU 测量；每次均有 72000 个正式 sample，deadline miss、audio underflow、full resync、trace dropped、稳定段 upload/readback/allocation 与 memory growth 为 0，runtime p99 为 0.2725–0.2938 ms，presentation p99 为 0.81456–1.11064 ms。该静态标题负载关闭正式 GPU 性能 E2，但不覆盖完整路线媒体、音频听审或 Windows E3。
 
 同日最新同身份单次运行完成 33490 fixed steps、34108 帧、16951 条输入和 33 个 checkpoint，首个 choice、实际 post-choice 分支与不可由 Control 跳过的结局媒体已进入同一份通过报告。global progress rollback snapshot 使用独立 versioned section，restore 后首个 message 与 retained scene 在同一 typed transaction 提交；terminal、snapshot round-trip、user save/restore 和自然 unlock 均成立，diagnostic 为空。模型已查看全部 33 个 required frame，`prepare-review` 自动门禁通过；完整 WAV 仍待逐段听审，`validate-review` 正确返回 `ASTRA_HEADLESS_REVIEW_BLOCKED`。此前两次重复运行继续提供确定性证据，本次运行不替代该边界。

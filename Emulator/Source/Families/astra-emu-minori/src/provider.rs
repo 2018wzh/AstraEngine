@@ -125,6 +125,7 @@ const MINORI_MESSAGE_HOST_AWAIT_CONTROLS: [&str; 2] = ["enter", "space"];
 
 fn minori_message_presentation(
     stage_size: Option<(u32, u32)>,
+    text_shadow: bool,
 ) -> Result<LegacyTextPresentationV1, LegacyProviderError> {
     if stage_size != Some((1280, 720)) {
         return Err(invalid(
@@ -157,7 +158,7 @@ fn minori_message_presentation(
             horizontal_alignment: LegacyTextHorizontalAlignmentV1::Start,
         }),
         rgba: [255, 255, 255, 255],
-        outline: Some(LegacyTextOutlineV1 {
+        outline: text_shadow.then_some(LegacyTextOutlineV1 {
             radius: 2,
             rgba: [0, 0, 0, 192],
         }),
@@ -1198,7 +1199,10 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             let lease_id = format!("minori.text.{}.{}", input.tick_index, capture_sequence);
             let presentation = LegacyTextPresentationLeaseV1 {
                 lease_id: lease_id.clone(),
-                presentation: match minori_message_presentation(session.stage_size) {
+                presentation: match minori_message_presentation(
+                    session.stage_size,
+                    session.vm.state().system_ui.config.text_shadow,
+                ) {
                     Ok(presentation) => presentation,
                     Err(error) => {
                         session.poisoned = true;
@@ -4541,7 +4545,10 @@ fn append_resumed_message_text(
     let lease_id = format!("minori.text.resume.{tick_index}.{capture_sequence}");
     let presentation = LegacyTextPresentationLeaseV1 {
         lease_id: lease_id.clone(),
-        presentation: minori_message_presentation(session.stage_size)?,
+        presentation: minori_message_presentation(
+            session.stage_size,
+            session.vm.state().system_ui.config.text_shadow,
+        )?,
     };
     presentation.validate()?;
     if session
@@ -4632,7 +4639,10 @@ fn append_backlog_text(
         lease_id: lease_id.clone(),
         // IDA confirms that backlog state 11 keeps CMessagePanel mode 1 and
         // state 12 submits the selected CLog record through the same layout.
-        presentation: minori_message_presentation(session.stage_size)?,
+        presentation: minori_message_presentation(
+            session.stage_size,
+            session.vm.state().system_ui.config.text_shadow,
+        )?,
     };
     presentation.validate()?;
     if session
@@ -6201,6 +6211,22 @@ mod tests {
             Some(MinoriConfigControl::FontPrevious)
         );
         assert_eq!(config_control_at(0, 0), None);
+    }
+
+    #[test]
+    fn config_text_shadow_uses_the_existing_typed_outline_without_a_renderer_fallback() {
+        let enabled = minori_message_presentation(Some((1280, 720)), true).unwrap();
+        assert_eq!(
+            enabled.outline,
+            Some(LegacyTextOutlineV1 {
+                radius: 2,
+                rgba: [0, 0, 0, 192],
+            })
+        );
+        let disabled = minori_message_presentation(Some((1280, 720)), false).unwrap();
+        assert!(disabled.outline.is_none());
+        assert_eq!(disabled.body, enabled.body);
+        assert_eq!(disabled.speaker, enabled.speaker);
     }
 
     #[test]

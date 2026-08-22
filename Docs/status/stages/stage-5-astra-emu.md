@@ -51,6 +51,8 @@ event loop owner。开发复用 Release 分发包已通过签名、ABI、FVP pro
 
 backlog 多记录 E2 随后暴露 retained text 的生命周期错误：未变化的 system tick 仍清除文字，却不会重发 scene/lease。清除动作现只绑定页面、cursor、输入、restore 或 terminal 的实际变化。VM 三记录 cursor 钳制和 provider idle retention 回归通过；真实八包短程以 771 fixed steps、776 帧、55 条输入验证打开、连续两次上翻和关闭，snapshot round-trip 与零 diagnostic 成立。人工查看确认三条历史文字及 gauge 位置逐次变化，关闭后恢复当前消息。该短程未到 terminal，只关闭 backlog 多记录翻页的定向 E2。
 
+Config 文字阴影随后接入既有 typed text presentation。启用时使用已验证的 2 px 黑色 outline，关闭时提交 `None`；CosmicText shaping、字体绑定、layout 和 Renderer2D 合成保持公共主路径，没有 family 私有 renderer 或 fallback。真实八包短程以 384 fixed steps、388 帧、34 条物理输入验证 Config 开关、Apply 和首条剧情消息，snapshot round-trip 与零 diagnostic 成立。人工视觉检查未见缺字、裁剪、错层或残影。该短程未到 terminal，只关闭文字阴影定向 E2，Stage 5 仍为 `IN_PROGRESS`。
+
 后续 Headless 修正了按采样间隔保留 surface 导致的 stale checkpoint：每个显式 checkpoint 都会先提交待处理 Scene2D 并排空 receipt，Config 与 backlog 的真实短程截图现能分别证明页面打开和关闭。decoded video 通过公共 `SceneCommand::VideoFrame` 合成；脚本未标为 skippable 的首轮 movie 不接受 Control 跳过。真实影片 checkpoint 进一步修正了 transient draw blend 和公共 WGPU atlas 连续帧 placement 生命周期；人工查看确认 decoded frame 非空、比例正确，剧情层文字合成无裁剪或旧帧残留。公共 Kira main track 使用成熟 Compressor 组成显式 peak limiter，并在前后各保留 meter。完整路线记录约 2.71 的 pre-master peak，但 master output peak 约 0.990、overload 为 0、underflow 为 0，完整 WAV 非静音且低于 i16 full scale；blocked machine report 写完后返回非零退出码。标题启动路线完成 28814 fixed steps、2480 个呈现帧、20058 条物理输入、30 个 checkpoint、snapshot、用户 save/restore 和 terminal。该证据仍缺自然鉴赏解锁和 Windows E3，Stage 5 继续保持 `IN_PROGRESS`。
 
 clear flag 的处理现已收紧到原程序确认的四个精确名称。runtime 只保存对应的脱敏 unlock identity，snapshot restore 会校验集合边界；provider 只报告 session 内 unlock count。任意未知 `CLEAR` 名称都会被忽略。平台 global progress 的原子提交、新 session 恢复和标题资源切换尚未实现，因此这项局部证据不会提升自然鉴赏或 Windows E3 状态。
