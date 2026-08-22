@@ -16,11 +16,10 @@ use astra_emu_family_support::copy_surface_to_straight_rgba8;
 use astra_emu_manager::{AstraUnderlayRenderer, TranslationOverlayView, WgpuFrameContext};
 use astra_media::{FilterGraph, FilterNode, FilterParam, FilterTarget, FilterValidator};
 use astra_plugin_abi::{
-    RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLiveFilterGraph, RuntimeLiveFilterParam,
-    RuntimeLiveFilterTarget, RuntimeLiveLayerBlend, RuntimeLiveLayerFilter,
-    RuntimeLiveLayerOperation, RuntimeLiveLayerState, RuntimeLiveLayerTransaction,
-    RuntimeLiveSceneCompositing, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
-    RuntimeLiveScissor, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat, RuntimeLiveVertex,
+    RuntimeLiveDamageRect, RuntimeLiveFilterGraph, RuntimeLiveFilterParam, RuntimeLiveFilterTarget,
+    RuntimeLiveLayerBlend, RuntimeLiveLayerFilter, RuntimeLiveLayerOperation,
+    RuntimeLiveLayerState, RuntimeLiveLayerTransaction, RuntimeLiveSceneCompositing,
+    RuntimeLiveTextureFormat,
 };
 use wgpu::util::DeviceExt;
 
@@ -78,6 +77,24 @@ struct TextureResource {
     height: u32,
     format: LegacyTextureFormat,
     compositing: RuntimeLiveSceneCompositing,
+}
+
+#[derive(Clone, Copy)]
+struct LayerVertex {
+    x: f32,
+    y: f32,
+    u: f32,
+    v: f32,
+    color: [u8; 4],
+}
+
+#[derive(Clone, Copy)]
+struct LayerDraw {
+    texture_id: u32,
+    vertices: [LayerVertex; 4],
+    blend: RuntimeLiveLayerBlend,
+    texture_filter: RuntimeLiveLayerFilter,
+    scissor: Option<RuntimeLiveDamageRect>,
 }
 
 impl AstraUnderlayRenderer for ManagerStageRenderer {
@@ -871,148 +888,6 @@ impl StageGpu {
         context.queue.submit([encoder.finish()]);
     }
 
-    #[allow(dead_code)]
-    fn render_scene_live(
-        &mut self,
-        context: &WgpuFrameContext<'_>,
-        target: &wgpu::Texture,
-        transaction: RuntimeLiveSceneTransaction,
-    ) -> Result<(), String> {
-        transaction.validate().map_err(|error| error.to_string())?;
-        let RuntimeLiveSceneTransaction {
-            width,
-            height,
-            compositing,
-            resources,
-            draws,
-            reset_resources,
-            ..
-        } = transaction;
-        if draws.iter().any(|draw| draw.texture_id == VIDEO_TEXTURE_ID)
-            || resources.iter().any(|operation| match operation {
-                RuntimeLiveSceneResourceOperation::CreateTexture { texture_id, .. }
-                | RuntimeLiveSceneResourceOperation::UpdateTexture { texture_id, .. }
-                | RuntimeLiveSceneResourceOperation::DestroyTexture { texture_id, .. } => {
-                    *texture_id == VIDEO_TEXTURE_ID
-                }
-            })
-        {
-            return Err("ASTRA_EMU_STAGE_LIVE_VIDEO_TEXTURE_ID_RESERVED".into());
-        }
-        if reset_resources {
-            self.textures.clear();
-            self.video_source = None;
-        } else if self
-            .textures
-            .values()
-            .any(|resource| resource.compositing != compositing)
-        {
-            return Err("ASTRA_EMU_STAGE_COMPOSITING_RESOURCE_EPOCH".into());
-        }
-        for operation in resources {
-            match operation {
-                RuntimeLiveSceneResourceOperation::CreateTexture {
-                    texture_id,
-                    generation,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                } => {
-                    if self.textures.contains_key(&texture_id) {
-                        return Err("ASTRA_EMU_STAGE_LIVE_TEXTURE_DUPLICATE".into());
-                    }
-                    self.upload_live(
-                        context,
-                        texture_id,
-                        generation,
-                        width,
-                        height,
-                        format,
-                        pixels,
-                        compositing,
-                    )?;
-                }
-                RuntimeLiveSceneResourceOperation::UpdateTexture {
-                    texture_id,
-                    generation,
-                    x,
-                    y,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                } => self.upload_live_partial(
-                    context,
-                    texture_id,
-                    generation,
-                    x,
-                    y,
-                    width,
-                    height,
-                    format,
-                    pixels,
-                    compositing,
-                )?,
-                RuntimeLiveSceneResourceOperation::DestroyTexture {
-                    texture_id,
-                    generation,
-                } => {
-                    let resource = self
-                        .textures
-                        .get(&texture_id)
-                        .ok_or_else(|| "ASTRA_EMU_STAGE_LIVE_TEXTURE_MISSING".to_owned())?;
-                    if generation <= resource.generation {
-                        return Err("ASTRA_EMU_STAGE_LIVE_TEXTURE_GENERATION".into());
-                    }
-                    self.textures.remove(&texture_id);
-                }
-            }
-        }
-        let vertex_bytes = runtime_live_scene_vertex_bytes(&draws, width, height)?;
-        let vertex_buffer = (!vertex_bytes.is_empty()).then(|| {
-            context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("astra.emu.stage.live-scene-vertices"),
-                    contents: &vertex_bytes,
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-        });
-        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("astra.emu.stage.live-scene-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("astra.emu.stage.live-scene-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            if let Some(vertex_buffer) = &vertex_buffer {
-                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            }
-            for (draw_index, draw) in draws.iter().enumerate() {
-                self.draw_live(&mut pass, draw, draw_index, width, height, compositing)?;
-            }
-        }
-        context.queue.submit([encoder.finish()]);
-        Ok(())
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn upload_live(
         &mut self,
@@ -1344,7 +1219,7 @@ impl StageGpu {
     fn draw_live<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
-        draw: &RuntimeLiveDraw,
+        draw: &LayerDraw,
         draw_index: usize,
         stage_width: u32,
         stage_height: u32,
@@ -1355,18 +1230,20 @@ impl StageGpu {
             .get(&draw.texture_id)
             .ok_or_else(|| "ASTRA_EMU_STAGE_LIVE_TEXTURE_MISSING".to_owned())?;
         let pipeline = match draw.blend {
-            RuntimeLiveBlendMode::Alpha => self.pipeline(compositing, LegacyBlendMode::Alpha),
-            RuntimeLiveBlendMode::Additive => self.pipeline(compositing, LegacyBlendMode::Add),
-            RuntimeLiveBlendMode::Opaque => self.pipeline(compositing, LegacyBlendMode::Opaque),
-            RuntimeLiveBlendMode::Multiply => self.pipeline(compositing, LegacyBlendMode::Multiply),
-            RuntimeLiveBlendMode::Screen => self.pipeline(compositing, LegacyBlendMode::Screen),
+            RuntimeLiveLayerBlend::Alpha => self.pipeline(compositing, LegacyBlendMode::Alpha),
+            RuntimeLiveLayerBlend::Add => self.pipeline(compositing, LegacyBlendMode::Add),
+            RuntimeLiveLayerBlend::Opaque => self.pipeline(compositing, LegacyBlendMode::Opaque),
+            RuntimeLiveLayerBlend::Multiply => {
+                self.pipeline(compositing, LegacyBlendMode::Multiply)
+            }
+            RuntimeLiveLayerBlend::Screen => self.pipeline(compositing, LegacyBlendMode::Screen),
         };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(
             0,
             match draw.texture_filter {
-                RuntimeLiveTextureFilter::Nearest => &resource.nearest_bind_group,
-                RuntimeLiveTextureFilter::Linear => &resource.linear_bind_group,
+                RuntimeLiveLayerFilter::Nearest => &resource.nearest_bind_group,
+                RuntimeLiveLayerFilter::Linear => &resource.linear_bind_group,
             },
             &[],
         );
@@ -1591,8 +1468,8 @@ fn create_filter_target_texture(device: &wgpu::Device, width: u32, height: u32) 
     })
 }
 
-fn layer_draw(layer: &RuntimeLiveLayerState, texture_id: u32) -> Result<RuntimeLiveDraw, String> {
-    let point = |x: f32, y: f32| RuntimeLiveVertex {
+fn layer_draw(layer: &RuntimeLiveLayerState, texture_id: u32) -> Result<LayerDraw, String> {
+    let point = |x: f32, y: f32| LayerVertex {
         x: layer.transform.m11 * x + layer.transform.m21 * y + layer.transform.tx,
         y: layer.transform.m12 * x + layer.transform.m22 * y + layer.transform.ty,
         u: x / layer.width as f32,
@@ -1616,32 +1493,23 @@ fn layer_draw(layer: &RuntimeLiveLayerState, texture_id: u32) -> Result<RuntimeL
     {
         return Err("ASTRA_EMU_STAGE_LAYER_TRANSFORM_INVALID".into());
     }
-    let scissor = layer.clip.map(|clip| RuntimeLiveScissor {
+    let scissor = layer.clip.map(|clip| RuntimeLiveDamageRect {
         x: clip.x,
         y: clip.y,
         width: clip.width,
         height: clip.height,
     });
-    Ok(RuntimeLiveDraw {
+    Ok(LayerDraw {
         texture_id,
         vertices,
-        blend: match layer.blend {
-            RuntimeLiveLayerBlend::Opaque => RuntimeLiveBlendMode::Opaque,
-            RuntimeLiveLayerBlend::Alpha => RuntimeLiveBlendMode::Alpha,
-            RuntimeLiveLayerBlend::Add => RuntimeLiveBlendMode::Additive,
-            RuntimeLiveLayerBlend::Multiply => RuntimeLiveBlendMode::Multiply,
-            RuntimeLiveLayerBlend::Screen => RuntimeLiveBlendMode::Screen,
-        },
-        texture_filter: match layer.texture_filter {
-            RuntimeLiveLayerFilter::Nearest => RuntimeLiveTextureFilter::Nearest,
-            RuntimeLiveLayerFilter::Linear => RuntimeLiveTextureFilter::Linear,
-        },
+        blend: layer.blend,
+        texture_filter: layer.texture_filter,
         scissor,
     })
 }
 
 fn runtime_live_scene_vertex_bytes(
-    draws: &[RuntimeLiveDraw],
+    draws: &[LayerDraw],
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, String> {
