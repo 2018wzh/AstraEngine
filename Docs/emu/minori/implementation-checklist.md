@@ -3,7 +3,7 @@
 ## 当前状态（2026-08-23）
 
 - 分支已同步到 Family ABI v9 基线。Minori 必须迁移为 `Native + MultiLayer`，并使用 Host-owned surface、同步 Hook 和 writable-file port；旧 scene、snapshot、text lease、session resource 与 budget API 已删除且不提供兼容层。
-- 当前 `astra-emu-minori` 仍引用迁移前接口，定向 `cargo check` 在 79 个调用点阻断。现有 ABI v8 Headless 运行只作为历史回归基线；v9 plugin 尚未形成可加载或 E2 证据。
+- 当前分支已同步到可写 surface lease 修正 `3f9a771ac`。Minori dylib 使用公共 `FfiLegacyFamilyHostAdapter`，定向 library check 已通过；旧 root export 与 provider-result payload 已删除。Host surface、Hook、family-owned raster 和 MultiLayer transaction 尚未接通，呈现会稳定阻断，旧 provider tests 也仍待迁移。现有 ABI v8 Headless 运行只作为历史回归基线；v9 plugin 尚未形成可运行或 E2 证据。
 - 授权样本仍是 8 个逻辑 archive、18 个物理 PAZ 文件和 14502 个 entry。`mov` role 含 5 个 RIFF/AVI；视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。纯 Rust reader 已完整解出 17480 个视频 sample，零长度 sample 按 AVI dropped frame 处理。
 - 签名 Minori dylib 已用同一 mount、plugin、Headless profile 和序列化物理输入连续跑完两次标题启动的真实路线。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入并最终从标题执行 Exit；snapshot round-trip、用户 save/restore、Config、backlog、真实影片、自然解锁和 31 个 checkpoint 均通过，diagnostic 为 0。新的同身份单次运行进一步推进 33490 fixed steps、呈现 34108 帧、消费 16951 条输入并通过 33 个 checkpoint，把首个 choice、实际 post-choice 分支和自然完成的不可跳过结局媒体纳入同一份通过报告。
 - 两次运行的 visual trace、runtime state trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。输入 hash 因 local-private session id 不同而不同，不作为跨 session 一致性结论。平台全局进度通过 ordered storage request/result 原子读写；两次均严格证明自然解锁数为 1。restore 会合并同一 provider session 已确认的全局进度，不允许旧 snapshot 回滚解锁。

@@ -7,18 +7,18 @@ use std::{
 use astra_byte_source::{ByteRange, OwnedByteBuffer};
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
-    validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyBlackboardMutation,
-    LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta, LegacyDrawV1,
-    LegacyEphemeralText, LegacyEvent, LegacyFamilyHostServicesV9, LegacyFamilyPluginDescriptor,
-    LegacyLiveOutput, LegacyOpenRequest, LegacyProbeReport, LegacyProbeRequest,
-    LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead, LegacyRestoreReport,
-    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
-    LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacySnapshotEnvelope,
-    LegacySnapshotSection, LegacyStepInput, LegacyStepOutput, LegacyTextHorizontalAlignmentV1,
-    LegacyTextLease, LegacyTextOutlineV1, LegacyTextPresentationLeaseV1, LegacyTextPresentationV1,
-    LegacyTextRegionV1, LegacyTextureFilter, LegacyTextureFormat, LegacyTextureResourceV1,
-    LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
-    LegacyVmTraceRecord, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
+    validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
+    LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta,
+    LegacyDrawV1, LegacyEphemeralText, LegacyEvent, LegacyFamilyHostServicesV9,
+    LegacyFamilyPluginDescriptor, LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest,
+    LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1,
+    LegacyResourceRead, LegacyRestoreReport, LegacyRuntimeHostCtx, LegacyRuntimeProvider,
+    LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced,
+    LegacyShutdownReport, LegacySnapshotEnvelope, LegacySnapshotSection, LegacyStepInput,
+    LegacyStepOutput as LegacyStepOutputV9, LegacyTextLease, LegacyTextureFilter,
+    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
+    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +36,7 @@ use crate::{
 pub const MINORI_FAMILY_ID: &str = "minori";
 pub const MINORI_RUNTIME_PROVIDER_ID: &str = "astra.emu.family.minori";
 const MAX_SCRIPT_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_INSTRUCTIONS_PER_STEP: u32 = 100_000;
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_WSCROLL2_SYNC_BYTES: u64 = 64 * 1024;
 const MAX_WSCROLL2_SYNC_VALUES: usize = 4096;
@@ -66,11 +67,149 @@ const MINORI_CONFIG_CIRCLE_TEXTURE_ID: u32 = 20_012;
 const MINORI_TITLE_BASE_ITEM_COUNT: u32 = 4;
 const MINORI_TITLE_MEMORIES_ITEM_COUNT: u32 = 5;
 const MINORI_MEMORIES_ITEM_COUNT: u32 = 5;
-const MINORI_PLATFORM_STORAGE_PROVIDER_ID: &str = "astra.platform.storage";
 const MINORI_GLOBAL_PROGRESS_OPTION: &str = "astra.provider.storage";
-const MINORI_GLOBAL_PROGRESS_SLOT: &str = "minori-global-progress-v1";
+const MINORI_WRITABLE_FILE_BINDING_ID: &str = "astra.writable_file.v1";
+const MINORI_GLOBAL_PROGRESS_DIRECTORY: &str = "minori";
+const MINORI_GLOBAL_PROGRESS_PATH: &str = "minori/global-progress-v1.bin";
+const MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH: &str = "minori/global-progress-v1.tmp";
+const MAX_GLOBAL_PROGRESS_BYTES: u64 = 1024 * 1024;
 const MINORI_GLOBAL_PROGRESS_SCHEMA: &str = "astra.emu.minori.global_progress.v1";
+#[allow(dead_code)]
 const MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA: &str = "astra.emu.minori.global_progress_snapshot.v1";
+
+// Family-owned text layout staging. ABI v9 never exports these values. The v9
+// publisher currently blocks before presentation; the next migration slice
+// must invoke the synchronous translation Hook and rasterize into Host-owned
+// layer surfaces before this staging data can leave the provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LegacyTextHorizontalAlignmentV1 {
+    Start,
+    Center,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LegacyTextOutlineV1 {
+    radius: u32,
+    rgba: [u8; 4],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LegacyTextRegionV1 {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    font_size: f32,
+    line_height: f32,
+    max_lines: u32,
+    horizontal_alignment: LegacyTextHorizontalAlignmentV1,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LegacyTextPresentationV1 {
+    layout_id: String,
+    language: String,
+    font_families: Vec<String>,
+    body: LegacyTextRegionV1,
+    speaker: Option<LegacyTextRegionV1>,
+    rgba: [u8; 4],
+    outline: Option<LegacyTextOutlineV1>,
+}
+
+impl LegacyTextPresentationV1 {
+    fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("text_layout_id", &self.layout_id)?;
+        if self.language != "ja-JP"
+            || self.font_families.as_slice() != ["Noto Sans JP"]
+            || self.rgba[3] == 0
+        {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_TEXT_LAYOUT_BINDING",
+                "Minori text layout requires its explicit Japanese font and visible color",
+            ));
+        }
+        for region in self.speaker.iter().chain(std::iter::once(&self.body)) {
+            if region.x < 0
+                || region.y < 0
+                || region.width == 0
+                || region.height == 0
+                || !region.font_size.is_finite()
+                || !region.line_height.is_finite()
+                || region.font_size <= 0.0
+                || region.line_height < region.font_size
+                || region.max_lines == 0
+            {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_TEXT_LAYOUT_REGION",
+                    "Minori text layout region is invalid",
+                ));
+            }
+        }
+        if self
+            .outline
+            .is_some_and(|outline| outline.radius == 0 || outline.rgba[3] == 0)
+        {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_TEXT_OUTLINE",
+                "Minori text outline is invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LegacyTextPresentationLeaseV1 {
+    lease_id: String,
+    presentation: LegacyTextPresentationV1,
+}
+
+impl LegacyTextPresentationLeaseV1 {
+    fn validate(&self) -> Result<(), LegacyProviderError> {
+        validate_symbol("text_presentation_lease_id", &self.lease_id)?;
+        self.presentation.validate()
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct LegacyLiveOutput {
+    clear_text: bool,
+    resource_scenes: Vec<LegacySequenced<LegacyRenderResourceFrameV1>>,
+    text_presentations: Vec<LegacySequenced<LegacyTextPresentationLeaseV1>>,
+    text: Vec<LegacyTextLease>,
+    audio: Vec<LegacyAudioPacketV7>,
+    audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
+    video: Vec<LegacySequenced<LegacyVideoCommandV1>>,
+}
+
+#[derive(Debug, PartialEq)]
+struct LegacyStepOutput {
+    status: LegacyRuntimeStatus,
+    live: LegacyLiveOutput,
+    control: LegacyControlTransaction,
+    trace: Vec<LegacyTraceEntry>,
+    diagnostics: Vec<astra_emu_family_api::LegacyDiagnostic>,
+    coverage: LegacyCoverageDelta,
+    state_revision: u64,
+}
+
+impl LegacyStepOutput {
+    fn validate(&self) -> Result<(), LegacyProviderError> {
+        for frame in &self.live.resource_scenes {
+            frame.value.validate()?;
+        }
+        for presentation in &self.live.text_presentations {
+            presentation.value.validate()?;
+        }
+        for command in &self.live.audio_commands {
+            command.value.validate()?;
+        }
+        for command in &self.live.video {
+            command.value.validate()?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,6 +220,7 @@ struct MinoriGlobalProgressV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)]
 struct MinoriGlobalProgressSnapshotV1 {
     schema: String,
     enabled: bool,
@@ -89,22 +229,10 @@ struct MinoriGlobalProgressSnapshotV1 {
 }
 
 #[derive(Debug, Clone)]
-enum MinoriGlobalProgressRequest {
-    Load {
-        request_id: String,
-    },
-    Store {
-        request_id: String,
-        unlocks: Vec<Hash256>,
-    },
-}
-
-#[derive(Debug, Clone)]
 struct MinoriGlobalProgressSession {
     enabled: bool,
     loaded: bool,
     persisted_unlocks: Vec<Hash256>,
-    pending: Option<MinoriGlobalProgressRequest>,
 }
 fn message_input_keys() -> Vec<String> {
     MINORI_MESSAGE_HOST_AWAIT_CONTROLS
@@ -168,6 +296,7 @@ fn minori_message_presentation(
 }
 
 struct MinoriSession {
+    #[allow(dead_code)]
     case_fingerprint: Hash256,
     mount_set_id: String,
     fixed_delta_ns: u64,
@@ -191,7 +320,7 @@ struct MinoriSession {
 #[derive(Default)]
 pub struct MinoriRuntimeProvider {
     vfs: Option<Arc<dyn LegacyVfsReader>>,
-    host_services: Option<Arc<dyn LegacyFamilyHostServicesV9>>,
+    host_services: Option<LegacyFamilyHostServicesV9>,
     sessions: BTreeMap<String, MinoriSession>,
 }
 
@@ -204,12 +333,9 @@ impl MinoriRuntimeProvider {
         }
     }
 
-    pub fn with_host_services(
-        vfs: Arc<dyn LegacyVfsReader>,
-        host_services: Arc<dyn LegacyFamilyHostServicesV9>,
-    ) -> Self {
+    pub fn with_host_services(host_services: LegacyFamilyHostServicesV9) -> Self {
         Self {
-            vfs: Some(vfs),
+            vfs: Some(Arc::clone(&host_services.vfs)),
             host_services: Some(host_services),
             sessions: BTreeMap::new(),
         }
@@ -228,7 +354,7 @@ impl MinoriRuntimeProvider {
         })
     }
 
-    fn host_services(&self) -> Result<&Arc<dyn LegacyFamilyHostServicesV9>, LegacyProviderError> {
+    fn host_services(&self) -> Result<&LegacyFamilyHostServicesV9, LegacyProviderError> {
         self.host_services.as_ref().ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
@@ -239,10 +365,9 @@ impl MinoriRuntimeProvider {
 }
 
 pub fn create_static_minori_provider(
-    vfs: Arc<dyn LegacyVfsReader>,
-    host_services: Arc<dyn LegacyFamilyHostServicesV9>,
+    host_services: LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError> {
-    let provider = MinoriRuntimeProvider::with_host_services(vfs, host_services);
+    let provider = MinoriRuntimeProvider::with_host_services(host_services);
     provider.descriptor().validate()?;
     Ok(Box::new(provider))
 }
@@ -425,11 +550,11 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .map(String::as_str)
         {
             None => false,
-            Some(MINORI_PLATFORM_STORAGE_PROVIDER_ID) => true,
+            Some(MINORI_WRITABLE_FILE_BINDING_ID) => true,
             Some(_) => {
                 return Err(invalid(
                     "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_PROVIDER",
-                    "global progress requires the explicitly bound platform storage provider",
+                    "global progress requires the explicitly bound v9 writable-file port",
                 ));
             }
         };
@@ -457,7 +582,6 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     enabled: global_progress_enabled,
                     loaded: !global_progress_enabled,
                     persisted_unlocks: Vec::new(),
-                    pending: None,
                 },
                 poisoned: false,
             },
@@ -469,11 +593,32 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
         session_id: &LegacyRuntimeSessionId,
+        input: LegacyStepInput,
+    ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
+        let staged = self.step_staged(ctx, session_id, input)?;
+        publish_v9_output(staged)
+    }
+
+    fn shutdown(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session_id: &LegacyRuntimeSessionId,
+    ) -> Result<LegacyShutdownReport, LegacyProviderError> {
+        self.shutdown_session_impl(ctx, session_id)
+    }
+}
+
+impl MinoriRuntimeProvider {
+    fn step_staged(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session_id: &LegacyRuntimeSessionId,
         mut input: LegacyStepInput,
     ) -> Result<LegacyStepOutput, LegacyProviderError> {
         ctx.validate()?;
         input.validate()?;
         let vfs = Arc::clone(self.vfs()?);
+        let host_services = self.host_services()?.clone();
         let session = self
             .sessions
             .get_mut(&session_id.0)
@@ -518,11 +663,15 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 session.vm.set_pointer_primary_pressed(edge.pressed);
             }
         }
-        if session.global_progress.pending.is_some() {
-            consume_global_progress_result(session, &input)?;
-            input.provider_results.clear();
-        } else if session.global_progress.enabled && !session.global_progress.loaded {
-            return begin_global_progress_load(session, &input);
+        if !input.provider_results.is_empty() {
+            session.poisoned = true;
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_PROVIDER_RESULT_REMOVED",
+                "Family ABI v9 Minori does not accept provider-result payloads",
+            ));
+        }
+        if session.global_progress.enabled && !session.global_progress.loaded {
+            load_global_progress(host_services.writable_files.as_ref(), session_id, session)?;
         }
         let mut restore_audio = match take_restore_audio_commands(session, &vfs) {
             Ok(commands) => commands,
@@ -973,10 +1122,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             ));
         }
         let before = session.vm.state().instruction_count;
-        let event = match session
-            .vm
-            .step(input.tick_index, input.budget.max_instructions)
-        {
+        let event = match session.vm.step(input.tick_index, MAX_INSTRUCTIONS_PER_STEP) {
             Ok(event) => event,
             Err(error) => {
                 let command = session.vm.take_executed_commands().last().cloned();
@@ -1656,10 +1802,15 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 value: "true".into(),
             });
         }
-        append_global_progress_store(session, &mut output)?;
+        store_global_progress_if_changed(
+            host_services.writable_files.as_ref(),
+            session_id,
+            session,
+            &mut output,
+        )?;
         let restored_presentation =
             append_restored_gameplay_scene(session, &vfs, &mut output.live)?;
-        output.validate(&input.budget)?;
+        output.validate()?;
         if let Some(page) = reported_system_page {
             session.reported_system_page = Some(page);
         }
@@ -1678,6 +1829,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         Ok(output)
     }
 
+    #[allow(dead_code)]
     fn save(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -1693,12 +1845,6 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_SESSION_POISONED",
                 "poisoned session cannot be saved",
-            ));
-        }
-        if session.global_progress.pending.is_some() {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_SAVE_PENDING",
-                "session cannot be saved while global progress storage is pending",
             ));
         }
         let bytes = session.vm.snapshot_bytes().map_err(runtime_error)?;
@@ -1742,6 +1888,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         Ok(envelope)
     }
 
+    #[allow(dead_code)]
     fn restore(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -1756,12 +1903,6 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .get_mut(&session_id.0)
             .ok_or_else(session_missing)?;
         validate_session_binding(ctx, session)?;
-        if session.global_progress.pending.is_some() {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_RESTORE_PENDING",
-                "session cannot be restored while global progress storage is pending",
-            ));
-        }
         if snapshot.family_id.0 != MINORI_FAMILY_ID
             || snapshot.session_id != *session_id
             || snapshot.case_fingerprint != session.case_fingerprint
@@ -1821,7 +1962,6 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .map_err(runtime_error)?;
         session.global_progress.loaded = restored_progress.loaded;
         session.global_progress.persisted_unlocks = restored_progress.persisted_unlocks;
-        session.global_progress.pending = None;
         if session.global_progress.enabled && session.global_progress.loaded {
             session
                 .vm
@@ -1844,6 +1984,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         })
     }
 
+    #[allow(dead_code)]
     fn take_ephemeral_text(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -1859,6 +2000,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         Ok(session.ephemeral_text.remove(lease_id))
     }
 
+    #[allow(dead_code)]
     fn read_session_resource(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -1883,6 +2025,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             .read_file(&ctx.mount_set_id, resource_uri, max_bytes)
     }
 
+    #[allow(dead_code)]
     fn begin_session_resource_read(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -1909,7 +2052,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         LegacyResourceRead::spawn(move || vfs.read_file(&mount_set_id, &resource_uri, max_bytes))
     }
 
-    fn shutdown(
+    fn shutdown_session_impl(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
         session_id: &LegacyRuntimeSessionId,
@@ -3843,159 +3986,145 @@ fn decode_global_progress(bytes: &[u8]) -> Result<Vec<Hash256>, LegacyProviderEr
     Ok(progress.gallery_unlocks)
 }
 
-fn begin_global_progress_load(
+fn load_global_progress(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
     session: &mut MinoriSession,
-    input: &LegacyStepInput,
-) -> Result<LegacyStepOutput, LegacyProviderError> {
-    if !session.global_progress.enabled
-        || session.global_progress.loaded
-        || session.global_progress.pending.is_some()
-        || !input.await_results.is_empty()
-        || !input.provider_results.is_empty()
-        || input
-            .input_edges
-            .iter()
-            .any(|edge| edge.control != MINORI_CONTROL_KEY)
-    {
+) -> Result<(), LegacyProviderError> {
+    if !session.global_progress.enabled || session.global_progress.loaded {
         return Err(invalid(
             "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_LOAD_STATE",
             "global progress load was requested in an invalid session state",
         ));
     }
-    let sequence = session
-        .vm
-        .allocate_effect_sequence()
-        .map_err(runtime_error)?;
-    let token_id = format!("minori.global.progress.load.token.{sequence}");
-    let request_id = format!("minori.global.progress.load.request.{sequence}");
-    session.global_progress.pending = Some(MinoriGlobalProgressRequest::Load {
-        request_id: request_id.clone(),
-    });
-    session
-        .vm
-        .advance_provider_tick(input.tick_index)
-        .map_err(runtime_error)?;
-    let output = LegacyStepOutput {
-        status: LegacyRuntimeStatus::Awaiting,
-        live: LegacyLiveOutput::default(),
-        control: LegacyControlTransaction {
-            waits: vec![LegacyWaitRequest::ProviderCompletion {
-                token_id,
-                request_id,
-                provider_id: MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-                operation: "read".into(),
-                key: MINORI_GLOBAL_PROGRESS_SLOT.into(),
-                payload: Vec::new(),
-            }],
-            ..LegacyControlTransaction::default()
+    let stat = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::Stat {
+            path: MINORI_GLOBAL_PROGRESS_PATH.into(),
         },
-        trace: Vec::new(),
-        diagnostics: Vec::new(),
-        coverage: LegacyCoverageDelta::default(),
-        state_revision: session.vm.state().fixed_tick,
-    };
-    output.validate(&input.budget)?;
-    Ok(output)
-}
-
-fn consume_global_progress_result(
-    session: &mut MinoriSession,
-    input: &LegacyStepInput,
-) -> Result<(), LegacyProviderError> {
-    let pending = session.global_progress.pending.clone().ok_or_else(|| {
-        invalid(
-            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_RESULT_UNEXPECTED",
-            "platform storage result has no matching global progress request",
-        )
-    })?;
-    if input.provider_results.len() != 1 || !input.await_results.is_empty() {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_RESULT_COUNT",
-            "global progress requires exactly one ordered provider result",
-        ));
+    )?;
+    if !stat.exists {
+        if stat.is_file || stat.length != 0 || !stat.entries.is_empty() || !stat.bytes.is_empty() {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_STAT",
+                "missing global progress returned contradictory metadata",
+            ));
+        }
+        session.global_progress.loaded = true;
+        return Ok(());
     }
-    let result = &input.provider_results[0];
-    let (request_id, unlocks) = match pending {
-        MinoriGlobalProgressRequest::Load { request_id, .. } => {
-            let unlocks = match result.status.as_str() {
-                "missing" if result.payload.is_empty() => Vec::new(),
-                "completed" => decode_global_progress(&result.payload)?,
-                _ => {
-                    return Err(invalid(
-                        "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_LOAD_RESULT",
-                        "platform storage returned an invalid global progress load result",
-                    ));
-                }
-            };
-            (request_id, unlocks)
-        }
-        MinoriGlobalProgressRequest::Store {
-            request_id,
-            unlocks,
-            ..
-        } => {
-            if result.status != "completed" || !result.payload.is_empty() {
-                return Err(invalid(
-                    "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_STORE_RESULT",
-                    "platform storage returned an invalid global progress store result",
-                ));
-            }
-            (request_id, unlocks)
-        }
-    };
-    if result.request_id != request_id || result.provider_id != MINORI_PLATFORM_STORAGE_PROVIDER_ID
+    if !stat.is_file
+        || stat.length == 0
+        || stat.length > MAX_GLOBAL_PROGRESS_BYTES
+        || !stat.entries.is_empty()
+        || !stat.bytes.is_empty()
     {
         return Err(invalid(
-            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_RESULT_IDENTITY",
-            "platform storage result does not match the pending global progress request",
+            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_STAT",
+            "global progress stat metadata is invalid or outside its byte bound",
         ));
     }
+    let read = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::ReadRange {
+            path: MINORI_GLOBAL_PROGRESS_PATH.into(),
+            offset: 0,
+            length: stat.length,
+        },
+    )?;
+    if !read.exists
+        || !read.is_file
+        || read.length != stat.length
+        || read.bytes.len() as u64 != stat.length
+        || !read.entries.is_empty()
+        || read.written != 0
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_READ",
+            "global progress read result does not match the prior stat",
+        ));
+    }
+    let unlocks = decode_global_progress(read.bytes.as_slice())?;
     session
         .vm
         .merge_verified_gallery_unlocks(&unlocks)
         .map_err(runtime_error)?;
     session.global_progress.loaded = true;
     session.global_progress.persisted_unlocks = unlocks;
-    session.global_progress.pending = None;
     Ok(())
 }
 
-fn append_global_progress_store(
+fn store_global_progress_if_changed(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
     session: &mut MinoriSession,
     output: &mut LegacyStepOutput,
 ) -> Result<(), LegacyProviderError> {
     if !session.global_progress.enabled
         || !session.global_progress.loaded
-        || session.global_progress.pending.is_some()
         || session.vm.state().gallery_unlocks == session.global_progress.persisted_unlocks
     {
         return Ok(());
     }
     let unlocks = session.vm.state().gallery_unlocks.clone();
     let payload = encode_global_progress(&unlocks)?;
-    let sequence = session
-        .vm
-        .allocate_effect_sequence()
-        .map_err(runtime_error)?;
-    let token_id = format!("minori.global.progress.store.token.{sequence}");
-    let request_id = format!("minori.global.progress.store.request.{sequence}");
-    session.global_progress.pending = Some(MinoriGlobalProgressRequest::Store {
-        request_id: request_id.clone(),
-        unlocks,
-    });
-    output
-        .control
-        .waits
-        .push(LegacyWaitRequest::ProviderCompletion {
-            token_id,
-            request_id,
-            provider_id: MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-            operation: "write".into(),
-            key: MINORI_GLOBAL_PROGRESS_SLOT.into(),
-            payload,
-        });
-    output.status = LegacyRuntimeStatus::Awaiting;
+    let create = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+            path: MINORI_GLOBAL_PROGRESS_DIRECTORY.into(),
+        },
+    )?;
+    validate_writable_mutation_result(&create, 0, "create directory")?;
+    let truncate = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+            path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+            length: 0,
+        },
+    )?;
+    validate_writable_mutation_result(&truncate, 0, "truncate temporary progress")?;
+    let write = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+            path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+            offset: 0,
+            bytes: payload.clone(),
+        },
+    )?;
+    validate_writable_mutation_result(&write, payload.len() as u64, "write global progress")?;
+    let length = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+            path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+            length: payload.len() as u64,
+        },
+    )?;
+    validate_writable_mutation_result(&length, 0, "finalize global progress length")?;
+    let replace = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+            temporary_path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+            destination_path: MINORI_GLOBAL_PROGRESS_PATH.into(),
+        },
+    )?;
+    validate_writable_mutation_result(&replace, 0, "replace global progress")?;
+    session.global_progress.persisted_unlocks = unlocks;
     output.state_revision = session.vm.state().fixed_tick;
+    Ok(())
+}
+
+fn validate_writable_mutation_result(
+    result: &astra_emu_family_api::LegacyWritableFileResultV1,
+    expected_written: u64,
+    operation: &'static str,
+) -> Result<(), LegacyProviderError> {
+    if !result.entries.is_empty() || !result.bytes.is_empty() || result.written != expected_written
+    {
+        return Err(LegacyProviderError::invalid(
+            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+            format!("writable-file result for {operation} is invalid"),
+        ));
+    }
     Ok(())
 }
 
@@ -4379,7 +4508,7 @@ fn system_ui_output(
     let reported_gallery_unlock_count =
         append_gallery_unlock_observation(session, &mut output.control)?;
     let reported_choice_active = append_choice_active_observation(session, &mut output.control)?;
-    output.validate(&input.budget)?;
+    output.validate()?;
     if let Some(page) = reported_system_page {
         session.reported_system_page = Some(page);
     }
@@ -4525,7 +4654,7 @@ fn gameplay_resume_output(
     let reported_gallery_unlock_count =
         append_gallery_unlock_observation(session, &mut output.control)?;
     let reported_choice_active = append_choice_active_observation(session, &mut output.control)?;
-    output.validate(&input.budget)?;
+    output.validate()?;
     if let Some(page) = reported_system_page {
         session.reported_system_page = Some(page);
     }
@@ -5029,7 +5158,7 @@ fn waiting_output(
     live: LegacyLiveOutput,
     event: Option<LegacyEvent>,
     publish_rebound_wait: bool,
-    input: &LegacyStepInput,
+    _input: &LegacyStepInput,
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
     let mut output = LegacyStepOutput {
         status: LegacyRuntimeStatus::Awaiting,
@@ -5055,7 +5184,7 @@ fn waiting_output(
     let reported_gallery_unlock_count =
         append_gallery_unlock_observation(session, &mut output.control)?;
     let reported_choice_active = append_choice_active_observation(session, &mut output.control)?;
-    output.validate(&input.budget)?;
+    output.validate()?;
     if let Some(page) = reported_system_page {
         session.reported_system_page = Some(page);
     }
@@ -5495,10 +5624,6 @@ fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
         } => LegacyWaitRequest::ProviderCompletion {
             token_id: token_id.clone(),
             request_id: request_id.clone(),
-            provider_id: "astra.family.provider".into(),
-            operation: "complete".into(),
-            key: request_id.clone(),
-            payload: Vec::new(),
         },
     }
 }
@@ -5515,6 +5640,35 @@ fn wait_token(wait: &MinoriWaitState) -> &str {
         | MinoriWaitState::Presentation { token_id, .. }
         | MinoriWaitState::Provider { token_id, .. } => token_id,
     }
+}
+
+fn publish_v9_output(staged: LegacyStepOutput) -> Result<LegacyStepOutputV9, LegacyProviderError> {
+    if staged.live.clear_text
+        || !staged.live.resource_scenes.is_empty()
+        || !staged.live.text_presentations.is_empty()
+        || !staged.live.text.is_empty()
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_V9_PRESENTATION_NOT_MIGRATED",
+            "Minori presentation requires the ABI v9 Host surface and MultiLayer renderer",
+        ));
+    }
+    let output = LegacyStepOutputV9 {
+        status: staged.status,
+        live: LegacyLiveOutputV9 {
+            layers: Vec::new(),
+            audio: staged.live.audio,
+            audio_commands: staged.live.audio_commands,
+            video: staged.live.video,
+        },
+        control: staged.control,
+        trace: staged.trace,
+        diagnostics: staged.diagnostics,
+        coverage: staged.coverage,
+        state_revision: staged.state_revision,
+    };
+    output.validate()?;
+    Ok(output)
 }
 
 fn validate_session_binding(
