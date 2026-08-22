@@ -118,6 +118,7 @@ pub struct ConcurrentProductRuntimeHost {
     sessions: Arc<Mutex<BTreeMap<String, Arc<SessionMailbox>>>>,
     control: Arc<Mutex<ConcurrentControl>>,
     runtime_binding: Option<ValidatedRuntimeProviderSelection>,
+    presentation_lane: astra_plugin_abi::RuntimePresentationLane,
     timeout: Duration,
     worker_budget: WorkerBudgetBroker,
 }
@@ -199,6 +200,9 @@ impl ConcurrentProductRuntimeHost {
                 "runtime host timeout must be greater than zero",
             ));
         }
+        let descriptor = factory.descriptor().map_err(|message| {
+            RuntimeHostError::new("ASTRA_RUNTIME_PROVIDER_DESCRIPTOR_UNAVAILABLE", message)
+        })?;
         let instance_id = ProviderInstanceId(instance_id.into());
         if instance_id.0.trim().is_empty() {
             return Err(RuntimeHostError::new(
@@ -225,6 +229,7 @@ impl ConcurrentProductRuntimeHost {
                 poisoned: false,
             })),
             runtime_binding,
+            presentation_lane: descriptor.presentation_lane,
             timeout,
             worker_budget: WorkerBudgetBroker::global().clone(),
         })
@@ -329,6 +334,7 @@ impl ConcurrentProductRuntimeHost {
         let state = Arc::clone(&entry.state);
         let poison_entry = Arc::clone(&state);
         let limits = self.limits.clone();
+        let presentation_lane = self.presentation_lane;
         let result = self
             .invoke_session(&entry, "step", move || {
                 let mut session = state.lock().map_err(|_| {
@@ -342,6 +348,7 @@ impl ConcurrentProductRuntimeHost {
                 match output {
                     Ok(output) if output.session_id == session_id => {
                         limits.validate_output_bounds(&output)?;
+                        limits.validate_presentation_lane(&output, presentation_lane)?;
                         session.last_fixed_step = Some(fixed_step);
                         session.next_step_mode = RuntimeStepMode::Live;
                         Ok(output)
@@ -1632,6 +1639,7 @@ fn runtime_live_output(value: FfiRuntimeLiveOutput) -> Result<RuntimeLiveOutput,
     let vn_step = value.vn_step.into_option().map(|step| step.into_runtime());
     Ok(RuntimeLiveOutput {
         clear_text: value.clear_text,
+        layers: Vec::new(),
         scenes,
         resource_scenes,
         audio,

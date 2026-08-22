@@ -7,6 +7,8 @@ ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
 
+2026-08-23 focused v9 consumer evidence remains E1: the dynamic loader four-port bridge, retained writable surface store and Product presentation-lane validation pass their incremental checks. FVP、CLI、Manager、Headless composition 和 Minori v9 真实样本 E2 仍未完成。
+
 本矩阵把 Stage 1-8 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-6 仍包含未实现目标路径；Stage 7/8 是 AstraRPG planned extension，测试项先作为 `SPEC_READY` 迁移目标。
 
 | Test ID | Stage | Test Project | Planned Path | Command | Covered Work IDs | Gate Domain | Expected Evidence |

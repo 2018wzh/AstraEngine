@@ -829,6 +829,10 @@ pub struct RuntimeLiveOutput {
     /// Requests removal of every retained ephemeral-text layout before this
     /// step's replacement text batch is presented.
     pub clear_text: bool,
+    /// Host-owned retained Layer2D transactions. A provider descriptor binds
+    /// exactly one presentation lane; Layer2D providers must leave the legacy
+    /// Scene2D and ephemeral-text collections empty.
+    pub layers: Vec<RuntimeLiveLayerTransaction>,
     pub scenes: Vec<RuntimeLiveSceneTransaction>,
     pub resource_scenes: Vec<RuntimeLiveResourceScene>,
     pub audio: Vec<RuntimeLiveAudioPacket>,
@@ -852,6 +856,87 @@ pub struct RuntimeLiveOutput {
     pub state_revision: u64,
     pub coverage: RuntimeLiveCoverage,
     pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveSurfaceFormat {
+    Rgba8SrgbPremultiplied,
+    Bgra8SrgbPremultiplied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLiveDamageRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeLiveSurfaceDamage {
+    Unchanged,
+    Full,
+    Rects(Vec<RuntimeLiveDamageRect>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeLiveLayerTransform {
+    pub m11: f32,
+    pub m12: f32,
+    pub m21: f32,
+    pub m22: f32,
+    pub tx: f32,
+    pub ty: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveLayerBlend {
+    Opaque,
+    Alpha,
+    Add,
+    Multiply,
+    Screen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveLayerFilter {
+    Nearest,
+    Linear,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveLayerState {
+    pub layer_id: String,
+    pub role: String,
+    pub z_index: i32,
+    pub surface_id: String,
+    pub generation: u64,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub format: RuntimeLiveSurfaceFormat,
+    pub damage: RuntimeLiveSurfaceDamage,
+    pub transform: RuntimeLiveLayerTransform,
+    pub clip: Option<RuntimeLiveDamageRect>,
+    pub opacity: f32,
+    pub texture_filter: RuntimeLiveLayerFilter,
+    pub blend: RuntimeLiveLayerBlend,
+    pub filter_graph_binding: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeLiveLayerOperation {
+    Create(RuntimeLiveLayerState),
+    Update(RuntimeLiveLayerState),
+    Destroy { layer_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveLayerTransaction {
+    pub sequence: u64,
+    pub viewport_width: u32,
+    pub viewport_height: u32,
+    pub operations: Vec<RuntimeLiveLayerOperation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

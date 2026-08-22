@@ -337,6 +337,14 @@ python Tools/check_docs.py
 3. 在具备足够空间的私有缓存卷复核 cache identity，并补齐 Manager media preview、Linux FUSE 与 macOS extract 证据。
 4. 使用同一 build/profile/package/input identity 进入 Windows Manager E3；在此之前不把 Headless E2 写成平台完成。
 
+### 2026-08-23 ABI v9 Host bridge 与 surface ownership
+
+- 当前分支已包含修正后的 ABI 基线 `3f9a771ac`。动态 family loader 现在接收完整 `LegacyFamilyHostServicesV9`，FFI 回调逐项转发 VFS、可写 surface、同步 Hook 和 writable-file；create 失败或 instance 销毁时会移除整组 Host services。旧 VFS-only token 不再保留。
+- `astra-emu-family-support` 新增公共 surface store。它在 lease 发出期间移走 retained allocation，commit 后收回同一 allocation；generation、session、fixed step、尺寸、格式、单 surface 配额和总配额均严格校验。定向测试确认 Rust 路径的指针在 commit 和下一次 acquire 间保持不变，并覆盖重复 lease 与错误 fixed step。
+- Manager runtime adapter 已删除 v9 不再提供的 Scene2D、ephemeral text、session resource 和 family snapshot 调用，并开始把 family `Layer2D` transaction 映射到 Product live output。同步 Hook 取代 provider completion；family 若仍提交旧 completion wait 会返回 `ASTRA_EMU_PROVIDER_COMPLETION_REMOVED`，不会构造空 payload 继续运行。
+- Product host 会按 descriptor 阻断 presentation lane 混用。`Scene2D` provider 不能提交 Layer2D；`Layer2D` provider 不能提交旧 scene 或 ephemeral-text payload。
+- 当前证据仅包括 `astra-emu-manager-core --lib` 编译、surface store 2 项测试、`astra-plugin-abi` 单元测试、Product host 定向回归和 Concurrent host 3 项测试。FVP 仍保留待迁移的 v7 scene/text/save consumer，导致 CLI 与 Manager 的完整测试目标无法编译；Minori text surface、translation Hook、writable-file composition 和新的 Headless E2 也尚未完成。因此 ABI v8 的路线证据继续只作历史基线。
+
 ### 2026-08-12 结局返回标题与 choice 视觉复核
 
 - `origin/master` 的最新提交已是当前分支祖先，本轮 rebase 为 no-op；工作树中的实现与私有研究产物未被覆盖。

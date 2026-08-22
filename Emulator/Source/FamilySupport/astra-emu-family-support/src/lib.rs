@@ -10,6 +10,7 @@ mod private_profile;
 mod profile;
 mod registry;
 mod runtime_vfs;
+mod surface_host;
 #[cfg(test)]
 mod test_support;
 mod verify;
@@ -25,6 +26,7 @@ pub use private_profile::*;
 pub use profile::*;
 pub use registry::*;
 pub use runtime_vfs::*;
+pub use surface_host::*;
 pub use verify::*;
 pub use viewer::*;
 

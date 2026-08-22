@@ -182,9 +182,9 @@ impl FvpRuntimeProvider {
 }
 
 pub fn create_static_fvp_provider(
-    vfs: Arc<dyn LegacyVfsReader>,
+    host_services: astra_emu_family_api::LegacyFamilyHostServicesV9,
 ) -> Result<Box<dyn LegacyRuntimeProvider>, LegacyProviderError> {
-    let provider = FvpRuntimeProvider::with_vfs(vfs);
+    let provider = FvpRuntimeProvider::with_vfs(host_services.vfs);
     provider.descriptor().validate()?;
     Ok(Box::new(provider))
 }
