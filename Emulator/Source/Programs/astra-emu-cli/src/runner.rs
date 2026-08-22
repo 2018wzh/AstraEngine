@@ -2980,7 +2980,7 @@ fn probe_profile(
                     ),
                     (
                         "astra.provider.storage".into(),
-                        "astra.platform.storage".into(),
+                        "astra.writable_file.v1".into(),
                     ),
                 ]
                 .into_iter()

@@ -1,7 +1,9 @@
 use std::{env, fs, process::Command};
 
-use astra_emu_family_api::LEGACY_FAMILY_ABI_FINGERPRINT;
-use serde_json::json;
+use astra_emu_family_api::{
+    FamilyId, LegacyFamilyCoreKind, LegacyFamilyPluginDescriptor, LegacyFamilyPresentationMode,
+    LEGACY_FAMILY_ABI_FINGERPRINT,
+};
 use sha2::{Digest, Sha256};
 
 fn main() {
@@ -48,19 +50,35 @@ fn main() {
     let feature_fingerprint = format!("sha256.{}", hex_sha256(feature_identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_MINORI_FEATURE_FINGERPRINT={feature_fingerprint}");
 
-    let descriptor = json!({
-        "family_id": "minori",
-        "plugin_id": "astra.emu.minori",
-        "provider_id": "astra.emu.family.minori",
-        "engine_version": env::var("CARGO_PKG_VERSION").expect("ASTRA_MINORI_VERSION_MISSING"),
-        "rustc_fingerprint": rustc_fingerprint,
-        "feature_fingerprint": feature_fingerprint,
-        "abi_fingerprint": LEGACY_FAMILY_ABI_FINGERPRINT,
-        "supported_formats": ["minori.sc", "minori.paz", "minori.ani", "minori.sqz"],
-        "permissions": ["vfs.read", "media.submit", "storage.request"],
-        "report_redaction": "astra.emu.redaction.v1",
-        "license": "MPL-2.0"
-    });
+    let descriptor = LegacyFamilyPluginDescriptor {
+        family_id: FamilyId("minori".into()),
+        plugin_id: "astra.emu.minori".into(),
+        provider_id: "astra.emu.family.minori".into(),
+        core_kind: LegacyFamilyCoreKind::Native,
+        presentation_mode: LegacyFamilyPresentationMode::MultiLayer,
+        engine_version: env::var("CARGO_PKG_VERSION").expect("ASTRA_MINORI_VERSION_MISSING"),
+        rustc_fingerprint,
+        feature_fingerprint,
+        abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
+        supported_formats: vec![
+            "minori.sc".into(),
+            "minori.paz".into(),
+            "minori.ani".into(),
+            "minori.sqz".into(),
+        ],
+        permissions: vec![
+            "vfs.read".into(),
+            "surface.write".into(),
+            "hook.invoke".into(),
+            "media.submit".into(),
+            "writable_file".into(),
+        ],
+        report_redaction: "astra.emu.redaction.v1".into(),
+        license: "MPL-2.0".into(),
+    };
+    descriptor
+        .validate()
+        .expect("ASTRA_MINORI_DESCRIPTOR_INVALID");
     let out_dir = env::var_os("OUT_DIR").expect("ASTRA_MINORI_OUT_DIR_MISSING");
     fs::write(
         std::path::Path::new(&out_dir).join("astra-minori-descriptor.json"),

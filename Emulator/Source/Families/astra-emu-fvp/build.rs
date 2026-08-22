@@ -1,7 +1,9 @@
 use std::{env, fs, path::Path, process::Command};
 
-use astra_emu_family_api::LEGACY_FAMILY_ABI_FINGERPRINT;
-use serde_json::json;
+use astra_emu_family_api::{
+    FamilyId, LegacyFamilyCoreKind, LegacyFamilyPluginDescriptor, LegacyFamilyPresentationMode,
+    LEGACY_FAMILY_ABI_FINGERPRINT,
+};
 use sha2::{Digest, Sha256};
 
 fn main() {
@@ -46,21 +48,27 @@ fn main() {
     let feature_identity = format!("rfvp={hosted_fork_revision};features={feature_identity}");
     let feature_fingerprint = format!("sha256.{}", hex_sha256(feature_identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_FVP_FEATURE_FINGERPRINT={feature_fingerprint}");
-    let descriptor = json!({
-        "family_id": "fvp",
-        "plugin_id": "astra.emu.fvp",
-        "provider_id": "astra.emu.family.fvp",
-        "core_kind": "ported",
-        "presentation_mode": "single_layer",
-        "engine_version": env::var("CARGO_PKG_VERSION").expect("ASTRA_FVP_VERSION_MISSING"),
-        "rustc_fingerprint": rustc_fingerprint,
-        "feature_fingerprint": feature_fingerprint,
-        "abi_fingerprint": LEGACY_FAMILY_ABI_FINGERPRINT,
-        "supported_formats": ["fvp.hcb", "fvp.bin", "fvp.nvsg", "fvp.hzc1"],
-        "permissions": ["vfs.read", "surface.write", "hook.invoke", "writable_file", "media.submit"],
-        "report_redaction": "astra.emu.redaction.v1",
-        "license": "MPL-2.0"
-    });
+    let descriptor = LegacyFamilyPluginDescriptor {
+        family_id: FamilyId("fvp".into()),
+        plugin_id: "astra.emu.fvp".into(),
+        provider_id: "astra.emu.family.fvp".into(),
+        core_kind: LegacyFamilyCoreKind::Ported,
+        presentation_mode: LegacyFamilyPresentationMode::SingleLayer,
+        engine_version: env::var("CARGO_PKG_VERSION").expect("ASTRA_FVP_VERSION_MISSING"),
+        rustc_fingerprint,
+        feature_fingerprint,
+        abi_fingerprint: LEGACY_FAMILY_ABI_FINGERPRINT.into(),
+        supported_formats: vec![
+            "fvp.hcb".into(),
+            "fvp.bin".into(),
+            "fvp.nvsg".into(),
+            "fvp.hzc1".into(),
+        ],
+        permissions: vec!["vfs.read".into(), "media.submit".into()],
+        report_redaction: "astra.emu.redaction.v1".into(),
+        license: "MPL-2.0".into(),
+    };
+    descriptor.validate().expect("ASTRA_FVP_DESCRIPTOR_INVALID");
     let out_dir = env::var_os("OUT_DIR").expect("ASTRA_FVP_OUT_DIR_MISSING");
     fs::write(
         std::path::Path::new(&out_dir).join("astra-fvp-descriptor.json"),
