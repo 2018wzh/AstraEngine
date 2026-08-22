@@ -7,7 +7,7 @@
 - 当前分支已基于 Family ABI v9 的可写 surface lease 修正提交 `3f9a771ac` 继续开发。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合改为 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
 - v9 删除了旧 scene transaction、family snapshot、ephemeral text、session resource presentation 和 step budget。旧接口不保留兼容层，也不会在缺少 surface、Hook、字体、decode 或 writable-file provider 时回退。
 - Minori dylib 已改用公共 `FfiLegacyFamilyHostAdapter`，不再维护私有 FFI host adapter；surface lease 采用独占、可写、零拷贝 owner，禁止 immutable buffer、复制回写和 const-cast。旧 save/restore/text/resource 导出已从 root module 删除。
-- 定向 `cargo check -p astra-emu-minori` 已通过。全局进度开始迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。当前呈现会在 `ASTRA_EMU_MINORI_V9_PRESENTATION_NOT_MIGRATED` 明确阻断，直到 Hook、family-owned decode/font/shaping/raster 和 MultiLayer surface transaction 全部接通。provider 旧测试仍待迁移，不能据此恢复 E1/E2 状态。
+- 定向 `cargo check -p astra-emu-minori` 已通过。全局进度已迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。resource image surface 与 MultiLayer transaction 已在后续 slice 接通；同步 Hook、font/shaping 与 text surface 仍会明确阻断，不能据此恢复 E2 状态。
 - 下文所有 ABI v8 真实样本结果只保留为迁移前行为与回归基线，不能证明 v9 plugin 可加载、可运行或通过 E2。迁移期间不得把旧报告重标为当前证据。
 
 ## 2026-08-22
@@ -379,7 +379,7 @@ python Tools/check_docs.py
 - 分支已基于 ABI v9 可写 surface 修正 `3f9a771ac`。Minori 使用共享 `FfiLegacyFamilyHostAdapter` 获取 VFS、surface、Hook 和 writable-file 四个 Host port；不存在 immutable surface、复制回退或 const-cast。
 - resource scene 已进入 ABI v9 的 `Native + MultiLayer` 主路径。family 按已确认的 texture id 域拆分 background、foreground、effect、panel 四层；未知 id 直接返回 `ASTRA_EMU_MINORI_LAYER_CLASSIFICATION`，不按资源名猜测。
 - 图像继续由 `image` 解码，四层栅格复用 `astra-media-core::CpuRendererProvider`。输出按 Host lease 的 stride 写入独占 `OwnedWritableByteBuffer`，提交 full damage 后生成 retained `LegacyLayerTransactionV9`；没有 Minori 私有 rasterizer、surface 镜像或 ABI payload copy。
-- 当前 slice 的 library clippy 已通过。同步 translation Hook 和 CosmicText text surface 尚未迁移；遇到实际文字呈现会以 `ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED` 阻断并毒化 session。因此历史 ABI v8 Headless 路线仅作行为回归基线，本轮不能声明新的 E2。
+- 119 个既有 Minori library tests 已通过。旧 provider-result storage 用例已经删除，改为验证同步 writable-file 的原子写 round-trip。新增用例覆盖四个 exclusive Host surface、带 padding 的 stride、premultiplied RGBA、full damage 与四层 create transaction。同步 translation Hook 和 CosmicText text surface 尚未迁移；实际文字呈现会返回 `ASTRA_EMU_MINORI_V9_TEXT_NOT_MIGRATED`，随后毒化 session。因此，历史 ABI v8 Headless 路线只作行为回归基线，本轮不能声明新的 E2。
 
 ### 2026-08-22 Config 动作与状态层
 

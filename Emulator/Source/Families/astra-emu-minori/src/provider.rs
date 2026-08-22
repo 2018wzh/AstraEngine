@@ -628,6 +628,16 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
 }
 
 impl MinoriRuntimeProvider {
+    #[cfg(test)]
+    fn step(
+        &mut self,
+        ctx: &LegacyRuntimeHostCtx,
+        session_id: &LegacyRuntimeSessionId,
+        input: LegacyStepInput,
+    ) -> Result<LegacyStepOutput, LegacyProviderError> {
+        self.step_staged(ctx, session_id, input)
+    }
+
     fn step_staged(
         &mut self,
         ctx: &LegacyRuntimeHostCtx,
@@ -5755,7 +5765,7 @@ fn publish_v9_output(
             &mount_set_id,
             fixed_step,
             layer_sequence,
-            session,
+            &mut session.published_layers,
             &resource_scene.value,
         )?
     } else {
@@ -5825,7 +5835,7 @@ fn publish_resource_scene(
     mount_set_id: &str,
     fixed_step: u64,
     sequence: u64,
-    session: &mut MinoriSession,
+    published_layers: &mut BTreeSet<String>,
     frame: &LegacyRenderResourceFrameV1,
 ) -> Result<Vec<LegacyLayerTransactionV9>, LegacyProviderError> {
     frame.validate()?;
@@ -5882,7 +5892,7 @@ fn publish_resource_scene(
                 damage: LegacySurfaceDamageV9::Full,
             },
         )?;
-        let operation = if session.published_layers.insert(layer_id) {
+        let operation = if published_layers.insert(layer_id) {
             LegacyLayerOperationV9::Create(state)
         } else {
             LegacyLayerOperationV9::Update(state)
@@ -6296,9 +6306,7 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
 #[cfg(test)]
 mod tests {
     use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
-    use astra_emu_family_api::{
-        LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode, LegacyStepBudget,
-    };
+    use astra_emu_family_api::{LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode};
     use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
     use super::*;
@@ -6354,6 +6362,167 @@ mod tests {
                 revision: stat.revision,
                 bytes: bytes.into(),
             })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingSurfaceHost {
+        commits: std::sync::Mutex<Vec<RecordedSurfaceCommit>>,
+    }
+
+    struct RecordedSurfaceCommit {
+        surface_id: String,
+        generation: u64,
+        stride: u32,
+        pixels: Vec<u8>,
+    }
+
+    impl astra_emu_family_api::LegacySurfaceHostV9 for RecordingSurfaceHost {
+        fn acquire(
+            &self,
+            session_id: &str,
+            fixed_step: u64,
+            surface_id: &str,
+            width: u32,
+            height: u32,
+            format: LegacySurfaceFormatV9,
+        ) -> Result<astra_emu_family_api::LegacySurfaceLeaseV9, LegacyProviderError> {
+            assert_eq!(session_id, "session.surface");
+            assert_eq!(fixed_step, 1);
+            assert_eq!(format, LegacySurfaceFormatV9::Rgba8SrgbPremultiplied);
+            let stride = width.checked_mul(4).unwrap().checked_add(8).unwrap();
+            let len = usize::try_from(u64::from(stride) * u64::from(height)).unwrap();
+            Ok(astra_emu_family_api::LegacySurfaceLeaseV9 {
+                lease_id: format!("lease.{surface_id}"),
+                surface_id: surface_id.into(),
+                generation: 1,
+                width,
+                height,
+                stride,
+                format,
+                pixels: astra_byte_source::OwnedWritableByteBuffer::from_vec(vec![0xcc; len]),
+            })
+        }
+
+        fn commit(
+            &self,
+            session_id: &str,
+            fixed_step: u64,
+            commit: LegacySurfaceCommitV9,
+        ) -> Result<(), LegacyProviderError> {
+            assert_eq!(session_id, "session.surface");
+            assert_eq!(fixed_step, 1);
+            commit.validate()?;
+            assert_eq!(commit.damage, LegacySurfaceDamageV9::Full);
+            self.commits.lock().unwrap().push(RecordedSurfaceCommit {
+                surface_id: commit.lease.surface_id,
+                generation: commit.lease.generation,
+                stride: commit.lease.stride,
+                pixels: commit.lease.pixels.as_slice().to_vec(),
+            });
+            Ok(())
+        }
+    }
+
+    struct UnboundHookHost;
+
+    impl astra_emu_family_api::LegacyHookHostV1 for UnboundHookHost {
+        fn invoke(
+            &self,
+            _invocation: astra_emu_family_api::LegacyHookInvocationV1,
+        ) -> Result<astra_emu_family_api::LegacyHookResultV1, LegacyProviderError> {
+            Ok(astra_emu_family_api::LegacyHookResultV1 {
+                status: astra_emu_family_api::LegacyHookStatusV1::Unbound,
+                payload: Vec::new().into(),
+                diagnostics: Vec::new(),
+            })
+        }
+    }
+
+    struct RejectWritableFiles;
+
+    impl astra_emu_family_api::LegacyWritableFileHostV1 for RejectWritableFiles {
+        fn execute(
+            &self,
+            _session_id: &str,
+            _request: astra_emu_family_api::LegacyWritableFileRequestV1,
+        ) -> Result<astra_emu_family_api::LegacyWritableFileResultV1, LegacyProviderError> {
+            Err(invalid(
+                "TEST_WRITABLE_UNEXPECTED",
+                "surface test must not access writable files",
+            ))
+        }
+    }
+
+    #[test]
+    fn v9_resource_scene_writes_exclusive_host_surfaces_and_multilayer_transaction() {
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(
+                &[
+                    255, 0, 0, 128, 255, 0, 0, 128, 255, 0, 0, 128, 255, 0, 0, 128,
+                ],
+                2,
+                2,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([("minori:/bg/test.png".into(), png)]),
+        });
+        let resource = read_texture_resource(&vfs, "mount.test", "minori:/bg/test.png", 1).unwrap();
+        let mut draws = Vec::new();
+        append_texture_draw(&resource, 0, 0, 1.0, &mut draws).unwrap();
+        let frame = LegacyRenderResourceFrameV1 {
+            width: 2,
+            height: 2,
+            texture_resources: vec![resource],
+            draws,
+        };
+        let surfaces = Arc::new(RecordingSurfaceHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs: Arc::clone(&vfs),
+            surfaces: surfaces.clone(),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::new(RejectWritableFiles),
+        };
+        let mut published_layers = BTreeSet::new();
+        let transactions = publish_resource_scene(
+            &services,
+            &vfs,
+            &LegacyRuntimeSessionId("session.surface".into()),
+            "mount.test",
+            1,
+            7,
+            &mut published_layers,
+            &frame,
+        )
+        .unwrap();
+        assert_eq!(transactions.len(), 1);
+        assert_eq!(transactions[0].sequence, 7);
+        assert_eq!(transactions[0].operations.len(), 4);
+        assert!(transactions[0]
+            .operations
+            .iter()
+            .all(|operation| matches!(operation, LegacyLayerOperationV9::Create(_))));
+        assert_eq!(published_layers.len(), 4);
+
+        let commits = surfaces.commits.lock().unwrap();
+        assert_eq!(commits.len(), 4);
+        let background = commits
+            .iter()
+            .find(|commit| commit.surface_id == "minori.surface.background")
+            .unwrap();
+        assert_eq!(background.generation, 1);
+        assert_eq!(background.stride, 16);
+        assert_eq!(&background.pixels[..4], &[128, 0, 0, 128]);
+        assert_eq!(&background.pixels[8..16], &[0; 8]);
+        for commit in commits
+            .iter()
+            .filter(|commit| commit.surface_id != "minori.surface.background")
+        {
+            assert_eq!(commit.stride, 16);
+            assert!(commit.pixels.iter().all(|byte| *byte == 0));
         }
     }
 
@@ -6433,14 +6602,77 @@ mod tests {
         assert!(!provider.has_active_sessions());
     }
 
+    struct ScriptedWritableFiles {
+        exchanges: std::sync::Mutex<
+            std::collections::VecDeque<(
+                astra_emu_family_api::LegacyWritableFileRequestV1,
+                astra_emu_family_api::LegacyWritableFileResultV1,
+            )>,
+        >,
+    }
+
+    impl ScriptedWritableFiles {
+        fn new(
+            exchanges: impl IntoIterator<
+                Item = (
+                    astra_emu_family_api::LegacyWritableFileRequestV1,
+                    astra_emu_family_api::LegacyWritableFileResultV1,
+                ),
+            >,
+        ) -> Self {
+            Self {
+                exchanges: std::sync::Mutex::new(exchanges.into_iter().collect()),
+            }
+        }
+
+        fn assert_consumed(&self) {
+            assert!(self.exchanges.lock().unwrap().is_empty());
+        }
+    }
+
+    impl astra_emu_family_api::LegacyWritableFileHostV1 for ScriptedWritableFiles {
+        fn execute(
+            &self,
+            session_id: &str,
+            request: astra_emu_family_api::LegacyWritableFileRequestV1,
+        ) -> Result<astra_emu_family_api::LegacyWritableFileResultV1, LegacyProviderError> {
+            assert_eq!(session_id, "session.progress");
+            let (expected, result) = self
+                .exchanges
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected writable-file request");
+            assert_eq!(request, expected);
+            Ok(result)
+        }
+    }
+
+    fn writable_result(
+        exists: bool,
+        is_file: bool,
+        length: u64,
+        bytes: Vec<u8>,
+        written: u64,
+    ) -> astra_emu_family_api::LegacyWritableFileResultV1 {
+        astra_emu_family_api::LegacyWritableFileResultV1 {
+            exists,
+            is_file,
+            length,
+            entries: Vec::new(),
+            bytes: bytes.into(),
+            written,
+        }
+    }
+
     #[test]
-    fn provider_round_trips_verified_global_progress_through_platform_storage() {
-        let script = b".setglobal REN_CLEAR = 1\r\n.end\r\n".to_vec();
+    fn global_progress_round_trips_through_synchronous_writable_file_port() {
+        let script = b".end\r\n".to_vec();
         let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
             scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
         }));
         let ctx = context();
-        let session = provider
+        let session_id = provider
             .open(
                 &ctx,
                 LegacyOpenRequest {
@@ -6452,190 +6684,95 @@ mod tests {
                     compatibility_profile: "minori.reference".into(),
                     family_options: BTreeMap::from([(
                         MINORI_GLOBAL_PROGRESS_OPTION.into(),
-                        MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
+                        MINORI_WRITABLE_FILE_BINDING_ID.into(),
                     )]),
                 },
             )
             .unwrap();
-
-        let mut load_input = step_input(1, Vec::new());
-        load_input.input_edges = vec![astra_emu_family_api::LegacyInputEdge {
-            control: MINORI_CONTROL_KEY.into(),
-            pressed: true,
-            value: 1.0,
-            sequence: 1,
-        }];
-        let load = provider.step(&ctx, &session, load_input).unwrap();
-        assert_eq!(load.status, LegacyRuntimeStatus::Awaiting);
-        let LegacyWaitRequest::ProviderCompletion {
-            request_id: load_request_id,
-            provider_id,
-            operation,
-            key,
-            payload,
-            ..
-        } = &load.control.waits[0]
-        else {
-            panic!("expected platform storage load")
-        };
-        assert_eq!(provider_id, MINORI_PLATFORM_STORAGE_PROVIDER_ID);
-        assert_eq!(operation, "read");
-        assert_eq!(key, MINORI_GLOBAL_PROGRESS_SLOT);
-        assert!(payload.is_empty());
-
-        let mut load_result = step_input(2, Vec::new());
-        load_result.provider_results = vec![astra_emu_family_api::LegacyProviderResult {
-            request_id: load_request_id.clone(),
-            provider_id: MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-            status: "missing".into(),
-            payload: Vec::new(),
-            sequence: 1,
-        }];
-        let store = provider.step(&ctx, &session, load_result).unwrap();
-        assert_eq!(store.status, LegacyRuntimeStatus::Awaiting);
-        let LegacyWaitRequest::ProviderCompletion {
-            request_id: store_request_id,
-            operation,
-            payload,
-            ..
-        } = &store.control.waits[0]
-        else {
-            panic!("expected platform storage write")
-        };
-        assert_eq!(operation, "write");
-        assert_eq!(
-            decode_global_progress(payload).unwrap(),
-            [Hash256::from_sha256(b"REN_CLEAR")]
-        );
-        let stored_progress = payload.clone();
-
-        let mut store_result = step_input(3, Vec::new());
-        store_result.provider_results = vec![astra_emu_family_api::LegacyProviderResult {
-            request_id: store_request_id.clone(),
-            provider_id: MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-            status: "completed".into(),
-            payload: Vec::new(),
-            sequence: 2,
-        }];
-        let terminal = provider.step(&ctx, &session, store_result).unwrap();
-        assert_eq!(terminal.status, LegacyRuntimeStatus::Terminal);
-        assert!(terminal.control.waits.is_empty());
-
-        let snapshot = provider.save(&ctx, &session).unwrap();
-        provider.restore(&ctx, &session, &snapshot).unwrap();
-        let restored_snapshot = provider.save(&ctx, &session).unwrap();
-        assert_eq!(restored_snapshot.family_sections, snapshot.family_sections);
-
-        let reopened = provider
-            .open(
-                &ctx,
-                LegacyOpenRequest {
-                    requested_session_id: LegacyRuntimeSessionId("session.progress.reopen".into()),
-                    case_fingerprint: Hash256::from_sha256(b"case"),
-                    script_uri: "minori:/scr/test.sc".into(),
-                    fixed_delta_ns: 16_666_667,
-                    session_seed: 7,
-                    compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::from([(
-                        MINORI_GLOBAL_PROGRESS_OPTION.into(),
-                        MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-                    )]),
-                },
-            )
-            .unwrap();
-        let load = provider
-            .step(&ctx, &reopened, step_input(1, Vec::new()))
-            .unwrap();
-        let LegacyWaitRequest::ProviderCompletion { request_id, .. } = &load.control.waits[0]
-        else {
-            panic!("expected reopened platform storage load")
-        };
-        let mut load_result = step_input(2, Vec::new());
-        load_result.provider_results = vec![astra_emu_family_api::LegacyProviderResult {
-            request_id: request_id.clone(),
-            provider_id: MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-            status: "completed".into(),
-            payload: stored_progress,
-            sequence: 1,
-        }];
-        let terminal = provider.step(&ctx, &reopened, load_result).unwrap();
-        assert_eq!(terminal.status, LegacyRuntimeStatus::Terminal);
-        assert!(terminal.control.waits.is_empty());
-        assert_eq!(
-            provider.sessions[&reopened.0].vm.state().gallery_unlocks,
-            [Hash256::from_sha256(b"REN_CLEAR")]
-        );
-    }
-
-    #[test]
-    fn provider_snapshots_quiescent_unloaded_global_progress_for_restore_rollback() {
-        let script = b".end\r\n".to_vec();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
-        }));
-        let ctx = context();
-        let request = LegacyOpenRequest {
-            requested_session_id: LegacyRuntimeSessionId("session.progress.rollback".into()),
-            case_fingerprint: Hash256::from_sha256(b"case"),
-            script_uri: "minori:/scr/test.sc".into(),
-            fixed_delta_ns: 16_666_667,
-            session_seed: 7,
-            compatibility_profile: "minori.reference".into(),
-            family_options: BTreeMap::from([(
-                MINORI_GLOBAL_PROGRESS_OPTION.into(),
-                MINORI_PLATFORM_STORAGE_PROVIDER_ID.into(),
-            )]),
-        };
-        let session = provider.open(&ctx, request.clone()).unwrap();
         let unlock = Hash256::from_sha256(b"REN_CLEAR");
-        provider
-            .sessions
-            .get_mut(&session.0)
-            .unwrap()
-            .vm
-            .merge_verified_gallery_unlocks(&[unlock])
-            .unwrap();
-        provider
-            .sessions
-            .get_mut(&session.0)
-            .unwrap()
-            .global_progress = MinoriGlobalProgressSession {
-            enabled: true,
-            loaded: true,
-            persisted_unlocks: vec![unlock],
-            pending: None,
+        let payload = encode_global_progress(&[unlock]).unwrap();
+        let writable = ScriptedWritableFiles::new([
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::Stat {
+                    path: MINORI_GLOBAL_PROGRESS_PATH.into(),
+                },
+                writable_result(false, false, 0, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+                    path: MINORI_GLOBAL_PROGRESS_DIRECTORY.into(),
+                },
+                writable_result(true, false, 0, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+                    path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+                    length: 0,
+                },
+                writable_result(true, true, 0, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+                    path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+                    offset: 0,
+                    bytes: payload.clone(),
+                },
+                writable_result(
+                    true,
+                    true,
+                    payload.len() as u64,
+                    Vec::new(),
+                    payload.len() as u64,
+                ),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+                    path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+                    length: payload.len() as u64,
+                },
+                writable_result(true, true, payload.len() as u64, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+                    temporary_path: MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH.into(),
+                    destination_path: MINORI_GLOBAL_PROGRESS_PATH.into(),
+                },
+                writable_result(true, true, payload.len() as u64, Vec::new(), 0),
+            ),
+        ]);
+        let state = provider.sessions.get_mut(&session_id.0).unwrap();
+        load_global_progress(&writable, &session_id, state).unwrap();
+        assert!(state.global_progress.loaded);
+        state.vm.merge_verified_gallery_unlocks(&[unlock]).unwrap();
+        let mut output = LegacyStepOutput {
+            status: LegacyRuntimeStatus::Active,
+            live: LegacyLiveOutput::default(),
+            control: LegacyControlTransaction::default(),
+            trace: Vec::new(),
+            diagnostics: Vec::new(),
+            coverage: LegacyCoverageDelta::default(),
+            state_revision: 0,
         };
-        let loaded_snapshot = provider.save(&ctx, &session).unwrap();
-        provider.shutdown(&ctx, &session).unwrap();
+        store_global_progress_if_changed(&writable, &session_id, state, &mut output).unwrap();
+        assert_eq!(state.global_progress.persisted_unlocks, [unlock]);
+        assert_eq!(decode_global_progress(&payload).unwrap(), [unlock]);
+        writable.assert_consumed();
 
-        let reopened = provider.open(&ctx, request).unwrap();
-        let rollback_snapshot = provider.save(&ctx, &reopened).unwrap();
-        let rollback_progress: MinoriGlobalProgressSnapshotV1 =
-            postcard::from_bytes(&rollback_snapshot.family_sections[1].bytes).unwrap();
-        assert!(!rollback_progress.loaded);
-        assert!(rollback_progress.persisted_unlocks.is_empty());
-
-        provider.restore(&ctx, &reopened, &loaded_snapshot).unwrap();
-        assert!(provider.sessions[&reopened.0].global_progress.loaded);
+        let snapshot = provider.save(&ctx, &session_id).unwrap();
+        provider
+            .sessions
+            .get_mut(&session_id.0)
+            .unwrap()
+            .global_progress
+            .loaded = false;
+        provider.restore(&ctx, &session_id, &snapshot).unwrap();
+        assert!(provider.sessions[&session_id.0].global_progress.loaded);
         assert_eq!(
-            provider.sessions[&reopened.0]
+            provider.sessions[&session_id.0]
                 .global_progress
                 .persisted_unlocks,
             [unlock]
         );
-
-        provider
-            .restore(&ctx, &reopened, &rollback_snapshot)
-            .unwrap();
-        assert!(!provider.sessions[&reopened.0].global_progress.loaded);
-        let load = provider
-            .step(&ctx, &reopened, step_input(1, Vec::new()))
-            .unwrap();
-        assert_eq!(load.status, LegacyRuntimeStatus::Awaiting);
-        assert!(matches!(
-            load.control.waits.as_slice(),
-            [LegacyWaitRequest::ProviderCompletion { operation, .. }] if operation == "read"
-        ));
     }
 
     #[test]
@@ -9163,11 +9300,6 @@ mod tests {
             input_edges: Vec::new(),
             await_results,
             provider_results: Vec::new(),
-            budget: LegacyStepBudget {
-                max_instructions: 64,
-                max_effects: 64,
-                max_trace_entries: 64,
-            },
         }
     }
 }
