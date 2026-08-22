@@ -904,6 +904,47 @@ pub enum RuntimeLiveLayerFilter {
     Linear,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeLiveFilterTarget {
+    Background,
+    Character,
+    Ui,
+    Text,
+    Video,
+    Final,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeLiveFilterParam {
+    Float(f32),
+    Int(i64),
+    Bool(bool),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveFilterParamEntry {
+    pub key: String,
+    pub value: RuntimeLiveFilterParam,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveFilterNode {
+    pub id: String,
+    pub kind: String,
+    pub input: RuntimeLiveFilterTarget,
+    pub output: RuntimeLiveFilterTarget,
+    pub params: Vec<RuntimeLiveFilterParamEntry>,
+    pub deterministic: bool,
+    pub allow_cpu_fallback: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeLiveFilterGraph {
+    pub schema: String,
+    pub nodes: Vec<RuntimeLiveFilterNode>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeLiveLayerState {
     pub layer_id: String,
@@ -921,7 +962,7 @@ pub struct RuntimeLiveLayerState {
     pub opacity: f32,
     pub texture_filter: RuntimeLiveLayerFilter,
     pub blend: RuntimeLiveLayerBlend,
-    pub filter_graph_binding: Option<String>,
+    pub filter_graph: Option<RuntimeLiveFilterGraph>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

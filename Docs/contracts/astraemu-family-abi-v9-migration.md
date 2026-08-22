@@ -13,6 +13,8 @@ Family ABI v9、Product Runtime Provider ABI v4 与 Extension ABI v1 是一次�
 
 Surface lease 使用独占、不可复制的 `OwnedWritableByteBuffer`。它在 FFI 上保留同一分配的可写指针与唯一 owner，acquire、family 写入、commit 全程不复制；只读 `OwnedByteBuffer` 不能用于 surface，也禁止通过 `const` 强转恢复写权限。`FfiLegacyFamilyHostAdapter` 是动态 family 绑定 VFS、surface、Hook 与 writable-file ports 的唯一公共适配入口。
 
+Layer 的 filter 使用 ABI-owned `LegacyFilterGraphV9`，节点、target 与 parameter 都是 typed DTO。Host 必须把图继续传入 Product/Renderer2D 边界，不得把它缩减为 binding string、hash，或按注册顺序重新解析。当前 ABI 修正基线为 `e6bc3d960b87373160acd8507faeac4cc589975b`。
+
 FVP 固定使用 `Ported + SingleLayer`。RFVP hosted feature 直接依赖固定 AstraEngine ABI commit；AstraEngine workspace 通过精确 Git source `[patch]` 映射到当前 path crate，并以 `cargo tree` 阻断双 package identity。`astra-emu-fvp` 只保留 dylib/root-module、build identity、descriptor、provider 构造与 shutdown、panic containment、最终错误映射和 observability 边界。
 
 Minori 固定使用 `Native + MultiLayer`，把 background、foreground/stand、effect、panel/text 映射为独立 retained layer。Siglus v8 不属于本迁移分支，必须单独迁移到 v9 后才能合并。
@@ -24,3 +26,5 @@ ABI milestone 只要求 ABI crates、schema generator、loader rejection、文�
 2026 年 8 月 23 日，动态 loader 已改为一次绑定 VFS、surface、Hook 和 writable-file 四个 Host port，注册表不再保留 VFS-only 入口。公共 support 层新增有界 surface store：acquire 会转移唯一可写 allocation，commit 收回同一 allocation，并校验 session、fixed step、generation、geometry 和总内存预算。Product host 同时开始按 descriptor 强制唯一 presentation lane。当前只通过 Manager Core 库级检查、surface 定向测试与 Product host 增量测试；FVP、CLI、Manager 和 Headless composition 尚未全部迁移，不能据此恢复 E2 状态。
 
 同日的 FVP consumer 清理删除了 v9 已移除的 family snapshot、text lease、session resource 和 step budget 调用，动态签名 lifecycle 已重新通过。RFVP scene 与 text 尚未改写为 Host surface 和 family-owned shaping；对应入口返回稳定 migration blocker，不会退回旧 scene 或宿主文字路径。这只解除 workspace consumer 的编译阻断，不代表 FVP 产品运行恢复。
+
+RFVP hosted fork 已推进到 `15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9`。workspace 使用精确 Git source patch 将 fork 的 AstraEngine 依赖绑定到当前 path crates，并用 dependency tree 检查唯一 package identity。

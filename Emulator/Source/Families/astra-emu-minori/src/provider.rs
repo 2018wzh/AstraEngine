@@ -5882,7 +5882,7 @@ fn publish_resource_scene(
             opacity: 1.0,
             texture_filter: LegacyLayerFilterV9::Linear,
             blend: LegacyLayerBlendV9::Alpha,
-            filter_graph_binding: None,
+            filter_graph: None,
         };
         services.surfaces.commit(
             &session_id.0,

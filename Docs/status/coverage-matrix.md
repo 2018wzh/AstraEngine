@@ -20,6 +20,8 @@ AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retai
 
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 
+ABI 修正基线已更新到 `e6bc3d960b87373160acd8507faeac4cc589975b`。Filter graph 现在以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9` 并绑定唯一 workspace ABI source。
+
 2026-08-03 的 Windows native 诊断另确认 PlatformHost command queue 未唤醒 Winit 是 present backlog 的直接根因。当前 command submit 和 HTTPS completion 已通过 `EventLoopProxy` 事件驱动，800-step signed Release 复跑无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms；该短跑不替代 hover 动画语义、Family ABI scene bulk 零拷贝、10 分钟 audio soak 或 Manager E3。
 
 当前热路径约束也覆盖 EngineCore/VFS：Shipping `RuntimeWorld` 不执行 StateMachine candidate cycle 的 postcard/hash 指纹，只保留有界 microstep 失败边界；禁用 integrity report 使用常量 marker，不在每 tick 计算 hash。`RangeReadResult` 与 Family v7 VFS wire 只携带 revision、range 和 owned bytes，重复读取由 revision/lifecycle 契约约束，不计算 per-read content hash。VN provider 的产品音频已改为 typed live cue，Shipping 热组件改为 owned postcard allocation + disabled marker；VN presentation/view-state/timeline 的实时 persisted DTO 仍是未关闭的独立热点，因此本项仍不能标记为全引擎零序列化完成。

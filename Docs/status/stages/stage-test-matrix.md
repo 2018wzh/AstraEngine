@@ -11,6 +11,8 @@ required before the row can leave `IN_PROGRESS`.
 
 FVP 已删除退役 consumer，并通过动态签名 lifecycle 与 Manager adapter 定向测试；scene/text 仍以稳定 migration diagnostic 阻断。这不覆盖 presentation 或 Headless E2。
 
+Typed filter graph 修正基线为 `e6bc3d960b87373160acd8507faeac4cc589975b`。Family API round-trip、生成 schema、Manager typed mapping 和 RFVP 新 revision check 属于本轮最小验证集；不代替 CLI/Headless composition。
+
 本矩阵把 Stage 1-8 的工作项映射到测试项目。Stage 1 和 Stage 2 路径已经落在 UE 风格 workspace；Stage 3-6 仍包含未实现目标路径；Stage 7/8 是 AstraRPG planned extension，测试项先作为 `SPEC_READY` 迁移目标。
 
 | Test ID | Stage | Test Project | Planned Path | Command | Covered Work IDs | Gate Domain | Expected Evidence |

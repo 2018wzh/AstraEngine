@@ -160,7 +160,73 @@ fn move_layer_state(
                 astra_plugin_abi::RuntimeLiveLayerBlend::Screen
             }
         },
-        filter_graph_binding: layer.filter_graph_binding,
+        filter_graph: layer.filter_graph.map(move_filter_graph),
+    }
+}
+
+fn move_filter_graph(
+    graph: astra_emu_family_api::LegacyFilterGraphV9,
+) -> astra_plugin_abi::RuntimeLiveFilterGraph {
+    astra_plugin_abi::RuntimeLiveFilterGraph {
+        schema: graph.schema,
+        nodes: graph
+            .nodes
+            .into_iter()
+            .map(|node| astra_plugin_abi::RuntimeLiveFilterNode {
+                id: node.id,
+                kind: node.kind,
+                input: move_filter_target(node.input),
+                output: move_filter_target(node.output),
+                params: node
+                    .params
+                    .into_iter()
+                    .map(|param| astra_plugin_abi::RuntimeLiveFilterParamEntry {
+                        key: param.key,
+                        value: match param.value {
+                            astra_emu_family_api::LegacyFilterParamV9::Float(value) => {
+                                astra_plugin_abi::RuntimeLiveFilterParam::Float(value)
+                            }
+                            astra_emu_family_api::LegacyFilterParamV9::Int(value) => {
+                                astra_plugin_abi::RuntimeLiveFilterParam::Int(value)
+                            }
+                            astra_emu_family_api::LegacyFilterParamV9::Bool(value) => {
+                                astra_plugin_abi::RuntimeLiveFilterParam::Bool(value)
+                            }
+                            astra_emu_family_api::LegacyFilterParamV9::Text(value) => {
+                                astra_plugin_abi::RuntimeLiveFilterParam::Text(value)
+                            }
+                        },
+                    })
+                    .collect(),
+                deterministic: node.deterministic,
+                allow_cpu_fallback: node.allow_cpu_fallback,
+            })
+            .collect(),
+    }
+}
+
+fn move_filter_target(
+    target: astra_emu_family_api::LegacyFilterTargetV9,
+) -> astra_plugin_abi::RuntimeLiveFilterTarget {
+    match target {
+        astra_emu_family_api::LegacyFilterTargetV9::Background => {
+            astra_plugin_abi::RuntimeLiveFilterTarget::Background
+        }
+        astra_emu_family_api::LegacyFilterTargetV9::Character => {
+            astra_plugin_abi::RuntimeLiveFilterTarget::Character
+        }
+        astra_emu_family_api::LegacyFilterTargetV9::Ui => {
+            astra_plugin_abi::RuntimeLiveFilterTarget::Ui
+        }
+        astra_emu_family_api::LegacyFilterTargetV9::Text => {
+            astra_plugin_abi::RuntimeLiveFilterTarget::Text
+        }
+        astra_emu_family_api::LegacyFilterTargetV9::Video => {
+            astra_plugin_abi::RuntimeLiveFilterTarget::Video
+        }
+        astra_emu_family_api::LegacyFilterTargetV9::Final => {
+            astra_plugin_abi::RuntimeLiveFilterTarget::Final
+        }
     }
 }
 
@@ -1520,7 +1586,7 @@ mod tests {
                         opacity: 1.0,
                         texture_filter: astra_emu_family_api::LegacyLayerFilterV9::Linear,
                         blend: astra_emu_family_api::LegacyLayerBlendV9::Alpha,
-                        filter_graph_binding: None,
+                        filter_graph: None,
                     },
                 )],
             }],
@@ -1537,5 +1603,32 @@ mod tests {
         assert_eq!(control.len(), 1);
         assert_eq!(live.len(), 1);
         assert_eq!(live.layers[0].operations.len(), 1);
+    }
+
+    #[test]
+    fn typed_filter_graph_crosses_product_boundary_without_string_resolution() {
+        let graph = move_filter_graph(astra_emu_family_api::LegacyFilterGraphV9 {
+            schema: "astra.filter_graph.v1".into(),
+            nodes: vec![astra_emu_family_api::LegacyFilterNodeV9 {
+                id: "node.color".into(),
+                kind: "color_matrix".into(),
+                input: astra_emu_family_api::LegacyFilterTargetV9::Character,
+                output: astra_emu_family_api::LegacyFilterTargetV9::Character,
+                params: vec![astra_emu_family_api::LegacyFilterParamEntryV9 {
+                    key: "strength".into(),
+                    value: astra_emu_family_api::LegacyFilterParamV9::Float(0.75),
+                }],
+                deterministic: true,
+                allow_cpu_fallback: false,
+            }],
+        });
+
+        assert_eq!(graph.schema, "astra.filter_graph.v1");
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.nodes[0].id, "node.color");
+        assert_eq!(
+            graph.nodes[0].params[0].value,
+            astra_plugin_abi::RuntimeLiveFilterParam::Float(0.75)
+        );
     }
 }

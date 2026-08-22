@@ -496,7 +496,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
 dependencies = [
  "clipboard-win",
- "image",
+ "image 0.25.10",
  "log",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -712,7 +712,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "hex",
- "image",
+ "image 0.25.10",
  "postcard",
  "schemars",
  "serde",
@@ -733,7 +733,7 @@ dependencies = [
  "astra-headless-test",
  "astra-package",
  "camino",
- "image",
+ "image 0.25.10",
  "postcard",
  "schemars",
  "serde",
@@ -806,7 +806,7 @@ dependencies = [
  "fuser",
  "globset",
  "hex",
- "image",
+ "image 0.25.10",
  "libc",
  "na_mpeg2_decoder",
  "postcard",
@@ -994,7 +994,7 @@ dependencies = [
  "directories",
  "gilrs",
  "hex",
- "image",
+ "image 0.25.10",
  "jni 0.21.1",
  "ndk 0.9.0",
  "pollster",
@@ -1054,7 +1054,7 @@ version = "0.1.0"
 dependencies = [
  "bangumi-api",
  "hex",
- "image",
+ "image 0.25.10",
  "reqwest 0.12.28",
  "reqwest 0.13.4",
  "schemars",
@@ -1086,7 +1086,7 @@ dependencies = [
  "directories",
  "encoding_rs",
  "flate2",
- "image",
+ "image 0.25.10",
  "lru",
  "postcard",
  "rc4",
@@ -1110,7 +1110,7 @@ dependencies = [
  "astra-observability",
  "clap",
  "flate2",
- "image",
+ "image 0.25.10",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1177,7 +1177,7 @@ dependencies = [
  "astra-product-host",
  "clap",
  "hound",
- "image",
+ "image 0.25.10",
  "rustfft",
  "serde",
  "serde_json",
@@ -1257,7 +1257,7 @@ dependencies = [
  "astra-worker-budget",
  "cosmic-text",
  "ffmpeg-next",
- "image",
+ "image 0.25.10",
  "js-sys",
  "postcard",
  "rubato",
@@ -1417,7 +1417,7 @@ dependencies = [
  "astra-platform-common",
  "astra-ui-core",
  "hound",
- "image",
+ "image 0.25.10",
  "postcard",
  "rcgen",
  "reqwest 0.13.4",
@@ -1642,7 +1642,7 @@ dependencies = [
  "astra-vn-runtime-provider",
  "astra-vn-system",
  "astra-vn-ui",
- "image",
+ "image 0.25.10",
  "postcard",
  "serde",
  "serde_json",
@@ -5346,7 +5346,7 @@ dependencies = [
  "derive_more",
  "i-slint-common",
  "icu_normalizer",
- "image",
+ "image 0.25.10",
  "itertools 0.14.0",
  "linked_hash_set",
  "lyon_extra",
@@ -5384,7 +5384,7 @@ dependencies = [
  "i-slint-common",
  "i-slint-core-macros",
  "icu_normalizer",
- "image",
+ "image 0.25.10",
  "lyon_algorithms",
  "lyon_extra",
  "lyon_geom",
@@ -5733,6 +5733,18 @@ checksum = "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "image"
+version = "0.24.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "color_quant",
+ "num-traits",
 ]
 
 [[package]]
@@ -8761,10 +8773,12 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=ce921717f043a8a035eadff1f41fc060c7de7c3c#ce921717f043a8a035eadff1f41fc060c7de7c3c"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9#15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9"
 dependencies = [
  "ab_glyph",
  "anyhow",
+ "astra-byte-source",
+ "astra-emu-family-api",
  "atomic_refcell",
  "bincode 1.3.3",
  "bitflags 2.13.1",
@@ -8777,6 +8791,7 @@ dependencies = [
  "glam 0.27.0",
  "hashbrown 0.14.5",
  "hecs",
+ "image 0.24.9",
  "itertools 0.12.1",
  "lazy_static",
  "log",
