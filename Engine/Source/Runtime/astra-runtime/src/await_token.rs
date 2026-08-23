@@ -255,7 +255,7 @@ impl AwaitQueue {
         }
         AwaitDrain {
             results: ready,
-            diagnostics: self.diagnostics.drain(..).collect(),
+            diagnostics: std::mem::take(&mut self.diagnostics),
         }
     }
 

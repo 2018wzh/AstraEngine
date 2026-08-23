@@ -547,8 +547,10 @@ fn shaped_clusters_fonts_ruby_voice_and_glyph_bitmaps_reach_renderer() {
     let frame = renderer.capture_frame(&commands).unwrap();
     assert!(frame
         .bytes
-        .chunks_exact(4)
-        .any(|pixel| pixel != [8, 8, 8, 255]));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|pixel| *pixel != [8, 8, 8, 255]));
     let redraw = resource_owner
         .update_layout("line.production", &layout, [255, 255, 255, 255])
         .unwrap();

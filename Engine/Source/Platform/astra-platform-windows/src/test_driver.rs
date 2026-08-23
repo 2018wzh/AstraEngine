@@ -295,7 +295,7 @@ impl TestWindow {
                     return Err(driver_error("test_driver.capture", "pixel readback failed"));
                 }
                 let mut rgba8 = Vec::with_capacity(bgra.len());
-                for pixel in bgra.chunks_exact(4) {
+                for pixel in bgra.as_chunks::<4>().0.iter() {
                     rgba8.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
                 }
                 Ok(TestCapturedFrame {

@@ -240,7 +240,7 @@ impl CpuFilterExecutor {
 
 fn apply_bloom(bytes: &mut [u8], intensity: f32) {
     let add = (255.0 * intensity.clamp(0.0, 1.0)) as u8;
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0.iter_mut() {
         pixel[0] = pixel[0].saturating_add(add);
         pixel[1] = pixel[1].saturating_add(add);
         pixel[2] = pixel[2].saturating_add(add);
@@ -252,7 +252,7 @@ fn apply_color_matrix(bytes: &mut [u8], node: &FilterNode) -> Result<(), MediaEr
     let g = required_float_param(node, "g")?;
     let b = required_float_param(node, "b")?;
     let a = required_float_param(node, "a")?;
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0.iter_mut() {
         pixel[0] = scaled_channel(pixel[0], r);
         pixel[1] = scaled_channel(pixel[1], g);
         pixel[2] = scaled_channel(pixel[2], b);
@@ -263,7 +263,7 @@ fn apply_color_matrix(bytes: &mut [u8], node: &FilterNode) -> Result<(), MediaEr
 
 fn apply_fade(bytes: &mut [u8], amount: f32) {
     let scale = amount.clamp(0.0, 1.0);
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0.iter_mut() {
         pixel[0] = scaled_channel(pixel[0], scale);
         pixel[1] = scaled_channel(pixel[1], scale);
         pixel[2] = scaled_channel(pixel[2], scale);

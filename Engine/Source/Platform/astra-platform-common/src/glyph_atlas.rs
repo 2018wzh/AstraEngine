@@ -4044,7 +4044,9 @@ mod tests {
         let mut destination = vec![0; 4 * 4 * 4];
         write_padded_resource(&resource, &mut destination, 4, 0, 0).unwrap();
         let pixels = destination
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|pixel| pixel[0])
             .collect::<Vec<_>>();
         assert_eq!(
@@ -4074,7 +4076,7 @@ mod tests {
         let resource = AtlasResource::Texture(Arc::new(updated));
         let mut destination = vec![0; 4 * 3 * 4];
         write_padded_resource(&resource, &mut destination, 4, 0, 0).unwrap();
-        let pixels = destination.chunks_exact(4).collect::<Vec<_>>();
+        let pixels = destination.as_chunks::<4>().0.iter().collect::<Vec<_>>();
         assert_eq!(pixels[5], &[1, 2, 3, 4]);
         assert_eq!(pixels[6], &[9, 10, 11, 12]);
     }

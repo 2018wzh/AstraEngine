@@ -877,7 +877,9 @@ impl RuntimeBridge {
             let pixels = match texture.decoded_format {
                 RuntimeLiveTextureFormat::Rgba8 => rgba,
                 RuntimeLiveTextureFormat::LumaAlpha8 => rgba
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .flat_map(|pixel| [pixel[0], pixel[3]])
                     .collect(),
             };

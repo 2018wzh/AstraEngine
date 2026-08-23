@@ -126,7 +126,9 @@ impl ValidateUi for UiRenderFrame {
             if upload.format == UiTextureFormat::Rgba8SrgbPremultiplied
                 && upload
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .any(|pixel| pixel[0] > pixel[3] || pixel[1] > pixel[3] || pixel[2] > pixel[3])
             {
                 return Err(UiValidationError::invalid(

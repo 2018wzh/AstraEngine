@@ -1825,7 +1825,7 @@ mod macos {
                     }
                     for row in 0..height {
                         let source = std::slice::from_raw_parts(base.add(row * stride), width * 4);
-                        for pixel in source.chunks_exact(4) {
+                        for pixel in source.as_chunks::<4>().0.iter() {
                             bytes.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
                         }
                     }

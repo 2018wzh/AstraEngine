@@ -3153,7 +3153,7 @@ fn native_video_frame(frame: FvpMovieFrame, duration_us: u64) -> Result<DecodedV
         .checked_mul(1_000)
         .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
     let mut bgra8 = frame.rgba8;
-    for pixel in bgra8.chunks_exact_mut(4) {
+    for pixel in bgra8.as_chunks_mut::<4>().0.iter_mut() {
         pixel.swap(0, 2);
     }
     Ok(DecodedVideoFrame {
@@ -3606,7 +3606,7 @@ fn runtime_live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextur
 
 fn rgba8_to_luma_alpha8(rgba8: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(rgba8.len() / 2);
-    for pixel in rgba8.chunks_exact(4) {
+    for pixel in rgba8.as_chunks::<4>().0.iter() {
         let luma = ((u16::from(pixel[0]) * 77
             + u16::from(pixel[1]) * 150
             + u16::from(pixel[2]) * 29
@@ -3688,7 +3688,9 @@ fn gpu_rgba8_owned(
         LegacyTextureFormat::LumaAlpha8 => OwnedPixelBuffer::from_vec(
             pixels
                 .as_slice()
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
                 .collect(),
         ),
@@ -6200,7 +6202,7 @@ fn frame_mean_rgba(rgba8: &[u8], width: u32, height: u32) -> Result<[u8; 4], Str
         return Err("ASTRA_EMU_HEADLESS_FRAME_SIGNATURE_LENGTH".into());
     }
     let mut sums = [0_u64; 4];
-    for pixel in rgba8.chunks_exact(4) {
+    for pixel in rgba8.as_chunks::<4>().0.iter() {
         for channel in 0..4 {
             sums[channel] += u64::from(pixel[channel]);
         }

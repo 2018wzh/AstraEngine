@@ -214,8 +214,10 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
     let captured = host.client.capture_surface(surface).await.unwrap();
     let changed_pixels = captured
         .rgba8
-        .chunks_exact(4)
-        .filter(|pixel| *pixel != BACKGROUND)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| **pixel != BACKGROUND)
         .count();
     assert!(changed_pixels >= golden["minimum_changed_pixels"].as_u64().unwrap() as usize);
     let capture_hash = Hash256::from_sha256(&captured.rgba8);
@@ -320,8 +322,10 @@ async fn windows_wgpu_renders_multiscript_layout_through_live_glyph_atlas() {
     let cleared = host.client.capture_surface(surface).await.unwrap();
     assert!(cleared
         .rgba8
-        .chunks_exact(4)
-        .all(|pixel| pixel == BACKGROUND));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == BACKGROUND));
 
     exercise_scene_atlas(&host.client, surface).await;
 
@@ -424,6 +428,8 @@ async fn exercise_scene_atlas(client: &PlatformHostClient, surface: SurfaceHandl
     let cleared = client.capture_surface(surface).await.unwrap();
     assert!(cleared
         .rgba8
-        .chunks_exact(4)
-        .all(|pixel| pixel == [0, 0, 0, 255]));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [0, 0, 0, 255]));
 }

@@ -1430,9 +1430,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             .max()
             .map_or(0, |sequence| sequence.saturating_add(1));
         let live_effect_count = live.len();
-        let mut live = move_live_output(live).map_err(|error| {
+        let mut live = move_live_output(live).inspect_err(|_| {
             session.poisoned = true;
-            error
         })?;
         let mut next_layer_state = session.layer_state.clone();
         for transaction in &live.layers {
@@ -1442,9 +1441,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             })?;
         }
         let surface_generations =
-            referenced_surface_generations(&live.layers).map_err(|error| {
+            referenced_surface_generations(&live.layers).inspect_err(|_| {
                 session.poisoned = true;
-                error
             })?;
         *session
             .pending_control

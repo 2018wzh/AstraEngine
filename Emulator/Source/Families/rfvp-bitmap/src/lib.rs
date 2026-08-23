@@ -456,7 +456,7 @@ pub fn pack_4bpp_row_or_glyph(alpha_4bit: &[u8]) -> Result<Vec<u8>, BitmapFontBu
         return Err(BitmapFontBuildError::PackInputLen);
     }
     let mut out = Vec::with_capacity(alpha_4bit.len() / 2);
-    for pair in alpha_4bit.chunks_exact(2) {
+    for pair in alpha_4bit.as_chunks::<2>().0.iter() {
         out.push(((pair[0] & 0x0f) << 4) | (pair[1] & 0x0f));
     }
     Ok(out)

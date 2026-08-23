@@ -695,8 +695,10 @@ impl PlayerPresentationReport {
         }
         let changed_pixels = capture
             .rgba8
-            .chunks_exact(4)
-            .filter(|pixel| *pixel != background)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel.as_slice() != background)
             .count() as u64;
         if changed_pixels == 0 {
             return Err(PlayerPresentationError::NoVisualOutput);

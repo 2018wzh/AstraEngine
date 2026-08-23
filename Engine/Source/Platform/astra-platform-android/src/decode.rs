@@ -814,7 +814,9 @@ fn drive_audio_codec(
                     }
                     audio.extend(
                         bytes
-                            .chunks_exact(2)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
                             .map(|sample| i16::from_le_bytes([sample[0], sample[1]])),
                     );
                     codec

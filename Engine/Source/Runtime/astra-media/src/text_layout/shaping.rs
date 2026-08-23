@@ -293,7 +293,9 @@ pub(super) fn glyph_bitmap(image: &cosmic_text::SwashImage) -> Result<GlyphBitma
             // coverage to a stable mask so replay does not depend on panel stripe order.
             let alpha = image
                 .data
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .map(|coverage| coverage[0].max(coverage[1]).max(coverage[2]))
                 .collect();
             (GlyphBitmapFormat::Alpha8, alpha)

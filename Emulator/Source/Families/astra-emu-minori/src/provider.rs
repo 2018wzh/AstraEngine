@@ -441,13 +441,16 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "message or speaker exceeds the text render bound",
                 ));
             }
+            let hook_context = TextHookContext {
+                session_id: &session_id.0,
+                family_game_id: &ctx.case_id,
+                fixed_step: input.tick_index,
+                capture_sequence: *capture_sequence,
+            };
             live.layers.push(publish_text_layer(
                 &services,
                 session,
-                &session_id.0,
-                &ctx.case_id,
-                input.tick_index,
-                *capture_sequence,
+                &hook_context,
                 text,
                 speaker.as_deref(),
                 &mut diagnostics,
@@ -1189,12 +1192,14 @@ fn publish_resource_frame(
             let generation = upload_rgba_surface(
                 services,
                 session,
-                session_id,
-                fixed_step,
-                &surface_id,
-                decoded.width(),
-                decoded.height(),
-                decoded.as_raw(),
+                SurfaceUpload {
+                    session_id,
+                    fixed_step,
+                    surface_id: &surface_id,
+                    width: decoded.width(),
+                    height: decoded.height(),
+                    rgba: decoded.as_raw(),
+                },
             )?;
             session
                 .layer_sources
@@ -1284,14 +1289,17 @@ fn publish_resource_frame(
     layer_transaction(session, frame.width, frame.height, operations)
 }
 
-#[allow(clippy::too_many_arguments)]
+struct TextHookContext<'a> {
+    session_id: &'a str,
+    family_game_id: &'a str,
+    fixed_step: u64,
+    capture_sequence: u64,
+}
+
 fn publish_text_layer(
     services: &LegacyFamilyHostServicesV9,
     session: &mut MinoriSession,
-    session_id: &str,
-    family_game_id: &str,
-    fixed_step: u64,
-    capture_sequence: u64,
+    hook_context: &TextHookContext<'_>,
     original_text: &str,
     speaker: Option<&str>,
     diagnostics: &mut Vec<LegacyDiagnostic>,
@@ -1304,10 +1312,7 @@ fn publish_text_layer(
     })?;
     let translated = translate_text(
         services,
-        session_id,
-        family_game_id,
-        fixed_step,
-        capture_sequence,
+        hook_context,
         original_text,
         session.hook_timeout_ms,
         diagnostics,
@@ -1346,7 +1351,16 @@ fn publish_text_layer(
             Err(code) => return Err(invalid("ASTRA_EMU_MINORI_TEXT_LAYOUT", code)),
         };
         let generation = upload_rgba_surface(
-            services, session, session_id, fixed_step, surface_id, width, height, &pixels,
+            services,
+            session,
+            SurfaceUpload {
+                session_id: hook_context.session_id,
+                fixed_step: hook_context.fixed_step,
+                surface_id,
+                width,
+                height,
+                rgba: &pixels,
+            },
         )?;
         session.last_text = Some(text_identity);
         (generation, LegacySurfaceDamageV9::Full)
@@ -1393,10 +1407,7 @@ fn publish_text_layer(
 
 fn translate_text(
     services: &LegacyFamilyHostServicesV9,
-    session_id: &str,
-    family_game_id: &str,
-    fixed_step: u64,
-    capture_sequence: u64,
+    context: &TextHookContext<'_>,
     original: &str,
     timeout_ms: u32,
     diagnostics: &mut Vec<LegacyDiagnostic>,
@@ -1408,10 +1419,13 @@ fn translate_text(
         Err(_) => return original.to_owned(),
     };
     let result = services.hooks.invoke(LegacyHookInvocationV1 {
-        session_id: session_id.into(),
-        invocation_id: format!("minori.translation.{fixed_step}.{capture_sequence}"),
+        session_id: context.session_id.into(),
+        invocation_id: format!(
+            "minori.translation.{}.{}",
+            context.fixed_step, context.capture_sequence
+        ),
         family_id: MINORI_FAMILY_ID.into(),
-        family_game_id: family_game_id.into(),
+        family_game_id: context.family_game_id.into(),
         hook_id: TRANSLATION_TEXT_HOOK_ID.into(),
         timeout_ms,
         payload: OwnedByteBuffer::from_vec(payload),
@@ -1452,16 +1466,28 @@ fn translate_text(
     }
 }
 
+struct SurfaceUpload<'a> {
+    session_id: &'a str,
+    fixed_step: u64,
+    surface_id: &'a str,
+    width: u32,
+    height: u32,
+    rgba: &'a [u8],
+}
+
 fn upload_rgba_surface(
     services: &LegacyFamilyHostServicesV9,
     session: &mut MinoriSession,
-    session_id: &str,
-    fixed_step: u64,
-    surface_id: &str,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
+    upload: SurfaceUpload<'_>,
 ) -> Result<u64, LegacyProviderError> {
+    let SurfaceUpload {
+        session_id,
+        fixed_step,
+        surface_id,
+        width,
+        height,
+        rgba,
+    } = upload;
     let row_bytes = width.checked_mul(4).ok_or_else(|| {
         invalid(
             "ASTRA_EMU_MINORI_SURFACE_STRIDE",
@@ -1569,8 +1595,10 @@ fn copy_premultiplied_rows(
         .zip(target.chunks_exact_mut(stride))
     {
         for (source_pixel, target_pixel) in source
-            .chunks_exact(4)
-            .zip(target[..row_bytes].chunks_exact_mut(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(target[..row_bytes].as_chunks_mut::<4>().0.iter_mut())
         {
             let alpha = u16::from(source_pixel[3]);
             target_pixel[0] = ((u16::from(source_pixel[0]) * alpha + 127) / 255) as u8;

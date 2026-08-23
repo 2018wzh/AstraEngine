@@ -465,7 +465,9 @@ fn rgba8_pixels(
     Ok(match format {
         LegacyTextureFormat::Rgba8 => pixels.to_vec(),
         LegacyTextureFormat::LumaAlpha8 => pixels
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
             .collect(),
     })
@@ -493,7 +495,9 @@ fn rgba8_pixels_owned(
         LegacyTextureFormat::LumaAlpha8 => OwnedPixelBuffer::from_vec(
             pixels
                 .as_slice()
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
                 .collect(),
         ),

@@ -527,18 +527,16 @@ fn install_intrinsics(
                 let cipher: Blowfish = Blowfish::new_from_slice(&key.to_vec())
                     .map_err(|_| mlua::Error::runtime("ASTRA_EMU_DECODER_BLOWFISH_KEY"))?;
                 let mut out = bytes.to_vec();
-                for chunk in out.chunks_exact_mut(8) {
+                for chunk in out.as_chunks_mut::<8>().0.iter_mut() {
                     chunk[..4].reverse();
                     chunk[4..].reverse();
-                    let block: &mut [u8; 8] =
-                        chunk.try_into().expect("chunks_exact_mut yields 8 bytes");
                     if decrypt {
-                        cipher.decrypt_block(block.into())
+                        cipher.decrypt_block((&mut *chunk).into())
                     } else {
-                        cipher.encrypt_block(block.into())
+                        cipher.encrypt_block((&mut *chunk).into())
                     }
-                    block[..4].reverse();
-                    block[4..].reverse();
+                    chunk[..4].reverse();
+                    chunk[4..].reverse();
                 }
                 lua.create_buffer(out)
             },

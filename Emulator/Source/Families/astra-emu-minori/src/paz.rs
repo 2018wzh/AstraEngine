@@ -1527,13 +1527,12 @@ fn blowfish_decrypt(key: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, PazError> {
     let cipher: Blowfish = Blowfish::new_from_slice(key)
         .map_err(|_| error("ASTRA_EMU_MINORI_BLOWFISH_KEY", "Blowfish key is invalid"))?;
     let mut bytes = encrypted.to_vec();
-    for chunk in bytes.chunks_exact_mut(8) {
+    for chunk in bytes.as_chunks_mut::<8>().0.iter_mut() {
         chunk[..4].reverse();
         chunk[4..].reverse();
-        let block: &mut [u8; 8] = chunk.try_into().expect("chunks_exact_mut yields 8 bytes");
-        cipher.decrypt_block(block.into());
-        block[..4].reverse();
-        block[4..].reverse();
+        cipher.decrypt_block((&mut *chunk).into());
+        chunk[..4].reverse();
+        chunk[4..].reverse();
     }
     Ok(bytes)
 }
@@ -1645,13 +1644,12 @@ mod tests {
         assert!(plaintext.len().is_multiple_of(8));
         let cipher: Blowfish = Blowfish::new_from_slice(key).unwrap();
         let mut bytes = plaintext.to_vec();
-        for chunk in bytes.chunks_exact_mut(8) {
+        for chunk in bytes.as_chunks_mut::<8>().0.iter_mut() {
             chunk[..4].reverse();
             chunk[4..].reverse();
-            let block: &mut [u8; 8] = chunk.try_into().unwrap();
-            cipher.encrypt_block(block.into());
-            block[..4].reverse();
-            block[4..].reverse();
+            cipher.encrypt_block((&mut *chunk).into());
+            chunk[..4].reverse();
+            chunk[4..].reverse();
         }
         bytes
     }

@@ -4371,7 +4371,7 @@ fn validate_universal_macho(bytes: &[u8]) -> Result<(), CliError> {
         .filter(|end| *end <= bytes.len())
         .ok_or("Mach-O architecture table is truncated")?;
     let mut architectures = std::collections::BTreeSet::new();
-    for record in bytes[8..table_end].chunks_exact(20) {
+    for record in bytes[8..table_end].as_chunks::<20>().0.iter() {
         architectures.insert(u32::from_be_bytes(record[0..4].try_into()?));
     }
     if !architectures.contains(&CPU_X86_64) || !architectures.contains(&CPU_ARM64) {

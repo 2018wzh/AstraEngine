@@ -582,7 +582,7 @@ fn parse_platform_video_output(output: DecodeOutput) -> Result<PlatformVideoOutp
     };
     {
         let mut rgba8 = frame.bgra8;
-        for pixel in rgba8.make_mut_vec().chunks_exact_mut(4) {
+        for pixel in rgba8.make_mut_vec().as_chunks_mut::<4>().0.iter_mut() {
             pixel.swap(0, 2);
         }
         let rgba8 = rgba8

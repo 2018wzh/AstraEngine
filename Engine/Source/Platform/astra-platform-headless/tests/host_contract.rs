@@ -456,8 +456,10 @@ async fn gpu_sparse_frames_defer_retained_resource_mutations_until_materializati
     let captured = client.capture_surface(surface).await.unwrap();
     assert!(captured
         .rgba8
-        .chunks_exact(4)
-        .all(|pixel| pixel == [255, 0, 0, 255]));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [255, 0, 0, 255]));
     client.destroy_surface(surface).await.unwrap();
     client.destroy_window(window).await.unwrap();
     client.shutdown().await.unwrap();
@@ -572,8 +574,10 @@ async fn gpu_atlas_repack_preserves_reserved_white_texel_for_solid_meshes() {
     let captured = client.capture_surface(surface).await.unwrap();
     assert!(captured
         .rgba8
-        .chunks_exact(4)
-        .all(|pixel| pixel == [128, 128, 128, 255]));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| *pixel == [128, 128, 128, 255]));
     client.destroy_surface(surface).await.unwrap();
     client.destroy_window(window).await.unwrap();
     client.shutdown().await.unwrap();

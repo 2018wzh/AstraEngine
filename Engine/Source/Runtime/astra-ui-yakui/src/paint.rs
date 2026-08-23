@@ -292,7 +292,7 @@ fn texture_upload(
         ),
         TextureFormat::Rgba8Srgb => {
             let mut pixels = texture.data().to_vec();
-            for pixel in pixels.chunks_exact_mut(4) {
+            for pixel in pixels.as_chunks_mut::<4>().0.iter_mut() {
                 pixel[0] = ((pixel[0] as u16 * pixel[3] as u16) / 255) as u8;
                 pixel[1] = ((pixel[1] as u16 * pixel[3] as u16) / 255) as u8;
                 pixel[2] = ((pixel[2] as u16 * pixel[3] as u16) / 255) as u8;
@@ -384,7 +384,9 @@ fn scene_texture_rgba8(upload: &UiTextureUpload) -> Vec<u8> {
     match upload.format {
         UiTextureFormat::Rgba8SrgbPremultiplied => upload
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|pixel| {
                 let alpha = u16::from(pixel[3]);
                 if alpha == 0 {

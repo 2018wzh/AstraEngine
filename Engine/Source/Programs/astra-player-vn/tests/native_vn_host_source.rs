@@ -1211,7 +1211,9 @@ async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resourc
     let first = session.client.capture_surface(surface).await.unwrap();
     assert!(first
         .rgba8
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .any(|pixel| pixel != [8, 10, 16, 255]));
 
     executor
@@ -1221,7 +1223,9 @@ async fn packaged_native_vn_scene_reaches_live_windows_wgpu_and_releases_resourc
     let released = session.client.capture_surface(surface).await.unwrap();
     assert!(released
         .rgba8
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .all(|pixel| pixel == [0, 0, 0, 255]));
     source.shutdown().unwrap();
     drop(executor);

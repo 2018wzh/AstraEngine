@@ -87,7 +87,9 @@ fn decode_wav(data: &[u8]) -> Result<(Vec<i16>, u32)> {
             samples = match bits_per_sample {
                 8 => raw.iter().map(|&b| ((b as i16) - 128) * 256).collect(),
                 16 => raw
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|c| i16::from_le_bytes([c[0], c[1]]))
                     .collect(),
                 _ => unreachable!(),

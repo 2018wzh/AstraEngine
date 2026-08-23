@@ -22,11 +22,15 @@ fn canonical_upsampling_preserves_tone_energy_and_channel_identity() {
     assert!(converted.samples.len() >= 95_900 && converted.samples.len() <= 96_100);
     assert!(converted
         .samples
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .all(|frame| frame[0].to_bits() == frame[1].to_bits()));
     let left = converted
         .samples
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|frame| frame[0])
         .collect::<Vec<_>>();
     let rms = (left

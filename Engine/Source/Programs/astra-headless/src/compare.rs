@@ -34,7 +34,12 @@ pub(crate) fn compare_image(
     let expected = decoded.as_raw();
     let mut changed = 0_u64;
     let mut max_delta = 0_u8;
-    for (actual, baseline) in actual_rgba.chunks_exact(4).zip(expected.chunks_exact(4)) {
+    for (actual, baseline) in actual_rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(expected.as_chunks::<4>().0.iter())
+    {
         let mut pixel_changed = false;
         for channel in 0..4 {
             let delta = actual[channel].abs_diff(baseline[channel]);
@@ -230,7 +235,7 @@ fn integrated_loudness_lufs(samples: &[f64]) -> f64 {
     let mut pre = [BiquadState::default(); CHANNELS];
     let mut rlb = [BiquadState::default(); CHANNELS];
     let mut weighted = Vec::with_capacity(frames * CHANNELS);
-    for frame in samples.chunks_exact(CHANNELS) {
+    for frame in samples.as_chunks::<CHANNELS>().0.iter() {
         for channel in 0..CHANNELS {
             let value = pre[channel].process(frame[channel], PRE_B, PRE_A);
             weighted.push(rlb[channel].process(value, RLB_B, RLB_A));
@@ -342,12 +347,29 @@ fn global_ssim(left: &[u8], right: &[u8]) -> f64 {
         0.2126 * f64::from(pixel[0]) + 0.7152 * f64::from(pixel[1]) + 0.0722 * f64::from(pixel[2])
     };
     let count = (left.len() / 4) as f64;
-    let mean_left = left.chunks_exact(4).map(luminance).sum::<f64>() / count;
-    let mean_right = right.chunks_exact(4).map(luminance).sum::<f64>() / count;
+    let mean_left = left
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| luminance(pixel))
+        .sum::<f64>()
+        / count;
+    let mean_right = right
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| luminance(pixel))
+        .sum::<f64>()
+        / count;
     let mut variance_left = 0.0;
     let mut variance_right = 0.0;
     let mut covariance = 0.0;
-    for (left, right) in left.chunks_exact(4).zip(right.chunks_exact(4)) {
+    for (left, right) in left
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(right.as_chunks::<4>().0.iter())
+    {
         let left = luminance(left) - mean_left;
         let right = luminance(right) - mean_right;
         variance_left += left * left;

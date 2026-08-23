@@ -123,7 +123,7 @@ impl AudioOutputCallback for StereoCallback {
             let complete_frames = filled / 2;
             for (target, frame) in output[written_frames..written_frames + complete_frames]
                 .iter_mut()
-                .zip(scratch[..complete_frames * 2].chunks_exact(2))
+                .zip(scratch[..complete_frames * 2].as_chunks::<2>().0.iter())
             {
                 target.0 = frame[0] * gain;
                 target.1 = frame[1] * gain;

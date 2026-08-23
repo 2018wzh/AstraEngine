@@ -1308,7 +1308,7 @@ impl Renderer2D for HeadlessRenderer {
                     }
                 }
                 DrawCommand::Clear { rgba } => {
-                    for pixel in bytes.chunks_exact_mut(4) {
+                    for pixel in bytes.as_chunks_mut::<4>().0.iter_mut() {
                         pixel.copy_from_slice(rgba);
                     }
                 }
@@ -1740,7 +1740,7 @@ fn draw_glyph(
             }
         }
         GlyphBitmapFormat::Rgba8 => {
-            for source in glyph.pixels.chunks_exact(4) {
+            for source in glyph.pixels.as_chunks::<4>().0.iter() {
                 rgba8.extend_from_slice(&[
                     ((source[0] as u16 * rgba[0] as u16) / 255) as u8,
                     ((source[1] as u16 * rgba[1] as u16) / 255) as u8,
@@ -1843,7 +1843,7 @@ fn draw_mesh(
         })
         .collect::<Result<Vec<_>, MediaError>>()?;
 
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0.iter() {
         let a = transformed[triangle[0] as usize];
         let b = transformed[triangle[1] as usize];
         let c = transformed[triangle[2] as usize];

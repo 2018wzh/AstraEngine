@@ -699,6 +699,7 @@ impl LegacyWritableFileHostV1 for FamilyWritableFileHost {
                 }
                 let mut file = OpenOptions::new()
                     .create(true)
+                    .truncate(false)
                     .write(true)
                     .open(path)
                     .map_err(file_error)?;
@@ -715,6 +716,7 @@ impl LegacyWritableFileHostV1 for FamilyWritableFileHost {
                 let path = self.resolve(session_id, &path)?;
                 let file = OpenOptions::new()
                     .create(true)
+                    .truncate(false)
                     .write(true)
                     .open(path)
                     .map_err(file_error)?;

@@ -1687,7 +1687,7 @@ fn to_rgba<'a>(format: LegacyTextureFormat, pixels: &'a [u8]) -> Result<Cow<'a, 
                 return Err("ASTRA_EMU_STAGE_TEXTURE_LENGTH".into());
             }
             let mut rgba = Vec::with_capacity(pixels.len().saturating_mul(2));
-            for pair in pixels.chunks_exact(2) {
+            for pair in pixels.as_chunks::<2>().0.iter() {
                 rgba.extend_from_slice(&[pair[0], pair[0], pair[0], pair[1]]);
             }
             Ok(Cow::Owned(rgba))
@@ -2295,8 +2295,10 @@ mod tests {
         };
         let bytes = vertex_bytes(&draw, 1280, 720).unwrap();
         let floats = bytes
-            .chunks_exact(4)
-            .map(|value| f32::from_ne_bytes(value.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|value| f32::from_ne_bytes(*value))
             .collect::<Vec<_>>();
         assert_eq!((floats[0], floats[1]), (-1.0, 1.0));
         assert_eq!((floats[24], floats[25]), (1.0, -1.0));

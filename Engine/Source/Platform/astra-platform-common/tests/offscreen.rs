@@ -51,7 +51,12 @@ async fn native_offscreen_gpu_renders_scene_filter_and_readback() {
     let capture = renderer.render(&frame).unwrap();
     assert_eq!((capture.width, capture.height), (4, 4));
     assert_eq!(capture.rgba8.len(), 64);
-    assert!(capture.rgba8.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(capture
+        .rgba8
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|pixel| pixel[3] != 0));
     assert_eq!(renderer.performance_counters().readback_bytes, 64);
     for sequence in 2..=4 {
         frame.sequence = sequence;

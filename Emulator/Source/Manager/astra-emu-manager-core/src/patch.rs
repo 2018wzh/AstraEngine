@@ -476,7 +476,7 @@ mod tests {
         let source = "astra.decode_transform('script.bin', {1,2,3}); \
              astra.emit('media_hook', 'audio/original.ogg', {97,117,100,105,111,47,110,101,119,46,111,103,103}); \
              astra.emit('deterministic_effect', 'event.patch_ready', {9,8,7}); return nil";
-        let execution = runtime.evaluate(&source, &PatchContext::default()).unwrap();
+        let execution = runtime.evaluate(source, &PatchContext::default()).unwrap();
         assert_eq!(execution.host_actions.len(), 3);
         assert!(matches!(
             &execution.host_actions[0],

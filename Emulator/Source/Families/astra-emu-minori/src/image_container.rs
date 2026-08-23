@@ -265,12 +265,16 @@ fn raw_to_rgba(
     let mut rgba = Vec::with_capacity(pixel_count * 4);
     match bits_per_pixel {
         32 => source
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .for_each(|pixel| rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]])),
         24 => source
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .for_each(|pixel| rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255])),
-        16 => source.chunks_exact(2).for_each(|pixel| {
+        16 => source.as_chunks::<2>().0.iter().for_each(|pixel| {
             let value = u16::from_le_bytes([pixel[0], pixel[1]]);
             let r = ((value >> 11) & 0x1f) as u8;
             let g = ((value >> 5) & 0x3f) as u8;
