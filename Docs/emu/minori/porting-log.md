@@ -4,7 +4,7 @@
 
 ### Family ABI v9 hard cut
 
-- 当前分支已 rebase 到 Family ABI v9 consumer implementation 提交 `289b89f74a972f92f98bbd481f8b45b23d969200`；其中包含 writable zero-copy surface 与 typed filter graph 两次 ABI 修正。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合是 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
+- 当前分支已 rebase 到 Family ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`；其中包含 writable zero-copy surface、typed filter graph 以及 Rust 1.98 workspace gate 修正。当前 consumer 提交为 `d440daac86ef396dd92237c2bd677b060ec17c59`。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合是 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
 - v9 删除了旧 scene transaction、family snapshot、ephemeral text、session resource presentation 和 step budget。旧接口不保留兼容层，也不会在缺少 surface、Hook、字体、decode 或 writable-file provider 时回退。
 - Minori dylib 已改用公共 `FfiLegacyFamilyHostAdapter`，不再维护私有 FFI host adapter；surface lease 采用独占、可写、零拷贝 owner，禁止 immutable buffer、复制回写和 const-cast。旧 save/restore/text/resource 导出已从 root module 删除。
 - 全局进度已迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。Windows 复验发现 writable root 曾直接使用带 `sha256:` 前缀的显示字符串，冒号会生成非法目录名；现在目录组件固定为原始 digest 的 64 位小写十六进制。Runtime control action 同时补齐实际 Blackboard 写入的 `ActionAccess` 声明，两个问题都有定向回归。
