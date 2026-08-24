@@ -30,12 +30,14 @@ pub fn copy_surface_to_straight_rgba8(
         match format {
             LegacySurfaceFormatV9::Rgba8SrgbPremultiplied => output.extend_from_slice(row),
             LegacySurfaceFormatV9::Bgra8SrgbPremultiplied => output.extend(
-                row.chunks_exact(4)
+                row.as_chunks::<4>()
+                    .0
+                    .iter()
                     .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]]),
             ),
         }
     }
-    for pixel in output.chunks_exact_mut(4) {
+    for pixel in output.as_chunks_mut::<4>().0 {
         let alpha = u32::from(pixel[3]);
         if alpha == 0 {
             pixel[..3].fill(0);

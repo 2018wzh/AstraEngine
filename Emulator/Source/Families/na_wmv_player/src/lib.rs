@@ -32,4 +32,5 @@ pub use avi::{
 pub use decoder::YuvFrame;
 pub use error::{DecoderError, Result};
 
+#[cfg(feature = "ffi")]
 pub mod ffi;

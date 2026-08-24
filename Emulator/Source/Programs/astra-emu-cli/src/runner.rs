@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
+    io::{Read, Seek},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Instant,
@@ -34,7 +35,8 @@ use astra_emu_family_api::{
     LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::{
-    verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
+    verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
+    LegacyVfsFamilyRegistry,
 };
 use astra_emu_manager_core::{
     evidence_vm_coverage_ids, AstraEmuRuntimeProvider, CancellationToken, CaseRecord,
@@ -98,6 +100,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc as tokio_mpsc, task::JoinHandle};
 
 use crate::{
+    avi_range::{AviRangeDecoder, AviRangeEvent, AviRangeTelemetry},
     family_host::CliFamilyHostConfig,
     input::{read_input_sequence, ValidatedInputSequence},
     rasterizer::{CpuStageRasterizer, PreparedRenderFrame},
@@ -265,6 +268,7 @@ pub struct HeadlessLaunch {
     pub game_dir: PathBuf,
     pub mount_profile: PathBuf,
     pub entry: Option<String>,
+    pub launch_mode: FamilyLaunchMode,
     pub input_path: PathBuf,
     pub artifact_root: PathBuf,
     pub family_manifest: Option<PathBuf>,
@@ -306,6 +310,7 @@ pub struct NativeLaunch {
     pub game_dir: PathBuf,
     pub mount_profile: PathBuf,
     pub entry: Option<String>,
+    pub launch_mode: FamilyLaunchMode,
     pub family_manifest: Option<PathBuf>,
     pub family_library: Option<PathBuf>,
     pub extension: Option<ExtensionBinding>,
@@ -314,6 +319,12 @@ pub struct NativeLaunch {
     pub input_path: Option<PathBuf>,
     pub max_fixed_steps: Option<u64>,
     pub mode: NativeLaunchMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum FamilyLaunchMode {
+    Direct,
+    Title,
 }
 
 #[derive(Debug, Clone)]
@@ -760,6 +771,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             media_service_id: "astra.platform.windows.media",
             report_sink_id: "astra.emu.cli.native.report",
             stage_size: (1280, 720),
+            launch_mode: launch.launch_mode,
         },
     )?;
     record_native_launch_phase("family_probe", phase_started, launch_started);
@@ -868,6 +880,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         &host.client,
         surface,
         RuntimeDriverConfig {
+            family_id: launch.family_id.clone(),
             seed,
             delta_ns: probe.runtime.fixed_delta_ns,
             audio_enabled: launch.enable_audio,
@@ -1231,6 +1244,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             media_service_id: "astra.platform.headless.media",
             report_sink_id: "astra.emu.cli.headless.report",
             stage_size: (launch.viewport_width, launch.viewport_height),
+            launch_mode: launch.launch_mode,
         },
     )?;
     bind_extension(
@@ -1320,7 +1334,11 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             _ => None,
         })
         .collect();
-    let frame_budget = input.final_tick.saturating_add(100).max(1);
+    let frame_budget = input
+        .max_execution_tick
+        .checked_add(100)
+        .ok_or_else(|| "ASTRA_EMU_HEADLESS_EXECUTION_FRAME_BUDGET_OVERFLOW".to_owned())?
+        .max(1);
     let presentation_substeps = u64::from(launch.presentation_rate_hz / 60);
     host_profile.artifacts.max_submitted_frames =
         frame_budget
@@ -1330,9 +1348,10 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     // substeps, so it keeps the original bounded storage budget.
     host_profile.artifacts.max_rasterized_frames = frame_budget;
     host_profile.artifacts.max_duration_ns = input
-        .final_tick
-        .saturating_add(100)
-        .saturating_mul(probe.runtime.fixed_delta_ns);
+        .max_execution_tick
+        .checked_add(100)
+        .and_then(|ticks| ticks.checked_mul(probe.runtime.fixed_delta_ns))
+        .ok_or_else(|| "ASTRA_EMU_HEADLESS_EXECUTION_DURATION_BUDGET_OVERFLOW".to_owned())?;
     host_profile.input.max_messages = input.messages.len() as u64;
     host_profile.input.max_tick = input.final_tick;
     let artifact_policy = host_profile.artifacts.clone();
@@ -1392,6 +1411,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         surface,
         &input.messages,
         ExecutionConfig {
+            family_id: launch.family_id.clone(),
             seed,
             delta_ns: probe.runtime.fixed_delta_ns,
             frame_sample_interval: launch.frame_sample_interval,
@@ -1617,8 +1637,8 @@ fn standard_headless_run_report(
         submitted_frame_count: manifest.submitted_frame_count,
         rasterized_frame_count: manifest.rasterized_frame_count,
         audio_frame_count: manifest.audio_frame_count,
-        duration_ns: input
-            .final_tick
+        duration_ns: execution
+            .fixed_step
             .checked_mul(profile.tick_duration_ns)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_DURATION_OVERFLOW".to_owned())?,
         completed_sequence: input
@@ -2232,11 +2252,19 @@ struct ProbeProfileRequest<'a> {
     media_service_id: &'a str,
     report_sink_id: &'a str,
     stage_size: (u32, u32),
+    launch_mode: FamilyLaunchMode,
 }
 
 struct ProbeProfile {
     runtime: astra_emu_manager_core::CaseRuntimeProfileRecord,
     content_identity: Hash256,
+}
+
+fn launch_entry_explicit(mode: FamilyLaunchMode) -> &'static str {
+    match mode {
+        FamilyLaunchMode::Direct => "true",
+        FamilyLaunchMode::Title => "false",
+    }
 }
 
 #[cfg(test)]
@@ -2300,6 +2328,9 @@ fn probe_profile(
     case: &PreparedFamilyCase,
     request: ProbeProfileRequest<'_>,
 ) -> Result<ProbeProfile, String> {
+    if request.launch_mode == FamilyLaunchMode::Title && case.family_id != "minori" {
+        return Err("ASTRA_EMU_LAUNCH_MODE_UNSUPPORTED".into());
+    }
     let (requested_stage_width, requested_stage_height) = request.stage_size;
     let report = runtime.probe_family(
         &LegacyRuntimeHostCtx {
@@ -2345,6 +2376,10 @@ fn probe_profile(
                     (
                         "astra.stage_height".into(),
                         requested_stage_height.to_string(),
+                    ),
+                    (
+                        "astra.launch_entry_explicit".into(),
+                        launch_entry_explicit(request.launch_mode).into(),
                     ),
                 ]
                 .into_iter()
@@ -2551,7 +2586,147 @@ struct ActiveVideo {
 
 enum ActiveVideoStream {
     Native(FvpNativeVideoCursor),
+    MinoriAvi(Box<MinoriAviPlayback>),
     Platform(PlatformVideoCursor),
+}
+
+const MAX_AVI_PENDING_AUDIO_SAMPLES: usize = 16 * 1024 * 1024;
+
+struct MinoriAviPlayback {
+    decoder: AviRangeDecoder,
+    current: Option<DecodedVideoFrame>,
+    pending: Option<DecodedVideoFrame>,
+    last_pts_us: Option<u64>,
+    last_audio_pts_us: Option<u64>,
+    frame_sequence: u64,
+    audio: Vec<na_mpeg2_decoder::MpegAudioF32>,
+    pending_audio_samples: usize,
+    duration_us: u64,
+    ended: bool,
+}
+
+impl MinoriAviPlayback {
+    fn open(decoder: AviRangeDecoder) -> Self {
+        let duration_us = decoder.duration_us();
+        Self {
+            decoder,
+            current: None,
+            pending: None,
+            last_pts_us: None,
+            last_audio_pts_us: None,
+            frame_sequence: 0,
+            audio: Vec::new(),
+            pending_audio_samples: 0,
+            duration_us,
+            ended: false,
+        }
+    }
+
+    fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
+        if self.ended {
+            return Ok(false);
+        }
+        let previous_sequence = self.current.as_ref().map(|frame| frame.sequence);
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|frame| frame.pts_us > elapsed_us)
+        {
+            return Ok(false);
+        }
+        if let Some(frame) = self.pending.take() {
+            self.current = Some(frame);
+        }
+        loop {
+            match self.decoder.next_event()? {
+                AviRangeEvent::Video {
+                    pts_us,
+                    width,
+                    height,
+                    bgra8,
+                } => {
+                    if width == 0
+                        || height == 0
+                        || self.last_pts_us.is_some_and(|previous| pts_us < previous)
+                    {
+                        return Err("ASTRA_EMU_MINORI_AVI_TIMELINE".into());
+                    }
+                    let expected = usize::try_from(width)
+                        .ok()
+                        .and_then(|width| {
+                            usize::try_from(height)
+                                .ok()
+                                .and_then(|height| width.checked_mul(height))
+                        })
+                        .and_then(|pixels| pixels.checked_mul(4))
+                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".to_owned())?;
+                    if bgra8.len() != expected {
+                        return Err("ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".into());
+                    }
+                    self.frame_sequence = self
+                        .frame_sequence
+                        .checked_add(1)
+                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_SEQUENCE".to_owned())?;
+                    let frame = DecodedVideoFrame {
+                        sequence: self.frame_sequence,
+                        pts_us,
+                        duration_us: 1,
+                        width,
+                        height,
+                        bgra8: bgra8.into(),
+                    };
+                    self.last_pts_us = Some(pts_us);
+                    if pts_us <= elapsed_us {
+                        self.current = Some(frame);
+                        continue;
+                    }
+                    self.pending = Some(frame);
+                    break;
+                }
+                AviRangeEvent::Audio(chunk) => {
+                    let pts_us = u64::try_from(chunk.pts_ms)
+                        .map_err(|_| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?
+                        .checked_mul(1_000)
+                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?;
+                    if chunk.sample_rate == 0
+                        || !(1..=2).contains(&chunk.channels)
+                        || chunk.samples.is_empty()
+                        || !chunk
+                            .samples
+                            .len()
+                            .is_multiple_of(usize::from(chunk.channels))
+                        || chunk.samples.iter().any(|sample| !sample.is_finite())
+                        || self
+                            .last_audio_pts_us
+                            .is_some_and(|previous| pts_us < previous)
+                    {
+                        return Err("ASTRA_EMU_MINORI_AVI_AUDIO_FORMAT".into());
+                    }
+                    self.pending_audio_samples = self
+                        .pending_audio_samples
+                        .checked_add(chunk.samples.len())
+                        .filter(|samples| *samples <= MAX_AVI_PENDING_AUDIO_SAMPLES)
+                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_AUDIO_EVENT_BUDGET".to_owned())?;
+                    self.last_audio_pts_us = Some(pts_us);
+                    self.audio.push(chunk);
+                }
+                AviRangeEvent::End => {
+                    self.ended = true;
+                    break;
+                }
+            }
+        }
+        Ok(previous_sequence != self.current.as_ref().map(|frame| frame.sequence))
+    }
+
+    fn drain_audio(&mut self) -> Vec<na_mpeg2_decoder::MpegAudioF32> {
+        self.pending_audio_samples = 0;
+        std::mem::take(&mut self.audio)
+    }
+
+    fn telemetry(&self) -> AviRangeTelemetry {
+        self.decoder.telemetry()
+    }
 }
 
 struct FvpNativeVideoCursor {
@@ -3161,7 +3336,7 @@ fn native_video_frame(frame: FvpMovieFrame, duration_us: u64) -> Result<DecodedV
         .checked_mul(1_000)
         .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_TIMELINE_BOUNDS".to_owned())?;
     let mut bgra8 = frame.rgba8;
-    for pixel in bgra8.chunks_exact_mut(4) {
+    for pixel in bgra8.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Ok(DecodedVideoFrame {
@@ -3178,6 +3353,7 @@ impl ActiveVideoStream {
     async fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
         match self {
             Self::Native(cursor) => cursor.advance(elapsed_us),
+            Self::MinoriAvi(cursor) => cursor.advance(elapsed_us),
             Self::Platform(cursor) => cursor.advance(elapsed_us).await,
         }
     }
@@ -3188,6 +3364,10 @@ impl ActiveVideoStream {
                 .current
                 .as_ref()
                 .filter(|frame| frame.pts_us <= elapsed_us),
+            Self::MinoriAvi(cursor) => cursor
+                .current
+                .as_ref()
+                .filter(|frame| frame.pts_us <= elapsed_us),
             Self::Platform(cursor) => cursor.current_frame(),
         }
     }
@@ -3195,6 +3375,7 @@ impl ActiveVideoStream {
     fn duration_us(&self) -> Option<u64> {
         match self {
             Self::Native(cursor) => cursor.duration_us,
+            Self::MinoriAvi(cursor) => Some(cursor.duration_us),
             Self::Platform(cursor) => cursor.duration_us(),
         }
     }
@@ -3202,6 +3383,7 @@ impl ActiveVideoStream {
     async fn close(&mut self) -> Result<(), String> {
         match self {
             Self::Native(_) => Ok(()),
+            Self::MinoriAvi(_) => Ok(()),
             Self::Platform(cursor) => cursor.close().await,
         }
     }
@@ -3614,7 +3796,7 @@ fn runtime_live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextur
 
 fn rgba8_to_luma_alpha8(rgba8: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(rgba8.len() / 2);
-    for pixel in rgba8.chunks_exact(4) {
+    for pixel in rgba8.as_chunks::<4>().0 {
         let luma = ((u16::from(pixel[0]) * 77
             + u16::from(pixel[1]) * 150
             + u16::from(pixel[2]) * 29
@@ -3696,7 +3878,9 @@ fn gpu_rgba8_owned(
         LegacyTextureFormat::LumaAlpha8 => OwnedPixelBuffer::from_vec(
             pixels
                 .as_slice()
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|pair| [pair[0], pair[0], pair[0], pair[1]])
                 .collect(),
         ),
@@ -3973,6 +4157,7 @@ fn blend_premultiplied(target: &mut [u8], source: [u8; 4], blend: BlendMode) {
 struct RuntimeDriver<'a> {
     runtime: &'a mut AstraEmuRuntimeProvider,
     session_id: GameRuntimeSessionId,
+    family_id: String,
     seed: u64,
     delta_ns: u64,
     platform: &'a PlatformHostClient,
@@ -3982,6 +4167,7 @@ struct RuntimeDriver<'a> {
     await_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
     pending_waits: BTreeMap<String, PendingWait>,
+    observed_blackboard: BTreeMap<String, String>,
     rasterizer: CpuStageRasterizer,
     layer_state: RetainedLayer2DState,
     direct_layer_frame: bool,
@@ -4037,6 +4223,7 @@ struct PendingScenePresent {
 }
 
 struct RuntimeDriverConfig {
+    family_id: String,
     seed: u64,
     delta_ns: u64,
     audio_enabled: bool,
@@ -4221,6 +4408,7 @@ fn perfetto_domain(name: &str) -> &'static str {
 }
 
 struct ExecutionConfig {
+    family_id: String,
     seed: u64,
     delta_ns: u64,
     frame_sample_interval: u64,
@@ -4538,6 +4726,30 @@ impl NativeViewport {
     }
 }
 
+#[derive(Debug, Default)]
+struct HeadlessAwaitTimeline {
+    unused_reserved_ticks: u64,
+}
+
+impl HeadlessAwaitTimeline {
+    fn effective_tick(&self, scheduled_tick: u64) -> Result<u64, String> {
+        scheduled_tick
+            .checked_sub(self.unused_reserved_ticks)
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_AWAIT_TICK_SHIFT_INVALID".to_owned())
+    }
+
+    fn complete(&mut self, timeout_ticks: u32, advanced_ticks: u64) -> Result<(), String> {
+        let unused_ticks = u64::from(timeout_ticks)
+            .checked_sub(advanced_ticks)
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_AWAIT_TICK_ACCOUNTING_INVALID".to_owned())?;
+        self.unused_reserved_ticks = self
+            .unused_reserved_ticks
+            .checked_add(unused_ticks)
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_AWAIT_TICK_SHIFT_OVERFLOW".to_owned())?;
+        Ok(())
+    }
+}
+
 async fn execute_sequence(
     runtime: &mut AstraEmuRuntimeProvider,
     session_id: GameRuntimeSessionId,
@@ -4552,6 +4764,7 @@ async fn execute_sequence(
         platform,
         surface,
         RuntimeDriverConfig {
+            family_id: config.family_id,
             seed: config.seed,
             delta_ns: config.delta_ns,
             audio_enabled: true,
@@ -4565,9 +4778,11 @@ async fn execute_sequence(
     )?;
     let mut checkpoints = Vec::new();
     let mut checkpoint_frames = Vec::new();
+    let mut await_timeline = HeadlessAwaitTimeline::default();
     let run_result: Result<(), String> = async {
         for (message_index, message) in messages.iter().enumerate() {
-            while driver.fixed_step < message.tick && !driver.terminal {
+            let effective_tick = await_timeline.effective_tick(message.tick)?;
+            while driver.fixed_step < effective_tick && !driver.terminal {
                 driver.step().await?;
             }
             match &message.event {
@@ -4607,8 +4822,7 @@ async fn execute_sequence(
                     // same-tick shutdown ends the oracle tick before rendering,
                     // so its preceding checkpoint observes the last committed
                     // frame without advancing.
-                    let checkpoint_step = message
-                        .tick
+                    let checkpoint_step = effective_tick
                         .checked_add(1)
                         .ok_or_else(|| "ASTRA_EMU_HEADLESS_CHECKPOINT_TICK_OVERFLOW".to_owned())?;
                     if !shutdown_same_tick {
@@ -4646,9 +4860,7 @@ async fn execute_sequence(
                     if matches!(observation, ObservationPredicate::Equals { .. }) {
                         return Err("ASTRA_EMU_HEADLESS_OBSERVATION_HASH_REMOVED".into());
                     }
-                    if *continue_at_match {
-                        return Err("ASTRA_EMU_HEADLESS_AWAIT_CONTINUATION_UNSUPPORTED".into());
-                    }
+                    let starting_step = driver.fixed_step;
                     let mut matched = driver.observation_matches(observation);
                     for _ in 0..*timeout_ticks {
                         if matched || driver.terminal {
@@ -4659,6 +4871,26 @@ async fn execute_sequence(
                     }
                     if !matched {
                         return Err("ASTRA_EMU_HEADLESS_AWAIT_TIMEOUT".into());
+                    }
+                    tracing::info!(
+                        target: "astra_emu_cli::runner",
+                        event = "astra_emu_headless_await_matched",
+                        input_sequence = message.sequence,
+                        fixed_step = driver.fixed_step,
+                        observation_kind = match observation {
+                            ObservationPredicate::Exists { .. } => "exists",
+                            ObservationPredicate::Equals { .. } => "removed_hash_observation",
+                        },
+                        "Headless await matched its typed observation"
+                    );
+                    if *continue_at_match {
+                        let advanced_ticks = driver
+                            .fixed_step
+                            .checked_sub(starting_step)
+                            .ok_or_else(|| {
+                                "ASTRA_EMU_HEADLESS_AWAIT_TICK_ACCOUNTING_INVALID".to_owned()
+                            })?;
+                        await_timeline.complete(*timeout_ticks, advanced_ticks)?;
                     }
                 }
                 input => driver.consume_physical_input(input)?,
@@ -4836,6 +5068,7 @@ impl<'a> RuntimeDriver<'a> {
         let driver = RuntimeDriver {
             runtime,
             session_id,
+            family_id: config.family_id,
             seed: config.seed,
             delta_ns: config.delta_ns,
             platform,
@@ -4845,6 +5078,7 @@ impl<'a> RuntimeDriver<'a> {
             await_sequence: 0,
             pending_inputs: Vec::new(),
             pending_waits: BTreeMap::new(),
+            observed_blackboard: BTreeMap::new(),
             rasterizer: CpuStageRasterizer::default(),
             layer_state: RetainedLayer2DState::default(),
             direct_layer_frame: false,
@@ -5368,6 +5602,15 @@ impl<'a> RuntimeDriver<'a> {
             if self.pending_waits.insert(token, condition).is_some() {
                 return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
             }
+        }
+        for mutation in live.blackboard {
+            if self.observed_blackboard.len() >= 4096
+                && !self.observed_blackboard.contains_key(&mutation.key)
+            {
+                return Err("ASTRA_EMU_HEADLESS_BLACKBOARD_OBSERVATION_BOUNDS".into());
+            }
+            self.observed_blackboard
+                .insert(mutation.key, mutation.value);
         }
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.end_perfetto_phase("runtime.live_output_routing", 2)?;
@@ -5926,52 +6169,32 @@ impl<'a> RuntimeDriver<'a> {
         if self.video.is_some() || started_step > self.fixed_step {
             return Err("ASTRA_EMU_HEADLESS_VIDEO_ALREADY_ACTIVE".into());
         }
-        let bytes =
-            self.runtime
-                .read_vfs_resource(&self.session_id, &resource_uri, 512 * 1024 * 1024)?;
         let extension = resource_uri
             .rsplit_once('.')
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_EXTENSION_MISSING".to_owned())?;
-        let (stream, audio_stream_id, audio_stream) = match fvp_movie_compatibility(&extension) {
-            FvpMovieCompatibility::Native => {
-                let audio_stream_id =
-                    if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
-                        let stream_id = MOVIE_AUDIO_STREAM_BASE
-                            .checked_add(self.movie_audio_sequence)
-                            .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
-                        self.movie_audio_sequence = self
-                            .movie_audio_sequence
-                            .checked_add(1)
-                            .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
-                        Some(stream_id)
-                    } else {
-                        None
-                    };
-                (
-                    ActiveVideoStream::Native(FvpNativeVideoCursor::open(&extension, bytes)?),
-                    audio_stream_id,
-                    None,
-                )
+        let (stream, audio_stream_id, audio_stream) = if self.family_id == "minori" {
+            let (vfs, mount_set_id) = self.runtime.vfs_reader_binding(&self.session_id)?;
+            let source = Arc::new(
+                LegacyRuntimeVfsByteSource::new(vfs, mount_set_id, resource_uri.clone())
+                    .map_err(|error| error.to_string())?,
+            );
+            let mut reader =
+                astra_byte_source::BoundedByteSourceReader::new(source, 4 * 1024 * 1024)
+                    .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_READER".to_owned())?;
+            let mut header = [0_u8; 12];
+            reader
+                .read_exact(&mut header)
+                .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_READ".to_owned())?;
+            reader
+                .seek(std::io::SeekFrom::Start(0))
+                .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_READER".to_owned())?;
+            if !is_avi_container_header(&header) {
+                return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".into());
             }
-            FvpMovieCompatibility::PlatformProviderRequired => {
-                tracing::info!(
-                    event = "astra_emu_native_video_platform_stream_open",
-                    codec = extension.as_str(),
-                    "using PlatformHost incremental video decode"
-                );
-                let wants_audio =
-                    self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio);
-                let (video_bytes, audio_bytes) = if wants_audio {
-                    let audio_bytes = bytes;
-                    (audio_bytes.clone(), Some(audio_bytes))
-                } else {
-                    (bytes, None)
-                };
-                let video_stream =
-                    PlatformVideoCursor::open(self.platform.clone(), &extension, video_bytes)
-                        .await?;
-                let (audio_stream_id, audio_stream) = if wants_audio {
+            let decoder = AviRangeDecoder::new(reader)?;
+            let audio_stream_id =
+                if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
                     let stream_id = MOVIE_AUDIO_STREAM_BASE
                         .checked_add(self.movie_audio_sequence)
                         .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
@@ -5979,58 +6202,121 @@ impl<'a> RuntimeDriver<'a> {
                         .movie_audio_sequence
                         .checked_add(1)
                         .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
-                    // Video and audio are separate PlatformHost decode sessions;
-                    // the second session receives the same shared encoded owner,
-                    // while decoded payloads stay chunked.
-                    let mut audio_stream = PlatformAudioCursor::open(
-                        self.platform.clone(),
-                        &extension,
-                        audio_bytes
-                            .ok_or_else(|| "ASTRA_EMU_NATIVE_AUDIO_SOURCE_MISSING".to_owned())?,
-                    )
-                    .await?;
-                    let chunks = match audio_stream.drain_ready() {
-                        Ok(chunks) => chunks,
-                        Err(error) => {
-                            let _ = audio_stream.close().await;
-                            return Err(error);
-                        }
-                    };
-                    let mut chunks = chunks.into_iter();
-                    let first = match chunks.next() {
-                        Some(first) => first,
-                        None => {
-                            let _ = audio_stream.close().await;
-                            return Err("ASTRA_EMU_NATIVE_AUDIO_FIRST_CHUNK_MISSING".to_owned());
-                        }
-                    };
-                    if let Err(error) = self.audio.begin_platform_movie(stream_id, first) {
-                        let _ = audio_stream.close().await;
-                        return Err(error);
-                    }
-                    for chunk in chunks {
-                        if let Err(error) = self.audio.append_platform_movie(
-                            stream_id,
-                            chunk.sample_rate,
-                            chunk.channels,
-                            chunk.samples,
-                        ) {
-                            let _ = audio_stream.close().await;
-                            return Err(error);
-                        }
-                    }
-                    (Some(stream_id), Some(audio_stream))
+                    Some(stream_id)
                 } else {
-                    (None, None)
+                    None
                 };
-                (
-                    ActiveVideoStream::Platform(video_stream),
-                    audio_stream_id,
-                    audio_stream,
-                )
-            }
-            FvpMovieCompatibility::Unsupported => {
-                return Err("ASTRA_EMU_HEADLESS_VIDEO_CODEC_UNSUPPORTED".into());
+            (
+                ActiveVideoStream::MinoriAvi(Box::new(MinoriAviPlayback::open(decoder))),
+                audio_stream_id,
+                None,
+            )
+        } else {
+            let bytes = self.runtime.read_vfs_resource(
+                &self.session_id,
+                &resource_uri,
+                512 * 1024 * 1024,
+            )?;
+            match fvp_movie_compatibility(&extension) {
+                FvpMovieCompatibility::Native => {
+                    let audio_stream_id =
+                        if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
+                            let stream_id = MOVIE_AUDIO_STREAM_BASE
+                                .checked_add(self.movie_audio_sequence)
+                                .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
+                            self.movie_audio_sequence = self
+                                .movie_audio_sequence
+                                .checked_add(1)
+                                .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
+                            Some(stream_id)
+                        } else {
+                            None
+                        };
+                    (
+                        ActiveVideoStream::Native(FvpNativeVideoCursor::open(&extension, bytes)?),
+                        audio_stream_id,
+                        None,
+                    )
+                }
+                FvpMovieCompatibility::PlatformProviderRequired => {
+                    tracing::info!(
+                        event = "astra_emu_native_video_platform_stream_open",
+                        codec = extension.as_str(),
+                        "using PlatformHost incremental video decode"
+                    );
+                    let wants_audio =
+                        self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio);
+                    let (video_bytes, audio_bytes) = if wants_audio {
+                        let audio_bytes = bytes;
+                        (audio_bytes.clone(), Some(audio_bytes))
+                    } else {
+                        (bytes, None)
+                    };
+                    let video_stream =
+                        PlatformVideoCursor::open(self.platform.clone(), &extension, video_bytes)
+                            .await?;
+                    let (audio_stream_id, audio_stream) = if wants_audio {
+                        let stream_id = MOVIE_AUDIO_STREAM_BASE
+                            .checked_add(self.movie_audio_sequence)
+                            .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
+                        self.movie_audio_sequence = self
+                            .movie_audio_sequence
+                            .checked_add(1)
+                            .ok_or_else(|| "ASTRA_EMU_HEADLESS_MOVIE_AUDIO_ID".to_owned())?;
+                        // Video and audio are separate PlatformHost decode sessions;
+                        // the second session receives the same shared encoded owner,
+                        // while decoded payloads stay chunked.
+                        let mut audio_stream = PlatformAudioCursor::open(
+                            self.platform.clone(),
+                            &extension,
+                            audio_bytes.ok_or_else(|| {
+                                "ASTRA_EMU_NATIVE_AUDIO_SOURCE_MISSING".to_owned()
+                            })?,
+                        )
+                        .await?;
+                        let chunks = match audio_stream.drain_ready() {
+                            Ok(chunks) => chunks,
+                            Err(error) => {
+                                let _ = audio_stream.close().await;
+                                return Err(error);
+                            }
+                        };
+                        let mut chunks = chunks.into_iter();
+                        let first = match chunks.next() {
+                            Some(first) => first,
+                            None => {
+                                let _ = audio_stream.close().await;
+                                return Err("ASTRA_EMU_NATIVE_AUDIO_FIRST_CHUNK_MISSING".to_owned());
+                            }
+                        };
+                        if let Err(error) = self.audio.begin_platform_movie(stream_id, first) {
+                            let _ = audio_stream.close().await;
+                            return Err(error);
+                        }
+                        for chunk in chunks {
+                            if let Err(error) = self.audio.append_platform_movie(
+                                stream_id,
+                                chunk.sample_rate,
+                                chunk.channels,
+                                chunk.samples,
+                            ) {
+                                let _ = audio_stream.close().await;
+                                return Err(error);
+                            }
+                        }
+                        (Some(stream_id), Some(audio_stream))
+                    } else {
+                        (None, None)
+                    };
+                    (
+                        ActiveVideoStream::Platform(video_stream),
+                        audio_stream_id,
+                        audio_stream,
+                    )
+                }
+                FvpMovieCompatibility::Unsupported => {
+                    return Err("ASTRA_EMU_HEADLESS_VIDEO_CODEC_UNSUPPORTED".into());
+                }
             }
         };
         tracing::debug!(
@@ -6038,6 +6324,7 @@ impl<'a> RuntimeDriver<'a> {
             codec = extension,
             decoded_frame_count = match &stream {
                 ActiveVideoStream::Native(_) => 0,
+                ActiveVideoStream::MinoriAvi(_) => 0,
                 ActiveVideoStream::Platform(_) => 1,
             },
             duration_us = stream.duration_us(),
@@ -6118,6 +6405,19 @@ impl<'a> RuntimeDriver<'a> {
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
             let chunks = match &mut video.stream {
                 ActiveVideoStream::Native(cursor) => cursor.drain_audio(),
+                ActiveVideoStream::MinoriAvi(cursor) => cursor
+                    .drain_audio()
+                    .into_iter()
+                    .map(|chunk| {
+                        Ok(FvpMovieAudioChunk {
+                            pts_ms: u64::try_from(chunk.pts_ms)
+                                .map_err(|_| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?,
+                            sample_rate: chunk.sample_rate,
+                            channels: chunk.channels,
+                            samples: chunk.samples,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?,
                 ActiveVideoStream::Platform(_) => Vec::new(),
             };
             (chunks, video.audio_stream_id, video.native_audio_started)
@@ -6157,6 +6457,23 @@ impl<'a> RuntimeDriver<'a> {
                 .video
                 .take()
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
+            if let ActiveVideoStream::MinoriAvi(stream) = &completed.stream {
+                if stream.current.is_none() {
+                    let telemetry = stream.telemetry();
+                    tracing::error!(
+                        event = "astra_emu_minori_avi_frame_missing",
+                        diagnostic_code = "ASTRA_EMU_MINORI_AVI_VIDEO_FRAME_MISSING",
+                        encoded_bytes = telemetry.encoded_bytes,
+                        video_packets = telemetry.video_packets,
+                        dropped_video_packets = telemetry.dropped_video_packets,
+                        audio_packets = telemetry.audio_packets,
+                        decoded_frames = telemetry.decoded_frames,
+                        decoded_audio_samples = telemetry.decoded_audio_samples,
+                        "Minori AVI stream ended without a decoded video frame"
+                    );
+                    return Err("ASTRA_EMU_MINORI_AVI_VIDEO_FRAME_MISSING".into());
+                }
+            }
             tracing::debug!(
                 event = "astra_emu_headless_video_completed",
                 elapsed_us,
@@ -6180,19 +6497,43 @@ impl<'a> RuntimeDriver<'a> {
         Ok(video_changed)
     }
 
-    fn observations(&self) -> std::collections::BTreeSet<&'static str> {
-        ["runtime.state_revision", "runtime.terminal", "runtime.tick"]
-            .into_iter()
-            .chain((!self.frame_samples.is_empty()).then_some("frame.presented"))
-            .collect()
-    }
-
     fn observation_matches(&self, predicate: &ObservationPredicate) -> bool {
         match predicate {
-            ObservationPredicate::Exists { key } => self.observations().contains(key.as_str()),
+            ObservationPredicate::Exists { key } => match key.as_str() {
+                "runtime.state_revision" | "runtime.tick" => true,
+                "runtime.terminal" => self.terminal,
+                "runtime.input_or_terminal" => {
+                    self.terminal
+                        || self
+                            .pending_waits
+                            .values()
+                            .any(|wait| matches!(wait, PendingWait::Input(_)))
+                }
+                "frame.presented" => !self.frame_samples.is_empty(),
+                _ => matches_blackboard_observation(&self.observed_blackboard, key),
+            },
             ObservationPredicate::Equals { .. } => false,
         }
     }
+}
+
+fn matches_blackboard_observation(
+    observed: &BTreeMap<String, String>,
+    observation_key: &str,
+) -> bool {
+    observation_key
+        .strip_prefix("blackboard.")
+        .and_then(|binding| binding.rsplit_once('.'))
+        .and_then(|(blackboard_key, expected)| {
+            observed
+                .get(blackboard_key)
+                .map(|actual| actual == expected)
+        })
+        .unwrap_or(false)
+}
+
+fn is_avi_container_header(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
 }
 
 fn frame_mean_rgba(rgba8: &[u8], width: u32, height: u32) -> Result<[u8; 4], String> {
@@ -6208,7 +6549,7 @@ fn frame_mean_rgba(rgba8: &[u8], width: u32, height: u32) -> Result<[u8; 4], Str
         return Err("ASTRA_EMU_HEADLESS_FRAME_SIGNATURE_LENGTH".into());
     }
     let mut sums = [0_u64; 4];
-    for pixel in rgba8.chunks_exact(4) {
+    for pixel in rgba8.as_chunks::<4>().0 {
         for channel in 0..4 {
             sums[channel] += u64::from(pixel[channel]);
         }
@@ -6407,6 +6748,53 @@ mod native_tests {
     }
 
     #[test]
+    fn continuing_await_consumes_only_unused_reserved_ticks() {
+        let mut timeline = HeadlessAwaitTimeline::default();
+        assert_eq!(timeline.effective_tick(12).unwrap(), 12);
+        timeline.complete(600, 20).unwrap();
+        assert_eq!(timeline.effective_tick(612).unwrap(), 32);
+        assert_eq!(
+            timeline.complete(10, 11).unwrap_err(),
+            "ASTRA_EMU_HEADLESS_AWAIT_TICK_ACCOUNTING_INVALID"
+        );
+    }
+
+    #[test]
+    fn blackboard_observation_uses_typed_key_and_plain_symbol_value() {
+        let observed = BTreeMap::from([
+            ("minori.choice_active".into(), "true".into()),
+            ("minori.gallery_unlock_count".into(), "1".into()),
+        ]);
+
+        assert!(matches_blackboard_observation(
+            &observed,
+            "blackboard.minori.choice_active.true"
+        ));
+        assert!(matches_blackboard_observation(
+            &observed,
+            "blackboard.minori.gallery_unlock_count.1"
+        ));
+        assert!(!matches_blackboard_observation(
+            &observed,
+            "blackboard.minori.choice_active.false"
+        ));
+    }
+
+    #[test]
+    fn family_launch_mode_maps_to_the_explicit_entry_contract() {
+        assert_eq!(launch_entry_explicit(FamilyLaunchMode::Direct), "true");
+        assert_eq!(launch_entry_explicit(FamilyLaunchMode::Title), "false");
+    }
+
+    #[test]
+    fn minori_avi_probe_requires_the_riff_avi_container_identity() {
+        assert!(is_avi_container_header(b"RIFF\x10\0\0\0AVI "));
+        assert!(!is_avi_container_header(b"RIFF\x10\0\0\0WAVE"));
+        assert!(!is_avi_container_header(b"JUNK\x10\0\0\0AVI "));
+        assert!(!is_avi_container_header(b"RIFF"));
+    }
+
+    #[test]
     fn frame_sample_preserves_mean_rgba() {
         let mut frame = vec![0_u8; 9 * 8 * 4];
         for y in 0..8 {
@@ -6559,6 +6947,7 @@ mod native_tests {
                 event: PhysicalInput::Shutdown,
             }],
             final_tick: 12,
+            max_execution_tick: 12,
         };
         let zero = duration_distribution(Vec::new());
         let execution = ExecutionEvidence {
@@ -6575,7 +6964,7 @@ mod native_tests {
                 rgba8: vec![1, 2, 3, 255],
             }],
             diagnostics: BTreeSet::new(),
-            fixed_step: 12,
+            fixed_step: 18,
             present_sequence: 1,
             terminal: false,
             phase_timings: HeadlessPhaseTimingEvidenceV1 {
@@ -6607,6 +6996,7 @@ mod native_tests {
         assert_eq!(report.schema, STANDARD_HEADLESS_RUN_REPORT_SCHEMA);
         assert_eq!(report.status, RunStatus::Passed);
         assert_eq!(report.completed_sequence, 7);
+        assert_eq!(report.duration_ns, 18 * profile.tick_duration_ns);
         assert_eq!(report.checkpoint_results.len(), 1);
         assert_eq!(report.checkpoint_results[0].id, "message");
         assert_eq!(

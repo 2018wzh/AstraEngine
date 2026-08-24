@@ -6454,7 +6454,7 @@ fn convert_scissor(scissor: LegacyScissorV1) -> Result<RectI, LegacyProviderErro
 }
 
 fn premultiply_rgba8(bytes: &mut [u8]) {
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0 {
         let alpha = u16::from(pixel[3]);
         for channel in &mut pixel[..3] {
             *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;

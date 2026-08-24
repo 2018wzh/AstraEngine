@@ -11,6 +11,7 @@ pub struct ValidatedInputSequence {
     pub hash: Hash256,
     pub messages: Vec<InputMessage>,
     pub final_tick: u64,
+    pub max_execution_tick: u64,
 }
 
 pub fn read_input_sequence(path: &Path) -> Result<ValidatedInputSequence, String> {
@@ -76,12 +77,30 @@ pub fn read_input_sequence(path: &Path) -> Result<ValidatedInputSequence, String
         joined.extend_from_slice(&line);
         joined.push(b'\n');
     }
+    let max_execution_tick = maximum_execution_tick(&messages)?;
     Ok(ValidatedInputSequence {
         session: expected_session.ok_or_else(|| "ASTRA_EMU_HEADLESS_INPUT_EMPTY".to_owned())?,
         hash: Hash256::from_sha256(&joined),
         messages,
         final_tick: previous_tick,
+        max_execution_tick,
     })
+}
+
+fn maximum_execution_tick(messages: &[InputMessage]) -> Result<u64, String> {
+    let mut execution_tick = 0_u64;
+    for message in messages {
+        execution_tick = execution_tick.max(message.tick);
+        let additional_ticks = match &message.event {
+            PhysicalInput::AdvanceTicks { count } => u64::from(*count),
+            PhysicalInput::Await { timeout_ticks, .. } => u64::from(*timeout_ticks),
+            _ => 0,
+        };
+        execution_tick = execution_tick
+            .checked_add(additional_ticks)
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_INPUT_EXECUTION_BUDGET_OVERFLOW".to_owned())?;
+    }
+    Ok(execution_tick)
 }
 
 #[cfg(test)]
@@ -124,5 +143,54 @@ mod tests {
         let loaded = read_input_sequence(&input).unwrap();
         assert_eq!(loaded.session, "run-1");
         assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(loaded.max_execution_tick, 1);
+    }
+
+    #[test]
+    fn execution_budget_counts_await_and_advance_without_double_counting_reserved_ticks() {
+        let messages = [
+            InputMessage {
+                schema: USER_INPUT_SEQUENCE_SCHEMA.into(),
+                session: "run-budget".into(),
+                sequence: 1,
+                tick: 5,
+                event: PhysicalInput::Await {
+                    observation: astra_headless_protocol::ObservationPredicate::Exists {
+                        key: "runtime.tick".into(),
+                    },
+                    timeout_ticks: 10,
+                    continue_at_match: true,
+                },
+            },
+            InputMessage {
+                schema: USER_INPUT_SEQUENCE_SCHEMA.into(),
+                session: "run-budget".into(),
+                sequence: 2,
+                tick: 15,
+                event: PhysicalInput::AdvanceTicks { count: 3 },
+            },
+            InputMessage {
+                schema: USER_INPUT_SEQUENCE_SCHEMA.into(),
+                session: "run-budget".into(),
+                sequence: 3,
+                tick: 16,
+                event: PhysicalInput::Await {
+                    observation: astra_headless_protocol::ObservationPredicate::Exists {
+                        key: "runtime.terminal".into(),
+                    },
+                    timeout_ticks: 20,
+                    continue_at_match: false,
+                },
+            },
+            InputMessage {
+                schema: USER_INPUT_SEQUENCE_SCHEMA.into(),
+                session: "run-budget".into(),
+                sequence: 4,
+                tick: 17,
+                event: PhysicalInput::Shutdown,
+            },
+        ];
+
+        assert_eq!(maximum_execution_tick(&messages).unwrap(), 38);
     }
 }

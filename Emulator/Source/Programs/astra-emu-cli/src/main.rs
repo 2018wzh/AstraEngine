@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use astra_emu_cli::{
-    run_headless, run_native, ExtensionBinding, HeadlessLaunch, HeadlessPerformanceArtifacts,
-    NativeLaunch, NativeLaunchMode,
+    run_headless, run_native, ExtensionBinding, FamilyLaunchMode, HeadlessLaunch,
+    HeadlessPerformanceArtifacts, NativeLaunch, NativeLaunchMode,
 };
 use clap::{Parser, Subcommand};
 
@@ -57,6 +57,8 @@ enum CliCommand {
         mount_profile: PathBuf,
         #[arg(long)]
         entry: Option<String>,
+        #[arg(long, value_enum, default_value = "direct")]
+        launch_mode: FamilyLaunchMode,
         #[arg(long, requires = "family_library")]
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
@@ -91,6 +93,8 @@ enum CliCommand {
         mount_profile: PathBuf,
         #[arg(long)]
         entry: Option<String>,
+        #[arg(long, value_enum, default_value = "direct")]
+        launch_mode: FamilyLaunchMode,
         #[arg(long, requires = "family_library")]
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
@@ -118,6 +122,8 @@ enum CliCommand {
         mount_profile: PathBuf,
         #[arg(long)]
         entry: Option<String>,
+        #[arg(long, value_enum, default_value = "direct")]
+        launch_mode: FamilyLaunchMode,
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
@@ -182,6 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             game_dir,
             mount_profile,
             entry,
+            launch_mode,
             family_manifest,
             family_library,
             extension_library,
@@ -200,6 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 game_dir,
                 mount_profile,
                 entry,
+                launch_mode,
                 family_manifest,
                 family_library,
                 extension: extension_binding(extension_library, extension_timeout_ms),
@@ -220,6 +228,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             game_dir,
             mount_profile,
             entry,
+            launch_mode,
             family_manifest,
             family_library,
             extension_library,
@@ -238,6 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 game_dir,
                 mount_profile,
                 entry,
+                launch_mode,
                 family_manifest,
                 family_library,
                 extension: extension_binding(extension_library, extension_timeout_ms),
@@ -260,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             game_dir,
             mount_profile,
             entry,
+            launch_mode,
             input,
             artifacts,
             family_manifest,
@@ -304,6 +315,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 game_dir,
                 mount_profile,
                 entry,
+                launch_mode,
                 input_path: input,
                 artifact_root: artifacts,
                 family_manifest,

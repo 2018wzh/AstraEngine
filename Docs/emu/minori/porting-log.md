@@ -410,3 +410,14 @@ python Tools/check_docs.py
 - 首次真实试听严格阻断于资源查找。VFS 清单确认 archive identity 是大小写敏感的 `BGMTest.wav`；随后又发现三个原生 SE bus 分别为 `se`、`se2`、`se3`，都应受同一 SE 配置控制。实现按已确认 identity 修正，不加入大小写搜索或未知 bus fallback。
 - 修正后的签名 Release plugin 在真实八包上完成 Config 短程 Headless E2：166 fixed steps、171 个提交/栅格帧、42 条物理输入、6 个 checkpoint、snapshot round-trip 和零 diagnostic。默认页、关闭画面效果、BGM 滑块 50% 和试听 checkpoint 的状态 hash 均按输入变化；完整 WAV 有 132608 frame，peak -3.5906 dBFS、RMS -17.8713 dBFS，无静音、clipping、master overload 或 underflow。
 - 模型查看全部 6 张 checkpoint。checkmark 与 knob 对齐原版控件，开关移除和滑块移动清晰可见；标题及进入剧情后的画面也没有裁剪、拉伸、错层或残留。视觉 verdict 通过。完整试听仍未由具名人工完成，所以 v3 review 以 `ASTRA_HEADLESS_REVIEW_AUDIO_LISTEN_PENDING` 返回 blocking；该阻断不被模型视觉结论覆盖。
+
+### 2026-08-23 ABI v9 媒体与 typed observation 恢复
+
+- 当前分支基于 AstraEMU ABI v9 implementation `289b89f74`，RFVP 固定为 `f4f64a5bb726c1759350a666a35e0a454b810f61`。Minori 继续使用 `Native + MultiLayer`；surface 是独占可写 lease，FilterGraph 使用 typed graph，未恢复旧 scene、text lease、family snapshot 或 session-resource ABI。
+- v9 真实八包短程启动已通过签名动态 plugin、VFS、RuntimeWorld、Layer2D、CosmicText 和音频生命周期。该 run 的自动结果为通过，但最早的标题 checkpoint 发生在首张有效标题帧之前，后续 Config 标签也没有与页面变化严格对齐，因此人工视觉结论保持 blocking，不能沿用历史 v8 E2。
+- 完整路线首先暴露 `LegacyVfsReader::read_file` 把约 196 MiB 影片作为一次 range 请求，而公共 byte-source transport 的单次上限是 16 MiB。公共 whole-file helper 现按该上限分块，逐块校验 source revision、返回 range 和短读；调用方总预算不变，不放宽 transport 上限。
+- Minori 影片主路径重新绑定仓库已有的纯 Rust `AviDemuxer` 与 `Wmv3Decoder`。encoded source 通过 4 MiB `BoundedByteSourceReader` 读取，decoded frame 和 PCM chunk 按时间轴有界提交；Minori 不进入 Windows 系统 codec、FFmpeg 或 RFVP 的 platform-provider 分支。容器、WMV3 stream、PCM、PTS、frame 或预算不匹配均返回 `ASTRA_EMU_MINORI_*` blocking diagnostic。
+- 本地增强 `wmv-decoder` 的 C ABI 改为显式 `ffi` feature；standalone 默认构建仍包含该 feature，Rust `video-only` consumer 会关闭它，避免同一进程内两个 decoder identity 导出重复全局符号。Release 链接已通过，不使用 linker 忽略参数。
+- Headless await 不再接受 runtime semantic hash。当前只支持 bounded typed existence marker；Minori route 使用 `choice_active`、`route_complete` 和自然 unlock marker。`continue_at_match` 只扣除 await 已预留但未消费的 timeout tick，不跳过 VM、媒体或 presentation tick。真实纯 Rust影片 run 已到达首个 choice marker；完整路线、带 checkpoint 复跑和正式 visual/audio review 仍在进行，不能计作新的 ABI v9 E2。
+- 首次完整诊断在 `choice_active` 之后被 Headless 音频 artifact 时长门禁阻断。根因是 host profile 只按最后一条消息的 tick 估算执行上界，漏掉了未被后续 tick 覆盖的 Await 和 `AdvanceTicks`；不是影片 PCM 重复提交。输入验证现在按消息顺序递推最坏执行 tick，artifact 预算使用该上界，标准报告则记录实际 fixed step。清理阶段的 resource leak 只作为音频根错误后的级联结果保留，不单独结案。
+- 修复 artifact 上界后的第二轮诊断越过原阻断并完整推进剧情，但以 `ASTRA_EMU_HEADLESS_AWAIT_TIMEOUT` 结束。代码复核确认 CLI 虽接收 `--entry`，却没有传递 title/direct 启动语义，Minori 因而按 `DirectEntry` 在脚本末尾进入 terminal，不会生成返回标题的 `route_complete`。通用 CLI 现增加显式 `--launch-mode direct|title`；Minori composition 将其映射到既有 family profile，其他不支持 title 语义的 family 会直接阻断，不静默忽略。

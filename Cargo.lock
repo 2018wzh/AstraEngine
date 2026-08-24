@@ -808,7 +808,7 @@ dependencies = [
  "hex",
  "image 0.25.10",
  "libc",
- "na_mpeg2_decoder 0.1.0",
+ "na_mpeg2_decoder",
  "postcard",
  "rayon",
  "rfvp-astra-provider",
@@ -6711,16 +6711,6 @@ checksum = "956787520e75e9bd233246045d19f42fb73242759cc57fba9611d940ae96d4b0"
 [[package]]
 name = "na_mpeg2_decoder"
 version = "0.1.0"
-dependencies = [
- "byteorder",
- "log",
- "symphonia 0.5.5",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "na_mpeg2_decoder"
-version = "0.1.0"
 source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
 dependencies = [
  "byteorder",
@@ -8824,7 +8814,7 @@ dependencies = [
  "astra-emu-family-core",
  "bincode 1.3.3",
  "encoding_rs",
- "na_mpeg2_decoder 0.1.0 (git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61)",
+ "na_mpeg2_decoder",
  "postcard",
  "rfvp",
  "schemars",

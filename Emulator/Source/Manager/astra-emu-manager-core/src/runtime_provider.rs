@@ -1005,6 +1005,20 @@ impl AstraEmuRuntimeProvider {
             .map_err(|error| error.to_string())
     }
 
+    /// Returns the revision-pinned range source binding owned by this session.
+    /// Consumers use it for streaming decoders; no source path or family key
+    /// crosses this boundary.
+    pub fn vfs_reader_binding(
+        &self,
+        session_id: &GameRuntimeSessionId,
+    ) -> Result<(Arc<dyn astra_emu_family_api::LegacyVfsReader>, String), String> {
+        let session = self
+            .sessions
+            .get(&session_id.0)
+            .ok_or_else(|| "ASTRA_EMU_SESSION_MISSING".to_owned())?;
+        Ok((self.host.vfs(), session.host_ctx.mount_set_id.clone()))
+    }
+
     pub fn begin_vfs_resource_read(
         &self,
         session_id: &GameRuntimeSessionId,

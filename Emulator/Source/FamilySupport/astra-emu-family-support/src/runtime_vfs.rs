@@ -236,7 +236,19 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
     ) -> Result<RangeReadResult, LegacyProviderError> {
         self.validate_mount(mount_set_id)?;
         let (before, _, resource_id) = self.stat_and_revision(uri)?;
-        range.validate(before.len, max_bytes).map_err(|_| {
+        range.validate(before.len, max_bytes).map_err(|error| {
+            tracing::error!(
+                target: "astra_emu_family_support::runtime_vfs",
+                event = "astra_emu_vfs_runtime_range_rejected",
+                diagnostic_code = "ASTRA_EMU_VFS_RUNTIME_RANGE",
+                resource_id = %resource_id,
+                source_length = before.len,
+                range_offset = range.offset,
+                range_length = range.len,
+                max_bytes,
+                error = %error,
+                "runtime VFS rejected an out-of-contract range"
+            );
             invalid(
                 "ASTRA_EMU_VFS_RUNTIME_RANGE",
                 "runtime VFS range is invalid",

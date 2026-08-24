@@ -184,17 +184,39 @@ pub trait LegacyVfsReader: Send + Sync {
                 "VFS entry exceeds the requested byte bound",
             ));
         }
-        self.read_file_range(
-            mount_set_id,
-            uri,
-            stat.revision,
-            astra_byte_source::ByteRange {
-                offset: 0,
-                len: stat.len,
-            },
-            max_bytes,
-        )
-        .map(|result| result.bytes)
+        let capacity = usize::try_from(stat.len).map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_BOUNDS",
+                "VFS entry cannot be represented by the host address space",
+            )
+        })?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(capacity).map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_VFS_ALLOCATION",
+                "VFS entry allocation exceeds the available host budget",
+            )
+        })?;
+        let mut offset = 0_u64;
+        while offset < stat.len {
+            let len = (stat.len - offset).min(astra_byte_source::DEFAULT_MAX_RANGE_BYTES);
+            let range = astra_byte_source::ByteRange { offset, len };
+            let result = self.read_file_range(mount_set_id, uri, stat.revision, range, len)?;
+            if result.range != range
+                || result.revision != stat.revision
+                || result.bytes.len() as u64 != len
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_VFS_SHORT_READ",
+                    "VFS entry chunk did not match the requested range",
+                ));
+            }
+            bytes.extend_from_slice(result.bytes.as_slice());
+            offset = offset.checked_add(len).ok_or_else(|| {
+                LegacyProviderError::invalid("ASTRA_EMU_VFS_BOUNDS", "VFS entry range overflowed")
+            })?;
+        }
+        Ok(astra_byte_source::OwnedByteBuffer::from_vec(bytes))
     }
 }
 
@@ -1738,6 +1760,73 @@ fn validate_sequence(
 mod tests {
     use super::*;
     use serde::{de::DeserializeOwned, Serialize};
+    use std::sync::Mutex;
+
+    struct ChunkedVfsReader {
+        len: u64,
+        ranges: Mutex<Vec<astra_byte_source::ByteRange>>,
+    }
+
+    impl LegacyVfsReader for ChunkedVfsReader {
+        fn stat_file(
+            &self,
+            _mount_set_id: &str,
+            _uri: &str,
+        ) -> Result<astra_byte_source::ByteSourceStat, LegacyProviderError> {
+            Ok(astra_byte_source::ByteSourceStat {
+                len: self.len,
+                revision: astra_byte_source::SourceRevision(7),
+            })
+        }
+
+        fn read_file_range(
+            &self,
+            _mount_set_id: &str,
+            _uri: &str,
+            expected_revision: astra_byte_source::SourceRevision,
+            range: astra_byte_source::ByteRange,
+            max_bytes: u64,
+        ) -> Result<astra_byte_source::RangeReadResult, LegacyProviderError> {
+            range
+                .validate(self.len, max_bytes)
+                .map_err(|_| LegacyProviderError::invalid("TEST_RANGE", "test range is invalid"))?;
+            assert_eq!(expected_revision, astra_byte_source::SourceRevision(7));
+            self.ranges.lock().unwrap().push(range);
+            Ok(astra_byte_source::RangeReadResult {
+                range,
+                revision: expected_revision,
+                bytes: astra_byte_source::OwnedByteBuffer::from_vec(vec![0x5a; range.len as usize]),
+            })
+        }
+    }
+
+    #[test]
+    fn whole_file_read_chunks_entries_larger_than_the_range_transport_limit() {
+        let len = astra_byte_source::DEFAULT_MAX_RANGE_BYTES + 3;
+        let reader = ChunkedVfsReader {
+            len,
+            ranges: Mutex::new(Vec::new()),
+        };
+
+        let bytes = reader
+            .read_file("mount.test", "family:/movie.bin", len)
+            .unwrap();
+
+        assert_eq!(bytes.len() as u64, len);
+        assert_eq!(
+            *reader.ranges.lock().unwrap(),
+            vec![
+                astra_byte_source::ByteRange {
+                    offset: 0,
+                    len: astra_byte_source::DEFAULT_MAX_RANGE_BYTES,
+                },
+                astra_byte_source::ByteRange {
+                    offset: astra_byte_source::DEFAULT_MAX_RANGE_BYTES,
+                    len: 3,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn video_command_requires_safe_identity_uri_and_stage_bounds() {

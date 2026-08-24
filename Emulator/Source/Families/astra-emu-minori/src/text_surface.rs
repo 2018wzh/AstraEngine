@@ -183,7 +183,7 @@ impl MinoriTextSurfaceRenderer {
                 "ASTRA_EMU_MINORI_TEXT_RENDER"
             })?
             .bytes;
-        for pixel in frame.chunks_exact_mut(4) {
+        for pixel in frame.as_chunks_mut::<4>().0 {
             let alpha = u16::from(pixel[3]);
             for channel in &mut pixel[..3] {
                 *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;

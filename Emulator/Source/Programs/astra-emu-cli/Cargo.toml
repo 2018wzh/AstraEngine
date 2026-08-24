@@ -35,7 +35,7 @@ astra-platform-common = { path = "../../../../Engine/Source/Platform/astra-platf
 astra-platform-headless = { path = "../../../../Engine/Source/Platform/astra-platform-headless" }
 astra-plugin = { path = "../../../../Engine/Source/Runtime/astra-plugin" }
 astra-plugin-abi = { path = "../../../../Engine/Source/Runtime/astra-plugin-abi" }
-na_mpeg2_decoder = { path = "../../Families/na_mpeg2_decoder" }
+na_mpeg2_decoder = { git = "https://github.com/2018wzh/rfvp.git", rev = "f4f64a5bb726c1759350a666a35e0a454b810f61" }
 wmv-decoder = { path = "../../Families/na_wmv_player", default-features = false, features = ["video-only"] }
 clap.workspace = true
 directories.workspace = true
