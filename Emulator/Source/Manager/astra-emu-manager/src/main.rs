@@ -215,12 +215,17 @@ struct RuntimeBridge {
 impl RuntimeBridge {
     fn new(vfs: Arc<VfsRegistry>) -> Result<Self, String> {
         let family_host = astra_emu_manager_core::AstraEmuFamilyHost::new(vfs.clone());
-        let family = FamilyHostConfig::from_process()?.create_provider(family_host.services())?;
+        // Keep Manager startup independent of an unselected native family.
+        // Minori's static provider is pure Rust and has no external binary
+        // load; the explicitly selected family is rebuilt in `ensure_family`
+        // before any session opens.
+        let family = astra_emu_minori::create_static_minori_provider(family_host.services())
+            .map_err(|error| error.to_string())?;
         let mut provider = AstraEmuRuntimeProvider::new(family, family_host)?;
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
         Ok(Self {
             provider,
-            family_id: "fvp".into(),
+            family_id: "minori".into(),
             active: None,
             terminal: false,
             failed: false,
@@ -247,9 +252,6 @@ impl RuntimeBridge {
         }
         if self.active.is_some() {
             return Err("ASTRA_EMU_RUNTIME_SESSION_ALREADY_ACTIVE".into());
-        }
-        if self.family_id == family_id {
-            return Ok(());
         }
         self.provider
             .destroy_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;

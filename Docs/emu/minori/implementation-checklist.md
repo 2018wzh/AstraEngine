@@ -2,6 +2,10 @@
 
 Minori family-mounted image previews now use the explicit `astra-media` `DecodeProviderRegistry` binding for bounded PNG/JPEG/BMP/WebP bytes; UI receives RGBA8 pixels, not paths or native handles. Unsupported proprietary containers and audio/video bindings remain open.
 
+Manager startup no longer eagerly loads the unselected FVP binary. The composition root creates the pure-Rust Minori idle provider and rebuilds the selected family only after a validated mount is available; same-family rebuild is intentional because the idle and mounted VFS bindings differ.
+
+本页较早记录的 route 数字来自 ABI v9 之前的 local-private run；在当前 `635527831e89e5ff9b87ac165b5b5532e28356c6` consumer 身份上重新生成完整四路线、自然解锁和 Windows E3 evidence 前，不把它们当作当前发布证据。
+
 ## 当前状态（2026-08-25）
 
 - 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。

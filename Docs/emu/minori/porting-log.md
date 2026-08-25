@@ -2,6 +2,11 @@
 
 ## 2026-08-25
 
+### Manager family selection is explicit at startup
+
+- Manager startup now constructs only the pure-Rust static Minori provider; the external FVP provider is loaded only after an explicit `fvp` family selection and is rebuilt before the session opens. This keeps composition-root provider choice explicit and avoids loading an unselected native family.
+- The same-family path is rebuilt when a real mount is selected, because the initial idle provider is intentionally bound to the desktop VFS while a Minori launch must bind the decrypted family VFS adapter. Manager focused tests and clippy pass after this change.
+
 ### Family VFS 图片预览的显式绑定
 
 - Manager family-mounted VFS 的 PNG/JPEG/BMP/WebP 预览现在先用 bounded range read，再通过 `astra-media` 的 `DecodeProviderRegistry` 绑定 `astra.decode.image`；未绑定 codec、尺寸超限、解码输出格式或长度不符时只显示稳定 diagnostic 与有界 hex，不把 raw bytes 当作图片，也不走系统 codec fallback。
