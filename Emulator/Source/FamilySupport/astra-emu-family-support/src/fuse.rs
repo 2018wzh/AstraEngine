@@ -222,6 +222,9 @@ impl Filesystem for ReadOnlyLegacyFs {
             return reply.error(Errno::ENOENT);
         };
         let length = (size as u64).min(node.size.saturating_sub(offset));
+        if length == 0 {
+            return reply.data(&[]);
+        }
         match self.vfs.read_range(&node.uri, offset, length) {
             Ok(read) => reply.data(&read.bytes),
             Err(_) => reply.error(Errno::EIO),
