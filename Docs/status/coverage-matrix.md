@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+Manager family-mounted PNG/JPEG/BMP/WebP previews now use an explicit `astra.decode.image` registry binding and bounded RGBA8 handoff to Slint. Proprietary ANI/SQZ and audio/video preview bindings remain blocking/open.
+
 Minori `progress_in_background` is now exposed as a bounded provider observation and consumed by the Windows native host for Minori-only focus suspend/resume. Focused provider/CLI evidence passes; real focus/audio and Windows E3 evidence remain open.
 
 Current AstraEMU identity note: the active contract is Family ABI v9 at

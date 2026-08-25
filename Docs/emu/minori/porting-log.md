@@ -2,6 +2,12 @@
 
 ## 2026-08-25
 
+### Family VFS 图片预览的显式绑定
+
+- Manager family-mounted VFS 的 PNG/JPEG/BMP/WebP 预览现在先用 bounded range read，再通过 `astra-media` 的 `DecodeProviderRegistry` 绑定 `astra.decode.image`；未绑定 codec、尺寸超限、解码输出格式或长度不符时只显示稳定 diagnostic 与有界 hex，不把 raw bytes 当作图片，也不走系统 codec fallback。
+- 解码后的 RGBA8 buffer 在 UI 线程创建 Slint `Image`，VFS model 不携带路径或 native handle。桌面目录仍使用原有显式 resolve path；Minori mount 使用内存 buffer，`.ani/.sqz` 等专有容器没有匹配 provider 时保持阻断并可查看 hex。
+- Manager 8 个 focused tests、UI contract test、clippy 和文档检查通过；音频/视频 preview provider binding 和正式视觉审查仍开放。
+
 ### Manager family mount 与 Minori runtime 接线
 
 - Manager launch 现在根据显式 family override 或 `scr.paz` entry 选择 `fvp`/`minori`；Minori 通过游戏目录内的 `astraemu.minori.mount.yaml` 调用静态 `MinoriVfsFamilyFactory`，再把 `LegacyMountedVfsReaderAdapter` 绑定到 ABI v9 host。RuntimeBridge 在无活动 session 时销毁旧 family instance，并重建同一 ABI v9 provider，不按注册顺序或隐式 fallback 选择。

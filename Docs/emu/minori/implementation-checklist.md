@@ -1,5 +1,7 @@
 # Minori Implementation Checklist
 
+Minori family-mounted image previews now use the explicit `astra-media` `DecodeProviderRegistry` binding for bounded PNG/JPEG/BMP/WebP bytes; UI receives RGBA8 pixels, not paths or native handles. Unsupported proprietary containers and audio/video bindings remain open.
+
 ## 当前状态（2026-08-25）
 
 - 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。

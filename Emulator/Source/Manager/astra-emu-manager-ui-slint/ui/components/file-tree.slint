@@ -21,6 +21,7 @@ export struct VfsPreview {
     text-content: string,
     hex-summary: string,
     image-data: image,
+    diagnostic: string,
     size-display: string,
     source-layer: string,
     resolve-path: string,
@@ -168,6 +169,13 @@ export component FilePreviewPanel inherits Rectangle {
                 color: Theme.text-muted;
                 font-size: 12px;
             }
+        }
+
+        if preview.diagnostic != "" : Text {
+            text: preview.diagnostic;
+            color: Theme.danger;
+            font-size: 11px;
+            wrap: word-wrap;
         }
 
         Rectangle { height: 1px; background: Theme.divider; }

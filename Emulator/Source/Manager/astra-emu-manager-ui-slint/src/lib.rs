@@ -64,6 +64,13 @@ pub struct VfsPreviewViewModel {
     pub text_content: String,
     pub hex_summary: String,
     pub image_uri: String,
+    /// Decoded RGBA8 pixels for private/family-mounted resources. The UI
+    /// creates the Slint image on its own thread; the manager never passes a
+    /// path or native image handle across the view-model boundary.
+    pub image_pixels: Vec<u8>,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub diagnostic: String,
     pub size_display: String,
     pub source_layer: String,
     pub resolve_path: String,
@@ -431,12 +438,24 @@ impl SlintManagerAdapter {
                     encoding: preview.encoding.as_str().into(),
                     text_content: preview.text_content.as_str().into(),
                     hex_summary: preview.hex_summary.as_str().into(),
-                    image_data: if preview.image_uri.is_empty() {
+                    image_data: if !preview.image_pixels.is_empty()
+                        && preview.image_width != 0
+                        && preview.image_height != 0
+                    {
+                        let buffer =
+                            slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+                                &preview.image_pixels,
+                                preview.image_width,
+                                preview.image_height,
+                            );
+                        slint::Image::from_rgba8(buffer)
+                    } else if preview.image_uri.is_empty() {
                         slint::Image::default()
                     } else {
                         slint::Image::load_from_path(Path::new(&preview.image_uri))
                             .unwrap_or_default()
                     },
+                    diagnostic: preview.diagnostic.as_str().into(),
                     size_display: preview.size_display.as_str().into(),
                     source_layer: preview.source_layer.as_str().into(),
                     resolve_path: preview.resolve_path.as_str().into(),

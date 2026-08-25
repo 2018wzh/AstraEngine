@@ -30,7 +30,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use astra_byte_source::ByteRange;
+use astra_byte_source::{ByteRange, OwnedByteBuffer};
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
@@ -62,6 +62,10 @@ use astra_emu_metadata::{
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
+};
+use astra_media::{
+    DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProviderRegistry, DecodeRequest,
+    ImageDecodeProvider,
 };
 use astra_media_core::Layer2DTransaction;
 use astra_plugin::ProductRuntimeProvider;
@@ -1731,9 +1735,29 @@ impl AstraEmuManagerController {
         let mut text_content = String::new();
         let mut hex_summary = String::new();
         let mut image_uri = String::new();
+        let mut image_pixels = Vec::new();
+        let mut image_width = 0;
+        let mut image_height = 0;
+        let mut diagnostic = String::new();
         if is_image && !resource.resolve_path.is_empty() {
             kind = "image";
             image_uri = resource.resolve_path.clone();
+        } else if is_image {
+            let bytes = self
+                .read_vfs_preview_bytes_with_limit(mount_set_id, resource, 16 * 1024 * 1024)
+                .ok()?;
+            match decode_image_preview(&bytes, &resource.path) {
+                Ok((pixels, width, height)) => {
+                    kind = "image";
+                    image_pixels = pixels;
+                    image_width = width;
+                    image_height = height;
+                }
+                Err(error) => {
+                    diagnostic = error;
+                    hex_summary = hex_dump(&bytes);
+                }
+            }
         } else {
             let bytes = self.read_vfs_preview_bytes(mount_set_id, resource).ok()?;
             match decode_text_preview(&bytes, &resource.path) {
@@ -1754,6 +1778,10 @@ impl AstraEmuManagerController {
             text_content,
             hex_summary,
             image_uri,
+            image_pixels,
+            image_width,
+            image_height,
+            diagnostic,
             size_display: human_size(resource.byte_size),
             source_layer: resource.source_layer.clone(),
             resolve_path: resource.resolve_path.clone(),
@@ -1765,6 +1793,18 @@ impl AstraEmuManagerController {
         mount_set_id: &str,
         resource: &VfsResourceInfo,
     ) -> Result<Vec<u8>, String> {
+        self.read_vfs_preview_bytes_with_limit(mount_set_id, resource, 64 * 1024)
+    }
+
+    fn read_vfs_preview_bytes_with_limit(
+        &self,
+        mount_set_id: &str,
+        resource: &VfsResourceInfo,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, String> {
+        if max_bytes == 0 || max_bytes > 64 * 1024 * 1024 {
+            return Err("ASTRA_EMU_VFS_PREVIEW_LIMIT_INVALID".into());
+        }
         if let (Some(mounted), Some(reader)) = (
             self.active_family_mount.as_ref(),
             self.active_family_reader.as_ref(),
@@ -1774,7 +1814,7 @@ impl AstraEmuManagerController {
             let stat = reader
                 .stat_file(mount_set_id, &uri)
                 .map_err(|error| error.code().to_owned())?;
-            let length = stat.len.min(64 * 1024);
+            let length = stat.len.min(max_bytes);
             let read = reader
                 .read_file_range(
                     mount_set_id,
@@ -1784,7 +1824,7 @@ impl AstraEmuManagerController {
                         offset: 0,
                         len: length,
                     },
-                    64 * 1024,
+                    max_bytes,
                 )
                 .map_err(|error| error.code().to_owned())?;
             return Ok(read.bytes.as_slice().to_vec());
@@ -2373,6 +2413,58 @@ impl AstraEmuManagerController {
             _ => Err("ASTRA_EMU_PATCH_MODE_INVALID".into()),
         }
     }
+}
+
+fn decode_image_preview(bytes: &[u8], path: &str) -> Result<(Vec<u8>, u32, u32), String> {
+    const MAX_IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
+    let codec = path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_CODEC_UNSUPPORTED".to_owned())?;
+    let codec = match codec.as_str() {
+        "png" | "jpg" | "jpeg" | "bmp" | "webp" => codec,
+        _ => return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_CODEC_UNSUPPORTED".into()),
+    };
+    let (width, height) = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_HEADER_INVALID".to_owned())?
+        .into_dimensions()
+        .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_HEADER_INVALID".to_owned())?;
+    let pixel_count = u64::from(width)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_DIMENSIONS_OVERFLOW".to_owned())?;
+    if pixel_count == 0 || pixel_count > MAX_IMAGE_PIXELS {
+        return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_DIMENSIONS_INVALID".into());
+    }
+    let mut registry = DecodeProviderRegistry::default();
+    registry
+        .register(Box::new(ImageDecodeProvider))
+        .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_PROVIDER_INVALID".to_owned())?;
+    let profile = "astra.manager.preview.v1";
+    let result = registry
+        .decode(
+            &DecodeRequest {
+                kind: DecodeKind::Image,
+                codec,
+                bytes: OwnedByteBuffer::from_vec(bytes.to_vec()),
+                profile: profile.into(),
+            },
+            &DecodeBindingContext::shipping("astra.decode.image", "astra-emu-manager", profile),
+        )
+        .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_DECODE_FAILED".to_owned())?;
+    let DecodeOutput::CpuBuffer { bytes, format } = result.output else {
+        return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
+    };
+    if format != "rgba8" {
+        return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
+    }
+    let expected = pixel_count
+        .checked_mul(4)
+        .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
+    if u64::try_from(bytes.len()).ok() != Some(expected) {
+        return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
+    }
+    Ok((bytes.as_slice().to_vec(), width, height))
 }
 
 /// Decode a bounded manager preview without treating arbitrary binary data as
@@ -4253,8 +4345,8 @@ mod manager_tests {
     };
 
     use super::{
-        apply_audio_media_hook, decode_text_preview, fvp_pack_paths_option, parse_glossary,
-        refresh_cover_cache, validate_patch_actions,
+        apply_audio_media_hook, decode_image_preview, decode_text_preview, fvp_pack_paths_option,
+        parse_glossary, refresh_cover_cache, validate_patch_actions,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -4355,6 +4447,19 @@ mod manager_tests {
             Some(("shift_jis".into(), "夏空".into()))
         );
         assert_eq!(decode_text_preview(&[0x00, 0x01, 0x02], "data.bin"), None);
+    }
+
+    #[test]
+    fn vfs_image_preview_requires_explicit_bound_image_provider() {
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(2, 3)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let (pixels, width, height) = decode_image_preview(&png.into_inner(), "sys/test.png")
+            .expect("image provider should decode the bounded PNG");
+        assert_eq!((width, height), (2, 3));
+        assert_eq!(pixels.len(), 2 * 3 * 4);
+        assert!(decode_image_preview(b"not-an-image", "sys/test.ani").is_err());
     }
 
     #[test]
