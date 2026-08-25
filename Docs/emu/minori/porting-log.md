@@ -454,3 +454,8 @@ python Tools/check_docs.py
 - 当前 consumer 在 `6f554012b` 收紧保存槽恢复：v9 `LegacyAudioCommandV1::Play` 与 `LegacyVideoCommandV1::Play` 没有 seek 起点，载入包含非零 `continuation_pts` 的槽现在在加载边界直接返回 `ASTRA_EMU_MINORI_MEDIA_CONTINUATION_UNSUPPORTED`，不会先替换 VM 再在下一 tick 伪造续播或隐藏失败。已有 presentation/restore 保护保持不变。
 - 配置写入继续使用 identity-bound `astra.emu.minori.config.v1` envelope、temporary file + range write + SetLength + atomic replace；相同配置不会产生第二次写入。Minori library 定向回归为 `133/133`，clippy、fmt、文档检查和 diff 检查通过。
 - 这项修复不扩大 ABI、不开启平台播放器或私有 seek API；需要原位置媒体恢复仍必须先有经过验证的公共 Host/media contract。完整四路线、正式音频听审、movie gallery 原版视觉 parity、cache volume、Linux FUSE 和 Windows E3 继续保持 blocking。
+
+### 2026-08-25 v9 短程 Headless 视觉复验
+
+- 在 `6f554012b` 后用当前签名 package、mount profile 和序列化物理输入执行了受限 Minori route smoke：107 个 submitted/rasterized frame、85,504 个音频 frame、68 个输入序列事件、2 个 checkpoint、diagnostic 为 0，Headless report status 为 `passed`。该运行没有到达 terminal，也不替代完整路线报告。
+- 实际查看两个 checkpoint：背景资源和日文正文均非空，字形、比例、透明度、层次和画面边界正常，未见拉伸、裁剪或残留层。该检查只证明当前 v9 surface/Layer2D/text/media 组合的短程可观察输出，不能证明原版像素 parity、影片续播、四路线自然 unlock 或 Windows E3。
