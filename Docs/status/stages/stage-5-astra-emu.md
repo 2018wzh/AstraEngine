@@ -120,7 +120,7 @@ filter visual golden 和正式 GPU 性能证据尚未形成。
 
 **Status:** `IN_PROGRESS`
 
-RFVP fork 固定 revision `f4f64a5bb726c1759350a666a35e0a454b810f61`，直接依赖 Family ABI v9，并实现 `Ported + SingleLayer`。正常像素路径只有“RFVP 写 Host lease → Host 上传”。fork 已删除 hosted texture/draw capture、GraphBuff/runtime texture hash、snapshot、ephemeral text storage 和旧 probe budget；局部变化提交 rect damage，无变化提交 `Unchanged`。
+RFVP fork 当前固定 revision `f4f64a5bb726c1759350a666a35e0a454b810f61`，provider 已声明 `Ported + SingleLayer` 并能走 Host writable surface、Hook 和 writable-file 路径。AstraEngine 侧 adapter 已收缩为 dylib/export、identity、panic 和错误边界；正常目标像素路径只有“RFVP 写 Host lease → Host 上传”。但 pinned fork 仍保留 hosted semantic-delta、snapshot/restore 和旧 policy-limit API，详见 [RFVP fork audit](../../emu/fvp/rfvp-fork-audit.md)，因此 fork thinness gate 当前为 `BLOCKED`，不能把旧路径写成已删除。
 
 `astra-emu-fvp` 已收缩为 dylib/export、build identity、provider 构造/shutdown、panic containment 和最终错误映射。fork provider 聚焦测试已通过；fork 全量测试、真实游戏 oracle、翻译布局、冷启动存档和 Performance E2 仍开放。
 

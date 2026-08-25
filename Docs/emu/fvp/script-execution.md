@@ -1,5 +1,9 @@
 # FVP Script Execution
 
+本页保留 VM safe-point 研究记录。Family ABI v9 已删除 Host snapshot/save/
+restore；文中 snapshot 仅指 VM 内部调试概念，不能作为公共 API、RuntimeWorld
+状态或 release evidence。当前外部存档只走 writable-file Host port。
+
 FVP VM is a cooperative stack VM. It runs multiple script contexts, but those contexts are engine threads, not OS threads. AstraEMU core should keep that model private and emit deterministic events at fixed tick boundaries.
 
 ## Variant and stack frame

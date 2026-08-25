@@ -1,5 +1,10 @@
 # FVP Implementation Checklist
 
+本页保留为 v9 迁移前的验收记录，不能关闭当前 Family ABI v9 gate。当前实现
+必须使用 Host writable surface、三态 damage、同步 Hook 和 writable-file；
+snapshot/save-slot、text lease、Runtime semantic hash 与策略 budget 均不再是
+Family contract。当前 fork 的未完成项见 [rfvp-fork-audit.md](rfvp-fork-audit.md)。
+
 This checklist is the smallest useful path for AstraEMU FVP. It starts with metadata and deterministic VM evidence before full presentation parity.
 
 ## Phase 1: Probe

@@ -1,95 +1,82 @@
-# RFVP Thin Fork 与 Hosted Adapter
+# RFVP Fork 与薄 Adapter（Family ABI v9）
 
-## 目的与当前状态
+本页只描述当前 v9 边界。旧的 v5/v6/v7 hosted delta、scene packet、text
+lease、continuation snapshot 和 adapter-side compositor 不属于当前契约。
 
-当前 hosted fork 绑定 Family ABI v7。v5/v6 binary、fingerprint 和 runtime
-snapshot 只作为拒绝测试输入，不再进入运行时；scene/PCM 继续按值消费，
-PlatformHost 负责有界 WMF video/audio cursor。
+## 结论
 
-FVP 采用 `2018wzh/rfvp` 的 `astra-hosted` 分支作为小型、可重放的 fork。补丁基底固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）；为复用已验证的文本 surface 所有权实现，补丁栈还保留一个经审查、未改写的上游移植补丁 `a94fa18`。除此以外只补充 host-neutral `hosted-core`，不把 Astra 类型、RuntimeWorld、序列化格式、错误码、路径约定或平台 GPU/audio handle 写入 RFVP。
-
-截至本文更新，Astra 精确 pin hosted fork `ee6bd6a8ae7470a073216d2d110e1042fad7cc25`。fork 保持 `GraphBuff` 和 generation 为权威状态，只保留一次 `GraphBuff -> hosted capture` 复制；`HostedStepDelta`、scene operation 和 PCM command 随后按值移动。owned audio port 直接接收 RFVP 已拥有的 PCM `Vec`，并记录 capture、operation、PCM moved/copied bytes；这些计数只进入脱敏 telemetry，不参与状态或 replay hash。同一 texture id 的尺寸或格式变化会按顺序输出 destroy/create，建立新 generation；同尺寸同格式仍只输出 update。BGM/SE 的空槽参数变化和未播放 stop 不再生成 host 命令，host 因而无需用兼容 fallback 接受不存在的 stream。
-
-Astra 的注册 case image 和动态 host VFS 都经无平台 handle 的 hosted VFS/clock port 打开。Family ABI v7 使用显式 `StableAbi` wire DTO 和 ABI-owned bulk buffer，不再把整份 step postcard 编码后跨 dylib。scene translator 按值消费 delta，restore 后显式切换资源 epoch并完整重发。旧 render-frame、逐 syscall journal、逐 opcode 字符串 trace、v5/v6 binary/fingerprint/runtime snapshot 都不再进入当前 provider。
-
-本地公开 Win95 Painter sample 的 signed dynamic FVP v5 已通过 120 fixed step 的 Headless run：6 条物理输入均被 host 消费、4 个实际 CPU frame、一个 PNG checkpoint、VFS 2 资源/20 次 range-read、snapshot round-trip 和正常 host shutdown 均通过；人工查看 checkpoint，窗口、工具栏、调色板、画布与底部状态栏可见且无残缺。该输入序列未产生可见笔划，因此它只证明 input transport，不证明脚本交互语义。CPU reference 该次 step p95 为 11.22 ms，4 次 raster 的中位数为 248.12 ms；它用于确认 scene dedup 没有退化为逐 tick 全帧光栅化，不是 GPU 或 RFVP 对比结论。该 sample 无音频、未到脚本 terminal，也没有媒体、路线、性能 soak 或 Windows E3，所以只构成 hosted-v5 的局部 Headless E2/视觉证据，不能作为完成声明。
-
-另一个由公开无资源脚本生成的 signed dynamic FVP v5 Headless lifecycle case 已在 2 step 达到 `terminal`，并同时通过 snapshot round-trip、PNG checkpoint、正常 session shutdown 与 host shutdown。该 checkpoint 是预期的空黑 frame，只证明 `ExitMode(3)` 到 hosted terminal 的生命周期传播，不是产品视觉、路线或媒体证据。
-
-公开生成的 input case 将主按钮 edge 送入 hosted session，并在下一固定 step 将一个已分组的 64×64 tile 从黑色改为红色；其 3 step signed dynamic run 同时通过 snapshot round-trip、PNG checkpoint、terminal 与 shutdown。人工检查 checkpoint，左上角 tile 为红色且其余画面保持黑色。这是 physical input → VM → `ScenePacket` → CPU reference 的可见 E2，证明输入 transport 和语义提交；它不替代实际游戏路线、文本、媒体或平台 E3。
-
-公开生成的 audio case 以 `AudioLoad`/`AudioPlay` 请求一个 Ogg source URI，并在四个 `ThreadNext` 后停止；其 62 step signed dynamic run 通过 snapshot round-trip、checkpoint、shutdown 与 VFS resource policy，输出 49,600 个音频 frame 和两个真实 WAV artifact，audio meter hash 非空。它覆盖 RFVP named-audio → URI-only hosted delta → adapter session resource read → Headless decoder/output 的链路；这是局部媒体 E2，不等同于真实游戏音频、视频、PTS/route 或 Windows E3。
-
-2026-08-02 的授权本机安装 smoke 以签名动态 v5 family 完成 300 fixed step：170 个 scene commit/raster frame、两个 PNG checkpoint、同 session snapshot round-trip 和正常 shutdown 均通过，VFS 记录 14 个资源、55,011 次受限读取、41,648,158 bytes，且没有 blocking diagnostic。人工查看后一个 checkpoint，标题画面完整可见；前一个启动期 checkpoint 为空白，未被当作视觉通过项。该 run 没有路线输入、terminal、音频或视频证据，CPU reference 的 step p95 为 58.08 ms，只是 Evidence profile 下的本机趋势，不能视为性能放行、媒体 parity 或 Windows E3。
-
-同一 build/profile 的 900 fixed step idle 延伸运行也通过：342 个 scene/raster frame、两个较晚 checkpoint、snapshot round-trip、正常 shutdown 和同一受限 VFS 账本均无 diagnostic。人工查看两个后期 checkpoint，标题淡入和静止阶段均完整，确认前述资源重发布在更长的 idle 段没有丢失纹理。该延伸仍没有路线输入、terminal、音频、视频或 soak 承诺，CPU reference 的 step p95 为 53.18 ms，只保留为本机 Evidence 趋势。
-
-在 `0.5.0` 基底与当前 fork pin 上，复用了既有本机排障中验证过的 11 条物理输入序列：恢复/focus、650 tick 前置、Enter down/up，以及 1,256 与 1,260 tick checkpoint。签名动态 v5 Headless 运行完整消费该序列，在 1,261 fixed step、720 scene/raster frame、488,800 audio frame 后通过 snapshot round-trip、正常 shutdown、受限 VFS 和非静音非削波 WAV artifact，且没有 diagnostic。两个转场 checkpoint 的图像 hash 相同，人工检查均为完整标题画面；因此该复跑只证明基底迁移后历史输入格式、键盘 edge 和当前 host 生命周期兼容，**不**把它计为菜单选择、路线推进或 RFVP parity 证据。后续真实路线验收必须先记录当前 build/profile 下经 host 消费且产生状态/画面变化的输入意图，再以独立 checkpoint 验证。
-
-该复跑暴露了 hosted-core 漏掉 `RfvpEvent::KeyDown`/`KeyUp` 到 `InputManager` 的映射：CLI 虽记录 `confirm` edge，fork 却只转发 pointer/wheel，因而键盘输入不能到达 VM。fork 已在 `90af8f88cb10ccad70dfc74fa914c286993aaf3d` 修复完整 FVP key-bit 映射并由 Astra 精确 pin。使用同一受控安装重新运行后，4,200 fixed step 的显式确认序列产生 814 scene/raster frame、2,840,000 audio frame、非静音非削波 WAV、完整标题菜单 checkpoint、snapshot round-trip 和零 diagnostic；随后以 pointer click 选择首个菜单项的 5,100 step run 产生 942 scene/raster frame、3,637,156 audio frame及多段非静音非削波 WAV，两个点击后 checkpoint 为完整黑场。后者已证明键盘/鼠标 edge 参与真实脚本、菜单状态和媒体链路，但黑场尚未区分为内容转场、等待还是视频阶段，不能作为正文视觉、route terminal 或视频 parity 结论。
-
-## 不可跨越的边界
+`astra-emu-fvp` 的 AstraEngine 侧已经是薄边界：它只负责 dylib root export、
+descriptor/build identity、panic containment 和最终错误映射。正常像素路径应当
+只有：
 
 ```text
-RFVP hosted-core
-  HCB VM / FVP semantics / hosted ports / typed delta
-        │ single bounded delta
-        ▼
-Astra FVP adapter
-  ABI validation / ScenePacket / media request / PreparedCommit
-        │ validated family effects
-        ▼
-RuntimeWorld + platform renderer/audio/media
+RFVP fork 直接 acquire Host writable lease
+    -> RFVP software renderer 写入同一 allocation
+    -> RFVP 显式 commit damage
+    -> Host 校验并上传
 ```
 
-- RFVP 保持 upstream 的 app、window、GPU、software renderer 和 UEFI 文件布局；这些原生 host 不参与 Astra hosted build。
-- Astra adapter 是唯一可见 `LegacyRuntimeProvider`、动态 ABI、VFS policy、资源授权和 `RuntimeWorld` 接口的一层。
-- EngineCore 不依赖 RFVP、legacy VM、native decoder 或任何 FVP DTO。
-- 插件不能打开宿主目录、保存宿主路径或持有 platform handle。资源身份、revision、范围和预算由 Astra host 验证。
+当前 pinned RFVP revision 为
+`f4f64a5bb726c1759350a666a35e0a454b810f61`。这个 revision 的 provider 已经能
+走 `Ported + SingleLayer`、Hook、writable-file 和 surface lease，但 fork 内仍
+保留旧的通用 hosted semantic-delta、snapshot/restore 和策略-limit 层，尚未达到
+最终 v9 形态。具体证据见 [RFVP fork audit](rfvp-fork-audit.md)。
 
-## 更新与 rebase
+## 职责边界
 
-1. 在 fork 分支上逐个提交可审查 patch，标题使用 `[hosted]`。补丁顺序以 `0.5.0` 为基底；任何获准复用的上游成熟移植先单独记录来源、范围和理由，再置于 hosted patch 之前。
-2. 每个 patch 必须只修改相邻 RFVP 模块，并在提交前记录 upstream base、patch id、许可证来源和验证命令。
-3. Astra 的 Cargo dependency 只钉住已推送的 git revision；禁止再次 vendor RFVP 或使用浮动 branch/tag。
-4. 更新 upstream 时先在 fork rebase，运行 upstream 回归和 hosted-core 测试，再更新 Astra pin。不得把 Astra adapter 修改混入 fork rebase。
-5. dynamic FVP descriptor、CLI 和 Manager 的 feature fingerprint 都从 `astra-emu-fvp` manifest 的 `hosted_fork_revision` 读取；pin 更新若未同步进入这三个 identity，构建必须失败，不能继续签发把旧 revision 写入证据的 binary。
+RFVP fork 必须拥有：
 
-## 性能与正确性原则
+- FVP VM、syscall、字体 fallback、shaping、换行、布局和最终绘制；
+- Host input、wait、audio、video、control DTO 的生成；
+- Hook 的同步调用。调用必须发生在 surface acquire 前；失败保留原文并返回
+  稳定 diagnostic；
+- 一个稳定的 `fvp.main` surface allocation，以及 `Unchanged`、`Full`、像素坐标
+  `Rects` damage；
+- per-game writable-file Host port 上的原生存档读写。
 
-- Shipping 只传 scene/resource/media 的语义 delta；不得逐 opcode 分配 trace、格式化 opcode 字符串、序列化完整状态或复制完整 RGBA framebuffer。接收端以尺寸、draw list 和已验证资源内容 hash 计算轻量 visual identity，再校验并提交 `PreparedCommit`；不得为了帧去重再次序列化包含纹理像素的 commit。
-- Evidence 使用固定容量 crash trace ring 和显式 profile。它是受限诊断，不得改变 Shipping 执行、状态 hash 或资源访问。
-- 纹理按稳定 id/generation 管理：同 id、尺寸和格式的变化使用 `UpdateTextureRegion`，保留 atlas placement 并执行有界 `queue.write_texture`；只有 create、destroy、尺寸/格式变化或真实容量不足才允许重新布局。adapter 在资源/profile/binding 检查完成前不得提交部分帧。
-- `.bin` 只读取受限 metadata；entry 通过受限 range-read 提供。禁止启动时预载整包，也禁止把商业 bytes 写入 save、replay、日志或报告。
-- named hosted audio 保留 source URI并转换为受 policy 约束的资源命令；没有 source identity 的 encoded bytes 不能伪装成 URI。PCM stream command 使用 owned submit。Manager 与 native CLI 统一把命令送入 PlatformHost-backed worker；worker 按 90/150 ms 低水位策略独立 decode、resample、mix 和 refill，使用分段队列、可复用 source/mix buffer 与批量 `rtrb` push/pop，不依赖 fixed tick。
-- `PreparedCommit` 在 host 完成 ABI、资源、预算、hash、profile 与 binding 验证后才可提交。任何缺失或不匹配都必须阻断。
-- `astra-emu-cli headless` 的性能证据必须同时指定 `--performance-budget`、`--performance-report`、`--perfetto-trace` 和 `--performance-trace-manifest`。该模式固定 1,200 个 warmup presentation 加 72,000 个测量 presentation，拒绝 Debug 或 dirty build、CPU renderer、非 DX12 timestamp-query GPU、`frame_sample_interval != 1`、resume/export snapshot 和不完整输出集。它把 shared `astra.performance_report.v1` 与 `astra.performance_trace_manifest.v1` 的 hash 回写到 Headless v3 report；report/manifest 只保存身份、计数和 hash，不能携带商业 payload 或本地路径。
+AstraEngine 的 `astra-emu-fvp` 只能保留：
 
-## 原版与 hosted 链路对照
+- `abi_stable` root module 和 dylib 导出；
+- plugin descriptor、engine/rustc/feature/fork identity；
+- RFVP provider 构造、shutdown、panic containment 和最终 diagnostic boundary。
 
-对照基准固定为 RFVP `0.5.0`（`3b5ea6c96a925c12f95aef8554905e8fecbc77c3`）和 Astra 当前 pin `ee6bd6a8ae7470a073216d2d110e1042fad7cc25`。原版在同一进程内从 `GraphBuff generation` 进入 `GpuPrimRenderer`：generation 未变时直接命中 cache；同尺寸 `RawRgba` 更新调用 `GpuTexture::update_rgba8`，最终只对已有纹理执行 `queue.write_texture`。资源未变化时不会重建 GPU texture。
+Adapter 不得出现 framebuffer compositor、scene/draw DTO translator、texture
+cache、像素复制或格式重组、text lease/翻译 overlay、snapshot/save envelope、
+runtime semantic hash、策略预算或业务状态修补。
 
-hosted 路径保留 generation 判断和一次必要 capture；capture 后的 delta、translator、Family ABI v7 与 Runtime bulk 采用消费式所有权。业务 serde/schema 仍是契约真源，但 FFI wire 不再使用整包 postcard。RGBA upload 只借用 bulk slice；LumaAlpha8 允许一次显式、可计量的格式转换。copy telemetry 分别记录 fork capture、operation 和 PCM moved/copied bytes，用来阻断重新引入的完整 payload clone。
+## Fork 清理门槛
 
-平台资源更新已与原版语义对齐：同 id、同尺寸、同格式 update 保持 resource generation 和 atlas placement，事务通过后只上传变更 region。retained texture 保存权威 base 与有界 sparse patches，不为每次局部更新重建完整 CPU 镜像；patch 总量超过 base 大小时会 fail-fast 要求 full refresh。create、destroy、尺寸/格式变化或 allocator 真实容量不足才会 release、repack 或创建新 generation。
+下列内容必须从 fork 的 shipping hosted surface 移除，而不是通过兼容分支隐藏：
 
-音频 producer 已脱离 fixed tick、scene prepare、GPU receipt 和 Slint event loop。共享 worker 对 named BGM/SE 按需流式 decode，对 PCM 使用分段队列和 cursor，不再随历史长度合并；resample/mix buffer 在平台 owned submit 返回后复用，native callback 批量 push/pop。pause/resume、repeat、fade、format drift、queue overflow、device loss、worker panic 和 shutdown 都有稳定失败边界。Runtime tick 只提交命令和读取 telemetry。
+1. `HostedSceneOperation`、texture payload capture、`HostedStepDelta.scene` 和
+   adapter-side scene translator。RFVP 可以保留内部的有界 damage bookkeeping，
+   但不能把 texture bytes 或 draw list 作为 Host 交易载荷。
+2. `HostedSnapshot`、`snapshot_bytes`、`restore_bytes`、semantic state hash 以及
+   family continuation snapshot。游戏自己的 save 格式只能经 writable-file port。
+3. `HostedTextOperation` 和 ephemeral text storage。Hook 结果必须在 RFVP 内完成
+   fallback、shaping、换行和绘制，不把正文转发给 Host。
+4. `max_scene_operations`、`max_texture_bytes`、`max_text_operations` 等旧
+   policy budget。保留 checked arithmetic、buffer/stride、所有权和实际分配失败
+   的 fail-fast 检查；Performance E2 之外的策略预算不参与阻断。
 
-实现与审查按下列顺序检查放大点：
+清理完成后，RFVP fork 应更新其 AstraEngine Git dependency 到实际 v9 ABI commit，
+独立构建通过后再更新 AstraEngine 的 `Cargo.toml`/`Cargo.lock` pin。
 
-1. 先看 `rfvp.core.provider_step`。core p99 正常而 `astra.emu.adapter.effect_dispatch` 出现长帧时，不得把问题归因于 VM。
-2. 对每次 scene commit 同时记录 create/update bytes、resource operation、draw count、live generation 和平台 atlas upload bytes。局部 update 后若上传整张资源，说明 subresource 语义已经丢失；若 upload bytes 进一步接近全部 live texture，则检查 allocator 是否因 generation churn 进入 repack。
-3. 对 payload 分别记录 fork capture、translator、ABI encode/decode 和 GPU prepare 字节数；同一 decoded pixel 不应在单步内拥有多份长期存活副本。
-4. 音频 trace 必须区分 command、decode、producer、platform queue、callback underflow。增大 buffer 只能用于明确的 bounded latency policy，不能替代独立 producer。
+## 验收顺序
 
-## 当前性能证据
+```bash
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
 
-本地授权样本的一次 clean Release GPU Headless 运行使用同一物理输入，在 DX12 集显 `wgpu_offscreen` 上完成 36,600 个 60 Hz fixed tick 与 73,200 个 120 Hz semantic presentation（其中前 1,200 个是 warmup）。正式 `astra.performance_report.v1` 为 `pass`：Runtime p99 为 2.80 ms、presentation p99 为 0.65 ms、deadline miss 为零，稳态 upload/readback/renderer allocation p95 均为零，memory growth 为零；v3 报告绑定 performance report 与 trace manifest hash。该运行同时产出并可解析 183,000 条 Perfetto Trace Event，trace 丢失和截断均为零，CPU raster phase 的样本数为零。snapshot/restore 正确性由同一输入的独立预跑验证；性能段不在采样窗口执行该昂贵操作。它证明本次 60 FPS baseline 的单轮 E2；不替代三轮 release-reference 对照、10 分钟原生音频 soak、route/media PTS parity 或 Windows Manager E3。
+并完成以下静态检查：
 
-2026 年 8 月 3 日的原生 10 分钟 mixed-run 形成 35,578 个配对 fixed-tick slice，RFVP core p99 为 2.923 ms，fixed tick p99 为 16.690 ms。第 651 step 的 core 为 2.696 ms，effect dispatch 却达到 3.940 s；该 step 正好消费标题菜单转场输入。整段运行的最长 fixed tick 为 5.892 s，后段累计 656 次平台 audio underflow，decoder refill counter 始终为零。证据说明本次撕裂不是 RFVP VM 或增量 decoder 慢，而是 adapter/presentation 长阻塞耗尽了依赖 fixed tick 补充的音频队列。该 run 明确失败，保留为根因 trace，不计入 60 FPS baseline 或音频 soak 通过项。
+- `cargo tree` 只有一个 `astra-emu-family-api` package identity；
+- adapter 中没有 scene、texture capture、像素复制、snapshot、text lease、
+  runtime hash 或业务 budget；
+- RFVP fork 的独立测试覆盖 writable surface、三态 damage、Hook 原文回退、
+  writable-file range/atomic-replace、输入/音频/控制 DTO 和稳定 diagnostic；
+- 正常 full-damage 帧只有 RFVP 写 Host lease、Host 上传这一条像素路径。
 
-## 迁移约束
-
-- Family ABI v7 是 hard cut。v5/v6 binary、fingerprint、FVP runtime snapshot、逐 syscall journal 和旧 render-frame 都不得进入运行时或保存容器；遇到旧 identity 必须返回明确迁移诊断，不能保留双读运行时。
-- `na_wmv_player` 与 `na_mpeg2_decoder` 只在没有其他消费者后移除；RFVP hosted-core 不再拥有这些 decoder。
-- Headless E2 需要同一 session 的真实 PNG/WAV、artifact manifest、输入消费、state/scene/route/wait/media PTS/audio 签名与视觉审查。单元测试、fixture 或启动日志不能替代它。
+外部 fork 的 58 个增量提交应在上述清理完成后压成一个可审查提交；不要把 Astra
+Engine adapter 的改动混入该提交，也不要通过 force-push 覆盖已有发布分支。

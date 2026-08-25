@@ -1,5 +1,10 @@
 # FVP Runtime Family Plugin Design
 
+本页保留为 v9 迁移前的设计记录，不能作为当前 Family ABI 的实现声明。当前
+FVP 固定为 `Ported + SingleLayer`；Family core 直接写 Host writable surface，
+文字 Hook、原生存档和错误边界以 [thin-fork.md](thin-fork.md) 为准。本页的
+snapshot、text capture 和 opaque save envelope 术语已退出当前契约。
+
 FVP family 以 engine-native plugin 接入 AstraEMU。Plugin 注册 `LegacyRuntimeProvider`，session 持有 `.hcb` VM、`.bin` archive set、syscall mapper、presentation/audio state、save state 和 diagnostics。Manager 负责窗口、平台输入、provider selection、overlay、报告和 release gate UI，并通过 `RuntimeWorld` 驱动 session。
 
 ## Session State

@@ -42,6 +42,7 @@ fn main() {
     let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let hosted_fork_revision = hosted_fork_revision(&manifest_path);
     println!("cargo:rerun-if-changed={}", manifest_path.display());
+    println!("cargo:rustc-env=ASTRA_FVP_HOSTED_FORK_REVISION={hosted_fork_revision}");
     let feature_identity = format!("rfvp={hosted_fork_revision};features={feature_identity}");
     let feature_fingerprint = format!("sha256.{}", hex_sha256(feature_identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_FVP_FEATURE_FINGERPRINT={feature_fingerprint}");

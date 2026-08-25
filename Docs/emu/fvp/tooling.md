@@ -1,5 +1,9 @@
 # FVP Tooling
 
+本页的 continuation snapshot、旧性能 budget 和 hosted scene 术语属于历史工具
+记录，不能用于当前 v9 release gate。当前 CLI/Headless 不提供 checkpoint/resume
+或 Family snapshot；请以 [thin-fork.md](thin-fork.md) 的 v9 验收顺序为准。
+
 ## 通用 VFS
 
 FVP 与 Minori 共用 `astra-emu-cli vfs` 和 `LegacyVfsFamilyRegistry`。FVP mount profile 必须显式列出根目录 `.bin` archive；这比 rfvp 扫描 `*.bin` 后跳过解析失败文件更严格，避免损坏包或误识别被静默隐藏。FVP 原始 archive 不需要 private patch，因此 profile 必须省略 `private_patch`；出现该字段会由 FVP factory 阻断。示例只描述格式，不是商业样本清单：
