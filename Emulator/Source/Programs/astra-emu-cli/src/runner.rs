@@ -5879,15 +5879,12 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     /// A sparse frame sample interval must not make a declared checkpoint
-    /// unreadable.  The regular step path intentionally skips presentation on
-    /// non-sampled ticks, but the checkpoint contract still requires a real
-    /// submitted surface.  Materialize the currently queued retained scene or
-    /// the prepared CPU layer once, without advancing the runtime tick.
+    /// unreadable or leave it pointing at an earlier scene. The regular step
+    /// path intentionally skips presentation on non-sampled ticks, but the
+    /// checkpoint contract still requires the current retained scene, CPU
+    /// layer, or video overlay. Materialize that state without advancing the
+    /// runtime tick.
     async fn ensure_checkpoint_surface(&mut self) -> Result<(), String> {
-        if self.present_sequence != 0 {
-            return Ok(());
-        }
-
         if let Some(scene) = self.pending_scene_frame.take() {
             self.submit_scene(scene).await?;
             self.visual_dirty = false;

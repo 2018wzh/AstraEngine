@@ -565,3 +565,8 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - 为 Headless 的 typed await 超时与匹配日志补充有界状态计数：pending input/time/media wait、active video，以及最近一次 provider status、wait/event/blackboard 数量。日志不包含正文、资源 payload、路径或 key；计数只用于定位输入序列和媒体 fence 的边界。
 - 授权样本的短路线复核确认：首段影片完成后，runtime 已发布下一脚本的 input wait；若继续保持 Control 并用 Enter 消费消息，Minori 语义会把下一条消息转换为 time wait，因此随后期待 `runtime.input_or_terminal` 会超时。这是测试输入未释放 Control 的语义问题，不是 chain、影片完成或 message wait 丢失。正式路线输入必须在需要逐条等待前释放 Control。
 - 新增纯 Rust 回归覆盖“movie fence → chain → next message input wait”，并通过；直接从下一脚本入口运行的 Headless 短流程也通过，说明 chain 恢复和首个消息 wait 可独立观察。当前完整首条路线、自然解锁、正式视觉/音频审查及 Windows E3 仍未闭合。
+
+### 2026-08-26 稀疏 checkpoint 的当前帧修正
+
+- 复核发现：此前 `ensure_checkpoint_surface` 只在首次提交 surface 时工作，稀疏采样下后续 `config` checkpoint 可能重复写入标题帧。现已改为在每个 checkpoint 物化当前 pending retained scene、CPU layer 或 video overlay，不推进 fixed tick；没有可提交的当前 surface 仍直接阻断。
+- 修正后的短 Headless 运行通过 typed await，配置页截图已显示实际 Minori 系统页，且与标题帧分离；标题、配置、影片活动帧和首条消息均已实际查看。该证据只覆盖 checkpoint 当前帧和输入语义，不能替代完整首条路线、自然解锁、正式音频审查或 Windows E3。
