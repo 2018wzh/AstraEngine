@@ -6023,9 +6023,12 @@ impl<'a> RuntimeDriver<'a> {
             else {
                 return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_CPU_BUFFER_REQUIRED".into());
             };
-            if decoded_format != "rgba8" {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".into());
-            }
+            validate_image_decode_output(
+                binding,
+                &decoded_format,
+                texture.decoded_width,
+                texture.decoded_height,
+            )?;
             let expected_rgba = usize::try_from(texture.decoded_width)
                 .ok()
                 .and_then(|width| {
@@ -6819,6 +6822,36 @@ fn image_decode_binding(family_id: &str, codec: &str) -> &'static str {
     }
 }
 
+fn validate_image_decode_output(
+    binding: &str,
+    format: &str,
+    expected_width: u32,
+    expected_height: u32,
+) -> Result<(), String> {
+    if binding == "astra.decode.minori.image" {
+        let dimensions = format
+            .strip_prefix("rgba8:first_frame:")
+            .and_then(|value| value.split_once('x'))
+            .ok_or_else(|| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".to_owned())?;
+        let width = dimensions
+            .0
+            .parse::<u32>()
+            .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".to_owned())?;
+        let height = dimensions
+            .1
+            .parse::<u32>()
+            .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".to_owned())?;
+        if (width, height) != (expected_width, expected_height) {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
+        }
+        return Ok(());
+    }
+    if format != "rgba8" {
+        return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod native_tests {
     use super::*;
@@ -6910,6 +6943,31 @@ mod native_tests {
         );
         assert_eq!(image_decode_binding("minori", "png"), "astra.decode.image");
         assert_eq!(image_decode_binding("fvp", "ani"), "astra.decode.image");
+    }
+
+    #[test]
+    fn minori_first_frame_output_requires_matching_dimensions() {
+        assert!(validate_image_decode_output(
+            "astra.decode.minori.image",
+            "rgba8:first_frame:320x180",
+            320,
+            180,
+        )
+        .is_ok());
+        assert_eq!(
+            validate_image_decode_output(
+                "astra.decode.minori.image",
+                "rgba8:first_frame:320x180",
+                640,
+                360,
+            )
+            .unwrap_err(),
+            "ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH"
+        );
+        assert_eq!(
+            validate_image_decode_output("astra.decode.minori.image", "rgba8", 1, 1).unwrap_err(),
+            "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT"
+        );
     }
 
     #[test]
