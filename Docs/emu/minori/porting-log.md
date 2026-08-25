@@ -544,6 +544,7 @@ python Tools/check_docs.py
 
 - 纯 Rust `MinoriAviDecodeProvider` 现在在容器解析前拒绝空输入和超过 64 MiB 的预览请求；该边界与公共 viewer 的媒体预览预算一致，避免直接 provider 调用绕过 viewer 预算。超限固定返回 `ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT`，不尝试其他 provider。
 - `MinoriAviDecoder` 在创建 WMV3 decoder 前校验非零尺寸、16,384 像素边长和 64 MiB RGBA 帧上限；demux 后单包同样限制为 64 MiB，并在解码后再次校验帧大小。尺寸、包或帧越界均返回 `ASTRA_EMU_MINORI_AVI_*` blocking diagnostic。
+- AVI stream table 现在只接受一个 WMV3 video 和最多一个 16-bit PCM audio；`AviStreamFormat::Other` 不再静默忽略，直接返回 `ASTRA_EMU_MINORI_AVI_STREAM_UNSUPPORTED`，避免未知 data/subtitle stream 被误认为已验证格式。
 - 新增 4 个定向回归（预览输入预算、空/截断容器、尺寸/帧预算），`astra-emu-minori` AVI tests 为 4/4。该项只收紧资源边界，不扩大 codec 覆盖，也不改变真实 movie parity、完整路线或 Windows E3 的证据边界。
 
 Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求长度被截为零时直接返回空数据，不再把合法 EOF 误报为 `EIO`。该路径仍需真实 Linux mount/list/stat/random-read/unmount evidence，Windows 工作树不能据此标记 FUSE 完成。

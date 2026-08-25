@@ -222,7 +222,9 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
                     audio_sample_rate = Some(info.sample_rate);
                     audio_channels = Some(info.channels);
                 }
-                AviStreamFormat::Other { .. } => {}
+                AviStreamFormat::Other { .. } => {
+                    return Err("ASTRA_EMU_MINORI_AVI_STREAM_UNSUPPORTED".into());
+                }
             }
         }
         let video_stream_index =

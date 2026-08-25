@@ -8,6 +8,8 @@ Minori video selection is now family-closed: Manager preview/playback and the He
 
 Minori's pure-Rust AVI provider now enforces the shared 64 MiB preview input budget before parsing, plus bounded WMV3 dimensions, encoded packet size, and decoded RGBA frame size. These checks are covered by four focused AVI tests and only tighten blocking behavior; they do not claim additional codec or movie-parity coverage.
 
+The Minori AVI stream table is also closed over one WMV3 video and at most one 16-bit PCM audio stream; unknown `AviStreamFormat::Other` streams now block instead of being ignored.
+
 The shared Linux read-only FUSE adapter now returns a successful empty read at EOF instead of mapping a zero-length range to `EIO`; real Linux mount evidence remains open.
 
 Fresh current-v9 Headless smoke after the stable Rust toolchain reinstall passed through the normal signed-plugin composition: 431 fixed steps, 27 physical input messages, 13 submitted/rasterized frames, 344576 audio frames, non-silent audio, distinct title/scene frame hashes and no diagnostics. It stopped before route terminal by design and therefore does not close full-route, gallery, formal audio review or Windows E3 gates.
