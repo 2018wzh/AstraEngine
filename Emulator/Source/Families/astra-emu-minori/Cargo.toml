@@ -37,6 +37,7 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+wmv-decoder = { path = "../na_wmv_player", default-features = false, features = ["video-only"] }
 
 [dev-dependencies]
 tempfile.workspace = true

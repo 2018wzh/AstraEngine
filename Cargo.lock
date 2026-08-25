@@ -1093,6 +1093,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
+ "wmv-decoder 0.2.0",
 ]
 
 [[package]]

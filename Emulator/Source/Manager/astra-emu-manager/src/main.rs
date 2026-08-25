@@ -61,7 +61,10 @@ use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityFetch, CoverAsset,
     MatchInput, MetadataProviderId, MetadataSearchQuery, DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
-use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
+use astra_emu_minori::{
+    MinoriAviDecodeProvider, MinoriImageDecodeProvider, MinoriVfsFamilyFactory,
+    MINORI_AVI_DECODE_PROVIDER_ID,
+};
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
@@ -227,6 +230,8 @@ impl RuntimeBridge {
             .map_err(|error| error.to_string())?;
         let mut provider = AstraEmuRuntimeProvider::new(family, family_host)?;
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
+        let mut video = HostVideoExecutor::default();
+        video.bind_family("minori");
         Ok(Self {
             provider,
             family_id: "minori".into(),
@@ -237,7 +242,7 @@ impl RuntimeBridge {
             live_layer_commits: VecDeque::new(),
             resource_revisions: BTreeMap::new(),
             audio: None,
-            video: HostVideoExecutor::default(),
+            video,
             translation: None,
             media_hooks: BTreeMap::new(),
             filter_preset: "none".into(),
@@ -270,6 +275,7 @@ impl RuntimeBridge {
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
         self.provider = provider;
         self.family_id = family_id.into();
+        self.video.bind_family(family_id);
         self.terminal = false;
         self.failed = false;
         self.live_scene_commits.clear();
@@ -1999,12 +2005,24 @@ impl AstraEmuManagerController {
             .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_FAMILY_MOUNT_MISSING".to_owned())?;
         let prefix = mounted.manifest().prefix.trim_end_matches('/');
         let uri = format!("{prefix}/{}", resource.path.trim_matches('/'));
+        let codec = resource
+            .path
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_CODEC_MISSING".to_owned())?;
+        let minori_avi =
+            mounted.manifest().family_id == "minori" && media_kind == "video" && codec == "avi";
         let mut registry = DecodeProviderRegistry::default();
         registry
             .register(Box::new(SymphoniaAudioDecodeProvider))
             .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_AUDIO_PROVIDER_INVALID".to_owned())?;
+        if minori_avi {
+            registry
+                .register(Box::new(MinoriAviDecodeProvider))
+                .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_INVALID".to_owned())?;
+        }
         #[cfg(target_os = "windows")]
-        if media_kind == "video" {
+        if media_kind == "video" && !minori_avi {
             let provider = WindowsMediaFoundationDecodeProvider::probe()
                 .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_UNAVAILABLE".to_owned())?;
             registry
@@ -2012,11 +2030,13 @@ impl AstraEmuManagerController {
                 .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_INVALID".to_owned())?;
         }
         #[cfg(not(target_os = "windows"))]
-        if media_kind == "video" {
+        if media_kind == "video" && !minori_avi {
             return Err("ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_UNBOUND".into());
         }
         let provider_id = if media_kind == "audio" {
             "astra.decode.symphonia"
+        } else if minori_avi {
+            MINORI_AVI_DECODE_PROVIDER_ID
         } else {
             "astra.decode.wmf"
         };

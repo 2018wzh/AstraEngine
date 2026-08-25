@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    io::Cursor,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender},
@@ -10,6 +11,7 @@ use std::{
 
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
+use astra_emu_minori::{MinoriAviDecoder, MinoriAviEvent};
 use astra_media::PlayerDecodedAudio;
 use astra_platform::{
     DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
@@ -64,9 +66,71 @@ struct ActiveMovie {
 
 enum MovieDecoder {
     Native(FvpMoviePacketStream),
+    Minori(Box<MinoriAviStreamDecoder>),
     Platform(Box<PlatformMovieDecoder>),
     #[cfg(test)]
     Buffered(VecDeque<FvpMoviePacket>),
+}
+
+struct MinoriAviStreamDecoder {
+    decoder: MinoriAviDecoder<Cursor<OwnedByteBuffer>>,
+    ended: bool,
+}
+
+impl MinoriAviStreamDecoder {
+    fn open(bytes: OwnedByteBuffer) -> Result<Self, String> {
+        Ok(Self {
+            decoder: MinoriAviDecoder::new(Cursor::new(bytes))?,
+            ended: false,
+        })
+    }
+
+    fn duration_ns(&self) -> Result<u64, String> {
+        self.decoder
+            .duration_us()
+            .checked_mul(1_000)
+            .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_TIMELINE".to_owned())
+    }
+
+    fn next_packet(&mut self) -> Result<FvpMoviePacket, String> {
+        if self.ended {
+            return Ok(FvpMoviePacket::End);
+        }
+        match self.decoder.next_event()? {
+            MinoriAviEvent::Video {
+                pts_us,
+                width,
+                height,
+                mut bgra8,
+            } => {
+                for pixel in bgra8.as_chunks_mut::<4>().0.iter_mut() {
+                    pixel.swap(0, 2);
+                }
+                Ok(FvpMoviePacket::Video(FvpMovieFrame {
+                    pts_ms: pts_us / 1_000,
+                    width,
+                    height,
+                    rgba8: bgra8,
+                }))
+            }
+            MinoriAviEvent::Audio {
+                pts_ms,
+                sample_rate,
+                channels,
+                samples,
+            } => Ok(FvpMoviePacket::Audio(FvpMovieAudioChunk {
+                pts_ms: u64::try_from(pts_ms)
+                    .map_err(|_| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?,
+                sample_rate,
+                channels,
+                samples,
+            })),
+            MinoriAviEvent::End => {
+                self.ended = true;
+                Ok(FvpMoviePacket::End)
+            }
+        }
+    }
 }
 
 struct PlatformMovieDecoder {
@@ -609,6 +673,7 @@ impl MovieDecoder {
                 video_result.and(audio_result)
             }
             Self::Native(_) => Ok(()),
+            Self::Minori(_) => Ok(()),
             #[cfg(test)]
             Self::Buffered(_) => Ok(()),
         }
@@ -617,6 +682,7 @@ impl MovieDecoder {
     fn next_packet(&mut self) -> Result<Option<FvpMoviePacket>, String> {
         match self {
             Self::Native(decoder) => decoder.try_next().map_err(|error| error.to_string()),
+            Self::Minori(decoder) => decoder.next_packet().map(Some),
             Self::Platform(decoder) => {
                 if decoder.next_video.is_none() && !decoder.video_eof {
                     match decoder
@@ -669,9 +735,14 @@ pub(crate) struct HostVideoExecutor {
     completed: Vec<String>,
     audio_sequence: u32,
     platform: Option<PlatformHostClient>,
+    family_id: String,
 }
 
 impl HostVideoExecutor {
+    pub(crate) fn bind_family(&mut self, family_id: &str) {
+        self.family_id = family_id.to_owned();
+    }
+
     pub(crate) fn bind_platform(&mut self, platform: PlatformHostClient) {
         self.platform = Some(platform);
     }
@@ -725,6 +796,40 @@ impl HostVideoExecutor {
             .rsplit_once('.')
             .map(|(_, extension)| extension)
             .ok_or_else(|| "ASTRA_EMU_VIDEO_EXTENSION_MISSING".to_owned())?;
+        if self.family_id == "minori" && extension.eq_ignore_ascii_case("avi") {
+            let decoder = MinoriAviStreamDecoder::open(bytes)?;
+            let duration_ns = Some(decoder.duration_ns()?);
+            let audio_stream_id = if matches!(mode, LegacyVideoMode::ModalWithAudio) {
+                let stream_id = MOVIE_AUDIO_STREAM_BASE
+                    .checked_add(self.audio_sequence)
+                    .ok_or_else(|| "ASTRA_EMU_MOVIE_AUDIO_ID_BOUNDS".to_owned())?;
+                self.audio_sequence = self.audio_sequence.saturating_add(1);
+                Some(stream_id)
+            } else {
+                None
+            };
+            let mut active = ActiveMovie {
+                playback_id,
+                mode,
+                stage_width,
+                stage_height,
+                frames: VecDeque::new(),
+                decoder: MovieDecoder::Minori(Box::new(decoder)),
+                duration_ns,
+                elapsed_ns: 0,
+                audio_stream_id,
+                audio_started: false,
+                previous_frame_pts_ns: None,
+                inferred_frame_step_ns: 34_000_000,
+                eof: false,
+            };
+            pump_decoder(&mut active, audio)?;
+            if active.frames.is_empty() && active.eof {
+                return Err("ASTRA_EMU_VIDEO_DECODE_NO_FRAME".into());
+            }
+            self.active = Some(active);
+            return Ok(());
+        }
         let compatibility = fvp_movie_compatibility(extension);
         match compatibility {
             FvpMovieCompatibility::Native | FvpMovieCompatibility::PlatformProviderRequired => {}

@@ -1,5 +1,6 @@
 //! Minori PAZ virtual filesystem and lossless script research parser.
 
+mod avi;
 mod factory;
 #[cfg(feature = "dynamic-plugin-export")]
 mod ffi;
@@ -11,6 +12,7 @@ mod save;
 mod script;
 mod text_surface;
 
+pub use avi::*;
 pub use factory::*;
 #[cfg(feature = "dynamic-plugin-export")]
 pub use ffi::*;
