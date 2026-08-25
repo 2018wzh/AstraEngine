@@ -1,6 +1,6 @@
 # Minori Implementation Checklist
 
-Minori family-mounted image previews now use the explicit `astra-media` `DecodeProviderRegistry` binding for bounded PNG/JPEG/BMP/WebP bytes; UI receives RGBA8 pixels, not paths or native handles. Unsupported proprietary containers and audio/video bindings remain open.
+Minori family-mounted image previews now use the explicit `astra-media` `DecodeProviderRegistry` binding for bounded PNG/JPEG/BMP/WebP bytes; UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only; proprietary containers and video bindings remain blocking/open where no provider is bound.
 
 Manager startup no longer eagerly loads the unselected FVP binary. The composition root creates the pure-Rust Minori idle provider and rebuilds the selected family only after a validated mount is available; same-family rebuild is intentional because the idle and mounted VFS bindings differ.
 

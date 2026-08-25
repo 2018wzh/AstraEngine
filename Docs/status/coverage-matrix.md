@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-Manager family-mounted PNG/JPEG/BMP/WebP previews now use an explicit `astra.decode.image` registry binding and bounded RGBA8 handoff to Slint. Proprietary ANI/SQZ and audio/video preview bindings remain blocking/open.
+Manager family-mounted PNG/JPEG/BMP/WebP previews now use an explicit `astra.decode.image` registry binding and bounded RGBA8 handoff to Slint. Family audio previews now use explicit Symphonia binding with metadata-only handoff; proprietary ANI/SQZ and unbound video remain blocking/open.
 
 Manager startup uses a pure-Rust Minori idle provider and loads FVP only from an explicit family selection; the selected family is rebuilt with its validated VFS binding before launch. This is focused composition-root evidence, not Windows E3.
 

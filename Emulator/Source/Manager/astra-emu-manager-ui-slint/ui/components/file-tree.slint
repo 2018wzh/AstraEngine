@@ -21,6 +21,7 @@ export struct VfsPreview {
     text-content: string,
     hex-summary: string,
     image-data: image,
+    media-summary: string,
     diagnostic: string,
     size-display: string,
     source-layer: string,
@@ -201,6 +202,18 @@ export component FilePreviewPanel inherits Rectangle {
             Image {
                 source: preview.image-data;
                 image-fit: contain;
+            }
+        }
+
+        if preview.kind == "media" : ScrollView {
+            vertical-stretch: 1;
+            mouse-drag-pan-enabled: true;
+
+            Text {
+                text: preview.media-summary;
+                color: Theme.text-muted;
+                font-size: 12px;
+                wrap: word-wrap;
             }
         }
 

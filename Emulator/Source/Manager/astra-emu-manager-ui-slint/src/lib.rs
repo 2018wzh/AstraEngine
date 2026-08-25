@@ -70,6 +70,9 @@ pub struct VfsPreviewViewModel {
     pub image_pixels: Vec<u8>,
     pub image_width: u32,
     pub image_height: u32,
+    /// Bounded, payload-free summary for an explicitly bound audio/video
+    /// decoder. The UI never receives PCM, frame buffers, or provider handles.
+    pub media_summary: String,
     pub diagnostic: String,
     pub size_display: String,
     pub source_layer: String,
@@ -455,6 +458,7 @@ impl SlintManagerAdapter {
                         slint::Image::load_from_path(Path::new(&preview.image_uri))
                             .unwrap_or_default()
                     },
+                    media_summary: preview.media_summary.as_str().into(),
                     diagnostic: preview.diagnostic.as_str().into(),
                     size_display: preview.size_display.as_str().into(),
                     source_layer: preview.source_layer.as_str().into(),

@@ -38,7 +38,9 @@ use astra_emu_family_api::{
     LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1,
     LegacyVideoMode,
 };
-use astra_emu_family_support::{LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry};
+use astra_emu_family_support::{
+    LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry, LegacyVfsViewer, ViewerPreview,
+};
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
@@ -63,9 +65,11 @@ use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
+#[cfg(target_os = "windows")]
+use astra_media::WindowsMediaFoundationDecodeProvider;
 use astra_media::{
     DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProviderRegistry, DecodeRequest,
-    ImageDecodeProvider,
+    ImageDecodeProvider, SymphoniaAudioDecodeProvider,
 };
 use astra_media_core::Layer2DTransaction;
 use astra_plugin::ProductRuntimeProvider;
@@ -1740,8 +1744,17 @@ impl AstraEmuManagerController {
         let mut image_pixels = Vec::new();
         let mut image_width = 0;
         let mut image_height = 0;
+        let mut media_summary = String::new();
         let mut diagnostic = String::new();
-        if is_image && !resource.resolve_path.is_empty() {
+        let family_media_kind = self.family_media_kind(resource);
+        if matches!(family_media_kind.as_deref(), Some("audio" | "video")) {
+            let media_kind = family_media_kind.as_deref().unwrap_or_default();
+            kind = "media";
+            match self.preview_family_media(mount_set_id, resource, media_kind) {
+                Ok(summary) => media_summary = summary,
+                Err(error) => diagnostic = error,
+            }
+        } else if is_image && !resource.resolve_path.is_empty() {
             kind = "image";
             image_uri = resource.resolve_path.clone();
         } else if is_image {
@@ -1783,11 +1796,80 @@ impl AstraEmuManagerController {
             image_pixels,
             image_width,
             image_height,
+            media_summary,
             diagnostic,
             size_display: human_size(resource.byte_size),
             source_layer: resource.source_layer.clone(),
             resolve_path: resource.resolve_path.clone(),
         })
+    }
+
+    fn family_media_kind(&self, resource: &VfsResourceInfo) -> Option<String> {
+        let mounted = self.active_family_mount.as_ref()?;
+        let prefix = mounted.manifest().prefix.trim_end_matches('/');
+        let uri = format!("{prefix}/{}", resource.path.trim_matches('/'));
+        mounted
+            .manifest()
+            .entries
+            .iter()
+            .find(|entry| entry.uri == uri)
+            .map(|entry| entry.media_kind.clone())
+    }
+
+    fn preview_family_media(
+        &self,
+        _mount_set_id: &str,
+        resource: &VfsResourceInfo,
+        media_kind: &str,
+    ) -> Result<String, String> {
+        let mounted = self
+            .active_family_mount
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_FAMILY_MOUNT_MISSING".to_owned())?;
+        let prefix = mounted.manifest().prefix.trim_end_matches('/');
+        let uri = format!("{prefix}/{}", resource.path.trim_matches('/'));
+        let mut registry = DecodeProviderRegistry::default();
+        registry
+            .register(Box::new(SymphoniaAudioDecodeProvider))
+            .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_AUDIO_PROVIDER_INVALID".to_owned())?;
+        #[cfg(target_os = "windows")]
+        if media_kind == "video" {
+            let provider = WindowsMediaFoundationDecodeProvider::probe()
+                .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_UNAVAILABLE".to_owned())?;
+            registry
+                .register(Box::new(provider))
+                .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_INVALID".to_owned())?;
+        }
+        #[cfg(not(target_os = "windows"))]
+        if media_kind == "video" {
+            return Err("ASTRA_EMU_VFS_PREVIEW_VIDEO_PROVIDER_UNBOUND".into());
+        }
+        let provider_id = if media_kind == "audio" {
+            "astra.decode.symphonia"
+        } else {
+            "astra.decode.wmf"
+        };
+        let mut binding = DecodeBindingContext::shipping(
+            provider_id,
+            "astra-emu-manager",
+            "astra.manager.preview.v1",
+        );
+        if media_kind == "audio" {
+            binding = binding.with_declared_fallback();
+        }
+        let preview = LegacyVfsViewer::new(mounted.clone())
+            .preview_media(&uri, &registry, &binding)
+            .map_err(|error| error.code().to_owned())?;
+        let ViewerPreview::Media {
+            provider_id,
+            kind,
+            codec,
+            output,
+        } = preview
+        else {
+            return Err("ASTRA_EMU_VFS_PREVIEW_MEDIA_OUTPUT_INVALID".into());
+        };
+        Ok(media_preview_summary(&provider_id, kind, &codec, &output))
     }
 
     fn read_vfs_preview_bytes(
@@ -2467,6 +2549,65 @@ fn decode_image_preview(bytes: &[u8], path: &str) -> Result<(Vec<u8>, u32, u32),
         return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
     }
     Ok((bytes.as_slice().to_vec(), width, height))
+}
+
+fn media_preview_summary(
+    provider_id: &str,
+    kind: DecodeKind,
+    codec: &str,
+    output: &DecodeOutput,
+) -> String {
+    let kind = match kind {
+        DecodeKind::Image => "image",
+        DecodeKind::Audio => "audio",
+        DecodeKind::Video => "video",
+    };
+    match output {
+        DecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            samples,
+        } => {
+            let frames = samples.len().checked_div(usize::from(*channels)).unwrap_or(0);
+            let duration_ms = if *sample_rate == 0 {
+                0
+            } else {
+                u64::try_from(frames)
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(1_000)
+                    / u64::from(*sample_rate)
+            };
+            format!(
+                "provider={provider_id}; kind={kind}; codec={codec}; pcm=i16; sample_rate={sample_rate}; channels={channels}; frames={frames}; duration_ms={duration_ms}"
+            )
+        }
+        DecodeOutput::AudioPcmF32 {
+            sample_rate,
+            channels,
+            samples,
+        } => {
+            let frames = samples.len().checked_div(usize::from(*channels)).unwrap_or(0);
+            let duration_ms = if *sample_rate == 0 {
+                0
+            } else {
+                u64::try_from(frames)
+                    .unwrap_or(u64::MAX)
+                    .saturating_mul(1_000)
+                    / u64::from(*sample_rate)
+            };
+            format!(
+                "provider={provider_id}; kind={kind}; codec={codec}; pcm=f32; sample_rate={sample_rate}; channels={channels}; frames={frames}; duration_ms={duration_ms}"
+            )
+        }
+        DecodeOutput::CpuBuffer { bytes, format } => format!(
+            "provider={provider_id}; kind={kind}; codec={codec}; output=cpu_buffer; format={format}; bytes={}",
+            bytes.len()
+        ),
+        DecodeOutput::MediaSurfaceToken(token) => format!(
+            "provider={provider_id}; kind={kind}; codec={codec}; output=bound_surface; format={}",
+            token.format
+        ),
+    }
 }
 
 /// Decode a bounded manager preview without treating arbitrary binary data as
@@ -4348,7 +4489,7 @@ mod manager_tests {
 
     use super::{
         apply_audio_media_hook, decode_image_preview, decode_text_preview, fvp_pack_paths_option,
-        parse_glossary, refresh_cover_cache, validate_patch_actions,
+        media_preview_summary, parse_glossary, refresh_cover_cache, validate_patch_actions,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -4462,6 +4603,24 @@ mod manager_tests {
         assert_eq!((width, height), (2, 3));
         assert_eq!(pixels.len(), 2 * 3 * 4);
         assert!(decode_image_preview(b"not-an-image", "sys/test.ani").is_err());
+    }
+
+    #[test]
+    fn vfs_audio_preview_exposes_only_bounded_decode_metadata() {
+        let summary = media_preview_summary(
+            "astra.decode.symphonia",
+            astra_media::DecodeKind::Audio,
+            "ogg",
+            &astra_media::DecodeOutput::AudioPcmI16 {
+                sample_rate: 48_000,
+                channels: 2,
+                samples: vec![0; 9_600],
+            },
+        );
+        assert!(summary.contains("provider=astra.decode.symphonia"));
+        assert!(summary.contains("frames=4800"));
+        assert!(summary.contains("duration_ms=100"));
+        assert!(!summary.contains("0, 0"));
     }
 
     #[test]

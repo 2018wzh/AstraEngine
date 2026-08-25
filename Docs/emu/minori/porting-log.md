@@ -2,6 +2,11 @@
 
 ## 2026-08-25
 
+### Family media preview binding
+
+- Manager family VFS audio entries now use the explicitly bound `astra.decode.symphonia` provider with a declared fallback policy; the UI receives only codec, sample-rate, channel, frame-count and duration metadata, never PCM or a provider handle.
+- Video preview remains a separate binding: Windows may select the explicit Media Foundation provider, while unsupported targets return a stable unbound diagnostic. Proprietary ANI/SQZ still remains hex/diagnostic-only until a format-specific provider is implemented.
+
 ### Manager family selection is explicit at startup
 
 - Manager startup now constructs only the pure-Rust static Minori provider; the external FVP provider is loaded only after an explicit `fvp` family selection and is rebuilt before the session opens. This keeps composition-root provider choice explicit and avoids loading an unselected native family.
