@@ -25,6 +25,10 @@ use astra_emu_family_api::{
     LegacyVmTraceRecord, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 use astra_emu_family_core::LegacyCoreError;
+use astra_media::{
+    DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProviderRegistry, DecodeRequest,
+    ImageDecodeProvider,
+};
 use astra_media_core::{
     BlendMode, CpuRendererProvider, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
     Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFilter2D, TextureFrame,
@@ -44,12 +48,12 @@ use crate::{
     collect_resource_references, parse_sc, MinoriAudioCommand, MinoriAudioEncoding,
     MinoriAxisScrollFrame, MinoriCharacterFrame, MinoriCharacterState, MinoriChoicePresentation,
     MinoriConfigAudioBus, MinoriConfigChange, MinoriConfigControl, MinoriConfigState,
-    MinoriEffectFrame, MinoriExecutedCommand, MinoriLinearScrollFrame, MinoriMovieState,
-    MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState, MinoriScreenShakeFrame,
-    MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand, MinoriStageLayer,
-    MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent, MinoriWScroll2Frame,
-    MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
-    MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
+    MinoriEffectFrame, MinoriExecutedCommand, MinoriImageDecodeProvider, MinoriLinearScrollFrame,
+    MinoriMovieState, MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState,
+    MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand,
+    MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent,
+    MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
+    MINORI_IMAGE_DECODE_PROVIDER_ID, MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
 };
 use crate::{MinoriAniArchive, MinoriSqzArchive};
 
@@ -8556,19 +8560,9 @@ fn decode_texture(
             MAX_RESOURCE_BYTES,
         )?
         .bytes;
-    let reader = image::ImageReader::new(Cursor::new(encoded.as_slice()))
-        .with_guessed_format()
-        .map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
-                "image provider could not identify the Minori layer texture",
-            )
-        })?;
-    let expected_format = match resource.codec.as_str() {
-        "png" => image::ImageFormat::Png,
-        "bmp" => image::ImageFormat::Bmp,
-        "jpg" | "jpeg" => image::ImageFormat::Jpeg,
-        "webp" => image::ImageFormat::WebP,
+    let provider_id = match resource.codec.as_str() {
+        "ani" | "sqz" => MINORI_IMAGE_DECODE_PROVIDER_ID,
+        "png" | "bmp" | "jpg" | "jpeg" | "webp" => "astra.decode.image",
         _ => {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
@@ -8576,25 +8570,92 @@ fn decode_texture(
             ));
         }
     };
-    if reader.format() != Some(expected_format) {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
-            "texture content does not match the staged codec identity",
-        ));
+    if provider_id == "astra.decode.image" {
+        let reader = image::ImageReader::new(Cursor::new(encoded.as_slice()))
+            .with_guessed_format()
+            .map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                    "image provider could not identify the Minori layer texture",
+                )
+            })?;
+        let expected_format = match resource.codec.as_str() {
+            "png" => image::ImageFormat::Png,
+            "bmp" => image::ImageFormat::Bmp,
+            "jpg" | "jpeg" => image::ImageFormat::Jpeg,
+            "webp" => image::ImageFormat::WebP,
+            _ => unreachable!("standard image codec was matched above"),
+        };
+        if reader.format() != Some(expected_format) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                "texture content does not match the staged codec identity",
+            ));
+        }
     }
-    let image = reader.decode().map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_LAYER_TEXTURE_DECODE",
-            "image provider failed to decode the Minori layer texture",
+    let mut decoders = DecodeProviderRegistry::default();
+    decoders
+        .register(Box::new(ImageDecodeProvider))
+        .map_err(minori_media_decode_error)?;
+    decoders
+        .register(Box::new(MinoriImageDecodeProvider))
+        .map_err(minori_media_decode_error)?;
+    let result = decoders
+        .decode(
+            &DecodeRequest {
+                kind: DecodeKind::Image,
+                codec: resource.codec.clone(),
+                bytes: encoded,
+                profile: "astra.emu.minori.layer.v1".into(),
+            },
+            &DecodeBindingContext::shipping(
+                provider_id,
+                "astra-emu-minori",
+                "astra.emu.minori.layer.v1",
+            ),
         )
-    })?;
-    if image.width() != resource.decoded_width || image.height() != resource.decoded_height {
+        .map_err(minori_media_decode_error)?;
+    let DecodeOutput::CpuBuffer { bytes, format } = result.output else {
         return Err(invalid(
-            "ASTRA_EMU_MINORI_LAYER_TEXTURE_IDENTITY",
-            "decoded texture dimensions differ from the staged resource identity",
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_DECODE",
+            "bound Minori image provider did not return a CPU texture buffer",
+        ));
+    };
+    if provider_id == MINORI_IMAGE_DECODE_PROVIDER_ID {
+        let dimensions = format
+            .strip_prefix("rgba8:first_frame:")
+            .and_then(|value| value.split_once('x'))
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                    "Minori image provider returned an invalid first-frame format",
+                )
+            })?;
+        let width = dimensions.0.parse::<u32>().map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                "Minori image provider returned an invalid first-frame width",
+            )
+        })?;
+        let height = dimensions.1.parse::<u32>().map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_CODEC",
+                "Minori image provider returned an invalid first-frame height",
+            )
+        })?;
+        if (width, height) != (resource.decoded_width, resource.decoded_height) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_IDENTITY",
+                "decoded first-frame dimensions differ from the staged resource identity",
+            ));
+        }
+    } else if format != "rgba8" {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LAYER_TEXTURE_DECODE",
+            "bound image provider returned an unsupported pixel format",
         ));
     }
-    let mut rgba8 = image.into_rgba8().into_raw();
+    let mut rgba8 = bytes.as_slice().to_vec();
     premultiply_rgba8(&mut rgba8);
     TextureFrame::from_vec(resource.decoded_width, resource.decoded_height, rgba8).map_err(|_| {
         invalid(
@@ -8602,6 +8663,10 @@ fn decode_texture(
             "decoded texture violates the Renderer2D texture contract",
         )
     })
+}
+
+fn minori_media_decode_error(error: astra_media::MediaError) -> LegacyProviderError {
+    LegacyProviderError::invalid("ASTRA_EMU_MINORI_LAYER_TEXTURE_DECODE", error.to_string())
 }
 
 fn convert_vertex(vertex: &LegacyVertexV1) -> Result<MeshVertex2D, LegacyProviderError> {
@@ -8902,6 +8967,39 @@ mod tests {
             .expect("ANI metadata should be accepted by the family resource resolver");
         assert_eq!(resource.codec, "ani");
         assert_eq!((resource.decoded_width, resource.decoded_height), (2, 1));
+    }
+
+    #[test]
+    fn layer_texture_decode_uses_the_family_provider_for_ani() {
+        let mut ani = Vec::from([0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        ani.extend_from_slice(b"frame\0");
+        ani.extend_from_slice(&2_u16.to_le_bytes());
+        ani.extend_from_slice(&1_u16.to_le_bytes());
+        ani.extend_from_slice(&24_u16.to_le_bytes());
+        ani.extend_from_slice(&0_i16.to_le_bytes());
+        ani.extend_from_slice(&0_i16.to_le_bytes());
+        ani.extend_from_slice(&[0, 0, 255, 255, 255, 255]);
+        let revision = u64::from_le_bytes(
+            Hash256::from_sha256(&ani).as_bytes()[..8]
+                .try_into()
+                .expect("hash prefix has a fixed width"),
+        );
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([("minori:/st/frame.ani".into(), ani)]),
+        });
+        let resource = LegacyTextureResourceV1 {
+            texture_id: 1,
+            resource_uri: "minori:/st/frame.ani".into(),
+            codec: "ani".into(),
+            revision: texture_binding_revision("minori:/st/frame.ani", revision),
+            decoded_width: 2,
+            decoded_height: 1,
+            decoded_format: LegacyTextureFormat::Rgba8,
+        };
+
+        let frame = decode_texture(&vfs, "mount.test", &resource).unwrap();
+        assert_eq!((frame.width, frame.height), (2, 1));
+        assert_eq!(frame.rgba8.len(), 8);
     }
 
     #[derive(Default)]

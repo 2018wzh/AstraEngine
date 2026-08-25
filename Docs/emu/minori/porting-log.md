@@ -11,6 +11,7 @@
 - The Headless CLI runtime driver now registers the same family provider and selects `astra.decode.minori.image` for ANI/SQZ resource scenes. Standard image codecs continue to use `astra.decode.image`; no registration-order or codec fallback is introduced. A runtime route containing ANI/SQZ still requires real media evidence before animation playback can be called complete.
 - The CLI validates the provider's explicit `rgba8:first_frame:WxH` format against the resource descriptor before handing pixels to the retained renderer; a generic `rgba8` result is not accepted for the Minori family binding.
 - The Minori runtime resource resolver now recognizes ANI/SQZ metadata through the same strict container adapters instead of sending those resources through `image::ImageReader`. It emits the family codec and verified first-frame dimensions to the host; multi-frame playback is still intentionally open.
+- The v9 `Layer2D` texture path now sends both standard image resources and ANI/SQZ resources through an explicit `DecodeProviderRegistry` binding. Standard images retain encoded-format identity checks; ANI/SQZ require the family provider's first-frame dimensions and output contract before Renderer2D upload.
 
 ### Manager family selection is explicit at startup
 
