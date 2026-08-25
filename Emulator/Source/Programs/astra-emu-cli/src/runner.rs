@@ -6230,6 +6230,7 @@ impl<'a> RuntimeDriver<'a> {
             .rsplit_once('.')
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_EXTENSION_MISSING".to_owned())?;
+        validate_minori_video_extension(&self.family_id, &extension)?;
         let (stream, audio_stream_id, audio_stream) = if self.family_id == "minori" {
             let (vfs, mount_set_id) = self.runtime.vfs_reader_binding(&self.session_id)?;
             let source = Arc::new(
@@ -6612,6 +6613,13 @@ fn is_avi_container_header(bytes: &[u8]) -> bool {
     bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
 }
 
+fn validate_minori_video_extension(family_id: &str, extension: &str) -> Result<(), String> {
+    if family_id == "minori" && !extension.eq_ignore_ascii_case("avi") {
+        return Err("ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED".into());
+    }
+    Ok(())
+}
+
 fn frame_mean_rgba(rgba8: &[u8], width: u32, height: u32) -> Result<[u8; 4], String> {
     let pixel_count = usize::try_from(width)
         .ok()
@@ -6929,6 +6937,16 @@ mod native_tests {
         assert!(!is_avi_container_header(b"RIFF\x10\0\0\0WAVE"));
         assert!(!is_avi_container_header(b"JUNK\x10\0\0\0AVI "));
         assert!(!is_avi_container_header(b"RIFF"));
+    }
+
+    #[test]
+    fn minori_video_binding_rejects_non_avi_without_fvp_provider_selection() {
+        assert_eq!(
+            validate_minori_video_extension("minori", "wmv").unwrap_err(),
+            "ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED"
+        );
+        assert!(validate_minori_video_extension("minori", "AVI").is_ok());
+        assert!(validate_minori_video_extension("fvp", "wmv").is_ok());
     }
 
     #[test]

@@ -2,6 +2,33 @@
 
 ## 2026-08-25
 
+### Minori video codec gate
+
+- Manager preview and playback now reject every Minori video extension except the
+  explicitly bound `avi` codec before entering the FVP compatibility table or
+  Windows Media Foundation path. The Headless driver applies the same strict
+  extension check before opening its range-backed AVI decoder. This closes a
+  family-boundary hole where a future `.wmv`/`.mp4` entry could otherwise be
+  interpreted by a provider belonging to another family; the diagnostic is
+  `ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED`.
+- The guard is pure Rust and covered by the Manager focused test. It does not
+  claim movie-container parity or Windows E3 evidence; those remain separate
+  gates.
+
+### Fresh v9 Headless smoke after toolchain reinstall
+
+- The current signed Minori plugin was rebuilt with the repaired stable Rust
+  toolchain and launched through the normal `--family minori` composition. A
+  bounded title-to-scene input sequence completed 431 fixed steps, consumed 27
+  physical input messages, produced 13 submitted/rasterized frames and
+  344,576 audio frames, with `status=passed`, no diagnostic, a non-silent WAV,
+  and distinct title/scene frame hashes.
+- Manual inspection of the two retained checkpoints found the expected title
+  layout, Japanese glyphs, scene composition, alpha and aspect ratio. The
+  sequence intentionally stops before a route terminal, so this is a fresh
+  current-v9 smoke/E2 result, not full-route, gallery-unlock or Windows E3
+  evidence. The artifacts remain local-private.
+
 ### Family media preview binding
 
 - Manager family VFS audio entries now use the explicitly bound pure-Rust `astra.decode.symphonia` provider; it is a packaged platform provider rather than a declared fallback. The UI receives only codec, sample-rate, channel, frame-count and duration metadata, never PCM or a provider handle.

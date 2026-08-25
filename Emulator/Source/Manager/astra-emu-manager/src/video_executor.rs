@@ -738,6 +738,16 @@ pub(crate) struct HostVideoExecutor {
     family_id: String,
 }
 
+pub(crate) fn validate_family_video_extension(
+    family_id: &str,
+    extension: &str,
+) -> Result<(), String> {
+    if family_id == "minori" && !extension.eq_ignore_ascii_case("avi") {
+        return Err("ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED".into());
+    }
+    Ok(())
+}
+
 impl HostVideoExecutor {
     pub(crate) fn bind_family(&mut self, family_id: &str) {
         self.family_id = family_id.to_owned();
@@ -796,6 +806,7 @@ impl HostVideoExecutor {
             .rsplit_once('.')
             .map(|(_, extension)| extension)
             .ok_or_else(|| "ASTRA_EMU_VIDEO_EXTENSION_MISSING".to_owned())?;
+        validate_family_video_extension(&self.family_id, extension)?;
         if self.family_id == "minori" && extension.eq_ignore_ascii_case("avi") {
             let decoder = MinoriAviStreamDecoder::open(bytes)?;
             let duration_ns = Some(decoder.duration_ns()?);
@@ -1146,5 +1157,15 @@ mod tests {
         };
         assert_eq!(frame.rgba8.as_ptr(), payload_ptr);
         assert_eq!(&*frame.rgba8, &[3, 2, 1, 255]);
+    }
+
+    #[test]
+    fn minori_rejects_non_avi_before_selecting_fvp_compatibility() {
+        assert_eq!(
+            validate_family_video_extension("minori", "wmv").unwrap_err(),
+            "ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED"
+        );
+        assert!(validate_family_video_extension("minori", "AVI").is_ok());
+        assert!(validate_family_video_extension("fvp", "wmv").is_ok());
     }
 }

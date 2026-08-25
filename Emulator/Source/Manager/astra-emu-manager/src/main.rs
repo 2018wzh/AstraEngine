@@ -96,7 +96,7 @@ use stage_renderer::ManagerStageRenderer;
 use translation_runtime::{
     translation_profile_from_record, TranslationLaunchConfig, TranslationRuntime,
 };
-use video_executor::{HostVideoExecutor, HostVideoFrame};
+use video_executor::{validate_family_video_extension, HostVideoExecutor, HostVideoFrame};
 
 #[cfg(not(target_os = "android"))]
 fn platform_data_dir() -> Result<PathBuf, String> {
@@ -2010,6 +2010,9 @@ impl AstraEmuManagerController {
             .rsplit_once('.')
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_CODEC_MISSING".to_owned())?;
+        if media_kind == "video" {
+            validate_family_video_extension(mounted.manifest().family_id.as_str(), &codec)?;
+        }
         let minori_avi =
             mounted.manifest().family_id == "minori" && media_kind == "video" && codec == "avi";
         let mut registry = DecodeProviderRegistry::default();
