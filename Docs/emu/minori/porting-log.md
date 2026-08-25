@@ -554,3 +554,9 @@ python Tools/check_docs.py
 - 新增 4 个定向回归（预览输入预算、空/截断容器、尺寸/帧预算），`astra-emu-minori` AVI tests 为 4/4。该项只收紧资源边界，不扩大 codec 覆盖，也不改变真实 movie parity、完整路线或 Windows E3 的证据边界。
 
 Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求长度被截为零时直接返回空数据，不再把合法 EOF 误报为 `EIO`。该路径仍需真实 Linux mount/list/stat/random-read/unmount evidence，Windows 工作树不能据此标记 FUSE 完成。
+
+### 2026-08-26 稀疏 Headless checkpoint 物化
+
+- 发现 `--frame-sample-interval` 大于 1 时，运行路径会按契约跳过非采样 tick 的 presentation；如果 checkpoint 恰好先于首个采样 frame，直接 readback 会返回 `ASTRA_EMU_HEADLESS_CHECKPOINT_SURFACE_MISSING`。这是真实的采样与 checkpoint 契约冲突，不是输入或资源问题。
+- `astra-emu-cli` 现在在捕获 checkpoint 前调用 `ensure_checkpoint_surface`：优先提交 pending retained scene，其次绘制已绑定的 GPU scene，CPU layer 则只物化当前 prepared frame；该过程不推进 fixed tick，也不改变 runtime state。没有可提交 surface 时仍 fail fast，不生成替代帧。
+- 重新编译并签名当前 ABI v9 package 后，以 `frame_sample_interval=60` 运行真实八包短程：431 fixed steps、7 presented frames、27 条物理输入、无 diagnostic，报告为 `passed`；title_initial、ending 和 route_5 checkpoint 均可读，确认稀疏采样不再破坏声明的 checkpoint。该结果仍是非 terminal smoke，不替代完整四路线、正式 audio review 或 Windows E3。

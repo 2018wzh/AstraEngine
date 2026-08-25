@@ -4867,6 +4867,7 @@ async fn execute_sequence(
                             return Err("ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL".into());
                         }
                     }
+                    driver.ensure_checkpoint_surface().await?;
                     let captured = platform
                         .capture_surface(surface)
                         .await
@@ -5812,6 +5813,53 @@ impl<'a> RuntimeDriver<'a> {
             u64::try_from(self.pending_scene_presents.len())
                 .map_err(|_| "ASTRA_EMU_NATIVE_PRESENT_QUEUE_DEPTH_OVERFLOW".to_owned())?,
         )?;
+        Ok(())
+    }
+
+    /// A sparse frame sample interval must not make a declared checkpoint
+    /// unreadable.  The regular step path intentionally skips presentation on
+    /// non-sampled ticks, but the checkpoint contract still requires a real
+    /// submitted surface.  Materialize the currently queued retained scene or
+    /// the prepared CPU layer once, without advancing the runtime tick.
+    async fn ensure_checkpoint_surface(&mut self) -> Result<(), String> {
+        if self.present_sequence != 0 {
+            return Ok(());
+        }
+
+        if let Some(scene) = self.pending_scene_frame.take() {
+            self.submit_scene(scene).await?;
+            self.visual_dirty = false;
+        } else if let Some(gpu_scene) = self.gpu_scene.as_ref() {
+            let scene = gpu_scene.draw_scene()?;
+            self.submit_scene(scene).await?;
+            self.visual_dirty = false;
+        } else {
+            if self.visual_dirty {
+                if self.direct_layer_frame {
+                    self.direct_layer_frame = false;
+                    self.visual_dirty = false;
+                } else {
+                    let frame = self
+                        .pending_render_frame
+                        .as_ref()
+                        .ok_or_else(|| "ASTRA_EMU_HEADLESS_PENDING_FRAME_MISSING".to_owned())?;
+                    let (width, height) = frame.dimensions();
+                    let raster_started = Instant::now();
+                    let rgba8 = self.rasterizer.render_prepared(frame)?;
+                    self.raster_timings_ns.push(elapsed_ns(raster_started)?);
+                    self.record_perfetto_phase("scene.cpu_oracle", 4, raster_started)?;
+                    self.base_frame = Some((width, height, rgba8));
+                    self.visual_dirty = false;
+                }
+            }
+            if self.base_frame.is_some() {
+                self.present().await?;
+            }
+        }
+
+        if self.present_sequence == 0 {
+            return Err("ASTRA_EMU_HEADLESS_CHECKPOINT_SURFACE_MISSING".into());
+        }
         Ok(())
     }
 

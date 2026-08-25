@@ -118,6 +118,11 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - [ ] 旧 gallery 输入在当前 mount/profile/global-progress identity 下触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，不能沿用历史 gallery report；需要重新生成匹配当前状态的物理输入并完成 required checkpoint 复核。
 - [ ] 四条自然路线、自然 gallery unlock、正式 audio review、movie gallery 原版视觉 parity、cache second-run、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。
 
+## 2026-08-26 稀疏采样回归
+
+- [x] checkpoint 捕获前物化 pending retained scene / prepared CPU layer；不推进 fixed tick，不生成替代帧。
+- [x] `frame_sample_interval=60` 的真实八包短程通过：431 fixed steps、7 frames、27 条输入、零 diagnostic；该结果不替代完整路线和平台证据。
+
 ## Release Gate
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
