@@ -7445,6 +7445,35 @@ mod tests {
     }
 
     #[test]
+    fn malformed_read_identity_vector_is_rejected_on_restore() {
+        let source = b".message 1  speaker same\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(1, 4).unwrap() else {
+            panic!("expected message")
+        };
+        let MinoriWaitState::Input { token_id } = wait else {
+            panic!("expected input wait")
+        };
+        vm.resolve_wait(&token_id).unwrap();
+        let mut corrupt = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        corrupt
+            .read_message_identities
+            .push(corrupt.read_message_identities[0]);
+        let bytes = postcard::to_allocvec(&corrupt).unwrap();
+        assert_eq!(
+            MinoriVm::decode_snapshot(&bytes).unwrap_err(),
+            MinoriRuntimeError::State
+        );
+    }
+
+    #[test]
     fn message_preserves_empty_voice_and_speaker_positions() {
         let source = b".message 42   body words\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
