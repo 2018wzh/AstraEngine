@@ -5221,9 +5221,13 @@ fn apply_system_ui_input(
                 vm.set_system_page(MinoriSystemPage::Title, 0)
                     .map_err(runtime_error)?;
             }
+            (MinoriSystemPage::GalleryBgm, "escape") => {
+                vm.set_system_page(MinoriSystemPage::Memories, 0)
+                    .map_err(runtime_error)?;
+                action = MinoriSystemUiAction::GalleryBgmStop;
+            }
             (
                 MinoriSystemPage::GalleryCg
-                | MinoriSystemPage::GalleryBgm
                 | MinoriSystemPage::GalleryReplay
                 | MinoriSystemPage::GalleryMovie,
                 "escape",
@@ -8689,6 +8693,45 @@ mod tests {
         assert!(gallery_resource_uri(MinoriSystemPage::GalleryCg, 12).is_err());
         assert!(gallery_resource_uri(MinoriSystemPage::GalleryBgm, 47).is_err());
         assert!(gallery_resource_uri(MinoriSystemPage::GalleryReplay, 4).is_err());
+    }
+
+    #[test]
+    fn leaving_bgm_gallery_stops_the_shared_stream_before_returning_to_memories() {
+        let script = parse_sc(b".end\r\n", &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(b"gallery-bgm"),
+            script,
+            7,
+        )
+        .unwrap();
+        vm.begin_title_launch().unwrap();
+        vm.set_system_page(MinoriSystemPage::GalleryBgm, 0).unwrap();
+        vm.gallery_bgm_play("minori:/bgm/BGM001.ogg").unwrap();
+
+        let action = apply_system_ui_input(
+            &mut vm,
+            &LegacyStepInput {
+                input_edges: vec![LegacyInputEdge {
+                    control: "escape".into(),
+                    pressed: true,
+                    value: 1.0,
+                    sequence: 1,
+                }],
+                ..step_input(1, Vec::new())
+            },
+        )
+        .unwrap();
+        assert_eq!(action, MinoriSystemUiAction::GalleryBgmStop);
+        assert_eq!(vm.state().system_ui.page, MinoriSystemPage::Memories);
+        let stop = vm.gallery_bgm_stop().unwrap();
+        assert!(matches!(
+            stop.as_slice(),
+            [MinoriAudioCommand::Stop {
+                stream_id: crate::runtime::MINORI_BGM_STREAM_ID,
+                ..
+            }]
+        ));
     }
 
     #[test]

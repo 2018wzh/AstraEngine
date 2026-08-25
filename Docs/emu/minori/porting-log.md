@@ -438,3 +438,4 @@ python Tools/check_docs.py
 - `sys/cgthumb` 的真实缩略图尺寸由样本确认是 `128x72`；provider 现在对该尺寸做严格校验，错误尺寸阻断，不缩放猜测。CG 页按已验证的 4x4 网格呈现，最后一页的空槽保持资源定义的空态。
 - 标题、Memories、BGM、CG 和回想页面的文字、比例、层次和焦点没有发现裁剪、拉伸或残影。movie 列表已使用真实标签与脚本目标校验，但当前样本没有独立的 movie gallery 背景资源；运行时保留已验证的 Memories 背景和有界文字层，不能把它写成原版逐像素一致。实际影片播放仍由剧情 movie fence 证据覆盖，鉴赏页的原版视觉 parity 继续开放。
 - 该次鉴赏运行使用 local-private global progress 进入页面，不能证明四条路线自然解锁或完整鉴赏解锁条件；正式人工音频听审、自然 unlock 全量证据和 Windows E3 仍未完成。自动非静音量测也不替代具名人工听审。
+- 复核页面返回路径时发现 BGM gallery 的 Escape 会回到 Memories，却没有停止共享 BGM stream；这会把鉴赏音频泄漏到父页面。runtime 现把该返回动作建模为 `GalleryBgmStop`，先停止 looped stream 再提交 Memories，pointer Stop 与键盘返回共用同一条音频边界；新增 provider/runtime 回归后 Minori library 为 `130/130`。

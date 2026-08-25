@@ -1452,7 +1452,10 @@ impl MinoriVm {
     }
 
     pub fn gallery_bgm_stop(&mut self) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
-        if self.state.system_ui.page != MinoriSystemPage::GalleryBgm {
+        if !matches!(
+            self.state.system_ui.page,
+            MinoriSystemPage::GalleryBgm | MinoriSystemPage::Memories
+        ) {
             return Err(MinoriRuntimeError::State);
         }
         stop_audio_stream(&mut self.state, MINORI_BGM_STREAM_ID, 0).map(|event| match event {
@@ -5349,6 +5352,10 @@ mod tests {
             }]
         ));
         assert!(!vm.state().audio[&MINORI_BGM_STREAM_ID].playing);
+
+        vm.set_system_page(MinoriSystemPage::Memories, 0).unwrap();
+        let stopped_from_parent = vm.gallery_bgm_stop().unwrap();
+        assert!(stopped_from_parent.is_empty());
     }
 
     #[test]
