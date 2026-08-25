@@ -915,6 +915,10 @@ impl WindowsMediaFoundationDecodeProvider {
                 "mp4".to_string(),
                 "m4v".to_string(),
                 "wmv".to_string(),
+                // Minori's movie archives commonly carry WMV3 streams in a
+                // RIFF/AVI container; the bound provider still validates the
+                // container and stream before returning its first frame.
+                "avi".to_string(),
                 "asf".to_string(),
                 "mpg".to_string(),
                 "mpeg".to_string(),
