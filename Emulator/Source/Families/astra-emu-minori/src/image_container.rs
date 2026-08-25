@@ -1,6 +1,11 @@
 use std::{io::Read, sync::Arc};
 
+use astra_core::Diagnostic;
 use astra_emu_family_core::LegacyCoreError;
+use astra_media::{
+    DecodeCapability, DecodeKind, DecodeOutput, DecodeProvider, DecodeRequest, DecodeResult,
+    MediaError, ProviderPriority,
+};
 use encoding_rs::SHIFT_JIS;
 use flate2::read::ZlibDecoder;
 use image::RgbaImage;
@@ -10,6 +15,9 @@ const MAX_FRAME_COUNT: usize = 65_536;
 const MAX_NAME_BYTES: usize = 4_096;
 const MAX_DIMENSION: u32 = 16_384;
 const MAX_PIXELS: u64 = 64 * 1024 * 1024;
+const MAX_PREVIEW_BYTES: usize = 64 * 1024 * 1024;
+
+pub const MINORI_IMAGE_DECODE_PROVIDER_ID: &str = "astra.decode.minori.image";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MinoriImageFrameDescriptor {
@@ -243,6 +251,88 @@ impl MinoriSqzArchive {
     }
 }
 
+/// Explicit decode binding for Minori's family-owned ANI/SQZ image containers.
+///
+/// The provider deliberately exposes only the first decoded frame because the
+/// shared viewer contract is a bounded still-image preview. Animation playback
+/// remains a runtime presentation concern and is not inferred from a preview
+/// request.
+#[derive(Debug, Clone, Default)]
+pub struct MinoriImageDecodeProvider;
+
+impl MinoriImageDecodeProvider {
+    pub fn capability(&self) -> DecodeCapability {
+        DecodeCapability {
+            provider_id: MINORI_IMAGE_DECODE_PROVIDER_ID.to_owned(),
+            priority: ProviderPriority::Platform,
+            kinds: vec![DecodeKind::Image],
+            codecs: vec!["ani".into(), "sqz".into()],
+            feature_gated: false,
+            packaged_eligible: true,
+            reference_only: false,
+        }
+    }
+}
+
+impl DecodeProvider for MinoriImageDecodeProvider {
+    fn capability(&self) -> DecodeCapability {
+        MinoriImageDecodeProvider::capability(self)
+    }
+
+    fn decode(&self, request: &DecodeRequest) -> Result<DecodeResult, MediaError> {
+        if request.kind != DecodeKind::Image {
+            return Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+                "ASTRA_EMU_MINORI_IMAGE_DECODE_KIND",
+                "Minori image provider received a non-image request",
+            )]));
+        }
+        let source = Arc::<[u8]>::from(request.bytes.as_ref());
+        let (image, width, height) = match request.codec.as_str() {
+            "ani" => {
+                let archive = MinoriAniArchive::parse(source).map_err(image_decode_error)?;
+                let frame = archive.decode_frame(0).map_err(image_decode_error)?;
+                let width = frame.width();
+                let height = frame.height();
+                (frame, width, height)
+            }
+            "sqz" => {
+                let archive = MinoriSqzArchive::parse(source).map_err(image_decode_error)?;
+                let width = archive.width();
+                let height = archive.height();
+                let frame = archive.decode_frame(0).map_err(image_decode_error)?;
+                (frame, width, height)
+            }
+            _ => {
+                return Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+                    "ASTRA_EMU_MINORI_IMAGE_DECODE_CODEC",
+                    "Minori image provider received an unsupported container codec",
+                )]));
+            }
+        };
+        let bytes = image.into_raw();
+        if bytes.len() > MAX_PREVIEW_BYTES {
+            return Err(MediaError::Diagnostics(vec![Diagnostic::blocking(
+                "ASTRA_EMU_MINORI_IMAGE_PREVIEW_LIMIT",
+                "decoded Minori image exceeds the bounded preview output",
+            )]));
+        }
+        Ok(DecodeResult {
+            provider_id: MINORI_IMAGE_DECODE_PROVIDER_ID.to_owned(),
+            kind: request.kind,
+            codec: request.codec.clone(),
+            output: DecodeOutput::CpuBuffer {
+                bytes: bytes.into(),
+                format: format!("rgba8:first_frame:{width}x{height}"),
+            },
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+fn image_decode_error(error: LegacyCoreError) -> MediaError {
+    MediaError::Diagnostics(vec![Diagnostic::blocking(error.code(), error.message())])
+}
+
 fn raw_to_rgba(
     width: u32,
     height: u32,
@@ -376,6 +466,7 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
 mod tests {
     use std::io::Write;
 
+    use astra_media::{DecodeKind, DecodeOutput, DecodeProvider, DecodeRequest};
     use flate2::{write::ZlibEncoder, Compression};
 
     use super::*;
@@ -401,6 +492,35 @@ mod tests {
                 (-2, 3)
             );
             assert_eq!(archive.decode_frame(0).unwrap().as_raw(), &expected);
+        }
+    }
+
+    #[test]
+    fn image_decode_provider_exposes_a_bounded_first_frame() {
+        let mut bytes = vec![0x00, 0x01, 0x01, 0x00, 0, 0, 0, 0, b'f', 0];
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&32u16.to_le_bytes());
+        bytes.extend_from_slice(&0i16.to_le_bytes());
+        bytes.extend_from_slice(&0i16.to_le_bytes());
+        bytes.extend_from_slice(&[1, 2, 3, 4]);
+        let provider = MinoriImageDecodeProvider;
+        let result = provider
+            .decode(&DecodeRequest {
+                kind: DecodeKind::Image,
+                codec: "ani".into(),
+                bytes: bytes.into(),
+                profile: "manager-preview".into(),
+            })
+            .unwrap();
+        assert_eq!(result.provider_id, MINORI_IMAGE_DECODE_PROVIDER_ID);
+        assert_eq!(result.codec, "ani");
+        match result.output {
+            DecodeOutput::CpuBuffer { bytes, format } => {
+                assert_eq!(format, "rgba8:first_frame:1x1");
+                assert_eq!(bytes.as_slice(), &[3, 2, 1, 4]);
+            }
+            other => panic!("unexpected preview output: {other:?}"),
         }
     }
 

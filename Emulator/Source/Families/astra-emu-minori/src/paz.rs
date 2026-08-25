@@ -1472,7 +1472,7 @@ fn media_kind(name: &str) -> &'static str {
         .as_str()
     {
         "sc" => "script",
-        "png" | "jpg" | "bmp" => "image",
+        "png" | "jpg" | "bmp" | "ani" | "sqz" => "image",
         "ogg" | "wav" => "audio",
         "mpg" | "avi" | "wmv" => "video",
         _ => "binary",

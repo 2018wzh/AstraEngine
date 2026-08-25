@@ -61,7 +61,7 @@ use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityFetch, CoverAsset,
     MatchInput, MetadataProviderId, MetadataSearchQuery, DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
-use astra_emu_minori::MinoriVfsFamilyFactory;
+use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
 };
@@ -1753,12 +1753,33 @@ impl AstraEmuManagerController {
         let mut media_summary = String::new();
         let mut diagnostic = String::new();
         let family_media_kind = self.family_media_kind(resource);
+        let is_family_image = family_media_kind.as_deref() == Some("image")
+            && (lower.ends_with(".ani") || lower.ends_with(".sqz"));
         if matches!(family_media_kind.as_deref(), Some("audio" | "video")) {
             let media_kind = family_media_kind.as_deref().unwrap_or_default();
             kind = "media";
             match self.preview_family_media(mount_set_id, resource, media_kind) {
                 Ok(summary) => media_summary = summary,
                 Err(error) => diagnostic = error,
+            }
+        } else if is_family_image {
+            match self.preview_family_image(mount_set_id, resource) {
+                Ok((pixels, width, height)) => {
+                    kind = "image";
+                    image_pixels = pixels;
+                    image_width = width;
+                    image_height = height;
+                }
+                Err(error) => {
+                    diagnostic = error;
+                    if let Ok(bytes) = self.read_vfs_preview_bytes_with_limit(
+                        mount_set_id,
+                        resource,
+                        64 * 1024 * 1024,
+                    ) {
+                        hex_summary = hex_dump(&bytes);
+                    }
+                }
             }
         } else if is_image && !resource.resolve_path.is_empty() {
             kind = "image";
@@ -1820,6 +1841,64 @@ impl AstraEmuManagerController {
             .iter()
             .find(|entry| entry.uri == uri)
             .map(|entry| entry.media_kind.clone())
+    }
+
+    fn preview_family_image(
+        &self,
+        _mount_set_id: &str,
+        resource: &VfsResourceInfo,
+    ) -> Result<(Vec<u8>, u32, u32), String> {
+        const MAX_IMAGE_PIXELS: u64 = 16 * 1024 * 1024;
+        let mounted = self
+            .active_family_mount
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_FAMILY_MOUNT_MISSING".to_owned())?;
+        if mounted.manifest().family_id != "minori" {
+            return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_PROVIDER_UNBOUND".into());
+        }
+        let prefix = mounted.manifest().prefix.trim_end_matches('/');
+        let uri = format!("{prefix}/{}", resource.path.trim_matches('/'));
+        let mut registry = DecodeProviderRegistry::default();
+        registry
+            .register(Box::new(MinoriImageDecodeProvider))
+            .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_PROVIDER_INVALID".to_owned())?;
+        let profile = "astra.manager.preview.v1";
+        let binding = DecodeBindingContext::shipping(
+            astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID,
+            "astra-emu-manager",
+            profile,
+        );
+        let preview = LegacyVfsViewer::new(mounted.clone())
+            .preview_media(&uri, &registry, &binding)
+            .map_err(|error| error.code().to_owned())?;
+        let ViewerPreview::Media {
+            provider_id,
+            kind: DecodeKind::Image,
+            codec,
+            output: DecodeOutput::CpuBuffer { bytes, format },
+        } = preview
+        else {
+            return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
+        };
+        if provider_id != astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID
+            || !matches!(codec.as_str(), "ani" | "sqz")
+        {
+            return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
+        }
+        let (width, height) = parse_minori_image_preview_format(&format)?;
+        let pixel_count = u64::from(width)
+            .checked_mul(u64::from(height))
+            .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_DIMENSIONS_OVERFLOW".to_owned())?;
+        if pixel_count == 0 || pixel_count > MAX_IMAGE_PIXELS {
+            return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_DIMENSIONS_INVALID".into());
+        }
+        let expected = pixel_count
+            .checked_mul(4)
+            .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
+        if u64::try_from(bytes.len()).ok() != Some(expected) {
+            return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
+        }
+        Ok((bytes.as_slice().to_vec(), width, height))
     }
 
     fn preview_family_media(
@@ -2555,6 +2634,22 @@ fn decode_image_preview(bytes: &[u8], path: &str) -> Result<(Vec<u8>, u32, u32),
         return Err("ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".into());
     }
     Ok((bytes.as_slice().to_vec(), width, height))
+}
+
+fn parse_minori_image_preview_format(format: &str) -> Result<(u32, u32), String> {
+    let dimensions = format
+        .strip_prefix("rgba8:first_frame:")
+        .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
+    let (width, height) = dimensions
+        .split_once('x')
+        .ok_or_else(|| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
+    let width = width
+        .parse::<u32>()
+        .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
+    let height = height
+        .parse::<u32>()
+        .map_err(|_| "ASTRA_EMU_VFS_PREVIEW_IMAGE_OUTPUT_INVALID".to_owned())?;
+    Ok((width, height))
 }
 
 fn media_preview_summary(

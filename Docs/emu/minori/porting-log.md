@@ -5,8 +5,9 @@
 ### Family media preview binding
 
 - Manager family VFS audio entries now use the explicitly bound `astra.decode.symphonia` provider with a declared fallback policy; the UI receives only codec, sample-rate, channel, frame-count and duration metadata, never PCM or a provider handle.
-- Video preview remains a separate binding: Windows may select the explicit Media Foundation provider, while unsupported targets return a stable unbound diagnostic. Proprietary ANI/SQZ still remains hex/diagnostic-only until a format-specific provider is implemented.
+- Video preview remains a separate binding: Windows may select the explicit Media Foundation provider, while unsupported targets return a stable unbound diagnostic. ANI/SQZ now have a separate family-owned first-frame binding; animation playback remains a runtime concern.
 - The Windows binding now declares `avi` explicitly for RIFF/AVI Minori movies; this removes only the codec-identity block. An actual Windows preview, Headless, or E3 run is still required before movie support can be marked verified.
+- ANI/SQZ preview now uses the explicit family-owned `astra.decode.minori.image` binding and returns only a bounded first-frame RGBA8 buffer. It does not imply animation playback or original pixel-parity evidence.
 
 ### Manager family selection is explicit at startup
 

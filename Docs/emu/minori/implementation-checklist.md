@@ -1,6 +1,6 @@
 # Minori Implementation Checklist
 
-Minori family-mounted image previews now use the explicit `astra-media` `DecodeProviderRegistry` binding for bounded PNG/JPEG/BMP/WebP bytes; UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only; proprietary containers and video bindings remain blocking/open where no provider is bound.
+Minori family-mounted image previews now use explicit `astra-media` `DecodeProviderRegistry` bindings: standard PNG/JPEG/BMP/WebP use `astra.decode.image`, and ANI/SQZ use the family-owned `astra.decode.minori.image` provider for a bounded first frame. UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only; animation playback and video targets without a bound provider remain blocking/open.
 
 Manager startup no longer eagerly loads the unselected FVP binary. The composition root creates the pure-Rust Minori idle provider and rebuilds the selected family only after a validated mount is available; same-family rebuild is intentional because the idle and mounted VFS bindings differ.
 
@@ -10,7 +10,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。
 
-- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori mount profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；显式 media provider binding 和真实 media preview evidence 仍未完成。
+- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori mount profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Windows AVI video 的 provider binding 已落地，真实 media preview evidence 仍未完成。
 
 - 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、同步 translation Hook、CosmicText text layer 和 writable-file save/global-progress port；旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
 - 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
