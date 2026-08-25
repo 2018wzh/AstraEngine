@@ -113,8 +113,7 @@ fn registry_executes_only_the_explicit_provider_and_validates_output_identity() 
         profile: "desktop-release".into(),
     };
     let binding =
-        DecodeBindingContext::shipping("astra.decode.symphonia", "native-game", "desktop-release")
-            .with_declared_fallback();
+        DecodeBindingContext::shipping("astra.decode.symphonia", "native-game", "desktop-release");
     let result = registry.decode(&request, &binding).unwrap();
     assert_eq!(result.provider_id, "astra.decode.symphonia");
     assert!(matches!(result.output, DecodeOutput::AudioPcmI16 { .. }));

@@ -4,7 +4,7 @@
 
 ### Family media preview binding
 
-- Manager family VFS audio entries now use the explicitly bound `astra.decode.symphonia` provider with a declared fallback policy; the UI receives only codec, sample-rate, channel, frame-count and duration metadata, never PCM or a provider handle.
+- Manager family VFS audio entries now use the explicitly bound pure-Rust `astra.decode.symphonia` provider; it is a packaged platform provider rather than a declared fallback. The UI receives only codec, sample-rate, channel, frame-count and duration metadata, never PCM or a provider handle.
 - Video preview remains a separate binding: Windows may select the explicit Media Foundation provider, while unsupported targets return a stable unbound diagnostic. ANI/SQZ now have a separate family-owned first-frame binding; animation playback remains a runtime concern.
 - The Windows binding now declares `avi` explicitly for RIFF/AVI Minori movies; this removes only the codec-identity block. An actual Windows preview, Headless, or E3 run is still required before movie support can be marked verified.
 - ANI/SQZ preview now uses the explicit family-owned `astra.decode.minori.image` binding and returns only a bounded first-frame RGBA8 buffer. It does not imply animation playback or original pixel-parity evidence.
@@ -12,6 +12,7 @@
 - The CLI validates the provider's explicit `rgba8:first_frame:WxH` format against the resource descriptor before handing pixels to the retained renderer; a generic `rgba8` result is not accepted for the Minori family binding.
 - The Minori runtime resource resolver now recognizes ANI/SQZ metadata through the same strict container adapters instead of sending those resources through `image::ImageReader`. It emits the family codec and verified first-frame dimensions to the host; multi-frame playback is still intentionally open.
 - The v9 `Layer2D` texture path now sends both standard image resources and ANI/SQZ resources through an explicit `DecodeProviderRegistry` binding. Standard images retain encoded-format identity checks; ANI/SQZ require the family provider's first-frame dimensions and output contract before Renderer2D upload.
+- The Manager's legacy `RuntimeLiveResourceScene` path now uses the same explicit image registry and codec identity checks. Minori ANI/SQZ never pass through generic `image::load_from_memory`; unsupported codecs, provider identity mismatches, malformed first-frame metadata, and decoded byte-size mismatches stop the transaction. This closes the host-side decode bypass for the retained resource-scene path; it does not add multi-frame animation playback.
 
 ### Manager family selection is explicit at startup
 

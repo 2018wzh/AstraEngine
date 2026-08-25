@@ -759,7 +759,11 @@ impl SymphoniaAudioDecodeProvider {
     pub fn capability(&self) -> DecodeCapability {
         DecodeCapability {
             provider_id: "astra.decode.symphonia".to_string(),
-            priority: ProviderPriority::Fallback,
+            // Symphonia is the explicit pure-Rust audio provider used by
+            // desktop Manager and Minori preview paths. It is not a hidden
+            // fallback: callers bind this provider id directly and a missing
+            // or incompatible codec is a blocking error.
+            priority: ProviderPriority::Platform,
             kinds: vec![DecodeKind::Audio],
             codecs: vec![
                 "wav".to_string(),

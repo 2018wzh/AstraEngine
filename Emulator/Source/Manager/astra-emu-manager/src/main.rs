@@ -990,19 +990,13 @@ impl RuntimeBridge {
                     return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_CHANGE".into());
                 }
             }
-            let encoded = self.provider.read_vfs_resource(
+            let rgba = self.decode_live_resource_texture(
                 session_id,
                 &texture.resource_uri,
-                1024 * 1024 * 1024,
+                &texture.codec,
+                texture.decoded_width,
+                texture.decoded_height,
             )?;
-            let decoded = image::load_from_memory(&encoded)
-                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE".to_owned())?;
-            if decoded.width() != texture.decoded_width
-                || decoded.height() != texture.decoded_height
-            {
-                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
-            }
-            let rgba = decoded.to_rgba8().into_raw();
             let pixels = match texture.decoded_format {
                 RuntimeLiveTextureFormat::Rgba8 => rgba,
                 RuntimeLiveTextureFormat::LumaAlpha8 => {
@@ -1061,6 +1055,98 @@ impl RuntimeBridge {
             self.resource_revisions.insert(texture_id, revision);
         }
         Ok(())
+    }
+
+    fn decode_live_resource_texture(
+        &self,
+        session_id: &GameRuntimeSessionId,
+        resource_uri: &str,
+        codec: &str,
+        expected_width: u32,
+        expected_height: u32,
+    ) -> Result<Vec<u8>, String> {
+        let codec = codec.to_ascii_lowercase();
+        let binding = if self.family_id == "minori" && matches!(codec.as_str(), "ani" | "sqz") {
+            astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID
+        } else if matches!(codec.as_str(), "png" | "bmp" | "jpg" | "jpeg" | "webp") {
+            "astra.decode.image"
+        } else {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_CODEC_UNSUPPORTED".into());
+        };
+        let encoded =
+            self.provider
+                .read_vfs_resource(session_id, resource_uri, 1024 * 1024 * 1024)?;
+        if binding == "astra.decode.image" {
+            let reader = image::ImageReader::new(Cursor::new(encoded.as_slice()))
+                .with_guessed_format()
+                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE".to_owned())?;
+            let expected_format = match codec.as_str() {
+                "png" => image::ImageFormat::Png,
+                "bmp" => image::ImageFormat::Bmp,
+                "jpg" | "jpeg" => image::ImageFormat::Jpeg,
+                "webp" => image::ImageFormat::WebP,
+                _ => unreachable!("standard codec was matched above"),
+            };
+            if reader.format() != Some(expected_format) {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_CODEC_MISMATCH".into());
+            }
+        }
+        let profile = "astra.manager.live-image.v1";
+        let mut registry = DecodeProviderRegistry::default();
+        registry
+            .register(Box::new(ImageDecodeProvider))
+            .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_PROVIDER_INVALID".to_owned())?;
+        if binding == astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID {
+            registry
+                .register(Box::new(MinoriImageDecodeProvider))
+                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_PROVIDER_INVALID".to_owned())?;
+        }
+        let decoded = registry
+            .decode(
+                &DecodeRequest {
+                    kind: DecodeKind::Image,
+                    codec,
+                    bytes: encoded,
+                    profile: profile.into(),
+                },
+                &DecodeBindingContext::shipping(binding, "astra-emu-manager", profile),
+            )
+            .map_err(|error| format!("ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE: {error}"))?;
+        let DecodeOutput::CpuBuffer { bytes, format } = decoded.output else {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_CPU_BUFFER_REQUIRED".into());
+        };
+        if binding == astra_emu_minori::MINORI_IMAGE_DECODE_PROVIDER_ID {
+            let dimensions = format
+                .strip_prefix("rgba8:first_frame:")
+                .and_then(|value| value.split_once('x'))
+                .ok_or_else(|| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".to_owned())?;
+            let width = dimensions
+                .0
+                .parse::<u32>()
+                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".to_owned())?;
+            let height = dimensions
+                .1
+                .parse::<u32>()
+                .map_err(|_| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".to_owned())?;
+            if (width, height) != (expected_width, expected_height) {
+                return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
+            }
+        } else if format != "rgba8" {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DECODE_FORMAT".into());
+        }
+        let expected_bytes = usize::try_from(expected_width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(expected_height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_OVERFLOW".to_owned())?;
+        if bytes.len() != expected_bytes {
+            return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_DIMENSION_MISMATCH".into());
+        }
+        Ok(bytes.as_slice().to_vec())
     }
 
     fn current_video_frame(&self) -> Option<HostVideoFrame> {
@@ -1934,14 +2020,11 @@ impl AstraEmuManagerController {
         } else {
             "astra.decode.wmf"
         };
-        let mut binding = DecodeBindingContext::shipping(
+        let binding = DecodeBindingContext::shipping(
             provider_id,
             "astra-emu-manager",
             "astra.manager.preview.v1",
         );
-        if media_kind == "audio" {
-            binding = binding.with_declared_fallback();
-        }
         let preview = LegacyVfsViewer::new(mounted.clone())
             .preview_media(&uri, &registry, &binding)
             .map_err(|error| error.code().to_owned())?;
