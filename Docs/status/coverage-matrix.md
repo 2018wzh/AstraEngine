@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+Minori `progress_in_background` is now exposed as a bounded provider observation and consumed by the Windows native host for Minori-only focus suspend/resume. Focused provider/CLI evidence passes; real focus/audio and Windows E3 evidence remain open.
+
 Current AstraEMU identity note: the active contract is Family ABI v9 at
 `635527831e89e5ff9b87ac165b5b5532e28356c6` with Product Runtime Provider ABI
 v4. Minori uses `Native + MultiLayer`, Host-owned surfaces, synchronous Hook,

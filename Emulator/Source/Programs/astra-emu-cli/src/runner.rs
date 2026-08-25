@@ -4484,6 +4484,17 @@ fn route_native_event(
             viewport.window_height = height;
             Ok(NativeEventAction::Continue)
         }
+        PlatformEventKind::WindowFocused {
+            window: event_window,
+            focused,
+        } if event_window == window => {
+            if driver.family_id == "minori" {
+                let should_suspend = !focused && !driver.progress_in_background()?;
+                Ok(NativeEventAction::Suspend(should_suspend))
+            } else {
+                Ok(NativeEventAction::Continue)
+            }
+        }
         PlatformEventKind::WindowFocused { .. } => Ok(NativeEventAction::Continue),
         PlatformEventKind::Keyboard {
             window: event_window,
@@ -6556,6 +6567,25 @@ impl<'a> RuntimeDriver<'a> {
             ObservationPredicate::Equals { .. } => false,
         }
     }
+
+    #[cfg(target_os = "windows")]
+    fn progress_in_background(&self) -> Result<bool, String> {
+        progress_background_from_observation(&self.observed_blackboard)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn progress_background_from_observation(
+    observed: &BTreeMap<String, String>,
+) -> Result<bool, String> {
+    match observed
+        .get("minori.progress_in_background")
+        .map(String::as_str)
+    {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(_) => Err("ASTRA_EMU_MINORI_PROGRESS_BACKGROUND_OBSERVATION_INVALID".into()),
+    }
 }
 
 fn matches_blackboard_observation(
@@ -6824,6 +6854,24 @@ mod native_tests {
             &observed,
             "blackboard.minori.choice_active.false"
         ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn progress_background_observation_defaults_to_suspended_when_absent() {
+        let observed = BTreeMap::new();
+        assert!(!progress_background_from_observation(&observed).unwrap());
+        let enabled = BTreeMap::from([(
+            "minori.progress_in_background".to_owned(),
+            "true".to_owned(),
+        )]);
+        assert!(progress_background_from_observation(&enabled).unwrap());
+        let malformed =
+            BTreeMap::from([("minori.progress_in_background".to_owned(), "1".to_owned())]);
+        assert_eq!(
+            progress_background_from_observation(&malformed).unwrap_err(),
+            "ASTRA_EMU_MINORI_PROGRESS_BACKGROUND_OBSERVATION_INVALID"
+        );
     }
 
     #[test]

@@ -21,6 +21,12 @@
 - Save slot restore 明确保留当前 installation-scoped config，旧 gameplay slot 不再回滚音量、文字阴影或 play-mode 偏好。新增 round-trip 与 identity-drift 回归；真实桌面跨进程复验和原版全屏/逐字速度行为仍是独立开放项。
 - 复核 v9 media continuation 边界：`LegacyAudioCommandV1::Play` 与 `LegacyVideoCommandV1::Play` 没有 seek 起点。snapshot 虽保存活动资源和 continuation marker，restore 只能重新校验资源并从起点提交公共 `Play`，不能宣称原位置续播。该限制已同步到 presentation、script execution 与 coverage 说明，待 ABI/Host seek contract 和真实 evidence 后再关闭；没有引入平台播放器、私有 decoder 或伪造 fence。
 
+### 后台进度与窗口焦点
+
+- Minori provider 现在把已提交的 `progress_in_background` 配置作为有界 `minori.progress_in_background` blackboard observation 发布。默认值 `false` 不制造首 tick 噪声；持久化为 `true`、或从 `true` 切回 `false` 时才提交边沿，load/restore 会重新建立该观察值。
+- Windows native host 只对 `minori` family 消费该 observation：失焦且配置关闭时暂停固定 tick 和音频，重新获得焦点恢复；配置打开时继续运行。其他 family 保持原有焦点处理，不共享 Minori 配置语义。缺失 observation 按关闭处理，非 `true`/`false` 值返回 `ASTRA_EMU_MINORI_PROGRESS_BACKGROUND_OBSERVATION_INVALID`。
+- provider 与 CLI focused tests 已覆盖 observation edge、缺省和非法值；真实窗口失焦/恢复及完整路线仍需要 Windows E3 evidence，不能由该单元测试替代。
+
 ## 2026-08-23
 
 ### Family ABI v9 hard cut

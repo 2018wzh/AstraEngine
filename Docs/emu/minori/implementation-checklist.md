@@ -99,6 +99,12 @@
 - [ ] 完成正式 Headless audio review；视觉 bundle 已逐项检查，WAV 的格式、时长、peak、RMS、静音区间、clipping 和声道平衡已量测，但涉及语音的整段试听尚未完成，`validate-review` 保持 blocking。
 - [x] review protocol 强制 `full_audio` verdict 与 bundle 的完整 WAV selection；省略或失败必须在 validator 和 release preflight 阻断。私有 10 段连续听审清单覆盖全部 27260416 audio frame，但尚未据此宣称人工听审完成。
 
+## 后台进度与窗口焦点（2026-08-25）
+
+- `progress_in_background` 已进入 Minori provider 的有界 blackboard observation；默认关闭不发首 tick 边沿，持久化开启和关闭切换、load/restore 都会重新建立可消费状态。
+- Windows native host 只对 Minori 消费该 observation：失焦时按配置暂停或继续固定 tick/音频，其他 family 不改变原焦点行为；非法 observation 值直接阻断。
+- provider/CLI 定向测试通过；真实窗口焦点、音频恢复和完整路线仍需 Windows E3，不能把单元测试记为平台验收。
+
 ## Release Gate
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。

@@ -495,6 +495,7 @@ struct MinoriSession {
     reported_play_mode: Option<MinoriPlayMode>,
     reported_gallery_unlock_count: Option<usize>,
     reported_choice_active: Option<bool>,
+    reported_progress_in_background: Option<bool>,
     global_progress: MinoriGlobalProgressSession,
     config_storage_enabled: bool,
     config_persisted: MinoriConfigState,
@@ -817,6 +818,11 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 reported_play_mode: None,
                 reported_gallery_unlock_count: None,
                 reported_choice_active: None,
+                // `false` is the stable default and is intentionally not
+                // emitted on the first tick. A persisted `true` setting still
+                // produces an edge immediately, while a later true -> false
+                // transition remains observable.
+                reported_progress_in_background: Some(false),
                 global_progress: MinoriGlobalProgressSession {
                     enabled: global_progress_enabled,
                     loaded: !global_progress_enabled,
@@ -2365,6 +2371,8 @@ impl MinoriRuntimeProvider {
             append_gallery_unlock_observation(session, &mut output.control)?;
         let reported_choice_active =
             append_choice_active_observation(session, &mut output.control)?;
+        let reported_progress_in_background =
+            append_progress_in_background_observation(session, &mut output.control)?;
         if matches!(event, Some(MinoriVmEvent::Terminal)) && !session.vm.state().terminal {
             let sequence = session
                 .vm
@@ -2416,6 +2424,9 @@ impl MinoriRuntimeProvider {
         }
         if let Some(active) = reported_choice_active {
             session.reported_choice_active = Some(active);
+        }
+        if let Some(enabled) = reported_progress_in_background {
+            session.reported_progress_in_background = Some(enabled);
         }
         if restored_presentation {
             session.restore_presentation_pending = false;
@@ -2510,6 +2521,7 @@ impl MinoriRuntimeProvider {
         session.reported_play_mode = None;
         session.reported_gallery_unlock_count = None;
         session.reported_choice_active = None;
+        session.reported_progress_in_background = Some(false);
         session.poisoned = false;
         Ok(())
     }
@@ -4726,6 +4738,26 @@ fn append_choice_active_observation(
     Ok(Some(active))
 }
 
+fn append_progress_in_background_observation(
+    session: &mut MinoriSession,
+    control: &mut LegacyControlTransaction,
+) -> Result<Option<bool>, LegacyProviderError> {
+    let enabled = session.vm.persistent_config().progress_in_background;
+    if session.reported_progress_in_background == Some(enabled) {
+        return Ok(None);
+    }
+    let sequence = session
+        .vm
+        .allocate_effect_sequence()
+        .map_err(runtime_error)?;
+    control.blackboard.push(LegacyBlackboardMutation {
+        sequence,
+        key: "minori.progress_in_background".into(),
+        value: enabled.to_string(),
+    });
+    Ok(Some(enabled))
+}
+
 fn encode_global_progress(unlocks: &[Hash256]) -> Result<Vec<u8>, LegacyProviderError> {
     let progress = MinoriGlobalProgressV1 {
         schema: MINORI_GLOBAL_PROGRESS_SCHEMA.into(),
@@ -5417,6 +5449,7 @@ fn load_slot(
     session.reported_play_mode = None;
     session.reported_gallery_unlock_count = None;
     session.reported_choice_active = None;
+    session.reported_progress_in_background = Some(false);
     Ok(())
 }
 
@@ -6061,6 +6094,8 @@ fn system_ui_output(
     let reported_gallery_unlock_count =
         append_gallery_unlock_observation(session, &mut output.control)?;
     let reported_choice_active = append_choice_active_observation(session, &mut output.control)?;
+    let reported_progress_in_background =
+        append_progress_in_background_observation(session, &mut output.control)?;
     output.validate()?;
     if let Some(page) = reported_system_page {
         session.reported_system_page = Some(page);
@@ -6073,6 +6108,9 @@ fn system_ui_output(
     }
     if let Some(active) = reported_choice_active {
         session.reported_choice_active = Some(active);
+    }
+    if let Some(enabled) = reported_progress_in_background {
+        session.reported_progress_in_background = Some(enabled);
     }
     session.restore_presentation_pending = false;
     Ok(output)
@@ -6207,6 +6245,8 @@ fn gameplay_resume_output(
     let reported_gallery_unlock_count =
         append_gallery_unlock_observation(session, &mut output.control)?;
     let reported_choice_active = append_choice_active_observation(session, &mut output.control)?;
+    let reported_progress_in_background =
+        append_progress_in_background_observation(session, &mut output.control)?;
     output.validate()?;
     if let Some(page) = reported_system_page {
         session.reported_system_page = Some(page);
@@ -6219,6 +6259,9 @@ fn gameplay_resume_output(
     }
     if let Some(active) = reported_choice_active {
         session.reported_choice_active = Some(active);
+    }
+    if let Some(enabled) = reported_progress_in_background {
+        session.reported_progress_in_background = Some(enabled);
     }
     session.restore_presentation_pending = false;
     Ok(output)
@@ -7316,6 +7359,8 @@ fn waiting_output(
     let reported_gallery_unlock_count =
         append_gallery_unlock_observation(session, &mut output.control)?;
     let reported_choice_active = append_choice_active_observation(session, &mut output.control)?;
+    let reported_progress_in_background =
+        append_progress_in_background_observation(session, &mut output.control)?;
     output.validate()?;
     if let Some(page) = reported_system_page {
         session.reported_system_page = Some(page);
@@ -7328,6 +7373,9 @@ fn waiting_output(
     }
     if let Some(active) = reported_choice_active {
         session.reported_choice_active = Some(active);
+    }
+    if let Some(enabled) = reported_progress_in_background {
+        session.reported_progress_in_background = Some(enabled);
     }
     Ok(output)
 }
