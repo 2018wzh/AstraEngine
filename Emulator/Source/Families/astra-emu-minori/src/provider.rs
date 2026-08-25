@@ -5260,6 +5260,20 @@ fn load_slot(
             "load slot contains an invalid gameplay continuation state",
         ));
     }
+    if state
+        .audio
+        .values()
+        .any(|audio| audio.playing && audio.continuation_pts != 0)
+        || state
+            .movie
+            .as_ref()
+            .is_some_and(|movie| movie.continuation_pts != 0)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_MEDIA_CONTINUATION_UNSUPPORTED",
+            "v9 media Play cannot restore a non-zero continuation position",
+        ));
+    }
     // The original configuration store is installation-scoped rather than a
     // gameplay slot. Keep the active persisted settings when restoring the
     // VM so loading an older slot cannot silently roll back audio, text, or
