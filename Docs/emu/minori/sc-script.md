@@ -27,7 +27,7 @@ Message command 至少要恢复：
 
 ## Choice
 
-Choice command 的 parser 目前只输出一个保真的候选组：
+Choice command 的 parser 输出一个保真的候选组，并将已经验证的目标 label 单独保存在 CFG 中：
 
 ```text
 ChoiceGroup
@@ -36,7 +36,7 @@ ChoiceGroup
     target_field
 ```
 
-已确认每项以首个 `:` 分成显示文本与目标字段，且一组严格限制为一至四项。原程序会为该组建立独立 UI 和确认事件；确认结果如何写回 VM、是否跳转，以及右侧字段是否为 label，仍未完成数据流验证。因此当前 runtime 在遇到 `select` 时返回 blocking diagnostic，不接受输入，也不把该字段猜成 `target_label`、条件或变量写入。
+已确认每项以首个 `:` 分成显示文本与目标字段，且一组严格限制为一至四项。runtime 只接受 parser 已确认的目标 label：进入选择时建立有界 `Choice` wait，呈现层只传递各显示文本的 hash、选中索引和 option 数量；确认后消费一次性选择输入，按选中项跳转到对应 label，并清除 choice presentation。目标字段为空、不是 parser 建立的 label、选项数量超出范围、重复等待或跳转越界都会返回 blocking diagnostic。显示文本不进入 ABI、report 或日志，右侧字段不会被猜测成条件、变量或其他语义。
 
 ## 演出命令
 
