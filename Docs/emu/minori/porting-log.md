@@ -13,7 +13,7 @@
 
 ### Family ABI v9 hard cut
 
-- 当前分支已 rebase 到 Family ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`；其中包含 writable zero-copy surface、typed filter graph 以及 Rust 1.98 workspace gate 修正。当前 consumer 提交为 `d440daac86ef396dd92237c2bd677b060ec17c59`。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合是 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
+- 当前分支已 rebase 到 Family ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`；其中包含 writable zero-copy surface、typed filter graph 以及 Rust 1.98 workspace gate 修正。当前 consumer 提交为 `d153f06e1`。Product Runtime Provider 使用 ABI v4；Minori 的唯一合法组合是 `Native + MultiLayer`，画面通过 Host-owned surface 和 retained `Layer2D` transaction 提交。
 - v9 删除了旧 scene transaction、family snapshot、ephemeral text、session resource presentation 和 step budget。旧接口不保留兼容层，也不会在缺少 surface、Hook、字体、decode 或 writable-file provider 时回退。
 - Minori dylib 已改用公共 `FfiLegacyFamilyHostAdapter`，不再维护私有 FFI host adapter；surface lease 采用独占、可写、零拷贝 owner，禁止 immutable buffer、复制回写和 const-cast。旧 save/restore/text/resource 导出已从 root module 删除。
 - 全局进度已迁到同步 writable-file port，并使用相对路径、临时文件和 atomic replace；旧 provider-result payload 不再进入生产 step。Windows 复验发现 writable root 曾直接使用带 `sha256:` 前缀的显示字符串，冒号会生成非法目录名；现在目录组件固定为原始 digest 的 64 位小写十六进制。Runtime control action 同时补齐实际 Blackboard 写入的 `ActionAccess` 声明，两个问题都有定向回归。
@@ -422,7 +422,7 @@ python Tools/check_docs.py
 
 ### 2026-08-23 ABI v9 媒体与 typed observation 恢复
 
-- 当前分支基于 AstraEMU ABI v9 implementation `289b89f74`，RFVP 固定为 `f4f64a5bb726c1759350a666a35e0a454b810f61`。Minori 继续使用 `Native + MultiLayer`；surface 是独占可写 lease，FilterGraph 使用 typed graph，未恢复旧 scene、text lease、family snapshot 或 session-resource ABI。
+- 当前分支基于 AstraEMU ABI v9 implementation `635527831e89e5ff9b87ac165b5b5532e28356c6`，RFVP 固定为 `f4f64a5bb726c1759350a666a35e0a454b810f61`。Minori 继续使用 `Native + MultiLayer`；surface 是独占可写 lease，FilterGraph 使用 typed graph，未恢复旧 scene、text lease、family snapshot 或 session-resource ABI。
 - v9 真实八包短程启动已通过签名动态 plugin、VFS、RuntimeWorld、Layer2D、CosmicText 和音频生命周期。该 run 的自动结果为通过，但最早的标题 checkpoint 发生在首张有效标题帧之前，后续 Config 标签也没有与页面变化严格对齐，因此人工视觉结论保持 blocking，不能沿用历史 v8 E2。
 - 完整路线首先暴露 `LegacyVfsReader::read_file` 把约 196 MiB 影片作为一次 range 请求，而公共 byte-source transport 的单次上限是 16 MiB。公共 whole-file helper 现按该上限分块，逐块校验 source revision、返回 range 和短读；调用方总预算不变，不放宽 transport 上限。
 - Minori 影片主路径重新绑定仓库已有的纯 Rust `AviDemuxer` 与 `Wmv3Decoder`。encoded source 通过 4 MiB `BoundedByteSourceReader` 读取，decoded frame 和 PCM chunk 按时间轴有界提交；Minori 不进入 Windows 系统 codec、FFmpeg 或 RFVP 的 platform-provider 分支。容器、WMV3 stream、PCM、PTS、frame 或预算不匹配均返回 `ASTRA_EMU_MINORI_*` blocking diagnostic。
