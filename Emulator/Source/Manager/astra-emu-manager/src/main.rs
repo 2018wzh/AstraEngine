@@ -1005,10 +1005,16 @@ impl RuntimeBridge {
             let rgba = decoded.to_rgba8().into_raw();
             let pixels = match texture.decoded_format {
                 RuntimeLiveTextureFormat::Rgba8 => rgba,
-                RuntimeLiveTextureFormat::LumaAlpha8 => rgba
-                    .chunks_exact(4)
-                    .flat_map(|pixel| [pixel[0], pixel[3]])
-                    .collect(),
+                RuntimeLiveTextureFormat::LumaAlpha8 => {
+                    let (chunks, remainder) = rgba.as_chunks::<4>();
+                    if !remainder.is_empty() {
+                        return Err("ASTRA_EMU_LIVE_RESOURCE_SCENE_RGBA_ALIGNMENT".into());
+                    }
+                    chunks
+                        .iter()
+                        .flat_map(|pixel| [pixel[0], pixel[3]])
+                        .collect()
+                }
             };
             let operation = if self.resource_revisions.contains_key(&texture.texture_id) {
                 RuntimeLiveSceneResourceOperation::UpdateTexture {
