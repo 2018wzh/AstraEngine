@@ -2,6 +2,12 @@
 
 ## 2026-08-25
 
+### Rust 1.98 trust-root 复核与当前 v9 短程 smoke
+
+- 在重新安装 stable Rust 1.98 后，重新编译并签名当前 Minori dynamic plugin；CLI 在编译期嵌入同一 development signer 与 family public-key trust root，随后用当前 v9 `Native + MultiLayer` composition 运行直接入口短程。Headless report 为 `passed`，执行 431 个 fixed step、消费 27 条物理输入，提交并栅格化 13 个 frame，产出 344576 个 audio frame，无 diagnostic，标题与场景 frame hash 不同。
+- 这次运行按设计未到达 route terminal，只能作为当前 ABI、surface、Layer2D、CosmicText、图像/音频绑定和基本输入消费的 E2 smoke；它不关闭四条自然路线、gallery unlock、正式 audio review、movie gallery 原版视觉 parity、cache second-run、Linux FUSE、macOS extract 或 Windows E3。
+- 旧 gallery JSONL 序列在当前 identity 重放时触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，因此不再沿用历史 gallery report。需要重新生成与当前 mount/profile/global-progress identity 一致的物理输入；运行时保持 fail-fast，不通过 fallback 或注入 unlock 修复该证据缺口。
+
 ### Minori video codec gate
 
 - Manager preview and playback now reject every Minori video extension except the

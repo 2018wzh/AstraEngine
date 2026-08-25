@@ -145,6 +145,10 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Linked Test IDs:** `T-S5-LEGACY-VFS-01`
 
+## 2026-08-25 当前 Minori v9 smoke 证据
+
+重新安装 stable Rust 1.98 后，当前签名 Minori plugin 通过 v9 `Native + MultiLayer` composition 完成 431 个 fixed step、27 条物理输入、13 个 submitted/rasterized frame 和 344576 个 audio frame；Headless report 为 `passed`，无 diagnostic，标题与场景 frame hash 不同。该 run 未到达 terminal，只是 E2 smoke，不代表完整路线、gallery、正式音频审查或 Windows E3 已完成。旧 gallery 输入在当前 identity 下触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，已从证据集中排除，需重新生成匹配当前 global-progress 的物理输入。
+
 ## S5-MANAGER-01 Manager RuntimeWorld bridge
 
 **ID:** `S5-MANAGER-01`

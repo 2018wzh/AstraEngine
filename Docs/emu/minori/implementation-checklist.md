@@ -112,6 +112,12 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - Windows native host 只对 Minori 消费该 observation：失焦时按配置暂停或继续固定 tick/音频，其他 family 不改变原焦点行为；非法 observation 值直接阻断。
 - provider/CLI 定向测试通过；真实窗口焦点、音频恢复和完整路线仍需 Windows E3，不能把单元测试记为平台验收。
 
+## 2026-08-25 当前 v9 复核
+
+- [x] 重新安装 stable Rust 1.98 后，以当前 signer/trust-root 重新编译、签名并运行 Minori v9 短程；431 fixed step、27 条物理输入、13 个 submitted/rasterized frame、344576 个 audio frame、无 diagnostic，标题与场景 frame hash 不同。
+- [ ] 旧 gallery 输入在当前 mount/profile/global-progress identity 下触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，不能沿用历史 gallery report；需要重新生成匹配当前状态的物理输入并完成 required checkpoint 复核。
+- [ ] 四条自然路线、自然 gallery unlock、正式 audio review、movie gallery 原版视觉 parity、cache second-run、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。
+
 ## Release Gate
 
 - [ ] 本地 case report 只包含 hash、coverage、diagnostics 和命令。
