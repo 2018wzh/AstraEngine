@@ -2821,6 +2821,12 @@ fn take_restore_audio_commands(
         .map(|(stream_id, state)| (*stream_id, state.clone()))
         .collect::<Vec<_>>();
     for (_, state) in &active {
+        if state.continuation_pts != 0 {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_MEDIA_CONTINUATION_UNSUPPORTED",
+                "v9 audio Play cannot restore a non-zero continuation position",
+            ));
+        }
         match vfs.stat_file(&session.mount_set_id, &state.resource_uri) {
             Ok(stat) if stat.len > 0 && stat.len <= MAX_RESOURCE_BYTES => {}
             Ok(_) => {
@@ -7539,6 +7545,12 @@ fn movie_presentation(
     movie: &MinoriMovieState,
     sequence: u64,
 ) -> Result<LegacySequenced<LegacyVideoCommandV1>, LegacyProviderError> {
+    if movie.continuation_pts != 0 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_MEDIA_CONTINUATION_UNSUPPORTED",
+            "v9 video Play cannot restore a non-zero continuation position",
+        ));
+    }
     if stage_size != Some((movie.width, movie.height)) {
         return Err(invalid(
             "ASTRA_EMU_MINORI_MOVIE_STAGE_IDENTITY",
@@ -9643,6 +9655,110 @@ mod tests {
     }
 
     #[test]
+    fn persistent_config_store_is_atomic_and_skips_unchanged_values() {
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([("minori:/scr/test.sc".into(), b".end\r\n".to_vec())]),
+        }));
+        let ctx = context();
+        let session_id = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.progress".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        let (case_fingerprint, package_hash, profile_fingerprint, config) = {
+            let session = provider.sessions.get_mut(&session_id.0).unwrap();
+            session.vm.begin_title_launch().unwrap();
+            session.vm.open_config().unwrap();
+            session
+                .vm
+                .apply_config_control(MinoriConfigControl::BgmVolume(37))
+                .unwrap();
+            session
+                .vm
+                .apply_config_control(MinoriConfigControl::ToggleTextShadow)
+                .unwrap();
+            session
+                .vm
+                .apply_config_control(MinoriConfigControl::Apply)
+                .unwrap();
+            session.config_storage_enabled = true;
+            (
+                session.case_fingerprint,
+                session.package_hash,
+                session.profile_fingerprint,
+                session.vm.persistent_config().clone(),
+            )
+        };
+        let payload = encode_config(&MinoriConfigEnvelope {
+            schema: MINORI_CONFIG_SCHEMA.into(),
+            case_fingerprint,
+            package_hash,
+            profile_fingerprint,
+            config: config.clone(),
+        })
+        .unwrap();
+        let writable = ScriptedWritableFiles::new([
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+                    path: MINORI_CONFIG_ROOT.into(),
+                },
+                writable_result(true, false, 0, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+                    path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    length: 0,
+                },
+                writable_result(true, true, 0, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+                    path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    offset: 0,
+                    bytes: payload.clone(),
+                },
+                writable_result(
+                    true,
+                    true,
+                    payload.len() as u64,
+                    Vec::new(),
+                    payload.len() as u64,
+                ),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+                    path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    length: payload.len() as u64,
+                },
+                writable_result(true, true, payload.len() as u64, Vec::new(), 0),
+            ),
+            (
+                astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+                    temporary_path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    destination_path: MINORI_CONFIG_PATH.into(),
+                },
+                writable_result(true, true, payload.len() as u64, Vec::new(), 0),
+            ),
+        ]);
+        {
+            let session = provider.sessions.get_mut(&session_id.0).unwrap();
+            store_persistent_config_if_changed(&writable, &session_id, session).unwrap();
+            assert_eq!(session.config_persisted, config);
+            store_persistent_config_if_changed(&writable, &session_id, session).unwrap();
+        }
+        writable.assert_consumed();
+    }
+
+    #[test]
     fn provider_title_launch_uses_verified_system_assets_and_restores_page_state() {
         let mut page_png = Vec::new();
         PngEncoder::new(&mut page_png)
@@ -11137,6 +11253,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(completed.status, LegacyRuntimeStatus::Terminal);
+    }
+
+    #[test]
+    fn movie_restore_rejects_non_zero_continuation_without_a_v9_seek_field() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([("minori:/mov/op.avi".into(), b"RIFFfixture".to_vec())]),
+        });
+        let movie = MinoriMovieState {
+            media_id: "minori.movie.1".into(),
+            resource_uri: "minori:/mov/op.avi".into(),
+            width: 1280,
+            height: 720,
+            skippable: true,
+            continuation_pts: 1,
+            fence_id: "minori.wait.movie.1".into(),
+        };
+        let error =
+            movie_presentation(&vfs, "mount.test", Some((1280, 720)), &movie, 1).unwrap_err();
+        assert_eq!(
+            error.code(),
+            "ASTRA_EMU_MINORI_MEDIA_CONTINUATION_UNSUPPORTED"
+        );
     }
 
     #[test]

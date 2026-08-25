@@ -7,6 +7,7 @@
 - 复核原程序的配置加载/写回字段后，补上 Minori runtime 的 installation-scoped config store。显式绑定 `astra.provider.storage = astra.writable_file.v1` 时，family 在 open 阶段读取 `astra.emu.minori.config.v1`；文件缺失使用原程序默认值，schema、大小、case/package/profile identity 或 postcard 内容不匹配均直接阻断。
 - Apply 后只在已应用值发生变化时写入相对 writable-file root，使用 bounded temporary file、保留式 range write、length 校验和 atomic replace。配置 envelope 不含脚本正文、资源、密钥或宿主路径；没有 writable-file binding 的纯 VFS 单元 provider 不会伪造持久化。
 - Save slot restore 明确保留当前 installation-scoped config，旧 gameplay slot 不再回滚音量、文字阴影或 play-mode 偏好。新增 round-trip 与 identity-drift 回归；真实桌面跨进程复验和原版全屏/逐字速度行为仍是独立开放项。
+- 复核 v9 media continuation 边界：`LegacyAudioCommandV1::Play` 与 `LegacyVideoCommandV1::Play` 没有 seek 起点。snapshot 虽保存活动资源和 continuation marker，restore 只能重新校验资源并从起点提交公共 `Play`，不能宣称原位置续播。该限制已同步到 presentation、script execution 与 coverage 说明，待 ABI/Host seek contract 和真实 evidence 后再关闭；没有引入平台播放器、私有 decoder 或伪造 fence。
 
 ## 2026-08-23
 

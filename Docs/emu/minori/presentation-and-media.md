@@ -39,6 +39,8 @@ BGM、SE、voice 分离。Voice replay 从 backlog 触发时不能推进脚本 V
 
 当前样本 `mov.paz` 非空并含 5 个 entry。VFS 负责准确解密和读取；`PlayMovie` 已通过公共 AVI/WMV3/PCM provider、media fence 和有界 range reader 接入剧情路径。movie gallery 的脚本目标和标签已校验，但样本没有独立的 gallery 背景资源，因此当前页面保留严格有界的已验证 Memories 背景近似，不能作为原版逐像素 parity 证据。
 
+当前 Family ABI v9 的 `LegacyAudioCommandV1::Play` 与 `LegacyVideoCommandV1::Play` 没有起始 PTS 或 seek 字段。Minori snapshot 会保存活动资源、编码、循环和 continuation marker，并在 restore 时重新校验资源 identity；Host 只能按公共 ABI 重新提交从起点开始的 `Play`，不能把 marker 冒充成可寻址的媒体续播。需要原位置恢复的音频/影片 continuation 是明确的 blocking 项，必须先由 ABI/Host 提供经过验证的 seek contract，再补实现和 evidence；当前不使用平台播放器、私有 decoder 或伪造 completion 绕过该边界。
+
 ## `bg` / `bgm` 真实 inventory
 
 八包 full verify 后，`census-media` 对 `bg`、`bgm` 做了 payload-free 格式核验：

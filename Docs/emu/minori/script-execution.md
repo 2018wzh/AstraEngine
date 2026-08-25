@@ -75,6 +75,8 @@ Snapshot schema 当前为 `astra.emu.minori.runtime_state.v23`，包含 VM state
 
 Config 的跨 session 持久化不依赖 gameplay snapshot：显式 writable-file binding 开启后，family 以 `astra.emu.minori.config.v1` envelope 保存已应用配置，严格校验 case/package/profile identity，并以临时文件加 atomic replace 写回。缺少文件使用默认值；损坏、越界或 identity 漂移阻断。加载 gameplay slot 时保留当前 installation-scoped config，避免旧 slot 改写当前音量、阴影和 play-mode 偏好。
 
+媒体恢复有独立边界：v9 的公共 `Play` command 不携带 seek 起点，snapshot 中的 `continuation_pts` 只是已验证的状态记录，不能在 restore 时解释成可执行的媒体位置。restore 会重新检查活动资源并提交从起点开始的确定性播放；要求原位置继续的音频/影片场景保持 blocking，直到公共 Host/media contract 增加并验证 seek continuation。
+
 ## Determinism
 
 随机数、auto/skip、voice replay 和 movie end event 都必须进入 trace。联网或系统时间不参与脚本决定。

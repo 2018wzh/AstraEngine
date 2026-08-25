@@ -1,7 +1,7 @@
 # Implementation Coverage Matrix
 
 Current AstraEMU identity note: the active contract is Family ABI v9 at
-`289b89f74a972f92f98bbd481f8b45b23d969200` with Product Runtime Provider ABI
+`635527831e89e5ff9b87ac165b5b5532e28356c6` with Product Runtime Provider ABI
 v4. Minori uses `Native + MultiLayer`, Host-owned surfaces, synchronous Hook,
 typed `LegacyFilterGraphV9` and writable-file ports. CLI、Manager 和 Minori 的
 增量 consumer 已恢复编译，Manager typed filter graph 已走 WGPU，旧 Scene2D
@@ -21,7 +21,7 @@ AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retai
 
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 
-ABI consumer implementation 基线已更新到 `289b89f74a972f92f98bbd481f8b45b23d969200`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `f4f64a5bb726c1759350a666a35e0a454b810f61` 并绑定唯一 workspace ABI source。
+ABI consumer implementation 基线已更新到 `635527831e89e5ff9b87ac165b5b5532e28356c6`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `f4f64a5bb726c1759350a666a35e0a454b810f61` 并绑定唯一 workspace ABI source。
 
 2026-08-03 的 Windows native 诊断另确认 PlatformHost command queue 未唤醒 Winit 是 present backlog 的直接根因。当前 command submit 和 HTTPS completion 已通过 `EventLoopProxy` 事件驱动，800-step signed Release 复跑无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms；该短跑不替代 hover 动画语义、Family ABI scene bulk 零拷贝、10 分钟 audio soak 或 Manager E3。
 
