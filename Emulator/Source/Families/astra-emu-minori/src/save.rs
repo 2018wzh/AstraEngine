@@ -1,10 +1,17 @@
 use astra_core::Hash256;
 use serde::{Deserialize, Serialize};
 
+use crate::MinoriConfigState;
+
 pub(crate) const MINORI_SAVE_SCHEMA: &str = "astra.emu.minori.save_slot.v1";
 pub(crate) const MINORI_SAVE_ROOT: &str = "minori/saves";
 pub(crate) const MINORI_SAVE_MAX_SLOTS: u32 = 100;
 pub(crate) const MINORI_SAVE_MAX_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const MINORI_CONFIG_SCHEMA: &str = "astra.emu.minori.config.v1";
+pub(crate) const MINORI_CONFIG_ROOT: &str = "minori";
+pub(crate) const MINORI_CONFIG_PATH: &str = "minori/config-v1.bin";
+pub(crate) const MINORI_CONFIG_TEMPORARY_PATH: &str = "minori/config-v1.tmp";
+pub(crate) const MINORI_CONFIG_MAX_BYTES: usize = 64 * 1024;
 
 pub(crate) fn slot_path(slot: u32) -> String {
     format!("{MINORI_SAVE_ROOT}/slot-{slot:03}.bin")
@@ -31,5 +38,23 @@ pub(crate) fn encode(envelope: &MinoriSaveEnvelope) -> Result<Vec<u8>, postcard:
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<MinoriSaveEnvelope, postcard::Error> {
+    postcard::from_bytes(bytes)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MinoriConfigEnvelope {
+    pub schema: String,
+    pub case_fingerprint: Hash256,
+    pub package_hash: Hash256,
+    pub profile_fingerprint: Hash256,
+    pub config: MinoriConfigState,
+}
+
+pub(crate) fn encode_config(envelope: &MinoriConfigEnvelope) -> Result<Vec<u8>, postcard::Error> {
+    postcard::to_allocvec(envelope)
+}
+
+pub(crate) fn decode_config(bytes: &[u8]) -> Result<MinoriConfigEnvelope, postcard::Error> {
     postcard::from_bytes(bytes)
 }

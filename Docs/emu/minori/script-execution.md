@@ -73,6 +73,8 @@ Manager 只能接收 trace 和 presentation/audio command，不读取私有 VM �
 
 Snapshot schema 当前为 `astra.emu.minori.runtime_state.v23`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、message voice URI/volume/pan、`Normal/Auto/Skip` play mode、Config 已应用值和页面内 draft、Control 与指针物理状态、两个 pragma gate、已提交 presentation layer、transition 配置、effect state、message panel、audio bus 的 URI/encoding/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
 
+Config 的跨 session 持久化不依赖 gameplay snapshot：显式 writable-file binding 开启后，family 以 `astra.emu.minori.config.v1` envelope 保存已应用配置，严格校验 case/package/profile identity，并以临时文件加 atomic replace 写回。缺少文件使用默认值；损坏、越界或 identity 漂移阻断。加载 gameplay slot 时保留当前 installation-scoped config，避免旧 slot 改写当前音量、阴影和 play-mode 偏好。
+
 ## Determinism
 
 随机数、auto/skip、voice replay 和 movie end event 都必须进入 trace。联网或系统时间不参与脚本决定。

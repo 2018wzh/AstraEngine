@@ -14,6 +14,7 @@
 - 模型复核新报告全部 33 个 required checkpoint；人物、背景、影片和日文字形没有缺失、横向裁剪、非预期拉伸、旧图层残留或未退场人物。choice 与 post-choice 已从独立真实 slice 升级为同一条完整路线证据。
 - 公共 Kira limiter 后 output peak 为 0.989551，output overload 与 underflow 均为 0。自动 E2 已闭合这条路线的结局返回标题、最终 Exit、snapshot continuation、用户 save/restore、自然解锁和 VM/视觉/音频重复运行确定性。原版 `Memories` 菜单只在第四条已确认路线后出现，因此首条路线不能形成 CG/BGM/回想 checkpoint；鉴赏完整入口、Config 行为级 E2 和 Windows E3 仍开放。当前状态不是完整产品体验或 E3。
 - Config 已按原程序 29 类 action 建立 v23 draft transaction、精确鼠标命中区、滑块换算、四类 retained texture overlay、WAV 试听和公共音量/静音映射。真实八包短程 Headless 已以物理 pointer 验证画面效果开关、BGM 滑块和 `BGMTest.wav` 试听；文字阴影另以 384 fixed steps、388 帧和 34 条输入验证关闭选项后剧情消息使用无 outline 的公共 typed text path。相关 checkpoint 的模型视觉检查通过。全屏 Host effect、逐字速度、其余视觉开关对剧情的实际影响和角色语音筛选仍待验证。
+- Config 的已应用值现在在显式 `astra.provider.storage = astra.writable_file.v1` 时按 `astra.emu.minori.config.v1` 保存到相对 writable-file root；读取严格绑定 case/package/profile identity，缺失文件使用原程序默认值，损坏、越界或 identity 漂移直接阻断。Save slot restore 保留当前 installation-scoped config，不会被旧 gameplay slot 静默覆盖；这关闭了配置跨 session 的持久化契约，但不替代全屏 Host effect、逐字速度和其余行为级证据。
 - runtime state v19 已在当时的 release plugin 上重跑同一输入序列：33490 fixed steps、34108 个呈现帧、16951 条物理输入和 33 个 required checkpoint 均通过。当前代码已硬切到 state v23；三态 play mode、Auto 入口、message voice 与 backlog voice replay 均有定向回归。活动消息现以同 token 的 `Input`/`Time` modality 重绑定响应 Auto 切换。当前签名 Release plugin 已在真实八包上用最快 Auto 持续跑完首路线：25552 fixed steps、25557 个 GPU frame、50 条物理输入、terminal、snapshot round-trip 和零 diagnostic 均通过，正文阶段没有周期性 Enter。v21 完整路线另以 33553 fixed steps、34172 帧、16957 条输入和 34 个 checkpoint 验证物理 Enter 的 backlog voice replay 不推进 VM、保留同一 message wait，并继续到 terminal。完整 WAV 的具名人工听审未完成，因此正式 review 保持 blocking。
 
 ### Control 快进增量（2026-08-03）
@@ -45,6 +46,7 @@
 | Minori deterministic VM state 与 control-flow | E2 route | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie 和 end；未确认 operand 继续阻断 |
 | Minori runtime provider / `cdylib` ABI | E2 增量 | Family ABI v9 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺完整四路线与正式 Windows host evidence |
 | Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
+| Config writable-file persistence | 已实现 | `astra.emu.minori.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |
 
 当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已完成八包 manifest v2 full verify：14502 个 entry、43818 次 range read、6624958365 个 decoded bytes。验证轮显式关闭 cache；启用 cache 的运行因平台缓存卷空间不足阻断，因此新的八包 cache identity 仍没有第二轮命中实证。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 

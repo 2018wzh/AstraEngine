@@ -31,9 +31,10 @@ use astra_media_core::{
 use serde::{Deserialize, Serialize};
 
 use crate::save::{
-    decode as decode_save, encode as encode_save, slot_path, slot_temporary_path,
-    MinoriSaveEnvelope, MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT,
-    MINORI_SAVE_SCHEMA,
+    decode as decode_save, decode_config, encode as encode_save, encode_config, slot_path,
+    slot_temporary_path, MinoriConfigEnvelope, MinoriSaveEnvelope, MINORI_CONFIG_MAX_BYTES,
+    MINORI_CONFIG_PATH, MINORI_CONFIG_ROOT, MINORI_CONFIG_SCHEMA, MINORI_CONFIG_TEMPORARY_PATH,
+    MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT, MINORI_SAVE_SCHEMA,
 };
 use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
@@ -41,11 +42,12 @@ use crate::text_surface::{
 use crate::{
     parse_sc, MinoriAudioCommand, MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame,
     MinoriCharacterState, MinoriChoicePresentation, MinoriConfigAudioBus, MinoriConfigChange,
-    MinoriConfigControl, MinoriEffectFrame, MinoriExecutedCommand, MinoriLinearScrollFrame,
-    MinoriMovieState, MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState,
-    MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand,
-    MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent,
-    MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
+    MinoriConfigControl, MinoriConfigState, MinoriEffectFrame, MinoriExecutedCommand,
+    MinoriLinearScrollFrame, MinoriMovieState, MinoriPlayMode, MinoriRuntimeError,
+    MinoriRuntimeState, MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame,
+    MinoriStageCommand, MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm,
+    MinoriVmEvent, MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog,
+    MINORI_CHOICE_PRESENTATION_SCHEMA,
 };
 
 pub const MINORI_FAMILY_ID: &str = "minori";
@@ -182,7 +184,7 @@ const MINORI_GALLERY_MOVIE_LABELS: [&str; 4] =
     ["ed_ayame.avi", "ed_ren.avi", "ed_sui.avi", "ed_tohka.avi"];
 const MINORI_GLOBAL_PROGRESS_OPTION: &str = "astra.provider.storage";
 const MINORI_WRITABLE_FILE_BINDING_ID: &str = "astra.writable_file.v1";
-const MINORI_GLOBAL_PROGRESS_DIRECTORY: &str = "minori";
+const MINORI_GLOBAL_PROGRESS_DIRECTORY: &str = MINORI_CONFIG_ROOT;
 const MINORI_GLOBAL_PROGRESS_PATH: &str = "minori/global-progress-v1.bin";
 const MINORI_GLOBAL_PROGRESS_TEMPORARY_PATH: &str = "minori/global-progress-v1.tmp";
 const MAX_GLOBAL_PROGRESS_BYTES: u64 = 1024 * 1024;
@@ -191,9 +193,8 @@ const MINORI_GLOBAL_PROGRESS_SCHEMA: &str = "astra.emu.minori.global_progress.v1
 const MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA: &str = "astra.emu.minori.global_progress_snapshot.v1";
 
 // Family-owned text layout staging. ABI v9 never exports these values. The v9
-// publisher currently blocks before presentation; the next migration slice
-// must invoke the synchronous translation Hook and rasterize into Host-owned
-// layer surfaces before this staging data can leave the provider.
+// publisher invokes the synchronous translation Hook and rasterizes into
+// Host-owned layer surfaces before publishing the retained transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LegacyTextHorizontalAlignmentV1 {
     Start,
@@ -494,6 +495,8 @@ struct MinoriSession {
     reported_gallery_unlock_count: Option<usize>,
     reported_choice_active: Option<bool>,
     global_progress: MinoriGlobalProgressSession,
+    config_storage_enabled: bool,
+    config_persisted: MinoriConfigState,
     save_slots: BTreeSet<u32>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
@@ -752,6 +755,21 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 ));
             }
         };
+        let config_storage_enabled = global_progress_enabled;
+        let persisted_config = if config_storage_enabled {
+            let services = self.host_services()?.clone();
+            load_persistent_config(
+                services.writable_files.as_ref(),
+                &request.requested_session_id,
+                request.case_fingerprint,
+                ctx.package_hash,
+                profile_fingerprint,
+            )?
+        } else {
+            MinoriConfigState::default()
+        };
+        vm.set_persistent_config(persisted_config.clone())
+            .map_err(runtime_error)?;
         let id = request.requested_session_id;
         self.sessions.insert(
             id.0.clone(),
@@ -779,6 +797,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     loaded: !global_progress_enabled,
                     persisted_unlocks: Vec::new(),
                 },
+                config_storage_enabled,
+                config_persisted: persisted_config,
                 save_slots: BTreeSet::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
@@ -2343,6 +2363,19 @@ impl MinoriRuntimeProvider {
                 .writable_files
                 .as_ref();
             store_global_progress_if_changed(writable_files, session_id, session, &mut output)?;
+        }
+        if session.config_storage_enabled {
+            let writable_files = host_services
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                        "config persistence requires ABI v9 Host services",
+                    )
+                })?
+                .writable_files
+                .as_ref();
+            store_persistent_config_if_changed(writable_files, session_id, session)?;
         }
         let restored_presentation =
             append_restored_gameplay_scene(session, &vfs, &mut output.live)?;
@@ -4691,7 +4724,12 @@ fn store_global_progress_if_changed(
             path: MINORI_GLOBAL_PROGRESS_DIRECTORY.into(),
         },
     )?;
-    validate_writable_mutation_result(&create, 0, "create directory")?;
+    validate_writable_mutation_result(
+        &create,
+        0,
+        "create directory",
+        "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+    )?;
     let truncate = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
@@ -4699,7 +4737,12 @@ fn store_global_progress_if_changed(
             length: 0,
         },
     )?;
-    validate_writable_mutation_result(&truncate, 0, "truncate temporary progress")?;
+    validate_writable_mutation_result(
+        &truncate,
+        0,
+        "truncate temporary progress",
+        "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+    )?;
     let write = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
@@ -4708,7 +4751,12 @@ fn store_global_progress_if_changed(
             bytes: payload.clone(),
         },
     )?;
-    validate_writable_mutation_result(&write, payload.len() as u64, "write global progress")?;
+    validate_writable_mutation_result(
+        &write,
+        payload.len() as u64,
+        "write global progress",
+        "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+    )?;
     let length = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
@@ -4716,7 +4764,12 @@ fn store_global_progress_if_changed(
             length: payload.len() as u64,
         },
     )?;
-    validate_writable_mutation_result(&length, 0, "finalize global progress length")?;
+    validate_writable_mutation_result(
+        &length,
+        0,
+        "finalize global progress length",
+        "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+    )?;
     let replace = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
@@ -4724,7 +4777,12 @@ fn store_global_progress_if_changed(
             destination_path: MINORI_GLOBAL_PROGRESS_PATH.into(),
         },
     )?;
-    validate_writable_mutation_result(&replace, 0, "replace global progress")?;
+    validate_writable_mutation_result(
+        &replace,
+        0,
+        "replace global progress",
+        "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+    )?;
     session.global_progress.persisted_unlocks = unlocks;
     output.state_revision = session.vm.state().fixed_tick;
     Ok(())
@@ -4734,14 +4792,186 @@ fn validate_writable_mutation_result(
     result: &astra_emu_family_api::LegacyWritableFileResultV1,
     expected_written: u64,
     operation: &'static str,
+    diagnostic_code: &'static str,
 ) -> Result<(), LegacyProviderError> {
     if !result.entries.is_empty() || !result.bytes.is_empty() || result.written != expected_written
     {
         return Err(LegacyProviderError::invalid(
-            "ASTRA_EMU_MINORI_GLOBAL_PROGRESS_WRITE",
+            diagnostic_code,
             format!("writable-file result for {operation} is invalid"),
         ));
     }
+    Ok(())
+}
+
+fn load_persistent_config(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
+    case_fingerprint: Hash256,
+    package_hash: Hash256,
+    profile_fingerprint: Hash256,
+) -> Result<MinoriConfigState, LegacyProviderError> {
+    let stat = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::Stat {
+            path: MINORI_CONFIG_PATH.into(),
+        },
+    )?;
+    if !stat.exists {
+        if stat.is_file || stat.length != 0 || !stat.entries.is_empty() || !stat.bytes.is_empty() {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_CONFIG_STAT",
+                "missing config returned contradictory metadata",
+            ));
+        }
+        return Ok(MinoriConfigState::default());
+    }
+    if !stat.is_file
+        || stat.length == 0
+        || stat.length > MINORI_CONFIG_MAX_BYTES as u64
+        || !stat.entries.is_empty()
+        || !stat.bytes.is_empty()
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_STAT",
+            "config stat metadata is invalid or outside its byte bound",
+        ));
+    }
+    let read = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::ReadRange {
+            path: MINORI_CONFIG_PATH.into(),
+            offset: 0,
+            length: stat.length,
+        },
+    )?;
+    if !read.exists
+        || !read.is_file
+        || read.length != stat.length
+        || read.bytes.len() as u64 != stat.length
+        || !read.entries.is_empty()
+        || read.written != 0
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_READ",
+            "config read result does not match the prior stat",
+        ));
+    }
+    let envelope = decode_config(read.bytes.as_slice()).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_CONFIG_FORMAT",
+            "config envelope is malformed",
+        )
+    })?;
+    if envelope.schema != MINORI_CONFIG_SCHEMA
+        || envelope.case_fingerprint != case_fingerprint
+        || envelope.package_hash != package_hash
+        || envelope.profile_fingerprint != profile_fingerprint
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_IDENTITY",
+            "config identity does not match the active case",
+        ));
+    }
+    envelope.config.validate().map_err(runtime_error)?;
+    Ok(envelope.config)
+}
+
+fn store_persistent_config_if_changed(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
+    session: &mut MinoriSession,
+) -> Result<(), LegacyProviderError> {
+    if !session.config_storage_enabled
+        || session.vm.persistent_config() == &session.config_persisted
+    {
+        return Ok(());
+    }
+    let envelope = MinoriConfigEnvelope {
+        schema: MINORI_CONFIG_SCHEMA.into(),
+        case_fingerprint: session.case_fingerprint,
+        package_hash: session.package_hash,
+        profile_fingerprint: session.profile_fingerprint,
+        config: session.vm.persistent_config().clone(),
+    };
+    let payload = encode_config(&envelope).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_CONFIG_ENCODE",
+            "config envelope could not be encoded",
+        )
+    })?;
+    if payload.is_empty() || payload.len() > MINORI_CONFIG_MAX_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_BOUNDS",
+            "config envelope exceeds the bounded size",
+        ));
+    }
+    let create = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+            path: MINORI_CONFIG_ROOT.into(),
+        },
+    )?;
+    validate_writable_mutation_result(
+        &create,
+        0,
+        "create config directory",
+        "ASTRA_EMU_MINORI_CONFIG_WRITE",
+    )?;
+    let truncate = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+            path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+            length: 0,
+        },
+    )?;
+    validate_writable_mutation_result(
+        &truncate,
+        0,
+        "truncate config temporary",
+        "ASTRA_EMU_MINORI_CONFIG_WRITE",
+    )?;
+    let write = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+            path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+            offset: 0,
+            bytes: payload.clone(),
+        },
+    )?;
+    validate_writable_mutation_result(
+        &write,
+        payload.len() as u64,
+        "write config",
+        "ASTRA_EMU_MINORI_CONFIG_WRITE",
+    )?;
+    let length = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+            path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+            length: payload.len() as u64,
+        },
+    )?;
+    validate_writable_mutation_result(
+        &length,
+        0,
+        "finalize config length",
+        "ASTRA_EMU_MINORI_CONFIG_WRITE",
+    )?;
+    let replace = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+            temporary_path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+            destination_path: MINORI_CONFIG_PATH.into(),
+        },
+    )?;
+    validate_writable_mutation_result(
+        &replace,
+        0,
+        "replace config",
+        "ASTRA_EMU_MINORI_CONFIG_WRITE",
+    )?;
+    session.config_persisted = envelope.config;
     Ok(())
 }
 
@@ -4766,7 +4996,12 @@ fn refresh_save_slots(
             path: MINORI_SAVE_ROOT.into(),
         },
     )?;
-    validate_writable_mutation_result(&create, 0, "prepare save directory")?;
+    validate_writable_mutation_result(
+        &create,
+        0,
+        "prepare save directory",
+        "ASTRA_EMU_MINORI_SAVE_WRITE",
+    )?;
     let result = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::List {
@@ -4870,7 +5105,12 @@ fn save_slot(
             path: MINORI_SAVE_ROOT.into(),
         },
     )?;
-    validate_writable_mutation_result(&create, 0, "create save directory")?;
+    validate_writable_mutation_result(
+        &create,
+        0,
+        "create save directory",
+        "ASTRA_EMU_MINORI_SAVE_WRITE",
+    )?;
     let temporary_path = slot_temporary_path(slot);
     let destination_path = slot_path(slot);
     let truncate = writable_files.execute(
@@ -4880,7 +5120,12 @@ fn save_slot(
             length: 0,
         },
     )?;
-    validate_writable_mutation_result(&truncate, 0, "truncate save temporary")?;
+    validate_writable_mutation_result(
+        &truncate,
+        0,
+        "truncate save temporary",
+        "ASTRA_EMU_MINORI_SAVE_WRITE",
+    )?;
     let write = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
@@ -4889,7 +5134,12 @@ fn save_slot(
             bytes: payload.clone(),
         },
     )?;
-    validate_writable_mutation_result(&write, payload.len() as u64, "write save slot")?;
+    validate_writable_mutation_result(
+        &write,
+        payload.len() as u64,
+        "write save slot",
+        "ASTRA_EMU_MINORI_SAVE_WRITE",
+    )?;
     let length = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
@@ -4897,7 +5147,12 @@ fn save_slot(
             length: payload.len() as u64,
         },
     )?;
-    validate_writable_mutation_result(&length, 0, "finalize save slot length")?;
+    validate_writable_mutation_result(
+        &length,
+        0,
+        "finalize save slot length",
+        "ASTRA_EMU_MINORI_SAVE_WRITE",
+    )?;
     let replace = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
@@ -4905,7 +5160,12 @@ fn save_slot(
             destination_path,
         },
     )?;
-    validate_writable_mutation_result(&replace, 0, "replace save slot")
+    validate_writable_mutation_result(
+        &replace,
+        0,
+        "replace save slot",
+        "ASTRA_EMU_MINORI_SAVE_WRITE",
+    )
 }
 
 fn load_slot(
@@ -4994,6 +5254,11 @@ fn load_slot(
             "load slot contains an invalid gameplay continuation state",
         ));
     }
+    // The original configuration store is installation-scoped rather than a
+    // gameplay slot. Keep the active persisted settings when restoring the
+    // VM so loading an older slot cannot silently roll back audio, text, or
+    // input preferences.
+    state.system_ui.config = session.vm.persistent_config().clone();
     // The slot's fixed tick belongs to the previous host session. The
     // continuation is rebased to the current host tick below; rejecting a
     // valid save merely because the new session has fewer elapsed ticks would
@@ -8285,6 +8550,7 @@ mod tests {
     use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
     use astra_emu_family_api::{
         LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode, LegacyVfsListedFile,
+        LegacyWritableFileHostV1,
     };
     use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
@@ -9210,10 +9476,7 @@ mod tests {
                     fixed_delta_ns: 16_666_667,
                     session_seed: 7,
                     compatibility_profile: "minori.reference".into(),
-                    family_options: BTreeMap::from([(
-                        MINORI_GLOBAL_PROGRESS_OPTION.into(),
-                        MINORI_WRITABLE_FILE_BINDING_ID.into(),
-                    )]),
+                    family_options: BTreeMap::new(),
                 },
             )
             .unwrap();
@@ -9269,6 +9532,8 @@ mod tests {
             ),
         ]);
         let state = provider.sessions.get_mut(&session_id.0).unwrap();
+        state.global_progress.enabled = true;
+        state.global_progress.loaded = false;
         load_global_progress(&writable, &session_id, state).unwrap();
         assert!(state.global_progress.loaded);
         state.vm.merge_verified_gallery_unlocks(&[unlock]).unwrap();
@@ -9302,6 +9567,78 @@ mod tests {
                 .global_progress
                 .persisted_unlocks,
             [unlock]
+        );
+    }
+
+    #[test]
+    fn persistent_config_round_trip_is_identity_bound_and_bounded() {
+        let writable = InMemoryWritableFiles::default();
+        let session_id = LegacyRuntimeSessionId("session.config".into());
+        let case_fingerprint = Hash256::from_sha256(b"case");
+        let package_hash = Hash256::from_sha256(b"package");
+        let profile_fingerprint = Hash256::from_sha256(b"profile");
+        let config = MinoriConfigState {
+            bgm_volume: 37,
+            text_shadow: false,
+            ..MinoriConfigState::default()
+        };
+        let envelope = MinoriConfigEnvelope {
+            schema: MINORI_CONFIG_SCHEMA.into(),
+            case_fingerprint,
+            package_hash,
+            profile_fingerprint,
+            config: config.clone(),
+        };
+        let payload = encode_config(&envelope).unwrap();
+        writable
+            .execute(
+                &session_id.0,
+                astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+                    path: MINORI_CONFIG_ROOT.into(),
+                },
+            )
+            .unwrap();
+        writable
+            .execute(
+                &session_id.0,
+                astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+                    path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    offset: 0,
+                    bytes: payload.clone(),
+                },
+            )
+            .unwrap();
+        writable
+            .execute(
+                &session_id.0,
+                astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+                    temporary_path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    destination_path: MINORI_CONFIG_PATH.into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            load_persistent_config(
+                &writable,
+                &session_id,
+                case_fingerprint,
+                package_hash,
+                profile_fingerprint,
+            )
+            .unwrap(),
+            config
+        );
+        assert_eq!(
+            load_persistent_config(
+                &writable,
+                &session_id,
+                Hash256::from_sha256(b"other-case"),
+                package_hash,
+                profile_fingerprint,
+            )
+            .unwrap_err()
+            .code(),
+            "ASTRA_EMU_MINORI_CONFIG_IDENTITY"
         );
     }
 

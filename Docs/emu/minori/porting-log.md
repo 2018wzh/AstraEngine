@@ -1,5 +1,13 @@
 # Minori 移植日志
 
+## 2026-08-25
+
+### Config 跨 session 持久化
+
+- 复核原程序的配置加载/写回字段后，补上 Minori runtime 的 installation-scoped config store。显式绑定 `astra.provider.storage = astra.writable_file.v1` 时，family 在 open 阶段读取 `astra.emu.minori.config.v1`；文件缺失使用原程序默认值，schema、大小、case/package/profile identity 或 postcard 内容不匹配均直接阻断。
+- Apply 后只在已应用值发生变化时写入相对 writable-file root，使用 bounded temporary file、保留式 range write、length 校验和 atomic replace。配置 envelope 不含脚本正文、资源、密钥或宿主路径；没有 writable-file binding 的纯 VFS 单元 provider 不会伪造持久化。
+- Save slot restore 明确保留当前 installation-scoped config，旧 gameplay slot 不再回滚音量、文字阴影或 play-mode 偏好。新增 round-trip 与 identity-drift 回归；真实桌面跨进程复验和原版全屏/逐字速度行为仍是独立开放项。
+
 ## 2026-08-23
 
 ### Family ABI v9 hard cut

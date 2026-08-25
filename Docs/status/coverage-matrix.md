@@ -33,6 +33,8 @@ ABI consumer implementation 基线已更新到 `289b89f74a972f92f98bbd481f8b45b2
 
 2026-08-22 Minori Config 增量：runtime state v23 覆盖 29 类已确认动作、Apply/Cancel draft、pointer hit map、滑块、四类 overlay 资源、WAV 试听和音量/静音映射；114 个 family library tests 通过。真实八包短程 Headless 以 166 fixed steps、171 帧、42 条物理输入和 6 个 checkpoint 验证 screen-effect checkmark、BGM knob 与 `BGMTest.wav` 试听，snapshot round-trip 和自动门禁通过。模型视觉审查通过；完整 WAV 未人工试听，正式 review 保持 blocking。全屏、逐字速度、视觉开关对剧情的实际影响和角色语音筛选仍无行为覆盖。
 
+2026-08-25 Minori Config 持久化增量：在显式 `astra.writable_file.v1` storage binding 下，已应用配置使用 `astra.emu.minori.config.v1` bounded postcard envelope 保存，严格绑定 case/package/profile identity，写入采用 temporary file + atomic replace。缺失文件使用默认值；损坏、越界、矛盾 stat/read 或 identity drift 都返回 blocking diagnostic。gameplay save slot restore 保留当前 installation-scoped Config。新增 identity round-trip 回归；尚未形成真实桌面跨进程证据，因此不关闭完整 Config 或 Windows E3。
+
 2026-08-22 Minori Auto 增量：活动消息等待支持同 token `Input`/`Time` modality 重绑定，CLI、Manager 和 RuntimeWorld mirror 保持单一权威 token，其他重复注册继续 blocking。最快 Auto 以一个 10 ms timing unit 运行。真实八包首路线在正文阶段无周期性 Enter，只在 choice active 后确认一次；运行完成 25552 fixed steps、25557 个 GPU frame、50 条物理输入、terminal、snapshot round-trip 和零 diagnostic，coverage hash 与既有完整路线一致。六个关键 checkpoint 的人工视觉检查通过。该证据只关闭持久 Auto 的首路线 Headless E2；Skip 整路线、正式音频听审、Config 剩余行为、鉴赏和 Windows E3 仍开放。
 
 同日 Control 增量：有效 Control gate 会把活动消息同 token 重绑定为 10 ms `Time`，释放后可恢复为 `Input`；media/presentation/provider fence 保持原完成边界。真实八包首路线在正文阶段无周期性 Enter，完成 25496 fixed steps、25498 帧、28 条输入、terminal、snapshot round-trip、自然解锁和零 diagnostic，coverage hash 与既有完整路线一致。音频 master peak 为 0.989372，output overload/underflow 为 0；标题、剧情和返回标题三个 checkpoint 的人工视觉检查通过。该证据关闭 Control 首路线 E2，不替代正式音频听审或 Windows E3。

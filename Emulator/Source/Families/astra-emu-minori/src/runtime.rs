@@ -581,6 +581,12 @@ pub struct MinoriConfigState {
     pub character_voice_enabled: [bool; 5],
 }
 
+impl MinoriConfigState {
+    pub(crate) fn validate(&self) -> Result<(), MinoriRuntimeError> {
+        validate_config_state(self)
+    }
+}
+
 impl Default for MinoriConfigState {
     fn default() -> Self {
         Self {
@@ -924,6 +930,22 @@ impl MinoriVm {
 
     pub fn state(&self) -> &MinoriRuntimeState {
         &self.state
+    }
+
+    pub(crate) fn persistent_config(&self) -> &MinoriConfigState {
+        &self.state.system_ui.config
+    }
+
+    pub(crate) fn set_persistent_config(
+        &mut self,
+        config: MinoriConfigState,
+    ) -> Result<(), MinoriRuntimeError> {
+        validate_config_state(&config)?;
+        if self.state.system_ui.config_draft.is_some() {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.config = config;
+        Ok(())
     }
 
     pub fn merge_verified_gallery_unlocks(
