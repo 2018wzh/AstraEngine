@@ -53,6 +53,8 @@ pub struct MinoriAviDecoder<R> {
     video_stream: usize,
     audio_stream: Option<usize>,
     video: Wmv3Decoder,
+    video_width: u32,
+    video_height: u32,
     audio_sample_rate: Option<u32>,
     audio_channels: Option<u16>,
     ended: bool,
@@ -154,6 +156,7 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
         let mut video_stream = None;
         let mut audio_stream = None;
         let mut video = None;
+        let mut video_dimensions = None;
         let mut audio_sample_rate = None;
         let mut audio_channels = None;
         for stream in demuxer.streams() {
@@ -168,6 +171,7 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
                         return Err("ASTRA_EMU_MINORI_AVI_VIDEO_CODEC".into());
                     }
                     video_stream = Some(stream.index);
+                    video_dimensions = Some((info.width, info.height));
                     video = Some(
                         Wmv3Decoder::new(info.width, info.height, &info.extra_data)
                             .map_err(|_| "ASTRA_EMU_MINORI_WMV3_SEQUENCE".to_owned())?,
@@ -202,6 +206,8 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
         if video_info.rate == 0 || video_info.scale == 0 || video_info.length == 0 {
             return Err("ASTRA_EMU_MINORI_AVI_TIMELINE".into());
         }
+        let (video_width, video_height) = video_dimensions
+            .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_VIDEO_STREAM_MISSING".to_owned())?;
         let duration_us = u64::from(video_info.length)
             .checked_mul(u64::from(video_info.scale))
             .and_then(|value| value.checked_mul(1_000_000))
@@ -213,6 +219,8 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
             video_stream: video_stream_index,
             audio_stream,
             video: video.ok_or_else(|| "ASTRA_EMU_MINORI_AVI_VIDEO_STREAM_MISSING".to_owned())?,
+            video_width,
+            video_height,
             audio_sample_rate,
             audio_channels,
             ended: false,
@@ -297,6 +305,8 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
                         .and_then(|pixels| pixels.checked_mul(4))
                         .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".to_owned())?;
                     if bgra8.len() != expected
+                        || decoded.frame.width != self.video_width
+                        || decoded.frame.height != self.video_height
                         || self
                             .last_video_pts_us
                             .is_some_and(|previous| packet.pts_us < previous)
