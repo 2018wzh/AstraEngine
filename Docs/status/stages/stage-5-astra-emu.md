@@ -520,3 +520,4 @@ BGRA/i16 followed by the required WGPU/device transfer. This implementation
 slice is still `IN_PROGRESS`: no clean Release ten-minute mixed-run or formal
 Windows E3 parity claim is made here.
 2026-08-25 后续：Minori 的纯 Rust AVI provider 在解析前执行 64 MiB 预览输入上限，并对 WMV3 尺寸、单包和解码帧执行 16,384 边长/64 MiB RGBA 有界校验；越界统一阻断，不进入 FVP 或平台 codec。定向 AVI 测试已通过，但这只是安全边界收紧，不改变完整路线、movie gallery parity、正式音频听审或 Windows E3 的开放状态。
+同一增量还关闭了未知 AVI stream type：Minori 只接受已验证的 WMV3 video 与 16-bit PCM audio，其他 `AviStreamFormat` 直接阻断；Linux FUSE EOF 读取返回空数据而不是 `EIO`。Windows 上的 support build 通过，Linux target check 受交叉编译环境缺少 GLib sysroot 阻断，真实 Linux mount evidence 仍未形成。
