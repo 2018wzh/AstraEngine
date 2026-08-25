@@ -8,6 +8,7 @@
 - Video preview remains a separate binding: Windows may select the explicit Media Foundation provider, while unsupported targets return a stable unbound diagnostic. ANI/SQZ now have a separate family-owned first-frame binding; animation playback remains a runtime concern.
 - The Windows binding now declares `avi` explicitly for RIFF/AVI Minori movies; this removes only the codec-identity block. An actual Windows preview, Headless, or E3 run is still required before movie support can be marked verified.
 - ANI/SQZ preview now uses the explicit family-owned `astra.decode.minori.image` binding and returns only a bounded first-frame RGBA8 buffer. It does not imply animation playback or original pixel-parity evidence.
+- The Headless CLI runtime driver now registers the same family provider and selects `astra.decode.minori.image` for ANI/SQZ resource scenes. Standard image codecs continue to use `astra.decode.image`; no registration-order or codec fallback is introduced. A runtime route containing ANI/SQZ still requires real media evidence before animation playback can be called complete.
 
 ### Manager family selection is explicit at startup
 

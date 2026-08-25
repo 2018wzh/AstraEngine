@@ -2,7 +2,7 @@
 
 Minori native host 现已消费 `minori.progress_in_background` observation：Windows 失焦暂停/恢复由配置决定，其他 family 不受影响；provider/CLI focused tests 已通过。真实焦点、音频恢复、完整路线和 Windows E3 仍保持开放。
 
-Manager family-mounted PNG/JPEG/BMP/WebP preview now binds `astra.decode.image` through `DecodeProviderRegistry` and transfers bounded RGBA8 pixels to Slint. Minori ANI/SQZ previews bind the family-owned `astra.decode.minori.image` provider for a bounded first frame. Family audio previews bind `astra.decode.symphonia` explicitly and expose bounded metadata; Windows RIFF/AVI video now binds the explicit Media Foundation provider, while animation playback and targets without a bound video provider remain open.
+Manager and Headless CLI family-mounted PNG/JPEG/BMP/WebP preview now bind `astra.decode.image` through `DecodeProviderRegistry` and transfer bounded RGBA8 pixels to their presentation paths. Minori ANI/SQZ previews bind the family-owned `astra.decode.minori.image` provider for a bounded first frame in both consumers. Family audio previews bind `astra.decode.symphonia` explicitly and expose bounded metadata; Windows RIFF/AVI video now binds the explicit Media Foundation provider, while animation playback and targets without a bound video provider remain open.
 
 Manager family selection is now explicit at the composition root: startup has only a pure-Rust Minori idle provider, while FVP is loaded on explicit selection and rebuilt with the selected VFS adapter before session creation. No provider is chosen by registration order or hidden fallback.
 

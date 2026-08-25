@@ -43,7 +43,7 @@ use astra_emu_manager_core::{
     DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits,
     SourceGrant,
 };
-use astra_emu_minori::MinoriVfsFamilyFactory;
+use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, ButtonState, CheckpointResult, Diagnostic, GamepadControl,
     InputMessage, ObservationPredicate, PhysicalInput, PointerButton, RunReport, RunStatus,
@@ -5099,6 +5099,11 @@ impl<'a> RuntimeDriver<'a> {
         image_decoders
             .register(Box::new(ImageDecodeProvider))
             .map_err(|error| error.to_string())?;
+        if config.family_id == "minori" {
+            image_decoders
+                .register(Box::new(MinoriImageDecodeProvider))
+                .map_err(|error| error.to_string())?;
+        }
         let driver = RuntimeDriver {
             runtime,
             session_id,
@@ -5997,6 +6002,7 @@ impl<'a> RuntimeDriver<'a> {
                 &texture.resource_uri,
                 1024 * 1024 * 1024,
             )?;
+            let binding = image_decode_binding(&self.family_id, &texture.codec);
             let decoded = self
                 .image_decoders
                 .decode(
@@ -6006,11 +6012,7 @@ impl<'a> RuntimeDriver<'a> {
                         bytes,
                         profile: "emu-live-image-v1".into(),
                     },
-                    &DecodeBindingContext::shipping(
-                        "astra.decode.image",
-                        "headless",
-                        "emu-live-image-v1",
-                    ),
+                    &DecodeBindingContext::shipping(binding, "headless", "emu-live-image-v1"),
                 )
                 .map_err(|error| error.to_string())?;
             let MediaDecodeOutput::CpuBuffer {
@@ -6809,6 +6811,14 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::rename(partial, path).map_err(|_| "ASTRA_EMU_HEADLESS_REPORT_COMMIT".to_owned())
 }
 
+fn image_decode_binding(family_id: &str, codec: &str) -> &'static str {
+    if family_id == "minori" && matches!(codec, "ani" | "sqz") {
+        "astra.decode.minori.image"
+    } else {
+        "astra.decode.image"
+    }
+}
+
 #[cfg(test)]
 mod native_tests {
     use super::*;
@@ -6886,6 +6896,20 @@ mod native_tests {
         assert!(!is_avi_container_header(b"RIFF\x10\0\0\0WAVE"));
         assert!(!is_avi_container_header(b"JUNK\x10\0\0\0AVI "));
         assert!(!is_avi_container_header(b"RIFF"));
+    }
+
+    #[test]
+    fn minori_family_image_codecs_use_the_explicit_family_binding() {
+        assert_eq!(
+            image_decode_binding("minori", "ani"),
+            "astra.decode.minori.image"
+        );
+        assert_eq!(
+            image_decode_binding("minori", "sqz"),
+            "astra.decode.minori.image"
+        );
+        assert_eq!(image_decode_binding("minori", "png"), "astra.decode.image");
+        assert_eq!(image_decode_binding("fvp", "ani"), "astra.decode.image");
     }
 
     #[test]
