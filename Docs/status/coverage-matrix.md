@@ -21,6 +21,8 @@ AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retai
 
 2026 年 8 月 25 日脚本引用审计增量：Minori open 可显式接收 `astra.resource_audit=full`，由 Host bounded enumeration 扫描全部 `.sc`，复用 VM grammar 对 stage、character、effect、audio、movie、panel 和 chain 引用做非空/大小/revision 校验。审计只形成脱敏计数与 identity digest；普通 lazy 运行、未知 opcode、VFS enum 缺失和完整路线/人工 review 的证据边界不变。
 
+2026 年 8 月 25 日消息状态增量：runtime schema 已硬切到 `astra.emu.minori.runtime_state.v24`；message completion 记录按脚本 revision、source span、message id、text hash 形成的排序 bounded read identity，并覆盖 snapshot round-trip 与重复/无序 corruption blocker。逐字 reveal 公式和原版未读 Skip 策略仍未知，不计入完整消息行为 coverage。
+
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 
 ABI consumer implementation 基线已更新到 `635527831e89e5ff9b87ac165b5b5532e28356c6`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `f4f64a5bb726c1759350a666a35e0a454b810f61` 并绑定唯一 workspace ABI source。
