@@ -1315,7 +1315,10 @@ impl MinoriVm {
             .ok_or(MinoriRuntimeError::Backlog)?
             .voice
             .clone();
-        let voice = voice.filter(|voice| message_voice_enabled(&self.state, voice));
+        let voice = voice.filter(|voice| {
+            self.state.system_ui.config.backlog_voice_playback
+                && message_voice_enabled(&self.state, voice)
+        });
         let mut commands = Vec::new();
         if self
             .state
@@ -7397,6 +7400,39 @@ mod tests {
         assert_eq!(
             restored.read_message_identities,
             vm.state().read_message_identities
+        );
+    }
+
+    #[test]
+    fn backlog_voice_preference_suppresses_replay_without_changing_entry_identity() {
+        let source = b".message 42 voice speaker hello\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        vm.step(1, 4).unwrap();
+        let mut state = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        state.system_ui.config.backlog_voice_playback = false;
+        state
+            .audio
+            .get_mut(&VOICE_STREAM_ID)
+            .expect("message voice state")
+            .playing = false;
+        vm.restore_state(&postcard::to_allocvec(&state).unwrap())
+            .unwrap();
+        vm.open_backlog().unwrap();
+
+        let commands = vm.replay_backlog_voice().unwrap();
+
+        assert!(commands.is_empty());
+        assert_eq!(vm.state().backlog.len(), 1);
+        assert_eq!(
+            vm.state().backlog[0].voice.as_ref().unwrap().resource_uri,
+            "minori:/voice/voice"
         );
     }
 

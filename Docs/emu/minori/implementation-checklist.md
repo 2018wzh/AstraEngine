@@ -68,6 +68,8 @@
 
 ## Runtime
 
+- backlog voice replay 现在尊重已应用的 `backlog_voice_playback` 开关：关闭时不提交新的播放命令，但保留 backlog 的 voice identity；角色 voice filter 与该 preference 都有 VM regression。全屏 Host effect、逐字速度和正式音频听审仍未关闭。
+
 - [x] boot 到首个 message；正文经一次性 lease、CosmicText 和 Renderer2D 形成真实 checkpoint，未进入 snapshot/report。
 - [x] 物理 Enter 推进与受 pragma 门控的 Control 快进可跑完首条剧情路线；Control 现在也会把已显示消息的同 token `Input` wait 重绑定为 10 ms `Time`，真实八包以 25496 fixed steps、25498 帧和 28 条输入跑完首路线，正文阶段没有周期性 Enter。backlog 的当前记录、滚轮导航、关闭恢复和当前记录 voice replay 已进入真实完整路线 E2；额外短程以 771 fixed steps、776 帧和 55 条输入验证两次上翻显示不同历史记录，idle tick 不再清空 retained text。Auto/Skip 三态、原版菜单命中区和等待重绑定已完成定向测试；真实八包分别在最快 Auto 与持久 Skip 下跑完首路线。
 - [x] Config 的 29 类已确认 action、Apply/Cancel transaction、pointer drag、状态 overlay、WAV 试听、音量/静音映射和 snapshot round-trip 已完成 E1。

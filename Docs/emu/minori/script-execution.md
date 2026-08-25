@@ -79,6 +79,8 @@ Config 的跨 session 持久化不依赖 gameplay snapshot：显式 writable-fil
 
 媒体恢复有独立边界：v9 的公共 `Play` command 不携带 seek 起点，snapshot 中的 `continuation_pts` 只是已验证的状态记录，不能在 restore 时解释成可执行的媒体位置。restore 会重新检查活动资源并提交从起点开始的确定性播放；要求原位置继续的音频/影片场景保持 blocking，直到公共 Host/media contract 增加并验证 seek continuation。
 
+Backlog 的语音按钮受已应用的 `backlog_voice_playback` 配置控制：关闭时仍保留原始 backlog voice identity，触发 replay 只会停止当前 voice stream（若有）而不会提交新的 `LoadResource`/`Play`。角色语音开关继续在同一边界按 voice identity 单独过滤；两者都不改变 message/read identity。
+
 ## Determinism
 
 随机数、auto/skip、voice replay 和 movie end event 都必须进入 trace。联网或系统时间不参与脚本决定。
