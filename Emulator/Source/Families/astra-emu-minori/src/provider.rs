@@ -24,6 +24,7 @@ use astra_emu_family_api::{
     LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
     LegacyVmTraceRecord, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
 };
+use astra_emu_family_core::LegacyCoreError;
 use astra_media_core::{
     BlendMode, CpuRendererProvider, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
     Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFilter2D, TextureFrame,
@@ -50,6 +51,7 @@ use crate::{
     MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
     MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
 };
+use crate::{MinoriAniArchive, MinoriSqzArchive};
 
 pub const MINORI_FAMILY_ID: &str = "minori";
 pub const MINORI_RUNTIME_PROVIDER_ID: &str = "astra.emu.family.minori";
@@ -4254,27 +4256,47 @@ fn read_texture_resource(
             );
         })?
         .bytes;
-    let image_reader = image::ImageReader::new(Cursor::new(bytes.as_slice()))
-        .with_guessed_format()
-        .map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MINORI_STAGE_IMAGE_FORMAT",
-                "stage image format could not be determined",
-            )
-        })?;
-    let (image_width, image_height) = image_reader.into_dimensions().map_err(|_| {
-        invalid(
-            "ASTRA_EMU_MINORI_STAGE_IMAGE_METADATA",
-            "stage image dimensions could not be read safely",
-        )
-    })?;
+    let codec = image_codec(resource_uri)?;
+    let (image_width, image_height) = match codec {
+        "ani" => {
+            let archive = MinoriAniArchive::parse(Arc::<[u8]>::from(bytes.as_slice()))
+                .map_err(minori_image_container_error)?;
+            let frame = archive.frames().first().ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_ANI_FRAME_COUNT",
+                    "ANI has no frame available for presentation",
+                )
+            })?;
+            (frame.width, frame.height)
+        }
+        "sqz" => {
+            let archive = MinoriSqzArchive::parse(Arc::<[u8]>::from(bytes.as_slice()))
+                .map_err(minori_image_container_error)?;
+            (archive.width(), archive.height())
+        }
+        _ => {
+            let image_reader = image::ImageReader::new(Cursor::new(bytes.as_slice()))
+                .with_guessed_format()
+                .map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_STAGE_IMAGE_FORMAT",
+                        "stage image format could not be determined",
+                    )
+                })?;
+            image_reader.into_dimensions().map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_STAGE_IMAGE_METADATA",
+                    "stage image dimensions could not be read safely",
+                )
+            })?
+        }
+    };
     if image_width == 0 || image_height == 0 || image_width > 16_384 || image_height > 16_384 {
         return Err(invalid(
             "ASTRA_EMU_MINORI_STAGE_IMAGE_BOUNDS",
             "stage image dimensions are outside the supported bound",
         ));
     }
-    let codec = image_codec(resource_uri)?;
     let revision = texture_binding_revision(resource_uri, stat.revision.0);
     Ok(LegacyTextureResourceV1 {
         texture_id,
@@ -4317,12 +4339,23 @@ fn image_codec(resource_uri: &str) -> Result<&'static str, LegacyProviderError> 
         Ok("jpeg")
     } else if extension.eq_ignore_ascii_case("webp") {
         Ok("webp")
+    } else if extension.eq_ignore_ascii_case("ani") {
+        Ok("ani")
+    } else if extension.eq_ignore_ascii_case("sqz") {
+        Ok("sqz")
     } else {
         Err(invalid(
             "ASTRA_EMU_MINORI_STAGE_IMAGE_CODEC",
             "stage image extension has no explicitly bound decode codec",
         ))
     }
+}
+
+fn minori_image_container_error(error: LegacyCoreError) -> LegacyProviderError {
+    LegacyProviderError::invalid(
+        "ASTRA_EMU_MINORI_IMAGE_CONTAINER",
+        format!("{}: {}", error.code(), error.message()),
+    )
 }
 
 fn load_script(
@@ -8849,6 +8882,26 @@ mod tests {
             }
             Ok(entries)
         }
+    }
+
+    #[test]
+    fn resource_descriptor_reads_minori_ani_dimensions_without_generic_image_fallback() {
+        let mut ani = Vec::from([0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        ani.extend_from_slice(b"frame\0");
+        ani.extend_from_slice(&2_u16.to_le_bytes());
+        ani.extend_from_slice(&1_u16.to_le_bytes());
+        ani.extend_from_slice(&24_u16.to_le_bytes());
+        ani.extend_from_slice(&0_i16.to_le_bytes());
+        ani.extend_from_slice(&0_i16.to_le_bytes());
+        ani.extend_from_slice(&[0, 0, 255, 255, 255, 255]);
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([("minori:/st/frame.ani".into(), ani)]),
+        });
+
+        let resource = read_texture_resource(&vfs, "mount.test", "minori:/st/frame.ani", 7)
+            .expect("ANI metadata should be accepted by the family resource resolver");
+        assert_eq!(resource.codec, "ani");
+        assert_eq!((resource.decoded_width, resource.decoded_height), (2, 1));
     }
 
     #[derive(Default)]
