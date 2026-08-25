@@ -448,3 +448,9 @@ python Tools/check_docs.py
 - 标题、Memories、BGM、CG 和回想页面的文字、比例、层次和焦点没有发现裁剪、拉伸或残影。movie 列表已使用真实标签与脚本目标校验，但当前样本没有独立的 movie gallery 背景资源；运行时保留已验证的 Memories 背景和有界文字层，不能把它写成原版逐像素一致。实际影片播放仍由剧情 movie fence 证据覆盖，鉴赏页的原版视觉 parity 继续开放。
 - 该次鉴赏运行使用 local-private global progress 进入页面，不能证明四条路线自然解锁或完整鉴赏解锁条件；正式人工音频听审、自然 unlock 全量证据和 Windows E3 仍未完成。自动非静音量测也不替代具名人工听审。
 - 复核页面返回路径时发现 BGM gallery 的 Escape 会回到 Memories，却没有停止共享 BGM stream；这会把鉴赏音频泄漏到父页面。runtime 现把该返回动作建模为 `GalleryBgmStop`，先停止 looped stream 再提交 Memories，pointer Stop 与键盘返回共用同一条音频边界；新增 provider/runtime 回归后 Minori library 为 `130/130`。
+
+### 2026-08-25 配置持久化与媒体恢复边界
+
+- 当前 consumer 在 `6f554012b` 收紧保存槽恢复：v9 `LegacyAudioCommandV1::Play` 与 `LegacyVideoCommandV1::Play` 没有 seek 起点，载入包含非零 `continuation_pts` 的槽现在在加载边界直接返回 `ASTRA_EMU_MINORI_MEDIA_CONTINUATION_UNSUPPORTED`，不会先替换 VM 再在下一 tick 伪造续播或隐藏失败。已有 presentation/restore 保护保持不变。
+- 配置写入继续使用 identity-bound `astra.emu.minori.config.v1` envelope、temporary file + range write + SetLength + atomic replace；相同配置不会产生第二次写入。Minori library 定向回归为 `133/133`，clippy、fmt、文档检查和 diff 检查通过。
+- 这项修复不扩大 ABI、不开启平台播放器或私有 seek API；需要原位置媒体恢复仍必须先有经过验证的公共 Host/media contract。完整四路线、正式音频听审、movie gallery 原版视觉 parity、cache volume、Linux FUSE 和 Windows E3 继续保持 blocking。
