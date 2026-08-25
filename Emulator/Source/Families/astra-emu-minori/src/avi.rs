@@ -18,7 +18,10 @@ use astra_media::{
 use wmv_decoder::{AviDemuxer, AviPacketKind, AviStreamFormat, DecoderError, Wmv3Decoder};
 
 const MAX_PREVIEW_EVENTS: usize = 4096;
+const MAX_PREVIEW_INPUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PREVIEW_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const MAX_VIDEO_DIMENSION: u32 = 16_384;
+const MAX_VIDEO_PACKET_BYTES: usize = 64 * 1024 * 1024;
 
 pub const MINORI_AVI_DECODE_PROVIDER_ID: &str = "astra.decode.minori.avi";
 
@@ -98,6 +101,7 @@ impl DecodeProvider for MinoriAviDecodeProvider {
         if !request.codec.eq_ignore_ascii_case("avi") {
             return Err(avi_preview_diagnostic("ASTRA_EMU_MINORI_AVI_PREVIEW_CODEC"));
         }
+        validate_preview_input_len(request.bytes.len())?;
         let mut decoder = MinoriAviDecoder::new(Cursor::new(request.bytes.clone()))
             .map_err(|_| avi_preview_diagnostic("ASTRA_EMU_MINORI_AVI_PREVIEW_HEADER"))?;
         for _ in 0..MAX_PREVIEW_EVENTS {
@@ -149,6 +153,29 @@ fn avi_preview_diagnostic(code: &'static str) -> MediaError {
     )])
 }
 
+fn validate_preview_input_len(len: usize) -> Result<(), MediaError> {
+    if len == 0 || len > MAX_PREVIEW_INPUT_BYTES {
+        return Err(avi_preview_diagnostic(
+            "ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_video_dimensions(width: u32, height: u32) -> Result<(), String> {
+    if width == 0 || height == 0 || width > MAX_VIDEO_DIMENSION || height > MAX_VIDEO_DIMENSION {
+        return Err("ASTRA_EMU_MINORI_AVI_VIDEO_DIMENSIONS".to_owned());
+    }
+    let pixels = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".to_owned())?;
+    if pixels > MAX_PREVIEW_FRAME_BYTES as u64 {
+        return Err("ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".to_owned());
+    }
+    Ok(())
+}
+
 impl<R: Read + Seek> MinoriAviDecoder<R> {
     pub fn new(reader: R) -> Result<Self, String> {
         let demuxer =
@@ -170,6 +197,7 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
                     {
                         return Err("ASTRA_EMU_MINORI_AVI_VIDEO_CODEC".into());
                     }
+                    validate_video_dimensions(info.width, info.height)?;
                     video_stream = Some(stream.index);
                     video_dimensions = Some((info.width, info.height));
                     video = Some(
@@ -260,6 +288,9 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
                         .map_err(|_| "ASTRA_EMU_MINORI_AVI_TELEMETRY_OVERFLOW".to_owned())?,
                 )
                 .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_TELEMETRY_OVERFLOW".to_owned())?;
+            if packet.data.len() > MAX_VIDEO_PACKET_BYTES {
+                return Err("ASTRA_EMU_MINORI_AVI_PACKET_BOUNDS".into());
+            }
             match packet.kind {
                 AviPacketKind::Video if packet.stream_index == self.video_stream => {
                     self.telemetry.video_packets = self
@@ -304,6 +335,9 @@ impl<R: Read + Seek> MinoriAviDecoder<R> {
                         })
                         .and_then(|pixels| pixels.checked_mul(4))
                         .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".to_owned())?;
+                    if expected > MAX_PREVIEW_FRAME_BYTES {
+                        return Err("ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".into());
+                    }
                     if bgra8.len() != expected
                         || decoded.frame.width != self.video_width
                         || decoded.frame.height != self.video_height
@@ -393,7 +427,10 @@ mod tests {
 
     use astra_media::{DecodeKind, DecodeProvider, DecodeRequest, MediaError};
 
-    use super::{MinoriAviDecodeProvider, MinoriAviDecoder, MINORI_AVI_DECODE_PROVIDER_ID};
+    use super::{
+        validate_preview_input_len, validate_video_dimensions, MinoriAviDecodeProvider,
+        MinoriAviDecoder, MAX_PREVIEW_INPUT_BYTES, MINORI_AVI_DECODE_PROVIDER_ID,
+    };
 
     #[test]
     fn truncated_container_is_rejected_before_stream_selection() {
@@ -421,6 +458,39 @@ mod tests {
         let MediaError::Diagnostics(diagnostics) = error else {
             panic!("preview failure must remain a blocking diagnostic");
         };
-        assert_eq!(diagnostics[0].code, "ASTRA_EMU_MINORI_AVI_PREVIEW_HEADER");
+        assert_eq!(
+            diagnostics[0].code,
+            "ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT"
+        );
+    }
+
+    #[test]
+    fn preview_input_budget_is_checked_before_container_parse() {
+        assert!(validate_preview_input_len(1).is_ok());
+        let error = validate_preview_input_len(MAX_PREVIEW_INPUT_BYTES + 1).unwrap_err();
+        let MediaError::Diagnostics(diagnostics) = error else {
+            panic!("preview input failure must remain a blocking diagnostic");
+        };
+        assert_eq!(
+            diagnostics[0].code,
+            "ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT"
+        );
+    }
+
+    #[test]
+    fn video_dimension_budget_rejects_zero_oversized_and_overflowing_frames() {
+        assert!(validate_video_dimensions(320, 180).is_ok());
+        assert_eq!(
+            validate_video_dimensions(0, 180).unwrap_err(),
+            "ASTRA_EMU_MINORI_AVI_VIDEO_DIMENSIONS"
+        );
+        assert_eq!(
+            validate_video_dimensions(16_385, 720).unwrap_err(),
+            "ASTRA_EMU_MINORI_AVI_VIDEO_DIMENSIONS"
+        );
+        assert_eq!(
+            validate_video_dimensions(16_384, 16_384).unwrap_err(),
+            "ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS"
+        );
     }
 }

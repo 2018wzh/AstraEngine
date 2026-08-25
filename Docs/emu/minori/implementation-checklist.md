@@ -99,6 +99,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - [x] BGM、SE、message voice 分通道；message voice 已按 IDA `resource[volume,pan]` 合同和 7,047 个真实 identity 全量绑定到 `voice.paz`，并通过公共 Ogg audio command 发出。完整首路线 Headless E2 已覆盖该路径；具名人工整段听审仍开放。
 - [x] backlog 当前记录的 voice replay 由原程序 Enter 路径确认；runtime 重播 stream 4 且保留原 message await，不推进 VM。真实 Headless 物理 Enter、checkpoint、后续 continuation 和 terminal 已通过；具名人工听审仍开放。
 - [x] `mov.paz` 的 5 个 RIFF/AVI 由 range-backed 纯 Rust AVI/WMV3/PCM 路径播放；缺 codec、格式漂移、短读和 fence 异常直接阻断。
+- [x] Minori AVI provider 在解析前拒绝空/超过 64 MiB 的预览输入，并校验 WMV3 尺寸、单包和 decoded RGBA 帧预算；边界测试 4/4 通过。该项不扩大 codec 覆盖或 movie parity 证据。
 - [x] decoded video 通过公共 `SceneCommand::VideoFrame` 合成；movie skip 只接受脚本明确标记为 skippable 的分支，并等待 Host 完成原 fence。
 - [x] 公共 Kira main track 使用显式 peak limiter，分别报告 pre-master 与 master-output；真实短程 output overload 和 underflow 均为 0。
 - [x] 真实 movie frame checkpoint 已确认 decoded frame、比例、剧情层文字合成和无旧帧残留；完整路线 WAV 非静音、低于 i16 full scale，master output overload/underflow 为 0。

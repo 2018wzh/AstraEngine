@@ -540,3 +540,8 @@ python Tools/check_docs.py
 - runtime snapshot 硬切到 `astra.emu.minori.runtime_state.v24`。每次 message wait 由物理输入、Auto timer、Control/Skip timer 或 await completion 结束时，记录由当前脚本 hash、source span、message id 和正文 hash 组成的 read identity；identity 以排序 bounded vector 保存并参与 snapshot/state hash。
 - 该改动只固化“已确认消息”的持久状态，不猜测 `messageSpeedTBR`/`messageSpeedRead` 的逐字 reveal 公式，也不把 skip 的原版未读策略提前写成事实。重复文本在不同脚本 revision 或 source span 不会互相标记；损坏、重复、无序和超限 identity 在 restore 时阻断。
 - 新增 runtime grammar census 与 provider VFS audit 回归；目标 crate 测试、clippy 和格式检查在提交前复跑。该门禁只证明资源引用覆盖，不替代完整路线、codec、人工音频 review 或 Windows E3。
+### 2026-08-25 Minori AVI 输入与帧预算收紧
+
+- 纯 Rust `MinoriAviDecodeProvider` 现在在容器解析前拒绝空输入和超过 64 MiB 的预览请求；该边界与公共 viewer 的媒体预览预算一致，避免直接 provider 调用绕过 viewer 预算。超限固定返回 `ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT`，不尝试其他 provider。
+- `MinoriAviDecoder` 在创建 WMV3 decoder 前校验非零尺寸、16,384 像素边长和 64 MiB RGBA 帧上限；demux 后单包同样限制为 64 MiB，并在解码后再次校验帧大小。尺寸、包或帧越界均返回 `ASTRA_EMU_MINORI_AVI_*` blocking diagnostic。
+- 新增 4 个定向回归（预览输入预算、空/截断容器、尺寸/帧预算），`astra-emu-minori` AVI tests 为 4/4。该项只收紧资源边界，不扩大 codec 覆盖，也不改变真实 movie parity、完整路线或 Windows E3 的证据边界。

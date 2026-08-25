@@ -519,3 +519,4 @@ WMF hardware transforms are requested, but the public boundary remains CPU
 BGRA/i16 followed by the required WGPU/device transfer. This implementation
 slice is still `IN_PROGRESS`: no clean Release ten-minute mixed-run or formal
 Windows E3 parity claim is made here.
+2026-08-25 后续：Minori 的纯 Rust AVI provider 在解析前执行 64 MiB 预览输入上限，并对 WMV3 尺寸、单包和解码帧执行 16,384 边长/64 MiB RGBA 有界校验；越界统一阻断，不进入 FVP 或平台 codec。定向 AVI 测试已通过，但这只是安全边界收紧，不改变完整路线、movie gallery parity、正式音频听审或 Windows E3 的开放状态。
