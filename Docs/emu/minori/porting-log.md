@@ -2,6 +2,12 @@
 
 ## 2026-08-25
 
+### Manager VFS 文本预览编码选择
+
+- Manager 的 VFS preview 现在在有界读取后先识别 UTF-8/UTF-16 BOM，再对 `.sc`、文本配置和脚本扩展名严格尝试 CP932；解码包含 NUL 或出现替换错误时保持 binary/hex 视图，不把任意二进制静默当成文本。UI 显示实际选用的编码，图像路径和 media provider binding 未被改写。
+- 这只补齐 Manager 文本预览的编码检测子路径。图片、音频和影片仍必须通过显式 `DecodeProviderRegistry` binding；Manager 的内部 mount viewer 接线和真实 media preview evidence 仍保持开放。
+- `astra-emu-manager` 的 7 项 manager tests、`astra-emu-manager-ui-slint` contract test、clippy 和格式检查通过；没有新增商业资源、路径或文本到仓库。
+
 ### Config 跨 session 持久化
 
 - 复核原程序的配置加载/写回字段后，补上 Minori runtime 的 installation-scoped config store。显式绑定 `astra.provider.storage = astra.writable_file.v1` 时，family 在 open 阶段读取 `astra.emu.minori.config.v1`；文件缺失使用原程序默认值，schema、大小、case/package/profile identity 或 postcard 内容不匹配均直接阻断。

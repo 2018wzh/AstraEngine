@@ -981,6 +981,7 @@ dependencies = [
  "astra-plugin",
  "astra-plugin-abi",
  "directories",
+ "encoding_rs",
  "gilrs",
  "hex",
  "image 0.25.10",

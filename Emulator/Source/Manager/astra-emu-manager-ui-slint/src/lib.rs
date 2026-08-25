@@ -59,6 +59,8 @@ pub struct VfsPreviewViewModel {
     pub path: String,
     /// "text" | "image" | "binary"
     pub kind: String,
+    /// The decoder selected for a text preview. Empty for non-text previews.
+    pub encoding: String,
     pub text_content: String,
     pub hex_summary: String,
     pub image_uri: String,
@@ -426,6 +428,7 @@ impl SlintManagerAdapter {
                 self.window.set_vfs_preview(VfsPreview {
                     path: preview.path.as_str().into(),
                     kind: preview.kind.as_str().into(),
+                    encoding: preview.encoding.as_str().into(),
                     text_content: preview.text_content.as_str().into(),
                     hex_summary: preview.hex_summary.as_str().into(),
                     image_data: if preview.image_uri.is_empty() {

@@ -17,6 +17,7 @@ export struct VfsEntry {
 export struct VfsPreview {
     path: string,
     kind: string,
+    encoding: string,
     text-content: string,
     hex-summary: string,
     image-data: image,
@@ -159,6 +160,11 @@ export component FilePreviewPanel inherits Rectangle {
             }
             Text {
                 text: "类型: " + preview.kind;
+                color: Theme.text-muted;
+                font-size: 12px;
+            }
+            if preview.encoding != "" : Text {
+                text: "编码: " + preview.encoding;
                 color: Theme.text-muted;
                 font-size: 12px;
             }

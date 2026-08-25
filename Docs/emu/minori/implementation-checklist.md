@@ -4,6 +4,8 @@
 
 - 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。
 
+- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。该项只关闭文本预览子路径，显式 media provider binding、Manager family mount 接线和真实 media preview evidence 仍未完成。
+
 - 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、同步 translation Hook、CosmicText text layer 和 writable-file save/global-progress port；旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
 - 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
 - 视觉检查已覆盖标题、Memories、BGM、CG、回想、Config、backlog 和首路线选定 checkpoint；movie gallery 仍只有已验证 Memories 背景 + 有界文字层的严格近似，不能写成原版 parity。local-private global progress 不能证明四条路线自然解锁；正式人工音频 review、完整四路线和 Windows E3 仍未闭合。

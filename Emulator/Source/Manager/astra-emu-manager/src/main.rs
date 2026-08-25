@@ -74,6 +74,7 @@ use astra_plugin_abi::{
     RuntimeOpenRequest, RuntimeProviderResult, RuntimeSectionCodec, RuntimeSectionPayload,
     RuntimeStepBudget, RuntimeStepInput, RuntimeStepMode,
 };
+use encoding_rs::{Encoding, SHIFT_JIS, UTF_16BE, UTF_16LE, UTF_8};
 use image::GenericImageView;
 use metadata_runtime::{MetadataCommand, MetadataCommandKind, MetadataPayload, MetadataRuntime};
 use platform_secret::ManagerSecretStore;
@@ -1592,6 +1593,7 @@ impl AstraEmuManagerController {
             .iter()
             .any(|extension| lower.ends_with(&format!(".{extension}")));
         let mut kind = "binary";
+        let mut encoding = String::new();
         let mut text_content = String::new();
         let mut hex_summary = String::new();
         let mut image_uri = String::new();
@@ -1603,12 +1605,13 @@ impl AstraEmuManagerController {
                 .vfs
                 .read_file(mount_set_id, &resource.path, 64 * 1024)
                 .ok()?;
-            match std::str::from_utf8(&bytes) {
-                Ok(text) => {
+            match decode_text_preview(&bytes, &resource.path) {
+                Some((name, text)) => {
                     kind = "text";
+                    encoding = name;
                     text_content = text.chars().take(8000).collect();
                 }
-                Err(_) => {
+                None => {
                     hex_summary = hex_dump(&bytes);
                 }
             }
@@ -1616,6 +1619,7 @@ impl AstraEmuManagerController {
         Some(VfsPreviewViewModel {
             path: resource.path.clone(),
             kind: kind.into(),
+            encoding,
             text_content,
             hex_summary,
             image_uri,
@@ -2203,6 +2207,63 @@ impl AstraEmuManagerController {
             _ => Err("ASTRA_EMU_PATCH_MODE_INVALID".into()),
         }
     }
+}
+
+/// Decode a bounded manager preview without treating arbitrary binary data as
+/// UTF-8. Minori scripts and legacy configuration files are commonly encoded
+/// as CP932, while newer metadata is UTF-8; BOMs always take precedence. The
+/// function returns `None` for binary data so the caller can render a hex view.
+fn decode_text_preview(bytes: &[u8], path: &str) -> Option<(String, String)> {
+    let (encoding, payload) = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        (UTF_8, &bytes[3..])
+    } else if bytes.starts_with(&[0xff, 0xfe]) {
+        (UTF_16LE, &bytes[2..])
+    } else if bytes.starts_with(&[0xfe, 0xff]) {
+        (UTF_16BE, &bytes[2..])
+    } else {
+        (UTF_8, bytes)
+    };
+    if let Some(text) = decode_with(encoding, payload) {
+        return Some((encoding.name().to_ascii_lowercase(), text));
+    }
+    if !is_legacy_text_path(path) {
+        return None;
+    }
+    decode_with(SHIFT_JIS, bytes).map(|text| ("shift_jis".into(), text))
+}
+
+fn decode_with(encoding: &'static Encoding, bytes: &[u8]) -> Option<String> {
+    let (text, _, malformed) = encoding.decode(bytes);
+    if malformed || text.chars().any(|character| character == '\0') {
+        return None;
+    }
+    Some(text.into_owned())
+}
+
+fn is_legacy_text_path(path: &str) -> bool {
+    [
+        ".sc",
+        ".txt",
+        ".ini",
+        ".cfg",
+        ".csv",
+        ".log",
+        ".lua",
+        ".luau",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".xml",
+        ".html",
+        ".css",
+        ".js",
+        ".ts",
+        ".rs",
+        ".toml",
+        ".properties",
+    ]
+    .iter()
+    .any(|extension| path.to_ascii_lowercase().ends_with(extension))
 }
 
 fn scan_error_code(error: &astra_emu_manager_core::SourceScanError) -> &'static str {
@@ -3932,8 +3993,8 @@ mod manager_tests {
     };
 
     use super::{
-        apply_audio_media_hook, fvp_pack_paths_option, parse_glossary, refresh_cover_cache,
-        validate_patch_actions,
+        apply_audio_media_hook, decode_text_preview, fvp_pack_paths_option, parse_glossary,
+        refresh_cover_cache, validate_patch_actions,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -4011,6 +4072,29 @@ mod manager_tests {
         assert_eq!(normalize_legacy_input_value("confirm", 1.25).unwrap(), 1.25);
         assert!(normalize_legacy_input_value("pointer.x", f32::NAN).is_err());
         assert!(normalize_legacy_input_value("pointer.y", i32::MAX as f32).is_err());
+    }
+
+    #[test]
+    fn vfs_preview_detects_bom_utf8_and_cp932_without_binary_fallback() {
+        let mut utf16le = vec![0xff, 0xfe];
+        utf16le.extend_from_slice(&[b'h', 0, b'i', 0]);
+        assert_eq!(
+            decode_text_preview(&utf16le, "sys/message.txt"),
+            Some(("utf-16le".into(), "hi".into()))
+        );
+        let mut japanese_utf16le = vec![0xff, 0xfe];
+        japanese_utf16le.extend("夏空".encode_utf16().flat_map(|unit| unit.to_le_bytes()));
+        assert_eq!(
+            decode_text_preview(&japanese_utf16le, "sys/message.txt"),
+            Some(("utf-16le".into(), "夏空".into()))
+        );
+        let (encoded, _, malformed) = encoding_rs::SHIFT_JIS.encode("夏空");
+        assert!(!malformed);
+        assert_eq!(
+            decode_text_preview(&encoded, "scr/test.sc"),
+            Some(("shift_jis".into(), "夏空".into()))
+        );
+        assert_eq!(decode_text_preview(&[0x00, 0x01, 0x02], "data.bin"), None);
     }
 
     #[test]

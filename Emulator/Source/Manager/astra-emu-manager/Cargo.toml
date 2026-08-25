@@ -34,6 +34,7 @@ astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }
 tokio.workspace = true
 directories.workspace = true
+encoding_rs.workspace = true
 image.workspace = true
 hex.workspace = true
 postcard.workspace = true
