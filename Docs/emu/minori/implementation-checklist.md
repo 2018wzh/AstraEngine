@@ -64,7 +64,7 @@
 - [x] 从 `scr.paz` 与原程序候选确认入口文件 `test.sc`；多脚本时 CLI 要求完整稳定 URI `--entry minori:/scr/test.sc`，不接受裸文件名，也不隐式选择。
 - [x] 拆分 select、普通 voice、stand 与本轮路线用到的主要演出 operand；未知形态仍按 source span/raw operand 阻断。
 - [x] 未确认 command/operand 保留 raw bytes、source span 和 `Unknown`。
-- [ ] 完成全部资源引用映射；BGM/SE、stage 前景/背景和 stand role 已有严格映射。
+- [x] 完成全部已确认资源引用映射；BGM/SE、message voice、movie、stage 前景/背景、stand、CrossFade2、Firefly、SnowH、panel、chain script 均复用 VM 的已验证 operand grammar。显式 `astra.resource_audit=full`（CLI `--audit-all-resources`）会先有界枚举所有 `.sc`、读取并解析引用，再逐项 stat 非空资源；缺失、短读、超限或 VFS 不支持枚举均阻断。未知 opcode/effect 仍不猜测，按执行路径阻断。
 
 ## Runtime
 

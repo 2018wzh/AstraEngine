@@ -21,6 +21,8 @@ Family ABI v9 不再传递 text lease 或 text presentation。Minori 在调用�
 
 音频资源后缀按原程序的 `resource[volume,pan]` 规则解析。普通 BGM/SE 引用生成稳定 `minori:/...` URI，并在发出公共 `LegacyAudioCommandV1` 前由绑定 VFS `stat` 核对存在性和大小；host 后续仍通过 session resource channel 读取，商业字节不进入 effect。BGM 使用固定 loop stream，三个 SE command 使用独立 bus；非循环 SE 使用确定性 stream id。`*` 停止对应固定 stream，并保留原程序的 fade-out 参数。
 
+资源审计有一个显式的 full policy：`astra.resource_audit=full`。CLI 的 `--audit-all-resources` 只对 Minori 注入该选项；open 阶段通过 Host 的 bounded `enumerate_by_extension` 收集全部 `.sc`，按同一 parser 和 operand validator 收集资源 URI，再逐项 `stat` 并核对非空和 `1 GiB` 上限。审计只保留计数、长度、revision 和 URI identity digest，不读取目录、不把商业字节写进 report；VFS 未提供枚举、脚本损坏、资源缺失、源 revision 漂移或边界异常都会返回稳定 blocking diagnostic。没有该显式选项时仍保持按执行路径的 lazy stat，不能把普通运行误报成全资源覆盖。
+
 `transition` 只配置后续 stage，不自行提交替代帧。`stage` 按已确认顺序更新前景、背景和 stand state。family effect 只保存 VFS URI、编码 hash、尺寸与绘制指令；Headless/Manager Host 通过 session resource channel 读取编码数据，并交给显式绑定的 Astra `DecodeProviderRegistry`。解码后的 RGBA 只存在于 Host 临时渲染帧，不进入 effect、snapshot 或 report，也没有 Minori 私有 renderer。stand position 尚未证明为像素坐标，因此含 stand 的 stage 会返回 `ASTRA_EMU_MINORI_STAGE_STAND_POSITION`。
 
 原程序 parser 将第一个 `effect` operand 绑定为 effect id，第二个 operand 才是可选的冒号分隔资源规格；其后最多三个 operand 以 C 整数读取，缺省值为 `-1`。已在真实执行路径确认 `.effect CrossFade2` 的单 operand 形式：原对象接收空资源规格、替换首层 effect slot，但不会解析出 resource frame。runtime 明确清除活动 effect 并递增确定性 sequence，不提交替代帧或自交叉淡入。四 operand 形式会逐项查询资源；单独的 `*` 是有效的空资源选择，查询不产生资源对象，也不进入双帧路径，因而以同样的无 presentation slot replacement 表达。非空资源序列的后两个整数分别作为 alpha 增量与更新间隔；只有至少两个已解析资源才进入双帧路径。runtime 以同一固定时钟累计间隔、在一次更新中提交当前帧后增加 alpha，并在达到阈值后推进相邻资源。

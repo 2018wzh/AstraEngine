@@ -459,3 +459,9 @@ python Tools/check_docs.py
 
 - 在 `6f554012b` 后用当前签名 package、mount profile 和序列化物理输入执行了受限 Minori route smoke：107 个 submitted/rasterized frame、85,504 个音频 frame、68 个输入序列事件、2 个 checkpoint、diagnostic 为 0，Headless report status 为 `passed`。该运行没有到达 terminal，也不替代完整路线报告。
 - 实际查看两个 checkpoint：背景资源和日文正文均非空，字形、比例、透明度、层次和画面边界正常，未见拉伸、裁剪或残留层。该检查只证明当前 v9 surface/Layer2D/text/media 组合的短程可观察输出，不能证明原版像素 parity、影片续播、四路线自然 unlock 或 Windows E3。
+
+### 2026-08-25 脚本资源引用审计
+
+- Minori runtime 新增显式 `astra.resource_audit=full` policy；通用 CLI 的 `--audit-all-resources` 仅在 `--family minori` 时注入该选项。open 阶段通过 bounded VFS enumeration 读取并解析全部 `.sc`，复用执行路径的 token、stage/character/effect/audio/movie/panel/chain validators，逐项检查资源存在、非空和 `1 GiB` 上限。
+- 审计只保留脚本/资源 URI identity、长度、revision、计数和聚合 digest；没有目录遍历、商业 payload、key 或本地路径进入日志、snapshot 或 report。缺少枚举能力、脚本资源缺失、源 revision 漂移、短读和未知已确认形态继续返回 blocking diagnostic，不做猜测或 fallback。
+- 新增 runtime grammar census 与 provider VFS audit 回归；目标 crate 测试、clippy 和格式检查在提交前复跑。该门禁只证明资源引用覆盖，不替代完整路线、codec、人工音频 review 或 Windows E3。

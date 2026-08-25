@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use astra_core::Hash256;
 use schemars::JsonSchema;
@@ -11,6 +11,11 @@ use crate::{
 };
 
 pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v23";
+
+/// Maximum number of script files accepted by the explicit resource-reference
+/// audit.  The audit is an opt-in mount/open policy; the normal runtime keeps
+/// its lazy, execution-bound resource validation.
+pub(crate) const MINORI_MAX_RESOURCE_AUDIT_SCRIPTS: u32 = 16_384;
 
 const MINORI_BACKLOG_MAX_ENTRIES: usize = 16_384;
 const MINORI_BACKLOG_MAX_ENTRY_BYTES: usize = 64 * 1024;
@@ -702,6 +707,229 @@ pub enum MinoriVmEvent {
         target: String,
     },
     Terminal,
+}
+
+/// Collects only resource URIs whose operand grammar is already implemented by
+/// the Minori VM.  This is intentionally separate from the VFS verifier: a
+/// manifest can be internally consistent while a script still points at a
+/// missing asset.  The caller owns the actual VFS reads and bounds checks.
+///
+/// Unknown opcodes and unknown effect kinds are not guessed here.  They remain
+/// execution-time blocking diagnostics, just as they are in the normal VM
+/// path.  Every known resource-bearing command uses the same tokenization and
+/// path validators as execution, so the audit cannot silently accept a shape
+/// the runtime would reject.
+pub(crate) fn collect_resource_references(
+    script: &ScScript,
+) -> Result<BTreeSet<String>, MinoriRuntimeError> {
+    let mut resources = BTreeSet::new();
+    for line in &script.lines {
+        let ScLineKind::Command { command } = &line.kind else {
+            continue;
+        };
+        let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MinoriRuntimeError::Operand)?;
+        match command.opcode.as_str() {
+            "message" => {
+                if tokens.len() >= 4 && !tokens[1].is_empty() {
+                    resources.insert(parse_message_voice(&tokens[1])?.resource_uri);
+                }
+            }
+            "playbgm" => {
+                let spec = tokens.first().ok_or(MinoriRuntimeError::Operand)?;
+                let spec = parse_audio_resource_spec(spec)?;
+                if spec.resource != "*" {
+                    validate_audio_relative_path(&spec.resource)?;
+                    resources.insert(format!("minori:/bgm/{}", spec.resource));
+                }
+            }
+            "playse" | "playse2" | "playse3" => {
+                let spec = tokens.first().ok_or(MinoriRuntimeError::Operand)?;
+                let spec = parse_audio_resource_spec(spec)?;
+                if spec.resource != "*" {
+                    validate_audio_relative_path(&spec.resource)?;
+                    resources.insert(format!("minori:/se/{}", spec.resource));
+                }
+            }
+            "playvoice" => {
+                let spec = tokens.first().ok_or(MinoriRuntimeError::Operand)?;
+                let spec = parse_audio_resource_spec(spec)?;
+                if spec.resource != "*" {
+                    return Err(MinoriRuntimeError::UnsupportedOpcode {
+                        opcode: "playvoice.resource".into(),
+                        ordinal: command.ordinal,
+                    });
+                }
+            }
+            "stage" => collect_stage_resources(&tokens, &mut resources)?,
+            "char" => {
+                if tokens
+                    .first()
+                    .is_some_and(|mode| mode.eq_ignore_ascii_case("load"))
+                {
+                    let [_, _slot, resource] = tokens.as_slice() else {
+                        return Err(MinoriRuntimeError::Character);
+                    };
+                    validate_scene_filename(resource).map_err(|_| MinoriRuntimeError::Character)?;
+                    resources.insert(format!("minori:/st/{resource}"));
+                }
+            }
+            "effect" => collect_primary_effect_resources(&tokens, &mut resources)?,
+            "effect2" => match tokens.as_slice() {
+                [kind] if kind == "SnowH" => {
+                    resources.extend([
+                        "minori:/sys/snowS.png".into(),
+                        "minori:/sys/snowM.png".into(),
+                        "minori:/sys/snowL.png".into(),
+                    ]);
+                }
+                [kind] if kind == "fadeout" => {}
+                [_] => {}
+                _ => return Err(MinoriRuntimeError::SecondaryEffect),
+            },
+            "panel" => match tokens.as_slice() {
+                [mode] if mode == "0" => {}
+                [mode] if mode == "1" => {
+                    resources.insert("minori:/sys/msgPanel.png".into());
+                }
+                [_] => {
+                    return Err(MinoriRuntimeError::Panel {
+                        operand_count: u8::try_from(tokens.len()).unwrap_or(u8::MAX),
+                        mode: tokens.first().and_then(|value| value.parse().ok()),
+                    })
+                }
+                _ => {
+                    return Err(MinoriRuntimeError::Panel {
+                        operand_count: u8::try_from(tokens.len()).unwrap_or(u8::MAX),
+                        mode: None,
+                    })
+                }
+            },
+            "movie" => {
+                let [_id, resource, _width, _height, _skippable] = tokens.as_slice() else {
+                    return Err(MinoriRuntimeError::Operand);
+                };
+                validate_scene_filename(resource)?;
+                resources.insert(format!("minori:/mov/{resource}"));
+            }
+            "chain" => {
+                if let ScControlFlow::Chain { target } = &command.control_flow {
+                    validate_chain_target(target)?;
+                    resources.insert(format!("minori:/scr/{target}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(resources)
+}
+
+fn collect_stage_resources(
+    tokens: &[String],
+    resources: &mut BTreeSet<String>,
+) -> Result<(), MinoriRuntimeError> {
+    if tokens.len() < 4 || tokens.len() > 26 {
+        return Err(MinoriRuntimeError::Operand);
+    }
+    for resource in parse_stage_resource_sequence(&tokens[0])?
+        .into_iter()
+        .flatten()
+    {
+        resources.insert(resource);
+    }
+    let mut cursor = 1usize;
+    if tokens.len() >= 6 && !tokens[1].contains('.') && !tokens[2].contains('.') {
+        if let (Ok(_x), Ok(_y)) = (tokens[1].parse::<i32>(), tokens[2].parse::<i32>()) {
+            cursor = 3;
+        }
+    }
+    if cursor + 3 > tokens.len() || !(tokens.len() - (cursor + 3)).is_multiple_of(2) {
+        return Err(MinoriRuntimeError::Operand);
+    }
+    let background = &tokens[cursor];
+    if background != "*" {
+        validate_scene_filename(background)?;
+        resources.insert(format!("minori:/bg/{background}"));
+    }
+    cursor += 3;
+    while cursor < tokens.len() {
+        let stand = &tokens[cursor];
+        validate_scene_filename(stand)?;
+        parse_stand_position_spec(&tokens[cursor + 1])?;
+        resources.insert(format!("minori:/st/{stand}"));
+        cursor += 2;
+    }
+    Ok(())
+}
+
+fn collect_primary_effect_resources(
+    tokens: &[String],
+    resources: &mut BTreeSet<String>,
+) -> Result<(), MinoriRuntimeError> {
+    let Some(kind) = tokens.first() else {
+        return Err(MinoriRuntimeError::Effect {
+            violation: MinoriEffectViolation::Tokenization,
+        });
+    };
+    match kind.as_str() {
+        "Firefly" => {
+            let [_, prefix, _count, _duration] = tokens else {
+                return Err(MinoriRuntimeError::Firefly);
+            };
+            validate_scene_filename(prefix).map_err(|_| MinoriRuntimeError::Firefly)?;
+            resources.extend([
+                format!("minori:/sys/{prefix}S.png"),
+                format!("minori:/sys/{prefix}M.png"),
+                format!("minori:/sys/{prefix}L.png"),
+            ]);
+        }
+        "WScroll2" => {
+            let [_, sync, _period, _speed] = tokens else {
+                return Err(MinoriRuntimeError::WScroll2);
+            };
+            let sync = sync
+                .strip_prefix("sync:")
+                .ok_or(MinoriRuntimeError::WScroll2)?;
+            validate_scene_filename(sync).map_err(|_| MinoriRuntimeError::WScroll2)?;
+            resources.insert(format!("minori:/st/{sync}"));
+        }
+        "CrossFade2" => {
+            if tokens.len() == 1 {
+                return Ok(());
+            }
+            let [_, sequence, _alpha, _interval] = tokens else {
+                return Err(MinoriRuntimeError::Effect {
+                    violation: MinoriEffectViolation::ResourceSequence {
+                        count: u8::try_from(tokens.len()).unwrap_or(u8::MAX),
+                    },
+                });
+            };
+            if sequence == "*" {
+                return Ok(());
+            }
+            let sequence = sequence
+                .split(':')
+                .map(|resource| {
+                    if resource == "*" {
+                        return Ok(None);
+                    }
+                    validate_scene_filename(resource)?;
+                    Ok(Some(format!("minori:/bg/{resource}")))
+                })
+                .collect::<Result<Vec<_>, MinoriRuntimeError>>()?;
+            if sequence.len() < 2 || sequence.len() > 64 {
+                return Err(MinoriRuntimeError::Effect {
+                    violation: MinoriEffectViolation::ResourceSequence {
+                        count: u8::try_from(sequence.len()).unwrap_or(u8::MAX),
+                    },
+                });
+            }
+            resources.extend(sequence.into_iter().flatten());
+        }
+        "*" | "end" => {}
+        _ => {}
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -7095,6 +7323,40 @@ mod tests {
         assert_eq!(state.text_hash, Hash256::from_sha256(b"body words"));
         assert!(state.voice_hash.is_none());
         assert!(state.speaker_hash.is_none());
+    }
+
+    #[test]
+    fn resource_reference_audit_reuses_verified_command_grammars() {
+        let source = b".stage * bg.png 0 0 Stand.png 640,0\r\n.char load 1 Aya.png\r\n.effect CrossFade2 A.png:*:B.png 16 10\r\n.effect Firefly Firefly_c 1 1000\r\n.effect2 SnowH\r\n.panel 1\r\n.playbgm theme.ogg\r\n.playse click.ogg\r\n.message 1 ren-0001.ogg speaker text\r\n.movie 1 op.avi 640 480 t\r\n.chain tail.sc\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let resources = collect_resource_references(&script).unwrap();
+        assert!(resources.contains("minori:/bg/bg.png"));
+        assert!(resources.contains("minori:/st/Stand.png"));
+        assert!(resources.contains("minori:/st/Aya.png"));
+        assert!(resources.contains("minori:/bg/A.png"));
+        assert!(resources.contains("minori:/bg/B.png"));
+        assert!(resources.contains("minori:/sys/Firefly_cS.png"));
+        assert!(resources.contains("minori:/sys/snowM.png"));
+        assert!(resources.contains("minori:/sys/msgPanel.png"));
+        assert!(resources.contains("minori:/bgm/theme.ogg"));
+        assert!(resources.contains("minori:/se/click.ogg"));
+        assert!(resources.contains("minori:/voice/ren-0001.ogg"));
+        assert!(resources.contains("minori:/mov/op.avi"));
+        assert!(resources.contains("minori:/scr/tail.sc"));
+    }
+
+    #[test]
+    fn resource_reference_audit_blocks_unverified_direct_voice_playback() {
+        let script = parse_sc(
+            b".playvoice direct.ogg\r\n",
+            &ScOpcodeCatalog::observed_minori(),
+        )
+        .unwrap();
+        assert!(matches!(
+            collect_resource_references(&script),
+            Err(MinoriRuntimeError::UnsupportedOpcode { opcode, .. })
+                if opcode == "playvoice.resource"
+        ));
     }
 
     #[test]

@@ -1247,6 +1247,12 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             launch_mode: launch.launch_mode,
         },
     )?;
+    if launch.audit_all_resources && launch.family_id == "minori" {
+        probe
+            .runtime
+            .family_options
+            .insert("astra.resource_audit".into(), "full".into());
+    }
     bind_extension(
         &runtime,
         launch.extension.as_ref(),

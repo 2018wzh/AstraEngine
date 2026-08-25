@@ -40,14 +40,15 @@ use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
 };
 use crate::{
-    parse_sc, MinoriAudioCommand, MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame,
-    MinoriCharacterState, MinoriChoicePresentation, MinoriConfigAudioBus, MinoriConfigChange,
-    MinoriConfigControl, MinoriConfigState, MinoriEffectFrame, MinoriExecutedCommand,
-    MinoriLinearScrollFrame, MinoriMovieState, MinoriPlayMode, MinoriRuntimeError,
-    MinoriRuntimeState, MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame,
-    MinoriStageCommand, MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm,
-    MinoriVmEvent, MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog,
-    MINORI_CHOICE_PRESENTATION_SCHEMA,
+    collect_resource_references, parse_sc, MinoriAudioCommand, MinoriAudioEncoding,
+    MinoriAxisScrollFrame, MinoriCharacterFrame, MinoriCharacterState, MinoriChoicePresentation,
+    MinoriConfigAudioBus, MinoriConfigChange, MinoriConfigControl, MinoriConfigState,
+    MinoriEffectFrame, MinoriExecutedCommand, MinoriLinearScrollFrame, MinoriMovieState,
+    MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState, MinoriScreenShakeFrame,
+    MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand, MinoriStageLayer,
+    MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent, MinoriWScroll2Frame,
+    MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
+    MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
 };
 
 pub const MINORI_FAMILY_ID: &str = "minori";
@@ -658,6 +659,30 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 .read_file(&ctx.mount_set_id, &request.script_uri, MAX_SCRIPT_BYTES)?;
         let script_hash = Hash256::from_sha256(&bytes);
         let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
+        match request
+            .family_options
+            .get("astra.resource_audit")
+            .map(String::as_str)
+        {
+            None => {}
+            Some("full") => {
+                let (resource_count, audit_hash) =
+                    audit_script_resources(self.vfs()?, &ctx.mount_set_id)?;
+                tracing::info!(
+                    target: "astra_emu_minori::resource",
+                    event = "astra_emu_minori_script_resource_audit_completed",
+                    resource_count,
+                    audit_hash = %audit_hash,
+                    "validated every bounded script resource reference"
+                );
+            }
+            Some(_) => {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_RESOURCE_AUDIT_POLICY",
+                    "resource audit policy must be full when present",
+                ));
+            }
+        }
         let title_launch = match request
             .family_options
             .get("astra.launch_entry_explicit")
@@ -4319,6 +4344,94 @@ fn load_script(
     )?;
     let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
     Ok((script_uri, script_hash, script))
+}
+
+/// Validates the resource references of every `.sc` entry without loading an
+/// archive directory or retaining commercial payload. The host VFS owns the
+/// bounded enumeration and all reads; this function keeps only URI identities,
+/// lengths and revisions long enough to form a local audit digest.
+fn audit_script_resources(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+) -> Result<(u64, Hash256), LegacyProviderError> {
+    let scripts = vfs
+        .enumerate_by_extension(
+            mount_set_id,
+            "minori:/scr",
+            "sc",
+            MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
+        )
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_AUDIT_UNSUPPORTED",
+                "the bound VFS cannot perform the required bounded script enumeration",
+            )
+        })?;
+    if scripts.is_empty() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_RESOURCE_AUDIT_EMPTY",
+            "the Minori script mount contains no scripts",
+        ));
+    }
+    if scripts.len() > MINORI_MAX_RESOURCE_AUDIT_SCRIPTS as usize {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_RESOURCE_AUDIT_BOUNDS",
+            "the Minori script enumeration exceeds its bound",
+        ));
+    }
+    let mut references = BTreeSet::new();
+    let mut identity = Vec::with_capacity(scripts.len() * 48);
+    identity.extend_from_slice(&(scripts.len() as u64).to_le_bytes());
+    for listed in scripts {
+        validate_script_uri(&listed.uri)?;
+        if listed.stat.len == 0 || listed.stat.len > MAX_SCRIPT_BYTES {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_AUDIT_SCRIPT_BOUNDS",
+                "a script entry is empty or exceeds the bounded source size",
+            ));
+        }
+        let source = vfs
+            .read_file(mount_set_id, &listed.uri, MAX_SCRIPT_BYTES)
+            .map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_RESOURCE_AUDIT_SCRIPT_READ",
+                    "a script entry could not be read consistently",
+                )
+            })?;
+        let script = parse_sc(source.as_slice(), &ScOpcodeCatalog::observed_minori())
+            .map_err(script_error)?;
+        let script_references = collect_resource_references(&script).map_err(runtime_error)?;
+        identity.extend_from_slice(Hash256::from_sha256(listed.uri.as_bytes()).as_bytes());
+        identity.extend_from_slice(&listed.stat.len.to_le_bytes());
+        identity.extend_from_slice(&listed.stat.revision.0.to_le_bytes());
+        references.extend(script_references);
+    }
+    let mut resource_count = 0u64;
+    identity.extend_from_slice(&(references.len() as u64).to_le_bytes());
+    for resource_uri in references {
+        let stat = vfs.stat_file(mount_set_id, &resource_uri).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_AUDIT_MISSING",
+                "a script resource reference is missing from the mounted VFS",
+            )
+        })?;
+        if stat.len == 0 || stat.len > MAX_RESOURCE_BYTES {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_AUDIT_BOUNDS",
+                "a referenced resource is empty or exceeds the session bound",
+            ));
+        }
+        resource_count = resource_count.checked_add(1).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_AUDIT_BOUNDS",
+                "the referenced resource count overflowed",
+            )
+        })?;
+        identity.extend_from_slice(Hash256::from_sha256(resource_uri.as_bytes()).as_bytes());
+        identity.extend_from_slice(&stat.len.to_le_bytes());
+        identity.extend_from_slice(&stat.revision.0.to_le_bytes());
+    }
+    Ok((resource_count, Hash256::from_sha256(&identity)))
 }
 
 fn expand_script_includes(
@@ -9051,6 +9164,33 @@ mod tests {
         });
         let error = load_script(&cycle_reader, "mount.test", "a.sc").unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_CYCLE");
+    }
+
+    #[test]
+    fn full_script_resource_audit_is_bounded_and_fails_on_missing_assets() {
+        let reader: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/test.sc".into(),
+                    b".stage * bg.png 0 0\r\n.playbgm theme.ogg\r\n.message 1 voice.ogg speaker text\r\n.end\r\n".to_vec(),
+                ),
+                ("minori:/bg/bg.png".into(), vec![1]),
+                ("minori:/bgm/theme.ogg".into(), vec![2]),
+                ("minori:/voice/voice.ogg".into(), vec![3]),
+            ]),
+        });
+        let (count, digest) = audit_script_resources(&reader, "mount.test").unwrap();
+        assert_eq!(count, 3);
+        assert_ne!(digest, Hash256::from_sha256(&[]));
+
+        let missing: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/test.sc".into(),
+                b".stage * missing.png 0 0\r\n".to_vec(),
+            )]),
+        });
+        let error = audit_script_resources(&missing, "mount.test").unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_MINORI_RESOURCE_AUDIT_MISSING");
     }
 
     #[test]

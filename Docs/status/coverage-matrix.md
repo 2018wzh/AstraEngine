@@ -19,6 +19,8 @@ AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retai
 
 2026 年 8 月 23 日的 consumer 增量已完成动态 loader、CLI 与 Manager 四个 Host port 组合；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。当前签名样本 slice 消费 42 条物理输入，提交 154 帧并输出 134144 个音频 frame，diagnostic 为 0。模型检查确认画面有标题、系统背景、正文与场景变化，也确认首个 checkpoint 是黑色过渡帧、页面标签存在错位，因此仍是受限 E2 诊断，不是完整视觉通过。
 
+2026 年 8 月 25 日脚本引用审计增量：Minori open 可显式接收 `astra.resource_audit=full`，由 Host bounded enumeration 扫描全部 `.sc`，复用 VM grammar 对 stage、character、effect、audio、movie、panel 和 chain 引用做非空/大小/revision 校验。审计只形成脱敏计数与 identity digest；普通 lazy 运行、未知 opcode、VFS enum 缺失和完整路线/人工 review 的证据边界不变。
+
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 
 ABI consumer implementation 基线已更新到 `635527831e89e5ff9b87ac165b5b5532e28356c6`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `f4f64a5bb726c1759350a666a35e0a454b810f61` 并绑定唯一 workspace ABI source。
