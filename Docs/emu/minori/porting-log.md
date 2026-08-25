@@ -464,4 +464,9 @@ python Tools/check_docs.py
 
 - Minori runtime 新增显式 `astra.resource_audit=full` policy；通用 CLI 的 `--audit-all-resources` 仅在 `--family minori` 时注入该选项。open 阶段通过 bounded VFS enumeration 读取并解析全部 `.sc`，复用执行路径的 token、stage/character/effect/audio/movie/panel/chain validators，逐项检查资源存在、非空和 `1 GiB` 上限。
 - 审计只保留脚本/资源 URI identity、长度、revision、计数和聚合 digest；没有目录遍历、商业 payload、key 或本地路径进入日志、snapshot 或 report。缺少枚举能力、脚本资源缺失、源 revision 漂移、短读和未知已确认形态继续返回 blocking diagnostic，不做猜测或 fallback。
+
+### 2026-08-25 消息 read identity
+
+- runtime snapshot 硬切到 `astra.emu.minori.runtime_state.v24`。每次 message wait 由物理输入、Auto timer、Control/Skip timer 或 await completion 结束时，记录由当前脚本 hash、source span、message id 和正文 hash 组成的 read identity；identity 以排序 bounded vector 保存并参与 snapshot/state hash。
+- 该改动只固化“已确认消息”的持久状态，不猜测 `messageSpeedTBR`/`messageSpeedRead` 的逐字 reveal 公式，也不把 skip 的原版未读策略提前写成事实。重复文本在不同脚本 revision 或 source span 不会互相标记；损坏、重复、无序和超限 identity 在 restore 时阻断。
 - 新增 runtime grammar census 与 provider VFS audit 回归；目标 crate 测试、clippy 和格式检查在提交前复跑。该门禁只证明资源引用覆盖，不替代完整路线、codec、人工音频 review 或 Windows E3。

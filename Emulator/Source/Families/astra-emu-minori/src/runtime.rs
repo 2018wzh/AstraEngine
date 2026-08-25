@@ -10,7 +10,7 @@ use crate::{
     SourceSpan,
 };
 
-pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v23";
+pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v24";
 
 /// Maximum number of script files accepted by the explicit resource-reference
 /// audit.  The audit is an opt-in mount/open policy; the normal runtime keeps
@@ -20,6 +20,7 @@ pub(crate) const MINORI_MAX_RESOURCE_AUDIT_SCRIPTS: u32 = 16_384;
 const MINORI_BACKLOG_MAX_ENTRIES: usize = 16_384;
 const MINORI_BACKLOG_MAX_ENTRY_BYTES: usize = 64 * 1024;
 const MINORI_BACKLOG_MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+const MINORI_READ_MESSAGE_MAX_ENTRIES: usize = 131_072;
 
 const MINORI_FIREFLY_STAGE_WIDTH: i32 = 1280;
 const MINORI_FIREFLY_STAGE_HEIGHT: i32 = 720;
@@ -67,6 +68,10 @@ pub struct MinoriRuntimeState {
     pub global_variables: BTreeMap<String, i64>,
     pub wait: Option<MinoriWaitState>,
     pub message: Option<MinoriMessageState>,
+    /// Message identities confirmed by the player.  The identity includes the
+    /// script revision, source span, message id and text hash, so repeated text
+    /// at different source locations is not accidentally treated as read.
+    pub read_message_identities: Vec<Hash256>,
     pub backlog: Vec<MinoriBacklogEntry>,
     pub backlog_bytes: u64,
     pub choice: Option<MinoriChoiceState>,
@@ -1121,6 +1126,7 @@ impl MinoriVm {
             global_variables: BTreeMap::new(),
             wait: None,
             message: None,
+            read_message_identities: Vec::new(),
             backlog: Vec::new(),
             backlog_bytes: 0,
             choice: None,
@@ -1929,8 +1935,9 @@ impl MinoriVm {
             .state
             .wait
             .as_ref()
-            .ok_or(MinoriRuntimeError::Waiting)?;
-        let expected = match current {
+            .ok_or(MinoriRuntimeError::Waiting)?
+            .clone();
+        let expected = match &current {
             MinoriWaitState::Time { token_id, .. }
             | MinoriWaitState::AxisScroll { token_id, .. }
             | MinoriWaitState::LinearScroll { token_id, .. }
@@ -1943,6 +1950,9 @@ impl MinoriVm {
         };
         if expected != token_id {
             return Err(MinoriRuntimeError::Waiting);
+        }
+        if token_id.starts_with("minori.message.") {
+            self.mark_active_message_read()?;
         }
         let completes_media = matches!(current, MinoriWaitState::Media { .. });
         let completes_axis_scroll = matches!(current, MinoriWaitState::AxisScroll { .. });
@@ -1962,6 +1972,33 @@ impl MinoriVm {
             complete_character_transition_state(&mut self.state)?;
         }
         self.state.wait = None;
+        Ok(())
+    }
+
+    fn mark_active_message_read(&mut self) -> Result<(), MinoriRuntimeError> {
+        let Some(message) = self.state.message.as_ref() else {
+            return Err(MinoriRuntimeError::State);
+        };
+        let identity = message_read_identity(&self.state, message);
+        if self
+            .state
+            .read_message_identities
+            .binary_search(&identity)
+            .is_ok()
+        {
+            return Ok(());
+        }
+        if self.state.read_message_identities.len() >= MINORI_READ_MESSAGE_MAX_ENTRIES {
+            return Err(MinoriRuntimeError::State);
+        }
+        let insertion = self
+            .state
+            .read_message_identities
+            .binary_search(&identity)
+            .unwrap_or_else(|index| index);
+        self.state
+            .read_message_identities
+            .insert(insertion, identity);
         Ok(())
     }
 
@@ -2033,6 +2070,17 @@ impl MinoriVm {
         self.state.system_ui.skip_enabled
             && (self.state.system_ui.play_mode == MinoriPlayMode::Skip
                 || (self.state.system_ui.control_enabled && self.state.system_ui.control_pressed))
+    }
+
+    pub fn active_message_is_read(&self) -> Result<bool, MinoriRuntimeError> {
+        let Some(message) = self.state.message.as_ref() else {
+            return Err(MinoriRuntimeError::State);
+        };
+        Ok(self
+            .state
+            .read_message_identities
+            .binary_search(&message_read_identity(&self.state, message))
+            .is_ok())
     }
 
     /// Allocate an effect sequence for a host-side presentation update that
@@ -3548,6 +3596,14 @@ fn firefly_particle_opacity(parameter: u32) -> u16 {
 
 fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntimeError> {
     validate_backlog_state(state)?;
+    if state.read_message_identities.len() > MINORI_READ_MESSAGE_MAX_ENTRIES
+        || state
+            .read_message_identities
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+    {
+        return Err(MinoriRuntimeError::State);
+    }
     if let Some(message) = state.message.as_ref() {
         if message.voice.is_some() != message.voice_hash.is_some() {
             return Err(MinoriRuntimeError::AudioResource);
@@ -5320,6 +5376,17 @@ fn message_wait_for_current_mode(
         return message_auto_wait(token_id, state.system_ui.config.message_speed_auto_play);
     }
     Ok(MinoriWaitState::Input { token_id })
+}
+
+fn message_read_identity(state: &MinoriRuntimeState, message: &MinoriMessageState) -> Hash256 {
+    let mut material = Vec::with_capacity(32 + 8 + 4 + 8 + 32 + 32);
+    material.extend_from_slice(b"astra.emu.minori.message.read.v1\0");
+    material.extend_from_slice(state.script_hash.as_bytes());
+    material.extend_from_slice(&message.source.offset.to_le_bytes());
+    material.extend_from_slice(&message.source.length.to_le_bytes());
+    material.extend_from_slice(&message.message_id.to_le_bytes());
+    material.extend_from_slice(message.text_hash.as_bytes());
+    Hash256::from_sha256(&material)
 }
 
 const VOICE_STREAM_ID: u32 = 4;
@@ -7300,6 +7367,81 @@ mod tests {
         vm.close_backlog().unwrap();
         assert_eq!(vm.state().system_ui.page, MinoriSystemPage::None);
         assert!(vm.state().wait.is_some());
+    }
+
+    #[test]
+    fn message_completion_records_read_identity_and_snapshot_round_trips_it() {
+        let source = b".message 42  speaker hello\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(1, 4).unwrap() else {
+            panic!("expected message")
+        };
+        assert!(!vm.active_message_is_read().unwrap());
+        let token_id = match wait {
+            MinoriWaitState::Input { token_id } => token_id,
+            _ => panic!("expected input wait"),
+        };
+        vm.resolve_wait(&token_id).unwrap();
+        assert!(vm.active_message_is_read().unwrap());
+        assert_eq!(vm.state().read_message_identities.len(), 1);
+
+        let snapshot = vm.snapshot_bytes().unwrap();
+        let restored = MinoriVm::decode_snapshot(&snapshot).unwrap();
+        assert_eq!(
+            restored.read_message_identities,
+            vm.state().read_message_identities
+        );
+    }
+
+    #[test]
+    fn read_identity_includes_source_location_and_script_revision() {
+        let first = b".message 1  speaker same\r\n.end\r\n";
+        let second = b".wait 1\r\n.message 1  speaker same\r\n.end\r\n";
+        let first_script = parse_sc(first, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let second_script = parse_sc(second, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut first_vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(first),
+            first_script,
+            1,
+        )
+        .unwrap();
+        let mut second_vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(second),
+            second_script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Message { wait, .. }) = first_vm.step(1, 4).unwrap() else {
+            panic!("expected first message")
+        };
+        let MinoriWaitState::Input { token_id } = wait else {
+            panic!("expected first input wait")
+        };
+        first_vm.resolve_wait(&token_id).unwrap();
+        let Some(MinoriVmEvent::Wait(_)) = second_vm.step(1, 4).unwrap() else {
+            panic!("expected second script wait")
+        };
+        second_vm.resolve_wait("minori.wait.1").unwrap();
+        let Some(MinoriVmEvent::Message { .. }) = second_vm.step(2, 4).unwrap() else {
+            panic!("expected second message")
+        };
+        assert!(!second_vm.active_message_is_read().unwrap());
+        assert_ne!(
+            first_vm.state().read_message_identities[0],
+            message_read_identity(
+                second_vm.state(),
+                second_vm.state().message.as_ref().unwrap()
+            )
+        );
     }
 
     #[test]

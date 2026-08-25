@@ -1,6 +1,6 @@
 # Minori Script Execution
 
-The active Minori runtime section is `astra.emu.minori.runtime_state.v23`.
+The active Minori runtime section is `astra.emu.minori.runtime_state.v24`.
 Any older snapshot is a migration-rejection input and is never restored.
 
 当前 VM 已覆盖首条路线实际经过的控制流、message、choice、stage/character、effect、BGM/SE、movie、panel、chain 和 end。message 自带 voice 通过公共 audio command 通道读取 `voice.paz`；非控制型独立 `playvoice` 在样本 census 中没有出现，遇到时继续阻断。
@@ -27,7 +27,7 @@ Family ABI v9 不再传递 text lease 或 text presentation。Minori 在调用�
 
 原程序 parser 将第一个 `effect` operand 绑定为 effect id，第二个 operand 才是可选的冒号分隔资源规格；其后最多三个 operand 以 C 整数读取，缺省值为 `-1`。已在真实执行路径确认 `.effect CrossFade2` 的单 operand 形式：原对象接收空资源规格、替换首层 effect slot，但不会解析出 resource frame。runtime 明确清除活动 effect 并递增确定性 sequence，不提交替代帧或自交叉淡入。四 operand 形式会逐项查询资源；单独的 `*` 是有效的空资源选择，查询不产生资源对象，也不进入双帧路径，因而以同样的无 presentation slot replacement 表达。非空资源序列的后两个整数分别作为 alpha 增量与更新间隔；只有至少两个已解析资源才进入双帧路径。runtime 以同一固定时钟累计间隔、在一次更新中提交当前帧后增加 alpha，并在达到阈值后推进相邻资源。
 
-`.effect2` 复用相同命令对象，但原程序把结果写入独立的第二 effect slot。IDA 已确认当前样本使用的两种形式为 `SnowH` 与 `fadeout`：`SnowH` 建立 50 个横向粒子，绑定 `snowS.png`、`snowM.png`、`snowL.png`；`fadeout` 只衰减第二 slot，不清除第一 slot。runtime 现按该合同保存独立状态、确定性随机数、定点位置、速度、方向、资源级别与 16 ms alpha 累计，并在完整呈现帧的顶层合成。其他 `.effect2` kind 或 operand 形式仍严格阻断。当前 snapshot schema 已随 Config transaction 硬切到 `astra.emu.minori.runtime_state.v23`，旧 schema 不做迁移或回退。
+`.effect2` 复用相同命令对象，但原程序把结果写入独立的第二 effect slot。IDA 已确认当前样本使用的两种形式为 `SnowH` 与 `fadeout`：`SnowH` 建立 50 个横向粒子，绑定 `snowS.png`、`snowM.png`、`snowL.png`；`fadeout` 只衰减第二 slot，不清除第一 slot。runtime 现按该合同保存独立状态、确定性随机数、定点位置、速度、方向、资源级别与 16 ms alpha 累计，并在完整呈现帧的顶层合成。其他 `.effect2` kind 或 operand 形式仍严格阻断。当前 snapshot schema 已硬切到 `astra.emu.minori.runtime_state.v24`，新增已确认消息 read identity（脚本 revision、source span、message id、text hash）；旧 schema 不做迁移或回退。
 
 `.panel` 已确认调用 `CMessagePanel`。第一个整数是 `!panel_Mode`，资源名以 `!panel_Filename` 保存；原程序的 mode 0 分支不会加载 panel asset，因此 runtime 清除当前可见 panel 并重发同一演出层；mode 1 分支选择 `msgPanel.png`，并把它作为最上层 resource-frame 与最后实际显示的 CrossFade2 frame 合成。mode 1 的 x 使用 panel 全局坐标，y 按 `viewport_height - image_height + 64` 计算；超出 viewport 的底部 64 px 由 renderer clip。mode 2–10、第二个过渡参数和自定义文件名仍缺完整语义，统一返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
 
@@ -73,7 +73,7 @@ Manager 只能接收 trace 和 presentation/audio command，不读取私有 VM �
 
 ## Save/Load
 
-Snapshot schema 当前为 `astra.emu.minori.runtime_state.v23`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、message voice URI/volume/pan、`Normal/Auto/Skip` play mode、Config 已应用值和页面内 draft、Control 与指针物理状态、两个 pragma gate、已提交 presentation layer、transition 配置、effect state、message panel、audio bus 的 URI/encoding/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
+Snapshot schema 当前为 `astra.emu.minori.runtime_state.v24`，包含 VM state、当前脚本 URI/hash、pc、message/backlog、已确认消息 read identity、message voice URI/volume/pan、`Normal/Auto/Skip` play mode、Config 已应用值和页面内 draft、Control 与指针物理状态、两个 pragma gate、已提交 presentation layer、transition 配置、effect state、message panel、audio bus 的 URI/encoding/loop/volume/pan/continuation 状态和 patch mount manifest。恢复时 host 必须重新从绑定 VFS 读取当前脚本并核对 hash，不能信任 snapshot 中的脚本身份。Snapshot 不包含解密 payload。
 
 Config 的跨 session 持久化不依赖 gameplay snapshot：显式 writable-file binding 开启后，family 以 `astra.emu.minori.config.v1` envelope 保存已应用配置，严格校验 case/package/profile identity，并以临时文件加 atomic replace 写回。缺少文件使用默认值；损坏、越界或 identity 漂移阻断。加载 gameplay slot 时保留当前 installation-scoped config，避免旧 slot 改写当前音量、阴影和 play-mode 偏好。
 
