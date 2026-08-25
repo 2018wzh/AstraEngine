@@ -7,6 +7,7 @@ mod image_container;
 mod paz;
 mod provider;
 mod runtime;
+mod save;
 mod script;
 mod text_surface;
 

@@ -1,9 +1,13 @@
 # Minori Implementation Checklist
 
-## 当前状态（2026-08-23）
+## 当前状态（2026-08-25）
+
+- 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、同步 translation Hook、CosmicText text layer 和 writable-file save/global-progress port；旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
+- 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
+- 视觉检查已覆盖标题、Memories、BGM、CG、回想、Config、backlog 和首路线选定 checkpoint；movie gallery 仍只有已验证 Memories 背景 + 有界文字层的严格近似，不能写成原版 parity。local-private global progress 不能证明四条路线自然解锁；正式人工音频 review、完整四路线和 Windows E3 仍未闭合。
 
 - 分支已同步到 Family ABI v9 基线。Minori 必须迁移为 `Native + MultiLayer`，并使用 Host-owned surface、同步 Hook 和 writable-file port；旧 scene、snapshot、text lease、session resource 与 budget API 已删除且不提供兼容层。
-- 当前分支已同步到可写 surface lease 修正 `3f9a771ac`。Minori dylib 使用公共 `FfiLegacyFamilyHostAdapter`，旧 root export 与 provider-result payload 已删除。resource scene 已通过公共 `CpuRendererProvider` 写入独占 Host surface，并提交四层 MultiLayer transaction；旧 storage tests 已改为同步 writable-file round-trip，既有 119 个 library tests 和新增 surface 用例通过。同步 Hook 与 CosmicText text surface 仍待迁移。现有 ABI v8 Headless 运行只作为历史回归基线；v9 plugin 尚未形成完整可运行或 E2 证据。
+- 历史 2026-08-23 ABI v9 迁移条目保留为过程记录；当前同步 Hook、CosmicText text surface 和真实 v9 E2 已由 2026-08-25 条目覆盖。
 - 授权样本仍是 8 个逻辑 archive、18 个物理 PAZ 文件和 14502 个 entry。`mov` role 含 5 个 RIFF/AVI；视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。纯 Rust reader 已完整解出 17480 个视频 sample，零长度 sample 按 AVI dropped frame 处理。
 - 签名 Minori dylib 已用同一 mount、plugin、Headless profile 和序列化物理输入连续跑完两次标题启动的真实路线。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入并最终从标题执行 Exit；snapshot round-trip、用户 save/restore、Config、backlog、真实影片、自然解锁和 31 个 checkpoint 均通过，diagnostic 为 0。新的同身份单次运行进一步推进 33490 fixed steps、呈现 34108 帧、消费 16951 条输入并通过 33 个 checkpoint，把首个 choice、实际 post-choice 分支和自然完成的不可跳过结局媒体纳入同一份通过报告。
 - 两次运行的 visual trace、runtime state trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。输入 hash 因 local-private session id 不同而不同，不作为跨 session 一致性结论。平台全局进度通过 ordered storage request/result 原子读写；两次均严格证明自然解锁数为 1。restore 会合并同一 provider session 已确认的全局进度，不允许旧 snapshot 回滚解锁。
@@ -39,8 +43,8 @@
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
 | Minori deterministic VM state 与 control-flow | E2 route | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie 和 end；未确认 operand 继续阻断 |
-| Minori runtime provider / `cdylib` ABI | 迁移中 | Family ABI v9 已 hard cut；共享 Host adapter、writable-file、resource image surface 与四层 `Native + MultiLayer` 已接通，library/all-target tests 已迁移，Hook/text surface 尚未迁移。ABI v8 的完整路线结果仅作历史回归基线 |
-| Minori 演出、系统 UI、完整模拟 | 未完成 | 当前首路线已自然结局并返回标题，required checkpoint 未见缺字、裁剪、拉伸、影片比例错误或图层残影；完整路线 E2 覆盖标题、Config、backlog、save/restore、choice、post-choice、影片、结局媒体和自然 unlock。原版 `Memories` 入口需第四条 clear route，正式 audio review、鉴赏完整入口、Config 控件和 Windows E3 仍开放 |
+| Minori runtime provider / `cdylib` ABI | E2 增量 | Family ABI v9 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺完整四路线与正式 Windows host evidence |
+| Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
 
 当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已完成八包 manifest v2 full verify：14502 个 entry、43818 次 range read、6624958365 个 decoded bytes。验证轮显式关闭 cache；启用 cache 的运行因平台缓存卷空间不足阻断，因此新的八包 cache identity 仍没有第二轮命中实证。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 

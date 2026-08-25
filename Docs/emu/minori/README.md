@@ -1,6 +1,6 @@
 # AstraEMU Minori
 
-Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已接入 typed IR、已确认控制流、消息、选择、stage/character、音频、影片、系统页、save/restore 和可序列化状态；签名动态 provider 已用真实八包跑完首条路线并返回标题。`.char trans/.char vis` 的动态立绘合同已有合成 Headless GPU 视觉证据，但真实脚本没有这两类命令。同一 clean Release identity 的三次十分钟 120 Hz GPU E2 已通过；完整鉴赏、Config 控件、正式音频听审和 Windows E3 仍未完成。
+Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-minori`、公共 VFS/support 层、通用 `astra-emu-cli vfs --family minori` 和独立研究工具 `astra-emu-minori-cli`。runtime 已接入 typed IR、已确认控制流、消息、选择、stage/character、音频、影片、系统页、save/restore 和可序列化状态；签名动态 provider 已用真实八包跑完首条路线并返回标题。`.char trans/.char vis` 的动态立绘合同已有合成 Headless GPU 视觉证据，但真实脚本没有这两类命令。同一 clean Release identity 的三次十分钟 120 Hz GPU E2 已通过；完整鉴赏、正式音频听审和 Windows E3 仍未完成。Config 已有行为级 Headless E2，但还没有正式人工音频或 Windows E3 证据。
 
 ## 阅读顺序
 
@@ -9,6 +9,7 @@ Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-mi
 | [source-inventory.md](source-inventory.md) | 参考目录、游戏样本和可用工具 |
 | [research-sources.md](research-sources.md) | 资料来源、revision、许可证和适用边界 |
 | [porting-log.md](porting-log.md) | 按日期维护的移植事实、测试和 blocker |
+| [save-load-e2.md](save-load-e2.md) | ABI v9 writable-file save/load 的 Headless E2 证据 |
 | [archive-format.md](archive-format.md) | PAZ、MYS、补丁包和 key 外置规则 |
 | [paz.md](paz.md) | PAZ TOC、压缩、key 输入和诊断细节 |
 | [script-format.md](script-format.md) | `.sc`、`.mys`、`.acr` 的脚本/文本关系 |

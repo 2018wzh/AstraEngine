@@ -241,7 +241,7 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
                 .saturating_mul(1_000_000)
                 .saturating_add(delta_ns.saturating_sub(1))
                 / delta_ns.max(1);
-            PendingWait::DueStep(step.saturating_add(ticks.max(1)))
+            PendingWait::Time(step.saturating_add(ticks.max(1)))
         }
         RuntimeLiveWaitKind::Input { keys } => PendingWait::Input(keys),
         RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::Media(media_id),
@@ -954,7 +954,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         if !driver.terminal && !resource_activity_seen {
             return Err("ASTRA_EMU_NATIVE_PREWARM_RESOURCE_ACTIVITY_MISSING".into());
         }
-        tracing::info!(
+        tracing::debug!(
             event = "astra.emu.native_prewarm_completed",
             fixed_step = driver.fixed_step,
             prewarm_steps,
@@ -1260,6 +1260,18 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             .family_options
             .insert("astra.hosted_trace_profile".into(), "evidence".into());
     }
+    tracing::info!(
+        event = "astra_emu_cli_headless_profile_selected",
+        family = launch.family_id.as_str(),
+        launch_mode = ?launch.launch_mode,
+        launch_entry_explicit = probe
+            .runtime
+            .family_options
+            .get("astra.launch_entry_explicit")
+            .map(String::as_str)
+            .unwrap_or("missing"),
+        "selected the explicit family launch profile"
+    );
     let stage_width = probe
         .runtime
         .family_options
@@ -2381,6 +2393,10 @@ fn probe_profile(
                         "astra.launch_entry_explicit".into(),
                         launch_entry_explicit(request.launch_mode).into(),
                     ),
+                    (
+                        "astra.provider.storage".into(),
+                        "astra.writable_file.v1".into(),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -2567,6 +2583,7 @@ struct CheckpointFrame {
 #[serde(rename_all = "snake_case")]
 enum PendingWait {
     DueStep(u64),
+    Time(u64),
     Input(Vec<String>),
     Presentation,
     Media(String),
@@ -5416,6 +5433,13 @@ impl<'a> RuntimeDriver<'a> {
                 PendingWait::DueStep(due) if *due <= next_step => {
                     Some((token.clone(), BTreeSet::new()))
                 }
+                // Minori's Escape menu is allowed to interrupt a message
+                // timer. Keep this distinct from a generic frame/presentation
+                // wait: those waits still require their own completion and
+                // cannot be silently cancelled by system UI input.
+                PendingWait::Time(due) if *due <= next_step || pressed_keys.contains("escape") => {
+                    Some((token.clone(), BTreeSet::new()))
+                }
                 PendingWait::Input(keys) => {
                     let consumed = keys
                         .iter()
@@ -5495,6 +5519,17 @@ impl<'a> RuntimeDriver<'a> {
                 max_trace_entries: 100_000,
             },
         })?;
+        tracing::debug!(
+            target: "astra_emu_cli::runner",
+            event = "astra_emu_headless_provider_step_result",
+            fixed_step = next_step,
+            status = output.status.as_str(),
+            live_scene_count = output.live.scenes.len(),
+            live_layer_count = output.live.layers.len(),
+            live_resource_scene_count = output.live.resource_scenes.len(),
+            wait_count = output.live.waits.len(),
+            "received the bounded family provider step result"
+        );
         let runtime_duration_ns = elapsed_ns(runtime_started)?;
         tracing::trace!(
             event = "astra.emu.native_provider_step_timing",
@@ -6684,7 +6719,12 @@ fn retain_unconsumed_input_edges(
 ) -> Vec<LegacyInputEdge> {
     edges
         .into_iter()
-        .filter(|edge| !consumed_keys.contains(&edge.control))
+        // Escape is both a normal wait-completion key and the host-owned
+        // system-menu shortcut.  Keep its edge visible to the family even
+        // when it completes an input wait; the family validates the matching
+        // await token before opening its system page.  Other controls remain
+        // consumed exactly once by the await owner.
+        .filter(|edge| !consumed_keys.contains(&edge.control) || edge.control == "escape")
         .collect()
 }
 
@@ -7169,6 +7209,53 @@ mod native_tests {
 
         assert_eq!(retained.len(), 1);
         assert_eq!(retained[0].control, "arrow_left");
+    }
+
+    #[test]
+    fn escape_remains_visible_when_it_completes_an_input_wait() {
+        let edges = vec![
+            LegacyInputEdge {
+                control: "escape".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 1,
+            },
+            LegacyInputEdge {
+                control: "escape".into(),
+                pressed: false,
+                value: 0.0,
+                sequence: 2,
+            },
+        ];
+
+        let retained = retain_unconsumed_input_edges(edges, &BTreeSet::from(["escape".into()]));
+
+        assert_eq!(retained.len(), 2);
+        assert!(retained.iter().all(|edge| edge.control == "escape"));
+    }
+
+    #[test]
+    fn minori_time_wait_can_be_cancelled_by_escape_for_system_menu() {
+        let (token, condition) = live_wait_condition(
+            RuntimeLiveWait {
+                sequence: 1,
+                token_id: "time".into(),
+                kind: RuntimeLiveWaitKind::Time {
+                    milliseconds: 2_000,
+                },
+            },
+            10,
+            16_666_667,
+        );
+        assert_eq!(token, "time");
+        assert!(matches!(condition, PendingWait::Time(due) if due > 10));
+
+        let pressed = BTreeSet::from(["escape".to_owned()]);
+        let ready = matches!(
+            condition,
+            PendingWait::Time(due) if due <= 10 || pressed.contains("escape")
+        );
+        assert!(ready);
     }
 
     #[test]

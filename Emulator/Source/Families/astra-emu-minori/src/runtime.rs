@@ -49,6 +49,8 @@ const MINORI_AXIS_SCROLL_MAX_SPEED_TENTHS: i32 = 10_000;
 const MINORI_CONFIG_TEST_BGM_STREAM_ID: u32 = 0xffff_ff00;
 const MINORI_CONFIG_TEST_VOICE_STREAM_ID: u32 = 0xffff_ff01;
 const MINORI_CONFIG_TEST_SE_STREAM_ID: u32 = 0xffff_ff02;
+const MINORI_SAVE_PAGE_COUNT: u32 = 10;
+pub(crate) const MINORI_BGM_STREAM_ID: u32 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MinoriRuntimeState {
@@ -1057,6 +1059,7 @@ impl MinoriVm {
             .ok_or(MinoriRuntimeError::Backlog)?
             .voice
             .clone();
+        let voice = voice.filter(|voice| message_voice_enabled(&self.state, voice));
         let mut commands = Vec::new();
         if self
             .state
@@ -1127,6 +1130,44 @@ impl MinoriVm {
         }
         self.state.system_ui.page = page;
         self.state.system_ui.focus_index = focus_index;
+        Ok(())
+    }
+
+    pub fn open_save_page(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.terminal
+            || self.state.system_ui.page != MinoriSystemPage::None
+            || self.state.wait.is_none()
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.page = MinoriSystemPage::Save;
+        self.state.system_ui.focus_index = 0;
+        Ok(())
+    }
+
+    pub fn open_load_page(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.terminal
+            || self.state.system_ui.page != MinoriSystemPage::None
+            || self.state.wait.is_none()
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.page = MinoriSystemPage::Load;
+        self.state.system_ui.focus_index = 0;
+        Ok(())
+    }
+
+    pub fn close_gameplay_system_page(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.terminal
+            || !matches!(
+                self.state.system_ui.page,
+                MinoriSystemPage::Save | MinoriSystemPage::Load
+            )
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.page = MinoriSystemPage::None;
+        self.state.system_ui.focus_index = 0;
         Ok(())
     }
 
@@ -1355,6 +1396,71 @@ impl MinoriVm {
         Ok(commands)
     }
 
+    /// Start a verified BGM from the Memories music page. The gallery uses the
+    /// same stream contract as `.playbgm`: one looped OGG stream, with the
+    /// previous stream stopped before the new resource is loaded. The caller
+    /// still validates the resource against the mounted VFS before publishing
+    /// the commands.
+    pub fn gallery_bgm_play(
+        &mut self,
+        resource_uri: &str,
+    ) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::GalleryBgm
+            || !resource_uri.starts_with("minori:/bgm/")
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        let resource = &resource_uri["minori:/bgm/".len()..];
+        validate_audio_relative_path(resource)?;
+        let mut commands = Vec::new();
+        if self
+            .state
+            .audio
+            .get(&MINORI_BGM_STREAM_ID)
+            .is_some_and(|current| current.playing)
+        {
+            commands.push(MinoriAudioCommand::Stop {
+                sequence: next_effect_sequence(&mut self.state)?,
+                stream_id: MINORI_BGM_STREAM_ID,
+                fade_ms: 0,
+            });
+        }
+        append_audio_load_and_play(
+            &mut self.state,
+            &mut commands,
+            MINORI_BGM_STREAM_ID,
+            resource_uri,
+            1000,
+            0,
+            true,
+            0,
+        )?;
+        self.state.audio.insert(
+            MINORI_BGM_STREAM_ID,
+            MinoriAudioState {
+                bus: "bgm".into(),
+                encoding: MinoriAudioEncoding::Ogg,
+                resource_uri: resource_uri.into(),
+                looped: true,
+                volume_milli: 1000,
+                pan_milli: 0,
+                playing: true,
+                continuation_pts: 0,
+            },
+        );
+        Ok(commands)
+    }
+
+    pub fn gallery_bgm_stop(&mut self) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::GalleryBgm {
+            return Err(MinoriRuntimeError::State);
+        }
+        stop_audio_stream(&mut self.state, MINORI_BGM_STREAM_ID, 0).map(|event| match event {
+            Some(MinoriVmEvent::Audio { commands }) => commands,
+            Some(_) | None => Vec::new(),
+        })
+    }
+
     pub fn config_test_audio_commands(
         &mut self,
         bus: MinoriConfigAudioBus,
@@ -1439,6 +1545,52 @@ impl MinoriVm {
         } else {
             current.checked_add(1).unwrap_or(0) % item_count
         };
+        Ok(())
+    }
+
+    pub fn set_system_focus(
+        &mut self,
+        focus_index: u32,
+        item_count: u32,
+    ) -> Result<(), MinoriRuntimeError> {
+        if self.state.system_ui.page == MinoriSystemPage::None
+            || item_count == 0
+            || focus_index >= item_count
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.focus_index = focus_index;
+        Ok(())
+    }
+
+    pub fn move_save_page(&mut self, direction: i32) -> Result<(), MinoriRuntimeError> {
+        if !matches!(
+            self.state.system_ui.page,
+            MinoriSystemPage::Save | MinoriSystemPage::Load
+        ) || direction == 0
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        let page = self.state.system_ui.focus_index / 10;
+        let slot = self.state.system_ui.focus_index % 10;
+        let page = if direction < 0 {
+            page.checked_sub(1).unwrap_or(MINORI_SAVE_PAGE_COUNT - 1)
+        } else {
+            page.checked_add(1).unwrap_or(0) % MINORI_SAVE_PAGE_COUNT
+        };
+        self.state.system_ui.focus_index = page * 10 + slot;
+        Ok(())
+    }
+
+    pub fn set_save_focus(&mut self, slot: u32) -> Result<(), MinoriRuntimeError> {
+        if !matches!(
+            self.state.system_ui.page,
+            MinoriSystemPage::Save | MinoriSystemPage::Load
+        ) || slot >= MINORI_SAVE_PAGE_COUNT * 10
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.focus_index = slot;
         Ok(())
     }
 
@@ -4804,19 +4956,22 @@ fn execute_message(
         .as_ref()
         .map(|value| Hash256::from_sha256(value.as_bytes()));
     let voice = voice.as_deref().map(parse_message_voice).transpose()?;
+    let voice_playback_enabled = voice
+        .as_ref()
+        .is_none_or(|voice| message_voice_enabled(state, voice));
     let mut audio_commands = Vec::new();
-    if state
+    let voice_is_playing = state
         .audio
         .get(&VOICE_STREAM_ID)
-        .is_some_and(|current| current.playing)
-    {
+        .is_some_and(|current| current.playing);
+    if voice_is_playing {
         audio_commands.push(MinoriAudioCommand::Stop {
             sequence: next_effect_sequence(state)?,
             stream_id: VOICE_STREAM_ID,
             fade_ms: 0,
         });
     }
-    if let Some(voice) = &voice {
+    if let Some(voice) = voice.as_ref().filter(|_| voice_playback_enabled) {
         append_audio_load_and_play(
             state,
             &mut audio_commands,
@@ -4840,8 +4995,13 @@ fn execute_message(
                 continuation_pts: 0,
             },
         );
-    } else if let Some(current) = state.audio.get_mut(&VOICE_STREAM_ID) {
-        current.playing = false;
+    } else if voice.is_none()
+        || !voice_playback_enabled
+        || state.system_ui.config.stop_voice_at_next_message
+    {
+        if let Some(current) = state.audio.get_mut(&VOICE_STREAM_ID) {
+            current.playing = false;
+        }
     }
     append_backlog_entry(
         state,
@@ -4919,6 +5079,28 @@ fn parse_message_voice(token: &str) -> Result<MinoriMessageVoice, MinoriRuntimeE
         volume_milli: spec.volume_percent * 10,
         pan_milli: spec.pan_percent * 10,
     })
+}
+
+fn message_voice_enabled(state: &MinoriRuntimeState, voice: &MinoriMessageVoice) -> bool {
+    let Some(name) = voice.resource_uri.strip_prefix("minori:/voice/") else {
+        return true;
+    };
+    let prefix = name.split('-').next().unwrap_or_default();
+    let index = match prefix {
+        "ren" => 0,
+        "sui" => 1,
+        "aya" => 2,
+        "tou" => 3,
+        "mot" => 4,
+        _ => return true,
+    };
+    state
+        .system_ui
+        .config
+        .character_voice_enabled
+        .get(index)
+        .copied()
+        .unwrap_or(true)
 }
 
 fn append_backlog_entry(
@@ -5118,6 +5300,55 @@ mod tests {
             seed,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn gallery_bgm_playback_uses_the_shared_looped_ogg_stream() {
+        let mut vm = firefly_vm(b".end\r\n", 7);
+        vm.begin_title_launch().unwrap();
+        vm.set_system_page(MinoriSystemPage::GalleryBgm, 0).unwrap();
+
+        let first = vm.gallery_bgm_play("minori:/bgm/BGM001.ogg").unwrap();
+        assert!(matches!(first.as_slice(), [
+            MinoriAudioCommand::LoadResource {
+                stream_id: MINORI_BGM_STREAM_ID,
+                encoding: MinoriAudioEncoding::Ogg,
+                resource_uri,
+                ..
+            },
+            MinoriAudioCommand::Play {
+                stream_id: MINORI_BGM_STREAM_ID,
+                repeat: true,
+                ..
+            }
+        ] if resource_uri == "minori:/bgm/BGM001.ogg"));
+        assert_eq!(
+            vm.state().audio[&MINORI_BGM_STREAM_ID].resource_uri,
+            "minori:/bgm/BGM001.ogg"
+        );
+
+        let second = vm.gallery_bgm_play("minori:/bgm/BGM002.ogg").unwrap();
+        assert!(matches!(
+            second.first(),
+            Some(MinoriAudioCommand::Stop {
+                stream_id: MINORI_BGM_STREAM_ID,
+                ..
+            })
+        ));
+        assert_eq!(
+            vm.state().audio[&MINORI_BGM_STREAM_ID].resource_uri,
+            "minori:/bgm/BGM002.ogg"
+        );
+
+        let stopped = vm.gallery_bgm_stop().unwrap();
+        assert!(matches!(
+            stopped.as_slice(),
+            [MinoriAudioCommand::Stop {
+                stream_id: MINORI_BGM_STREAM_ID,
+                ..
+            }]
+        ));
+        assert!(!vm.state().audio[&MINORI_BGM_STREAM_ID].playing);
     }
 
     #[test]
@@ -6935,6 +7166,38 @@ mod tests {
             }]
         ));
         assert!(!vm.state().audio[&VOICE_STREAM_ID].playing);
+    }
+
+    #[test]
+    fn character_voice_toggle_keeps_backlog_identity_but_suppresses_playback() {
+        let source = b".message 1 aya-A02-0003 speaker one\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let mut state = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        state.system_ui.config.character_voice_enabled[2] = false;
+        vm.restore_state(&postcard::to_allocvec(&state).unwrap())
+            .unwrap();
+        let Some(MinoriVmEvent::Message { audio_commands, .. }) = vm.step(1, 4).unwrap() else {
+            panic!("expected message")
+        };
+        assert!(audio_commands.is_empty());
+        assert_eq!(
+            vm.state()
+                .message
+                .as_ref()
+                .unwrap()
+                .voice
+                .as_ref()
+                .unwrap()
+                .resource_uri,
+            "minori:/voice/aya-A02-0003"
+        );
     }
 
     #[test]

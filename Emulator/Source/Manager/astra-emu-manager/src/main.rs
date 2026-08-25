@@ -181,6 +181,7 @@ struct ActiveRuntimeSession {
 
 enum PendingWait {
     DueStep(u64),
+    Time(u64),
     Input(BTreeSet<String>),
     PresentationFence,
     MediaFence(String),
@@ -477,6 +478,10 @@ impl RuntimeBridge {
             .iter()
             .filter(|(_, wait)| match wait {
                 PendingWait::DueStep(due) => *due <= next_step,
+                // Escape is the Minori system-menu shortcut and may interrupt
+                // a message timer. Keep frame/presentation waits separate so
+                // they cannot be cancelled by unrelated UI input.
+                PendingWait::Time(due) => *due <= next_step || input_controls.contains("escape"),
                 PendingWait::Input(keys) => {
                     keys.iter().any(|key| input_controls.contains(key.as_str()))
                 }
@@ -1218,7 +1223,7 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
         }
         RuntimeLiveWaitKind::Time { milliseconds } => {
             let delay_ns = u64::from(milliseconds).saturating_mul(1_000_000);
-            PendingWait::DueStep(step.saturating_add(delay_ns.div_ceil(delta_ns).max(1)))
+            PendingWait::Time(step.saturating_add(delay_ns.div_ceil(delta_ns).max(1)))
         }
         RuntimeLiveWaitKind::Input { keys } => PendingWait::Input(keys.into_iter().collect()),
         RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::MediaFence(media_id),

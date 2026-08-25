@@ -30,6 +30,11 @@ use astra_media_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::save::{
+    decode as decode_save, encode as encode_save, slot_path, slot_temporary_path,
+    MinoriSaveEnvelope, MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT,
+    MINORI_SAVE_SCHEMA,
+};
 use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
 };
@@ -79,9 +84,102 @@ const MINORI_BACKLOG_BALL_TEXTURE_ID: u32 = 20_002;
 const MINORI_CONFIG_KNOB_TEXTURE_ID: u32 = 20_010;
 const MINORI_CONFIG_CHECKMARK_TEXTURE_ID: u32 = 20_011;
 const MINORI_CONFIG_CIRCLE_TEXTURE_ID: u32 = 20_012;
+const MINORI_GALLERY_CG_THUMB_TEXTURE_BASE: u32 = 21_000;
 const MINORI_TITLE_BASE_ITEM_COUNT: u32 = 4;
 const MINORI_TITLE_MEMORIES_ITEM_COUNT: u32 = 5;
 const MINORI_MEMORIES_ITEM_COUNT: u32 = 5;
+const MINORI_GALLERY_CG_PAGE_COUNT: u32 = 12;
+const MINORI_GALLERY_BGM_TRACK_COUNT: u32 = 47;
+const MINORI_GALLERY_REPLAY_PAGE_COUNT: u32 = 4;
+const MINORI_GALLERY_MOVIE_COUNT: u32 = 4;
+const MINORI_GALLERY_CG_PAGE_URIS: [&str; 12] = [
+    "minori:/sys/cgpage001.png",
+    "minori:/sys/cgpage002.png",
+    "minori:/sys/cgpage003.png",
+    "minori:/sys/cgpage004.png",
+    "minori:/sys/cgpage005.png",
+    "minori:/sys/cgpage006.png",
+    "minori:/sys/cgpage007.png",
+    "minori:/sys/cgpage008.png",
+    "minori:/sys/cgpage009.png",
+    "minori:/sys/cgpage010.png",
+    "minori:/sys/cgpage011.png",
+    "minori:/sys/cgpage012.png",
+];
+const MINORI_GALLERY_BGM_PAGE_URIS: [&str; 3] = [
+    "minori:/sys/musicPage1.png",
+    "minori:/sys/musicPage2.png",
+    "minori:/sys/musicPage3.png",
+];
+const MINORI_GALLERY_BGM_TRACK_URIS: [&str; 47] = [
+    "minori:/bgm/BGM001.ogg",
+    "minori:/bgm/BGM002.ogg",
+    "minori:/bgm/BGM003.ogg",
+    "minori:/bgm/BGM004.ogg",
+    "minori:/bgm/BGM005.ogg",
+    "minori:/bgm/BGM006.ogg",
+    "minori:/bgm/BGM007.ogg",
+    "minori:/bgm/BGM008.ogg",
+    "minori:/bgm/BGM009.ogg",
+    "minori:/bgm/BGM010.ogg",
+    "minori:/bgm/BGM011.ogg",
+    "minori:/bgm/BGM012.ogg",
+    "minori:/bgm/BGM013.ogg",
+    "minori:/bgm/BGM014.ogg",
+    "minori:/bgm/BGM015.ogg",
+    "minori:/bgm/BGM016.ogg",
+    "minori:/bgm/BGM017.ogg",
+    "minori:/bgm/BGM018.ogg",
+    "minori:/bgm/BGM019.ogg",
+    "minori:/bgm/BGM020.ogg",
+    "minori:/bgm/BGM021.ogg",
+    "minori:/bgm/BGM022.ogg",
+    "minori:/bgm/BGM023.ogg",
+    "minori:/bgm/BGM024.ogg",
+    "minori:/bgm/BGM031.ogg",
+    "minori:/bgm/BGM032.ogg",
+    "minori:/bgm/BGM033.ogg",
+    "minori:/bgm/BGM034.ogg",
+    "minori:/bgm/BGM035.ogg",
+    "minori:/bgm/BGM036.ogg",
+    "minori:/bgm/BGM037.ogg",
+    "minori:/bgm/BGM038.ogg",
+    "minori:/bgm/BGM041.ogg",
+    "minori:/bgm/BGM042.ogg",
+    "minori:/bgm/BGM043.ogg",
+    "minori:/bgm/BGM051.ogg",
+    "minori:/bgm/BGM052.ogg",
+    "minori:/bgm/BGM061.ogg",
+    "minori:/bgm/BGM062.ogg",
+    "minori:/bgm/BGM071.ogg",
+    "minori:/bgm/BGM072.ogg",
+    "minori:/bgm/BGM073.ogg",
+    "minori:/bgm/BGM074.ogg",
+    "minori:/bgm/BGM081.ogg",
+    "minori:/bgm/BGM082.ogg",
+    "minori:/bgm/BGM083.ogg",
+    "minori:/bgm/BGM084.ogg",
+];
+const MINORI_GALLERY_REPLAY_PAGE_URIS: [&str; 4] = [
+    "minori:/sys/flash0.png",
+    "minori:/sys/flash1.png",
+    "minori:/sys/flash2.png",
+    "minori:/sys/flash3.png",
+];
+const MINORI_GALLERY_REPLAY_SCRIPT_TARGETS: [&str; 4] = [
+    "fb_ren_04.sc",
+    "fb_aya_04.sc",
+    "fb_sui_04.sc",
+    "fb_tou_04.sc",
+];
+const MINORI_GALLERY_MOVIE_SCRIPT_TARGETS: [&str; 4] = [
+    "fb_aya_12.sc",
+    "fb_ren_16.sc",
+    "fb_sui_12.sc",
+    "fb_tou_12.sc",
+];
+const MINORI_GALLERY_MOVIE_LABELS: [&str; 4] =
+    ["ed_ayame.avi", "ed_ren.avi", "ed_sui.avi", "ed_tohka.avi"];
 const MINORI_GLOBAL_PROGRESS_OPTION: &str = "astra.provider.storage";
 const MINORI_WRITABLE_FILE_BINDING_ID: &str = "astra.writable_file.v1";
 const MINORI_GLOBAL_PROGRESS_DIRECTORY: &str = "minori";
@@ -291,7 +389,11 @@ fn choice_input_keys() -> Vec<String> {
 }
 
 const MINORI_MESSAGE_INPUT_CONTROLS: [&str; 3] = ["enter", "space", "pointer.primary"];
-const MINORI_MESSAGE_HOST_AWAIT_CONTROLS: [&str; 2] = ["enter", "space"];
+// Escape is a host-owned system-menu shortcut, but it must also be present in
+// the wait contract so the host removes the active message wait in the same
+// tick that the family opens the save page.  The edge remains visible to the
+// family (see the CLI wait router), where it is consumed as the menu action.
+const MINORI_MESSAGE_HOST_AWAIT_CONTROLS: [&str; 3] = ["enter", "space", "escape"];
 
 fn minori_message_presentation(
     stage_size: Option<(u32, u32)>,
@@ -337,9 +439,45 @@ fn minori_message_presentation(
     Ok(presentation)
 }
 
+fn minori_gallery_movie_presentation(
+    stage_size: Option<(u32, u32)>,
+) -> Result<LegacyTextPresentationV1, LegacyProviderError> {
+    if stage_size != Some((1280, 720)) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_MOVIE_STAGE_IDENTITY",
+            "the verified movie gallery layout requires the 1280x720 stage",
+        ));
+    }
+    let presentation = LegacyTextPresentationV1 {
+        layout_id: "minori.gallery.movie".into(),
+        language: "ja-JP".into(),
+        font_families: vec!["Noto Sans JP".into()],
+        body: LegacyTextRegionV1 {
+            x: 160,
+            y: 112,
+            width: 520,
+            height: 280,
+            font_size: 32.0,
+            line_height: 52.0,
+            max_lines: 4,
+            horizontal_alignment: LegacyTextHorizontalAlignmentV1::Start,
+        },
+        speaker: None,
+        rgba: [255, 255, 255, 255],
+        outline: Some(LegacyTextOutlineV1 {
+            radius: 2,
+            rgba: [0, 0, 0, 192],
+        }),
+    };
+    presentation.validate()?;
+    Ok(presentation)
+}
+
 struct MinoriSession {
     #[allow(dead_code)]
     case_fingerprint: Hash256,
+    package_hash: Hash256,
+    profile_fingerprint: Hash256,
     mount_set_id: String,
     fixed_delta_ns: u64,
     session_seed: u64,
@@ -356,6 +494,7 @@ struct MinoriSession {
     reported_gallery_unlock_count: Option<usize>,
     reported_choice_active: Option<bool>,
     global_progress: MinoriGlobalProgressSession,
+    save_slots: BTreeSet<u32>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
     last_layer_sequence: u64,
@@ -510,6 +649,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             ));
         }
         validate_script_uri(&request.script_uri)?;
+        let profile_fingerprint = profile_fingerprint(ctx, &request)?;
         let bytes =
             self.vfs()?
                 .read_file(&ctx.mount_set_id, &request.script_uri, MAX_SCRIPT_BYTES)?;
@@ -529,6 +669,17 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 ));
             }
         };
+        tracing::debug!(
+            target: "astra_emu_minori::runtime",
+            event = "astra_emu_minori_launch_profile_received",
+            launch_marker = request
+                .family_options
+                .get("astra.launch_entry_explicit")
+                .map(String::as_str)
+                .unwrap_or("missing"),
+            title_launch,
+            "received the explicit Minori launch profile"
+        );
         let mut vm = MinoriVm::new(
             request.script_uri,
             script_hash,
@@ -538,6 +689,13 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         .map_err(runtime_error)?;
         if title_launch {
             vm.begin_title_launch().map_err(runtime_error)?;
+            tracing::debug!(
+                target: "astra_emu_minori::system_ui",
+                event = "astra_emu_minori_title_session_initialized",
+                page = system_page_name(vm.state().system_ui.page),
+                terminal = vm.state().terminal,
+                "initialized the title session without executing the entry script"
+            );
         }
         let stage_size = match (
             request.family_options.get("astra.stage_width"),
@@ -599,6 +757,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             id.0.clone(),
             MinoriSession {
                 case_fingerprint: request.case_fingerprint,
+                package_hash: ctx.package_hash,
+                profile_fingerprint,
                 mount_set_id: ctx.mount_set_id.clone(),
                 fixed_delta_ns: request.fixed_delta_ns,
                 session_seed: request.session_seed,
@@ -619,6 +779,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     loaded: !global_progress_enabled,
                     persisted_unlocks: Vec::new(),
                 },
+                save_slots: BTreeSet::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
                         MinoriTextSurfaceRenderer::new(width, height)
@@ -659,6 +820,33 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
     ) -> Result<LegacyShutdownReport, LegacyProviderError> {
         self.shutdown_session_impl(ctx, session_id)
     }
+}
+
+fn profile_fingerprint(
+    ctx: &LegacyRuntimeHostCtx,
+    request: &LegacyOpenRequest,
+) -> Result<Hash256, LegacyProviderError> {
+    // The launch-mode marker selects whether the family opens its title or
+    // gameplay entry; it is not part of the save-compatible installation
+    // profile. A save made from the direct gameplay launch must remain
+    // loadable after the host starts the same case through the title screen.
+    let stable_family_options = request
+        .family_options
+        .iter()
+        .filter(|(key, _)| key.as_str() != "astra.launch_entry_explicit")
+        .collect::<Vec<_>>();
+    let identity = (
+        &ctx.profile,
+        &request.compatibility_profile,
+        stable_family_options,
+    );
+    let bytes = postcard::to_allocvec(&identity).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_PROFILE_IDENTITY",
+            "Minori profile identity could not be encoded",
+        )
+    })?;
+    Ok(Hash256::from_sha256(&bytes))
 }
 
 impl MinoriRuntimeProvider {
@@ -771,8 +959,109 @@ impl MinoriRuntimeProvider {
                 .map_err(runtime_error)?;
             return system_ui_output(session, &vfs, &input, restore_audio);
         }
+        let save_menu_pressed = input
+            .input_edges
+            .iter()
+            .any(|edge| edge.pressed && edge.control == "escape");
+        if save_menu_pressed && session.vm.state().system_ui.page == MinoriSystemPage::None {
+            let escape_wait_completion = if input.await_results.len() == 1 {
+                let wait_token = session.vm.state().wait.as_ref().map(wait_token);
+                let result = &input.await_results[0];
+                wait_token.is_some_and(|token| {
+                    result.token_id == token
+                        && result.status == "completed"
+                        && result.payload_len == 0
+                })
+            } else {
+                false
+            };
+            if input.input_edges.iter().filter(|edge| edge.pressed).count() != 1
+                || (!input.await_results.is_empty() && !escape_wait_completion)
+                || !input.provider_results.is_empty()
+            {
+                session.poisoned = true;
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_SAVE_INPUT_AMBIGUOUS",
+                    "save menu opening cannot share a tick with another completion or input",
+                ));
+            }
+            // Escape is also a valid completion for the current message/input
+            // wait.  Consume only that exact owner-side completion before
+            // entering the system page; unrelated results remain blocking.
+            if escape_wait_completion {
+                input.await_results.clear();
+            }
+            match session.vm.state().wait.as_ref() {
+                Some(MinoriWaitState::Input { .. } | MinoriWaitState::Time { .. }) => {}
+                Some(MinoriWaitState::Choice { .. }) => {
+                    session.poisoned = true;
+                    return Err(invalid(
+                        "ASTRA_EMU_MINORI_SAVE_CHOICE_ACTIVE",
+                        "save menu cannot open while a choice is active",
+                    ));
+                }
+                Some(MinoriWaitState::Media { .. }) => {
+                    session.poisoned = true;
+                    return Err(invalid(
+                        "ASTRA_EMU_MINORI_SAVE_MEDIA_ACTIVE",
+                        "save menu cannot open while a movie is active",
+                    ));
+                }
+                Some(MinoriWaitState::AxisScroll { .. })
+                | Some(MinoriWaitState::LinearScroll { .. })
+                | Some(MinoriWaitState::CharacterTransition { .. })
+                | Some(MinoriWaitState::Presentation { .. })
+                | Some(MinoriWaitState::Provider { .. })
+                | None => {
+                    session.poisoned = true;
+                    return Err(invalid(
+                        "ASTRA_EMU_MINORI_SAVE_WAIT_STATE",
+                        "save menu requires a stable message wait",
+                    ));
+                }
+            }
+            session.vm.open_save_page().map_err(runtime_error)?;
+            refresh_save_slots(
+                host_services
+                    .as_ref()
+                    .ok_or_else(|| {
+                        invalid(
+                            "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                            "save menu requires ABI v9 Host services",
+                        )
+                    })?
+                    .writable_files
+                    .as_ref(),
+                session_id,
+                session,
+            )?;
+            session
+                .vm
+                .advance_system_tick(input.tick_index)
+                .map_err(runtime_error)?;
+            return system_ui_output(session, &vfs, &input, restore_audio);
+        }
         let mut started_game = false;
         if session.vm.state().system_ui.page != MinoriSystemPage::None {
+            if matches!(
+                session.vm.state().system_ui.page,
+                MinoriSystemPage::Save | MinoriSystemPage::Load
+            ) {
+                refresh_save_slots(
+                    host_services
+                        .as_ref()
+                        .ok_or_else(|| {
+                            invalid(
+                                "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                                "save/load pages require ABI v9 Host services",
+                            )
+                        })?
+                        .writable_files
+                        .as_ref(),
+                    session_id,
+                    session,
+                )?;
+            }
             let backlog_replay_completion = if session.vm.state().system_ui.page
                 == MinoriSystemPage::Backlog
                 && input.provider_results.is_empty()
@@ -798,7 +1087,7 @@ impl MinoriRuntimeProvider {
                 session.poisoned = true;
                 return Err(invalid(
                     "ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED",
-                    "system UI cannot consume an await or provider result",
+                    "system UI cannot consume a result",
                 ));
             }
             if backlog_replay_completion {
@@ -823,7 +1112,124 @@ impl MinoriRuntimeProvider {
                 input_edge_count = input.input_edges.len(),
                 "applied bounded system UI input"
             );
+            if let MinoriSystemUiAction::GalleryReplayStart(_)
+            | MinoriSystemUiAction::GalleryMovieStart(_) = action
+            {
+                let (target, page) = match action {
+                    MinoriSystemUiAction::GalleryReplayStart(index) => (
+                        MINORI_GALLERY_REPLAY_SCRIPT_TARGETS
+                            .get(usize::try_from(index).map_err(|_| {
+                                invalid(
+                                    "ASTRA_EMU_MINORI_GALLERY_REPLAY_FOCUS",
+                                    "flashback gallery focus cannot be represented",
+                                )
+                            })?)
+                            .copied()
+                            .ok_or_else(|| {
+                                invalid(
+                                    "ASTRA_EMU_MINORI_GALLERY_REPLAY_FOCUS",
+                                    "flashback gallery focus is outside the verified range",
+                                )
+                            })?,
+                        MinoriSystemPage::GalleryReplay,
+                    ),
+                    MinoriSystemUiAction::GalleryMovieStart(index) => (
+                        MINORI_GALLERY_MOVIE_SCRIPT_TARGETS
+                            .get(usize::try_from(index).map_err(|_| {
+                                invalid(
+                                    "ASTRA_EMU_MINORI_GALLERY_MOVIE_FOCUS",
+                                    "movie gallery focus cannot be represented",
+                                )
+                            })?)
+                            .copied()
+                            .ok_or_else(|| {
+                                invalid(
+                                    "ASTRA_EMU_MINORI_GALLERY_MOVIE_FOCUS",
+                                    "movie gallery focus is outside the verified range",
+                                )
+                            })?,
+                        MinoriSystemPage::GalleryMovie,
+                    ),
+                    _ => unreachable!("gallery start action was matched above"),
+                };
+                let (script_uri, script_hash, script) =
+                    load_script(&vfs, &session.mount_set_id, target)?;
+                session
+                    .vm
+                    .set_system_page(MinoriSystemPage::None, 0)
+                    .map_err(runtime_error)?;
+                session
+                    .vm
+                    .replace_script(script_uri, script_hash, script)
+                    .map_err(runtime_error)?;
+                tracing::info!(
+                    target: "astra_emu_minori::system_ui",
+                    event = "astra_emu_minori_gallery_script_started",
+                    page = system_page_name(page),
+                    script_identity = %Hash256::from_sha256(target.as_bytes()),
+                    "started a verified gallery script"
+                );
+                action = MinoriSystemUiAction::StartGame;
+            }
             if action != MinoriSystemUiAction::StartGame {
+                if let MinoriSystemUiAction::SaveSlot(slot) = action {
+                    save_slot(
+                        host_services
+                            .as_ref()
+                            .ok_or_else(|| {
+                                invalid(
+                                    "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                                    "save requires ABI v9 Host services",
+                                )
+                            })?
+                            .writable_files
+                            .as_ref(),
+                        session_id,
+                        session,
+                        slot,
+                    )?;
+                    session.save_slots.insert(slot);
+                    session
+                        .vm
+                        .advance_system_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    session
+                        .vm
+                        .close_gameplay_system_page()
+                        .map_err(runtime_error)?;
+                    return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                }
+                if let MinoriSystemUiAction::LoadSlot(slot) = action {
+                    load_slot(
+                        host_services
+                            .as_ref()
+                            .ok_or_else(|| {
+                                invalid(
+                                    "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                                    "load requires ABI v9 Host services",
+                                )
+                            })?
+                            .writable_files
+                            .as_ref(),
+                        &vfs,
+                        session_id,
+                        session,
+                        slot,
+                        input.tick_index,
+                    )?;
+                    return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                }
+                if action == MinoriSystemUiAction::CloseGameplaySystemPage {
+                    session
+                        .vm
+                        .advance_system_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    session
+                        .vm
+                        .close_gameplay_system_page()
+                        .map_err(runtime_error)?;
+                    return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                }
                 let commands = match action {
                     MinoriSystemUiAction::ReplayBacklogVoice => {
                         session.vm.replay_backlog_voice().map_err(runtime_error)?
@@ -840,6 +1246,18 @@ impl MinoriRuntimeProvider {
                         .vm
                         .config_test_audio_commands(bus)
                         .map_err(runtime_error)?,
+                    MinoriSystemUiAction::GalleryBgmPlay => {
+                        let resource_uri = gallery_bgm_track_resource_uri(
+                            session.vm.state().system_ui.focus_index,
+                        )?;
+                        session
+                            .vm
+                            .gallery_bgm_play(resource_uri)
+                            .map_err(runtime_error)?
+                    }
+                    MinoriSystemUiAction::GalleryBgmStop => {
+                        session.vm.gallery_bgm_stop().map_err(runtime_error)?
+                    }
                     _ => Vec::new(),
                 };
                 if !commands.is_empty() {
@@ -989,42 +1407,80 @@ impl MinoriRuntimeProvider {
             }
             session.vm.resolve_wait(&token_id).map_err(runtime_error)?;
         }
-        let animated_effect = session
-            .vm
-            .advance_effect_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_firefly = session
-            .vm
-            .advance_firefly_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_secondary_effect = session
-            .vm
-            .advance_secondary_effect_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_screen_shake = session
-            .vm
-            .advance_screen_shake_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_axis_scroll = session
-            .vm
-            .advance_axis_scroll_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_character = session
-            .vm
-            .advance_character_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_linear_scroll = session
-            .vm
-            .advance_linear_scroll_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_scroll_xf = session
-            .vm
-            .advance_scroll_xf_clock(input.delta_ns)
-            .map_err(runtime_error)?;
-        let animated_wscroll2 = session
-            .vm
-            .advance_wscroll2_clock(input.delta_ns)
-            .map_err(runtime_error)?;
+        let animation_enabled = session.vm.state().system_ui.config.animation;
+        let screen_effect_enabled = session.vm.state().system_ui.config.screen_effect;
+        let animated_effect = if animation_enabled && screen_effect_enabled {
+            session
+                .vm
+                .advance_effect_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_firefly = if animation_enabled {
+            session
+                .vm
+                .advance_firefly_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_secondary_effect = if animation_enabled && screen_effect_enabled {
+            session
+                .vm
+                .advance_secondary_effect_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_screen_shake = if animation_enabled && screen_effect_enabled {
+            session
+                .vm
+                .advance_screen_shake_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_axis_scroll = if animation_enabled {
+            session
+                .vm
+                .advance_axis_scroll_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_character = if animation_enabled {
+            session
+                .vm
+                .advance_character_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_linear_scroll = if animation_enabled {
+            session
+                .vm
+                .advance_linear_scroll_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_scroll_xf = if animation_enabled {
+            session
+                .vm
+                .advance_scroll_xf_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
+        let animated_wscroll2 = if animation_enabled {
+            session
+                .vm
+                .advance_wscroll2_clock(input.delta_ns)
+                .map_err(runtime_error)?
+        } else {
+            None
+        };
         if let Some(wait) = session.vm.state().wait.clone() {
             if input.await_results.is_empty() {
                 let movie_to_skip = match &wait {
@@ -3800,7 +4256,7 @@ fn load_script(
 ) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
     let script_uri = format!("minori:/scr/{target}");
     validate_script_uri(&script_uri)?;
-    let bytes = vfs
+    let source = vfs
         .read_file(mount_set_id, &script_uri, MAX_SCRIPT_BYTES)
         .inspect_err(|error| {
             tracing::debug!(
@@ -3811,9 +4267,140 @@ fn load_script(
                 "chain script read failed"
             );
         })?;
-    let script_hash = Hash256::from_sha256(&bytes);
+    let script_hash = Hash256::from_sha256(&source);
+    let mut include_stack = vec![script_uri.clone()];
+    let mut expanded_bytes = 0usize;
+    let bytes = expand_script_includes(
+        vfs,
+        mount_set_id,
+        &script_uri,
+        source.as_slice(),
+        &mut include_stack,
+        &mut expanded_bytes,
+    )?;
     let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
     Ok((script_uri, script_hash, script))
+}
+
+fn expand_script_includes(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    source_uri: &str,
+    source: &[u8],
+    include_stack: &mut Vec<String>,
+    expanded_bytes: &mut usize,
+) -> Result<Vec<u8>, LegacyProviderError> {
+    const MAX_INCLUDE_DEPTH: usize = 32;
+    if include_stack.len() > MAX_INCLUDE_DEPTH {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_DEPTH",
+            "script include depth exceeds the verified bound",
+        ));
+    }
+    let mut expanded = Vec::with_capacity(source.len());
+    for segment in source.split_inclusive(|byte| *byte == b'\n') {
+        let line = segment.strip_suffix(b"\n").unwrap_or(segment);
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let trimmed = trim_ascii_script_space(line);
+        if !trimmed.starts_with(b".include") {
+            expanded.extend_from_slice(segment);
+            *expanded_bytes = expanded_bytes.checked_add(segment.len()).ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_SIZE",
+                    "expanded script size overflowed",
+                )
+            })?;
+            if *expanded_bytes > MAX_SCRIPT_BYTES as usize {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_SIZE",
+                    "expanded script exceeds the bounded source size",
+                ));
+            }
+            continue;
+        }
+        let include_target = parse_include_target(trimmed).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_OPERAND",
+                "script include requires one safe .sc target",
+            )
+        })?;
+        let include_uri = format!("minori:/scr/{include_target}");
+        validate_script_uri(&include_uri)?;
+        if include_stack.iter().any(|uri| uri == &include_uri) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_CYCLE",
+                "script include cycle is not allowed",
+            ));
+        }
+        let included = vfs
+            .read_file(mount_set_id, &include_uri, MAX_SCRIPT_BYTES)
+            .inspect_err(|error| {
+                tracing::debug!(
+                    target: "astra_emu_minori::resource",
+                    event = "astra_emu_minori_script_include_read_failed",
+                    resource_identity = %Hash256::from_sha256(include_uri.as_bytes()),
+                    source_identity = %Hash256::from_sha256(source_uri.as_bytes()),
+                    diagnostic = %error.code(),
+                    "script include read failed"
+                );
+            })?;
+        include_stack.push(include_uri.clone());
+        let included_expanded = expand_script_includes(
+            vfs,
+            mount_set_id,
+            &include_uri,
+            included.as_slice(),
+            include_stack,
+            expanded_bytes,
+        )?;
+        include_stack.pop();
+        expanded.extend_from_slice(&included_expanded);
+        if segment.ends_with(b"\n") && !included_expanded.ends_with(b"\n") {
+            expanded.extend_from_slice(b"\r\n");
+            *expanded_bytes = expanded_bytes.checked_add(2).ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_SIZE",
+                    "expanded script size overflowed",
+                )
+            })?;
+        }
+        if *expanded_bytes > MAX_SCRIPT_BYTES as usize {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_SIZE",
+                "expanded script exceeds the bounded source size",
+            ));
+        }
+    }
+    Ok(expanded)
+}
+
+fn trim_ascii_script_space(value: &[u8]) -> &[u8] {
+    let start = value
+        .iter()
+        .position(|byte| !matches!(*byte, b' ' | b'\t'))
+        .unwrap_or(value.len());
+    let end = value
+        .iter()
+        .rposition(|byte| !matches!(*byte, b' ' | b'\t'))
+        .map_or(start, |index| index + 1);
+    &value[start..end]
+}
+
+fn parse_include_target(line: &[u8]) -> Option<String> {
+    let mut tokens = line.split(|byte| matches!(*byte, b' ' | b'\t'));
+    if tokens.next()? != b".include" {
+        return None;
+    }
+    let raw_target = tokens.next()?;
+    let target = raw_target.strip_suffix(b"\r").unwrap_or(raw_target);
+    if target.is_empty() || tokens.next().is_some() {
+        return None;
+    }
+    let target = std::str::from_utf8(target).ok()?.to_owned();
+    if !target.to_ascii_lowercase().ends_with(".sc") {
+        return None;
+    }
+    Some(target)
 }
 
 fn validate_script_uri(script_uri: &str) -> Result<(), LegacyProviderError> {
@@ -3850,6 +4437,13 @@ enum MinoriSystemUiAction {
     StartGame,
     CloseBacklog,
     ReplayBacklogVoice,
+    SaveSlot(u32),
+    LoadSlot(u32),
+    CloseGameplaySystemPage,
+    GalleryBgmPlay,
+    GalleryBgmStop,
+    GalleryReplayStart(u32),
+    GalleryMovieStart(u32),
     Exit,
 }
 
@@ -3862,6 +4456,13 @@ fn system_ui_action_name(action: MinoriSystemUiAction) -> &'static str {
         MinoriSystemUiAction::StartGame => "start_game",
         MinoriSystemUiAction::CloseBacklog => "close_backlog",
         MinoriSystemUiAction::ReplayBacklogVoice => "replay_backlog_voice",
+        MinoriSystemUiAction::SaveSlot(_) => "save_slot",
+        MinoriSystemUiAction::LoadSlot(_) => "load_slot",
+        MinoriSystemUiAction::CloseGameplaySystemPage => "close_gameplay_system_page",
+        MinoriSystemUiAction::GalleryBgmPlay => "gallery_bgm_play",
+        MinoriSystemUiAction::GalleryBgmStop => "gallery_bgm_stop",
+        MinoriSystemUiAction::GalleryReplayStart(_) => "gallery_replay_start",
+        MinoriSystemUiAction::GalleryMovieStart(_) => "gallery_movie_start",
         MinoriSystemUiAction::Exit => "exit",
     }
 }
@@ -4144,6 +4745,283 @@ fn validate_writable_mutation_result(
     Ok(())
 }
 
+fn validate_save_slot(slot: u32) -> Result<(), LegacyProviderError> {
+    if slot >= MINORI_SAVE_MAX_SLOTS {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_SLOT",
+            "save slot is outside the verified 100-slot range",
+        ));
+    }
+    Ok(())
+}
+
+fn refresh_save_slots(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
+    session: &mut MinoriSession,
+) -> Result<(), LegacyProviderError> {
+    let create = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+            path: MINORI_SAVE_ROOT.into(),
+        },
+    )?;
+    validate_writable_mutation_result(&create, 0, "prepare save directory")?;
+    let result = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::List {
+            path: MINORI_SAVE_ROOT.into(),
+        },
+    )?;
+    if result.written != 0 || !result.bytes.is_empty() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LIST",
+            "save slot listing returned an unexpected payload",
+        ));
+    }
+    let mut slots = BTreeSet::new();
+    for entry in result.entries {
+        if !entry.is_file {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_LIST",
+                "save slot directory contains a non-file entry",
+            ));
+        }
+        let Some(slot) = entry
+            .name
+            .strip_prefix("slot-")
+            .and_then(|name| name.strip_suffix(".bin"))
+            .filter(|name| name.len() == 3)
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_LIST",
+                "save slot directory contains an invalid file name",
+            ));
+        };
+        validate_save_slot(slot)?;
+        if entry.length == 0 || entry.length > MINORI_SAVE_MAX_BYTES as u64 {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_SLOT_BOUNDS",
+                "save slot file length is outside the bounded format",
+            ));
+        }
+        if !slots.insert(slot) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_LIST",
+                "save slot directory contains a duplicate slot",
+            ));
+        }
+    }
+    session.save_slots = slots;
+    Ok(())
+}
+
+fn save_slot(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
+    session: &MinoriSession,
+    slot: u32,
+) -> Result<(), LegacyProviderError> {
+    validate_save_slot(slot)?;
+    if session.vm.state().system_ui.page != MinoriSystemPage::Save {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_PAGE",
+            "save slot writes require the save page",
+        ));
+    }
+    let mut state = MinoriVm::decode_snapshot(&session.vm.snapshot_bytes().map_err(runtime_error)?)
+        .map_err(runtime_error)?;
+    state.system_ui.page = MinoriSystemPage::None;
+    state.system_ui.focus_index = 0;
+    state.system_ui.pending_save_slot = None;
+    state.system_ui.pending_load_slot = None;
+    state.system_ui.backlog_cursor = None;
+    let vm_snapshot = postcard::to_allocvec(&state).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_ENCODE",
+            "save state could not be encoded",
+        )
+    })?;
+    let envelope = MinoriSaveEnvelope {
+        schema: MINORI_SAVE_SCHEMA.into(),
+        case_fingerprint: session.case_fingerprint,
+        package_hash: session.package_hash,
+        profile_fingerprint: session.profile_fingerprint,
+        script_uri: state.script_uri.clone(),
+        script_hash: state.script_hash,
+        vm_snapshot,
+    };
+    let payload = encode_save(&envelope).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_ENCODE",
+            "save envelope could not be encoded",
+        )
+    })?;
+    if payload.is_empty() || payload.len() > MINORI_SAVE_MAX_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_BOUNDS",
+            "save envelope exceeds the bounded slot size",
+        ));
+    }
+    let create = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+            path: MINORI_SAVE_ROOT.into(),
+        },
+    )?;
+    validate_writable_mutation_result(&create, 0, "create save directory")?;
+    let temporary_path = slot_temporary_path(slot);
+    let destination_path = slot_path(slot);
+    let truncate = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+            path: temporary_path.clone(),
+            length: 0,
+        },
+    )?;
+    validate_writable_mutation_result(&truncate, 0, "truncate save temporary")?;
+    let write = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+            path: temporary_path.clone(),
+            offset: 0,
+            bytes: payload.clone(),
+        },
+    )?;
+    validate_writable_mutation_result(&write, payload.len() as u64, "write save slot")?;
+    let length = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::SetLength {
+            path: temporary_path,
+            length: payload.len() as u64,
+        },
+    )?;
+    validate_writable_mutation_result(&length, 0, "finalize save slot length")?;
+    let replace = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+            temporary_path: slot_temporary_path(slot),
+            destination_path,
+        },
+    )?;
+    validate_writable_mutation_result(&replace, 0, "replace save slot")
+}
+
+fn load_slot(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    session_id: &LegacyRuntimeSessionId,
+    session: &mut MinoriSession,
+    slot: u32,
+    host_tick: u64,
+) -> Result<(), LegacyProviderError> {
+    validate_save_slot(slot)?;
+    if session.vm.state().system_ui.page != MinoriSystemPage::Load {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_PAGE",
+            "load slot reads require the load page",
+        ));
+    }
+    let path = slot_path(slot);
+    let stat = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::Stat { path: path.clone() },
+    )?;
+    if !stat.exists || !stat.is_file {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_EMPTY",
+            "selected load slot is empty",
+        ));
+    }
+    if stat.length == 0 || stat.length > MINORI_SAVE_MAX_BYTES as u64 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_BOUNDS",
+            "selected load slot exceeds the bounded format",
+        ));
+    }
+    let read = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::ReadRange {
+            path,
+            offset: 0,
+            length: stat.length,
+        },
+    )?;
+    if read.written != 0 || read.bytes.len() as u64 != stat.length {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_READ",
+            "load slot read returned a short or unexpected payload",
+        ));
+    }
+    let envelope = decode_save(read.bytes.as_slice()).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_FORMAT",
+            "load slot envelope is malformed",
+        )
+    })?;
+    if envelope.schema != MINORI_SAVE_SCHEMA
+        || envelope.case_fingerprint != session.case_fingerprint
+        || envelope.package_hash != session.package_hash
+        || envelope.profile_fingerprint != session.profile_fingerprint
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_IDENTITY",
+            "load slot identity does not match the active case",
+        ));
+    }
+    validate_script_uri(&envelope.script_uri)?;
+    let target = envelope
+        .script_uri
+        .strip_prefix("minori:/scr/")
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_LOAD_SLOT_SCRIPT",
+                "load script URI is invalid",
+            )
+        })?;
+    let (script_uri, script_hash, script) = load_script(vfs, &session.mount_set_id, target)?;
+    if script_uri != envelope.script_uri || script_hash != envelope.script_hash {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_SCRIPT",
+            "load slot script identity does not match the mounted VFS",
+        ));
+    }
+    let mut state = MinoriVm::decode_snapshot(&envelope.vm_snapshot).map_err(runtime_error)?;
+    if state.system_ui.page != MinoriSystemPage::None || state.terminal {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_STATE",
+            "load slot contains an invalid gameplay continuation state",
+        ));
+    }
+    // The slot's fixed tick belongs to the previous host session. The
+    // continuation is rebased to the current host tick below; rejecting a
+    // valid save merely because the new session has fewer elapsed ticks would
+    // make title-screen load impossible.
+    state.fixed_tick = host_tick;
+    let adjusted_snapshot = postcard::to_allocvec(&state).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_STATE",
+            "load continuation state could not be encoded",
+        )
+    })?;
+    session
+        .vm
+        .replace_script(script_uri, script_hash, script)
+        .map_err(runtime_error)?;
+    session
+        .vm
+        .restore_state(&adjusted_snapshot)
+        .map_err(runtime_error)?;
+    session.restore_audio_pending = true;
+    session.restore_presentation_pending = true;
+    session.reported_system_page = None;
+    session.reported_play_mode = None;
+    session.reported_gallery_unlock_count = None;
+    session.reported_choice_active = None;
+    Ok(())
+}
+
 fn apply_system_ui_input(
     vm: &mut MinoriVm,
     input: &LegacyStepInput,
@@ -4173,6 +5051,104 @@ fn apply_system_ui_input(
             (None, false) => Ok(MinoriSystemUiAction::Present),
             (Some(_), _) => unreachable!("backlog wheel direction is normalized"),
         };
+    }
+    if matches!(
+        vm.state().system_ui.page,
+        MinoriSystemPage::Save | MinoriSystemPage::Load
+    ) {
+        let page = vm.state().system_ui.page;
+        for edge in input.input_edges.iter().filter(|edge| edge.pressed) {
+            match edge.control.as_str() {
+                "arrow_up" => vm
+                    .move_system_focus(-1, MINORI_SAVE_MAX_SLOTS)
+                    .map_err(runtime_error)?,
+                "arrow_down" => vm
+                    .move_system_focus(1, MINORI_SAVE_MAX_SLOTS)
+                    .map_err(runtime_error)?,
+                "arrow_left" => vm.move_save_page(-1).map_err(runtime_error)?,
+                "arrow_right" => vm.move_save_page(1).map_err(runtime_error)?,
+                "escape" => {
+                    if page == MinoriSystemPage::Load
+                        && vm.state().launch_mode == crate::MinoriLaunchMode::Title
+                    {
+                        vm.set_system_page(MinoriSystemPage::Title, 0)
+                            .map_err(runtime_error)?;
+                        return Ok(MinoriSystemUiAction::Present);
+                    }
+                    return Ok(MinoriSystemUiAction::CloseGameplaySystemPage);
+                }
+                "load" if page == MinoriSystemPage::Save => {
+                    vm.open_load_page().map_err(runtime_error)?;
+                    return Ok(MinoriSystemUiAction::Present);
+                }
+                "enter" | "space" => {
+                    return Ok(match page {
+                        MinoriSystemPage::Save => {
+                            MinoriSystemUiAction::SaveSlot(vm.state().system_ui.focus_index)
+                        }
+                        MinoriSystemPage::Load => {
+                            MinoriSystemUiAction::LoadSlot(vm.state().system_ui.focus_index)
+                        }
+                        _ => unreachable!("save/load branch has a verified page"),
+                    });
+                }
+                _ => {}
+            }
+        }
+        if input.input_edges.iter().any(|edge| {
+            edge.pressed
+                && edge.control == MINORI_POINTER_PRIMARY
+                && (462..818).contains(&vm.state().system_ui.pointer_x)
+                && (650..720).contains(&vm.state().system_ui.pointer_y)
+        }) {
+            let x = vm.state().system_ui.pointer_x;
+            if (462..578).contains(&x) {
+                vm.move_save_page(-1).map_err(runtime_error)?;
+                return Ok(MinoriSystemUiAction::Present);
+            }
+            if (578..700).contains(&x) {
+                vm.move_save_page(1).map_err(runtime_error)?;
+                return Ok(MinoriSystemUiAction::Present);
+            }
+            if page == MinoriSystemPage::Load
+                && vm.state().launch_mode == crate::MinoriLaunchMode::Title
+            {
+                vm.set_system_page(MinoriSystemPage::Title, 0)
+                    .map_err(runtime_error)?;
+                return Ok(MinoriSystemUiAction::Present);
+            }
+            return Ok(MinoriSystemUiAction::CloseGameplaySystemPage);
+        }
+        if input.input_edges.iter().any(|edge| {
+            edge.pressed
+                && edge.control == MINORI_POINTER_PRIMARY
+                && (64..800).contains(&vm.state().system_ui.pointer_x)
+                && (81..611).contains(&vm.state().system_ui.pointer_y)
+        }) {
+            let x = vm.state().system_ui.pointer_x;
+            let y = vm.state().system_ui.pointer_y;
+            let column = if (64..408).contains(&x) {
+                Some(0u32)
+            } else if (456..800).contains(&x) {
+                Some(1u32)
+            } else {
+                None
+            };
+            let row = [81, 189, 297, 405, 513]
+                .iter()
+                .position(|top| (*top..(*top + 98)).contains(&y))
+                .map(|row| u32::try_from(row).expect("five save rows fit u32"));
+            if let (Some(column), Some(row)) = (column, row) {
+                let slot = (vm.state().system_ui.focus_index / 10) * 10 + row * 2 + column;
+                vm.set_save_focus(slot).map_err(runtime_error)?;
+                return Ok(match page {
+                    MinoriSystemPage::Save => MinoriSystemUiAction::SaveSlot(slot),
+                    MinoriSystemPage::Load => MinoriSystemUiAction::LoadSlot(slot),
+                    _ => unreachable!("save/load branch has a verified page"),
+                });
+            }
+        }
+        return Ok(MinoriSystemUiAction::Present);
     }
     let mut action = MinoriSystemUiAction::Present;
     for edge in input.input_edges.iter().filter(|edge| edge.pressed) {
@@ -4255,17 +5231,160 @@ fn apply_system_ui_input(
                 vm.set_system_page(MinoriSystemPage::Memories, 0)
                     .map_err(runtime_error)?;
             }
+            (MinoriSystemPage::GalleryCg, "arrow_up") => vm
+                .move_system_focus(-1, MINORI_GALLERY_CG_PAGE_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryCg, "arrow_down") => vm
+                .move_system_focus(1, MINORI_GALLERY_CG_PAGE_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryBgm, "arrow_up") => vm
+                .move_system_focus(-1, MINORI_GALLERY_BGM_TRACK_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryBgm, "arrow_down") => vm
+                .move_system_focus(1, MINORI_GALLERY_BGM_TRACK_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryBgm, "arrow_left") => {
+                let current = vm.state().system_ui.focus_index;
+                let target = current.checked_sub(16).unwrap_or_else(|| {
+                    MINORI_GALLERY_BGM_TRACK_COUNT
+                        - ((16 - current) % MINORI_GALLERY_BGM_TRACK_COUNT)
+                });
+                vm.set_system_focus(target, MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .map_err(runtime_error)?;
+            }
+            (MinoriSystemPage::GalleryBgm, "arrow_right") => {
+                let current = vm.state().system_ui.focus_index;
+                let target = current
+                    .checked_add(16)
+                    .map(|value| value % MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .unwrap_or(0);
+                vm.set_system_focus(target, MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .map_err(runtime_error)?;
+            }
+            (MinoriSystemPage::GalleryBgm, "enter" | "space") => {
+                action = MinoriSystemUiAction::GalleryBgmPlay;
+            }
+            (MinoriSystemPage::GalleryReplay, "arrow_up") => vm
+                .move_system_focus(-1, MINORI_GALLERY_REPLAY_PAGE_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryReplay, "arrow_down") => vm
+                .move_system_focus(1, MINORI_GALLERY_REPLAY_PAGE_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryReplay, "enter" | "space") => {
+                action = MinoriSystemUiAction::GalleryReplayStart(vm.state().system_ui.focus_index);
+            }
+            (MinoriSystemPage::GalleryMovie, "arrow_up") => vm
+                .move_system_focus(-1, MINORI_GALLERY_MOVIE_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryMovie, "arrow_down") => vm
+                .move_system_focus(1, MINORI_GALLERY_MOVIE_COUNT)
+                .map_err(runtime_error)?,
+            (MinoriSystemPage::GalleryMovie, "enter" | "space") => {
+                action = MinoriSystemUiAction::GalleryMovieStart(vm.state().system_ui.focus_index);
+            }
             (MinoriSystemPage::Load, "escape") => {
                 vm.set_system_page(MinoriSystemPage::Title, 0)
                     .map_err(runtime_error)?;
             }
             (MinoriSystemPage::Load, "enter" | "space") => {
-                return Err(invalid(
-                    "ASTRA_EMU_MINORI_LOAD_SLOT_REQUIRED",
-                    "load confirmation requires a verified populated slot",
+                return Ok(MinoriSystemUiAction::LoadSlot(
+                    vm.state().system_ui.focus_index,
                 ));
             }
             _ => {}
+        }
+        if vm.state().system_ui.page == MinoriSystemPage::GalleryBgm
+            && input.input_edges.iter().any(|edge| {
+                edge.pressed
+                    && edge.control == MINORI_POINTER_PRIMARY
+                    && (140..420).contains(&vm.state().system_ui.pointer_x)
+                    && (96..592).contains(&vm.state().system_ui.pointer_y)
+            })
+        {
+            let row = u32::try_from((vm.state().system_ui.pointer_y - 96) / 32).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_BGM_POINTER",
+                    "BGM gallery pointer row cannot be represented",
+                )
+            })?;
+            let page = vm.state().system_ui.focus_index / 16;
+            let track = page
+                .checked_mul(16)
+                .and_then(|base| base.checked_add(row))
+                .ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_GALLERY_BGM_POINTER",
+                        "BGM gallery pointer track overflowed",
+                    )
+                })?;
+            if track >= MINORI_GALLERY_BGM_TRACK_COUNT {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_BGM_POINTER",
+                    "BGM gallery pointer selected an empty row",
+                ));
+            }
+            vm.set_system_focus(track, MINORI_GALLERY_BGM_TRACK_COUNT)
+                .map_err(runtime_error)?;
+            return Ok(MinoriSystemUiAction::GalleryBgmPlay);
+        }
+        if vm.state().system_ui.page == MinoriSystemPage::GalleryBgm
+            && input.input_edges.iter().any(|edge| {
+                edge.pressed
+                    && edge.control == MINORI_POINTER_PRIMARY
+                    && (578..894).contains(&vm.state().system_ui.pointer_x)
+                    && (558..628).contains(&vm.state().system_ui.pointer_y)
+            })
+        {
+            let x = vm.state().system_ui.pointer_x;
+            return Ok(if (578..644).contains(&x) {
+                let current = vm.state().system_ui.focus_index;
+                let target = current
+                    .checked_sub(1)
+                    .unwrap_or(MINORI_GALLERY_BGM_TRACK_COUNT - 1);
+                vm.set_system_focus(target, MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .map_err(runtime_error)?;
+                MinoriSystemUiAction::Present
+            } else if (656..722).contains(&x) {
+                MinoriSystemUiAction::GalleryBgmPlay
+            } else if (736..802).contains(&x) {
+                MinoriSystemUiAction::GalleryBgmStop
+            } else if (816..882).contains(&x) {
+                let target =
+                    (vm.state().system_ui.focus_index + 1) % MINORI_GALLERY_BGM_TRACK_COUNT;
+                vm.set_system_focus(target, MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .map_err(runtime_error)?;
+                MinoriSystemUiAction::Present
+            } else {
+                MinoriSystemUiAction::Present
+            });
+        }
+        if vm.state().system_ui.page == MinoriSystemPage::GalleryBgm
+            && input.input_edges.iter().any(|edge| {
+                edge.pressed
+                    && edge.control == MINORI_POINTER_PRIMARY
+                    && (558..906).contains(&vm.state().system_ui.pointer_x)
+                    && (650..710).contains(&vm.state().system_ui.pointer_y)
+            })
+        {
+            let x = vm.state().system_ui.pointer_x;
+            if (558..665).contains(&x) {
+                let current = vm.state().system_ui.focus_index;
+                let target = current.checked_sub(16).unwrap_or_else(|| {
+                    let remainder = (16 - current) % MINORI_GALLERY_BGM_TRACK_COUNT;
+                    MINORI_GALLERY_BGM_TRACK_COUNT - remainder
+                });
+                vm.set_system_focus(target, MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .map_err(runtime_error)?;
+            } else if (700..810).contains(&x) {
+                let target =
+                    (vm.state().system_ui.focus_index + 16) % MINORI_GALLERY_BGM_TRACK_COUNT;
+                vm.set_system_focus(target, MINORI_GALLERY_BGM_TRACK_COUNT)
+                    .map_err(runtime_error)?;
+            } else if (830..906).contains(&x) {
+                vm.set_system_page(MinoriSystemPage::Memories, 2)
+                    .map_err(runtime_error)?;
+            }
+            return Ok(MinoriSystemUiAction::Present);
         }
         if action != MinoriSystemUiAction::Present {
             break;
@@ -4443,6 +5562,14 @@ fn system_ui_output(
     input: &LegacyStepInput,
     audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
+    tracing::info!(
+        target: "astra_emu_minori::system_ui",
+        event = "astra_emu_minori_system_ui_output",
+        page = system_page_name(session.vm.state().system_ui.page),
+        terminal = session.vm.state().terminal,
+        fixed_tick = input.tick_index,
+        "emitting system UI output"
+    );
     let status = if session.vm.state().terminal {
         LegacyRuntimeStatus::Terminal
     } else {
@@ -4487,11 +5614,19 @@ fn system_ui_output(
                     sequence,
                 )?
             } else {
-                describe_system_page(vfs, &session.mount_set_id, session.stage_size, &session.vm)?
+                describe_system_page_with_slots(
+                    vfs,
+                    &session.mount_set_id,
+                    session.stage_size,
+                    &session.vm,
+                    &session.save_slots,
+                )?
             },
         });
         if is_backlog {
             append_backlog_text(session, input.tick_index, &mut live)?;
+        } else if session.vm.state().system_ui.page == MinoriSystemPage::GalleryMovie {
+            append_gallery_movie_text(session, input.tick_index, &mut live)?;
         }
     }
     let mut output = LegacyStepOutput {
@@ -4756,6 +5891,90 @@ fn append_resumed_message_text(
     Ok(())
 }
 
+fn append_gallery_movie_text(
+    session: &mut MinoriSession,
+    tick_index: u64,
+    live: &mut LegacyLiveOutput,
+) -> Result<(), LegacyProviderError> {
+    let selected = usize::try_from(session.vm.state().system_ui.focus_index).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_GALLERY_MOVIE_FOCUS",
+            "movie gallery focus cannot be represented",
+        )
+    })?;
+    if selected >= MINORI_GALLERY_MOVIE_LABELS.len() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_MOVIE_FOCUS",
+            "movie gallery focus is outside the verified range",
+        ));
+    }
+    let text = MINORI_GALLERY_MOVIE_LABELS
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            if index == selected {
+                format!("> {label}")
+            } else {
+                format!("  {label}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.len() > MAX_EPHEMERAL_TEXT_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_MOVIE_TEXT_BOUNDS",
+            "movie gallery text exceeds the ephemeral text bound",
+        ));
+    }
+    let presentation_sequence = session
+        .vm
+        .allocate_effect_sequence()
+        .map_err(runtime_error)?;
+    let capture_sequence = session
+        .vm
+        .allocate_effect_sequence()
+        .map_err(runtime_error)?;
+    let lease_id = format!("minori.gallery.movie.{tick_index}.{capture_sequence}");
+    let presentation = LegacyTextPresentationLeaseV1 {
+        lease_id: lease_id.clone(),
+        presentation: minori_gallery_movie_presentation(session.stage_size)?,
+    };
+    presentation.validate()?;
+    if session
+        .ephemeral_text
+        .insert(
+            lease_id.clone(),
+            StagedEphemeralText {
+                lease_id: lease_id.clone(),
+                text: text.clone(),
+                speaker: None,
+            },
+        )
+        .is_some()
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_LEASE_DUPLICATE",
+            "movie gallery text lease id is duplicated",
+        ));
+    }
+    live.text_presentations.push(LegacySequenced {
+        sequence: presentation_sequence,
+        value: presentation,
+    });
+    live.text.push(StagedTextLease {
+        sequence: capture_sequence,
+        lease_id,
+        byte_len: text.len().try_into().map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_GALLERY_MOVIE_TEXT_BOUNDS",
+                "movie gallery text length cannot be represented",
+            )
+        })?,
+        source_ref: "minori.gallery.movie".into(),
+    });
+    Ok(())
+}
+
 fn append_backlog_text(
     session: &mut MinoriSession,
     tick_index: u64,
@@ -4973,6 +6192,16 @@ fn describe_system_page(
     stage_size: Option<(u32, u32)>,
     vm: &MinoriVm,
 ) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    describe_system_page_with_slots(vfs, mount_set_id, stage_size, vm, &BTreeSet::new())
+}
+
+fn describe_system_page_with_slots(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    stage_size: Option<(u32, u32)>,
+    vm: &MinoriVm,
+    save_slots: &BTreeSet<u32>,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
     let (width, height) = stage_size.ok_or_else(|| {
         invalid(
             "ASTRA_EMU_MINORI_SYSTEM_STAGE_SIZE",
@@ -4988,6 +6217,24 @@ fn describe_system_page(
     if vm.state().system_ui.page == MinoriSystemPage::Config {
         return describe_config_page(vfs, mount_set_id, width, height, vm);
     }
+    if matches!(
+        vm.state().system_ui.page,
+        MinoriSystemPage::Save | MinoriSystemPage::Load
+    ) {
+        return describe_save_load_page(vfs, mount_set_id, width, height, vm, save_slots);
+    }
+    if vm.state().system_ui.page == MinoriSystemPage::GalleryBgm {
+        return describe_gallery_bgm_page(vfs, mount_set_id, width, height, vm);
+    }
+    if vm.state().system_ui.page == MinoriSystemPage::GalleryReplay {
+        return describe_gallery_replay_page(vfs, mount_set_id, width, height, vm);
+    }
+    if vm.state().system_ui.page == MinoriSystemPage::GalleryMovie {
+        return describe_gallery_movie_page(vfs, mount_set_id, width, height);
+    }
+    if vm.state().system_ui.page == MinoriSystemPage::GalleryCg {
+        return describe_gallery_cg_page(vfs, mount_set_id, width, height, vm);
+    }
     let resource_uri = match vm.state().system_ui.page {
         MinoriSystemPage::Title => match vm.title_variant() {
             0 => "minori:/sys/topMenu0.png",
@@ -5000,12 +6247,14 @@ fn describe_system_page(
                 ));
             }
         },
-        MinoriSystemPage::Load => "minori:/sys/saveloadBase.png",
+        MinoriSystemPage::Load => unreachable!("save/load uses the stateful presentation path"),
         MinoriSystemPage::Config => unreachable!("config uses its stateful presentation path"),
         MinoriSystemPage::Memories => "minori:/sys/memories.png",
-        MinoriSystemPage::GalleryCg => "minori:/sys/cgmode0.png",
-        MinoriSystemPage::GalleryBgm => "minori:/sys/musicPage1.png",
-        MinoriSystemPage::GalleryReplay => "minori:/sys/flash0.png",
+        MinoriSystemPage::GalleryCg
+        | MinoriSystemPage::GalleryBgm
+        | MinoriSystemPage::GalleryReplay => {
+            gallery_resource_uri(vm.state().system_ui.page, vm.state().system_ui.focus_index)?
+        }
         MinoriSystemPage::GalleryMovie => {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_GALLERY_MOVIE_SCRIPT_REQUIRED",
@@ -5043,6 +6292,471 @@ fn describe_system_page(
     };
     frame.validate()?;
     Ok(frame)
+}
+
+fn describe_gallery_bgm_page(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+    vm: &MinoriVm,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    let page_uri = gallery_resource_uri(
+        MinoriSystemPage::GalleryBgm,
+        vm.state().system_ui.focus_index,
+    )?;
+    let page = read_texture_resource(vfs, mount_set_id, page_uri, MINORI_SYSTEM_TEXTURE_ID)?;
+    if (page.decoded_width, page.decoded_height) != (width, height) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_BGM_RESOURCE_DIMENSIONS",
+            "BGM gallery page does not match the reference stage",
+        ));
+    }
+    let note = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/musicNote.png",
+        MINORI_SYSTEM_TEXTURE_ID + 1,
+    )?;
+    if (note.decoded_width, note.decoded_height) != (32, 32) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_BGM_RESOURCE_DIMENSIONS",
+            "BGM gallery cursor resource does not match the verified dimensions",
+        ));
+    }
+    let row = vm.state().system_ui.focus_index % 16;
+    let note_y = 96i32
+        .checked_add(
+            i32::try_from(row).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_BGM_FOCUS",
+                    "BGM gallery focus row cannot be represented",
+                )
+            })? * 32,
+        )
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_GALLERY_BGM_FOCUS",
+                "BGM gallery cursor position overflowed",
+            )
+        })?;
+    let mut draws = Vec::with_capacity(2);
+    append_texture_draw(&page, 0, 0, 1.0, &mut draws)?;
+    append_texture_draw(&note, 143, note_y, 1.0, &mut draws)?;
+    let frame = LegacyRenderResourceFrameV1 {
+        width,
+        height,
+        texture_resources: vec![page, note],
+        draws,
+    };
+    frame.validate()?;
+    Ok(frame)
+}
+
+fn describe_gallery_replay_page(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+    vm: &MinoriVm,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    let index = usize::try_from(vm.state().system_ui.focus_index).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_GALLERY_REPLAY_FOCUS",
+            "flashback gallery focus cannot be represented",
+        )
+    })?;
+    let page_uri = MINORI_GALLERY_REPLAY_PAGE_URIS.get(index).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_GALLERY_REPLAY_FOCUS",
+            "flashback gallery focus is outside the verified range",
+        )
+    })?;
+    let menu_uri = format!("minori:/sys/flash{index}menu.png");
+    let page = read_texture_resource(vfs, mount_set_id, page_uri, MINORI_SYSTEM_TEXTURE_ID)?;
+    let menu = read_texture_resource(vfs, mount_set_id, &menu_uri, MINORI_SYSTEM_TEXTURE_ID + 1)?;
+    if (page.decoded_width, page.decoded_height) != (width, height)
+        || (menu.decoded_width, menu.decoded_height) != (384, 64)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_REPLAY_RESOURCE_DIMENSIONS",
+            "flashback gallery resources do not match the verified stage shape",
+        ));
+    }
+    let mut draws = Vec::with_capacity(2);
+    append_texture_draw(&page, 0, 0, 1.0, &mut draws)?;
+    append_texture_draw(&menu, 0, 656, 1.0, &mut draws)?;
+    let frame = LegacyRenderResourceFrameV1 {
+        width,
+        height,
+        texture_resources: vec![page, menu],
+        draws,
+    };
+    frame.validate()?;
+    Ok(frame)
+}
+
+fn describe_gallery_movie_page(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    // The movie page shares the verified sunflower system backdrop. The
+    // selectable movie names are emitted through the existing bounded text
+    // presentation channel below; no synthetic bitmap or guessed title art is
+    // introduced for the page.
+    let background = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/memories.png",
+        MINORI_SYSTEM_TEXTURE_ID,
+    )?;
+    if (background.decoded_width, background.decoded_height) != (width, height) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_MOVIE_RESOURCE_DIMENSIONS",
+            "movie gallery backdrop does not match the verified stage shape",
+        ));
+    }
+    let mut draws = Vec::with_capacity(1);
+    append_texture_draw(&background, 0, 0, 1.0, &mut draws)?;
+    let frame = LegacyRenderResourceFrameV1 {
+        width,
+        height,
+        texture_resources: vec![background],
+        draws,
+    };
+    frame.validate()?;
+    Ok(frame)
+}
+
+fn describe_gallery_cg_page(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+    vm: &MinoriVm,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    let base = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/cgmode0.png",
+        MINORI_SYSTEM_TEXTURE_ID,
+    )?;
+    let boxes = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/cgmode0box.png",
+        MINORI_SYSTEM_TEXTURE_ID + 1,
+    )?;
+    let menu = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/cgmode0menu.png",
+        MINORI_SYSTEM_TEXTURE_ID + 2,
+    )?;
+    if (base.decoded_width, base.decoded_height) != (width, height)
+        || (boxes.decoded_width, boxes.decoded_height) != (width, height)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE_DIMENSIONS",
+            "CG gallery base resources do not match the reference stage",
+        ));
+    }
+    let page_index = usize::try_from(vm.state().system_ui.focus_index).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+            "CG gallery page index cannot be represented",
+        )
+    })?;
+    let page_label_uri = MINORI_GALLERY_CG_PAGE_URIS.get(page_index).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+            "CG gallery page index is outside the verified range",
+        )
+    })?;
+    let page_label = read_texture_resource(
+        vfs,
+        mount_set_id,
+        page_label_uri,
+        MINORI_SYSTEM_TEXTURE_ID + 3,
+    )?;
+    let mut thumbnails =
+        vfs.enumerate_by_extension(mount_set_id, "minori:/sys/cgthumb", "png", 256)?;
+    thumbnails.sort_by(|left, right| left.uri.cmp(&right.uri));
+    let page_start = page_index.checked_mul(16).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+            "CG gallery thumbnail range overflowed",
+        )
+    })?;
+    let mut resources = vec![base, boxes, menu, page_label];
+    let mut draws = Vec::with_capacity(20);
+    append_texture_draw(&resources[0], 0, 0, 1.0, &mut draws)?;
+    append_texture_draw(&resources[1], 0, 0, 1.0, &mut draws)?;
+    append_texture_draw(&resources[3], 64, 48, 1.0, &mut draws)?;
+    let positions: [(i32, i32); 4] = [(64, 96), (240, 96), (416, 96), (592, 96)];
+    for (visible_index, thumbnail) in thumbnails.iter().skip(page_start).take(16).enumerate() {
+        let thumbnail = read_texture_resource(
+            vfs,
+            mount_set_id,
+            &thumbnail.uri,
+            MINORI_GALLERY_CG_THUMB_TEXTURE_BASE
+                + u32::try_from(visible_index).map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+                        "CG gallery thumbnail index cannot be represented",
+                    )
+                })?,
+        )?;
+        if (thumbnail.decoded_width, thumbnail.decoded_height) != (128, 72) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE_DIMENSIONS",
+                "CG gallery thumbnail does not match the verified 128x72 asset shape",
+            ));
+        }
+        let row = visible_index / 4;
+        let column = visible_index % 4;
+        let x = positions[column].0 + 1;
+        let y = positions[column]
+            .1
+            .checked_add(
+                i32::try_from(row).map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+                        "CG gallery thumbnail row cannot be represented",
+                    )
+                })? * 112
+                    + 1,
+            )
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+                    "CG gallery thumbnail position overflowed",
+                )
+            })?;
+        append_texture_draw(&thumbnail, x, y, 0.4, &mut draws)?;
+        resources.push(thumbnail);
+    }
+    append_texture_draw(
+        resources.get(2).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_GALLERY_CG_RESOURCE",
+                "CG gallery menu resource is missing",
+            )
+        })?,
+        560,
+        640,
+        1.0,
+        &mut draws,
+    )?;
+    let frame = LegacyRenderResourceFrameV1 {
+        width,
+        height,
+        texture_resources: resources,
+        draws,
+    };
+    frame.validate()?;
+    Ok(frame)
+}
+
+fn describe_save_load_page(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    width: u32,
+    height: u32,
+    vm: &MinoriVm,
+    save_slots: &BTreeSet<u32>,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    let base = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/saveloadBase.png",
+        MINORI_SYSTEM_TEXTURE_ID,
+    )?;
+    let title_uri = match vm.state().system_ui.page {
+        MinoriSystemPage::Save => "minori:/sys/saveloadSave.png",
+        MinoriSystemPage::Load => "minori:/sys/saveloadLoad.png",
+        _ => {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_LOAD_PAGE",
+                "save/load renderer received an unrelated system page",
+            ));
+        }
+    };
+    let title = read_texture_resource(vfs, mount_set_id, title_uri, MINORI_SYSTEM_TEXTURE_ID + 1)?;
+    let select = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/saveloadSelect.png",
+        MINORI_SYSTEM_TEXTURE_ID + 2,
+    )?;
+    let buttons = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/saveloadButtons.png",
+        MINORI_SYSTEM_TEXTURE_ID + 3,
+    )?;
+    let page_auto = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/saveload_Page0.png",
+        MINORI_SYSTEM_TEXTURE_ID + 4,
+    )?;
+    let page_quick = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/saveload_Page1.png",
+        MINORI_SYSTEM_TEXTURE_ID + 5,
+    )?;
+    let not_saved = read_texture_resource(
+        vfs,
+        mount_set_id,
+        "minori:/sys/notsaved.png",
+        MINORI_SYSTEM_TEXTURE_ID + 6,
+    )?;
+    if (base.decoded_width, base.decoded_height) != (width, height)
+        || (title.decoded_width, title.decoded_height) != (352, 48)
+        || (select.decoded_width, select.decoded_height) != (344, 98)
+        || (buttons.decoded_width, buttons.decoded_height) != (356, 48)
+        || (page_auto.decoded_width, page_auto.decoded_height) != (208, 48)
+        || (page_quick.decoded_width, page_quick.decoded_height) != (208, 48)
+        || (not_saved.decoded_width, not_saved.decoded_height) != (106, 60)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LOAD_RESOURCE_DIMENSIONS",
+            "save/load resources do not match the verified 1280x720 layout",
+        ));
+    }
+
+    let mut draws = Vec::with_capacity(16);
+    append_texture_draw(&base, 0, 0, 1.0, &mut draws)?;
+    append_texture_draw(&title, 464, 16, 1.0, &mut draws)?;
+    append_texture_draw(&buttons, 462, 656, 1.0, &mut draws)?;
+
+    let page_base = (vm.state().system_ui.focus_index / 10) * 10;
+    let slot_index = vm.state().system_ui.focus_index % 10;
+    let slot_left = [64, 456];
+    let slot_top = [81, 189, 297, 405, 513];
+    for row in 0..5u32 {
+        for column in 0..2u32 {
+            let visible_index = row * 2 + column;
+            let slot = page_base + visible_index;
+            let left = slot_left[column as usize];
+            let top = slot_top[row as usize];
+            if save_slots.contains(&slot) {
+                continue;
+            }
+            if page_base == 0 && slot == 0 {
+                append_texture_draw(&page_auto, left + 68, top + 25, 1.0, &mut draws)?;
+            } else if page_base == 0 && slot == 1 {
+                append_texture_draw(&page_quick, left + 68, top + 25, 1.0, &mut draws)?;
+            } else {
+                append_texture_draw(&not_saved, left + 119, top + 19, 1.0, &mut draws)?;
+            }
+        }
+    }
+    let selected_row = slot_index / 2;
+    let selected_column = slot_index % 2;
+    append_texture_draw(
+        &select,
+        slot_left[selected_column as usize],
+        slot_top[selected_row as usize],
+        1.0,
+        &mut draws,
+    )?;
+    let frame = LegacyRenderResourceFrameV1 {
+        width,
+        height,
+        texture_resources: vec![
+            base, title, select, buttons, page_auto, page_quick, not_saved,
+        ],
+        draws,
+    };
+    frame.validate()?;
+    Ok(frame)
+}
+
+fn gallery_resource_uri(
+    page: MinoriSystemPage,
+    focus_index: u32,
+) -> Result<&'static str, LegacyProviderError> {
+    let resource = match page {
+        MinoriSystemPage::GalleryCg => MINORI_GALLERY_CG_PAGE_URIS
+            .get(usize::try_from(focus_index).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                    "CG gallery focus cannot be represented",
+                )
+            })?)
+            .copied()
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                    "CG gallery focus is outside the verified page range",
+                )
+            })?,
+        MinoriSystemPage::GalleryBgm => {
+            if focus_index >= MINORI_GALLERY_BGM_TRACK_COUNT {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                    "BGM gallery focus is outside the verified track range",
+                ));
+            }
+            MINORI_GALLERY_BGM_PAGE_URIS
+                .get(usize::try_from(focus_index / 16).map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                        "BGM gallery focus cannot be represented",
+                    )
+                })?)
+                .copied()
+                .ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                        "BGM gallery focus is outside the verified page range",
+                    )
+                })?
+        }
+        MinoriSystemPage::GalleryReplay => MINORI_GALLERY_REPLAY_PAGE_URIS
+            .get(usize::try_from(focus_index).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                    "replay gallery focus cannot be represented",
+                )
+            })?)
+            .copied()
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                    "replay gallery focus is outside the verified page range",
+                )
+            })?,
+        _ => {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_GALLERY_PAGE",
+                "gallery resource requested for a non-gallery page",
+            ));
+        }
+    };
+    Ok(resource)
+}
+
+fn gallery_bgm_track_resource_uri(focus_index: u32) -> Result<&'static str, LegacyProviderError> {
+    MINORI_GALLERY_BGM_TRACK_URIS
+        .get(usize::try_from(focus_index).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                "BGM gallery track cannot be represented",
+            )
+        })?)
+        .copied()
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_GALLERY_FOCUS",
+                "BGM gallery track is outside the verified range",
+            )
+        })
 }
 
 fn describe_config_page(
@@ -6565,7 +8279,9 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
 #[cfg(test)]
 mod tests {
     use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
-    use astra_emu_family_api::{LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode};
+    use astra_emu_family_api::{
+        LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode, LegacyVfsListedFile,
+    };
     use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
     use super::*;
@@ -6638,6 +8354,43 @@ mod tests {
                 revision: stat.revision,
                 bytes: bytes.into(),
             })
+        }
+
+        fn enumerate_by_extension(
+            &self,
+            mount_set_id: &str,
+            root: &str,
+            extension_without_dot: &str,
+            max_entries: u32,
+        ) -> Result<Vec<LegacyVfsListedFile>, LegacyProviderError> {
+            if mount_set_id != "mount.test" || max_entries == 0 {
+                return Err(invalid("TEST_VFS_ENUM", "fixture enumeration is invalid"));
+            }
+            let root = root.trim_end_matches('/');
+            let suffix = format!(".{}", extension_without_dot.to_ascii_lowercase());
+            let mut entries = self
+                .scripts
+                .keys()
+                .filter(|uri| {
+                    uri.starts_with(&format!("{root}/"))
+                        && uri.to_ascii_lowercase().ends_with(&suffix)
+                })
+                .map(|uri| {
+                    let stat = self.stat_file(mount_set_id, uri)?;
+                    Ok(LegacyVfsListedFile {
+                        uri: uri.clone(),
+                        stat,
+                    })
+                })
+                .collect::<Result<Vec<_>, LegacyProviderError>>()?;
+            entries.sort_by(|left, right| left.uri.cmp(&right.uri));
+            if entries.len() > max_entries as usize {
+                return Err(invalid(
+                    "TEST_VFS_ENUM",
+                    "fixture enumeration exceeds bound",
+                ));
+            }
+            Ok(entries)
         }
     }
 
@@ -6760,6 +8513,328 @@ mod tests {
                 "surface test must not access writable files",
             ))
         }
+    }
+
+    #[derive(Default)]
+    struct InMemoryWritableFiles {
+        files: std::sync::Mutex<BTreeMap<String, Vec<u8>>>,
+        directories: std::sync::Mutex<BTreeSet<String>>,
+    }
+
+    impl astra_emu_family_api::LegacyWritableFileHostV1 for InMemoryWritableFiles {
+        fn execute(
+            &self,
+            _session_id: &str,
+            request: astra_emu_family_api::LegacyWritableFileRequestV1,
+        ) -> Result<astra_emu_family_api::LegacyWritableFileResultV1, LegacyProviderError> {
+            use astra_emu_family_api::{
+                LegacyWritableFileEntryV1, LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
+            };
+            let result = |exists: bool,
+                          is_file: bool,
+                          length: u64,
+                          entries: Vec<LegacyWritableFileEntryV1>,
+                          bytes: Vec<u8>,
+                          written: u64| {
+                Ok(LegacyWritableFileResultV1 {
+                    exists,
+                    is_file,
+                    length,
+                    entries,
+                    bytes: bytes.into(),
+                    written,
+                })
+            };
+            match request {
+                LegacyWritableFileRequestV1::Stat { path } => {
+                    if let Some(bytes) = self.files.lock().unwrap().get(&path) {
+                        result(true, true, bytes.len() as u64, Vec::new(), Vec::new(), 0)
+                    } else if self.directories.lock().unwrap().contains(&path) {
+                        result(true, false, 0, Vec::new(), Vec::new(), 0)
+                    } else {
+                        result(false, false, 0, Vec::new(), Vec::new(), 0)
+                    }
+                }
+                LegacyWritableFileRequestV1::List { path } => {
+                    let prefix = format!("{path}/");
+                    let mut entries = Vec::new();
+                    for (file_path, bytes) in self.files.lock().unwrap().iter() {
+                        let Some(name) = file_path.strip_prefix(&prefix) else {
+                            continue;
+                        };
+                        if name.contains('/') {
+                            continue;
+                        }
+                        entries.push(LegacyWritableFileEntryV1 {
+                            name: name.into(),
+                            is_file: true,
+                            length: bytes.len() as u64,
+                        });
+                    }
+                    entries.sort_by(|left, right| left.name.cmp(&right.name));
+                    result(true, false, 0, entries, Vec::new(), 0)
+                }
+                LegacyWritableFileRequestV1::CreateDir { path } => {
+                    self.directories.lock().unwrap().insert(path);
+                    result(true, false, 0, Vec::new(), Vec::new(), 0)
+                }
+                LegacyWritableFileRequestV1::ReadRange {
+                    path,
+                    offset,
+                    length,
+                } => {
+                    let files = self.files.lock().unwrap();
+                    let bytes = files.get(&path).ok_or_else(|| {
+                        invalid("TEST_WRITABLE_MISSING", "requested file does not exist")
+                    })?;
+                    let start = usize::try_from(offset).map_err(|_| {
+                        invalid("TEST_WRITABLE_RANGE", "read offset does not fit usize")
+                    })?;
+                    let end = start
+                        .checked_add(usize::try_from(length).map_err(|_| {
+                            invalid("TEST_WRITABLE_RANGE", "read length does not fit usize")
+                        })?)
+                        .ok_or_else(|| invalid("TEST_WRITABLE_RANGE", "read range overflowed"))?;
+                    let payload = bytes.get(start..end).ok_or_else(|| {
+                        invalid("TEST_WRITABLE_RANGE", "read range is outside the file")
+                    })?;
+                    result(
+                        true,
+                        true,
+                        bytes.len() as u64,
+                        Vec::new(),
+                        payload.to_vec(),
+                        0,
+                    )
+                }
+                LegacyWritableFileRequestV1::WriteRange {
+                    path,
+                    offset,
+                    bytes,
+                } => {
+                    let mut files = self.files.lock().unwrap();
+                    let target = files.entry(path).or_default();
+                    let start = usize::try_from(offset).map_err(|_| {
+                        invalid("TEST_WRITABLE_RANGE", "write offset does not fit usize")
+                    })?;
+                    if start > target.len() {
+                        return Err(invalid(
+                            "TEST_WRITABLE_RANGE",
+                            "test writable file does not create sparse gaps",
+                        ));
+                    }
+                    let end = start
+                        .checked_add(bytes.len())
+                        .ok_or_else(|| invalid("TEST_WRITABLE_RANGE", "write range overflowed"))?;
+                    if end > target.len() {
+                        target.resize(end, 0);
+                    }
+                    target[start..end].copy_from_slice(&bytes);
+                    result(
+                        true,
+                        true,
+                        target.len() as u64,
+                        Vec::new(),
+                        Vec::new(),
+                        bytes.len() as u64,
+                    )
+                }
+                LegacyWritableFileRequestV1::SetLength { path, length } => {
+                    let mut files = self.files.lock().unwrap();
+                    let target = files.entry(path).or_default();
+                    let length = usize::try_from(length).map_err(|_| {
+                        invalid("TEST_WRITABLE_LENGTH", "file length does not fit usize")
+                    })?;
+                    target.resize(length, 0);
+                    result(true, true, length as u64, Vec::new(), Vec::new(), 0)
+                }
+                LegacyWritableFileRequestV1::Remove { path } => {
+                    self.files.lock().unwrap().remove(&path);
+                    result(false, false, 0, Vec::new(), Vec::new(), 0)
+                }
+                LegacyWritableFileRequestV1::AtomicReplace {
+                    temporary_path,
+                    destination_path,
+                } => {
+                    let mut files = self.files.lock().unwrap();
+                    let bytes = files.remove(&temporary_path).ok_or_else(|| {
+                        invalid("TEST_WRITABLE_RENAME", "temporary save file is missing")
+                    })?;
+                    let length = bytes.len() as u64;
+                    files.insert(destination_path, bytes);
+                    result(true, true, length, Vec::new(), Vec::new(), 0)
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gallery_pages_resolve_only_verified_system_assets() {
+        assert_eq!(
+            gallery_resource_uri(MinoriSystemPage::GalleryCg, 0).unwrap(),
+            "minori:/sys/cgpage001.png"
+        );
+        assert_eq!(
+            gallery_resource_uri(MinoriSystemPage::GalleryCg, 11).unwrap(),
+            "minori:/sys/cgpage012.png"
+        );
+        assert_eq!(
+            gallery_resource_uri(MinoriSystemPage::GalleryBgm, 32).unwrap(),
+            "minori:/sys/musicPage3.png"
+        );
+        assert_eq!(
+            gallery_resource_uri(MinoriSystemPage::GalleryReplay, 3).unwrap(),
+            "minori:/sys/flash3.png"
+        );
+        assert!(gallery_resource_uri(MinoriSystemPage::GalleryCg, 12).is_err());
+        assert!(gallery_resource_uri(MinoriSystemPage::GalleryBgm, 47).is_err());
+        assert!(gallery_resource_uri(MinoriSystemPage::GalleryReplay, 4).is_err());
+    }
+
+    #[test]
+    fn script_loader_expands_bounded_includes_and_rejects_cycles() {
+        let reader: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/root.sc".into(),
+                    b".include part.sc\r\n.end\r\n".to_vec(),
+                ),
+                (
+                    "minori:/scr/part.sc".into(),
+                    b".set included = 1\r\n".to_vec(),
+                ),
+            ]),
+        });
+        let (_, _, expanded) = load_script(&reader, "mount.test", "root.sc").unwrap();
+        assert_eq!(expanded.lines.len(), 2);
+
+        let cycle_reader: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/a.sc".into(), b".include b.sc\r\n".to_vec()),
+                ("minori:/scr/b.sc".into(), b".include a.sc\r\n".to_vec()),
+            ]),
+        });
+        let error = load_script(&cycle_reader, "mount.test", "a.sc").unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_CYCLE");
+    }
+
+    #[test]
+    fn save_slot_round_trips_through_v9_writable_file_port() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/test.sc".into(),
+                b".wait 20\r\n.end\r\n".to_vec(),
+            )]),
+        });
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::clone(&vfs));
+        let ctx = context();
+        let session_id = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.save".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        provider
+            .step(&ctx, &session_id, step_input(1, Vec::new()))
+            .unwrap();
+        let writable = InMemoryWritableFiles::default();
+        let session = provider.sessions.get_mut(&session_id.0).unwrap();
+        refresh_save_slots(&writable, &session_id, session).unwrap();
+        assert!(session.save_slots.is_empty());
+        session.vm.open_save_page().unwrap();
+        save_slot(&writable, &session_id, session, 7).unwrap();
+        assert!(writable.files.lock().unwrap().contains_key(&slot_path(7)));
+        session.vm.close_gameplay_system_page().unwrap();
+        session.vm.open_load_page().unwrap();
+        load_slot(&writable, &vfs, &session_id, session, 7, 2).unwrap();
+        assert_eq!(session.vm.state().system_ui.page, MinoriSystemPage::None);
+        assert_eq!(session.vm.state().fixed_tick, 2);
+        assert!(session.vm.state().wait.is_some());
+    }
+
+    #[test]
+    fn save_load_page_uses_the_verified_assets_and_slot_grid() {
+        let encode_rgba = |width: u32, height: u32| {
+            let mut png = Vec::new();
+            PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![0; usize::try_from(width * height * 4).unwrap()],
+                    width,
+                    height,
+                    ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
+                (
+                    "minori:/sys/saveloadBase.png".into(),
+                    encode_rgba(1280, 720),
+                ),
+                ("minori:/sys/saveloadSave.png".into(), encode_rgba(352, 48)),
+                (
+                    "minori:/sys/saveloadSelect.png".into(),
+                    encode_rgba(344, 98),
+                ),
+                (
+                    "minori:/sys/saveloadButtons.png".into(),
+                    encode_rgba(356, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page0.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page1.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                ("minori:/sys/notsaved.png".into(), encode_rgba(106, 60)),
+            ]),
+        });
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(b"script"),
+            parse_sc(b".end\r\n", &ScOpcodeCatalog::observed_minori()).unwrap(),
+            7,
+        )
+        .unwrap();
+        vm.begin_title_launch().unwrap();
+        vm.set_system_page(MinoriSystemPage::Save, 0).unwrap();
+        let frame = describe_system_page_with_slots(
+            &vfs,
+            "mount.test",
+            Some((1280, 720)),
+            &vm,
+            &BTreeSet::from([0, 7]),
+        )
+        .unwrap();
+        assert_eq!(frame.texture_resources.len(), 7);
+        assert_eq!(frame.draws.len(), 12);
+        assert_eq!(
+            frame.texture_resources[0].resource_uri,
+            "minori:/sys/saveloadBase.png"
+        );
+        assert_eq!(
+            frame.texture_resources[1].resource_uri,
+            "minori:/sys/saveloadSave.png"
+        );
+        assert!(frame.draws.iter().any(|draw| {
+            draw.texture_id == MINORI_SYSTEM_TEXTURE_ID + 2
+                && draw.vertices[0].position == [64.0, 81.0]
+        }));
+        vm.set_save_focus(17).unwrap();
+        vm.move_save_page(1).unwrap();
+        assert_eq!(vm.state().system_ui.focus_index, 27);
     }
 
     #[test]
@@ -7698,16 +9773,38 @@ mod tests {
                 ExtendedColorType::Rgba8,
             )
             .unwrap();
-        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
-            scripts: BTreeMap::from([
-                ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
-                ("minori:/sys/topMenu2.png".into(), page_png.clone()),
-                ("minori:/sys/memories.png".into(), page_png.clone()),
-                ("minori:/sys/cgmode0.png".into(), page_png.clone()),
-                ("minori:/sys/flash0.png".into(), page_png.clone()),
-                ("minori:/sys/musicPage1.png".into(), page_png),
-            ]),
-        }));
+        let mut label_png = Vec::new();
+        PngEncoder::new(&mut label_png)
+            .write_image(&vec![0; 160 * 80 * 4], 160, 80, ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut note_png = Vec::new();
+        PngEncoder::new(&mut note_png)
+            .write_image(&vec![0; 32 * 32 * 4], 32, 32, ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut menu_png = Vec::new();
+        PngEncoder::new(&mut menu_png)
+            .write_image(&vec![0; 384 * 64 * 4], 384, 64, ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut resources = BTreeMap::from([
+            ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
+            ("minori:/sys/topMenu2.png".into(), page_png.clone()),
+            ("minori:/sys/memories.png".into(), page_png.clone()),
+            ("minori:/sys/cgmode0.png".into(), page_png.clone()),
+            ("minori:/sys/cgmode0box.png".into(), page_png.clone()),
+            ("minori:/sys/cgmode0menu.png".into(), label_png.clone()),
+            ("minori:/sys/flash0.png".into(), page_png.clone()),
+            ("minori:/sys/flash0menu.png".into(), menu_png),
+            ("minori:/sys/musicPage1.png".into(), page_png),
+            ("minori:/sys/musicNote.png".into(), note_png),
+        ]);
+        for index in 1..=12 {
+            resources.insert(
+                format!("minori:/sys/cgpage{index:03}.png"),
+                label_png.clone(),
+            );
+        }
+        let mut provider =
+            MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader { scripts: resources }));
         let ctx = context();
         let session = provider
             .open(

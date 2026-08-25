@@ -430,3 +430,11 @@ python Tools/check_docs.py
 - 同一 package 的 backlog 短程运行通过：`771` fixed step、`30` presented frame、`55` 条输入、6 个 checkpoint、零 diagnostic。模型查看了打开 backlog、向上翻页两条记录、关闭 backlog 和返回剧情的 checkpoint；滚动条、记录顺序、消息层与关闭后的场景切换均可见，未发现空白替代或图层残留。音频 artifact 为 48 kHz 双声道、`616448` frames，量测 peak `32405`、RMS `4391.58`；同样只作为自动量测，不作为人工听感通过。
 - 当前完整路线输入没有插入 checkpoint 事件，因此不能把 terminal 运行误写成完整视觉 review；title timeline、Config 和 backlog 的 checkpoint 已在当前 build/package identity 下人工查看。影片播放、首选项/跳过、存档恢复、结局返回标题、CG/BGM/回想页的完整 checkpoint 集合及 Windows E3 仍未关闭。历史 ABI v8 review 不跨 ABI 继承，新的正式 `prepare-review`/`validate-review` 仍需在具名人工音频试听完成后运行。
 - 本轮只运行受影响 crate 的增量测试、`cargo build -p astra-headless`、`cargo fmt --check`、目标 clippy 和 `Tools/check_docs.py`；没有用全 workspace 测试替代当前证据，也没有把忽略目录中的商业 payload、截图、音频或私有路径写入仓库。
+
+### 2026-08-25 鉴赏页与真实缩略图契约复验
+
+- 使用当前源码重新生成的签名 package 完成鉴赏页 Headless E2：`82` 个 fixed step、`12` 个 presented frame、`64` 条物理输入、`9` 个 checkpoint、零 diagnostic。VFS 统计为 `45` 个 resource、`45` 个 unique range、`111` 次 read 和 `31046383` bytes；报告只保留 family、计数和 identity，不写文件名、路径或商业内容。
+- 复核输入语义后修正了鉴赏序列：在 BGM 页按 Escape 会回到 Memories 的 focus 0，随后 Enter 才是 CG；旧序列把同一张画面误标成 movie。修正后的序列实际覆盖 CG 第 1/2 页、回想页、BGM 播放和 movie 列表页，所有 checkpoint 已逐张查看。
+- `sys/cgthumb` 的真实缩略图尺寸由样本确认是 `128x72`；provider 现在对该尺寸做严格校验，错误尺寸阻断，不缩放猜测。CG 页按已验证的 4x4 网格呈现，最后一页的空槽保持资源定义的空态。
+- 标题、Memories、BGM、CG 和回想页面的文字、比例、层次和焦点没有发现裁剪、拉伸或残影。movie 列表已使用真实标签与脚本目标校验，但当前样本没有独立的 movie gallery 背景资源；运行时保留已验证的 Memories 背景和有界文字层，不能把它写成原版逐像素一致。实际影片播放仍由剧情 movie fence 证据覆盖，鉴赏页的原版视觉 parity 继续开放。
+- 该次鉴赏运行使用 local-private global progress 进入页面，不能证明四条路线自然解锁或完整鉴赏解锁条件；正式人工音频听审、自然 unlock 全量证据和 Windows E3 仍未完成。自动非静音量测也不替代具名人工听审。

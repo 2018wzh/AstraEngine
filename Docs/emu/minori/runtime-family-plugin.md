@@ -1,6 +1,6 @@
 # Minori Runtime Family Plugin Design
 
-Minori family 通过 `LegacyRuntimeProvider` 接入 AstraEMU。Session 持有 PAZ archive set、`.sc` decoder、VM、presentation/audio mapper、external key diagnostics 和 snapshot state。文档只描述 planned target，不表示 runtime 已实现。
+Minori family 通过 `LegacyRuntimeProvider` 接入 AstraEMU。Session 持有 PAZ archive set、`.sc` decoder、VM、presentation/audio mapper、external key diagnostics、writable-file save state 和 ABI v9 layer state。下面的生命周期与错误边界同时记录已落地契约和仍开放的行为证据；没有 Headless/Windows evidence 的项目不会被写成完成。
 
 ## Session Modules
 

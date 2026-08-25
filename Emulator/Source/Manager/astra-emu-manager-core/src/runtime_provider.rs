@@ -1205,6 +1205,24 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             target: request.target_id.clone(),
             profile: request.profile.clone(),
         };
+        let mut family_options = profile.family_options;
+        family_options.insert(
+            "astra.hosted_trace_profile".into(),
+            match request.integrity_mode {
+                RuntimeTickIntegrityMode::Shipping => "shipping",
+                RuntimeTickIntegrityMode::Evidence => "evidence",
+            }
+            .into(),
+        );
+        tracing::info!(
+            event = "astra_emu_runtime_family_open_options",
+            family_id = self.family.descriptor().family_id.0.as_str(),
+            launch_marker = family_options
+                .get("astra.launch_entry_explicit")
+                .map(String::as_str)
+                .unwrap_or("missing"),
+            "forwarding the explicit family open options"
+        );
         if let Err(error) = self.family.open(
             &host_ctx,
             LegacyOpenRequest {
@@ -1214,18 +1232,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 fixed_delta_ns: profile.fixed_delta_ns,
                 session_seed: request.seed,
                 compatibility_profile: profile.compatibility_profile,
-                family_options: {
-                    let mut options = profile.family_options;
-                    options.insert(
-                        "astra.hosted_trace_profile".into(),
-                        match request.integrity_mode {
-                            RuntimeTickIntegrityMode::Shipping => "shipping",
-                            RuntimeTickIntegrityMode::Evidence => "evidence",
-                        }
-                        .into(),
-                    );
-                    options
-                },
+                family_options,
             },
         ) {
             self.host.release_session(&family_session_id.0);
