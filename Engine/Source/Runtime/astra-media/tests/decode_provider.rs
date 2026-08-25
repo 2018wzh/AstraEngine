@@ -239,6 +239,15 @@ fn windows_wmf_decode_provider_decodes_public_mp4_first_frame_to_bgra() {
 
 #[cfg(windows)]
 #[astra_headless_test::test]
+fn windows_wmf_capability_declares_avi_for_minori_movies() {
+    let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
+    let capability = provider.capability();
+    assert!(capability.kinds.contains(&DecodeKind::Video));
+    assert!(capability.codecs.iter().any(|codec| codec == "avi"));
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
 fn windows_wmf_full_stream_decoder_enforces_frame_and_byte_budgets() {
     let bytes = fixture_bytes("flower.mp4");
     let frame_limited =
