@@ -30,6 +30,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use astra_byte_source::ByteRange;
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
     is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
@@ -37,7 +38,7 @@ use astra_emu_family_api::{
     LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1,
     LegacyVideoMode,
 };
-use astra_emu_family_support::LegacyVfsFamilyRegistry;
+use astra_emu_family_support::{LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry};
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
@@ -191,6 +192,7 @@ enum PendingWait {
 
 struct RuntimeBridge {
     provider: AstraEmuRuntimeProvider,
+    family_id: String,
     active: Option<ActiveRuntimeSession>,
     terminal: bool,
     failed: bool,
@@ -214,6 +216,7 @@ impl RuntimeBridge {
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
         Ok(Self {
             provider,
+            family_id: "fvp".into(),
             active: None,
             terminal: false,
             failed: false,
@@ -228,6 +231,41 @@ impl RuntimeBridge {
             suspended: false,
             host_wake: None,
         })
+    }
+
+    fn ensure_family(
+        &mut self,
+        family_id: &str,
+        reader: Arc<dyn LegacyVfsReader>,
+    ) -> Result<(), String> {
+        if family_id.is_empty() || !matches!(family_id, "fvp" | "minori") {
+            return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
+        }
+        if self.active.is_some() {
+            return Err("ASTRA_EMU_RUNTIME_SESSION_ALREADY_ACTIVE".into());
+        }
+        if self.family_id == family_id {
+            return Ok(());
+        }
+        self.provider
+            .destroy_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
+        let family_host = astra_emu_manager_core::AstraEmuFamilyHost::new(reader);
+        let family = match family_id {
+            "fvp" => FamilyHostConfig::from_process()?.create_provider(family_host.services())?,
+            "minori" => astra_emu_minori::create_static_minori_provider(family_host.services())
+                .map_err(|error| error.to_string())?,
+            _ => unreachable!("family id validated above"),
+        };
+        let mut provider = AstraEmuRuntimeProvider::new(family, family_host)?;
+        provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
+        self.provider = provider;
+        self.family_id = family_id.into();
+        self.terminal = false;
+        self.failed = false;
+        self.live_scene_commits.clear();
+        self.live_layer_commits.clear();
+        self.resource_revisions.clear();
+        Ok(())
     }
 
     fn set_host_wake(&mut self, wake: HostWake) {
@@ -245,7 +283,7 @@ impl RuntimeBridge {
         if self.active.is_some() {
             return Err("ASTRA_EMU_RUNTIME_SESSION_ALREADY_ACTIVE".into());
         }
-        if profile.family_id != "fvp" || profile.case_identity != case.case_identity {
+        if profile.family_id != self.family_id || profile.case_identity != case.case_identity {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
         }
         let (media_hooks, deterministic_effects) = validate_patch_actions(patch_actions)?;
@@ -257,16 +295,27 @@ impl RuntimeBridge {
         if env::var("ASTRA_EMU_QUICK_EVIDENCE").as_deref() == Ok("1") {
             family_options.insert("astra.hosted_trace_profile".into(), "evidence".into());
         }
-        let script_fingerprint: Hash256 = family_options
-            .remove("fvp.hcb_content_hash")
-            .ok_or_else(|| "ASTRA_EMU_FVP_HCB_IDENTITY_MISSING".to_owned())?
-            .parse()
-            .map_err(|_| "ASTRA_EMU_FVP_HCB_IDENTITY_INVALID".to_owned())?;
+        let script_uri = family_options
+            .remove("astra.entry_uri")
+            .unwrap_or_else(|| case.relative_path.clone());
+        let script_fingerprint: Hash256 = if self.family_id == "fvp" {
+            family_options
+                .remove("fvp.hcb_content_hash")
+                .ok_or_else(|| "ASTRA_EMU_FVP_HCB_IDENTITY_MISSING".to_owned())?
+                .parse()
+                .map_err(|_| "ASTRA_EMU_FVP_HCB_IDENTITY_INVALID".to_owned())?
+        } else {
+            family_options
+                .remove("astra.family_content_hash")
+                .ok_or_else(|| "ASTRA_EMU_FAMILY_CONTENT_IDENTITY_MISSING".to_owned())?
+                .parse()
+                .map_err(|_| "ASTRA_EMU_FAMILY_CONTENT_IDENTITY_INVALID".to_owned())?
+        };
         let emu_profile = EmuCaseProfile {
             schema: "astra.emu.case_profile.v1".into(),
-            family_id: "fvp".into(),
+            family_id: self.family_id.clone(),
             case_fingerprint: script_fingerprint,
-            script_uri: case.relative_path.clone(),
+            script_uri,
             fixed_delta_ns: profile.fixed_delta_ns,
             compatibility_profile: profile.compatibility_profile,
             mount_set_id: mount_set_id.clone(),
@@ -290,7 +339,7 @@ impl RuntimeBridge {
             script_fingerprint,
             platform_data_dir()?
                 .join("SavedGames")
-                .join("fvp")
+                .join(&self.family_id)
                 .join(package_hash.to_string()),
         )?;
         let audio = HostAudioExecutor::open()?;
@@ -305,7 +354,7 @@ impl RuntimeBridge {
         }
         let open = self.provider.open(RuntimeOpenRequest {
             target_id: "astra-emu-case".into(),
-            profile: "fvp-v1".into(),
+            profile: format!("{}-v1", self.family_id),
             locale: "und".into(),
             seed,
             integrity_mode: astra_plugin_abi::RuntimeTickIntegrityMode::Shipping,
@@ -436,6 +485,70 @@ impl RuntimeBridge {
             ]
             .into_iter()
             .collect(),
+        })
+    }
+
+    fn probe_minori_profile(
+        &self,
+        case: &astra_emu_manager_core::CaseRecord,
+        mount_set_id: &str,
+        entry_uri: &str,
+    ) -> Result<CaseRuntimeProfileRecord, String> {
+        if self.family_id != "minori" {
+            return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
+        }
+        let package_hash: Hash256 = case
+            .content_hash
+            .parse()
+            .map_err(|_| "ASTRA_EMU_CASE_FINGERPRINT_INVALID".to_owned())?;
+        let report = self.provider.probe_family(
+            &LegacyRuntimeHostCtx {
+                case_id: case.case_identity.clone(),
+                package_id: "astra-emu-case".into(),
+                package_hash,
+                mount_set_id: mount_set_id.into(),
+                media_service_ids: vec!["astra.media.host".into()],
+                permission_policy_id: "astra.emu.desktop.user_grant.v1".into(),
+                report_sink_id: "astra.emu.manager.report".into(),
+                target: "game".into(),
+                profile: "minori-v1".into(),
+            },
+            LegacyProbeRequest {
+                root_mount_id: mount_set_id.into(),
+                candidate_uris: vec![entry_uri.into()],
+                marker_hashes: Vec::new(),
+            },
+        )?;
+        if report.family_id.0 != "minori"
+            || report.confidence_permyriad != 10_000
+            || !report.blockers.is_empty()
+        {
+            return Err("ASTRA_EMU_MINORI_PROBE_BLOCKED".into());
+        }
+        let mut family_options = BTreeMap::from([
+            ("astra.entry_uri".into(), entry_uri.into()),
+            (
+                "astra.family_content_hash".into(),
+                report.content_identity.to_string(),
+            ),
+            ("astra.stage_width".into(), "1024".into()),
+            ("astra.stage_height".into(), "768".into()),
+            ("astra.launch_entry_explicit".into(), "true".into()),
+            (
+                "astra.provider.storage".into(),
+                "astra.writable_file.v1".into(),
+            ),
+            ("patch.mode".into(), "no_patch".into()),
+        ]);
+        if env::var("ASTRA_EMU_QUICK_EVIDENCE").as_deref() == Ok("1") {
+            family_options.insert("astra.hosted_trace_profile".into(), "evidence".into());
+        }
+        Ok(CaseRuntimeProfileRecord {
+            case_identity: case.case_identity.clone(),
+            family_id: "minori".into(),
+            fixed_delta_ns: 16_666_667,
+            compatibility_profile: "minori.reference".into(),
+            family_options,
         })
     }
 
@@ -1275,7 +1388,9 @@ struct AstraEmuManagerController {
     search_query: String,
     diagnostic: String,
     vfs: Arc<VfsRegistry>,
-    _family_vfs_registry: Arc<LegacyVfsFamilyRegistry>,
+    family_vfs_registry: Arc<LegacyVfsFamilyRegistry>,
+    active_family_mount: Option<Arc<dyn astra_emu_family_core::LegacyMountedVfs>>,
+    active_family_reader: Option<Arc<LegacyMountedVfsReaderAdapter>>,
     runtime: Rc<RefCell<RuntimeBridge>>,
     active_mount_set_id: Option<String>,
     active_play_session: Option<String>,
@@ -1446,7 +1561,9 @@ impl AstraEmuManagerController {
             search_query: String::new(),
             diagnostic: String::new(),
             vfs,
-            _family_vfs_registry: Arc::new(family_vfs_registry),
+            family_vfs_registry: Arc::new(family_vfs_registry),
+            active_family_mount: None,
+            active_family_reader: None,
             runtime,
             active_mount_set_id: None,
             active_play_session: None,
@@ -1484,6 +1601,23 @@ impl AstraEmuManagerController {
         let Some(mount_set_id) = self.active_mount_set_id.as_deref() else {
             return Vec::new();
         };
+        if let Some(mounted) = self.active_family_mount.as_ref() {
+            let prefix = mounted.manifest().prefix.trim_end_matches("/");
+            return mounted
+                .manifest()
+                .entries
+                .iter()
+                .filter_map(|entry| {
+                    let path = entry.uri.strip_prefix(prefix)?.trim_start_matches('/');
+                    Some(VfsResourceInfo {
+                        path: path.to_owned(),
+                        byte_size: entry.decoded_size,
+                        source_layer: "family".into(),
+                        resolve_path: String::new(),
+                    })
+                })
+                .collect();
+        }
         self.vfs.list_resources(mount_set_id).unwrap_or_default()
     }
 
@@ -1601,10 +1735,7 @@ impl AstraEmuManagerController {
             kind = "image";
             image_uri = resource.resolve_path.clone();
         } else {
-            let bytes = self
-                .vfs
-                .read_file(mount_set_id, &resource.path, 64 * 1024)
-                .ok()?;
+            let bytes = self.read_vfs_preview_bytes(mount_set_id, resource).ok()?;
             match decode_text_preview(&bytes, &resource.path) {
                 Some((name, text)) => {
                     kind = "text";
@@ -1627,6 +1758,41 @@ impl AstraEmuManagerController {
             source_layer: resource.source_layer.clone(),
             resolve_path: resource.resolve_path.clone(),
         })
+    }
+
+    fn read_vfs_preview_bytes(
+        &self,
+        mount_set_id: &str,
+        resource: &VfsResourceInfo,
+    ) -> Result<Vec<u8>, String> {
+        if let (Some(mounted), Some(reader)) = (
+            self.active_family_mount.as_ref(),
+            self.active_family_reader.as_ref(),
+        ) {
+            let prefix = mounted.manifest().prefix.trim_end_matches('/');
+            let uri = format!("{prefix}/{}", resource.path.trim_matches('/'),);
+            let stat = reader
+                .stat_file(mount_set_id, &uri)
+                .map_err(|error| error.code().to_owned())?;
+            let length = stat.len.min(64 * 1024);
+            let read = reader
+                .read_file_range(
+                    mount_set_id,
+                    &uri,
+                    stat.revision,
+                    ByteRange {
+                        offset: 0,
+                        len: length,
+                    },
+                    64 * 1024,
+                )
+                .map_err(|error| error.code().to_owned())?;
+            return Ok(read.bytes.as_slice().to_vec());
+        }
+        self.vfs
+            .read_file(mount_set_id, &resource.path, 64 * 1024)
+            .map(|bytes| bytes.as_slice().to_vec())
+            .map_err(|error| error.code().to_owned())
     }
 
     fn selected_metadata_context(
@@ -3597,8 +3763,29 @@ impl ManagerController for AstraEmuManagerController {
         if grant.token_kind != platform_grant_kind() {
             return Err("ASTRA_EMU_SOURCE_GRANT_PLATFORM_MISMATCH".into());
         }
+        let family_id = case
+            .family_override
+            .clone()
+            .or_else(|| {
+                case.relative_path
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("scr.paz"))
+                    .then_some("minori".into())
+            })
+            .or_else(|| profile.as_ref().map(|value| value.family_id.clone()))
+            .unwrap_or_else(|| "fvp".into());
+        if !matches!(family_id.as_str(), "fvp" | "minori") {
+            return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
+        }
         let mount_identity = Hash256::from_sha256(case.content_hash.as_bytes()).to_string();
         let mount_set_id = format!("mount-{}", &mount_identity[..32]);
+        let grant_root = PathBuf::from(&grant.platform_token);
+        let game_root = case
+            .relative_path
+            .rsplit_once('/')
+            .map(|(parent, _)| grant_root.join(parent.replace('/', std::path::MAIN_SEPARATOR_STR)))
+            .unwrap_or_else(|| grant_root.clone());
         let translation_config = TranslationLaunchConfig {
             case_identity: case.case_identity.clone(),
             profile: self
@@ -3611,47 +3798,112 @@ impl ManagerController for AstraEmuManagerController {
                 .map_err(|error| error.to_string())?
                 .is_some(),
         };
+        let mut family_mount = None;
+        let mut family_reader = None;
+        let entry_uri = if family_id == "minori" {
+            let loaded = self
+                .family_vfs_registry
+                .load_profile(&game_root.join("astraemu.minori.mount.yaml"))
+                .map_err(|error| error.to_string())?;
+            let mounted = self
+                .family_vfs_registry
+                .mount("minori", &game_root, &loaded)
+                .map_err(|error| error.to_string())?;
+            let entry_uri = mounted
+                .manifest()
+                .entries
+                .iter()
+                .find(|entry| entry.media_kind == "script" && entry.uri.ends_with("/test.sc"))
+                .or_else(|| {
+                    mounted
+                        .manifest()
+                        .entries
+                        .iter()
+                        .find(|entry| entry.media_kind == "script")
+                })
+                .map(|entry| entry.uri.clone())
+                .ok_or_else(|| "ASTRA_EMU_MINORI_ENTRY_REQUIRED".to_owned())?;
+            let adapter = Arc::new(
+                LegacyMountedVfsReaderAdapter::new(&mount_set_id, mounted.clone())
+                    .map_err(|error| error.to_string())?,
+            );
+            self.runtime
+                .try_borrow_mut()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .ensure_family("minori", adapter.clone())?;
+            family_mount = Some(mounted);
+            family_reader = Some(adapter);
+            entry_uri
+        } else {
+            self.runtime
+                .try_borrow_mut()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .ensure_family("fvp", self.vfs.clone())?;
+            case.relative_path.clone()
+        };
         self.vfs.bind(&mount_set_id, &grant.platform_token)?;
-        let pack_paths =
-            match fvp_pack_paths_option(self.vfs.as_ref(), &mount_set_id, &case.relative_path) {
+        let (mut detected, pack_paths) = if family_id == "minori" {
+            let detected = self
+                .runtime
+                .try_borrow()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .probe_minori_profile(&case, &mount_set_id, &entry_uri)
+                .inspect_err(|_| {
+                    self.vfs.unbind(&mount_set_id);
+                })?;
+            (detected, None)
+        } else {
+            let pack_paths = match fvp_pack_paths_option(
+                self.vfs.as_ref(),
+                &mount_set_id,
+                &case.relative_path,
+            ) {
                 Ok(pack_paths) => pack_paths,
                 Err(error) => {
                     self.vfs.unbind(&mount_set_id);
                     return Err(error);
                 }
             };
-        let detected = self
-            .runtime
-            .try_borrow()
-            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .probe_fvp_profile(&case, &mount_set_id);
-        match detected {
-            Ok(mut detected) => {
-                if let Some(explicit) = profile.take() {
-                    if explicit.case_identity != case.case_identity || explicit.family_id != "fvp" {
-                        self.vfs.unbind(&mount_set_id);
-                        return Err("ASTRA_EMU_EXPLICIT_PROFILE_BINDING_MISMATCH".into());
-                    }
-                    detected.fixed_delta_ns = explicit.fixed_delta_ns;
-                    detected.compatibility_profile = explicit.compatibility_profile;
-                    detected.family_options.extend(explicit.family_options);
-                }
-                if let Err(error) = self.library.set_case_runtime_profile(&detected) {
+            let detected = self
+                .runtime
+                .try_borrow()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .probe_fvp_profile(&case, &mount_set_id)
+                .inspect_err(|_| {
                     self.vfs.unbind(&mount_set_id);
-                    return Err(error.to_string());
-                }
-                profile = Some(detected);
-            }
-            Err(error) => {
+                })?;
+            (detected, Some(pack_paths))
+        };
+        if let Some(explicit) = profile.take() {
+            if explicit.case_identity != case.case_identity || explicit.family_id != family_id {
                 self.vfs.unbind(&mount_set_id);
-                return Err(error);
+                return Err("ASTRA_EMU_EXPLICIT_PROFILE_BINDING_MISMATCH".into());
             }
+            detected.fixed_delta_ns = explicit.fixed_delta_ns;
+            detected.compatibility_profile = explicit.compatibility_profile;
+            detected.family_options.extend(explicit.family_options);
         }
+        if let Err(error) = self.library.set_case_runtime_profile(&detected) {
+            self.vfs.unbind(&mount_set_id);
+            return Err(error.to_string());
+        }
+        profile = Some(detected);
         let mut profile =
             profile.ok_or_else(|| "ASTRA_EMU_CASE_PROFILE_NOT_CONFIGURED".to_owned())?;
-        profile
-            .family_options
-            .insert("fvp.pack_paths".into(), pack_paths);
+        if let Some(pack_paths) = pack_paths {
+            profile
+                .family_options
+                .insert("fvp.pack_paths".into(), pack_paths);
+        }
+        if family_id == "minori"
+            && profile
+                .family_options
+                .get("patch.mode")
+                .is_some_and(|mode| mode == "trusted")
+        {
+            self.vfs.unbind(&mount_set_id);
+            return Err("ASTRA_EMU_MINORI_TRUSTED_PATCH_UNSUPPORTED".into());
+        }
         if let Err(error) = self.apply_trusted_patch(&profile, &mount_set_id) {
             self.vfs.unbind(&mount_set_id);
             return Err(error);
@@ -3673,6 +3925,8 @@ impl ManagerController for AstraEmuManagerController {
             return Err(error);
         }
         self.active_mount_set_id = Some(mount_set_id);
+        self.active_family_mount = family_mount;
+        self.active_family_reader = family_reader;
         #[cfg(target_os = "android")]
         if let Err(error) = android_platform::set_game_mode(true) {
             if let Ok(mut runtime) = self.runtime.try_borrow_mut() {
@@ -3681,6 +3935,8 @@ impl ManagerController for AstraEmuManagerController {
             if let Some(mount_set_id) = self.active_mount_set_id.take() {
                 self.vfs.unbind(&mount_set_id);
             }
+            self.active_family_mount = None;
+            self.active_family_reader = None;
             return Err(error);
         }
         let session = self
@@ -3700,6 +3956,8 @@ impl ManagerController for AstraEmuManagerController {
         if let Some(mount_set_id) = self.active_mount_set_id.take() {
             self.vfs.unbind(&mount_set_id);
         }
+        self.active_family_mount = None;
+        self.active_family_reader = None;
         if let Some(session) = self.active_play_session.take() {
             if let Ok(now) = unix_time_ms() {
                 let _ = self.library.end_play_session(&session, now, "leave");
@@ -3885,6 +4143,8 @@ impl Drop for AstraEmuManagerController {
             if let Some(mount_set_id) = self.active_mount_set_id.take() {
                 self.vfs.unbind(&mount_set_id);
             }
+            self.active_family_mount = None;
+            self.active_family_reader = None;
         }
     }
 }

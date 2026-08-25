@@ -23,7 +23,7 @@ AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retai
 
 2026 年 8 月 25 日消息状态增量：runtime schema 已硬切到 `astra.emu.minori.runtime_state.v24`；message completion 记录按脚本 revision、source span、message id、text hash 形成的排序 bounded read identity，并覆盖 snapshot round-trip 与重复/无序 corruption blocker。逐字 reveal 公式和原版未读 Skip 策略仍未知，不计入完整消息行为 coverage。
 
-2026 年 8 月 25 日 Manager VFS preview 增量：文本 preview 先识别 UTF-8/UTF-16 BOM，再对已知脚本/配置扩展名尝试 CP932；包含 NUL 或 malformed input 的内容保持 hex 视图，UI 显示实际编码。该项只覆盖文本检测，不替代 family-mounted viewer、显式 image/audio/video decode binding 或真实 Manager media preview evidence。
+2026 年 8 月 25 日 Manager VFS preview 增量：文本 preview 先识别 UTF-8/UTF-16 BOM，再对已知脚本/配置扩展名尝试 CP932；包含 NUL 或 malformed input 的内容保持 hex 视图，UI 显示实际编码。Manager 同时接入 Minori family mount、解密 URI range reader 和静态 runtime provider。该项只覆盖文本检测和 family mount，不替代显式 image/audio/video decode binding 或真实 Manager media preview evidence。
 
 同日 backlog audio 增量：`backlog_voice_playback` 关闭时，replay 保留 backlog 中的 voice identity 但不提交新的播放命令；角色 voice filter 与该 preference 均有 VM regression。全屏 Host effect、逐字速度和真实 host 音频听审仍未关闭。
 

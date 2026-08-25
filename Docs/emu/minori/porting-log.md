@@ -2,6 +2,12 @@
 
 ## 2026-08-25
 
+### Manager family mount 与 Minori runtime 接线
+
+- Manager launch 现在根据显式 family override 或 `scr.paz` entry 选择 `fvp`/`minori`；Minori 通过游戏目录内的 `astraemu.minori.mount.yaml` 调用静态 `MinoriVfsFamilyFactory`，再把 `LegacyMountedVfsReaderAdapter` 绑定到 ABI v9 host。RuntimeBridge 在无活动 session 时销毁旧 family instance，并重建同一 ABI v9 provider，不按注册顺序或隐式 fallback 选择。
+- Manager VFS tree/文本 preview 在 Minori mount 生效时读取解密后的 manifest URI 与 range，不再把 archive 原文件误当成脚本；图片、音频和影片仍停在显式 `DecodeProviderRegistry` binding 之前，不以 hex 视图冒充 media preview。
+- 这关闭了 Manager 的 Minori family mount、runtime provider 和解密脚本读取接线；完整媒体预览、Manager 端 cache evidence、四条路线和 Windows E3 仍未关闭。没有把 key、商业文本、截图或本地绝对路径写入仓库。
+
 ### Manager VFS 文本预览编码选择
 
 - Manager 的 VFS preview 现在在有界读取后先识别 UTF-8/UTF-16 BOM，再对 `.sc`、文本配置和脚本扩展名严格尝试 CP932；解码包含 NUL 或出现替换错误时保持 binary/hex 视图，不把任意二进制静默当成文本。UI 显示实际选用的编码，图像路径和 media provider binding 未被改写。

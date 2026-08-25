@@ -967,6 +967,7 @@ dependencies = [
  "astra-core",
  "astra-emu-extension-api",
  "astra-emu-family-api",
+ "astra-emu-family-core",
  "astra-emu-family-support",
  "astra-emu-fvp",
  "astra-emu-manager-core",
