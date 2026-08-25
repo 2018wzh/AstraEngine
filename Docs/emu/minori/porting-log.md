@@ -560,3 +560,8 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - 发现 `--frame-sample-interval` 大于 1 时，运行路径会按契约跳过非采样 tick 的 presentation；如果 checkpoint 恰好先于首个采样 frame，直接 readback 会返回 `ASTRA_EMU_HEADLESS_CHECKPOINT_SURFACE_MISSING`。这是真实的采样与 checkpoint 契约冲突，不是输入或资源问题。
 - `astra-emu-cli` 现在在捕获 checkpoint 前调用 `ensure_checkpoint_surface`：优先提交 pending retained scene，其次绘制已绑定的 GPU scene，CPU layer 则只物化当前 prepared frame；该过程不推进 fixed tick，也不改变 runtime state。没有可提交 surface 时仍 fail fast，不生成替代帧。
 - 重新编译并签名当前 ABI v9 package 后，以 `frame_sample_interval=60` 运行真实八包短程：431 fixed steps、7 presented frames、27 条物理输入、无 diagnostic，报告为 `passed`；title_initial、ending 和 route_5 checkpoint 均可读，确认稀疏采样不再破坏声明的 checkpoint。该结果仍是非 terminal smoke，不替代完整四路线、正式 audio review 或 Windows E3。
+### 2026-08-26 Headless await 诊断与影片链回归
+
+- 为 Headless 的 typed await 超时与匹配日志补充有界状态计数：pending input/time/media wait、active video，以及最近一次 provider status、wait/event/blackboard 数量。日志不包含正文、资源 payload、路径或 key；计数只用于定位输入序列和媒体 fence 的边界。
+- 授权样本的短路线复核确认：首段影片完成后，runtime 已发布下一脚本的 input wait；若继续保持 Control 并用 Enter 消费消息，Minori 语义会把下一条消息转换为 time wait，因此随后期待 `runtime.input_or_terminal` 会超时。这是测试输入未释放 Control 的语义问题，不是 chain、影片完成或 message wait 丢失。正式路线输入必须在需要逐条等待前释放 Control。
+- 新增纯 Rust 回归覆盖“movie fence → chain → next message input wait”，并通过；直接从下一脚本入口运行的 Headless 短流程也通过，说明 chain 恢复和首个消息 wait 可独立观察。当前完整首条路线、自然解锁、正式视觉/音频审查及 Windows E3 仍未闭合。

@@ -4228,6 +4228,10 @@ struct RuntimeDriver<'a> {
     performance_memory_after_warmup: Option<astra_observability::ProcessMemorySample>,
     scene_full_resync_count: u64,
     last_step_resource_activity: bool,
+    last_runtime_status: String,
+    last_runtime_wait_count: usize,
+    last_runtime_event_count: usize,
+    last_runtime_blackboard_count: usize,
 }
 
 enum PendingAudioCommand {
@@ -4905,6 +4909,40 @@ async fn execute_sequence(
                         matched = driver.observation_matches(observation);
                     }
                     if !matched {
+                        tracing::error!(
+                            target: "astra_emu_cli::runner",
+                            event = "astra_emu_headless_await_timeout",
+                            input_sequence = message.sequence,
+                            fixed_step = driver.fixed_step,
+                            observation_kind = match observation {
+                                ObservationPredicate::Exists { .. } => "exists",
+                                ObservationPredicate::Equals { .. } => "removed_hash_observation",
+                            },
+                            timeout_ticks,
+                            pending_wait_count = driver.pending_waits.len(),
+                            pending_input_wait_count = driver
+                                .pending_waits
+                                .values()
+                                .filter(|wait| matches!(wait, PendingWait::Input(_)))
+                                .count(),
+                            pending_time_wait_count = driver
+                                .pending_waits
+                                .values()
+                                .filter(|wait| matches!(wait, PendingWait::Time(_)))
+                                .count(),
+                            pending_media_wait_count = driver
+                                .pending_waits
+                                .values()
+                                .filter(|wait| matches!(wait, PendingWait::Media(_)))
+                                .count(),
+                            active_video = driver.video.is_some(),
+                            observed_blackboard_count = driver.observed_blackboard.len(),
+                            runtime_status = driver.last_runtime_status.as_str(),
+                            runtime_wait_count = driver.last_runtime_wait_count,
+                            runtime_event_count = driver.last_runtime_event_count,
+                            runtime_blackboard_count = driver.last_runtime_blackboard_count,
+                            "Headless await did not match its typed observation"
+                        );
                         return Err("ASTRA_EMU_HEADLESS_AWAIT_TIMEOUT".into());
                     }
                     tracing::info!(
@@ -4916,6 +4954,22 @@ async fn execute_sequence(
                             ObservationPredicate::Exists { .. } => "exists",
                             ObservationPredicate::Equals { .. } => "removed_hash_observation",
                         },
+                        pending_input_wait_count = driver
+                            .pending_waits
+                            .values()
+                            .filter(|wait| matches!(wait, PendingWait::Input(_)))
+                            .count(),
+                        pending_time_wait_count = driver
+                            .pending_waits
+                            .values()
+                            .filter(|wait| matches!(wait, PendingWait::Time(_)))
+                            .count(),
+                        pending_media_wait_count = driver
+                            .pending_waits
+                            .values()
+                            .filter(|wait| matches!(wait, PendingWait::Media(_)))
+                            .count(),
+                        active_video = driver.video.is_some(),
                         "Headless await matched its typed observation"
                     );
                     if *continue_at_match {
@@ -5163,6 +5217,10 @@ impl<'a> RuntimeDriver<'a> {
             performance_memory_after_warmup: None,
             scene_full_resync_count: 0,
             last_step_resource_activity: false,
+            last_runtime_status: "unknown".into(),
+            last_runtime_wait_count: 0,
+            last_runtime_event_count: 0,
+            last_runtime_blackboard_count: 0,
         };
         Ok(driver)
     }
@@ -5567,6 +5625,10 @@ impl<'a> RuntimeDriver<'a> {
         self.record_perfetto_phase("runtime.provider_step", 6, runtime_started)?;
         let world_transaction_started = Instant::now();
         let live = output.live;
+        self.last_runtime_status = output.status.as_str().to_owned();
+        self.last_runtime_wait_count = live.waits.len();
+        self.last_runtime_event_count = live.events.len();
+        self.last_runtime_blackboard_count = live.blackboard.len();
         self.state_revision = live.state_revision;
         let coverage = live.coverage;
         self.fixed_step = next_step;
@@ -5829,7 +5891,15 @@ impl<'a> RuntimeDriver<'a> {
         if let Some(scene) = self.pending_scene_frame.take() {
             self.submit_scene(scene).await?;
             self.visual_dirty = false;
-        } else if let Some(gpu_scene) = self.gpu_scene.as_ref() {
+        } else if self
+            .gpu_scene
+            .as_ref()
+            .is_some_and(|scene| scene.width != 0 && scene.height != 0)
+        {
+            let gpu_scene = self
+                .gpu_scene
+                .as_ref()
+                .expect("checked retained GPU scene dimensions");
             let scene = gpu_scene.draw_scene()?;
             self.submit_scene(scene).await?;
             self.visual_dirty = false;

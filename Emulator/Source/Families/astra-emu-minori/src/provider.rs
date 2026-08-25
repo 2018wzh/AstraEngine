@@ -10835,6 +10835,69 @@ mod tests {
     }
 
     #[test]
+    fn provider_resumes_a_movie_into_a_chain_and_publishes_the_next_message_wait() {
+        let entry = b".movie 9989 op.avi 1280 720 t\r\n.chain K01.sc\r\n".to_vec();
+        let next = b".message 1  speaker after movie\r\n.end\r\n".to_vec();
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), entry),
+                ("minori:/scr/K01.sc".into(), next),
+                ("minori:/mov/op.avi".into(), b"RIFFfixture".to_vec()),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.movie-chain".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+        let started = provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        let token_id = match started.control.waits.as_slice() {
+            [LegacyWaitRequest::MediaFence { token_id, .. }] => token_id.clone(),
+            _ => panic!("expected the movie media fence"),
+        };
+        let chained = provider
+            .step(
+                &ctx,
+                &session,
+                step_input(
+                    2,
+                    vec![LegacyAwaitResult {
+                        token_id,
+                        status: "completed".into(),
+                        payload_len: 0,
+                        sequence: 1,
+                    }],
+                ),
+            )
+            .unwrap();
+        assert_eq!(chained.status, LegacyRuntimeStatus::Active);
+        assert_eq!(chained.trace[0].action.as_deref(), Some("chain"));
+        let resumed = provider
+            .step(&ctx, &session, step_input(3, Vec::new()))
+            .unwrap();
+        assert_eq!(resumed.status, LegacyRuntimeStatus::Awaiting);
+        assert!(matches!(
+            resumed.control.waits.as_slice(),
+            [LegacyWaitRequest::Input { .. }]
+        ));
+    }
+
+    #[test]
     fn provider_exposes_message_plaintext_only_through_a_one_shot_lease() {
         let script =
             b".message 42  speaker hello world\r\n.message 43  speaker second\r\n.end\r\n".to_vec();
