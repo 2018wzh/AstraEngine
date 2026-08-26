@@ -60,28 +60,28 @@ impl PluginDescriptor {
             "plugin.gate.validate"
         );
         let mut diagnostics = Vec::new();
-        if self.engine_version != gate.engine_version {
-            diagnostics.push(Diagnostic::blocking(
-                "ASTRA_PLUGIN_ENGINE_VERSION",
-                "plugin engine version does not match",
-            ));
-        }
-        if self.rustc_fingerprint != gate.rustc_fingerprint {
-            diagnostics.push(Diagnostic::blocking(
-                "ASTRA_PLUGIN_RUSTC_FINGERPRINT",
-                "plugin rustc fingerprint does not match",
-            ));
-        }
-        if self.feature_fingerprint != gate.feature_fingerprint {
-            diagnostics.push(Diagnostic::blocking(
-                "ASTRA_PLUGIN_FEATURE_FINGERPRINT",
-                "plugin feature fingerprint does not match",
-            ));
-        }
         if self.abi_fingerprint != gate.abi_fingerprint {
             diagnostics.push(Diagnostic::blocking(
                 "ASTRA_PLUGIN_ABI_FINGERPRINT",
                 "plugin ABI fingerprint does not match",
+            ));
+        }
+        if self.engine_version != gate.engine_version {
+            diagnostics.push(Diagnostic::warning(
+                "ASTRA_PLUGIN_ENGINE_VERSION",
+                "plugin engine version differs (warn-only)",
+            ));
+        }
+        if self.rustc_fingerprint != gate.rustc_fingerprint {
+            diagnostics.push(Diagnostic::warning(
+                "ASTRA_PLUGIN_RUSTC_FINGERPRINT",
+                "plugin rustc fingerprint differs (warn-only)",
+            ));
+        }
+        if self.feature_fingerprint != gate.feature_fingerprint {
+            diagnostics.push(Diagnostic::warning(
+                "ASTRA_PLUGIN_FEATURE_FINGERPRINT",
+                "plugin feature fingerprint differs (warn-only)",
             ));
         }
         if self.abi_style != "abi_stable_rust" {

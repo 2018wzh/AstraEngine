@@ -925,10 +925,18 @@ impl RuntimeWorld {
         let mut previous_sequence = 0;
         for ingress in &request.ingress {
             if ingress.sequence == 0 || ingress.sequence <= previous_sequence {
-                return Err(RuntimeError::diagnostic(Diagnostic::blocking(
-                    "ASTRA_RUNTIME_TICK_INGRESS_ORDER_INVALID",
-                    "tick ingress sequence must be non-zero and strictly increasing",
-                )));
+                if self.integrity_mode == TickIntegrityMode::Evidence {
+                    return Err(RuntimeError::diagnostic(Diagnostic::blocking(
+                        "ASTRA_RUNTIME_TICK_INGRESS_ORDER_INVALID",
+                        "tick ingress sequence must be non-zero and strictly increasing",
+                    )));
+                } else {
+                    warn!(
+                        sequence = ingress.sequence,
+                        previous = previous_sequence,
+                        "runtime.tick.ingress_order_warn"
+                    );
+                }
             }
             previous_sequence = ingress.sequence;
         }
@@ -950,13 +958,17 @@ impl RuntimeWorld {
             ));
         }
         if input.delta_ns == 0 || input.delta_ns > 1_000_000_000 {
-            return Err(RuntimeError::diagnostic(
-                Diagnostic::blocking(
-                    "ASTRA_RUNTIME_TICK_DELTA_INVALID",
-                    "runtime tick delta must be within the supported fixed-step range",
-                )
-                .with_field("delta_ns", input.delta_ns),
-            ));
+            if self.integrity_mode == TickIntegrityMode::Evidence {
+                return Err(RuntimeError::diagnostic(
+                    Diagnostic::blocking(
+                        "ASTRA_RUNTIME_TICK_DELTA_INVALID",
+                        "runtime tick delta must be within the supported fixed-step range",
+                    )
+                    .with_field("delta_ns", input.delta_ns),
+                ));
+            } else {
+                warn!(delta_ns = input.delta_ns, "runtime.tick.delta_warn");
+            }
         }
         if input.seed != self.config.seed {
             return Err(RuntimeError::diagnostic(
@@ -974,13 +986,17 @@ impl RuntimeWorld {
             .iter()
             .find(|slot| !self.mounted_modules.contains_key(*slot))
         {
-            return Err(RuntimeError::diagnostic(
-                Diagnostic::blocking(
-                    "ASTRA_RUNTIME_MODULE_MISSING",
-                    "runtime required module slot is not mounted",
-                )
-                .with_field("slot", slot),
-            ));
+            if self.integrity_mode == TickIntegrityMode::Evidence {
+                return Err(RuntimeError::diagnostic(
+                    Diagnostic::blocking(
+                        "ASTRA_RUNTIME_MODULE_MISSING",
+                        "runtime required module slot is not mounted",
+                    )
+                    .with_field("slot", slot),
+                ));
+            } else {
+                warn!(slot = %slot, "runtime.tick.module_missing_warn");
+            }
         }
         Ok(())
     }
@@ -1231,6 +1247,16 @@ impl RuntimeWorld {
     }
 
     pub fn state_hash(&self) -> Hash128 {
+        if self.integrity_mode == TickIntegrityMode::Shipping {
+            // 高性能 Shipping：仅 step + actor 摘要，不做全量 HistoryChain/postcard
+            let bytes = postcard::to_allocvec(&(
+                "astra.runtime.state_digest.shipping.v1",
+                self.step,
+                self.actors.deterministic_fingerprint(),
+            ))
+            .expect("shipping state digest must serialize");
+            return Hash128::from_blake3(&bytes);
+        }
         let mut history = self.history_digests.borrow_mut();
         history.refresh_from_world(self);
         let machine_definitions = history

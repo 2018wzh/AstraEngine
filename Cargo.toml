@@ -60,6 +60,7 @@ members = [
     "Engine/Source/Programs/astra-player-android",
     "Engine/Source/Programs/astra-crash-reporter",
     "Engine/Source/Programs/astra-ui-component-host",
+    "Engine/Tools/xtask",
     "Examples/TsuiNoSora/Tools/original-patcher",
     "Engine/Plugins/Fixtures/headless-presentation-provider",
     "Engine/Plugins/Fixtures/vn-extension-provider",
@@ -227,6 +228,7 @@ rayon = "1.12"
 yakui-core = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 yakui-widgets = { git = "https://github.com/SecondHalfGames/yakui", rev = "4b87f09ce18c36975de022507123eb360153728d", default-features = false }
 zstd = "0.13"
+anyhow = "1"
 ndk-sys = "0.6.0"
 oboe = "0.6.1"
 

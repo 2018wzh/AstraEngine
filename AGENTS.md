@@ -65,6 +65,14 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 - AstraRPG 是后续同级 gameplay runtime provider。`AstraTRPG` 不作为独立顶层模块或 provider 落地，只能作为 AstraRPG 的 `rpg.trpg` ruleset/profile layer；package/save/report namespace 使用 `rpg.*` 和 `rpg.trpg.*`，不得新增顶层 `trpg.*`。
 - CP2020 等规则书适配只能作为 local-private adapter：仓库可提交 schema、manifest、resolver skeleton、公开最小 fixture、hash、coverage 和 diagnostic，不得提交完整规则正文、表格、扫描图、职业/装备/义体完整清单或可复原 payload。
 
+
+### 2.2 防回弹与精简硬约束（高性能引擎）
+
+- 新增 crate 必须证明第二消费者或替代现有 crate；<200 行禁止独立 crate，必须并入父 crate；>600 行单文件必须拆模块。
+- 推测域（Stage 7/8 RPG、AI/MCP 重媒体生成）文档保留为设计意图，不进入 \Tools/check_docs.py\ 的强制阻塞校验，仅作人类可读 draft 校验。
+- 插件指纹仅 \bi_fingerprint\ blocking，\ngine_version/rustc/feature\ 降为 \warn\；工具并入 \cargo xtask\ 仅保人类可读（link + 路径泄露）。
+- Runtime \Shipping\ 仅校验 \step+seed\，\HistoryChain/state_hash\ 仅 \save/replay\ 边界计算；帧内不做 \lake3/postcard/clone\。
+- \workspace.members\ 预算 ~45，新增需 PR 说明替代关系；\Docs/implementation/workspace-blueprint.md\ \planned\ 行不得入主 workspace。
 ### 2.1 实现完备性与主路径硬约束
 
 - 设计声明“系统”或“能力”时，不能用最小 happy path 代替完整实现。例如字体系统不能用 `font_size * 常数`、字符数切行、构造未实际使用的 `Metrics` 或“字体名包含 missing”诊断代替；必须有真实 font database/provider、glyph shaping、Unicode/script 覆盖、fallback chain、度量/换行/裁剪/省略、字体资产 hash/lifecycle、跨平台绑定、真实视觉 evidence 和 layout replay 稳定性。
