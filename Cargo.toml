@@ -193,7 +193,7 @@ wait-timeout = "0.2"
 walkdir = "2"
 windows-sys = "0.61"
 winresource = "0.1"
-tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-rustls = "0.26"
 tracing = "0.1"
 zeroize = { version = "1", features = ["derive"] }

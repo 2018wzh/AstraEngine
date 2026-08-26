@@ -18,7 +18,7 @@ use astra_player_core::{
     PlayerAutomationReport, PlayerAutomationStatus, PlayerPlatform, PlayerPresentationReport,
     PLAYER_PRESENTATION_REPORT_SCHEMA,
 };
-use astra_plugin::{ProductRuntimeHost, RuntimeHostLimits};
+use astra_plugin::{ConcurrentProductRuntimeHost, RuntimeHostLimits};
 use astra_plugin_abi::{
     PluginExtensionRegistrySnapshot, ProviderPolicy, RuntimeOpenRequest, RuntimeRestoreRequest,
     RuntimeSaveRequest, RuntimeStepInput, RuntimeStepMode,
@@ -30,7 +30,7 @@ use astra_vn_package::{
     VnProfileManifest, VnStandardCommandManifest,
 };
 use astra_vn_policy::{VnPolicyBundleManifest, VnPolicyBundleSourceCache};
-use astra_vn_runtime_provider::NativeVnRuntimeProvider;
+use astra_vn_runtime_provider::NativeVnRuntimeProviderFactory;
 use astra_vn_script::SystemStoryValidationStatus;
 use astra_vn_system::{SystemStoryManifest, VnSystemUiProfileManifest};
 use schemars::JsonSchema;
@@ -1784,7 +1784,8 @@ fn native_vn_behavioral_evidence(
         .map(|entry| entry.id.clone())
         .collect::<Vec<_>>();
     let limits = RuntimeHostLimits::from_descriptor(selection.descriptor());
-    let mut host = ProductRuntimeHost::bound_in_process(
+    // v2 工厂式宿主：factory 独占 instance，session 各自 mailbox
+    let host = ConcurrentProductRuntimeHost::bound_in_process(
         format!(
             "astra-release.native-vn.{}",
             selection
@@ -1793,12 +1794,22 @@ fn native_vn_behavioral_evidence(
                 .trim_start_matches("sha256:")
         ),
         selection,
-        NativeVnRuntimeProvider::default(),
+        NativeVnRuntimeProviderFactory::default(),
         limits,
+        std::time::Duration::from_secs(10),
     )
     .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_BINDING", err.to_string()))?;
 
-    let result = (|| {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| {
+            (
+                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RUNTIME",
+                format!("create tokio runtime: {err}"),
+            )
+        })?;
+    let result = rt.block_on(async {
         let prepare = host
             .prepare(astra_plugin_abi::RuntimePrepareRequest {
                 target_id: selection.target().to_string(),
@@ -1806,6 +1817,7 @@ fn native_vn_behavioral_evidence(
                 package_hash: package.package_hash().to_string(),
                 section_ids: section_ids.clone(),
             })
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PREPARE", err.to_string()))?;
         if prepare.status != "pass" || !prepare.diagnostics.is_empty() {
             return Err((
@@ -1820,6 +1832,7 @@ fn native_vn_behavioral_evidence(
                 platform: None,
                 section_ids,
             })
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_PROBE", err.to_string()))?;
         if probe.status != "pass" || !probe.diagnostics.is_empty() {
             return Err((
@@ -1838,6 +1851,7 @@ fn native_vn_behavioral_evidence(
                 package_hash: package.package_hash().to_string(),
                 sections: vec![compiled_section],
             })
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_OPEN", err.to_string()))?;
         let output = host
             .step(RuntimeStepInput {
@@ -1849,6 +1863,7 @@ fn native_vn_behavioral_evidence(
                 action: "launch_default".to_string(),
                 ..RuntimeStepInput::default()
             })
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_STEP", err.to_string()))?;
         let state = output.live.vn_state.as_ref().ok_or_else(|| {
             (
@@ -1903,6 +1918,7 @@ fn native_vn_behavioral_evidence(
                 session_id: open.session_id.clone(),
                 slot: "release.conformance".to_string(),
             })
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", err.to_string()))?;
         let save_section_count = save.sections.len();
         let expected_sections = save.sections.clone();
@@ -1920,12 +1936,14 @@ fn native_vn_behavioral_evidence(
             session_id: open.session_id.clone(),
             sections: save.sections,
         })
+        .await
         .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_RESTORE", err.to_string()))?;
         let restored = host
             .save(RuntimeSaveRequest {
                 session_id: open.session_id.clone(),
                 slot: "release.conformance".to_string(),
             })
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SAVE", err.to_string()))?;
         if restored.sections != expected_sections {
             return Err((
@@ -1933,9 +1951,11 @@ fn native_vn_behavioral_evidence(
                 "provider restore did not reproduce the saved section identity".to_string(),
             ));
         }
-        host.shutdown_session(open.session_id)
+        host.shutdown(open.session_id.clone())
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_SHUTDOWN", err.to_string()))?;
         host.destroy()
+            .await
             .map_err(|err| ("ASTRA_RUNTIME_PROVIDER_BEHAVIOR_DESTROY", err.to_string()))?;
         Ok(vec![
             evidence(
@@ -1953,16 +1973,13 @@ fn native_vn_behavioral_evidence(
             evidence("behavior_save_section_count", save_section_count),
             evidence("provider_binding_hash", selection.binding_hash()),
         ])
-    })();
+    });
     match result {
         Ok(evidence) => Ok(evidence),
-        Err(error) => match host.cleanup_after_failure() {
-            Ok(_) => Err(error),
-            Err(cleanup_error) => Err((
-                "ASTRA_RUNTIME_PROVIDER_BEHAVIOR_CLEANUP",
-                format!("{}; cleanup failed: {cleanup_error}", error.1),
-            )),
-        },
+        Err(error) => {
+            let _ = rt.block_on(host.destroy());
+            Err(error)
+        }
     }
 }
 
