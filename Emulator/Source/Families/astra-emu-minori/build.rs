@@ -7,6 +7,8 @@ use astra_emu_family_api::{
 use sha2::{Digest, Sha256};
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FFMPEG_VCPKG");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_FEATURE");
     let rustc = env::var_os("RUSTC").expect("ASTRA_MINORI_BUILD_RUSTC_MISSING");
     let output = Command::new(rustc)
         .arg("-Vv")
@@ -34,9 +36,11 @@ fn main() {
     let rustc_fingerprint = format!("sha256.{}", hex_sha256(identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_MINORI_RUSTC_FINGERPRINT={rustc_fingerprint}");
 
-    let mut features = env::vars()
-        .filter_map(|(name, _)| name.strip_prefix("CARGO_FEATURE_").map(str::to_owned))
-        .filter(|name| !matches!(name.as_str(), "DEFAULT" | "DYNAMIC_PLUGIN_EXPORT"))
+    let mut features = env::var("CARGO_CFG_FEATURE")
+        .expect("ASTRA_MINORI_BUILD_FEATURE_IDENTITY_MISSING")
+        .split(',')
+        .filter(|name| !matches!(*name, "default" | "dynamic-plugin-export"))
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     features.sort();
     let feature_identity = format!(

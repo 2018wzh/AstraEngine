@@ -662,7 +662,7 @@ impl WorkerState {
                 channels,
                 samples,
             } => self.append_f32(stream_id, sample_rate, channels, samples),
-            WorkerCommand::StopMovie(stream_id) => self.remove_stream(stream_id),
+            WorkerCommand::StopMovie(stream_id) => self.stop_movie_stream(stream_id),
             WorkerCommand::Suspend(value) => self.set_suspended(value),
             WorkerCommand::Wake
             | WorkerCommand::FixedTick(_)
@@ -963,6 +963,13 @@ impl WorkerState {
             .remove(&stream_id)
             .ok_or_else(|| "ASTRA_EMU_AUDIO_STREAM_MISSING".to_owned())?;
         Ok(())
+    }
+
+    fn stop_movie_stream(&mut self, stream_id: u32) -> Result<(), String> {
+        if !self.streams.contains_key(&stream_id) {
+            return Ok(());
+        }
+        self.remove_stream(stream_id)
     }
 
     fn destroy_kira_stream(&mut self, stream_id: u32) -> Result<(), String> {

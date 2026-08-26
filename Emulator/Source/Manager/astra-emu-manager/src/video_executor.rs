@@ -11,8 +11,8 @@ use std::{
 
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
-use astra_emu_minori::{MinoriAviDecoder, MinoriAviEvent};
-use astra_media::PlayerDecodedAudio;
+use astra_emu_minori::MinoriAviDecoder;
+use astra_media::{IncrementalMediaPlayback, IncrementalPlaybackLimits, PlayerDecodedAudio};
 use astra_platform::{
     DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
 };
@@ -24,6 +24,7 @@ use rfvp_astra_provider::{
 use crate::audio_executor::HostAudioExecutor;
 
 pub(crate) const MAX_ENCODED_BYTES: u64 = 512 * 1024 * 1024;
+pub(crate) const MINORI_VIDEO_PROVIDER_BINDING: &str = "ffmpeg-vcpkg";
 const MAX_DECODED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_AUDIO_SAMPLES: usize = 64 * 1024 * 1024;
 const MAX_FRAMES: usize = 60 * 60 * 4;
@@ -73,63 +74,95 @@ enum MovieDecoder {
 }
 
 struct MinoriAviStreamDecoder {
-    decoder: MinoriAviDecoder<Cursor<OwnedByteBuffer>>,
+    playback: IncrementalMediaPlayback,
+    pending: VecDeque<FvpMoviePacket>,
+    last_frame_sequence: u64,
     ended: bool,
 }
 
 impl MinoriAviStreamDecoder {
     fn open(bytes: OwnedByteBuffer) -> Result<Self, String> {
+        let decoder = MinoriAviDecoder::new(Cursor::new(bytes))?;
+        let playback = IncrementalMediaPlayback::open(
+            Box::new(decoder),
+            IncrementalPlaybackLimits {
+                max_video_frame_bytes: MAX_DECODED_BYTES,
+                max_audio_samples: MAX_AUDIO_SAMPLES,
+                max_pending_audio_samples: MAX_AUDIO_SAMPLES,
+            },
+        )
+        .map_err(|error| error.to_string())?;
         Ok(Self {
-            decoder: MinoriAviDecoder::new(Cursor::new(bytes))?,
+            playback,
+            pending: VecDeque::new(),
+            last_frame_sequence: 0,
             ended: false,
         })
     }
 
     fn duration_ns(&self) -> Result<u64, String> {
-        self.decoder
+        self.playback
             .duration_us()
             .checked_mul(1_000)
             .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_TIMELINE".to_owned())
     }
 
-    fn next_packet(&mut self) -> Result<FvpMoviePacket, String> {
-        if self.ended {
-            return Ok(FvpMoviePacket::End);
+    fn next_packet_at(&mut self, elapsed_ns: u64) -> Result<Option<FvpMoviePacket>, String> {
+        if let Some(packet) = self.pending.pop_front() {
+            return Ok(Some(packet));
         }
-        match self.decoder.next_event()? {
-            MinoriAviEvent::Video {
-                pts_us,
+        if self.ended {
+            return Ok(Some(FvpMoviePacket::End));
+        }
+        self.playback
+            .advance(elapsed_ns / 1_000)
+            .map_err(|error| error.to_string())?;
+        let current_sequence = self.playback.current_frame().map(|frame| frame.sequence);
+        if current_sequence.is_some_and(|sequence| sequence > self.last_frame_sequence) {
+            let frame = self
+                .playback
+                .take_current_frame()
+                .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_OWNERSHIP".to_owned())?;
+            self.last_frame_sequence = frame.sequence;
+            let pts_ms = frame.pts_us / 1_000;
+            let width = frame.width;
+            let height = frame.height;
+            let rgba8 = frame.into_rgba8().map_err(|error| error.to_string())?;
+            self.pending.push_back(FvpMoviePacket::Video(FvpMovieFrame {
+                pts_ms,
                 width,
                 height,
-                mut bgra8,
-            } => {
-                for pixel in bgra8.as_chunks_mut::<4>().0.iter_mut() {
-                    pixel.swap(0, 2);
-                }
-                Ok(FvpMoviePacket::Video(FvpMovieFrame {
-                    pts_ms: pts_us / 1_000,
-                    width,
-                    height,
-                    rgba8: bgra8,
-                }))
-            }
-            MinoriAviEvent::Audio {
-                pts_ms,
-                sample_rate,
-                channels,
-                samples,
-            } => Ok(FvpMoviePacket::Audio(FvpMovieAudioChunk {
-                pts_ms: u64::try_from(pts_ms)
-                    .map_err(|_| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?,
-                sample_rate,
-                channels,
-                samples,
-            })),
-            MinoriAviEvent::End => {
-                self.ended = true;
-                Ok(FvpMoviePacket::End)
-            }
+                rgba8,
+            }));
         }
+        for chunk in self.playback.drain_audio() {
+            self.pending
+                .push_back(FvpMoviePacket::Audio(FvpMovieAudioChunk {
+                    pts_ms: chunk.pts_us / 1_000,
+                    sample_rate: chunk.sample_rate,
+                    channels: chunk.channels,
+                    samples: chunk.samples,
+                }));
+        }
+        self.pending
+            .make_contiguous()
+            .sort_by_key(|packet| match packet {
+                FvpMoviePacket::Video(frame) => frame.pts_ms,
+                FvpMoviePacket::Audio(chunk) => chunk.pts_ms,
+                FvpMoviePacket::End => u64::MAX,
+            });
+        if let Some(packet) = self.pending.pop_front() {
+            return Ok(Some(packet));
+        }
+        if self.playback.is_ended() {
+            self.ended = true;
+            return Ok(Some(FvpMoviePacket::End));
+        }
+        Ok(None)
+    }
+
+    fn close(&mut self) -> Result<(), String> {
+        self.playback.cancel().map_err(|error| error.to_string())
     }
 }
 
@@ -673,16 +706,16 @@ impl MovieDecoder {
                 video_result.and(audio_result)
             }
             Self::Native(_) => Ok(()),
-            Self::Minori(_) => Ok(()),
+            Self::Minori(mut decoder) => decoder.close(),
             #[cfg(test)]
             Self::Buffered(_) => Ok(()),
         }
     }
 
-    fn next_packet(&mut self) -> Result<Option<FvpMoviePacket>, String> {
+    fn next_packet(&mut self, elapsed_ns: u64) -> Result<Option<FvpMoviePacket>, String> {
         match self {
             Self::Native(decoder) => decoder.try_next().map_err(|error| error.to_string()),
-            Self::Minori(decoder) => decoder.next_packet().map(Some),
+            Self::Minori(decoder) => decoder.next_packet_at(elapsed_ns),
             Self::Platform(decoder) => {
                 if decoder.next_video.is_none() && !decoder.video_eof {
                     match decoder
@@ -736,6 +769,7 @@ pub(crate) struct HostVideoExecutor {
     audio_sequence: u32,
     platform: Option<PlatformHostClient>,
     family_id: String,
+    video_provider: String,
 }
 
 pub(crate) fn validate_family_video_extension(
@@ -748,9 +782,20 @@ pub(crate) fn validate_family_video_extension(
     Ok(())
 }
 
+fn validate_family_video_provider(family_id: &str, provider_id: &str) -> Result<(), String> {
+    if family_id == "minori" && provider_id != MINORI_VIDEO_PROVIDER_BINDING {
+        return Err("ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED".to_owned());
+    }
+    Ok(())
+}
+
 impl HostVideoExecutor {
     pub(crate) fn bind_family(&mut self, family_id: &str) {
         self.family_id = family_id.to_owned();
+    }
+
+    pub(crate) fn bind_video_provider(&mut self, provider_id: &str) {
+        self.video_provider = provider_id.to_owned();
     }
 
     pub(crate) fn bind_platform(&mut self, platform: PlatformHostClient) {
@@ -808,6 +853,7 @@ impl HostVideoExecutor {
             .ok_or_else(|| "ASTRA_EMU_VIDEO_EXTENSION_MISSING".to_owned())?;
         validate_family_video_extension(&self.family_id, extension)?;
         if self.family_id == "minori" && extension.eq_ignore_ascii_case("avi") {
+            validate_family_video_provider(&self.family_id, &self.video_provider)?;
             let decoder = MinoriAviStreamDecoder::open(bytes)?;
             let duration_ns = Some(decoder.duration_ns()?);
             let audio_stream_id = if matches!(mode, LegacyVideoMode::ModalWithAudio) {
@@ -1032,7 +1078,7 @@ fn pump_decoder(active: &mut ActiveMovie, audio: &mut HostAudioExecutor) -> Resu
             .back()
             .is_none_or(|frame| frame.pts_ns <= active.elapsed_ns.saturating_add(VIDEO_PREFETCH_NS))
     {
-        let Some(packet) = active.decoder.next_packet()? else {
+        let Some(packet) = active.decoder.next_packet(active.elapsed_ns)? else {
             // PlatformHost decode is producer-driven.  A slow hardware
             // decoder must not block the Runtime tick waiting for the bounded
             // ring; the next deadline/event will pump it again.
@@ -1167,5 +1213,15 @@ mod tests {
         );
         assert!(validate_family_video_extension("minori", "AVI").is_ok());
         assert!(validate_family_video_extension("fvp", "wmv").is_ok());
+    }
+
+    #[test]
+    fn minori_video_requires_the_shared_ffmpeg_binding() {
+        assert_eq!(
+            validate_family_video_provider("minori", "unbound").unwrap_err(),
+            "ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED"
+        );
+        assert!(validate_family_video_provider("minori", MINORI_VIDEO_PROVIDER_BINDING).is_ok());
+        assert!(validate_family_video_provider("fvp", "platform").is_ok());
     }
 }

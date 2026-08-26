@@ -1,6 +1,19 @@
 # Minori Implementation Checklist
 
-Minori family-mounted image previews now use explicit `astra-media` `DecodeProviderRegistry` bindings: standard PNG/JPEG/BMP/WebP use `astra.decode.image`, and ANI/SQZ use the family-owned `astra.decode.minori.image` provider for a bounded first frame. UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only; animation playback and video targets without a bound provider remain blocking/open.
+## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
+
+- [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
+- [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
+- [x] 当前签名 release plugin 的 title→config→movie→skip→title slice 报告 `passed`：3102 fixed steps、9 个 retained frame sample、零 diagnostic；该结果只覆盖 media/provider 与标题恢复接线，不覆盖完整剧情 terminal。
+- [ ] 正式音频人工听审、完整路线与自然 unlock、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合。
+
+## 当前媒体复核（2026-08-26）
+
+- rebase 到最新 ABI v9 `master` 后，签名动态 plugin 重新绑定 AstraMedia `ffmpeg-vcpkg`，真实授权样本 Headless slice 通过 139 fixed ticks、5 个 retained checkpoint samples、638 次有界 VFS read 和零 diagnostic；`title_initial`、`config`、`movie_60` 三张图已人工查看。该证据只关闭当前 media/provider 接线回归，不关闭完整路线、正式性能或 Windows E3。
+- 同一 FFmpeg release slice 在 CLI retained `Layer2D` composite cache 变更后重新执行：139 fixed steps、5 个 retained samples、638 次 bounded VFS read、zero diagnostic；`step_total` 从约 81.9 s 降到约 35.9 s，`effect_dispatch` 从约 48.7 s 降到约 22.4 s。缓存只在 viewport、完整 layer state 和已验证 base frame 全部相同时生效；该结果是性能诊断，不替代正式 120 Hz 或完整路线门禁。
+- FFmpeg feature 未编译、profile 没有 `ffmpeg-vcpkg` binding、AVI identity 不符或 codec/container 不受支持时，Minori 直接返回 blocking diagnostic；不存在 WMF、RFVP、手写 AVI/WMV 或按注册顺序选择的 fallback。
+
+Minori family-mounted image previews now use explicit `astra-media` `DecodeProviderRegistry` bindings: standard PNG/JPEG/BMP/WebP use `astra.decode.image`, and ANI/SQZ use the family-owned `astra.decode.minori.image` provider for a bounded first frame. UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only. Minori AVI playback and preview bind AstraMedia's incremental `ffmpeg-vcpkg` provider; an absent or mismatched binding remains blocking.
 
 Manager startup no longer eagerly loads the unselected FVP binary. The composition root creates the pure-Rust Minori idle provider and rebuilds the selected family only after a validated mount is available; same-family rebuild is intentional because the idle and mounted VFS bindings differ.
 
@@ -10,7 +23,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。
 
-- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori mount profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 media preview evidence 仍未完成。
+- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori mount profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
 
 - 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、同步 translation Hook、CosmicText text layer 和 writable-file save/global-progress port；旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
 - 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
@@ -18,7 +31,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - 分支已同步到 Family ABI v9 基线。Minori 必须迁移为 `Native + MultiLayer`，并使用 Host-owned surface、同步 Hook 和 writable-file port；旧 scene、snapshot、text lease、session resource 与 budget API 已删除且不提供兼容层。
 - 历史 2026-08-23 ABI v9 迁移条目保留为过程记录；当前同步 Hook、CosmicText text surface 和真实 v9 E2 已由 2026-08-25 条目覆盖。
-- 授权样本仍是 8 个逻辑 archive、18 个物理 PAZ 文件和 14502 个 entry。`mov` role 含 5 个 RIFF/AVI；视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。纯 Rust reader 已完整解出 17480 个视频 sample，零长度 sample 按 AVI dropped frame 处理。
+- 授权样本仍是 8 个逻辑 archive、18 个物理 PAZ 文件和 14502 个 entry。`mov` role 含 5 个 RIFF/AVI；视频为 WMV3 1280×720、24 fps，音频为 PCM 48 kHz 双声道 16-bit。当前生产路径由 AstraMedia/FFmpeg 负责 demux、codec、resample 和 packet timing；Minori 不再依赖纯 Rust WMV/AVI decoder。真实 Headless media slice 已验证 60 fixed ticks、16 帧、111104 音频帧、非静音和零 diagnostic。
 - 签名 Minori dylib 已用同一 mount、plugin、Headless profile 和序列化物理输入连续跑完两次标题启动的真实路线。两次均推进 31011 fixed steps、提交并栅格化 31627 帧、消费 16947 条输入并最终从标题执行 Exit；snapshot round-trip、用户 save/restore、Config、backlog、真实影片、自然解锁和 31 个 checkpoint 均通过，diagnostic 为 0。新的同身份单次运行进一步推进 33490 fixed steps、呈现 34108 帧、消费 16951 条输入并通过 33 个 checkpoint，把首个 choice、实际 post-choice 分支和自然完成的不可跳过结局媒体纳入同一份通过报告。
 - 两次运行的 visual trace、runtime state trace、route terminal、coverage、audio meter、submitted scene、rasterized frame 和 audio stream hash 全部一致。输入 hash 因 local-private session id 不同而不同，不作为跨 session 一致性结论。平台全局进度通过 ordered storage request/result 原子读写；两次均严格证明自然解锁数为 1。restore 会合并同一 provider session 已确认的全局进度，不允许旧 snapshot 回滚解锁。
 - 模型复核新报告全部 33 个 required checkpoint；人物、背景、影片和日文字形没有缺失、横向裁剪、非预期拉伸、旧图层残留或未退场人物。choice 与 post-choice 已从独立真实 slice 升级为同一条完整路线证据。
@@ -98,7 +111,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - [x] 背景、立绘和系统 UI 使用 retained Scene2D 分层输出；立绘 `load/pos/keep/vis/trans` 已接入固定 tick 透明度动画、等待和 snapshot。合成脚本的 256→128→0 透明度序列已通过 Headless WGPU capture 和人工视觉检查。真实样本没有 `trans/vis`，因此该证据只关闭合成动态立绘 E2，不计入真实路线 coverage。
 - [x] BGM、SE、message voice 分通道；message voice 已按 IDA `resource[volume,pan]` 合同和 7,047 个真实 identity 全量绑定到 `voice.paz`，并通过公共 Ogg audio command 发出。完整首路线 Headless E2 已覆盖该路径；具名人工整段听审仍开放。
 - [x] backlog 当前记录的 voice replay 由原程序 Enter 路径确认；runtime 重播 stream 4 且保留原 message await，不推进 VM。真实 Headless 物理 Enter、checkpoint、后续 continuation 和 terminal 已通过；具名人工听审仍开放。
-- [x] `mov.paz` 的 5 个 RIFF/AVI 由 range-backed 纯 Rust AVI/WMV3/PCM 路径播放；缺 codec、格式漂移、短读和 fence 异常直接阻断。
+- [x] `mov.paz` 的 5 个 RIFF/AVI 由 range-backed AstraMedia `ffmpeg-vcpkg` incremental provider 播放；缺 provider、格式漂移、短读和 fence 异常直接阻断。
 - [x] Minori AVI provider 在解析前拒绝空/超过 64 MiB 的预览输入，并校验 WMV3 尺寸、单包和 decoded RGBA 帧预算；边界测试 4/4 通过。该项不扩大 codec 覆盖或 movie parity 证据。
 - [x] decoded video 通过公共 `SceneCommand::VideoFrame` 合成；movie skip 只接受脚本明确标记为 skippable 的分支，并等待 Host 完成原 fence。
 - [x] 公共 Kira main track 使用显式 peak limiter，分别报告 pre-master 与 master-output；真实短程 output overload 和 underflow 均为 0。

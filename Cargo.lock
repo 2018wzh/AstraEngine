@@ -808,7 +808,6 @@ dependencies = [
  "hex",
  "image 0.25.10",
  "libc",
- "na_mpeg2_decoder",
  "postcard",
  "rayon",
  "rfvp-astra-provider",
@@ -820,7 +819,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "wmv-decoder 0.2.0",
 ]
 
 [[package]]
@@ -1093,7 +1091,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tracing",
- "wmv-decoder 0.2.0",
 ]
 
 [[package]]
@@ -8826,7 +8823,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 1.0.69",
  "tracing",
- "wmv-decoder 0.2.0 (git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61)",
+ "wmv-decoder",
 ]
 
 [[package]]
@@ -12457,15 +12454,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "wmv-decoder"
-version = "0.2.0"
-dependencies = [
- "byteorder",
- "log",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "wmv-decoder"

@@ -654,44 +654,12 @@ impl MinoriMountedVfs {
         }
         let archive = &self.archives[entry.archive];
         verify_source_unchanged(archive)?;
-        let identity = CacheIdentity {
-            family_id: "minori".into(),
-            source_hash: archive.hash,
-            entry_id: entry.descriptor.entry_id.clone(),
-            private_profile_hash: self.decrypt_provider.private_profile_hash(),
-            decrypt_provider_id: self.decrypt_provider.provider_id().into(),
-            descriptor_schema_hash: self.decrypt_provider.descriptor_schema_hash(),
-            codec_identity: format!("{MINORI_READER_ID}:raw"),
-        };
-        if let Some(bytes) = self
-            .cache
-            .as_ref()
-            .map(|cache| cache.get(&identity))
-            .transpose()
-            .map_err(cache_error)?
-            .flatten()
-        {
-            if bytes.len() as u64 != entry.descriptor.unpacked_size {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_CACHE_SIZE",
-                    "cached plaintext size does not match the entry descriptor",
-                ));
-            }
-            let start = usize::try_from(offset).map_err(|_| {
-                error(
-                    "ASTRA_EMU_VFS_READ_BOUNDS",
-                    "range offset exceeds platform bounds",
-                )
-            })?;
-            let end = usize::try_from(end).map_err(|_| {
-                error(
-                    "ASTRA_EMU_VFS_READ_BOUNDS",
-                    "range end exceeds platform bounds",
-                )
-            })?;
-            return Ok(Some((bytes[start..end].to_vec(), true)));
-        }
-
+        // A disk-cache hit returns the complete plaintext entry.  Reading that
+        // complete movie for every 4 MiB range would turn sequential FFmpeg
+        // spooling into an O(n^2) workload (and repeatedly re-read hundreds of
+        // MiB from the cache).  Raw movie ranges therefore stay source-backed;
+        // the entry cache remains available through `decoded_entry`/`open_stream`
+        // for callers that explicitly request a complete plaintext resource.
         let source_offset = entry
             .descriptor
             .offset

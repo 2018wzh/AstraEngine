@@ -37,6 +37,21 @@ impl DecodedVideoFrame {
         }
         Ok(())
     }
+
+    /// Materialise the renderer-facing RGBA8 order from the canonical BGRA8
+    /// frame.  This is a format conversion only; container and codec selection
+    /// remain owned by the selected decode provider.
+    pub fn into_rgba8(self) -> Result<Vec<u8>, MediaError> {
+        self.validate()?;
+        let mut rgba8 = match self.bgra8.try_into_vec() {
+            Ok(bytes) => bytes,
+            Err(bytes) => bytes.as_slice().to_vec(),
+        };
+        for pixel in rgba8.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        Ok(rgba8)
+    }
 }
 
 impl DecodedVideoStream {

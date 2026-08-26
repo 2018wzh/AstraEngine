@@ -1,5 +1,38 @@
 # Minori 移植日志
 
+## 2026 年 8 月 27 日
+
+### AstraMedia 增量游标边界复核
+
+- `IncrementalMediaPlayback` 现在在打开时校验完整的 `MediaPlaybackConfig`，每次推进都检查单调时钟和 `max_tick_us`，并拒绝与轨道声明不一致的 packet。视频、音频 packet 还会校验资源标识、尺寸、帧时长、声道、采样率、交错样本和 declared duration。
+- `max_video_frames`、`max_audio_packets`、`max_video_lead_us`、`max_video_lag_us` 和 `late_video_policy` 已进入同一游标边界。迟到帧在 `Block` 下返回 `ASTRA_MEDIA_INCREMENTAL_AV_SYNC_LATE`，在显式 `Drop` 下计入 `dropped_video_packets`；没有隐式丢帧或 provider 切换。
+- 新增的边界测试覆盖 tick 跳变、轨道错配、packet/音频队列预算、非法配置以及迟到帧的 block/drop 两种策略。FFmpeg 和 Minori 测试继续使用相同的共享游标。
+
+### 当前 FFmpeg 真实样本 media slice
+
+- 重新构建并签名当前 `ffmpeg-vcpkg` dynamic plugin 后，标题启动、配置页、影片播放、Control 跳过、影片 completion 和返回标题使用同一组 build、profile、mount 与输入身份执行。运行报告为 `passed`，完成 3102 个 fixed step、9 个 retained frame sample，诊断为空；影片 command、停止 command 和 owner-side completion 分别出现在连续的 3098、3099、3100 步，标题观察在 3101 步命中。
+- 这次运行确认 FFmpeg demux/codec、AstraMedia incremental cursor、媒体 fence 和 Minori 标题恢复接线可用。它没有到达剧情 terminal，也没有证明完整路线、gallery unlock、正式音频听审、第二次 cache 命中、Linux FUSE、macOS extract 或 Windows E3。
+
+### 本轮验证
+
+- `astra-media` library 9/9、FFmpeg stream 9/9、`astra-emu-minori`（含和不含 `ffmpeg-vcpkg`）各 148/148 通过；`astra-media`、`astra-emu-minori`、`astra-emu-cli` 和 `astra-emu-manager` 的增量 `clippy -D warnings` 通过。
+- 普通 Cargo release 构建、动态 plugin 签名、Headless media slice、`cargo fmt --check` 和文档检查通过。完整 workspace clippy/test 仍按仓库既有门禁单独处理，不能由这些聚焦结果替代。
+
+## 2026-08-26
+
+### Retained Layer2D composite cache复验
+
+- 在不改变 FFmpeg provider、mount profile、物理输入或 sample cadence 的前提下，Headless CLI 的 retained `Layer2D` CPU composite 增加了按 viewport、完整 layer state（含 surface generation）和已验证 base-frame 尺寸的缓存命中。缓存只跳过重复 surface read/composite，仍提交 presentation edge、wait semantics 和 frame sample；状态或尺寸不完全一致时仍走原始全量合成。当前签名 release 复验完成 139 个 fixed tick、5 个 sample、638 次 bounded VFS read、约 99 MiB、零 diagnostic，`step_total` 约 35.9 s，`effect_dispatch` 约 22.4 s，`media` 约 48 ms；`movie_60` 仍人工查看通过。该优化只形成性能诊断证据，未宣称完整路线或正式 120 Hz gate。
+
+### 增量视频播放迁移到 AstraMedia
+
+- Minori 的 `.avi` 运行时现在只保留 RIFF/AVI 身份检查和 family provider binding。增量解码生命周期由 `astra-media::IncrementalMediaDecoder` / `IncrementalMediaPlayback` 管理，统一处理 PTS read-ahead、BGRA 帧边界、PCM 转换、pending audio 限额、seek/cancel 和 codec-neutral telemetry。
+- `FfmpegPlaybackDecoder::open_reader` 以有界 reader 写入 AstraMedia 私有临时 spool，再由成熟的 FFmpeg demux/codec 完成逐 packet 解码。Minori 的 Manager、CLI Headless 和 preview 均绑定同一 `ffmpeg-vcpkg` provider；FFmpeg feature 未启用或 probe/decode 失败时返回稳定 blocking diagnostic，不调用 WMF、平台 codec、RFVP 或手写 decoder。
+- Manager 的 Minori host cursor 也已切换到 `IncrementalMediaPlayback`，只把当前时间窗内的新帧和有界 PCM chunk转移到通用 timeline，避免再次复制完整 decoded movie；`take_current_frame` 用所有权移动保持跨层零拷贝边界。CLI/native/headless composition 现在都把 video provider 作为显式 launch binding，Minori 在 `disabled` 或未知 binding 下直接阻断。
+- 已删除 CLI 的 `avi_range` 解码路径以及 Minori 对 `na_mpeg2_decoder`/`wmv-decoder` 的生产依赖；RFVP 自身的 transitive decoder 仍属于 FVP provider 边界，不由 Minori 复用或改写。该项已通过 `astra-media` 增量 cursor 单元测试、`astra-emu-minori` focused tests 和 Manager/CLI 增量编译；真实影片 FFmpeg feature run 与 Windows E3 仍未形成公开证据。
+- 当前授权样本的五个 `.avi` 均确认是 `AVI/WMV3/PCM s16le/48 kHz/stereo`。FFmpeg feature 的真实 Headless media slice 已完成：60 个固定 tick、16 个呈现帧、111104 个音频帧、音频非静音、`diagnostic_codes` 为空；`movie_60` checkpoint 的渲染 hash 与此前参考运行一致。该证据只说明增量 provider、VFS range、音频队列和 Headless artifact 接线可用，不等同 Windows E3 或完整路线通过。
+- rebase 到最新 `master` 后重新编译并签名动态 Minori plugin，使用同一 FFmpeg 绑定重新执行上述真实样本 slice：139 个固定 tick、5 个采样帧、638 次 VFS read、约 99 MiB 有界读取、约 81.9 s 总 step time，`diagnostic_codes` 为空；`title_initial`、`config` 和 `movie_60` 均成功生成。当前 `movie_60` 画面已人工查看，影片比例、日文正文、透明叠加和层次正常；软件 WMV3 解码仍是主要耗时，不能把该 E2 结果写成性能门禁或 Windows E3 通过。
+
 ## 2026-08-25
 
 ### Rust 1.98 trust-root 复核与当前 v9 短程 smoke
@@ -47,7 +80,7 @@
 - The v9 `Layer2D` texture path now sends both standard image resources and ANI/SQZ resources through an explicit `DecodeProviderRegistry` binding. Standard images retain encoded-format identity checks; ANI/SQZ require the family provider's first-frame dimensions and output contract before Renderer2D upload.
 - The Manager's legacy `RuntimeLiveResourceScene` path now uses the same explicit image registry and codec identity checks. Minori ANI/SQZ never pass through generic `image::load_from_memory`; unsupported codecs, provider identity mismatches, malformed first-frame metadata, and decoded byte-size mismatches stop the transaction. This closes the host-side decode bypass for the retained resource-scene path; it does not add multi-frame animation playback.
 - Minori AVI playback is now shared by the family crate: Headless keeps its revision-pinned range-reader wrapper, while Manager consumes the same bounded WMV3/PCM decoder over an owned source. The adapter validates the single WMV3 video stream, optional 16-bit PCM stream, decoded BGRA length and monotonic audio/video timestamps before handing frames to the common timeline. Manager no longer routes Minori `.avi` through the FVP compatibility table or a platform codec; unsupported containers remain blocking.
-- Manager VFS movie preview now binds the same pure-Rust `astra.decode.minori.avi` first-frame provider for Minori `.avi`; it no longer probes Media Foundation for that family/codec. The preview is bounded to one RGBA8 frame, while timestamped playback remains on the shared streaming adapter. Other family video entries retain their explicit platform binding and remain blocking when unavailable.
+- 该历史 preview 绑定已在 2026-08-26 媒体迁移中替换：Manager VFS movie preview 与 timestamped playback 现在共同绑定 AstraMedia `ffmpeg-vcpkg` 的有界增量 provider；不再使用 `astra.decode.minori.avi` 纯 Rust decoder。其他 family 的视频仍使用各自显式 provider，缺失时保持 blocking。
 
 ### Manager family selection is explicit at startup
 

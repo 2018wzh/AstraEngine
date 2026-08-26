@@ -100,6 +100,43 @@ pub struct MinoriRuntimeState {
     pub terminal: bool,
 }
 
+impl MinoriRuntimeState {
+    /// Returns whether a fixed tick can change the visible presentation while
+    /// an input wait is pending. This is a state query only; callers still
+    /// process every input edge and await completion through the normal VM
+    /// path. It lets the provider avoid rebuilding an identical no-op output
+    /// for long message waits without skipping an animation clock.
+    pub fn has_time_animated_presentation(&self) -> bool {
+        self.effect.as_ref().is_some_and(|effect| {
+            // A single source is a static CrossFade2 presentation. The VM
+            // deliberately leaves that descriptor installed, but its clock
+            // does not advance until a second source is available.
+            effect.resources.len() >= 2
+        }) || self.firefly.is_some()
+            || self.secondary_effect.is_some()
+            || self.screen_shake.is_some()
+            || self
+                .axis_scroll
+                .as_ref()
+                .is_some_and(|scroll| !scroll.completed)
+            || self
+                .linear_scroll
+                .as_ref()
+                .is_some_and(|scroll| !scroll.completed)
+            || self
+                .scroll_xf
+                .as_ref()
+                .is_some_and(|scroll| !scroll.completed)
+            || self.wscroll2.is_some()
+            || self.characters.values().any(|character| {
+                character
+                    .transition
+                    .as_ref()
+                    .is_some_and(|transition| !transition.completed)
+            })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MinoriWaitState {

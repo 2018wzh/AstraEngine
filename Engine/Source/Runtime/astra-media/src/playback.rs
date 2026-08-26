@@ -1,5 +1,7 @@
 mod contract;
+mod incremental;
 mod pipeline;
+mod registry;
 mod validation;
 
 use std::collections::VecDeque;
@@ -9,8 +11,35 @@ use astra_core::{Diagnostic, Hash256};
 use crate::MediaError;
 
 pub use contract::*;
+pub use incremental::*;
 pub use pipeline::*;
+pub use registry::*;
 use validation::*;
+
+/// A bounded, timestamped decoder owned by the AstraMedia layer.
+///
+/// Families and hosts consume decoded packets through this contract instead
+/// of owning a container/parser implementation.  Implementations must keep
+/// the encoded source private, return at most one packet per call, and fail
+/// closed on malformed timestamps, payloads, or provider state.  Provider
+/// selection remains an explicit composition-root decision; this trait does
+/// not imply a fallback order.
+pub trait IncrementalMediaDecoder {
+    /// Stable provider identity used by profile and artifact bindings.
+    fn provider_id(&self) -> &'static str;
+
+    /// Static playback contract discovered while opening the source.
+    fn playback_config(&self) -> MediaPlaybackConfig;
+
+    /// Decode and return the next timestamped packet, or `None` at EOS.
+    fn read_next(&mut self) -> Result<Option<DecodedMediaPacket>, MediaError>;
+
+    /// Start a new decoder generation at the requested timestamp.
+    fn seek(&mut self, position_us: u64) -> Result<u64, MediaError>;
+
+    /// Cancel the decoder and release provider-owned resources.
+    fn cancel(&mut self) -> Result<(), MediaError>;
+}
 
 impl MediaPlaybackSession {
     pub fn new(config: MediaPlaybackConfig) -> Result<Self, MediaError> {

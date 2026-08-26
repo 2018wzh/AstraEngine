@@ -1857,6 +1857,7 @@ impl FfmpegDecodeProvider {
             priority: ProviderPriority::Fallback,
             kinds: vec![DecodeKind::Audio, DecodeKind::Video],
             codecs: vec![
+                "avi".to_string(),
                 "mp4".to_string(),
                 "webm".to_string(),
                 "wav".to_string(),

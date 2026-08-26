@@ -508,6 +508,20 @@ struct MinoriSession {
     save_slots: BTreeSet<u32>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
+    /// Last resource-backed presentation descriptor committed to the host.
+    ///
+    /// The descriptor contains only bounded URI/geometry metadata; retaining
+    /// it lets the family keep the ABI v9 Layer2D scene retained across fixed
+    /// ticks instead of re-decoding every unchanged frame. It is deliberately
+    /// session-local and is cleared on restore, so it can never stand in for
+    /// a restored host surface.
+    last_resource_frame: Option<LegacyRenderResourceFrameV1>,
+    /// Per-role raster cache for resource-backed scenes.  Minori animation
+    /// changes draw geometry for one role at a time; retaining the other
+    /// role surfaces avoids re-decoding the same PAZ image and re-running the
+    /// full CPU renderer on every fixed tick.  The cache is session-local and
+    /// invalidated on restore or when the role's bounded descriptors change.
+    presentation_layers: BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
     last_layer_sequence: u64,
     poisoned: bool,
 }
@@ -845,6 +859,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     None => None,
                 },
                 published_layers: BTreeSet::new(),
+                last_resource_frame: None,
+                presentation_layers: BTreeMap::new(),
                 last_layer_sequence: 0,
                 poisoned: false,
             },
@@ -1464,6 +1480,35 @@ impl MinoriRuntimeProvider {
             }
             session.vm.resolve_wait(&token_id).map_err(runtime_error)?;
         }
+        if input.input_edges.is_empty()
+            && input.await_results.is_empty()
+            && input.provider_results.is_empty()
+            && !session.vm.state().has_time_animated_presentation()
+            && !session.restore_audio_pending
+            && !session.restore_presentation_pending
+        {
+            if let Some(wait @ MinoriWaitState::Input { .. }) = session.vm.state().wait.clone() {
+                // A message/input wait with no edge, completion, timer or
+                // animation cannot change family state or presentation. The
+                // VM still owns the authoritative fixed-tick clock, however;
+                // advance it before returning the bounded empty live output.
+                // Skipping this transition would make the host tick advance
+                // while the family tick stayed behind and the next step would
+                // fail closed with ASTRA_EMU_MINORI_RUNTIME_STATE.
+                session
+                    .vm
+                    .advance_waiting_tick(input.tick_index)
+                    .map_err(runtime_error)?;
+                return waiting_output(
+                    session,
+                    wait,
+                    LegacyLiveOutput::default(),
+                    None,
+                    play_mode_wait_rebound,
+                    &input,
+                );
+            }
+        }
         let animation_enabled = session.vm.state().system_ui.config.animation;
         let screen_effect_enabled = session.vm.state().system_ui.config.screen_effect;
         let animated_effect = if animation_enabled && screen_effect_enabled {
@@ -1765,6 +1810,39 @@ impl MinoriRuntimeProvider {
                 session.poisoned = true;
                 return Err(error);
             }
+        }
+        tracing::debug!(
+            target: "astra_emu_minori::runtime",
+            event = "astra_emu_minori_vm_tick",
+            fixed_tick = input.tick_index,
+            script_identity = %session.vm.state().script_hash,
+            pc_line = session.vm.state().pc_line,
+            instruction_count = session.vm.state().instruction_count,
+            vm_event = minori_vm_event_name(event.as_ref()),
+            waiting = session.vm.state().wait.is_some(),
+            system_page = system_page_name(session.vm.state().system_ui.page),
+            terminal = session.vm.state().terminal,
+            "advanced the verified Minori VM"
+        );
+        if matches!(
+            event,
+            Some(MinoriVmEvent::Chain { .. })
+                | Some(MinoriVmEvent::Movie(_))
+                | Some(MinoriVmEvent::Terminal)
+        ) {
+            tracing::info!(
+                target: "astra_emu_minori::runtime",
+                event = "astra_emu_minori_vm_boundary",
+                fixed_tick = input.tick_index,
+                script_identity = %session.vm.state().script_hash,
+                pc_line = session.vm.state().pc_line,
+                instruction_count = session.vm.state().instruction_count,
+                vm_event = minori_vm_event_name(event.as_ref()),
+                waiting = session.vm.state().wait.is_some(),
+                system_page = system_page_name(session.vm.state().system_ui.page),
+                terminal = session.vm.state().terminal,
+                "reached a Minori VM control-flow boundary"
+            );
         }
         let after = session.vm.state().instruction_count;
         let mut live = LegacyLiveOutput {
@@ -2523,6 +2601,8 @@ impl MinoriRuntimeProvider {
         session.ephemeral_text.clear();
         session.restore_audio_pending = true;
         session.restore_presentation_pending = true;
+        session.last_resource_frame = None;
+        session.presentation_layers.clear();
         session.reported_system_page = None;
         session.reported_play_mode = None;
         session.reported_gallery_unlock_count = None;
@@ -7915,7 +7995,16 @@ impl MinoriLayerRole {
 
 struct PreparedMinoriLayer {
     role: MinoriLayerRole,
-    rgba8_premultiplied: Vec<u8>,
+    rgba8_premultiplied: Arc<[u8]>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CachedMinoriLayer {
+    width: u32,
+    height: u32,
+    resources: Vec<LegacyTextureResourceV1>,
+    draws: Vec<LegacyDrawV1>,
+    rgba8_premultiplied: Arc<[u8]>,
 }
 
 fn publish_v9_output(
@@ -7928,9 +8017,17 @@ fn publish_v9_output(
 ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
     let prepared_text = prepare_text_surface(services, session_id, fixed_step, session, &staged)?;
     let layer_sequence = next_layer_sequence(&staged, session.last_layer_sequence)?;
-    let mut layers = if let Some(resource_scene) = staged.live.resource_scenes.last() {
+    // Resource-backed scenes are retained by the ABI v9 host. Minori emits a
+    // new Layer2D transaction only when the bounded descriptor actually
+    // changes; otherwise re-rendering all four full-size layer surfaces would
+    // turn a fixed-tick wait into repeated PAZ reads, image decodes and CPU
+    // composites with no visible effect.
+    let changed_resource_scene = staged.live.resource_scenes.last().filter(|resource_scene| {
+        session.last_resource_frame.as_ref() != Some(&resource_scene.value)
+    });
+    let mut layers = if let Some(resource_scene) = changed_resource_scene {
         let mount_set_id = session.mount_set_id.clone();
-        publish_resource_scene(
+        let layers = publish_resource_scene(
             services,
             vfs,
             session_id,
@@ -7938,8 +8035,11 @@ fn publish_v9_output(
             fixed_step,
             layer_sequence,
             &mut session.published_layers,
+            &mut session.presentation_layers,
             &resource_scene.value,
-        )?
+        )?;
+        session.last_resource_frame = Some(resource_scene.value.clone());
+        layers
     } else {
         Vec::new()
     };
@@ -8302,10 +8402,11 @@ fn publish_resource_scene(
     fixed_step: u64,
     sequence: u64,
     published_layers: &mut BTreeSet<String>,
+    presentation_layers: &mut BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
     frame: &LegacyRenderResourceFrameV1,
 ) -> Result<Vec<LegacyLayerTransactionV9>, LegacyProviderError> {
     frame.validate()?;
-    let prepared = prepare_resource_layers(vfs, mount_set_id, frame)?;
+    let prepared = prepare_resource_layers(vfs, mount_set_id, frame, presentation_layers)?;
     let mut leases = Vec::with_capacity(prepared.len());
     for layer in prepared {
         let surface_id = format!("minori.surface.{}", layer.role.symbol());
@@ -8379,6 +8480,7 @@ fn prepare_resource_layers(
     vfs: &Arc<dyn LegacyVfsReader>,
     mount_set_id: &str,
     frame: &LegacyRenderResourceFrameV1,
+    presentation_layers: &mut BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
 ) -> Result<Vec<PreparedMinoriLayer>, LegacyProviderError> {
     let layer_bytes = u64::from(frame.width)
         .checked_mul(u64::from(frame.height))
@@ -8411,20 +8513,81 @@ fn prepare_resource_layers(
     MinoriLayerRole::ALL
         .into_iter()
         .map(|role| {
-            render_resource_layer(
+            let role_draws = draws.remove(&role).unwrap_or_default();
+            let mut role_resources = BTreeMap::new();
+            for draw in &role_draws {
+                let resource = resources.get(&draw.texture_id).ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_LAYER_RESOURCE",
+                        "layer draw references an unknown texture resource",
+                    )
+                })?;
+                role_resources.insert(draw.texture_id, (*resource).clone());
+            }
+            let role_resources = role_resources.into_values().collect::<Vec<_>>();
+            let owned_draws = role_draws
+                .iter()
+                .map(|draw| (*draw).clone())
+                .collect::<Vec<_>>();
+            if let Some(cached) = presentation_layers.get(&role) {
+                if cached.width == frame.width
+                    && cached.height == frame.height
+                    && cached.resources == role_resources
+                    && cached.draws == owned_draws
+                {
+                    validate_cached_layer_sources(vfs, mount_set_id, &role_resources)?;
+                    return Ok(PreparedMinoriLayer {
+                        role,
+                        rgba8_premultiplied: Arc::clone(&cached.rgba8_premultiplied),
+                    });
+                }
+            }
+            let rgba8_premultiplied = render_resource_layer(
                 vfs,
                 mount_set_id,
                 frame.width,
                 frame.height,
                 &resources,
-                draws.remove(&role).unwrap_or_default(),
-            )
-            .map(|rgba8_premultiplied| PreparedMinoriLayer {
+                role_draws,
+            )?;
+            let rgba8_premultiplied: Arc<[u8]> = Arc::from(rgba8_premultiplied);
+            presentation_layers.insert(
+                role,
+                CachedMinoriLayer {
+                    width: frame.width,
+                    height: frame.height,
+                    resources: role_resources,
+                    draws: owned_draws,
+                    rgba8_premultiplied: Arc::clone(&rgba8_premultiplied),
+                },
+            );
+            Ok(PreparedMinoriLayer {
                 role,
                 rgba8_premultiplied,
             })
         })
         .collect()
+}
+
+fn validate_cached_layer_sources(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    resources: &[LegacyTextureResourceV1],
+) -> Result<(), LegacyProviderError> {
+    for resource in resources {
+        let stat = vfs.stat_file(mount_set_id, &resource.resource_uri)?;
+        if stat.len == 0
+            || stat.len > MAX_RESOURCE_BYTES
+            || texture_binding_revision(&resource.resource_uri, stat.revision.0)
+                != resource.revision
+        {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_LAYER_TEXTURE_REVISION",
+                "cached Minori layer source changed after the resource scene was staged",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn render_resource_layer(
@@ -8790,6 +8953,33 @@ fn script_error(_error: crate::ScParseError) -> LegacyProviderError {
 
 fn runtime_error(error: MinoriRuntimeError) -> LegacyProviderError {
     LegacyProviderError::invalid(runtime_error_code(&error), error.to_string())
+}
+
+fn minori_vm_event_name(event: Option<&MinoriVmEvent>) -> &'static str {
+    match event {
+        Some(MinoriVmEvent::Wait(_)) => "wait",
+        Some(MinoriVmEvent::Message { .. }) => "message",
+        Some(MinoriVmEvent::Audio { .. }) => "audio",
+        Some(MinoriVmEvent::Stage(_)) => "stage",
+        Some(MinoriVmEvent::Character(_)) => "character",
+        Some(MinoriVmEvent::AxisScroll(_)) => "axis_scroll",
+        Some(MinoriVmEvent::LinearScroll(_)) => "linear_scroll",
+        Some(MinoriVmEvent::ScrollXf(_)) => "scroll_xf",
+        Some(MinoriVmEvent::WScroll2(_)) => "wscroll2",
+        Some(MinoriVmEvent::Effect(_)) => "effect",
+        Some(MinoriVmEvent::EffectCleared { .. }) => "effect_cleared",
+        Some(MinoriVmEvent::Firefly(_)) => "firefly",
+        Some(MinoriVmEvent::FireflyCleared { .. }) => "firefly_cleared",
+        Some(MinoriVmEvent::SecondaryEffect(_)) => "secondary_effect",
+        Some(MinoriVmEvent::SecondaryEffectCleared { .. }) => "secondary_effect_cleared",
+        Some(MinoriVmEvent::ScreenShake(_)) => "screen_shake",
+        Some(MinoriVmEvent::Panel { .. }) => "panel",
+        Some(MinoriVmEvent::Choice { .. }) => "choice",
+        Some(MinoriVmEvent::Movie(_)) => "movie",
+        Some(MinoriVmEvent::Chain { .. }) => "chain",
+        Some(MinoriVmEvent::Terminal) => "terminal",
+        None => "none",
+    }
 }
 
 fn runtime_error_code(error: &MinoriRuntimeError) -> &'static str {
@@ -9544,6 +9734,7 @@ mod tests {
             writable_files: Arc::new(RejectWritableFiles),
         };
         let mut published_layers = BTreeSet::new();
+        let mut presentation_layers = BTreeMap::new();
         let transactions = publish_resource_scene(
             &services,
             &vfs,
@@ -9552,6 +9743,7 @@ mod tests {
             1,
             7,
             &mut published_layers,
+            &mut presentation_layers,
             &frame,
         )
         .unwrap();

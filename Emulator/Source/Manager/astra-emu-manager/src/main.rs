@@ -96,7 +96,10 @@ use stage_renderer::ManagerStageRenderer;
 use translation_runtime::{
     translation_profile_from_record, TranslationLaunchConfig, TranslationRuntime,
 };
-use video_executor::{validate_family_video_extension, HostVideoExecutor, HostVideoFrame};
+use video_executor::{
+    validate_family_video_extension, HostVideoExecutor, HostVideoFrame,
+    MINORI_VIDEO_PROVIDER_BINDING,
+};
 
 #[cfg(not(target_os = "android"))]
 fn platform_data_dir() -> Result<PathBuf, String> {
@@ -232,6 +235,7 @@ impl RuntimeBridge {
         provider.create_instance(ProviderInstanceId("astra.emu.manager.instance".into()))?;
         let mut video = HostVideoExecutor::default();
         video.bind_family("minori");
+        video.bind_video_provider(MINORI_VIDEO_PROVIDER_BINDING);
         Ok(Self {
             provider,
             family_id: "minori".into(),
@@ -276,6 +280,8 @@ impl RuntimeBridge {
         self.provider = provider;
         self.family_id = family_id.into();
         self.video.bind_family(family_id);
+        self.video
+            .bind_video_provider(MINORI_VIDEO_PROVIDER_BINDING);
         self.terminal = false;
         self.failed = false;
         self.live_scene_commits.clear();

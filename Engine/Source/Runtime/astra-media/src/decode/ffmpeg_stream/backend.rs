@@ -12,6 +12,7 @@ pub(super) struct AudioDecoder {
     pub(super) decoder: ffmpeg::decoder::Audio,
     pub(super) resampler: ffmpeg::software::resampling::Context,
     pub(super) format: ffmpeg::format::Sample,
+    pub(super) source_format: ffmpeg::format::Sample,
     pub(super) source_layout: ffmpeg::ChannelLayout,
     pub(super) source_sample_rate: u32,
     pub(super) layout: ffmpeg::ChannelLayout,
@@ -80,8 +81,15 @@ pub(super) fn create_audio_decoder(
         ));
     }
     let format = ffmpeg::format::Sample::I16(ffmpeg::format::sample::Type::Packed);
+    let source_format = decoder.format();
+    if source_format == ffmpeg::format::Sample::None {
+        return Err(decode_error(
+            "ASTRA_FFMPEG_STREAM_AUDIO_FORMAT",
+            "FFmpeg audio track has no decoder sample format",
+        ));
+    }
     let resampler = create_resampler(
-        decoder.format(),
+        source_format,
         source_layout,
         source_sample_rate,
         format,
@@ -94,6 +102,7 @@ pub(super) fn create_audio_decoder(
         decoder,
         resampler,
         format,
+        source_format,
         source_layout,
         source_sample_rate,
         layout,
@@ -143,7 +152,7 @@ pub(super) fn reconfigure_audio_decoder(
         ));
     }
     let resampler = create_resampler(
-        audio.decoder.format(),
+        audio.source_format,
         audio.source_layout,
         audio.source_sample_rate,
         audio.format,
@@ -158,6 +167,68 @@ pub(super) fn reconfigure_audio_decoder(
     audio.decoder_drained = false;
     audio.resampler_flushed = false;
     audio.next_output_pts_us = None;
+    Ok(())
+}
+
+/// FFmpeg may publish the final audio sample format/layout on the decoded
+/// frame rather than on the codec parameters.  `swr_convert_frame` rejects a
+/// frame whose input definition differs from the definition used to create
+/// the resampler.  Rebuild the explicit resampler from the frame metadata so
+/// the stream remains incremental without accepting an implicit conversion or
+/// silently dropping the changed input contract.
+pub(super) fn sync_audio_input(
+    audio: &mut AudioDecoder,
+    frame: &mut ffmpeg::frame::Audio,
+) -> Result<(), MediaError> {
+    let source_format = frame.format();
+    let source_sample_rate = frame.rate();
+    let source_channels = frame.channels();
+    if source_format == ffmpeg::format::Sample::None
+        || source_sample_rate == 0
+        || source_channels == 0
+        || source_channels > 8
+    {
+        return Err(decode_error(
+            "ASTRA_FFMPEG_STREAM_AUDIO_FORMAT",
+            "FFmpeg decoded audio frame has an invalid input format",
+        ));
+    }
+    let source_layout = if frame.channel_layout().is_empty() {
+        ffmpeg::ChannelLayout::default(i32::from(source_channels))
+    } else {
+        frame.channel_layout()
+    };
+    if source_layout.is_empty() || source_layout.channels() != i32::from(source_channels) {
+        return Err(decode_error(
+            "ASTRA_FFMPEG_STREAM_AUDIO_FORMAT",
+            "FFmpeg decoded audio frame has an invalid channel layout",
+        ));
+    }
+    // swr_convert_frame validates the AVFrame's layout itself.  An
+    // unspecified layout with a known channel count is valid FFmpeg output,
+    // but it must be canonicalised on the frame before the resampler sees it;
+    // changing only the Context definition still produces AVERROR_INPUT_CHANGED.
+    if frame.channel_layout().is_empty() {
+        frame.set_channel_layout(source_layout);
+    }
+    let input = audio.resampler.input();
+    if input.format == source_format
+        && input.channel_layout == source_layout
+        && input.rate == source_sample_rate
+    {
+        return Ok(());
+    }
+    audio.resampler = create_resampler(
+        source_format,
+        source_layout,
+        source_sample_rate,
+        audio.format,
+        audio.layout,
+        audio.sample_rate,
+    )?;
+    audio.source_format = source_format;
+    audio.source_layout = source_layout;
+    audio.source_sample_rate = source_sample_rate;
     Ok(())
 }
 
@@ -186,10 +257,17 @@ pub(super) fn create_video_decoder(
                 "FFmpeg video frame duration overflowed",
             )
         })?;
-    let context =
-        ffmpeg::codec::context::Context::from_parameters(stream.parameters()).map_err(|error| {
+    let mut context = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+        .map_err(|error| {
             ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "create video decoder", error)
         })?;
+    // WMV3 in the supplied Minori AVI tracks is CPU-bound.  Let FFmpeg use
+    // its frame worker pool while keeping frame order and the bounded packet
+    // contract in AstraMedia.  The decoder still exposes one packet per read;
+    // threading never becomes an implicit provider or buffering fallback.
+    context.set_threading(ffmpeg::threading::Config::kind(
+        ffmpeg::threading::Type::Frame,
+    ));
     let decoder = context.decoder().video().map_err(|error| {
         ffmpeg_error("ASTRA_FFMPEG_STREAM_DECODER", "open video decoder", error)
     })?;
@@ -243,12 +321,26 @@ pub(super) fn drain_audio(
         match audio.decoder.receive_frame(&mut decoded) {
             Ok(()) => {
                 let pts_us = timestamp_us(decoded.timestamp(), audio.time_base)?;
+                sync_audio_input(audio, &mut decoded)?;
                 let mut converted = ffmpeg::frame::Audio::empty();
                 audio
                     .resampler
                     .run(&decoded, &mut converted)
                     .map_err(|error| {
-                        ffmpeg_error("ASTRA_FFMPEG_STREAM_RESAMPLE", "convert audio frame", error)
+                        let input = audio.resampler.input();
+                        decode_error(
+                            "ASTRA_FFMPEG_STREAM_RESAMPLE",
+                            format!(
+                                "FFmpeg failed to convert audio frame: {error}; frame_format={:?}; frame_rate={}; frame_channels={}; frame_layout={:?}; configured_format={:?}; configured_rate={}; configured_layout={:?}",
+                                decoded.format(),
+                                decoded.rate(),
+                                decoded.channels(),
+                                decoded.channel_layout(),
+                                input.format,
+                                input.rate,
+                                input.channel_layout,
+                            ),
+                        )
                     })?;
                 push_audio_frame(
                     audio,
@@ -649,7 +741,10 @@ pub(super) fn validate_limits(limits: &FfmpegStreamLimits) -> Result<(), MediaEr
 }
 
 pub(super) fn safe_codec(codec: &str) -> bool {
-    matches!(codec, "mp4" | "webm" | "wav" | "ogg" | "flac" | "mp3")
+    matches!(
+        codec,
+        "avi" | "mp4" | "webm" | "wav" | "ogg" | "flac" | "mp3"
+    )
 }
 
 pub(super) fn ffmpeg_error(

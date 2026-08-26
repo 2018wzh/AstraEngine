@@ -3,6 +3,8 @@ use std::{env, fs, path::Path, process::Command};
 use sha2::{Digest, Sha256};
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FFMPEG_VCPKG");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_FEATURE");
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("ASTRA_EMU_CLI_MANIFEST_DIR_MISSING");
     let source_root = git_output(&manifest_dir, ["rev-parse", "--show-toplevel"]);
     let source_revision = git_output(&source_root, ["rev-parse", "HEAD"]);
@@ -62,7 +64,16 @@ fn main() {
         "cargo:rustc-env=ASTRA_EMU_FVP_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(features.as_bytes())
     );
-    let minori_features = "garbro=b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0;features=none";
+    let minori_feature_set = if env::var("CARGO_CFG_FEATURE")
+        .ok()
+        .is_some_and(|features| features.split(',').any(|name| name == "ffmpeg-vcpkg"))
+    {
+        "ffmpeg-vcpkg"
+    } else {
+        "none"
+    };
+    let minori_features =
+        format!("garbro=b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0;features={minori_feature_set}");
     println!(
         "cargo:rustc-env=ASTRA_EMU_MINORI_FEATURE_FINGERPRINT=sha256.{}",
         hex_sha256(minori_features.as_bytes())

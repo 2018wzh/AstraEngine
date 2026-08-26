@@ -9,6 +9,10 @@ build = "build.rs"
 crate-type = ["rlib", "cdylib"]
 doctest = false
 
+[features]
+default = []
+ffmpeg-vcpkg = ["astra-emu-minori/ffmpeg-vcpkg", "astra-media/ffmpeg-vcpkg"]
+
 [[bin]]
 name = "astra-emu-manager"
 path = "src/main.rs"

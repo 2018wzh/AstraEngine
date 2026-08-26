@@ -4,7 +4,7 @@ use super::{
     playback_error, AudioFramePacket, MediaPlaybackConfig, MediaPlaybackSession, MediaTrackKind,
     PlaybackTickOutput, PlaybackTickRequest, VideoFramePacket,
 };
-use crate::MediaError;
+use crate::{DecodedVideoFrame, MediaError, PlayerDecodedAudio};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodedMediaPacket {
@@ -16,6 +16,49 @@ pub enum DecodedMediaPacket {
         packet: VideoFramePacket,
         bgra8: astra_byte_source::OwnedByteBuffer,
     },
+}
+
+impl DecodedMediaPacket {
+    /// Validate and convert a decoded packet into the canonical video frame
+    /// owned by AstraMedia.  Family adapters should not duplicate packet or
+    /// BGRA payload validation.
+    pub fn into_video_frame(self) -> Result<DecodedVideoFrame, MediaError> {
+        let DecodedMediaPacket::Video { packet, bgra8 } = self else {
+            return Err(playback_error(
+                "ASTRA_MEDIA_PACKET_KIND",
+                "an audio packet cannot be converted into a video frame",
+            ));
+        };
+        let frame = DecodedVideoFrame {
+            sequence: packet.sequence,
+            pts_us: packet.pts_us,
+            duration_us: packet.duration_us,
+            width: packet.width,
+            height: packet.height,
+            bgra8,
+        };
+        frame.validate()?;
+        Ok(frame)
+    }
+
+    /// Validate and convert a decoded packet into AstraMedia's canonical
+    /// interleaved floating-point PCM representation.
+    pub fn into_audio(self, max_samples: usize) -> Result<PlayerDecodedAudio, MediaError> {
+        let DecodedMediaPacket::Audio { packet, samples } = self else {
+            return Err(playback_error(
+                "ASTRA_MEDIA_PACKET_KIND",
+                "a video packet cannot be converted into audio",
+            ));
+        };
+        if packet.generation == 0 || packet.sequence == 0 || packet.duration_us == 0 {
+            return Err(playback_error(
+                "ASTRA_MEDIA_AUDIO_PACKET",
+                "decoded audio packet identity or duration is invalid",
+            ));
+        }
+        PlayerDecodedAudio::from_i16(packet.sample_rate, packet.channels, samples, max_samples)
+            .map_err(|error| playback_error(error.code, error.to_string()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

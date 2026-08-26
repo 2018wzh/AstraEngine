@@ -70,6 +70,9 @@ enum CliCommand {
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
+        /// Explicit media decode provider. Minori requires the shared FFmpeg provider.
+        #[arg(long, default_value = "ffmpeg-vcpkg", value_parser = ["disabled", "ffmpeg-vcpkg"])]
+        video_provider: String,
         /// Write a local-private Perfetto Trace Event file for this native Windows run.
         #[arg(long)]
         perfetto_trace: Option<PathBuf>,
@@ -109,6 +112,9 @@ enum CliCommand {
         artifacts: PathBuf,
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         enable_audio: bool,
+        /// Explicit media decode provider. Minori requires the shared FFmpeg provider.
+        #[arg(long, default_value = "ffmpeg-vcpkg", value_parser = ["disabled", "ffmpeg-vcpkg"])]
+        video_provider: String,
         #[arg(long)]
         perfetto_trace: Option<PathBuf>,
     },
@@ -194,6 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             extension_library,
             extension_timeout_ms,
             enable_audio,
+            video_provider,
             perfetto_trace,
             input,
             max_fixed_steps,
@@ -212,6 +219,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 family_library,
                 extension: extension_binding(extension_library, extension_timeout_ms),
                 enable_audio,
+                video_provider,
                 perfetto_trace,
                 input_path: input,
                 max_fixed_steps,
@@ -236,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             input,
             artifacts,
             enable_audio,
+            video_provider,
             perfetto_trace,
         } => {
             tracing::info!(
@@ -252,6 +261,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 family_library,
                 extension: extension_binding(extension_library, extension_timeout_ms),
                 enable_audio,
+                video_provider,
                 perfetto_trace,
                 input_path: Some(input),
                 max_fixed_steps: None,

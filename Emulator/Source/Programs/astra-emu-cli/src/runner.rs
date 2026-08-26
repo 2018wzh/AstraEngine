@@ -43,7 +43,7 @@ use astra_emu_manager_core::{
     DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits,
     SourceGrant,
 };
-use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
+use astra_emu_minori::{MinoriAviDecoder, MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, ButtonState, CheckpointResult, Diagnostic, GamepadControl,
     InputMessage, ObservationPredicate, PhysicalInput, PointerButton, RunReport, RunStatus,
@@ -51,7 +51,7 @@ use astra_headless_protocol::{
 };
 use astra_media::{
     DecodeBindingContext, DecodeOutput as MediaDecodeOutput, DecodeProviderRegistry, DecodeRequest,
-    DecodedVideoFrame, ImageDecodeProvider, PlayerDecodedAudio,
+    DecodedVideoFrame, ImageDecodeProvider, MediaError, PlayerDecodedAudio,
 };
 use astra_media_core::{
     BlendMode, CpuFilterExecutor, CpuFrame, Layer2DContent, Layer2DState, Layer2DTransaction,
@@ -91,6 +91,7 @@ use astra_plugin_abi::{
     RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
 };
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
+use rayon::prelude::*;
 use rfvp_astra_provider::{
     fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
     FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
@@ -100,7 +101,6 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc as tokio_mpsc, task::JoinHandle};
 
 use crate::{
-    avi_range::{AviRangeDecoder, AviRangeEvent, AviRangeTelemetry},
     family_host::CliFamilyHostConfig,
     input::{read_input_sequence, ValidatedInputSequence},
     rasterizer::{CpuStageRasterizer, PreparedRenderFrame},
@@ -315,6 +315,11 @@ pub struct NativeLaunch {
     pub family_library: Option<PathBuf>,
     pub extension: Option<ExtensionBinding>,
     pub enable_audio: bool,
+    /// Explicit decode-provider binding used by family media paths.  Minori
+    /// movies require the shared AstraMedia FFmpeg provider; a missing or
+    /// different binding is a hard launch error rather than an implicit
+    /// decoder choice.
+    pub video_provider: String,
     pub perfetto_trace: Option<PathBuf>,
     pub input_path: Option<PathBuf>,
     pub max_fixed_steps: Option<u64>,
@@ -881,6 +886,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         surface,
         RuntimeDriverConfig {
             family_id: launch.family_id.clone(),
+            video_provider: launch.video_provider.clone(),
             seed,
             delta_ns: probe.runtime.fixed_delta_ns,
             audio_enabled: launch.enable_audio,
@@ -1430,6 +1436,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
         &input.messages,
         ExecutionConfig {
             family_id: launch.family_id.clone(),
+            video_provider: launch.video_provider.clone(),
             seed,
             delta_ns: probe.runtime.fixed_delta_ns,
             frame_sample_interval: launch.frame_sample_interval,
@@ -1713,6 +1720,17 @@ fn validate_launch(launch: &HeadlessLaunch) -> Result<(), String> {
         if cfg!(debug_assertions) || option_env!("ASTRA_EMU_CLI_SOURCE_DIRTY") == Some("1") {
             return Err("ASTRA_EMU_PERFORMANCE_IDENTITY_DIRTY_OR_DEBUG".into());
         }
+    }
+    validate_video_provider_binding(&launch.family_id, &launch.video_provider)?;
+    Ok(())
+}
+
+fn validate_video_provider_binding(family_id: &str, provider_id: &str) -> Result<(), String> {
+    if !matches!(provider_id, "disabled" | "ffmpeg-vcpkg") {
+        return Err("ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN".into());
+    }
+    if family_id == "minori" && provider_id != "ffmpeg-vcpkg" {
+        return Err("ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED".into());
     }
     Ok(())
 }
@@ -2613,142 +2631,74 @@ enum ActiveVideoStream {
     Platform(PlatformVideoCursor),
 }
 
-const MAX_AVI_PENDING_AUDIO_SAMPLES: usize = 16 * 1024 * 1024;
-
 struct MinoriAviPlayback {
-    decoder: AviRangeDecoder,
-    current: Option<DecodedVideoFrame>,
-    pending: Option<DecodedVideoFrame>,
-    last_pts_us: Option<u64>,
-    last_audio_pts_us: Option<u64>,
-    frame_sequence: u64,
-    audio: Vec<na_mpeg2_decoder::MpegAudioF32>,
-    pending_audio_samples: usize,
-    duration_us: u64,
-    ended: bool,
+    cursor: astra_media::IncrementalMediaPlayback,
+}
+
+fn minori_media_error(error: MediaError) -> String {
+    match error {
+        MediaError::Diagnostics(diagnostics) => {
+            let codes = diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            tracing::error!(
+                event = "astra_emu_minori_media_diagnostic",
+                diagnostic_count = diagnostics.len(),
+                diagnostic_codes = %codes,
+                "Minori media provider rejected an incremental packet"
+            );
+            format!("ASTRA_EMU_MINORI_MEDIA_DIAGNOSTICS:{codes}")
+        }
+        MediaError::Message(message) => message,
+    }
 }
 
 impl MinoriAviPlayback {
-    fn open(decoder: AviRangeDecoder) -> Self {
-        let duration_us = decoder.duration_us();
-        Self {
-            decoder,
-            current: None,
-            pending: None,
-            last_pts_us: None,
-            last_audio_pts_us: None,
-            frame_sequence: 0,
-            audio: Vec::new(),
-            pending_audio_samples: 0,
-            duration_us,
-            ended: false,
-        }
+    fn open(
+        decoder: MinoriAviDecoder<astra_byte_source::BoundedByteSourceReader>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            cursor: astra_media::IncrementalMediaPlayback::open(
+                Box::new(decoder),
+                astra_media::IncrementalPlaybackLimits::default(),
+            )
+            .map_err(minori_media_error)?,
+        })
     }
 
     fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
-        if self.ended {
-            return Ok(false);
-        }
-        let previous_sequence = self.current.as_ref().map(|frame| frame.sequence);
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|frame| frame.pts_us > elapsed_us)
-        {
-            return Ok(false);
-        }
-        if let Some(frame) = self.pending.take() {
-            self.current = Some(frame);
-        }
-        loop {
-            match self.decoder.next_event()? {
-                AviRangeEvent::Video {
-                    pts_us,
-                    width,
-                    height,
-                    bgra8,
-                } => {
-                    if width == 0
-                        || height == 0
-                        || self.last_pts_us.is_some_and(|previous| pts_us < previous)
-                    {
-                        return Err("ASTRA_EMU_MINORI_AVI_TIMELINE".into());
-                    }
-                    let expected = usize::try_from(width)
-                        .ok()
-                        .and_then(|width| {
-                            usize::try_from(height)
-                                .ok()
-                                .and_then(|height| width.checked_mul(height))
-                        })
-                        .and_then(|pixels| pixels.checked_mul(4))
-                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".to_owned())?;
-                    if bgra8.len() != expected {
-                        return Err("ASTRA_EMU_MINORI_AVI_FRAME_BOUNDS".into());
-                    }
-                    self.frame_sequence = self
-                        .frame_sequence
-                        .checked_add(1)
-                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_SEQUENCE".to_owned())?;
-                    let frame = DecodedVideoFrame {
-                        sequence: self.frame_sequence,
-                        pts_us,
-                        duration_us: 1,
-                        width,
-                        height,
-                        bgra8: bgra8.into(),
-                    };
-                    self.last_pts_us = Some(pts_us);
-                    if pts_us <= elapsed_us {
-                        self.current = Some(frame);
-                        continue;
-                    }
-                    self.pending = Some(frame);
-                    break;
-                }
-                AviRangeEvent::Audio(chunk) => {
-                    let pts_us = u64::try_from(chunk.pts_ms)
-                        .map_err(|_| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?
-                        .checked_mul(1_000)
-                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?;
-                    if chunk.sample_rate == 0
-                        || !(1..=2).contains(&chunk.channels)
-                        || chunk.samples.is_empty()
-                        || !chunk
-                            .samples
-                            .len()
-                            .is_multiple_of(usize::from(chunk.channels))
-                        || chunk.samples.iter().any(|sample| !sample.is_finite())
-                        || self
-                            .last_audio_pts_us
-                            .is_some_and(|previous| pts_us < previous)
-                    {
-                        return Err("ASTRA_EMU_MINORI_AVI_AUDIO_FORMAT".into());
-                    }
-                    self.pending_audio_samples = self
-                        .pending_audio_samples
-                        .checked_add(chunk.samples.len())
-                        .filter(|samples| *samples <= MAX_AVI_PENDING_AUDIO_SAMPLES)
-                        .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_AUDIO_EVENT_BUDGET".to_owned())?;
-                    self.last_audio_pts_us = Some(pts_us);
-                    self.audio.push(chunk);
-                }
-                AviRangeEvent::End => {
-                    self.ended = true;
-                    break;
-                }
-            }
-        }
-        Ok(previous_sequence != self.current.as_ref().map(|frame| frame.sequence))
+        self.cursor.advance(elapsed_us).map_err(minori_media_error)
     }
 
-    fn drain_audio(&mut self) -> Vec<na_mpeg2_decoder::MpegAudioF32> {
-        self.pending_audio_samples = 0;
-        std::mem::take(&mut self.audio)
+    fn drain_audio(&mut self) -> Vec<FvpMovieAudioChunk> {
+        self.cursor
+            .drain_audio()
+            .into_iter()
+            .map(|chunk| FvpMovieAudioChunk {
+                pts_ms: chunk.pts_us / 1_000,
+                sample_rate: chunk.sample_rate,
+                channels: chunk.channels,
+                samples: chunk.samples,
+            })
+            .collect()
     }
 
-    fn telemetry(&self) -> AviRangeTelemetry {
-        self.decoder.telemetry()
+    fn telemetry(&self) -> astra_media::IncrementalPlaybackTelemetry {
+        self.cursor.telemetry()
+    }
+
+    fn current_frame(&self) -> Option<&DecodedVideoFrame> {
+        self.cursor.current_frame()
+    }
+
+    fn duration_us(&self) -> u64 {
+        self.cursor.duration_us()
+    }
+
+    fn close(&mut self) -> Result<(), String> {
+        self.cursor.cancel().map_err(minori_media_error)
     }
 }
 
@@ -3388,8 +3338,7 @@ impl ActiveVideoStream {
                 .as_ref()
                 .filter(|frame| frame.pts_us <= elapsed_us),
             Self::MinoriAvi(cursor) => cursor
-                .current
-                .as_ref()
+                .current_frame()
                 .filter(|frame| frame.pts_us <= elapsed_us),
             Self::Platform(cursor) => cursor.current_frame(),
         }
@@ -3398,7 +3347,7 @@ impl ActiveVideoStream {
     fn duration_us(&self) -> Option<u64> {
         match self {
             Self::Native(cursor) => cursor.duration_us,
-            Self::MinoriAvi(cursor) => Some(cursor.duration_us),
+            Self::MinoriAvi(cursor) => Some(cursor.duration_us()),
             Self::Platform(cursor) => cursor.duration_us(),
         }
     }
@@ -3406,7 +3355,7 @@ impl ActiveVideoStream {
     async fn close(&mut self) -> Result<(), String> {
         match self {
             Self::Native(_) => Ok(()),
-            Self::MinoriAvi(_) => Ok(()),
+            Self::MinoriAvi(cursor) => cursor.close(),
             Self::Platform(cursor) => cursor.close().await,
         }
     }
@@ -4057,47 +4006,63 @@ fn composite_layer_cpu(
         max_x = max_x.min(clip.x.saturating_add(clip.width as i32));
         max_y = max_y.min(clip.y.saturating_add(clip.height as i32));
     }
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let dx = x as f32 + 0.5 - transform.tx;
-            let dy = y as f32 + 0.5 - transform.ty;
-            let source_x = inverse.0 * dx + inverse.2 * dy - 0.5;
-            let source_y = inverse.1 * dx + inverse.3 * dy - 0.5;
-            if source_x < -0.5
-                || source_y < -0.5
-                || source_x >= source_width as f32 - 0.5
-                || source_y >= source_height as f32 - 0.5
-            {
-                continue;
+    let target_row_bytes = usize::try_from(target_width)
+        .ok()
+        .and_then(|width| width.checked_mul(4))
+        .ok_or_else(|| "ASTRA_EMU_LAYER_TARGET_BOUNDS".to_owned())?;
+    let row_count = usize::try_from(max_y.saturating_sub(min_y))
+        .map_err(|_| "ASTRA_EMU_LAYER_TARGET_BOUNDS".to_owned())?;
+    target
+        .par_chunks_mut(target_row_bytes)
+        .enumerate()
+        .skip(usize::try_from(min_y).map_err(|_| "ASTRA_EMU_LAYER_TARGET_BOUNDS".to_owned())?)
+        .take(row_count)
+        .try_for_each(|(y, row)| -> Result<(), String> {
+            for x in min_x..max_x {
+                let dx = x as f32 + 0.5 - transform.tx;
+                let dy = y as f32 + 0.5 - transform.ty;
+                let source_x = inverse.0 * dx + inverse.2 * dy - 0.5;
+                let source_y = inverse.1 * dx + inverse.3 * dy - 0.5;
+                if source_x < -0.5
+                    || source_y < -0.5
+                    || source_x >= source_width as f32 - 0.5
+                    || source_y >= source_height as f32 - 0.5
+                {
+                    continue;
+                }
+                let mut pixel = match layer.texture_filter {
+                    TextureFilter2D::Nearest => read_surface_pixel(
+                        source,
+                        source_stride,
+                        source_format,
+                        source_x.round().clamp(0.0, source_width as f32 - 1.0) as u32,
+                        source_y.round().clamp(0.0, source_height as f32 - 1.0) as u32,
+                    )?,
+                    TextureFilter2D::Linear => sample_surface_linear(
+                        source,
+                        source_stride,
+                        source_format,
+                        source_width,
+                        source_height,
+                        source_x,
+                        source_y,
+                    )?,
+                };
+                let opacity = (layer.opacity * 255.0).round() as u16;
+                for channel in &mut pixel {
+                    *channel = ((u16::from(*channel) * opacity + 127) / 255) as u8;
+                }
+                let offset = usize::try_from(x)
+                    .map_err(|_| "ASTRA_EMU_LAYER_TARGET_BOUNDS".to_owned())?
+                    .checked_mul(4)
+                    .ok_or_else(|| "ASTRA_EMU_LAYER_TARGET_BOUNDS".to_owned())?;
+                let target_pixel = row
+                    .get_mut(offset..offset + 4)
+                    .ok_or_else(|| "ASTRA_EMU_LAYER_TARGET_BOUNDS".to_owned())?;
+                blend_premultiplied(target_pixel, pixel, layer.blend);
             }
-            let mut pixel = match layer.texture_filter {
-                TextureFilter2D::Nearest => read_surface_pixel(
-                    source,
-                    source_stride,
-                    source_format,
-                    source_x.round().clamp(0.0, source_width as f32 - 1.0) as u32,
-                    source_y.round().clamp(0.0, source_height as f32 - 1.0) as u32,
-                )?,
-                TextureFilter2D::Linear => sample_surface_linear(
-                    source,
-                    source_stride,
-                    source_format,
-                    source_width,
-                    source_height,
-                    source_x,
-                    source_y,
-                )?,
-            };
-            let opacity = (layer.opacity * 255.0).round() as u16;
-            for channel in &mut pixel {
-                *channel = ((u16::from(*channel) * opacity + 127) / 255) as u8;
-            }
-            let offset = (usize::try_from(y).unwrap() * usize::try_from(target_width).unwrap()
-                + usize::try_from(x).unwrap())
-                * 4;
-            blend_premultiplied(&mut target[offset..offset + 4], pixel, layer.blend);
-        }
-    }
+            Ok(())
+        })?;
     Ok(())
 }
 
@@ -4181,6 +4146,7 @@ struct RuntimeDriver<'a> {
     runtime: &'a mut AstraEmuRuntimeProvider,
     session_id: GameRuntimeSessionId,
     family_id: String,
+    video_provider: String,
     seed: u64,
     delta_ns: u64,
     platform: &'a PlatformHostClient,
@@ -4193,6 +4159,7 @@ struct RuntimeDriver<'a> {
     observed_blackboard: BTreeMap<String, String>,
     rasterizer: CpuStageRasterizer,
     layer_state: RetainedLayer2DState,
+    last_layer_composite: Option<(u32, u32, Vec<Layer2DState>)>,
     direct_layer_frame: bool,
     gpu_scene: Option<GpuSceneAdapter>,
     pending_scene_metrics: Option<GpuScenePrepareMetrics>,
@@ -4251,6 +4218,7 @@ struct PendingScenePresent {
 
 struct RuntimeDriverConfig {
     family_id: String,
+    video_provider: String,
     seed: u64,
     delta_ns: u64,
     audio_enabled: bool,
@@ -4436,6 +4404,7 @@ fn perfetto_domain(name: &str) -> &'static str {
 
 struct ExecutionConfig {
     family_id: String,
+    video_provider: String,
     seed: u64,
     delta_ns: u64,
     frame_sample_interval: u64,
@@ -4803,6 +4772,7 @@ async fn execute_sequence(
         surface,
         RuntimeDriverConfig {
             family_id: config.family_id,
+            video_provider: config.video_provider,
             seed: config.seed,
             delta_ns: config.delta_ns,
             audio_enabled: true,
@@ -5150,6 +5120,7 @@ impl<'a> RuntimeDriver<'a> {
         if config.presentation_substeps != 1 && config.presentation != PresentationPath::NativeGpu {
             return Err("ASTRA_EMU_PRESENTATION_SUBSTEPS_REQUIRE_GPU".into());
         }
+        validate_video_provider_binding(&config.family_id, &config.video_provider)?;
         let mut image_decoders = DecodeProviderRegistry::default();
         image_decoders
             .register(Box::new(ImageDecodeProvider))
@@ -5163,6 +5134,7 @@ impl<'a> RuntimeDriver<'a> {
             runtime,
             session_id,
             family_id: config.family_id,
+            video_provider: config.video_provider,
             seed: config.seed,
             delta_ns: config.delta_ns,
             platform,
@@ -5175,6 +5147,7 @@ impl<'a> RuntimeDriver<'a> {
             observed_blackboard: BTreeMap::new(),
             rasterizer: CpuStageRasterizer::default(),
             layer_state: RetainedLayer2DState::default(),
+            last_layer_composite: None,
             direct_layer_frame: false,
             gpu_scene: (config.presentation == PresentationPath::NativeGpu)
                 .then(GpuSceneAdapter::default),
@@ -5488,6 +5461,13 @@ impl<'a> RuntimeDriver<'a> {
             .checked_add(1)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_TICK_OVERFLOW".to_owned())?;
         for media_id in self.completed_media.drain(..) {
+            tracing::info!(
+                target: "astra_emu_cli::media",
+                event = "astra_emu_headless_media_completed",
+                media_identity = %Hash256::from_sha256(media_id.as_bytes()),
+                fixed_step = next_step,
+                "accepted an owner-side media completion"
+            );
             let mut matched = false;
             for wait in self.pending_waits.values_mut() {
                 if matches!(wait, PendingWait::Media(expected) if *expected == media_id) {
@@ -5713,6 +5693,19 @@ impl<'a> RuntimeDriver<'a> {
         }
         for command in live.video {
             let media_started = Instant::now();
+            let media_identity = match &command.command {
+                RuntimeLiveVideoCommandKind::Play { playback_id, .. }
+                | RuntimeLiveVideoCommandKind::Stop { playback_id } => {
+                    Hash256::from_sha256(playback_id.as_bytes())
+                }
+            };
+            tracing::info!(
+                target: "astra_emu_cli::media",
+                event = "astra_emu_headless_media_command",
+                media_identity = %media_identity,
+                fixed_step = next_step,
+                "routing an explicit media command"
+            );
             self.execute_video(legacy_live_video_command(command))
                 .await?;
             self.record_perfetto_phase("media.worker", 9, media_started)?;
@@ -6031,6 +6024,40 @@ impl<'a> RuntimeDriver<'a> {
             .layer_state
             .apply(&transaction)
             .map_err(|error| error.to_string())?;
+        let same_composite = self.last_layer_composite.as_ref().is_some_and(
+            |(cached_width, cached_height, cached_layers)| {
+                *cached_width == width && *cached_height == height && *cached_layers == layers
+            },
+        );
+        if same_composite
+            && self
+                .base_frame
+                .as_ref()
+                .is_some_and(|(cached_width, cached_height, bytes)| {
+                    *cached_width == width
+                        && *cached_height == height
+                        && bytes.len()
+                            == usize::try_from(width)
+                                .ok()
+                                .and_then(|width| {
+                                    usize::try_from(height)
+                                        .ok()
+                                        .and_then(|height| width.checked_mul(height))
+                                })
+                                .and_then(|pixels| pixels.checked_mul(4))
+                                .unwrap_or(0)
+                })
+        {
+            // A retained transaction may advance its sequence while leaving
+            // the visible layer state and surface generations unchanged. The
+            // previous composited base is still authoritative; avoid clearing
+            // and re-reading every published surface, while keeping the
+            // transaction's presentation edge and wait semantics below.
+            self.pending_render_frame = None;
+            self.direct_layer_frame = true;
+            self.visual_dirty = true;
+            return Ok(());
+        }
         let len = usize::try_from(width)
             .ok()
             .and_then(|width| {
@@ -6080,6 +6107,7 @@ impl<'a> RuntimeDriver<'a> {
             )??;
         }
         self.base_frame = Some((width, height, frame));
+        self.last_layer_composite = Some((width, height, layers));
         self.pending_render_frame = None;
         self.direct_layer_frame = true;
         self.visual_dirty = true;
@@ -6346,6 +6374,9 @@ impl<'a> RuntimeDriver<'a> {
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_VIDEO_EXTENSION_MISSING".to_owned())?;
         validate_minori_video_extension(&self.family_id, &extension)?;
+        if self.family_id == "minori" {
+            validate_video_provider_binding(&self.family_id, &self.video_provider)?;
+        }
         let (stream, audio_stream_id, audio_stream) = if self.family_id == "minori" {
             let (vfs, mount_set_id) = self.runtime.vfs_reader_binding(&self.session_id)?;
             let source = Arc::new(
@@ -6365,7 +6396,7 @@ impl<'a> RuntimeDriver<'a> {
             if !is_avi_container_header(&header) {
                 return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".into());
             }
-            let decoder = AviRangeDecoder::new(reader)?;
+            let decoder = MinoriAviDecoder::new(reader)?;
             let audio_stream_id =
                 if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
                     let stream_id = MOVIE_AUDIO_STREAM_BASE
@@ -6380,7 +6411,7 @@ impl<'a> RuntimeDriver<'a> {
                     None
                 };
             (
-                ActiveVideoStream::MinoriAvi(Box::new(MinoriAviPlayback::open(decoder))),
+                ActiveVideoStream::MinoriAvi(Box::new(MinoriAviPlayback::open(decoder)?)),
                 audio_stream_id,
                 None,
             )
@@ -6571,6 +6602,25 @@ impl<'a> RuntimeDriver<'a> {
             let changed = video.stream.advance(elapsed_us).await?;
             (changed, video.stream.duration_us())
         };
+        if let Some(video) = self.video.as_ref() {
+            let telemetry = match &video.stream {
+                ActiveVideoStream::MinoriAvi(stream) => Some(stream.telemetry()),
+                _ => None,
+            };
+            tracing::debug!(
+                target: "astra_emu_cli::media",
+                event = "astra_emu_headless_media_progress",
+                media_identity = %Hash256::from_sha256(video.playback_id.as_bytes()),
+                fixed_step = self.fixed_step,
+                elapsed_us,
+                duration_us,
+                video_changed,
+                decoded_frames = telemetry.map_or(0, |value| value.decoded_frames),
+                decoded_audio_samples = telemetry.map_or(0, |value| value.decoded_audio_samples),
+                dropped_video_packets = telemetry.map_or(0, |value| value.dropped_video_packets),
+                "advanced the bound incremental media cursor"
+            );
+        }
         let (native_audio, native_stream_id, native_audio_started) = {
             let video = self
                 .video
@@ -6578,19 +6628,7 @@ impl<'a> RuntimeDriver<'a> {
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
             let chunks = match &mut video.stream {
                 ActiveVideoStream::Native(cursor) => cursor.drain_audio(),
-                ActiveVideoStream::MinoriAvi(cursor) => cursor
-                    .drain_audio()
-                    .into_iter()
-                    .map(|chunk| {
-                        Ok(FvpMovieAudioChunk {
-                            pts_ms: u64::try_from(chunk.pts_ms)
-                                .map_err(|_| "ASTRA_EMU_MINORI_AVI_AUDIO_TIMELINE".to_owned())?,
-                            sample_rate: chunk.sample_rate,
-                            channels: chunk.channels,
-                            samples: chunk.samples,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, String>>()?,
+                ActiveVideoStream::MinoriAvi(cursor) => cursor.drain_audio(),
                 ActiveVideoStream::Platform(_) => Vec::new(),
             };
             (chunks, video.audio_stream_id, video.native_audio_started)
@@ -6631,17 +6669,16 @@ impl<'a> RuntimeDriver<'a> {
                 .take()
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
             if let ActiveVideoStream::MinoriAvi(stream) = &completed.stream {
-                if stream.current.is_none() {
+                if stream.current_frame().is_none() {
                     let telemetry = stream.telemetry();
                     tracing::error!(
                         event = "astra_emu_minori_avi_frame_missing",
                         diagnostic_code = "ASTRA_EMU_MINORI_AVI_VIDEO_FRAME_MISSING",
-                        encoded_bytes = telemetry.encoded_bytes,
                         video_packets = telemetry.video_packets,
-                        dropped_video_packets = telemetry.dropped_video_packets,
                         audio_packets = telemetry.audio_packets,
                         decoded_frames = telemetry.decoded_frames,
                         decoded_audio_samples = telemetry.decoded_audio_samples,
+                        dropped_video_packets = telemetry.dropped_video_packets,
                         "Minori AVI stream ended without a decoded video frame"
                     );
                     return Err("ASTRA_EMU_MINORI_AVI_VIDEO_FRAME_MISSING".into());
@@ -6769,12 +6806,14 @@ struct AudioPumpTelemetry {
 
 struct AudioExecutor {
     service: Option<FamilyAudioService>,
+    pump_required: bool,
 }
 
 impl AudioExecutor {
     fn new(service: FamilyAudioService) -> Self {
         Self {
             service: Some(service),
+            pump_required: false,
         }
     }
 
@@ -6798,11 +6837,15 @@ impl AudioExecutor {
         resource: Option<astra_byte_source::OwnedByteBuffer>,
         _platform: &PlatformHostClient,
     ) -> Result<(), String> {
-        self.service()?.execute(command, resource)
+        self.service()?.execute(command, resource)?;
+        self.pump_required = true;
+        Ok(())
     }
 
     async fn execute_live_pcm(&mut self, packet: LegacyAudioPacketV7) -> Result<(), String> {
-        self.service()?.execute_live_pcm(packet)
+        self.service()?.execute_live_pcm(packet)?;
+        self.pump_required = true;
+        Ok(())
     }
 
     fn begin_platform_movie(
@@ -6815,7 +6858,9 @@ impl AudioExecutor {
             chunk.sample_rate,
             chunk.channels,
             chunk.samples,
-        )
+        )?;
+        self.pump_required = true;
+        Ok(())
     }
 
     fn append_platform_movie(
@@ -6826,7 +6871,9 @@ impl AudioExecutor {
         samples: Vec<f32>,
     ) -> Result<(), String> {
         self.service()?
-            .append_movie_stream(stream_id, sample_rate, channels, samples)
+            .append_movie_stream(stream_id, sample_rate, channels, samples)?;
+        self.pump_required = true;
+        Ok(())
     }
 
     async fn close_movie_stream(
@@ -6834,7 +6881,9 @@ impl AudioExecutor {
         stream_id: u32,
         _platform: &PlatformHostClient,
     ) -> Result<(), String> {
-        self.service()?.stop_movie_pcm(stream_id)
+        self.service()?.stop_movie_pcm(stream_id)?;
+        self.pump_required = true;
+        Ok(())
     }
 
     async fn pump(
@@ -6842,18 +6891,18 @@ impl AudioExecutor {
         _platform: &PlatformHostClient,
         _policy: AudioPumpPolicy,
     ) -> Result<AudioPumpTelemetry, String> {
-        let service = self.service()?;
-        service.pump()?;
-        let telemetry = service.telemetry();
-        Ok(AudioPumpTelemetry {
-            active_streams: telemetry.active_streams,
-            packets_submitted: telemetry.packet_count,
-            submitted_frames: telemetry.submitted_frames,
-            consumed_frames: telemetry.consumed_frames,
-            queued_frames: telemetry.queued_frames,
-            underflow_count: telemetry.underflow_count,
-            decoder_refills: telemetry.decoder_refills,
-        })
+        let before = self.service()?.telemetry();
+        // A deterministic fixed tick has no audio state to advance when no
+        // command is pending and the worker reports no active stream. Avoid a
+        // synchronous cross-thread FixedTick round trip in that stable idle
+        // state; command submission sets `pump_required` before the next call.
+        if !self.pump_required && before.active_streams == 0 {
+            return Ok(audio_pump_telemetry(before));
+        }
+        self.service()?.pump()?;
+        let telemetry = self.service()?.telemetry();
+        self.pump_required = telemetry.active_streams != 0;
+        Ok(audio_pump_telemetry(telemetry))
     }
 
     #[cfg(target_os = "windows")]
@@ -6866,6 +6915,20 @@ impl AudioExecutor {
             .take()
             .ok_or_else(|| "ASTRA_EMU_AUDIO_SESSION_CLOSED".to_owned())?
             .shutdown()
+    }
+}
+
+fn audio_pump_telemetry(
+    telemetry: astra_emu_family_support::LegacyAudioTelemetry,
+) -> AudioPumpTelemetry {
+    AudioPumpTelemetry {
+        active_streams: telemetry.active_streams,
+        packets_submitted: telemetry.packet_count,
+        submitted_frames: telemetry.submitted_frames,
+        consumed_frames: telemetry.consumed_frames,
+        queued_frames: telemetry.queued_frames,
+        underflow_count: telemetry.underflow_count,
+        decoder_refills: telemetry.decoder_refills,
     }
 }
 
@@ -7062,6 +7125,20 @@ mod native_tests {
         );
         assert!(validate_minori_video_extension("minori", "AVI").is_ok());
         assert!(validate_minori_video_extension("fvp", "wmv").is_ok());
+    }
+
+    #[test]
+    fn minori_requires_the_explicit_ffmpeg_provider_binding() {
+        assert_eq!(
+            validate_video_provider_binding("minori", "disabled").unwrap_err(),
+            "ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED"
+        );
+        assert_eq!(
+            validate_video_provider_binding("minori", "platform").unwrap_err(),
+            "ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN"
+        );
+        assert!(validate_video_provider_binding("minori", "ffmpeg-vcpkg").is_ok());
+        assert!(validate_video_provider_binding("fvp", "disabled").is_ok());
     }
 
     #[test]

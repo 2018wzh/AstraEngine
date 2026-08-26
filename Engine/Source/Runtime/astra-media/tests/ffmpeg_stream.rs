@@ -1,10 +1,35 @@
 #![cfg(feature = "ffmpeg-vcpkg")]
 
+use std::io::Cursor;
+
 use astra_media::{
     DecodedMediaPacket, FfmpegAudioOutputFormat, FfmpegDecodedPacket, FfmpegPlaybackDecoder,
-    FfmpegStreamLimits, MediaPipelineLimits, MediaPlaybackPipeline, MediaPlaybackSession,
-    PlaybackTickRequest, QueuedMediaOutput,
+    FfmpegStreamLimits, IncrementalMediaPlayback, IncrementalPlaybackLimits, MediaPipelineLimits,
+    MediaPlaybackPipeline, MediaPlaybackSession, PlaybackTickRequest, QueuedMediaOutput,
 };
+
+#[astra_headless_test::test]
+fn ffmpeg_reader_api_feeds_the_shared_incremental_cursor() {
+    let decoder = FfmpegPlaybackDecoder::open_reader(
+        "mp4",
+        Cursor::new(fixture_bytes("flower.mp4")),
+        FfmpegStreamLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        astra_media::IncrementalMediaDecoder::provider_id(&decoder),
+        astra_media::FFMPEG_INCREMENTAL_PROVIDER_ID
+    );
+    let config = astra_media::IncrementalMediaDecoder::playback_config(&decoder);
+    assert!(config.has_video);
+    let mut playback =
+        IncrementalMediaPlayback::open(Box::new(decoder), IncrementalPlaybackLimits::default())
+            .unwrap();
+    assert!(playback.advance(0).unwrap());
+    let frame = playback.current_frame().expect("video fixture has a frame");
+    assert!(frame.width > 0 && frame.height > 0);
+    assert!(playback.telemetry().decoded_frames > 0);
+}
 
 #[astra_headless_test::test]
 fn ffmpeg_audio_stream_produces_timestamped_packets_accepted_by_scheduler() {

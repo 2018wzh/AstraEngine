@@ -9,15 +9,20 @@ use std::{
     },
     time::{Duration, Instant},
 };
+#[cfg(feature = "ffmpeg-vcpkg")]
+use std::{
+    sync::mpsc::{self, SyncSender},
+    thread::JoinHandle,
+};
 
 use crate::artifact::{ArtifactRecorder, AudioArtifactStream};
 use astra_headless_protocol::RendererExecutionIdentity;
-#[cfg(feature = "ffmpeg-vcpkg")]
-use astra_media::FfmpegDecodedPacket;
 use astra_media::{
     DecodeKind as MediaDecodeKind, DecodeOutput as MediaDecodeOutput, DecodeProvider,
     DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
 };
+#[cfg(feature = "ffmpeg-vcpkg")]
+use astra_media::{FfmpegDecodedPacket, MediaError as AstraMediaError};
 use astra_media_core::{
     CpuRendererProvider, HeadlessRenderer, MediaError, RenderTargetFormat, Renderer2DProvider,
     RendererCreateRequest, SceneCommand,
@@ -435,13 +440,78 @@ struct DecodeState {
 
 #[cfg(feature = "ffmpeg-vcpkg")]
 struct HeadlessVideoStream {
-    decoder: astra_media::FfmpegPlaybackDecoder,
+    worker: FfmpegVideoWorker,
     duration_us: u64,
     max_frames: u64,
     max_decoded_byte_count: u64,
     frame_count: u64,
     decoded_byte_count: u64,
     end_emitted: bool,
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+struct FfmpegVideoWorker {
+    commands: SyncSender<FfmpegVideoCommand>,
+    join: Option<JoinHandle<()>>,
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+enum FfmpegVideoCommand {
+    Next(SyncSender<Result<Option<FfmpegDecodedPacket>, AstraMediaError>>),
+    Shutdown(SyncSender<Result<(), AstraMediaError>>),
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+impl FfmpegVideoWorker {
+    fn next(&self) -> Result<Option<FfmpegDecodedPacket>, AstraMediaError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(FfmpegVideoCommand::Next(reply_tx))
+            .map_err(|_| AstraMediaError::message("ASTRA_FFMPEG_STREAM_WORKER_CLOSED"))?;
+        reply_rx
+            .recv()
+            .map_err(|_| AstraMediaError::message("ASTRA_FFMPEG_STREAM_WORKER_CLOSED"))?
+    }
+
+    fn close(mut self) -> Result<(), AstraMediaError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.commands
+            .send(FfmpegVideoCommand::Shutdown(reply_tx))
+            .map_err(|_| AstraMediaError::message("ASTRA_FFMPEG_STREAM_WORKER_CLOSED"))?;
+        let result = reply_rx
+            .recv()
+            .map_err(|_| AstraMediaError::message("ASTRA_FFMPEG_STREAM_WORKER_CLOSED"))?;
+        if let Some(join) = self.join.take() {
+            join.join()
+                .map_err(|_| AstraMediaError::message("ASTRA_FFMPEG_STREAM_WORKER_PANIC"))?;
+        }
+        result
+    }
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+impl Drop for FfmpegVideoWorker {
+    fn drop(&mut self) {
+        if self.join.is_none() {
+            return;
+        }
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        if self
+            .commands
+            .send(FfmpegVideoCommand::Shutdown(reply_tx))
+            .is_ok()
+        {
+            let _ = reply_rx.recv();
+        }
+        if let Some(join) = self.join.take() {
+            if join.join().is_err() {
+                tracing::error!(
+                    event = "platform.headless.decode.worker.panic",
+                    "FFmpeg decoder worker panicked during implicit cleanup"
+                );
+            }
+        }
+    }
 }
 enum PackageState {
     File(FilePackageSource),
@@ -1227,18 +1297,37 @@ impl HostState {
                 let _ = reply.send(result);
             }
             HostCommand::CloseDecode { session, reply } => {
-                let result = self.decoders.remove(session).map(|state| {
-                    #[cfg(feature = "ffmpeg-vcpkg")]
-                    let had_video_stream = state.video_stream.is_some();
-                    #[cfg(not(feature = "ffmpeg-vcpkg"))]
-                    let had_video_stream = false;
-                    tracing::info!(
-                        event = "platform.headless.decode.session.closed",
-                        kind = ?state.kind,
-                        had_video_stream,
-                        "closed Headless decode session and released decoder resources"
-                    );
-                });
+                let result = match self.decoders.remove(session) {
+                    Ok(state) => {
+                        #[cfg(feature = "ffmpeg-vcpkg")]
+                        let mut state = state;
+                        #[cfg(feature = "ffmpeg-vcpkg")]
+                        let had_video_stream = state.video_stream.is_some();
+                        #[cfg(not(feature = "ffmpeg-vcpkg"))]
+                        let had_video_stream = false;
+                        let close_result = {
+                            #[cfg(feature = "ffmpeg-vcpkg")]
+                            {
+                                state.video_stream.take().map_or(Ok(()), |stream| {
+                                    stream.worker.close().map_err(media_error)
+                                })
+                            }
+                            #[cfg(not(feature = "ffmpeg-vcpkg"))]
+                            {
+                                Ok(())
+                            }
+                        };
+                        close_result.map(|()| {
+                            tracing::info!(
+                                event = "platform.headless.decode.session.closed",
+                                kind = ?state.kind,
+                                had_video_stream,
+                                "closed Headless decode session and released decoder resources"
+                            );
+                        })
+                    }
+                    Err(error) => Err(error),
+                };
                 let _ = reply.send(result);
             }
             HostCommand::BeginSave { slot, reply } => {
@@ -1485,9 +1574,13 @@ fn decode_session(
                         "video stream is already active",
                     ));
                 }
+                let encoded = match request.bytes.try_into_vec() {
+                    Ok(bytes) => bytes,
+                    Err(bytes) => bytes.as_slice().to_vec(),
+                };
                 let stream = open_headless_video_stream(
                     &request.codec,
-                    &request.bytes,
+                    encoded,
                     video_binding,
                     max_video_frames,
                     max_decode_output_bytes,
@@ -1601,7 +1694,7 @@ fn decode(
 #[cfg(feature = "ffmpeg-vcpkg")]
 fn open_headless_video_stream(
     codec: &str,
-    encoded: &[u8],
+    encoded: Vec<u8>,
     video_binding: &str,
     max_video_frames: u64,
     max_decode_output_bytes: u64,
@@ -1632,17 +1725,71 @@ fn open_headless_video_stream(
         max_video_frame_bytes: max_decode_output_bytes_usize,
         ..astra_media::FfmpegStreamLimits::default()
     };
-    let decoder =
-        astra_media::FfmpegPlaybackDecoder::open(codec, encoded, limits).map_err(media_error)?;
-    let duration_us = decoder.playback_config().duration_us;
-    if duration_us == 0 {
-        return Err(invalid(
-            "decode.video.stream.start",
-            "video decoder reported an empty duration",
-        ));
-    }
+    let (commands, command_receiver) = mpsc::sync_channel(1);
+    let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+    let worker_codec = codec.to_owned();
+    let join = std::thread::Builder::new()
+        .name("astra-headless-ffmpeg-decoder".into())
+        .spawn(move || {
+            let mut decoder =
+                match astra_media::FfmpegPlaybackDecoder::open(&worker_codec, &encoded, limits) {
+                    Ok(decoder) => decoder,
+                    Err(error) => {
+                        let _ = ready_sender.send(Err(error));
+                        return;
+                    }
+                };
+            let duration_us = decoder.playback_config().duration_us;
+            if duration_us == 0 {
+                let _ = ready_sender.send(Err(AstraMediaError::message(
+                    "ASTRA_FFMPEG_STREAM_DURATION",
+                )));
+                return;
+            }
+            if ready_sender.send(Ok(duration_us)).is_err() {
+                return;
+            }
+            while let Ok(command) = command_receiver.recv() {
+                match command {
+                    FfmpegVideoCommand::Next(reply) => {
+                        let _ = reply.send(decoder.read_next());
+                    }
+                    FfmpegVideoCommand::Shutdown(reply) => {
+                        let _ = reply.send(decoder.cancel());
+                        break;
+                    }
+                }
+            }
+        })
+        .map_err(|error| {
+            PlatformError::new(
+                PlatformErrorCode::ProviderUnavailable,
+                "decode.video.stream.start",
+                "failed to start the dedicated FFmpeg decoder worker",
+            )
+            .with_field("worker", error.to_string())
+        })?;
+    let duration_us = match ready_receiver.recv() {
+        Ok(Ok(duration_us)) => duration_us,
+        Ok(Err(error)) => {
+            let _ = join.join();
+            return Err(media_error(error));
+        }
+        Err(error) => {
+            let _ = join.join();
+            return Err(PlatformError::new(
+                PlatformErrorCode::ProviderUnavailable,
+                "decode.video.stream.start",
+                "FFmpeg decoder worker closed before reporting its stream contract",
+            )
+            .with_field("worker", error.to_string()));
+        }
+    };
     Ok(HeadlessVideoStream {
-        decoder,
+        worker: FfmpegVideoWorker {
+            commands,
+            join: Some(join),
+        },
         duration_us,
         max_frames: max_video_frames,
         max_decoded_byte_count: max_decode_output_bytes,
@@ -1660,7 +1807,7 @@ fn next_headless_video_output(state: &mut DecodeState) -> Result<DecodeOutput, P
             "video stream has not been started",
         )
     })?;
-    while let Some(packet) = stream.decoder.read_next().map_err(media_error)? {
+    while let Some(packet) = stream.worker.next().map_err(media_error)? {
         let FfmpegDecodedPacket::Video { packet, bgra8 } = packet else {
             continue;
         };
@@ -1701,7 +1848,7 @@ fn next_headless_video_output(state: &mut DecodeState) -> Result<DecodeOutput, P
             duration_us: packet.duration_us,
             width: packet.width,
             height: packet.height,
-            bgra8: bgra8.into(),
+            bgra8,
         });
     }
     if stream.end_emitted {
