@@ -1,8 +1,8 @@
-//! Provider-factory host with one ordered lock per runtime session.
+//! v2 工厂式宿主（双轨主路径）：factory/session 所有权分离。
 //!
-//! This is intentionally separate from the v1 host while providers migrate.
-//! A factory owns only instance control-plane state; every opened session owns
-//! its RuntimeWorld and is never observed through another session's lock.
+//! 已切换为首选实现：`ProductRuntimeHostV2` / `ConcurrentProductRuntimeHost`。
+//! factory 为 `Send + Sync` 仅处理 descriptor/prepare/probe/instance；`ProductRuntimeSession: Send` 独占 RuntimeWorld。
+//! 每 session 32 容量 ordered mailbox 单飞，跨 session 由 `WorkerBudgetBroker` 全局限流；v1 `runtime_host::ProductRuntimeHostV1` 仅作兼容保留。
 
 use std::{
     any::Any,

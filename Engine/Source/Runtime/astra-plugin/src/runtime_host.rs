@@ -1,3 +1,7 @@
+//! v1 同步宿主（legacy，双轨兼容期保留）：单 Mutex + Box<dyn ProductRuntimeProvider>。
+//! 已切换至 v2 `concurrent_runtime_host::ConcurrentProductRuntimeHost`（factory/session + per-session ordered mailbox + WorkerBudgetBroker）。
+//! 本文件仅为双轨兼容期保留，新增代码请使用 `ProductRuntimeHostV2`。
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
