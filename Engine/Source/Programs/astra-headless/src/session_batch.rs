@@ -1,13 +1,12 @@
 use std::{
     fs,
-    io::{BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
-use astra_core::PerformanceReport;
+use astra_core::{Hash256, PerformanceReport};
 use astra_headless_protocol::RunReport;
 use astra_observability::{sample_process_cpu_time_us_by_pid, sample_process_memory_by_pid};
 use astra_plugin::WorkerBudgetBroker;
@@ -700,21 +699,9 @@ fn read_child_evidence(
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let file = fs::File::open(path)
-        .map_err(|error| format!("ASTRA_HEADLESS_BATCH_IDENTITY_READ: {error}"))?;
-    let mut reader = BufReader::new(file);
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| format!("ASTRA_HEADLESS_BATCH_IDENTITY_READ: {error}"))?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(format!("sha256:{:x}", digest.finalize()))
+    Hash256::from_sha256_file(path)
+        .map(|hash| hash.to_string())
+        .map_err(|error| format!("ASTRA_HEADLESS_BATCH_IDENTITY_READ: {error}"))
 }
 
 fn validate_manifest(manifest: &BatchManifest) -> Result<(), String> {

@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
+use astra_core::is_safe_symbol as safe_symbol;
 use astra_emu_family_core::{LegacyCoreError, LegacyMountedVfs, LegacyVfsFamilyFactory};
 
 use crate::{load_mount_profile, LoadedMountProfile};
@@ -73,12 +74,21 @@ impl LegacyVfsFamilyRegistry {
     }
 }
 
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+/// Registers the given family factories on a fresh registry, loads the mount
+/// profile and mounts the requested family in one step. Shared by the generic
+/// `astra-emu-cli vfs` command and family-specific research CLIs.
+pub fn mount_family_vfs(
+    requested_family: &str,
+    game_root: &Path,
+    profile: &Path,
+    factories: Vec<Arc<dyn LegacyVfsFamilyFactory>>,
+) -> Result<Arc<dyn LegacyMountedVfs>, LegacyCoreError> {
+    let mut registry = LegacyVfsFamilyRegistry::default();
+    for factory in factories {
+        registry.register(factory)?;
+    }
+    let loaded = registry.load_profile(profile)?;
+    registry.mount(requested_family, game_root, &loaded)
 }
 
 #[cfg(test)]

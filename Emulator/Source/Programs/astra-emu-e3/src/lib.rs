@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use astra_core::Hash256;
+use astra_core::{is_safe_symbol as safe_symbol, Hash256};
 use astra_emu_manager_core::EmuPlatformRunEvidenceV1;
 #[cfg(windows)]
 use astra_headless_protocol::{ButtonState, PointerButton};
@@ -194,14 +194,6 @@ fn safe_relative_path(value: &str) -> bool {
         && value
             .split(['/', '\\'])
             .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 #[cfg(windows)]

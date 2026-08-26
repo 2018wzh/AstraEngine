@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use astra_core::is_safe_symbol;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -291,12 +292,7 @@ fn remember_surface_generation(layer: &Layer2DState, generations: &mut BTreeMap<
 }
 
 fn validate_symbol(field: &str, value: &str) -> Result<(), MediaError> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
+    if !is_safe_symbol(value) {
         return Err(MediaError::message(format!("Layer2D {field} is invalid")));
     }
     Ok(())

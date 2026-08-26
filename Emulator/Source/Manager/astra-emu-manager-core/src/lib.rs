@@ -8,6 +8,7 @@ mod host_services;
 mod identity;
 mod input_mapping;
 mod library;
+mod live_mapping;
 mod patch;
 mod play_record;
 mod probe;
@@ -36,6 +37,10 @@ pub use library::{
     CancellationToken, CaseRecord, CaseRuntimeProfileRecord, CoverCacheRecord, Library,
     LibraryError, ScanCandidate, ScanReport, SourceDiagnosticRecord, SourceGrant,
     TranslationConsent, TranslationProfileRecord,
+};
+pub use live_mapping::{
+    legacy_live_audio_command, legacy_live_audio_packet, legacy_live_video_command,
+    legacy_texture_format, live_wait_condition, PendingLiveWait,
 };
 pub use patch::{
     PatchContext, PatchDiagnostic, PatchEffectIntent, PatchExecution, PatchHostAction,

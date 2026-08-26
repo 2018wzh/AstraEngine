@@ -39,6 +39,26 @@ impl Hash256 {
         Self(out)
     }
 
+    /// Streams a file through SHA-256 without loading it fully into memory.
+    pub fn from_sha256_file(path: &std::path::Path) -> std::io::Result<Self> {
+        use std::io::Read;
+
+        let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let read = reader.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        let digest = hasher.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&digest);
+        Ok(Self(out))
+    }
+
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }

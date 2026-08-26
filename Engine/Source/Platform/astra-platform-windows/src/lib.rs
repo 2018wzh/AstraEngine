@@ -1,16 +1,10 @@
-mod diagnostics;
 mod factory;
-#[cfg(all(target_os = "windows", feature = "ffmpeg-vcpkg"))]
-mod media_performance;
 #[cfg(target_os = "windows")]
 mod source_directory;
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]
 mod test_driver;
 
-pub use diagnostics::*;
 pub use factory::*;
-#[cfg(all(target_os = "windows", feature = "ffmpeg-vcpkg"))]
-pub use media_performance::*;
 #[cfg(target_os = "windows")]
 pub use source_directory::*;
 #[cfg(all(target_os = "windows", feature = "platform-test-driver"))]

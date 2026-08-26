@@ -248,10 +248,6 @@ impl PlayerHostCommandBatch {
     }
 }
 
-pub trait PlayerHostCommandSource {
-    fn take_host_commands(&mut self) -> Result<PlayerHostCommandBatch, PlayerHostCommandError>;
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlayerHostCommandResult {
     PackageOpened {

@@ -25,9 +25,11 @@ RFVP directly owns the `Ported + SingleLayer` Family ABI v9 provider:
 - it produces input, wait, audio, control, and diagnostic DTOs itself.
 
 Family ABI v9 has no snapshot/restore, text lease, scene draw transaction,
-runtime content hash, or step-budget contract. The fork therefore contains no
-hosted draw capture, GraphBuff hash, ephemeral text lease, or save envelope for
-the Astra path.
+runtime content hash, or step-budget contract. The AstraEngine adapter does not
+reintroduce those APIs. The pinned fork still contains legacy hosted draw
+capture, semantic-delta, snapshot/hash and policy-limit code; that fork-side
+residue is recorded as a blocking audit in
+`Docs/emu/fvp/rfvp-fork-audit.md` and must be removed in the next fork commit.
 
 The AstraEngine `astra-emu-fvp` crate is only the dynamic-library boundary. It
 injects build identity and package metadata, constructs and shuts down the RFVP
@@ -38,5 +40,7 @@ or repair RFVP business state.
 
 Fork updates start from the recorded upstream base, keep changes reviewable,
 run the RFVP Astra provider tests and the AstraEngine consumer tests, and pin a
-new immutable revision. The normal full-damage pixel path remains exactly
-RFVP writing the Host lease followed by the Host upload.
+new immutable revision. The intended full-damage pixel path remains exactly
+RFVP writing the Host lease followed by the Host upload; the current fork does
+not yet satisfy the single-path audit because its legacy capture API remains
+reachable inside the hosted core.

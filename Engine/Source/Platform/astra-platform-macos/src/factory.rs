@@ -1389,7 +1389,7 @@ mod macos {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [f32], _| {
-                            fill_f32(output, &mut consumer);
+                            let _ = consumer.fill_output_f32(output);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1407,7 +1407,7 @@ mod macos {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [i16], _| {
-                            fill_i16(output, &mut consumer);
+                            let _ = consumer.fill_output_i16(output);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1425,7 +1425,7 @@ mod macos {
                     device.build_output_stream(
                         &config,
                         move |output: &mut [u16], _| {
-                            fill_u16(output, &mut consumer);
+                            let _ = consumer.fill_output_u16(output);
                             wake.notify();
                         },
                         move |stream_error_value| {
@@ -1505,60 +1505,6 @@ mod macos {
             cpal::SampleFormat::I16 => Some(1),
             cpal::SampleFormat::U16 => Some(2),
             _ => None,
-        }
-    }
-
-    fn fill_f32(output: &mut [f32], consumer: &mut astra_platform_common::NativeAudioConsumer) {
-        let filled = consumer.pop_samples(output);
-        output[filled..].fill(0.0);
-        if filled != output.len() {
-            consumer.record_underflow();
-        }
-    }
-
-    fn fill_i16(output: &mut [i16], consumer: &mut astra_platform_common::NativeAudioConsumer) {
-        let mut scratch = [0.0_f32; 1024];
-        let mut written = 0;
-        while written < output.len() {
-            let requested = scratch.len().min(output.len() - written);
-            let filled = consumer.pop_samples(&mut scratch[..requested]);
-            for (target, sample) in output[written..written + filled]
-                .iter_mut()
-                .zip(&scratch[..filled])
-            {
-                *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
-            }
-            written += filled;
-            if filled != requested {
-                break;
-            }
-        }
-        output[written..].fill(0);
-        if written != output.len() {
-            consumer.record_underflow();
-        }
-    }
-
-    fn fill_u16(output: &mut [u16], consumer: &mut astra_platform_common::NativeAudioConsumer) {
-        let mut scratch = [0.0_f32; 1024];
-        let mut written = 0;
-        while written < output.len() {
-            let requested = scratch.len().min(output.len() - written);
-            let filled = consumer.pop_samples(&mut scratch[..requested]);
-            for (target, sample) in output[written..written + filled]
-                .iter_mut()
-                .zip(&scratch[..filled])
-            {
-                *target = ((sample.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
-            }
-            written += filled;
-            if filled != requested {
-                break;
-            }
-        }
-        output[written..].fill(u16::MAX / 2);
-        if written != output.len() {
-            consumer.record_underflow();
         }
     }
 

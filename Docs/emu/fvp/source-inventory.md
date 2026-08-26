@@ -1,5 +1,9 @@
 # FVP Source Inventory
 
+本页是 RFVP upstream 研究索引。它描述的 snapshot section、PresentationCommand
+等旧接入名词仅用于定位历史代码；当前 v9 provider 的职责和阻断项见
+[rfvp-fork-audit.md](rfvp-fork-audit.md)。
+
 ## FVP 参考入口
 
 FVP 研究实现是本次设计输入的主要参考。AstraEMU 只吸收格式、状态机和验收经验，不复制该实现的产品结构。

@@ -1,5 +1,9 @@
 # FVP Script Format
 
+本页为脚本格式研究资料。正文、text capture、逐运行 hash 和本地路径不得进入
+当前 v9 的日志、report、package 或 Host DTO；文字显示由 RFVP core 自己完成，
+翻译只经同步 UTF-8 Hook。当前边界见 [thin-fork.md](thin-fork.md)。
+
 FVP 主脚本通常是 `.hcb`。rfvp 的 parser 没有 magic check，文件开头直接是 `sys_desc_offset`，code area 从 offset `0x00000004` 开始，到 `sys_desc_offset` 之前结束。
 
 ## Header

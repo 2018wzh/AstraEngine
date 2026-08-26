@@ -1185,7 +1185,9 @@ fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> 
 }
 
 fn hash_file(path: &Path) -> Result<String, String> {
-    Ok(Hash256::from_sha256(&fs::read(path).map_err(|error| error.to_string())?).to_string())
+    Ok(Hash256::from_sha256_file(path)
+        .map_err(|error| error.to_string())?
+        .to_string())
 }
 
 #[cfg(test)]

@@ -2046,7 +2046,7 @@ fn read_profile(path: &Path, identity_hash: &str) -> Result<HeadlessHostProfile,
 }
 fn provider_hash(profile: &HeadlessHostProfile) -> Result<String, String> {
     let bytes = serde_json::to_vec(&profile.providers).map_err(|e| e.to_string())?;
-    Ok(format!("sha256:{}", sha256_hex(&bytes)))
+    Ok(astra_core::Hash256::from_sha256(&bytes).to_string())
 }
 
 fn render_policy_name(profile: &HeadlessHostProfile) -> &'static str {
@@ -2075,17 +2075,12 @@ fn renderer_identity_hash(identity: &RendererExecutionIdentity) -> String {
         .unwrap_or_else(|_| empty_hash())
 }
 fn hash_file(path: &Path) -> Result<String, String> {
-    Ok(format!(
-        "sha256:{}",
-        sha256_hex(&fs::read(path).map_err(|e| e.to_string())?)
-    ))
+    Ok(astra_core::Hash256::from_sha256_file(path)
+        .map_err(|e| e.to_string())?
+        .to_string())
 }
 fn empty_hash() -> String {
-    format!("sha256:{}", sha256_hex(&[]))
-}
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    format!("{:x}", Sha256::digest(bytes))
+    astra_core::Hash256::from_sha256(&[]).to_string()
 }
 fn is_hash(value: &str) -> bool {
     value
@@ -2380,7 +2375,7 @@ fn bootstrap_test_env(output: &Path, build_identity: &Path) -> Result<(), String
     let package_path = output.join("empty.astrapkg");
     fs::write(&package_path, package.as_bytes())
         .map_err(|e| format!("ASTRA_HEADLESS_EMPTY_PACKAGE_WRITE_FAILED: {e}"))?;
-    let package_hash = format!("sha256:{}", sha256_hex(package.as_bytes()));
+    let package_hash = astra_core::Hash256::from_sha256(package.as_bytes()).to_string();
     let mut profile = HeadlessHostProfile::reference(
         "headless-test",
         "astra.headless.empty",

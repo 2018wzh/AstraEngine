@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
+use astra_core::is_safe_symbol as safe_symbol;
 use astra_headless_protocol::PhysicalInput;
 use astra_platform::PlatformHostClient;
 use serde::{Deserialize, Serialize};
@@ -197,12 +198,4 @@ impl ProductAdapterRegistry {
             .open(request)
             .await
     }
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }

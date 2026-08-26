@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use astra_core::Diagnostic;
+use astra_core::{is_safe_path_symbol as is_safe_symbol, Diagnostic};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -389,14 +389,6 @@ impl ExtensionCommandDescriptor {
         }
         Ok(())
     }
-}
-
-fn is_safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

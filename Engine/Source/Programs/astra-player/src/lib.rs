@@ -714,8 +714,8 @@ fn required_string(value: &serde_json::Value, key: &str) -> Result<String, Playe
         .ok_or_else(|| format!("bundle manifest missing string field: {key}").into())
 }
 
-fn sha256_file(path: &PathBuf) -> Result<String, PlayerAutomationError> {
-    Ok(Hash256::from_sha256(&fs::read(path)?).to_string())
+fn sha256_file(path: &std::path::Path) -> Result<String, PlayerAutomationError> {
+    Ok(Hash256::from_sha256_file(path)?.to_string())
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {

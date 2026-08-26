@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use astra_core::{Diagnostic, DiagnosticSeverity};
+use astra_core::{is_safe_symbol as safe_symbol, Diagnostic, DiagnosticSeverity};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -358,14 +358,6 @@ fn validate_frame(frame: &CpuFrame) -> Result<(), MediaError> {
         ));
     }
     Ok(())
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn safe_filter_kind(value: &str) -> bool {

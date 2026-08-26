@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astra_core::Hash256;
+use astra_core::{is_safe_symbol as safe_symbol, Hash256};
 use astra_emu_family_core::{
     validate_decrypt_output, validate_decrypt_request, LegacyCoreError, LegacyDecryptPhase,
     LegacyDecryptProvider, LegacyDecryptRequest,
@@ -635,13 +635,6 @@ fn install_intrinsics(
     Ok(())
 }
 
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
 fn error(code: &'static str, message: impl Into<String>) -> LegacyCoreError {
     LegacyCoreError::invalid(code, message)
 }

@@ -1,5 +1,11 @@
 # FVP Presentation And Media
 
+本页保留为 v9 迁移前的研究映射，不能作为当前 Family ABI 或 release gate 的
+实现声明。当前 Host surface、Layer2D、Hook 和 writable-file 边界以
+[thin-fork.md](thin-fork.md) 与 [rfvp-fork-audit.md](rfvp-fork-audit.md) 为准；
+本页中的 `PresentationCommand`、`TextCaptureEvent` 和 Host overlay 术语不属于
+当前 v9 shipping path。
+
 FVP presentation is syscall-driven. Scripts load resources through VFS, mutate legacy graph/text/prim state, and the renderer/audio/video systems consume that state. AstraEMU should turn those mutations into `PresentationCommand`, `AudioCommand`, `TextCaptureEvent` and media block references.
 
 ## Graphics

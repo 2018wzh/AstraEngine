@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use astra_core::Hash256;
+use astra_core::{is_safe_symbol as safe_symbol, Hash256};
 use astra_emu_family_core::{LegacyCoreError, LegacyOpaqueFamilyConfig, LegacyVfsMountContext};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -164,14 +164,6 @@ fn resolve_relative(root: &Path, relative: &Path) -> Result<PathBuf, LegacyCoreE
         ));
     }
     Ok(resolved)
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use astra_core::is_safe_symbol;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -292,11 +293,7 @@ fn completion(
 }
 
 fn validate_symbol(value: &str, field: &str) -> Result<(), PlayerTimelineError> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
+    if !is_safe_symbol(value) {
         return Err(PlayerTimelineError::new(
             "ASTRA_PLAYER_TIMELINE_SYMBOL_INVALID",
             format!("timeline {field} is not a safe symbol"),

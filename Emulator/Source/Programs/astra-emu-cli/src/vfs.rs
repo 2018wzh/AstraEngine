@@ -8,8 +8,7 @@ use std::{
 use astra_core::Hash256;
 use astra_emu_family_core::{LegacyCoreError, LegacyMountedVfs, LEGACY_VFS_MAX_READ_BYTES};
 use astra_emu_family_support::{
-    enforce_private_file_permissions, extract_vfs, verify_vfs, ExtractSelection,
-    LegacyVfsFamilyRegistry,
+    enforce_private_file_permissions, extract_vfs, mount_family_vfs, verify_vfs, ExtractSelection,
 };
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use clap::{Args, Subcommand, ValueEnum};
@@ -171,11 +170,15 @@ pub fn run(arguments: VfsArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn mount(arguments: &VfsArgs) -> Result<Arc<dyn LegacyMountedVfs>, LegacyCoreError> {
-    let mut registry = LegacyVfsFamilyRegistry::default();
-    registry.register(Arc::new(FvpVfsFamilyFactory))?;
-    registry.register(Arc::new(MinoriVfsFamilyFactory))?;
-    let loaded = registry.load_profile(&arguments.mount_profile)?;
-    registry.mount(&arguments.family, &arguments.game_dir, &loaded)
+    mount_family_vfs(
+        &arguments.family,
+        &arguments.game_dir,
+        &arguments.mount_profile,
+        vec![
+            Arc::new(FvpVfsFamilyFactory),
+            Arc::new(MinoriVfsFamilyFactory),
+        ],
+    )
 }
 
 fn read(

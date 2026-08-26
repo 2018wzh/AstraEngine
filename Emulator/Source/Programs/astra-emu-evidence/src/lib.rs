@@ -4,7 +4,7 @@ use std::{
     path::{Component, Path},
 };
 
-use astra_core::Hash256;
+use astra_core::{is_safe_symbol, Hash256};
 use astra_emu_manager_core::{
     AstraEmuEvidenceBundleV1, EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1,
     EmuReleaseManifestV1, FvpParityEvidence, FvpSyscallCoverageEvidence, MetadataEvidenceV1,
@@ -365,12 +365,7 @@ fn validate_relative_path(path: &Path) -> Result<(), String> {
 }
 
 fn validate_symbol(value: &str, code: &'static str) -> Result<(), String> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
+    if !is_safe_symbol(value) {
         return Err(code.into());
     }
     Ok(())

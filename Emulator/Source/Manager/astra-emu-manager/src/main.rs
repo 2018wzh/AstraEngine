@@ -32,22 +32,22 @@ use std::{
 
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
-    is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyInputEdge, LegacyPcmBufferV7,
+    is_valid_input_control, LegacyAudioCommandV1, LegacyAwaitResult, LegacyInputEdge,
     LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1,
-    LegacyVideoMode,
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
-    evidence_vm_coverage_ids, AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken,
-    CaseRuntimeProfileRecord, CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile,
-    ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
-    MatchDecisionRecord, MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction,
-    PatchVfsReader, ProviderConsentRecord, QueuedPatchEffect, ScanLimits, SourceGrant,
-    TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
+    evidence_vm_coverage_ids, legacy_live_audio_command, legacy_live_audio_packet,
+    legacy_live_video_command, live_wait_condition, AstraEmuRuntimeProvider,
+    BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord, CompatibilityCacheEntry,
+    CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord, GrantedSourceReader, Library,
+    LibraryScanner, MatchCandidateRecord, MatchDecisionRecord, MetadataSnapshotRecord,
+    PatchContext, PatchDiagnostic, PatchHostAction, PatchVfsReader, PendingLiveWait as PendingWait,
+    ProviderConsentRecord, QueuedPatchEffect, ScanLimits, SourceGrant, TranslationConsent,
+    TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -66,11 +66,8 @@ use astra_media_core::Layer2DTransaction;
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
-    RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
-    RuntimeLiveAudioSampleFormat, RuntimeLiveBlackboardMutation, RuntimeLiveDirtySection,
-    RuntimeLivePcmBuffer, RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation,
-    RuntimeLiveSceneTransaction, RuntimeLiveTextureFormat, RuntimeLiveVideoCommand,
-    RuntimeLiveVideoCommandKind, RuntimeLiveVideoMode, RuntimeLiveWait, RuntimeLiveWaitKind,
+    RuntimeLiveBlackboardMutation, RuntimeLiveDirtySection, RuntimeLiveResourceScene,
+    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveTextureFormat,
     RuntimeOpenRequest, RuntimeProviderResult, RuntimeSectionCodec, RuntimeSectionPayload,
     RuntimeStepBudget, RuntimeStepInput, RuntimeStepMode,
 };
@@ -177,14 +174,6 @@ struct ActiveRuntimeSession {
     coverage_syscalls: u64,
     next_tick: Instant,
     next_step_mode: RuntimeStepMode,
-}
-
-enum PendingWait {
-    DueStep(u64),
-    Input(BTreeSet<String>),
-    PresentationFence,
-    MediaFence(String),
-    ProviderCompletion,
 }
 
 struct RuntimeBridge {
@@ -1071,126 +1060,6 @@ fn apply_video_media_hook(
     command.validate().map_err(|error| error.to_string())
 }
 
-fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
-    LegacyAudioPacketV7 {
-        sequence: packet.sequence,
-        stream_id: packet.stream_id,
-        sample_rate: packet.sample_rate,
-        channels: packet.channels,
-        pcm: match packet.pcm {
-            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples),
-            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples),
-        },
-    }
-}
-
-fn legacy_live_audio_command(command: RuntimeLiveAudioCommand) -> LegacyAudioCommandV1 {
-    match command {
-        RuntimeLiveAudioCommand::LoadResource {
-            stream_id,
-            encoding,
-            resource_uri,
-            ..
-        } => LegacyAudioCommandV1::LoadResource {
-            stream_id,
-            encoding: match encoding {
-                RuntimeLiveAudioEncoding::Unknown => LegacyAudioEncoding::Unknown,
-                RuntimeLiveAudioEncoding::Wav => LegacyAudioEncoding::Wav,
-                RuntimeLiveAudioEncoding::Ogg => LegacyAudioEncoding::Ogg,
-                RuntimeLiveAudioEncoding::Mp3 => LegacyAudioEncoding::Mp3,
-                RuntimeLiveAudioEncoding::Flac => LegacyAudioEncoding::Flac,
-            },
-            resource_uri,
-        },
-        RuntimeLiveAudioCommand::CreateStream {
-            stream_id,
-            sample_rate,
-            channels,
-            sample_format,
-            ..
-        } => LegacyAudioCommandV1::CreateStream {
-            stream_id,
-            sample_rate,
-            channels,
-            sample_format: match sample_format {
-                RuntimeLiveAudioSampleFormat::I16 => LegacyAudioSampleFormat::I16,
-                RuntimeLiveAudioSampleFormat::F32 => LegacyAudioSampleFormat::F32,
-            },
-        },
-        RuntimeLiveAudioCommand::SubmitI16 {
-            stream_id, samples, ..
-        } => LegacyAudioCommandV1::SubmitI16 { stream_id, samples },
-        RuntimeLiveAudioCommand::SubmitF32 {
-            stream_id, samples, ..
-        } => LegacyAudioCommandV1::SubmitF32 { stream_id, samples },
-        RuntimeLiveAudioCommand::Play {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-            fade_in_ms,
-            ..
-        } => LegacyAudioCommandV1::Play {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-            fade_in_ms,
-        },
-        RuntimeLiveAudioCommand::Stop {
-            stream_id, fade_ms, ..
-        } => LegacyAudioCommandV1::Stop { stream_id, fade_ms },
-        RuntimeLiveAudioCommand::Pause { stream_id, .. } => {
-            LegacyAudioCommandV1::Pause { stream_id }
-        }
-        RuntimeLiveAudioCommand::Resume { stream_id, .. } => {
-            LegacyAudioCommandV1::Resume { stream_id }
-        }
-        RuntimeLiveAudioCommand::SetParams {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-            ..
-        } => LegacyAudioCommandV1::SetParams {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-        },
-        RuntimeLiveAudioCommand::DestroyStream { stream_id, .. } => {
-            LegacyAudioCommandV1::DestroyStream { stream_id }
-        }
-        RuntimeLiveAudioCommand::MasterVolume { volume, .. } => {
-            LegacyAudioCommandV1::MasterVolume { volume }
-        }
-    }
-}
-
-fn legacy_live_video_command(command: RuntimeLiveVideoCommand) -> LegacyVideoCommandV1 {
-    match command.command {
-        RuntimeLiveVideoCommandKind::Play {
-            playback_id,
-            resource_uri,
-            mode,
-            stage_width,
-            stage_height,
-        } => LegacyVideoCommandV1::Play {
-            playback_id,
-            resource_uri,
-            mode: match mode {
-                RuntimeLiveVideoMode::ModalWithAudio => LegacyVideoMode::ModalWithAudio,
-                RuntimeLiveVideoMode::LayerNoAudio => LegacyVideoMode::LayerNoAudio,
-            },
-            stage_width,
-            stage_height,
-        },
-        RuntimeLiveVideoCommandKind::Stop { playback_id } => {
-            LegacyVideoCommandV1::Stop { playback_id }
-        }
-    }
-}
-
 fn validate_live_blackboard(blackboard: &[RuntimeLiveBlackboardMutation]) -> Result<(), String> {
     for mutation in blackboard {
         if mutation.key.is_empty() || mutation.key.len() > 128 {
@@ -1210,24 +1079,6 @@ fn validate_live_dirty_sections(dirty_sections: &[RuntimeLiveDirtySection]) -> R
         }
     }
     Ok(())
-}
-
-fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (String, PendingWait) {
-    let token_id = wait.token_id;
-    let condition = match wait.kind {
-        RuntimeLiveWaitKind::Frame { frames } => {
-            PendingWait::DueStep(step.saturating_add(u64::from(frames).max(1)))
-        }
-        RuntimeLiveWaitKind::Time { milliseconds } => {
-            let delay_ns = u64::from(milliseconds).saturating_mul(1_000_000);
-            PendingWait::DueStep(step.saturating_add(delay_ns.div_ceil(delta_ns).max(1)))
-        }
-        RuntimeLiveWaitKind::Input { keys } => PendingWait::Input(keys.into_iter().collect()),
-        RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::MediaFence(media_id),
-        RuntimeLiveWaitKind::PresentationFence { .. } => PendingWait::PresentationFence,
-        RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::ProviderCompletion,
-    };
-    (token_id, condition)
 }
 
 fn parse_glossary(input: &str) -> Result<Vec<(String, String)>, String> {
