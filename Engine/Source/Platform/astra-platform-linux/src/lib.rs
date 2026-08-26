@@ -1,12 +1,8 @@
-mod diagnostics;
 mod factory;
-mod media_performance;
 #[cfg(all(target_os = "linux", feature = "platform-test-driver"))]
 mod test_driver;
 
-pub use diagnostics::*;
 pub use factory::*;
-pub use media_performance::*;
 #[cfg(all(target_os = "linux", feature = "platform-test-driver"))]
 pub use test_driver::*;
 

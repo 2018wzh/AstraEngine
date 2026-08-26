@@ -3,7 +3,7 @@ use aes_gcm_siv::{
     aead::{Aead, KeyInit, Payload},
     Aes256GcmSiv, Nonce,
 };
-use astra_core::Hash256;
+use astra_core::{is_safe_symbol as safe_symbol, Hash256};
 use hkdf::Hkdf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -311,14 +311,6 @@ impl ContainerCryptoProvider for SourceFingerprintCryptoProvider {
         stored.extend_from_slice(&ciphertext);
         Ok(stored)
     }
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn safe_relative_path(value: &str) -> bool {

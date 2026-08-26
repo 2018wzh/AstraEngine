@@ -3,6 +3,7 @@ pub mod decode;
 mod decoded_audio;
 mod decoded_video;
 pub mod filter_graph;
+mod pcm_contract;
 pub mod playback;
 pub mod renderer2d;
 pub mod text_layout;

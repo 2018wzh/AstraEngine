@@ -24,18 +24,19 @@ use astra_core::{
 #[cfg(test)]
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
-    LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextureFilter, LegacyTextureFormat,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyAudioCommandV1, LegacyAudioPacketV7, LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge,
+    LegacyProbeRequest, LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextureFilter,
+    LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry,
 };
 use astra_emu_manager_core::{
-    evidence_vm_coverage_ids, AstraEmuRuntimeProvider, CancellationToken, CaseRecord,
-    DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits,
-    SourceGrant,
+    evidence_vm_coverage_ids, legacy_live_audio_command, legacy_live_audio_packet,
+    legacy_live_video_command, legacy_texture_format as runtime_live_texture_format,
+    live_wait_condition, AstraEmuRuntimeProvider, CancellationToken, CaseRecord,
+    DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner,
+    PendingLiveWait as PendingWait, ScanLimits, SourceGrant,
 };
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use astra_headless_protocol::{
@@ -76,13 +77,10 @@ use astra_platform_headless::{
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
-    RuntimeLiveAudioCommand, RuntimeLiveAudioEncoding, RuntimeLiveAudioPacket,
-    RuntimeLiveAudioSampleFormat, RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLivePcmBuffer,
-    RuntimeLiveResourceScene, RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction,
-    RuntimeLiveTextureFilter, RuntimeLiveTextureFormat, RuntimeLiveVideoCommand,
-    RuntimeLiveVideoCommandKind, RuntimeLiveWait, RuntimeLiveWaitKind, RuntimeOpenRequest,
-    RuntimeProviderResult, RuntimeSectionCodec, RuntimeSectionPayload, RuntimeStepBudget,
-    RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
+    RuntimeLiveBlendMode, RuntimeLiveDraw, RuntimeLiveResourceScene,
+    RuntimeLiveSceneResourceOperation, RuntimeLiveSceneTransaction, RuntimeLiveTextureFilter,
+    RuntimeOpenRequest, RuntimeProviderResult, RuntimeSectionCodec, RuntimeSectionPayload,
+    RuntimeStepBudget, RuntimeStepInput, RuntimeStepMode, RuntimeTickIntegrityMode,
 };
 use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 use rfvp_astra_provider::{
@@ -98,151 +96,6 @@ use crate::{
     input::{read_input_sequence, ValidatedInputSequence},
     rasterizer::{CpuStageRasterizer, PreparedRenderFrame},
 };
-
-fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
-    LegacyAudioPacketV7 {
-        sequence: packet.sequence,
-        stream_id: packet.stream_id,
-        sample_rate: packet.sample_rate,
-        channels: packet.channels,
-        pcm: match packet.pcm {
-            RuntimeLivePcmBuffer::I16(samples) => LegacyPcmBufferV7::I16(samples),
-            RuntimeLivePcmBuffer::F32(samples) => LegacyPcmBufferV7::F32(samples),
-        },
-    }
-}
-
-fn legacy_live_audio_command(command: RuntimeLiveAudioCommand) -> LegacyAudioCommandV1 {
-    match command {
-        RuntimeLiveAudioCommand::LoadResource {
-            stream_id,
-            encoding,
-            resource_uri,
-            ..
-        } => LegacyAudioCommandV1::LoadResource {
-            stream_id,
-            encoding: match encoding {
-                RuntimeLiveAudioEncoding::Unknown => LegacyAudioEncoding::Unknown,
-                RuntimeLiveAudioEncoding::Wav => LegacyAudioEncoding::Wav,
-                RuntimeLiveAudioEncoding::Ogg => LegacyAudioEncoding::Ogg,
-                RuntimeLiveAudioEncoding::Mp3 => LegacyAudioEncoding::Mp3,
-                RuntimeLiveAudioEncoding::Flac => LegacyAudioEncoding::Flac,
-            },
-            resource_uri,
-        },
-        RuntimeLiveAudioCommand::CreateStream {
-            stream_id,
-            sample_rate,
-            channels,
-            sample_format,
-            ..
-        } => LegacyAudioCommandV1::CreateStream {
-            stream_id,
-            sample_rate,
-            channels,
-            sample_format: match sample_format {
-                RuntimeLiveAudioSampleFormat::I16 => LegacyAudioSampleFormat::I16,
-                RuntimeLiveAudioSampleFormat::F32 => LegacyAudioSampleFormat::F32,
-            },
-        },
-        RuntimeLiveAudioCommand::SubmitI16 {
-            stream_id, samples, ..
-        } => LegacyAudioCommandV1::SubmitI16 { stream_id, samples },
-        RuntimeLiveAudioCommand::SubmitF32 {
-            stream_id, samples, ..
-        } => LegacyAudioCommandV1::SubmitF32 { stream_id, samples },
-        RuntimeLiveAudioCommand::Play {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-            fade_in_ms,
-            ..
-        } => LegacyAudioCommandV1::Play {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-            fade_in_ms,
-        },
-        RuntimeLiveAudioCommand::Stop {
-            stream_id, fade_ms, ..
-        } => LegacyAudioCommandV1::Stop { stream_id, fade_ms },
-        RuntimeLiveAudioCommand::Pause { stream_id, .. } => {
-            LegacyAudioCommandV1::Pause { stream_id }
-        }
-        RuntimeLiveAudioCommand::Resume { stream_id, .. } => {
-            LegacyAudioCommandV1::Resume { stream_id }
-        }
-        RuntimeLiveAudioCommand::SetParams {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-            ..
-        } => LegacyAudioCommandV1::SetParams {
-            stream_id,
-            volume,
-            pan,
-            repeat,
-        },
-        RuntimeLiveAudioCommand::DestroyStream { stream_id, .. } => {
-            LegacyAudioCommandV1::DestroyStream { stream_id }
-        }
-        RuntimeLiveAudioCommand::MasterVolume { volume, .. } => {
-            LegacyAudioCommandV1::MasterVolume { volume }
-        }
-    }
-}
-
-fn legacy_live_video_command(command: RuntimeLiveVideoCommand) -> LegacyVideoCommandV1 {
-    match command.command {
-        RuntimeLiveVideoCommandKind::Play {
-            playback_id,
-            resource_uri,
-            mode,
-            stage_width,
-            stage_height,
-        } => LegacyVideoCommandV1::Play {
-            playback_id,
-            resource_uri,
-            mode: match mode {
-                astra_plugin_abi::RuntimeLiveVideoMode::ModalWithAudio => {
-                    LegacyVideoMode::ModalWithAudio
-                }
-                astra_plugin_abi::RuntimeLiveVideoMode::LayerNoAudio => {
-                    LegacyVideoMode::LayerNoAudio
-                }
-            },
-            stage_width,
-            stage_height,
-        },
-        RuntimeLiveVideoCommandKind::Stop { playback_id } => {
-            LegacyVideoCommandV1::Stop { playback_id }
-        }
-    }
-}
-
-fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (String, PendingWait) {
-    let token_id = wait.token_id;
-    let condition = match wait.kind {
-        RuntimeLiveWaitKind::Frame { frames } => {
-            PendingWait::DueStep(step.saturating_add(u64::from(frames).max(1)))
-        }
-        RuntimeLiveWaitKind::Time { milliseconds } => {
-            let ticks = u64::from(milliseconds)
-                .saturating_mul(1_000_000)
-                .saturating_add(delta_ns.saturating_sub(1))
-                / delta_ns.max(1);
-            PendingWait::DueStep(step.saturating_add(ticks.max(1)))
-        }
-        RuntimeLiveWaitKind::Input { keys } => PendingWait::Input(keys),
-        RuntimeLiveWaitKind::MediaFence { media_id } => PendingWait::Media(media_id),
-        RuntimeLiveWaitKind::PresentationFence { .. } => PendingWait::Presentation,
-        RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::Unsupported,
-    };
-    (token_id, condition)
-}
 
 pub const HEADLESS_RUN_REPORT_SCHEMA: &str = "astra.emu.headless_run_report.v3";
 const FIXED_DELTA_NS: u64 = 16_666_667;
@@ -2520,16 +2373,6 @@ struct CheckpointFrame {
     rgba8: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-enum PendingWait {
-    DueStep(u64),
-    Input(Vec<String>),
-    Presentation,
-    Media(String),
-    Unsupported,
-}
-
 struct ActiveVideo {
     playback_id: String,
     stage_width: u32,
@@ -3595,13 +3438,6 @@ fn gpu_scene_compositing(
 
 fn gpu_resource_id(epoch: u64, texture_id: u32, generation: u64) -> String {
     format!("astra-emu-texture-{epoch}-{texture_id}-{generation}")
-}
-
-fn runtime_live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextureFormat {
-    match format {
-        RuntimeLiveTextureFormat::Rgba8 => LegacyTextureFormat::Rgba8,
-        RuntimeLiveTextureFormat::LumaAlpha8 => LegacyTextureFormat::LumaAlpha8,
-    }
 }
 
 fn rgba8_to_luma_alpha8(rgba8: &[u8]) -> Vec<u8> {
@@ -5152,7 +4988,7 @@ impl<'a> RuntimeDriver<'a> {
         for media_id in self.completed_media.drain(..) {
             let mut matched = false;
             for wait in self.pending_waits.values_mut() {
-                if matches!(wait, PendingWait::Media(expected) if *expected == media_id) {
+                if matches!(wait, PendingWait::MediaFence(expected) if *expected == media_id) {
                     *wait = PendingWait::DueStep(next_step);
                     matched = true;
                 }
@@ -5164,7 +5000,7 @@ impl<'a> RuntimeDriver<'a> {
         if self
             .pending_waits
             .values()
-            .any(|wait| matches!(wait, PendingWait::Unsupported))
+            .any(|wait| matches!(wait, PendingWait::ProviderCompletion))
         {
             return Err("ASTRA_EMU_HEADLESS_WAIT_UNSUPPORTED".into());
         }
@@ -5446,7 +5282,7 @@ impl<'a> RuntimeDriver<'a> {
         }
         if presentation_changed {
             for wait in self.pending_waits.values_mut() {
-                if matches!(wait, PendingWait::Presentation) {
+                if matches!(wait, PendingWait::PresentationFence) {
                     *wait = PendingWait::DueStep(next_step.saturating_add(1));
                 }
             }

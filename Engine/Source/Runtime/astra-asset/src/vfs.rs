@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use astra_core::{Diagnostic, Hash256};
+use astra_core::{is_safe_symbol, Diagnostic, Hash256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -521,14 +521,6 @@ impl VfsManifest {
 
 fn eligible(values: &[String], selected: &str) -> bool {
     values.is_empty() || values.iter().any(|value| value == selected)
-}
-
-fn is_safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -163,6 +163,69 @@ impl NativeAudioConsumer {
             .underflow_count
             .fetch_add(1, Ordering::Relaxed);
     }
+
+    /// Fills an f32 device callback buffer, silence-fills any shortfall and
+    /// records the underflow. Returns true when the buffer was underfilled.
+    pub fn fill_output_f32(&mut self, output: &mut [f32]) -> bool {
+        let filled = self.pop_samples(output);
+        output[filled..].fill(0.0);
+        if filled != output.len() {
+            self.record_underflow();
+        }
+        filled != output.len()
+    }
+
+    /// Fills an i16 device callback buffer by converting from the canonical
+    /// f32 stream. Returns true when the buffer was underfilled.
+    pub fn fill_output_i16(&mut self, output: &mut [i16]) -> bool {
+        let mut scratch = [0.0_f32; 1024];
+        let mut written = 0;
+        while written < output.len() {
+            let requested = scratch.len().min(output.len() - written);
+            let filled = self.pop_samples(&mut scratch[..requested]);
+            for (target, sample) in output[written..written + filled]
+                .iter_mut()
+                .zip(&scratch[..filled])
+            {
+                *target = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+            }
+            written += filled;
+            if filled != requested {
+                break;
+            }
+        }
+        output[written..].fill(0);
+        if written != output.len() {
+            self.record_underflow();
+        }
+        written != output.len()
+    }
+
+    /// Fills a u16 device callback buffer by converting from the canonical
+    /// f32 stream. Returns true when the buffer was underfilled.
+    pub fn fill_output_u16(&mut self, output: &mut [u16]) -> bool {
+        let mut scratch = [0.0_f32; 1024];
+        let mut written = 0;
+        while written < output.len() {
+            let requested = scratch.len().min(output.len() - written);
+            let filled = self.pop_samples(&mut scratch[..requested]);
+            for (target, sample) in output[written..written + filled]
+                .iter_mut()
+                .zip(&scratch[..filled])
+            {
+                *target = ((sample.clamp(-1.0, 1.0) * 0.5 + 0.5) * f32::from(u16::MAX)) as u16;
+            }
+            written += filled;
+            if filled != requested {
+                break;
+            }
+        }
+        output[written..].fill(u16::MAX / 2);
+        if written != output.len() {
+            self.record_underflow();
+        }
+        written != output.len()
+    }
 }
 
 pub struct NativeAudioQueue;

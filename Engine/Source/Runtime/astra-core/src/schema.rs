@@ -41,14 +41,6 @@ pub enum MigrationError {
     },
 }
 
-pub trait SchemaMigrator: Send + Sync {
-    fn schema(&self) -> &str;
-    #[allow(clippy::wrong_self_convention)]
-    fn from_version(&self) -> SchemaVersion;
-    fn to_version(&self) -> SchemaVersion;
-    fn migrate(&self, bytes: &[u8]) -> Result<Vec<u8>, MigrationError>;
-}
-
 #[derive(Default)]
 pub struct SchemaMigrationRegistry {
     edges: BTreeMap<SchemaId, BTreeSet<(SchemaVersion, SchemaVersion)>>,

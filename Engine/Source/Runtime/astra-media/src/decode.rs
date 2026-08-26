@@ -3,7 +3,7 @@ use std::{
     io::{Cursor, ErrorKind},
 };
 
-use astra_core::Diagnostic;
+use astra_core::{is_safe_symbol as safe_identity, Diagnostic};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use symphonia::core::{
@@ -14,6 +14,10 @@ use symphonia::core::{
     meta::MetadataOptions,
 };
 
+use crate::pcm_contract::{
+    contains_non_finite_sample, is_aligned_pcm_sample_count, is_supported_pcm_channel_count,
+    is_supported_pcm_rate,
+};
 use crate::MediaError;
 
 const MAX_DECODED_AUDIO_BYTES: usize = 16 * 1024 * 1024;
@@ -613,7 +617,7 @@ fn validate_output(output: &DecodeOutput) -> Result<(), MediaError> {
             samples,
         } => {
             validate_audio_samples(*sample_rate, *channels, samples.len(), true)?;
-            if samples.iter().any(|sample| !sample.is_finite()) {
+            if contains_non_finite_sample(samples) {
                 return Err(decode_error(
                     "ASTRA_DECODE_OUTPUT_INVALID",
                     "decoded floating-point PCM contains a non-finite sample",
@@ -641,10 +645,10 @@ fn validate_audio_samples(
     sample_count: usize,
     require_non_empty: bool,
 ) -> Result<(), MediaError> {
-    if !(8_000..=384_000).contains(&sample_rate)
-        || !(1..=8).contains(&channels)
+    if !is_supported_pcm_rate(sample_rate)
+        || !is_supported_pcm_channel_count(channels)
         || (require_non_empty && sample_count == 0)
-        || !sample_count.is_multiple_of(usize::from(channels))
+        || !is_aligned_pcm_sample_count(sample_count, channels)
     {
         return Err(decode_error(
             "ASTRA_DECODE_OUTPUT_INVALID",
@@ -652,14 +656,6 @@ fn validate_audio_samples(
         ));
     }
     Ok(())
-}
-
-fn safe_identity(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn safe_codec(value: &str) -> bool {
@@ -1070,8 +1066,8 @@ mod wmf_decode {
         Win32::{
             Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK},
             Media::MediaFoundation::{
-                IMFAttributes, IMFMediaType, IMFSample, MFAudioFormat_PCM, MFCreateAttributes,
-                MFCreateMFByteStreamOnStreamEx, MFCreateMediaType,
+                IMFAttributes, IMFMediaType, IMFSample, IMFSourceReader, MFAudioFormat_PCM,
+                MFCreateAttributes, MFCreateMFByteStreamOnStreamEx, MFCreateMediaType,
                 MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video,
                 MFShutdown, MFStartup, MFVideoFormat_RGB32, MFSTARTUP_FULL,
                 MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE,
@@ -1094,6 +1090,7 @@ mod wmf_decode {
         DecodeKind, DecodeOutput, DecodeRequest, DecodeResult, MediaError,
         WindowsDecodedAudioChunk, MAX_DECODED_AUDIO_BYTES, MAX_DECODED_VIDEO_FRAME_BYTES,
     };
+    use crate::pcm_contract::{is_supported_pcm_channel_count, is_supported_pcm_rate};
 
     pub(super) fn startup() -> Result<WmfSession, MediaError> {
         WmfSession::new().map_err(|err| {
@@ -1217,21 +1214,11 @@ mod wmf_decode {
                     return Err(wmf_error("audio stream decode budget is empty"));
                 }
                 let session = WmfSession::new()?;
-                let reader = source_reader_from_bytes(bytes)?;
-                let stream_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
-                let media_type = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
-                reader.SetCurrentMediaType(stream_index, None, &media_type)?;
-                let current_type = reader.GetCurrentMediaType(stream_index)?;
-                let sample_rate = attribute_u32(&current_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND)
-                    .filter(|value| (8_000..=384_000).contains(value))
-                    .ok_or_else(|| wmf_error("audio decode reported an invalid sample rate"))?;
-                let channels = attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS)
-                    .and_then(|value| u16::try_from(value).ok())
-                    .filter(|value| (1..=8).contains(value))
-                    .ok_or_else(|| wmf_error("audio decode reported an invalid channel count"))?;
+                let setup = audio_stream_setup(bytes)?;
+                let (sample_rate, channels) = audio_format_from_media_type(&setup.media_type)?;
                 Ok(Self {
-                    reader,
-                    stream_index,
+                    reader: setup.reader,
+                    stream_index: setup.stream_index,
                     sample_rate,
                     channels,
                     max_samples,
@@ -1475,24 +1462,15 @@ mod wmf_decode {
 
     fn decode_audio_inner(bytes: &[u8]) -> windows::core::Result<AudioOutput> {
         unsafe {
-            let reader = source_reader_from_bytes(bytes)?;
-            let stream_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
-            let media_type = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
-            reader.SetCurrentMediaType(stream_index, None, &media_type)?;
-            let current_type = reader.GetCurrentMediaType(stream_index)?;
-            let sample_rate = attribute_u32(&current_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND)
-                .filter(|value| *value > 0)
-                .ok_or_else(|| wmf_error("audio decode reported an invalid sample rate"))?;
-            let channels = attribute_u32(&current_type, &MF_MT_AUDIO_NUM_CHANNELS)
-                .filter(|value| *value > 0)
-                .ok_or_else(|| wmf_error("audio decode reported an invalid channel count"))?;
+            let setup = audio_stream_setup(bytes)?;
+            let (sample_rate, channels) = audio_format_from_media_type(&setup.media_type)?;
             let mut samples = Vec::new();
 
             loop {
                 let mut flags = 0;
                 let mut sample = None;
-                reader.ReadSample(
-                    stream_index,
+                setup.reader.ReadSample(
+                    setup.stream_index,
                     0,
                     None,
                     Some(&mut flags),
@@ -1524,7 +1502,7 @@ mod wmf_decode {
             Ok(AudioOutput {
                 samples,
                 sample_rate,
-                channels,
+                channels: u32::from(channels),
                 diagnostics: Vec::new(),
             })
         }
@@ -1689,6 +1667,42 @@ mod wmf_decode {
                 frames: decoded_frames,
             })
         }
+    }
+
+    struct AudioStreamSetup {
+        reader: IMFSourceReader,
+        stream_index: u32,
+        media_type: IMFMediaType,
+    }
+
+    /// Shared Source Reader setup for both audio decode paths: selects the
+    /// first audio stream and negotiates PCM output.
+    unsafe fn audio_stream_setup(bytes: &[u8]) -> windows::core::Result<AudioStreamSetup> {
+        let reader = source_reader_from_bytes(bytes)?;
+        let stream_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
+        let requested = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
+        reader.SetCurrentMediaType(stream_index, None, &requested)?;
+        let media_type = reader.GetCurrentMediaType(stream_index)?;
+        Ok(AudioStreamSetup {
+            reader,
+            stream_index,
+            media_type,
+        })
+    }
+
+    /// Reads sample rate and channel count from the negotiated PCM media
+    /// type, applying the shared PCM format contract.
+    unsafe fn audio_format_from_media_type(
+        media_type: &IMFMediaType,
+    ) -> windows::core::Result<(u32, u16)> {
+        let sample_rate = attribute_u32(media_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND)
+            .filter(|value| is_supported_pcm_rate(*value))
+            .ok_or_else(|| wmf_error("audio decode reported an invalid sample rate"))?;
+        let channels = attribute_u32(media_type, &MF_MT_AUDIO_NUM_CHANNELS)
+            .and_then(|value| u16::try_from(value).ok())
+            .filter(|value| is_supported_pcm_channel_count(*value))
+            .ok_or_else(|| wmf_error("audio decode reported an invalid channel count"))?;
+        Ok((sample_rate, channels))
     }
 
     unsafe fn source_reader_from_bytes(

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use astra_core::Diagnostic;
+use astra_core::{is_safe_path_symbol as safe_symbol, Diagnostic};
 
 use crate::{
     lower::ParsedLine, AspectRatio, AudioControl, AudioCue, ExtensionCommandDescriptor,
@@ -736,14 +736,6 @@ fn optional_symbol(line: &ParsedLine, key: &str) -> Result<Option<String>, VnErr
             Ok(value.to_string())
         })
         .transpose()
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
 }
 
 fn safe_schema(value: &str) -> bool {

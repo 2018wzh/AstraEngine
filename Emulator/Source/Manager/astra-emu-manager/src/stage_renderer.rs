@@ -8,7 +8,7 @@ use astra_emu_family_api::{
     LegacyVertexV1, LegacyVideoMode,
 };
 use astra_emu_manager::{AstraUnderlayRenderer, WgpuFrameContext};
-use astra_emu_manager_core::PublishedFamilySurface;
+use astra_emu_manager_core::{legacy_texture_format, PublishedFamilySurface};
 use astra_media_core::{
     BlendMode, FilterGraph as MediaFilterGraph, FilterParam, FilterValidator, Layer2DContent,
     Layer2DDamage, Layer2DOperation, Layer2DState, Layer2DTransaction, RetainedLayer2DState,
@@ -1692,13 +1692,6 @@ fn to_rgba<'a>(format: LegacyTextureFormat, pixels: &'a [u8]) -> Result<Cow<'a, 
             }
             Ok(Cow::Owned(rgba))
         }
-    }
-}
-
-fn legacy_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextureFormat {
-    match format {
-        RuntimeLiveTextureFormat::Rgba8 => LegacyTextureFormat::Rgba8,
-        RuntimeLiveTextureFormat::LumaAlpha8 => LegacyTextureFormat::LumaAlpha8,
     }
 }
 

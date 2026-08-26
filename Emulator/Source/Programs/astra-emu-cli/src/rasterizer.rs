@@ -4,10 +4,11 @@ use astra_emu_family_api::{
     LegacyBlendMode, LegacyDrawV1, LegacyRenderFrameV1, LegacySceneResourceStateV1,
     LegacyTextureFilter, LegacyTextureFormat, LegacyVertexV1,
 };
+use astra_emu_manager_core::legacy_texture_format as live_texture_format;
 use astra_media_core::OwnedPixelBuffer;
 use astra_plugin_abi::{
     RuntimeLiveBlendMode, RuntimeLiveSceneCompositing, RuntimeLiveSceneResourceOperation,
-    RuntimeLiveSceneTransaction, RuntimeLiveTextureFilter, RuntimeLiveTextureFormat,
+    RuntimeLiveSceneTransaction, RuntimeLiveTextureFilter,
 };
 use rayon::prelude::*;
 
@@ -473,13 +474,6 @@ fn rgba8_pixels(
     })
 }
 
-fn live_texture_format(format: RuntimeLiveTextureFormat) -> LegacyTextureFormat {
-    match format {
-        RuntimeLiveTextureFormat::Rgba8 => LegacyTextureFormat::Rgba8,
-        RuntimeLiveTextureFormat::LumaAlpha8 => LegacyTextureFormat::LumaAlpha8,
-    }
-}
-
 fn rgba8_pixels_owned(
     width: u32,
     height: u32,
@@ -724,7 +718,7 @@ fn linear_to_srgb_byte(value: f32) -> u8 {
 #[cfg(test)]
 mod tests {
     use astra_emu_family_api::{LegacyTextureUpdateV1, LegacyVertexV1};
-    use astra_plugin_abi::RuntimeLiveSceneResourceOperation;
+    use astra_plugin_abi::{RuntimeLiveSceneResourceOperation, RuntimeLiveTextureFormat};
 
     use super::*;
 

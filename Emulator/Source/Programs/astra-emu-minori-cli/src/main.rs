@@ -6,7 +6,7 @@ use std::{
 };
 
 use astra_core::Hash256;
-use astra_emu_family_support::LegacyVfsFamilyRegistry;
+use astra_emu_family_support::mount_family_vfs;
 use astra_emu_minori::{
     parse_audio_resource_spec, parse_sc, MinoriAniArchive, MinoriSqzArchive,
     MinoriVfsFamilyFactory, ScCensus, ScLineKind, ScOpcodeCatalog, ScOperand, ScScript,
@@ -102,10 +102,12 @@ fn mount_minori(
     game_dir: &std::path::Path,
     profile: &std::path::Path,
 ) -> Result<Arc<dyn astra_emu_family_core::LegacyMountedVfs>, Box<dyn std::error::Error>> {
-    let mut registry = LegacyVfsFamilyRegistry::default();
-    registry.register(Arc::new(MinoriVfsFamilyFactory))?;
-    let loaded = registry.load_profile(profile)?;
-    Ok(registry.mount("minori", game_dir, &loaded)?)
+    Ok(mount_family_vfs(
+        "minori",
+        game_dir,
+        profile,
+        vec![Arc::new(MinoriVfsFamilyFactory)],
+    )?)
 }
 
 fn census(

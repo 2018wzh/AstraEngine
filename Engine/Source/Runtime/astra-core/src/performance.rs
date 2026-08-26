@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Diagnostic, DiagnosticSeverity, Hash256};
+use crate::{is_safe_symbol as safe_symbol, Diagnostic, DiagnosticSeverity, Hash256};
 
 pub const PERFORMANCE_BUDGET_SCHEMA: &str = "astra.performance_budget.v1";
 pub const PERFORMANCE_REPORT_SCHEMA: &str = "astra.performance_report.v1";
@@ -450,14 +450,6 @@ fn append_threshold_diagnostics(
             .with_field("metric", budget.id.clone()),
         );
     }
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn safe_metric_id(value: &str) -> bool {

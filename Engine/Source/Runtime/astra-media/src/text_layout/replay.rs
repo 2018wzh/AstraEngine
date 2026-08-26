@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use astra_core::Hash256;
+use astra_core::{is_safe_symbol as safe_symbol, Hash256};
 use astra_media_core::GlyphBitmapFormat;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -584,14 +584,6 @@ fn canonical_hash<T: Serialize>(value: &T) -> Result<Hash256, MediaError> {
         )
     })?;
     Ok(Hash256::from_sha256(&bytes))
-}
-
-fn safe_symbol(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn safe_resource_id(value: &str) -> bool {

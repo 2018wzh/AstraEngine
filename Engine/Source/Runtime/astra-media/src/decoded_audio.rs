@@ -1,3 +1,8 @@
+use crate::pcm_contract::{
+    contains_non_finite_sample, is_aligned_pcm_sample_count, is_supported_pcm_channel_count,
+    is_supported_pcm_rate,
+};
+
 /// Canonical decoded PCM owned by the Media layer and reused by Player adapters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerDecodedAudio {
@@ -37,7 +42,7 @@ impl PlayerDecodedAudio {
         max_samples: usize,
     ) -> Result<Self, PlayerAudioContractError> {
         validate_format(sample_rate, channels, samples.len(), max_samples)?;
-        if samples.iter().any(|sample| !sample.is_finite()) {
+        if contains_non_finite_sample(&samples) {
             return Err(PlayerAudioContractError::new(
                 "ASTRA_PLAYER_AUDIO_NON_FINITE",
                 "decoded audio contains a non-finite sample",
@@ -66,7 +71,7 @@ impl PlayerDecodedAudio {
             SincInterpolationType, WindowFunction,
         };
 
-        if !(8_000..=384_000).contains(&sample_rate) || !(1..=8).contains(&channels) {
+        if !is_supported_pcm_rate(sample_rate) || !is_supported_pcm_channel_count(channels) {
             return Err(PlayerAudioContractError::new(
                 "ASTRA_PLAYER_AUDIO_OUTPUT_FORMAT",
                 "target audio format is outside the supported range",
@@ -198,8 +203,8 @@ impl PlayerDecodedAudio {
         if self.sample_rate == sample_rate && self.channels == channels {
             if self.samples.is_empty()
                 || self.samples.len() > max_output_samples
-                || !self.samples.len().is_multiple_of(usize::from(channels))
-                || self.samples.iter().any(|sample| !sample.is_finite())
+                || !is_aligned_pcm_sample_count(self.samples.len(), channels)
+                || contains_non_finite_sample(&self.samples)
             {
                 return Err(PlayerAudioContractError::new(
                     "ASTRA_PLAYER_AUDIO_CONVERSION_BUDGET",
@@ -218,13 +223,13 @@ fn validate_format(
     sample_count: usize,
     max_samples: usize,
 ) -> Result<(), PlayerAudioContractError> {
-    if !(8_000..=384_000).contains(&sample_rate) {
+    if !is_supported_pcm_rate(sample_rate) {
         return Err(PlayerAudioContractError::new(
             "ASTRA_PLAYER_AUDIO_SAMPLE_RATE",
             "decoded audio sample rate is outside the supported range",
         ));
     }
-    if !(1..=8).contains(&channels) {
+    if !is_supported_pcm_channel_count(channels) {
         return Err(PlayerAudioContractError::new(
             "ASTRA_PLAYER_AUDIO_CHANNELS",
             "decoded audio channel count is outside the supported range",
@@ -232,7 +237,7 @@ fn validate_format(
     }
     if sample_count == 0
         || sample_count > max_samples
-        || !sample_count.is_multiple_of(usize::from(channels))
+        || !is_aligned_pcm_sample_count(sample_count, channels)
     {
         return Err(PlayerAudioContractError::new(
             "ASTRA_PLAYER_AUDIO_SAMPLE_BUDGET",
