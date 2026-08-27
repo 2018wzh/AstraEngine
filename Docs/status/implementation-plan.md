@@ -1,5 +1,9 @@
 # Implementation Plan Status
 
+2026 年 8 月 27 日：Minori PAZ `decoded_entry` 增加单 entry、64 MiB 上限的进程内明文缓存。首次读取仍执行 source mutation、encrypted hash、解密、尺寸校验和既有磁盘 cache 完整性校验；同一 identity 的后续 bounded range read 直接复用已验证明文，避免 full verify 顺序读取时重复加载整个磁盘 entry。超过上限或 identity 变化时不驻留；movie 的 source-backed range transform 保持不变。新增合成回归覆盖首读 miss 与后续 range hit。该项只改善 I/O 分配行为，真实八包 cache full verify 与 cache identity evidence 仍开放。
+
+同日，真实八包启用 cache 的 full verify 完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。这证明本轮完整流读在当前 identity 下可完成，但不关闭 identity 变化、淘汰、损坏恢复或跨运行 cache identity 等剩余门禁。
+
 2026 年 8 月 27 日：`IncrementalMediaPlayback::drain_ready_outputs` 现在接收宿主复用的 output buffer；Manager 与 Minori CLI 的热路径不再为每个 presentation tick 分配新的输出列表。视频帧和 PCM chunk 的 `(PTS, track_order)` 稳定顺序及所有权转移保持不变，`take_ready_outputs` 仅作为一次性分配的便利包装。该项只改善公共 AstraMedia 的分配行为，不扩大媒体 codec、路线或平台 evidence。
 
 2026 年 8 月 27 日：增量媒体游标在 `astra-media` 内完成一轮边界收紧。`IncrementalMediaPlayback` 打开时校验完整 `MediaPlaybackConfig`，推进时限制 tick 间隔、轨道和 packet 形状、音频/视频预算以及视频 lead/lag；迟到帧只按显式 `late_video_policy` block 或 drop，并输出脱敏计数。当前签名 FFmpeg Minori 标题→配置→影片→跳过→标题 slice 为 `passed`（3102 fixed steps、9 个 retained samples、零 diagnostic）。同日按 v9 typed observation 重新生成物理输入后，首路线也以 `passed` 完成 3,034,309 fixed steps、16,150 条物理输入、53 个 retained samples、31 个 checkpoint、route terminal、自然 unlock count=1 和最终 Exit；该运行未计入过时的首 choice 等待点，choice 仍由独立 slice 覆盖。正式音频听审、四条路线后的完整 Memories/CG/BGM/回想、cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 继续开放。

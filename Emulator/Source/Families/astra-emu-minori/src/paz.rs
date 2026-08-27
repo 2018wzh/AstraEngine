@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{Cursor, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::SystemTime,
 };
 
@@ -348,7 +348,19 @@ pub struct MinoriMountedVfs {
     entries: BTreeMap<String, MountedEntry>,
     decrypt_provider: Arc<MinoriPazDecryptProvider>,
     cache: Option<PlaintextCache>,
+    memory_cache: Mutex<Option<MemoryDecodedEntry>>,
 }
+
+/// A single bounded in-process plaintext entry retained while a host consumes
+/// sequential ranges. Disk cache reads are integrity-checked by
+/// `PlaintextCache`; retaining one verified entry here avoids re-reading the
+/// complete disk entry for every 4 MiB verification range.
+struct MemoryDecodedEntry {
+    identity: String,
+    bytes: Arc<[u8]>,
+}
+
+const MAX_MEMORY_CACHE_ENTRY_BYTES: usize = 64 * 1024 * 1024;
 
 impl MinoriMountedVfs {
     pub fn mount(
@@ -528,10 +540,11 @@ impl MinoriMountedVfs {
             entries,
             decrypt_provider,
             cache,
+            memory_cache: Mutex::new(None),
         })
     }
 
-    fn decoded_entry(&self, entry: &MountedEntry) -> Result<(Vec<u8>, bool), PazError> {
+    fn decoded_entry(&self, entry: &MountedEntry) -> Result<(Arc<[u8]>, bool), PazError> {
         let archive = &self.archives[entry.archive];
         verify_source_unchanged(archive)?;
         let identity = CacheIdentity {
@@ -550,6 +563,21 @@ impl MinoriMountedVfs {
                 }
             ),
         };
+        let identity_name = identity.file_name();
+        if let Some(memory) = self
+            .memory_cache
+            .lock()
+            .map_err(|_| {
+                error(
+                    "ASTRA_EMU_MINORI_CACHE_STATE",
+                    "in-process cache state is poisoned",
+                )
+            })?
+            .as_ref()
+            .filter(|cached| cached.identity == identity_name)
+        {
+            return Ok((Arc::clone(&memory.bytes), true));
+        }
         if let Some(bytes) = self
             .cache
             .as_ref()
@@ -564,6 +592,8 @@ impl MinoriMountedVfs {
                     "cached plaintext size does not match the entry descriptor",
                 ));
             }
+            let bytes = Arc::<[u8]>::from(bytes.into_boxed_slice());
+            self.remember_memory_entry(identity_name, Arc::clone(&bytes))?;
             return Ok((bytes, true));
         }
         let mut encrypted = read_source_range(
@@ -626,7 +656,24 @@ impl MinoriMountedVfs {
         if let Some(cache) = &self.cache {
             cache.put(&identity, &decoded).map_err(cache_error)?;
         }
+        let decoded = Arc::<[u8]>::from(decoded.into_boxed_slice());
+        self.remember_memory_entry(identity_name, Arc::clone(&decoded))?;
         Ok((decoded, false))
+    }
+
+    fn remember_memory_entry(&self, identity: String, bytes: Arc<[u8]>) -> Result<(), PazError> {
+        let mut memory = self.memory_cache.lock().map_err(|_| {
+            error(
+                "ASTRA_EMU_MINORI_CACHE_STATE",
+                "in-process cache state is poisoned",
+            )
+        })?;
+        if bytes.len() <= MAX_MEMORY_CACHE_ENTRY_BYTES {
+            *memory = Some(MemoryDecodedEntry { identity, bytes });
+        } else {
+            *memory = None;
+        }
+        Ok(())
     }
 
     fn decoded_raw_entry_range(
@@ -853,7 +900,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
 }
 
 struct DecodedRange {
-    bytes: Vec<u8>,
+    bytes: Arc<[u8]>,
     start: usize,
     end: usize,
 }
@@ -1754,6 +1801,14 @@ mod tests {
     }
 
     fn mount_fixture(root: &Path, version: u8) -> MinoriMountedVfs {
+        mount_fixture_with_cache(root, version, None)
+    }
+
+    fn mount_fixture_with_cache(
+        root: &Path,
+        version: u8,
+        cache: Option<PlaintextCache>,
+    ) -> MinoriMountedVfs {
         let configs = REQUIRED_ARCHIVE_ROLES
             .iter()
             .map(|role| PazArchiveConfig {
@@ -1765,12 +1820,13 @@ mod tests {
             })
             .collect();
         let provider = mount_fixture_provider();
-        MinoriMountedVfs::mount(
+        MinoriMountedVfs::mount_with_cache(
             "fixture",
             "minori:/",
             configs,
             provider,
             Hash256::from_sha256(b"fixture-mount-profile"),
+            cache,
         )
         .unwrap()
     }
@@ -2036,6 +2092,29 @@ mod tests {
                 .code(),
             "ASTRA_EMU_MINORI_SOURCE_CHANGED"
         );
+    }
+
+    #[test]
+    fn decoded_entry_reuses_verified_plaintext_for_range_reads() {
+        let temp = tempfile::tempdir().unwrap();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            fs::write(
+                temp.path().join(format!("{role}.paz")),
+                fixture_archive(role, 0),
+            )
+            .unwrap();
+        }
+        let cache =
+            PlaintextCache::new(temp.path().join("cache"), 1024 * 1024, 1024 * 1024).unwrap();
+        let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
+
+        let first = vfs.read_range("minori:/scr/scr.bin", 0, 2).unwrap();
+        assert_eq!(first.bytes.as_slice(), b"fi");
+        assert!(!first.cache_hit);
+
+        let second = vfs.read_range("minori:/scr/scr.bin", 2, 2).unwrap();
+        assert_eq!(second.bytes.as_slice(), b"xt");
+        assert!(second.cache_hit);
     }
 
     #[test]

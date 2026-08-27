@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026 年 8 月 27 日：PAZ 明文范围读取缓存
+
+- `MinoriMountedVfs::decoded_entry` 在完成 source mutation、encrypted hash、解密和明文尺寸校验后，保留一个有界的进程内明文 entry（最大 64 MiB）。同一 entry 的后续 4 MiB range 不再重复从磁盘 cache 读取完整明文；identity 变化会立即替换缓存，超过上限的 entry 不驻留进程内。
+- 该缓存只改善顺序 range read 的 I/O 分配行为，磁盘 cache 仍使用既有 identity、完整性校验、原子写入和配额；不会进入 manifest、save、report 或日志，也不改变 movie 的 source-backed range transform。
+- 新增合成回归覆盖首次解密与后续 range 命中的 `cache_hit` 语义。真实八包启用 cache 的 full verify 已完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。该结果只记录脱敏计数和聚合 hash；更换 identity、淘汰、损坏恢复与跨运行 cache identity 仍需单独验证。
+
 ## 2026 年 8 月 27 日（AstraMedia 输出缓冲）
 
 - `IncrementalMediaPlayback::drain_ready_outputs` 允许宿主复用 output buffer；Manager 与 Minori CLI 不再在每个 presentation tick 分配新的输出列表。视频帧与 PCM chunk 仍按 `(PTS, track_order)` 稳定排序并转移所有权，`take_ready_outputs` 仅保留为一次性分配的便利包装。
