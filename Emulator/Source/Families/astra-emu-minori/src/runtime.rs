@@ -7977,6 +7977,85 @@ mod tests {
     }
 
     #[test]
+    fn title_route_choice_accumulates_verified_clear_flags_without_injected_unlocks() {
+        // K06_01 in the authorized sample is a bounded choice fan-out.  Each
+        // selected branch transfers to one route script, whose ending records
+        // exactly one verified clear flag before returning to the title.  This
+        // fixture keeps that control-flow shape while avoiding commercial text
+        // and resources.
+        let choice_source = b".select ren:route_ren ayame:route_ayame sui:route_sui tohka:route_tohka\r\n.label route_ren\r\n.chain REN.sc\r\n.label route_ayame\r\n.chain AYAME.sc\r\n.label route_sui\r\n.chain SUI.sc\r\n.label route_tohka\r\n.chain TOHKA.sc\r\n.end\r\n";
+        let routes = [
+            ("REN.sc", "REN_CLEAR", 0_u8),
+            ("AYAME.sc", "AYAME_CLEAR", 0_u8),
+            ("SUI.sc", "SUI_CLEAR", 1_u8),
+            ("TOHKA.sc", "TOHKA_CLEAR", 2_u8),
+        ];
+        let choice_script = parse_sc(choice_source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/K06_01.sc".into(),
+            Hash256::from_sha256(choice_source),
+            choice_script,
+            7,
+        )
+        .unwrap();
+        vm.begin_title_launch().unwrap();
+
+        for (route_index, (route_name, flag, expected_variant)) in routes.into_iter().enumerate() {
+            vm.set_system_page(MinoriSystemPage::None, 0).unwrap();
+            vm.replace_script(
+                "minori:/scr/K06_01.sc".into(),
+                Hash256::from_sha256(choice_source),
+                parse_sc(choice_source, &ScOpcodeCatalog::observed_minori()).unwrap(),
+            )
+            .unwrap();
+            let choice_tick = route_index as u64 * 3 + 1;
+            let Some(MinoriVmEvent::Choice { .. }) = vm.step(choice_tick, 64).unwrap() else {
+                panic!("route choice did not create an input wait");
+            };
+            let choice = vm.state().choice.as_ref().unwrap().clone();
+            let token_id = match vm.state().wait.as_ref().unwrap() {
+                MinoriWaitState::Choice { token_id } => token_id.clone(),
+                _ => panic!("route choice did not create a choice wait"),
+            };
+            let selected_index = u32::try_from(route_index).unwrap();
+            for _ in 0..selected_index {
+                vm.move_choice(1).unwrap();
+            }
+            assert_eq!(
+                vm.state().choice.as_ref().unwrap().selected_index,
+                Some(selected_index)
+            );
+            let expected_label =
+                ["route_ren", "route_ayame", "route_sui", "route_tohka"][route_index];
+            assert_eq!(
+                choice.targets[selected_index as usize], expected_label,
+                "choice target is represented by the label table, not a guessed route"
+            );
+            vm.resolve_wait(&token_id).unwrap();
+            vm.commit_choice().unwrap();
+            let Some(MinoriVmEvent::Chain { target }) = vm.step(choice_tick + 1, 64).unwrap()
+            else {
+                panic!("selected route did not tail-transfer");
+            };
+            assert_eq!(target, route_name);
+            let route_source = format!(".setGlobal {flag} = 1\r\n.end\r\n");
+            vm.replace_script(
+                format!("minori:/scr/{route_name}"),
+                Hash256::from_sha256(route_source.as_bytes()),
+                parse_sc(route_source.as_bytes(), &ScOpcodeCatalog::observed_minori()).unwrap(),
+            )
+            .unwrap();
+            assert!(matches!(
+                vm.step(choice_tick + 2, 64).unwrap(),
+                Some(MinoriVmEvent::Terminal)
+            ));
+            assert_eq!(vm.state().global_variables.get(flag), Some(&1));
+            assert_eq!(vm.title_variant(), expected_variant);
+            assert!(!vm.state().terminal);
+        }
+    }
+
+    #[test]
     fn assignment_uses_verified_three_and_five_token_forms() {
         let source = b".set base = 6\r\n.set sum = base + 4\r\n.set bits = sum | 1\r\n.set rem = sum % 4\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
