@@ -1,5 +1,10 @@
 # Minori 移植日志
 
+## 2026 年 8 月 27 日：Family VFS 单文件导出边界
+
+- FamilySupport 新增与整树导出共用约束的单 entry 原子导出：先验证 manifest entry、相对路径、容量和目标目录项，再以 owner-only 临时文件按 4 MiB range 流式读取，完成同步后提交到目标文件。
+- Manager 的 VFS 导出现在只接受当前 family mount，并通过该 helper 写入；既有文件（包含符号链接）、非法 selector、取消、短读和中途失败都会阻断并清理暂存，不再使用无界 `std::fs::write` 或暴露本地目标路径。该项仍不构成 macOS extract、Linux FUSE 或 Windows E3 证据。
+
 ## 2026 年 8 月 27 日：缓存私有目录边界
 
 - `PlaintextCache` 枚举缓存根目录时拒绝所有符号链接，并将其视为 `ASTRA_EMU_MINORI_CACHE_CORRUPT`。这样查找不会跟随目录外目标，也不会修改无关文件权限；Minori 重新挂载后对被篡改缓存保持阻断，不会重新解密或使用 fallback。

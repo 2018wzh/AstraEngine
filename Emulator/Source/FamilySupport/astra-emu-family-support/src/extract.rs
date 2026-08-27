@@ -44,7 +44,7 @@ pub fn extract_vfs_entry(
     output: &Path,
     cancelled: &AtomicBool,
 ) -> Result<ExtractReport, LegacyCoreError> {
-    if output.exists() {
+    if path_entry_exists(output)? {
         return Err(invalid(
             "ASTRA_EMU_VFS_EXTRACT_EXISTS",
             "extract destination already exists",
@@ -102,7 +102,7 @@ pub fn extract_vfs_entry(
         std::process::id(),
         Hash256::from_sha256(uri.as_bytes()).to_hex()
     ));
-    if temporary.exists() {
+    if path_entry_exists(&temporary)? {
         return Err(invalid(
             "ASTRA_EMU_VFS_EXTRACT_STAGING",
             "extract staging file already exists",
@@ -203,11 +203,20 @@ pub fn extract_vfs(
             "extract selectors are mutually exclusive",
         ));
     }
-    if output.exists() {
+    if path_entry_exists(output)? {
         return Err(invalid(
             "ASTRA_EMU_VFS_EXTRACT_EXISTS",
             "extract destination already exists",
         ));
+    }
+    if let Some(prefix) = selection.prefix.as_deref() {
+        validate_selector_path(prefix)?;
+    }
+    if let Some(entry) = selection.entry.as_deref() {
+        validate_selector_path(entry)?;
+    }
+    if let Some(glob) = selection.glob.as_deref() {
+        validate_selector_path(glob)?;
     }
     let parent = output.parent().ok_or_else(|| {
         invalid(
@@ -281,7 +290,7 @@ pub fn extract_vfs(
         std::process::id(),
         Hash256::from_sha256(output.as_os_str().to_string_lossy().as_bytes()).to_hex()
     ));
-    if staging.exists() {
+    if path_entry_exists(&staging)? {
         return Err(invalid(
             "ASTRA_EMU_VFS_EXTRACT_STAGING",
             "extract staging destination already exists",
@@ -436,6 +445,21 @@ fn normalized_relative(value: &str) -> Result<PathBuf, LegacyCoreError> {
     Ok(path.to_path_buf())
 }
 
+fn validate_selector_path(value: &str) -> Result<(), LegacyCoreError> {
+    normalized_relative(value).map(|_| ())
+}
+
+fn path_entry_exists(path: &Path) -> Result<bool, LegacyCoreError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(invalid(
+            "ASTRA_EMU_VFS_EXTRACT_DESTINATION",
+            "extract destination metadata could not be inspected",
+        )),
+    }
+}
+
 fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
     LegacyCoreError::invalid(code, message)
 }
@@ -536,5 +560,44 @@ mod tests {
             "ASTRA_EMU_VFS_EXTRACT_CANCELLED"
         );
         assert!(!cancelled.exists());
+
+        let existing = temp.path().join("existing.bin");
+        std::fs::write(&existing, b"keep").unwrap();
+        assert_eq!(
+            extract_vfs_entry(&vfs, "test:/scr/a.sc", &existing, &AtomicBool::new(false),)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_EXTRACT_EXISTS"
+        );
+        assert_eq!(std::fs::read(existing).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn selector_paths_reject_traversal_and_absolute_forms() {
+        let temp = tempfile::tempdir().unwrap();
+        let vfs = MemoryVfs::new(&[("test:/scr/a.sc", b"script", "script")]);
+        for selection in [
+            ExtractSelection {
+                prefix: Some("../scr".into()),
+                ..ExtractSelection::default()
+            },
+            ExtractSelection {
+                entry: Some("/scr/a.sc".into()),
+                ..ExtractSelection::default()
+            },
+            ExtractSelection {
+                glob: Some("scr\\*.sc".into()),
+                ..ExtractSelection::default()
+            },
+        ] {
+            let error = extract_vfs(
+                &vfs,
+                &temp.path().join("output"),
+                &selection,
+                &AtomicBool::new(false),
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "ASTRA_EMU_VFS_EXTRACT_PATH");
+        }
     }
 }
