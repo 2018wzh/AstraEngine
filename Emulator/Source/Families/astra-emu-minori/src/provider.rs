@@ -10905,6 +10905,11 @@ mod tests {
             .unwrap();
         let mut resources = BTreeMap::from([
             ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
+            (
+                "minori:/scr/fb_ren_04.sc".into(),
+                b".transition 0 * 15\r\n.stage * WHITE.png 0 0\r\n.playBGM * * 5\r\n.transition 0 * 5\r\n.stage * WHITE.png 0 0\r\n.wait 100\r\n.transition 0 * 10\r\n.stage * WHITE.png 0 0\r\n.end\r\n".to_vec(),
+            ),
+            ("minori:/bg/WHITE.png".into(), page_png.clone()),
             ("minori:/sys/topMenu2.png".into(), page_png.clone()),
             ("minori:/sys/memories.png".into(), page_png.clone()),
             ("minori:/sys/cgmode0.png".into(), page_png.clone()),
@@ -11023,6 +11028,132 @@ mod tests {
         assert_eq!(
             bgm.live.resource_scenes[0].value.texture_resources[0].resource_uri,
             "minori:/sys/musicPage1.png"
+        );
+
+        // A replay entry launches the verified script through the same title
+        // session.  The script must consume its own bounded wait and return to
+        // the title page, rather than leaving the session terminal or keeping
+        // the Memories page as an implicit fallback.
+        let memories_again = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "escape".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(8, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            memories_again.live.resource_scenes[0]
+                .value
+                .texture_resources[0]
+                .resource_uri,
+            "minori:/sys/memories.png"
+        );
+        let title_again = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "escape".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(9, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            title_again.live.resource_scenes[0].value.texture_resources[0].resource_uri,
+            "minori:/sys/topMenu2.png"
+        );
+        let memories_reopened = provider.step(&ctx, &session, select_page(10, 3)).unwrap();
+        assert_eq!(
+            memories_reopened.live.resource_scenes[0]
+                .value
+                .texture_resources[0]
+                .resource_uri,
+            "minori:/sys/memories.png"
+        );
+        let replay_reopened = provider.step(&ctx, &session, select_page(11, 1)).unwrap();
+        assert_eq!(
+            replay_reopened.live.resource_scenes[0]
+                .value
+                .texture_resources[0]
+                .resource_uri,
+            "minori:/sys/flash0.png"
+        );
+        let started = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "enter".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(12, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(started.status, LegacyRuntimeStatus::Active);
+        assert_eq!(
+            provider.sessions[&session.0].vm.state().script_uri,
+            "minori:/scr/fb_ren_04.sc"
+        );
+        provider
+            .step(&ctx, &session, step_input(13, Vec::new()))
+            .unwrap();
+        provider
+            .step(&ctx, &session, step_input(14, Vec::new()))
+            .unwrap();
+        let waiting = provider
+            .step(&ctx, &session, step_input(15, Vec::new()))
+            .unwrap();
+        let token_id = match waiting.control.waits.as_slice() {
+            [LegacyWaitRequest::Time {
+                token_id,
+                milliseconds,
+            }] => {
+                assert_eq!(*milliseconds, 1000);
+                token_id.clone()
+            }
+            other => panic!("expected replay timing wait, got {other:?}"),
+        };
+        let returned = provider
+            .step(
+                &ctx,
+                &session,
+                step_input(
+                    16,
+                    vec![LegacyAwaitResult {
+                        token_id,
+                        status: "completed".into(),
+                        payload_len: 0,
+                        sequence: 1,
+                    }],
+                ),
+            )
+            .unwrap();
+        assert_eq!(returned.status, LegacyRuntimeStatus::Active);
+        let returned_title = provider
+            .step(&ctx, &session, step_input(17, Vec::new()))
+            .unwrap();
+        assert_eq!(returned_title.status, LegacyRuntimeStatus::Active);
+        assert!(!provider.sessions[&session.0].vm.state().terminal);
+        assert_eq!(
+            provider.sessions[&session.0].vm.state().system_ui.page,
+            MinoriSystemPage::Title
         );
     }
 
