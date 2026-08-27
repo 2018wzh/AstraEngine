@@ -16,5 +16,5 @@ pub use provider::*;
 pub use scheduler::*;
 pub use v9::*;
 
-pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v9";
+pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v10";
 pub const LEGACY_EFFECT_SCHEMA: &str = "astra.emu.legacy_effect.v2";

@@ -1017,6 +1017,49 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         FixedDeadlineScheduler::after_completed_step(fixed_step_duration, driver.fixed_step)
             .map_err(str::to_owned)?;
     let mut scheduler = scheduler;
+    let mut fast_forward_was_active = false;
+
+    // Keep native replay and interactive input on the same bounded step path.
+    // The macro only removes wall-clock pacing while Control is held; every
+    // fixed tick, input edge, checkpoint and max-step bound is still applied.
+    macro_rules! execute_native_step {
+        () => {{
+            driver.step().await?;
+            let mut stop = driver.terminal;
+            if !stop {
+                if let Some(input) = native_input.as_ref() {
+                    let input_due = consume_native_inputs_due(
+                        &mut driver,
+                        &input.messages,
+                        &mut native_input_cursor,
+                        windowed_e2,
+                    )?;
+                    native_shutdown_requested = input_due.shutdown_requested;
+                    if windowed_e2 {
+                        for checkpoint_id in input_due.checkpoints {
+                            windowed_checkpoints.push(
+                                capture_windowed_checkpoint(
+                                    &driver,
+                                    &host.client,
+                                    surface,
+                                    checkpoint_id,
+                                )
+                                .await?,
+                            );
+                        }
+                    }
+                }
+                if launch
+                    .max_fixed_steps
+                    .is_some_and(|limit| driver.fixed_step >= limit)
+                {
+                    native_shutdown_requested = true;
+                }
+                stop = native_shutdown_requested;
+            }
+            stop
+        }};
+    }
     let run_result: Result<(), String> = async {
         loop {
             if native_shutdown_requested {
@@ -1045,6 +1088,53 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                 }
                 continue;
             }
+            if driver.physical_control_pressed {
+                fast_forward_was_active = true;
+                // Prefer a ready platform event so an interactive user can
+                // release Control or close the window while the replay is
+                // running at full speed.  The yield branch does not advance
+                // time; it only gives the host event loop a scheduling edge.
+                tokio::select! {
+                    biased;
+                    event = host.events.recv() => {
+                        let event = match event {
+                            Ok(event) => event,
+                            Err(error) => break Err(error.to_string()),
+                        };
+                        match process_native_event(
+                            &mut driver,
+                            window,
+                            &mut viewport,
+                            event.kind,
+                            windowed_e2,
+                            &mut external_input_rejected,
+                        ) {
+                            Ok(NativeEventAction::Continue) => {}
+                            Ok(NativeEventAction::Suspend(value)) => {
+                                driver.audio.set_suspended(value)?;
+                                suspended = value;
+                            }
+                            Ok(NativeEventAction::Close) => break Ok(()),
+                            Err(error) => break Err(error),
+                        }
+                    }
+                    _ = tokio::task::yield_now() => {
+                        let stop = execute_native_step!();
+                        if stop {
+                            break Ok(());
+                        }
+                    }
+                }
+                continue;
+            }
+            if fast_forward_was_active {
+                scheduler = FixedDeadlineScheduler::after_completed_step(
+                    fixed_step_duration,
+                    driver.fixed_step,
+                )
+                .map_err(str::to_owned)?;
+                fast_forward_was_active = false;
+            }
             let deadline =
                 tokio::time::sleep_until(tokio::time::Instant::from_std(scheduler.next_deadline()));
             tokio::pin!(deadline);
@@ -1066,34 +1156,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                     })?;
                     let Some(due) = due else { continue };
                     for _ in 0..due.steps {
-                        driver.step().await?;
-                        if driver.terminal {
-                            break;
-                        }
-                        if let Some(input) = native_input.as_ref() {
-                            let input_due = consume_native_inputs_due(
-                                &mut driver,
-                                &input.messages,
-                                &mut native_input_cursor,
-                                windowed_e2,
-                            )?;
-                            native_shutdown_requested = input_due.shutdown_requested;
-                            if windowed_e2 {
-                                for checkpoint_id in input_due.checkpoints {
-                                    windowed_checkpoints.push(
-                                        capture_windowed_checkpoint(
-                                            &driver,
-                                            &host.client,
-                                            surface,
-                                            checkpoint_id,
-                                        )
-                                        .await?,
-                                    );
-                                }
-                            }
-                        }
-                        if launch.max_fixed_steps.is_some_and(|limit| driver.fixed_step >= limit) {
-                            native_shutdown_requested = true;
+                        if execute_native_step!() {
                             break;
                         }
                     }
@@ -2723,6 +2786,10 @@ impl MinoriAviPlayback {
         output.append(&mut self.audio);
     }
 
+    fn discard_audio(&mut self) {
+        self.audio.clear();
+    }
+
     fn telemetry(&self) -> astra_media::IncrementalPlaybackTelemetry {
         self.cursor.telemetry()
     }
@@ -4228,6 +4295,11 @@ struct RuntimeDriver<'a> {
     frame_samples: Vec<HeadlessFrameSampleV1>,
     diagnostics: BTreeSet<String>,
     active_touch: Option<u64>,
+    /// The native Control key is an explicit Minori fast-forward gesture.
+    /// While it is held, the host still executes every fixed tick in order,
+    /// but does not sleep between ticks.  This is distinct from skipping
+    /// simulation ticks and is never used by the Headless scheduler.
+    physical_control_pressed: bool,
     audio_enabled: bool,
     audio_pump: AudioPumpPolicy,
     frame_sample_interval: u64,
@@ -4529,6 +4601,9 @@ fn route_native_event(
             }
             if let Some(control) = native_key_control(logical_key.as_deref(), &physical_key) {
                 let pressed = state == InputState::Pressed;
+                if control == "control" {
+                    driver.physical_control_pressed = pressed;
+                }
                 driver.queue_input(control, pressed, if pressed { 1.0 } else { 0.0 })?;
             }
             Ok(NativeEventAction::Continue)
@@ -5183,6 +5258,19 @@ impl<'a> RuntimeDriver<'a> {
                 .register(Box::new(MinoriImageDecodeProvider))
                 .map_err(|error| error.to_string())?;
         }
+        let audio = if config.audio_enabled {
+            AudioExecutor::new(FamilyAudioService::start_with_client(
+                platform.clone(),
+                false,
+            )?)
+        } else {
+            tracing::info!(
+                target: "astra_emu_cli::audio",
+                event = "astra_emu_audio_disabled",
+                "audio output is explicitly disabled for this run"
+            );
+            AudioExecutor::disabled()
+        };
         let driver = RuntimeDriver {
             runtime,
             session_id,
@@ -5214,10 +5302,7 @@ impl<'a> RuntimeDriver<'a> {
             pending_scene_presents: VecDeque::new(),
             state_revision: 0,
             terminal: false,
-            audio: AudioExecutor::new(FamilyAudioService::start_with_client(
-                platform.clone(),
-                false,
-            )?),
+            audio,
             pending_audio_commands: VecDeque::new(),
             native_audio: Vec::new(),
             video: None,
@@ -5226,6 +5311,7 @@ impl<'a> RuntimeDriver<'a> {
             frame_samples: Vec::new(),
             diagnostics: BTreeSet::new(),
             active_touch: None,
+            physical_control_pressed: false,
             audio_enabled: config.audio_enabled,
             audio_pump: config.audio_pump,
             frame_sample_interval: config.frame_sample_interval,
@@ -5317,6 +5403,9 @@ impl<'a> RuntimeDriver<'a> {
                 }
                 let control = native_key_control(logical_key.as_deref(), physical_key)
                     .ok_or_else(|| "ASTRA_EMU_HEADLESS_KEY_UNSUPPORTED".to_owned())?;
+                if control == "control" {
+                    self.physical_control_pressed = *state == ButtonState::Pressed;
+                }
                 self.queue_input(
                     control,
                     *state == ButtonState::Pressed,
@@ -5791,6 +5880,10 @@ impl<'a> RuntimeDriver<'a> {
             self.observed_blackboard
                 .insert(mutation.key, mutation.value);
         }
+        // Layer2D families publish directly into Host-owned surfaces. Their
+        // retained transaction has no GPU resource metrics, but it is still
+        // the initial presentation activity that native prewarm must observe.
+        self.last_step_resource_activity |= rendered;
         self.effect_timings_ns.push(elapsed_ns(effect_started)?);
         self.end_perfetto_phase("runtime.live_output_routing", 2)?;
         if let Some(metrics) = self.pending_scene_metrics.take() {
@@ -6692,7 +6785,14 @@ impl<'a> RuntimeDriver<'a> {
                 .video
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
-            video.stream.drain_audio_into(&mut self.native_audio);
+            if self.audio_enabled {
+                video.stream.drain_audio_into(&mut self.native_audio);
+            } else if let ActiveVideoStream::MinoriAvi(stream) = &mut video.stream {
+                // The shared FFmpeg cursor may still produce audio packets
+                // for a video-only native run. Drain them at the cursor owner
+                // without handing them to an absent audio service.
+                stream.discard_audio();
+            }
             (video.audio_stream_id, video.native_audio_started)
         };
         if !self.native_audio.is_empty() {
@@ -6832,7 +6932,7 @@ where
     #[cfg(not(feature = "ffmpeg-vcpkg"))]
     {
         let _ = reader;
-        return Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned());
+        Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
     }
     #[cfg(feature = "ffmpeg-vcpkg")]
     {
@@ -6900,6 +7000,13 @@ struct AudioExecutor {
 }
 
 impl AudioExecutor {
+    fn disabled() -> Self {
+        Self {
+            service: None,
+            pump_required: false,
+        }
+    }
+
     fn new(service: FamilyAudioService) -> Self {
         Self {
             service: Some(service),
@@ -6914,11 +7021,14 @@ impl AudioExecutor {
     }
 
     fn uses_resource_worker(&self) -> bool {
-        true
+        self.service.is_some()
     }
 
     fn underflow_count(&self) -> Result<u64, String> {
-        Ok(self.service()?.telemetry().underflow_count)
+        Ok(self
+            .service
+            .as_ref()
+            .map_or(0, |service| service.telemetry().underflow_count))
     }
 
     async fn execute(
@@ -6997,14 +7107,17 @@ impl AudioExecutor {
 
     #[cfg(target_os = "windows")]
     fn set_suspended(&self, suspended: bool) -> Result<(), String> {
-        self.service()?.set_suspended(suspended)
+        if let Some(service) = self.service.as_ref() {
+            service.set_suspended(suspended)?;
+        }
+        Ok(())
     }
 
     async fn shutdown(&mut self, _platform: &PlatformHostClient) -> Result<Vec<u8>, String> {
-        self.service
-            .take()
-            .ok_or_else(|| "ASTRA_EMU_AUDIO_SESSION_CLOSED".to_owned())?
-            .shutdown()
+        match self.service.take() {
+            Some(service) => service.shutdown(),
+            None => Ok(Vec::new()),
+        }
     }
 }
 

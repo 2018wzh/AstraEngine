@@ -1140,6 +1140,7 @@ mod tests {
                         session_seed: 31,
                         mode: LegacyReplayMode::Live,
                         input_edges: Vec::new(),
+                        system_menu: None,
                         await_results: Vec::new(),
                         provider_results: Vec::new(),
                     },

@@ -20,9 +20,10 @@ use astra_emu_family_api::{
     LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
     LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacyStepInput,
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
-    LegacySurfaceFormatV9, LegacyTextureFilter, LegacyTextureFormat, LegacyTextureResourceV1,
-    LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
-    LegacyVmTraceRecord, LegacyWaitRequest, LEGACY_FAMILY_ABI_FINGERPRINT,
+    LegacySurfaceFormatV9, LegacySystemMenuActionV1, LegacyTextureFilter, LegacyTextureFormat,
+    LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 use astra_emu_family_core::LegacyCoreError;
 use astra_media::{
@@ -199,7 +200,8 @@ const MINORI_GLOBAL_PROGRESS_SCHEMA: &str = "astra.emu.minori.global_progress.v1
 #[allow(dead_code)]
 const MINORI_GLOBAL_PROGRESS_SNAPSHOT_SCHEMA: &str = "astra.emu.minori.global_progress_snapshot.v1";
 
-// Family-owned text layout staging. ABI v9 never exports these values. The v9
+// Family-owned text layout staging. The current ABI never exports these values.
+// The v10
 // publisher invokes the synchronous translation Hook and rasterizes into
 // Host-owned layer surfaces before publishing the retained transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,7 +518,7 @@ struct MinoriSession {
     /// Last resource-backed presentation descriptor committed to the host.
     ///
     /// The descriptor contains only bounded URI/geometry metadata; retaining
-    /// it lets the family keep the ABI v9 Layer2D scene retained across fixed
+    /// it lets the family keep the ABI v10 Layer2D scene retained across fixed
     /// ticks instead of re-decoding every unchanged frame. It is deliberately
     /// session-local and is cleared on restore, so it can never stand in for
     /// a restored host surface.
@@ -572,7 +574,7 @@ impl MinoriRuntimeProvider {
         self.host_services.as_ref().ok_or_else(|| {
             invalid(
                 "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                "Minori runtime has no explicitly bound ABI v9 host services",
+                "Minori runtime has no explicitly bound current Family ABI host services",
             )
         })
     }
@@ -982,11 +984,31 @@ impl MinoriRuntimeProvider {
                 session.vm.set_pointer_primary_pressed(edge.pressed);
             }
         }
+        let context_menu_requested = if let Some(request) = input.system_menu.as_ref() {
+            match request.action {
+                LegacySystemMenuActionV1::Open => {}
+            }
+            if let Some(pointer_x) = request.pointer_x {
+                session
+                    .vm
+                    .set_pointer_axis('x', pointer_x as f32)
+                    .map_err(runtime_error)?;
+            }
+            if let Some(pointer_y) = request.pointer_y {
+                session
+                    .vm
+                    .set_pointer_axis('y', pointer_y as f32)
+                    .map_err(runtime_error)?;
+            }
+            true
+        } else {
+            false
+        };
         if !input.provider_results.is_empty() {
             session.poisoned = true;
             return Err(invalid(
                 "ASTRA_EMU_MINORI_PROVIDER_RESULT_REMOVED",
-                "Family ABI v9 Minori does not accept provider-result payloads",
+                "current Family ABI Minori does not accept provider-result payloads",
             ));
         }
         if session.global_progress.enabled && !session.global_progress.loaded {
@@ -995,7 +1017,7 @@ impl MinoriRuntimeProvider {
                 .ok_or_else(|| {
                     invalid(
                         "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                        "global progress requires ABI v9 Host services",
+                        "global progress requires current Family ABI Host services",
                     )
                 })?
                 .writable_files
@@ -1009,6 +1031,36 @@ impl MinoriRuntimeProvider {
                 return Err(error);
             }
         };
+        if context_menu_requested {
+            if session.vm.state().system_ui.page != MinoriSystemPage::None {
+                session.poisoned = true;
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_PAGE_ACTIVE",
+                    "right-click system-menu open requires gameplay without an active system page",
+                ));
+            }
+            validate_system_menu_open(&session.vm, &input)?;
+            session.vm.open_save_page().map_err(runtime_error)?;
+            refresh_save_slots(
+                host_services
+                    .as_ref()
+                    .ok_or_else(|| {
+                        invalid(
+                            "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                            "system-menu open requires current Family ABI Host services",
+                        )
+                    })?
+                    .writable_files
+                    .as_ref(),
+                session_id,
+                session,
+            )?;
+            session
+                .vm
+                .advance_system_tick(input.tick_index)
+                .map_err(runtime_error)?;
+            return system_ui_output(session, &vfs, &input, restore_audio);
+        }
         if session.vm.state().system_ui.page == MinoriSystemPage::None
             && backlog_wheel_direction(&input)? == Some(-1)
             && !session.vm.state().backlog.is_empty()
@@ -1095,7 +1147,7 @@ impl MinoriRuntimeProvider {
                     .ok_or_else(|| {
                         invalid(
                             "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                            "save menu requires ABI v9 Host services",
+                            "save menu requires current Family ABI Host services",
                         )
                     })?
                     .writable_files
@@ -1121,7 +1173,7 @@ impl MinoriRuntimeProvider {
                         .ok_or_else(|| {
                             invalid(
                                 "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                                "save/load pages require ABI v9 Host services",
+                                "save/load pages require current Family ABI Host services",
                             )
                         })?
                         .writable_files
@@ -1262,7 +1314,7 @@ impl MinoriRuntimeProvider {
                             .ok_or_else(|| {
                                 invalid(
                                     "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                                    "save requires ABI v9 Host services",
+                                    "save requires current Family ABI Host services",
                                 )
                             })?
                             .writable_files
@@ -1289,7 +1341,7 @@ impl MinoriRuntimeProvider {
                             .ok_or_else(|| {
                                 invalid(
                                     "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                                    "load requires ABI v9 Host services",
+                                    "load requires current Family ABI Host services",
                                 )
                             })?
                             .writable_files
@@ -2529,7 +2581,7 @@ impl MinoriRuntimeProvider {
                 .ok_or_else(|| {
                     invalid(
                         "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                        "global progress requires ABI v9 Host services",
+                        "global progress requires current Family ABI Host services",
                     )
                 })?
                 .writable_files
@@ -2542,7 +2594,7 @@ impl MinoriRuntimeProvider {
                 .ok_or_else(|| {
                     invalid(
                         "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                        "config persistence requires ABI v9 Host services",
+                        "config persistence requires current Family ABI Host services",
                     )
                 })?
                 .writable_files
@@ -6036,6 +6088,52 @@ fn apply_system_ui_input(
     Ok(action)
 }
 
+fn validate_system_menu_open(
+    vm: &MinoriVm,
+    input: &LegacyStepInput,
+) -> Result<(), LegacyProviderError> {
+    if !input.await_results.is_empty() || !input.provider_results.is_empty() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_RESULT_UNEXPECTED",
+            "right-click system-menu open cannot share a tick with a completion",
+        ));
+    }
+    if input.input_edges.iter().any(|edge| {
+        edge.pressed
+            && !matches!(
+                edge.control.as_str(),
+                MINORI_POINTER_X | MINORI_POINTER_Y | "pointer.secondary"
+            )
+    }) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_INPUT_AMBIGUOUS",
+            "right-click system-menu open cannot share a tick with gameplay input",
+        ));
+    }
+    match vm.state().wait.as_ref() {
+        Some(MinoriWaitState::Input { .. } | MinoriWaitState::Time { .. }) => Ok(()),
+        Some(MinoriWaitState::Choice { .. }) => Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_CHOICE_ACTIVE",
+            "right-click system-menu open is not valid while a choice is active",
+        )),
+        Some(MinoriWaitState::Media { .. }) => Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_MEDIA_ACTIVE",
+            "right-click system-menu open is not valid while a movie is active",
+        )),
+        Some(
+            MinoriWaitState::AxisScroll { .. }
+            | MinoriWaitState::LinearScroll { .. }
+            | MinoriWaitState::CharacterTransition { .. }
+            | MinoriWaitState::Presentation { .. }
+            | MinoriWaitState::Provider { .. },
+        )
+        | None => Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_WAIT_STATE",
+            "right-click system-menu open requires a stable message wait",
+        )),
+    }
+}
+
 fn apply_config_input(
     vm: &mut MinoriVm,
     input: &LegacyStepInput,
@@ -8108,7 +8206,7 @@ fn publish_v9_output(
 ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
     let prepared_text = prepare_text_surface(services, session_id, fixed_step, session, &staged)?;
     let layer_sequence = next_layer_sequence(&staged, session.last_layer_sequence)?;
-    // Resource-backed scenes are retained by the ABI v9 host. Minori emits a
+    // Resource-backed scenes are retained by the current Family ABI host. Minori emits a
     // new Layer2D transaction only when the bounded descriptor actually
     // changes; otherwise re-rendering all four full-size layer surfaces would
     // turn a fixed-tick wait into repeated PAZ reads, image decodes and CPU
@@ -9115,8 +9213,8 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyProviderError {
 mod tests {
     use astra_byte_source::{ByteRange, ByteSourceStat, RangeReadResult, SourceRevision};
     use astra_emu_family_api::{
-        LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode, LegacyVfsListedFile,
-        LegacyWritableFileHostV1,
+        LegacyAwaitResult, LegacyInputEdge, LegacyReplayMode, LegacySystemMenuActionV1,
+        LegacySystemMenuRequestV1, LegacyVfsListedFile, LegacyWritableFileHostV1,
     };
     use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
@@ -9756,6 +9854,113 @@ mod tests {
         assert_eq!(session.vm.state().system_ui.page, MinoriSystemPage::None);
         assert_eq!(session.vm.state().fixed_tick, 2);
         assert!(session.vm.state().wait.is_some());
+    }
+
+    #[test]
+    fn typed_system_menu_request_opens_verified_save_page_from_message_wait() {
+        let encode_rgba = |width: u32, height: u32| {
+            let mut png = Vec::new();
+            PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![0; usize::try_from(width * height * 4).unwrap()],
+                    width,
+                    height,
+                    ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/test.sc".into(),
+                    b".wait 20\r\n.end\r\n".to_vec(),
+                ),
+                (
+                    "minori:/sys/saveloadBase.png".into(),
+                    encode_rgba(1280, 720),
+                ),
+                ("minori:/sys/saveloadSave.png".into(), encode_rgba(352, 48)),
+                (
+                    "minori:/sys/saveloadSelect.png".into(),
+                    encode_rgba(344, 98),
+                ),
+                (
+                    "minori:/sys/saveloadButtons.png".into(),
+                    encode_rgba(356, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page0.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page1.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                ("minori:/sys/notsaved.png".into(), encode_rgba(106, 60)),
+            ]),
+        });
+        let surfaces = Arc::new(RecordingSurfaceHost::default());
+        let writable = Arc::new(InMemoryWritableFiles::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs: Arc::clone(&vfs),
+            surfaces,
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: writable,
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.surface".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        let output = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Open,
+                        pointer_x: Some(640),
+                        pointer_y: Some(360),
+                        sequence: 1,
+                    }),
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+
+        let session_state = provider.sessions.get(&session.0).unwrap();
+        assert_eq!(
+            session_state.vm.state().system_ui.page,
+            MinoriSystemPage::Save
+        );
+        assert_eq!(session_state.vm.state().system_ui.pointer_x, 640);
+        assert_eq!(session_state.vm.state().system_ui.pointer_y, 360);
+        assert!(output.live.resource_scenes.iter().any(|scene| {
+            scene
+                .value
+                .texture_resources
+                .iter()
+                .any(|resource| resource.resource_uri == "minori:/sys/saveloadBase.png")
+        }));
     }
 
     #[test]
@@ -13529,6 +13734,7 @@ mod tests {
             session_seed: 7,
             mode: LegacyReplayMode::Live,
             input_edges: Vec::new(),
+            system_menu: None,
             await_results,
             provider_results: Vec::new(),
         }

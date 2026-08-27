@@ -1,5 +1,14 @@
 # Minori 移植日志
 
+## 2026-08-28：Family API v10 与右键系统菜单
+
+- Family API 的 ABI hard cut 进入 `astra.emu.family_abi.v10`。`LegacyStepInput` 增加 `LegacySystemMenuRequestV1`，通过 `FfiSystemMenuRequestV1` 进入 ABI wire。request 目前只允许 `Open`，可携带有界 pointer 坐标和独立 sequence，不把右键当作键盘 alias。
+- Manager 将 `pointer.secondary` 的 pressed edge 提升为 typed request，并从传给 family 的 input stream 中移除重复的 pressed edge；release edge 仍留在普通 input stream。重复 pressed secondary、pointer 数值异常和 sequence 冲突都返回 `ASTRA_EMU_SYSTEM_MENU_*` diagnostic。
+- Minori 只在没有 system page、wait 状态为稳定 gameplay `Input`/`Time` wait、没有 await/provider completion 且已绑定 writable-file Host 时打开 Save page，并通过已验证 system assets 刷新 slot。choice、media、ambiguous input 和缺 Host service 都直接阻断。
+- Family API wire round-trip、validation、Manager promotion/duplicate 和 Minori provider 测试已经加入定向测试；该变更没有改变 Layer2D、音频或媒体 provider contract。
+
+Windows Sandbox E3 现场检查因 WASAPI 默认输出不可用而无法启动 native audio，随后 prewarm 未收敛并返回 `ASTRA_EMU_NATIVE_PREWARM_DID_NOT_CONVERGE`。随后以显式关闭音频的 direct native run 复核了真实 Minori 画面、消息层、转场/黑场与影片返回路径，并正常结束 `windowed-e2`；这只提供视觉现场证据，不满足音频 meter、artifact manifest 和可回收 machine-readable report 的 E3 门禁。共享目录为只读，未回收可发布 artifact，因此 Windows E3 仍保持 blocking。
+
 ## 2026-08-27：FFmpeg 构建身份校正
 
 - Minori 动态插件 descriptor 现在从 Cargo build script 实际提供的 `CARGO_FEATURE_*` 变量收集可选 feature，并以 `CARGO_CFG_FEATURE` 作为补充后规范化去重，避免不同 Cargo 环境下 descriptor 与 `cdylib` 的 feature 描述漂移；当前 stable Release 构建已核对启用 `ffmpeg-vcpkg` 时两者身份一致。

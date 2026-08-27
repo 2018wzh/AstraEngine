@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+Current AstraEMU contract identity is Family ABI v10 (`astra.emu.family_abi.v10`), a hard cut from v9. The v10 step wire carries an ABI-owned typed `LegacySystemMenuRequestV1`; Manager promotes a physical pressed `pointer.secondary` edge into this request and removes the duplicate edge before the family call. Minori accepts `Open` only from a stable gameplay wait and opens its verified Save page through the existing writable-file host port. Duplicate, ambiguous, active-choice, active-media and missing-host-service cases remain blocking diagnostics.
+
 2026 年 8 月 27 日增量媒体复核：`astra-media::IncrementalMediaPlayback` 已把播放配置、单调 tick、轨道/packet 形状、视频 lead/lag、迟到策略和音频/视频 packet 预算收进公共游标；`dropped_video_packets` 只在显式 `Drop` 策略下增加。当前签名 FFmpeg Minori slice 以 3102 个 fixed step、9 个 retained frame sample、连续 movie stop/completion 和标题观察完成，报告为 `passed` 且无诊断。该结果仍是 Headless E2 provider/media 证据，不关闭完整路线、正式音频听审、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
 
 同日首路线重验：按当前 v9 typed observation 重新生成物理输入后，签名 release plugin 通过同一 FFmpeg incremental provider 完成首路线。报告为 `passed`，3,034,309 fixed steps、16,150 条物理输入、53 个 retained frame sample、31 个 checkpoint，route terminal、`route_complete`、自然 unlock count=1 和最终 Exit 均成立，diagnostic 为空。该输入没有把已删除的 observation hash 当作成功条件，也没有把过时的首 choice 等待点计入本次 checkpoint；choice 语义仍由独立真实 slice 覆盖。因此这项证据关闭当前首路线的 FFmpeg/media/terminal 自动路径，但不关闭四条自然路线、第四条路线后的完整 Memories、正式 WAV 听审、cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
@@ -12,10 +14,10 @@ Manager startup uses a pure-Rust Minori idle provider and loads FVP only from an
 
 Minori `progress_in_background` is now exposed as a bounded provider observation and consumed by the Windows native host for Minori-only focus suspend/resume. Focused provider/CLI evidence passes; real focus/audio and Windows E3 evidence remain open.
 
-Current AstraEMU identity note: the active contract is Family ABI v9 at
+Current AstraEMU identity note: the active contract is Family ABI v10 at
 `635527831e89e5ff9b87ac165b5b5532e28356c6` with Product Runtime Provider ABI
 v4. Minori uses `Native + MultiLayer`, Host-owned surfaces, synchronous Hook,
-typed `LegacyFilterGraphV9` and writable-file ports. CLI、Manager 和 Minori 的
+typed `LegacyFilterGraphV9`, typed `LegacySystemMenuRequestV1` and writable-file ports. CLI、Manager 和 Minori 的
 增量 consumer 已恢复编译，Manager typed filter graph 已走 WGPU，旧 Scene2D
 transaction consumer 已删除。Minori 签名真实样本已通过一轮 v9 Headless lifecycle，
 但 checkpoint 阶段标签与完整路线视觉门禁尚未闭合。ABI v8 E2 只作历史回归基线；
@@ -27,7 +29,7 @@ TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary re
 
 RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁；`006` 仍是唯一允许绑定具名 `astra.headless_tolerance_approval.v2` 的色彩容差项。UI010 至 UI014 的系统窗几何偏差为 0 px，UI009 的选择菱形列偏差为 1 px。模型已查看全部五联图；30 张输入和 12 组稳定捕获契约均已闭合，权威 manifest 与 node map 已同步。Director movie 入口现按 Score snapshot 恢复初始可见 layer；source-bound package crypto、不透明授权目录、CLI build/bundle 与 Player bootstrap 已形成 contract/E2。商业明文、媒体签名和私有路径扫描均通过预检；最终同身份重跑和 formal signoff 尚未闭合。Windows E3 显式延期，不作为本轮 RC 门禁，状态保持 `IN_PROGRESS`。旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
-AstraEMU 当前实现边界以 Family ABI v9 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file 与 typed filter graph 已进入公共契约。Minori resource/text surface、CLI layer consumer 和 Manager Hook/Layer2D consumer 已进入 v9 主路径；旧 scene、snapshot、ephemeral text 与 session resource 路径不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
+AstraEMU 当前实现边界以 Family ABI v10 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file、typed filter graph 与 typed system-menu request 已进入公共契约。Minori resource/text surface、CLI layer consumer、Manager Hook/Layer2D consumer 和物理右键到 family system UI 的映射已进入 v10 主路径；旧 v9 及更早 ABI 只保留为历史记录，不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
 
 2026 年 8 月 23 日的 consumer 增量已完成动态 loader、CLI 与 Manager 四个 Host port 组合；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。当前签名样本 slice 消费 42 条物理输入，提交 154 帧并输出 134144 个音频 frame，diagnostic 为 0。模型检查确认画面有标题、系统背景、正文与场景变化，也确认首个 checkpoint 是黑色过渡帧、页面标签存在错位，因此仍是受限 E2 诊断，不是完整视觉通过。
 

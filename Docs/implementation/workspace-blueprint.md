@@ -4,8 +4,10 @@ AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目�
 
 ## Layout
 
-The current AstraEMU boundary is Family ABI v9. Existing v6/v7 references in
-historical status rows describe migrations that preceded the v9 hard cut.
+The current AstraEMU boundary is Family ABI v10. Existing v6/v7/v8/v9
+references in historical status rows describe migrations that preceded the v10
+hard cut. The v10 step wire includes the typed `LegacySystemMenuRequestV1` used
+for family-owned right-click system menus; no compatibility shim is retained.
 
 | 路径 | 状态 | 职责 |
 | --- | --- | --- |

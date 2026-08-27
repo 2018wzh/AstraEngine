@@ -1,11 +1,17 @@
 # Stage Test Matrix
 
-`T-S5-FVP-01` current identity is `astra.emu.family_abi.v9` and Product Runtime
+`T-S5-FVP-01` current identity is `astra.emu.family_abi.v10` and Product Runtime
 Provider ABI v4. Minori is reopening its current E2 while migrating to
 `Native + MultiLayer`, Host-owned surfaces, synchronous Hook and writable-file
 ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
+
+The v10 step contract also carries `LegacySystemMenuRequestV1`. Manager maps a
+pressed physical `pointer.secondary` edge to `Open`, strips that duplicate edge,
+and Minori opens the verified Save page only from a stable gameplay wait with a
+writable-file Host binding. Invalid combinations are blocking and covered by
+focused Family API, Manager and Minori tests.
 
 2026-08-23 focused v9 consumer evidence: dynamic loader、CLI 和 Manager 已组合四个 Host port；Minori resource/text surface 与同步 translation Hook 已有定向回归。签名真实样本 slice 挂载 8 个 source、14502 个 entry，消费 42 条物理输入，提交 154 帧和 134144 个音频 frame，diagnostic 为 0。checkpoint 实际画面有变化，但首帧仍是黑色过渡，页面标签未完全对应，因此只计受限 E2 诊断，不关闭完整路线或视觉门禁。当前 open 阶段另有显式 `astra.resource_audit=full` policy，可复用同一 parser 对全部 `.sc` 资源引用做 bounded stat；消息完成的 v24 read identity 也有定向回归；不带这些显式策略的普通运行仍不宣称全量引用或完整 read/reveal 覆盖。
 

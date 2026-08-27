@@ -15,8 +15,8 @@ use astra_emu_family_api::{
     LegacyEvent, LegacyInputEdge, LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7,
     LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyProviderResult,
     LegacyReplayMode, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacyShutdownReport, LegacyStepInput, LegacyVideoCommandV1, LegacyVideoMode,
-    LegacyWaitRequest,
+    LegacyShutdownReport, LegacyStepInput, LegacySystemMenuActionV1, LegacySystemMenuRequestV1,
+    LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
 };
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 #[cfg(test)]
@@ -69,6 +69,50 @@ pub fn evidence_vm_coverage_ids(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect())
+}
+
+fn system_menu_request(
+    edges: &[astra_plugin_abi::RuntimeInputEdge],
+) -> Result<Option<LegacySystemMenuRequestV1>, String> {
+    let mut pointer_x = None;
+    let mut pointer_y = None;
+    let mut request_sequence = None;
+    for edge in edges {
+        match edge.control.as_str() {
+            "pointer.x" => {
+                if !edge.value.is_finite()
+                    || edge.value.fract() != 0.0
+                    || edge.value < 0.0
+                    || edge.value > i32::MAX as f32
+                {
+                    return Err("ASTRA_EMU_SYSTEM_MENU_POINTER_INVALID".into());
+                }
+                pointer_x = Some(edge.value as i32);
+            }
+            "pointer.y" => {
+                if !edge.value.is_finite()
+                    || edge.value.fract() != 0.0
+                    || edge.value < 0.0
+                    || edge.value > i32::MAX as f32
+                {
+                    return Err("ASTRA_EMU_SYSTEM_MENU_POINTER_INVALID".into());
+                }
+                pointer_y = Some(edge.value as i32);
+            }
+            "pointer.secondary"
+                if edge.pressed && request_sequence.replace(edge.sequence).is_some() =>
+            {
+                return Err("ASTRA_EMU_SYSTEM_MENU_DUPLICATE".into());
+            }
+            _ => {}
+        }
+    }
+    Ok(request_sequence.map(|sequence| LegacySystemMenuRequestV1 {
+        action: LegacySystemMenuActionV1::Open,
+        pointer_x,
+        pointer_y,
+        sequence,
+    }))
 }
 
 fn move_live_audio(packet: LegacyAudioPacketV7) -> Result<RuntimeLiveAudioPacket, String> {
@@ -1354,9 +1398,11 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                     .into(),
             );
         }
+        let system_menu = system_menu_request(&input.input_edges)?;
         let input_edges = input
             .input_edges
             .into_iter()
+            .filter(|edge| !(edge.control == "pointer.secondary" && edge.pressed))
             .map(|edge| LegacyInputEdge {
                 control: edge.control,
                 pressed: edge.pressed,
@@ -1408,6 +1454,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 session_seed: input.session_seed,
                 mode: LegacyReplayMode::Live,
                 input_edges,
+                system_menu,
                 await_results: await_results.clone(),
                 provider_results,
             },
@@ -1682,6 +1729,56 @@ mod tests {
         LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader, LegacyVmTraceRecord,
     };
     use astra_emu_fvp::create_static_fvp_provider;
+
+    #[test]
+    fn secondary_pointer_edge_is_promoted_to_a_typed_system_menu_request() {
+        let request = system_menu_request(&[
+            astra_plugin_abi::RuntimeInputEdge {
+                control: "pointer.x".into(),
+                pressed: false,
+                value: 640.0,
+                sequence: 1,
+            },
+            astra_plugin_abi::RuntimeInputEdge {
+                control: "pointer.y".into(),
+                pressed: false,
+                value: 360.0,
+                sequence: 2,
+            },
+            astra_plugin_abi::RuntimeInputEdge {
+                control: "pointer.secondary".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 3,
+            },
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(request.action, LegacySystemMenuActionV1::Open);
+        assert_eq!(request.pointer_x, Some(640));
+        assert_eq!(request.pointer_y, Some(360));
+        assert_eq!(request.sequence, 3);
+    }
+
+    #[test]
+    fn duplicate_secondary_pointer_edges_are_blocked_before_family_step() {
+        let error = system_menu_request(&[
+            astra_plugin_abi::RuntimeInputEdge {
+                control: "pointer.secondary".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 3,
+            },
+            astra_plugin_abi::RuntimeInputEdge {
+                control: "pointer.secondary".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 4,
+            },
+        ])
+        .unwrap_err();
+        assert_eq!(error, "ASTRA_EMU_SYSTEM_MENU_DUPLICATE");
+    }
 
     #[test]
     fn legacy_control_action_declares_blackboard_writes() {

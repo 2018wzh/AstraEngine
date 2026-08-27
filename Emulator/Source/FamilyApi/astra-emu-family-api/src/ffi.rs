@@ -10,9 +10,10 @@ use abi_stable::{
     StableAbi,
 };
 
-/// The v9 wire contract makes surface, Hook, writable-file and bulk ownership explicit.
-/// v7/v8 modules are intentionally rejected by the loader; there is no shim.
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v9";
+/// The v10 wire contract makes surface, Hook, writable-file, bulk ownership and
+/// typed system-menu input explicit. Older modules are intentionally rejected
+/// by the loader; there is no shim.
+pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v10";
 
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
@@ -210,7 +211,7 @@ mod tests {
     use crate::{FamilyId, FfiOwnedBytes, LegacyFamilyPluginDescriptor};
 
     #[test]
-    fn v9_descriptor_round_trips_through_typed_wire() {
+    fn v10_descriptor_round_trips_through_typed_wire() {
         let descriptor = LegacyFamilyPluginDescriptor {
             family_id: FamilyId("fvp".into()),
             plugin_id: "astra.emu.fvp".into(),
@@ -232,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn v9_error_preserves_code_without_serialization() {
+    fn v10_error_preserves_code_without_serialization() {
         let ffi = FfiLegacyError::from(LegacyProviderError::invalid("TEST_CODE", "message"));
         let error = LegacyProviderError::from(ffi);
         assert_eq!(error.code(), "TEST_CODE");
@@ -240,8 +241,12 @@ mod tests {
     }
 
     #[test]
-    fn v7_and_v8_descriptors_are_rejected_without_a_shim() {
-        for fingerprint in ["astra.emu.family_abi.v7", "astra.emu.family_abi.v8"] {
+    fn pre_v10_descriptors_are_rejected_without_a_shim() {
+        for fingerprint in [
+            "astra.emu.family_abi.v7",
+            "astra.emu.family_abi.v8",
+            "astra.emu.family_abi.v9",
+        ] {
             let descriptor = LegacyFamilyPluginDescriptor {
                 family_id: FamilyId("fvp".into()),
                 plugin_id: "astra.emu.fvp".into(),

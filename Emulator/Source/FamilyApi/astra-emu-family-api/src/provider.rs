@@ -271,6 +271,13 @@ pub struct LegacyStepInput {
     pub session_seed: u64,
     pub mode: LegacyReplayMode,
     pub input_edges: Vec<LegacyInputEdge>,
+    /// A host-originated request to open the family-owned system menu.
+    ///
+    /// This is intentionally separate from the generic input-edge stream:
+    /// opening a system menu is a semantic family operation, not a keyboard
+    /// alias.  The request remains optional so families that do not expose a
+    /// system menu can reject it explicitly instead of guessing from a key.
+    pub system_menu: Option<LegacySystemMenuRequestV1>,
     pub await_results: Vec<LegacyAwaitResult>,
     pub provider_results: Vec<LegacyProviderResult>,
 }
@@ -295,6 +302,18 @@ impl LegacyStepInput {
             "provider_results",
             self.provider_results.iter().map(|item| item.sequence),
         )?;
+        if let Some(request) = self.system_menu.as_ref() {
+            request.validate()?;
+            if self.input_edges.iter().any(|edge| {
+                edge.sequence == request.sequence
+                    || (edge.control == "pointer.secondary" && edge.pressed)
+            }) {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_SEQUENCE_DUPLICATE",
+                    "system-menu request duplicates a physical secondary-button edge",
+                ));
+            }
+        }
         for edge in &self.input_edges {
             if !is_valid_input_control(&edge.control) {
                 return Err(LegacyProviderError::invalid(
@@ -317,6 +336,42 @@ impl LegacyStepInput {
             validate_symbol("provider_request_id", &result.request_id)?;
             validate_symbol("provider_id", &result.provider_id)?;
             validate_symbol("provider_status", &result.status)?;
+        }
+        Ok(())
+    }
+}
+
+/// Typed semantic request emitted by a host when the physical secondary
+/// pointer button opens the family-owned system menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacySystemMenuActionV1 {
+    Open,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySystemMenuRequestV1 {
+    pub action: LegacySystemMenuActionV1,
+    pub pointer_x: Option<i32>,
+    pub pointer_y: Option<i32>,
+    pub sequence: u64,
+}
+
+impl LegacySystemMenuRequestV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_SEQUENCE",
+                "system-menu request sequence must be non-zero",
+            ));
+        }
+        for (axis, value) in [("x", self.pointer_x), ("y", self.pointer_y)] {
+            if value.is_some_and(|coordinate| coordinate < 0) {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_POINTER",
+                    format!("system-menu pointer {axis} coordinate must be non-negative"),
+                ));
+            }
         }
         Ok(())
     }
@@ -1761,6 +1816,60 @@ mod tests {
     use super::*;
     use serde::{de::DeserializeOwned, Serialize};
     use std::sync::Mutex;
+
+    fn valid_step_input() -> LegacyStepInput {
+        LegacyStepInput {
+            tick_index: 1,
+            delta_ns: 16_666_667,
+            session_seed: 7,
+            mode: LegacyReplayMode::Live,
+            input_edges: Vec::new(),
+            system_menu: None,
+            await_results: Vec::new(),
+            provider_results: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn system_menu_request_requires_unique_semantic_input() {
+        let mut input = valid_step_input();
+        input.system_menu = Some(LegacySystemMenuRequestV1 {
+            action: LegacySystemMenuActionV1::Open,
+            pointer_x: Some(10),
+            pointer_y: Some(20),
+            sequence: 3,
+        });
+        input.input_edges.push(LegacyInputEdge {
+            control: "pointer.secondary".into(),
+            pressed: true,
+            value: 1.0,
+            sequence: 4,
+        });
+        let error = input.validate().unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_SYSTEM_MENU_SEQUENCE_DUPLICATE");
+    }
+
+    #[test]
+    fn system_menu_request_rejects_zero_sequence_and_negative_pointer() {
+        let mut input = valid_step_input();
+        input.system_menu = Some(LegacySystemMenuRequestV1 {
+            action: LegacySystemMenuActionV1::Open,
+            pointer_x: Some(-1),
+            pointer_y: None,
+            sequence: 0,
+        });
+        let error = input.validate().unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_SYSTEM_MENU_SEQUENCE");
+
+        input.system_menu = Some(LegacySystemMenuRequestV1 {
+            action: LegacySystemMenuActionV1::Open,
+            pointer_x: Some(-1),
+            pointer_y: None,
+            sequence: 1,
+        });
+        let error = input.validate().unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_SYSTEM_MENU_POINTER");
+    }
 
     struct ChunkedVfsReader {
         len: u64,

@@ -1,5 +1,12 @@
 # Minori Implementation Checklist
 
+## Family API v10 right-click system menu (2026-08-28)
+
+- [x] `LegacySystemMenuRequestV1` is part of the hard-cut Family API v10 step contract and has a stable `StableAbi` wire representation.
+- [x] Manager promotes a pressed physical `pointer.secondary` edge to `Open`, carries the latest bounded pointer coordinates, and removes the duplicate pressed edge before invoking Minori.
+- [x] Minori opens the verified Save page only from a stable gameplay wait with the writable-file Host service; ambiguous input, active choice/media, completion sharing, duplicate requests and missing services fail closed.
+- [ ] Windows E3 remains open: the Sandbox direct native run reached real scenes and completed its windowed route with audio explicitly disabled, but the WASAPI default output was unavailable and the read-only share prevented artifact recovery; no E3 artifact is claimed.
+
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
 
 当前八包 cache-enabled full verify 已完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。清单中的 `cache second-run` 仍指跨运行 identity、淘汰和损坏恢复的独立门禁，不把本轮完整流读误写成全部 cache gate 已关闭。

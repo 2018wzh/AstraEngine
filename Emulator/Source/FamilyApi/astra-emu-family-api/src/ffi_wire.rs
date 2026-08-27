@@ -15,8 +15,9 @@ use crate::{
     LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
     LegacyProviderError, LegacyProviderResult, LegacyReplayMode, LegacyRuntimeHostCtx,
     LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport,
-    LegacyStepInput, LegacyStepOutput, LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1,
-    LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacyStepInput, LegacyStepOutput, LegacySystemMenuActionV1, LegacySystemMenuRequestV1,
+    LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyVmTraceRecord, LegacyWaitRequest,
 };
 
 #[repr(C)]
@@ -462,6 +463,59 @@ impl From<FfiInputEdge> for LegacyInputEdge {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiSystemMenuActionV1 {
+    Open,
+}
+
+impl From<LegacySystemMenuActionV1> for FfiSystemMenuActionV1 {
+    fn from(value: LegacySystemMenuActionV1) -> Self {
+        match value {
+            LegacySystemMenuActionV1::Open => Self::Open,
+        }
+    }
+}
+
+impl From<FfiSystemMenuActionV1> for LegacySystemMenuActionV1 {
+    fn from(value: FfiSystemMenuActionV1) -> Self {
+        match value {
+            FfiSystemMenuActionV1::Open => Self::Open,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub struct FfiSystemMenuRequestV1 {
+    pub action: FfiSystemMenuActionV1,
+    pub pointer_x: ROption<i32>,
+    pub pointer_y: ROption<i32>,
+    pub sequence: u64,
+}
+
+impl From<LegacySystemMenuRequestV1> for FfiSystemMenuRequestV1 {
+    fn from(value: LegacySystemMenuRequestV1) -> Self {
+        Self {
+            action: value.action.into(),
+            pointer_x: value.pointer_x.into(),
+            pointer_y: value.pointer_y.into(),
+            sequence: value.sequence,
+        }
+    }
+}
+
+impl From<FfiSystemMenuRequestV1> for LegacySystemMenuRequestV1 {
+    fn from(value: FfiSystemMenuRequestV1) -> Self {
+        Self {
+            action: value.action.into(),
+            pointer_x: value.pointer_x.into_option(),
+            pointer_y: value.pointer_y.into_option(),
+            sequence: value.sequence,
+        }
+    }
+}
+
 macro_rules! ffi_result_item {
     ($ffi:ident, $native:ident, $($field:ident),+) => {
         #[repr(C)]
@@ -530,6 +584,7 @@ pub struct FfiStepInput {
     pub session_seed: u64,
     pub mode: FfiReplayMode,
     pub input_edges: RVec<FfiInputEdge>,
+    pub system_menu: ROption<FfiSystemMenuRequestV1>,
     pub await_results: RVec<FfiAwaitResult>,
     pub provider_results: RVec<FfiProviderResult>,
 }
@@ -547,6 +602,7 @@ impl From<LegacyStepInput> for FfiStepInput {
                 .map(Into::into)
                 .collect::<Vec<_>>()
                 .into(),
+            system_menu: value.system_menu.map(Into::into).into(),
             await_results: value
                 .await_results
                 .into_iter()
@@ -571,6 +627,7 @@ impl From<FfiStepInput> for LegacyStepInput {
             session_seed: value.session_seed,
             mode: value.mode.into(),
             input_edges: value.input_edges.iter().cloned().map(Into::into).collect(),
+            system_menu: value.system_menu.into_option().map(Into::into),
             await_results: value
                 .await_results
                 .iter()
@@ -1565,6 +1622,27 @@ impl TryFrom<FfiStepOutput> for LegacyStepOutput {
 #[cfg(test)]
 mod live_zero_copy_tests {
     use super::*;
+
+    #[test]
+    fn system_menu_request_round_trips_through_family_ffi_wire() {
+        let legacy = LegacyStepInput {
+            tick_index: 4,
+            delta_ns: 16_666_667,
+            session_seed: 19,
+            mode: LegacyReplayMode::Live,
+            input_edges: Vec::new(),
+            system_menu: Some(LegacySystemMenuRequestV1 {
+                action: LegacySystemMenuActionV1::Open,
+                pointer_x: Some(640),
+                pointer_y: Some(360),
+                sequence: 7,
+            }),
+            await_results: Vec::new(),
+            provider_results: Vec::new(),
+        };
+        let decoded: LegacyStepInput = FfiStepInput::from(legacy.clone()).into();
+        assert_eq!(decoded, legacy);
+    }
 
     #[test]
     fn pcm_i16_allocation_moves_across_family_ffi_wire() {
