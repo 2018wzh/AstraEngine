@@ -4,6 +4,8 @@
 
 同日，通用 `vfs read --output` 改为复用 FamilySupport 的私有原子文件写入 helper：范围上限、目标目录项/符号链接、owner-only 权限、同步、提交失败和清理错误都统一 fail-fast，CLI 不再拥有第二套可能覆盖或吞掉清理错误的 writer。该项不改变默认 evidence-only stdout 语义。
 
+Linux 只读 FUSE 的 `read` 现在也把底层短读视为 `EIO`，不会将不完整 payload 当作成功响应；该修复仍需真实 Linux mount/list/stat/random-read/unmount evidence 才能关闭 FUSE gate。
+
 2026-08-27: `PlaintextCache` initialization now rejects every symlink under the private cache root and reports it as corruption. This prevents a cache lookup from escaping the root and changing permissions on an unrelated target. The Minori mapping is covered by a focused corruption regression; cache identity, LRU, and atomic-write contracts are unchanged.
 
 2026-08-27: 在重装后的 stable 工具链上重新构建并签名 FFmpeg profile，当前样本的 Minori direct-entry A01 影片终点 slice 通过：3,084 fixed steps、5 个提交/栅格化帧、2,388,480 个音频帧、无 diagnostic、`terminal=true`。该运行只验证当前 ABI v9 + AstraMedia FFmpeg 绑定和 direct-entry 终点，不包含首路线全流程 checkpoint、完整自然解锁或 Windows E3，因此不改变这些 gate 的 blocking 状态。

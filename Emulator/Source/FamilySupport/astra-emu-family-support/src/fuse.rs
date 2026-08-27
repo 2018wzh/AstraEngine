@@ -226,7 +226,8 @@ impl Filesystem for ReadOnlyLegacyFs {
             return reply.data(&[]);
         }
         match self.vfs.read_range(&node.uri, offset, length) {
-            Ok(read) => reply.data(&read.bytes),
+            Ok(read) if read.bytes.len() as u64 == length => reply.data(&read.bytes),
+            Ok(_) => reply.error(Errno::EIO),
             Err(_) => reply.error(Errno::EIO),
         }
     }
