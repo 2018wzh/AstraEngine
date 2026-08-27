@@ -2717,8 +2717,9 @@ impl MinoriAviPlayback {
         Ok(changed)
     }
 
-    fn drain_audio(&mut self) -> Vec<FvpMovieAudioChunk> {
-        std::mem::take(&mut self.audio)
+    fn drain_audio_into(&mut self, output: &mut Vec<FvpMovieAudioChunk>) {
+        output.clear();
+        output.append(&mut self.audio);
     }
 
     fn telemetry(&self) -> astra_media::IncrementalPlaybackTelemetry {
@@ -3334,8 +3335,9 @@ impl FvpNativeVideoCursor {
         Ok(previous_sequence != self.current.as_ref().map(|frame| frame.sequence))
     }
 
-    fn drain_audio(&mut self) -> Vec<FvpMovieAudioChunk> {
-        std::mem::take(&mut self.audio)
+    fn drain_audio_into(&mut self, output: &mut Vec<FvpMovieAudioChunk>) {
+        output.clear();
+        output.append(&mut self.audio);
     }
 }
 
@@ -3385,6 +3387,14 @@ impl ActiveVideoStream {
             Self::Native(cursor) => cursor.duration_us,
             Self::MinoriAvi(cursor) => Some(cursor.duration_us()),
             Self::Platform(cursor) => cursor.duration_us(),
+        }
+    }
+
+    fn drain_audio_into(&mut self, output: &mut Vec<FvpMovieAudioChunk>) {
+        match self {
+            Self::Native(cursor) => cursor.drain_audio_into(output),
+            Self::MinoriAvi(cursor) => cursor.drain_audio_into(output),
+            Self::Platform(_) => output.clear(),
         }
     }
 
@@ -4210,6 +4220,7 @@ struct RuntimeDriver<'a> {
     terminal: bool,
     audio: AudioExecutor,
     pending_audio_commands: VecDeque<PendingAudioCommand>,
+    native_audio: Vec<FvpMovieAudioChunk>,
     video: Option<ActiveVideo>,
     movie_audio_sequence: u32,
     completed_media: Vec<String>,
@@ -5207,6 +5218,7 @@ impl<'a> RuntimeDriver<'a> {
                 false,
             )?),
             pending_audio_commands: VecDeque::new(),
+            native_audio: Vec::new(),
             video: None,
             movie_audio_sequence: 0,
             completed_media: Vec::new(),
@@ -6674,22 +6686,18 @@ impl<'a> RuntimeDriver<'a> {
                 "advanced the bound incremental media cursor"
             );
         }
-        let (native_audio, native_stream_id, native_audio_started) = {
+        let (native_stream_id, native_audio_started) = {
             let video = self
                 .video
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_VIDEO_MISSING".to_owned())?;
-            let chunks = match &mut video.stream {
-                ActiveVideoStream::Native(cursor) => cursor.drain_audio(),
-                ActiveVideoStream::MinoriAvi(cursor) => cursor.drain_audio(),
-                ActiveVideoStream::Platform(_) => Vec::new(),
-            };
-            (chunks, video.audio_stream_id, video.native_audio_started)
+            video.stream.drain_audio_into(&mut self.native_audio);
+            (video.audio_stream_id, video.native_audio_started)
         };
-        if !native_audio.is_empty() {
+        if !self.native_audio.is_empty() {
             let stream_id = native_stream_id
                 .ok_or_else(|| "ASTRA_EMU_NATIVE_AUDIO_STREAM_ID_MISSING".to_owned())?;
-            let mut chunks = native_audio.into_iter();
+            let mut chunks = self.native_audio.drain(..);
             if !native_audio_started {
                 let first = chunks
                     .next()
