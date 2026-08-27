@@ -487,6 +487,11 @@ struct MinoriSession {
     package_hash: Hash256,
     profile_fingerprint: Hash256,
     mount_set_id: String,
+    /// The title's configured gameplay entry.  Chain and gallery scripts may
+    /// replace the active VM program, but starting a new game from the title
+    /// must always reload this verified root instead of continuing at the
+    /// previous script's end.
+    entry_script_uri: String,
     fixed_delta_ns: u64,
     session_seed: u64,
     stage_size: Option<(u32, u32)>,
@@ -673,6 +678,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         let profile_fingerprint = profile_fingerprint(ctx, &request)?;
         let (script_uri, script_hash, script) =
             load_script_uri(self.vfs()?, &ctx.mount_set_id, &request.script_uri)?;
+        let entry_script_uri = script_uri.clone();
         match request
             .family_options
             .get("astra.resource_audit")
@@ -812,6 +818,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 package_hash: ctx.package_hash,
                 profile_fingerprint,
                 mount_set_id: ctx.mount_set_id.clone(),
+                entry_script_uri,
                 fixed_delta_ns: request.fixed_delta_ns,
                 session_seed: request.session_seed,
                 stage_size,
@@ -1154,6 +1161,7 @@ impl MinoriRuntimeProvider {
             if backlog_replay_completion {
                 input.await_results.clear();
             }
+            let title_start = session.vm.state().system_ui.page == MinoriSystemPage::Title;
             let mut action = match apply_system_ui_input(&mut session.vm, &input) {
                 Ok(action) => action,
                 Err(error) => {
@@ -1231,6 +1239,20 @@ impl MinoriRuntimeProvider {
                     "started a verified gallery script"
                 );
                 action = MinoriSystemUiAction::StartGame;
+            }
+            if action == MinoriSystemUiAction::StartGame && title_start {
+                let (script_uri, script_hash, script) =
+                    load_script_uri(&vfs, &session.mount_set_id, &session.entry_script_uri)?;
+                session
+                    .vm
+                    .replace_script(script_uri, script_hash, script)
+                    .map_err(runtime_error)?;
+                tracing::debug!(
+                    target: "astra_emu_minori::runtime",
+                    event = "astra_emu_minori_title_entry_reloaded",
+                    script_identity = %Hash256::from_sha256(session.entry_script_uri.as_bytes()),
+                    "reloaded the verified title entry before starting a new game"
+                );
             }
             if action != MinoriSystemUiAction::StartGame {
                 if let MinoriSystemUiAction::SaveSlot(slot) = action {
@@ -11190,6 +11212,184 @@ mod tests {
             provider.sessions[&session.0].vm.state().system_ui.page,
             MinoriSystemPage::Title
         );
+    }
+
+    #[test]
+    fn provider_title_session_naturally_chains_all_verified_routes() {
+        let mut title_png = Vec::new();
+        PngEncoder::new(&mut title_png)
+            .write_image(
+                &vec![0; 1280 * 720 * 4],
+                1280,
+                720,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let mut choice_png = Vec::new();
+        PngEncoder::new(&mut choice_png)
+            .write_image(&vec![0; 320 * 48 * 4], 320, 48, ExtendedColorType::Rgba8)
+            .unwrap();
+        let choice_source = b".select ren:route_ren ayame:route_ayame sui:route_sui tohka:route_tohka\r\n.label route_ren\r\n.chain REN.sc\r\n.label route_ayame\r\n.chain AYAME.sc\r\n.label route_sui\r\n.chain SUI.sc\r\n.label route_tohka\r\n.chain TOHKA.sc\r\n";
+        let routes = [
+            ("REN.sc", "REN_CLEAR", 0),
+            ("AYAME.sc", "AYAME_CLEAR", 0),
+            ("SUI.sc", "SUI_CLEAR", 1),
+            ("TOHKA.sc", "TOHKA_CLEAR", 2),
+        ];
+        let mut resources = BTreeMap::from([
+            ("minori:/scr/K06_01.sc".into(), choice_source.to_vec()),
+            ("minori:/sys/topMenu0.png".into(), title_png.clone()),
+            ("minori:/sys/topMenu1.png".into(), title_png.clone()),
+            ("minori:/sys/topMenu2.png".into(), title_png),
+            (MINORI_CHOICE_RESOURCE_URIS[0].into(), choice_png.clone()),
+            (MINORI_CHOICE_RESOURCE_URIS[1].into(), choice_png.clone()),
+            (MINORI_CHOICE_RESOURCE_URIS[2].into(), choice_png),
+        ]);
+        for (script_name, flag, _) in routes {
+            resources.insert(
+                format!("minori:/scr/{script_name}"),
+                format!(".setGlobal {flag} = 1\r\n.end\r\n").into_bytes(),
+            );
+        }
+        let mut provider =
+            MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader { scripts: resources }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.natural-routes".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/K06_01.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                        ("astra.launch_entry_explicit".into(), "false".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        let title = provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        assert_eq!(title.status, LegacyRuntimeStatus::Active);
+        assert_eq!(
+            title.live.resource_scenes[0].value.texture_resources[0].resource_uri,
+            "minori:/sys/topMenu0.png"
+        );
+
+        let mut tick = 1;
+        for (route_index, (script_name, flag, expected_variant)) in routes.into_iter().enumerate() {
+            tick += 1;
+            let started = provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        input_edges: vec![LegacyInputEdge {
+                            control: "enter".into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 1,
+                        }],
+                        ..step_input(tick, Vec::new())
+                    },
+                )
+                .unwrap_or_else(|error| {
+                    panic!("route {route_index} start at tick {tick} failed: {error:?}")
+                });
+            assert_eq!(started.status, LegacyRuntimeStatus::Awaiting);
+            assert!(started.control.waits.iter().any(|wait| {
+                matches!(wait, LegacyWaitRequest::Input { keys, .. } if *keys == vec!["enter".to_owned(), "space".to_owned()])
+            }));
+            assert_eq!(
+                provider.sessions[&session.0]
+                    .vm
+                    .state()
+                    .choice
+                    .as_ref()
+                    .map(|choice| choice.option_hashes.len()),
+                Some(4)
+            );
+
+            for _ in 0..route_index {
+                tick += 1;
+                let moved = provider
+                    .step(
+                        &ctx,
+                        &session,
+                        LegacyStepInput {
+                            input_edges: vec![LegacyInputEdge {
+                                control: "arrow_down".into(),
+                                pressed: true,
+                                value: 1.0,
+                                sequence: 1,
+                            }],
+                            ..step_input(tick, Vec::new())
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(moved.status, LegacyRuntimeStatus::Awaiting);
+            }
+
+            tick += 1;
+            let chained = provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        input_edges: vec![LegacyInputEdge {
+                            control: "enter".into(),
+                            pressed: true,
+                            value: 1.0,
+                            sequence: 1,
+                        }],
+                        ..step_input(tick, Vec::new())
+                    },
+                )
+                .unwrap();
+            assert_eq!(chained.status, LegacyRuntimeStatus::Active);
+            assert_eq!(chained.trace[0].action.as_deref(), Some("chain"));
+            assert_eq!(
+                provider.sessions[&session.0].vm.state().script_uri,
+                format!("minori:/scr/{script_name}")
+            );
+
+            tick += 1;
+            let returned = provider
+                .step(&ctx, &session, step_input(tick, Vec::new()))
+                .unwrap();
+            assert_eq!(returned.status, LegacyRuntimeStatus::Active);
+            assert!(returned.control.blackboard.iter().any(|mutation| {
+                mutation.key == "minori.route_complete" && mutation.value == "true"
+            }));
+            assert_eq!(
+                provider.sessions[&session.0].vm.state().system_ui.page,
+                MinoriSystemPage::Title
+            );
+            assert!(!provider.sessions[&session.0].vm.state().terminal);
+            assert_eq!(
+                provider.sessions[&session.0].vm.title_variant(),
+                expected_variant
+            );
+            assert!(provider.sessions[&session.0]
+                .vm
+                .state()
+                .global_variables
+                .contains_key(flag));
+            assert_eq!(
+                provider.sessions[&session.0]
+                    .vm
+                    .state()
+                    .gallery_unlocks
+                    .len(),
+                route_index + 1
+            );
+        }
     }
 
     #[test]

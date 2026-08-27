@@ -1,5 +1,10 @@
 # Minori 移植日志
 
+## 2026 年 8 月 27 日：Title route 重新进入
+
+- 修复一条 route 在 Title launch 中完成后再次按下 New Game 会继续使用已到达脚本末尾的 VM 状态的问题。session 现在保留经验证的初始 entry URI；Title 的 `StartGame` 先重新读取该脚本，gallery 仍使用自己的显式 script replacement。
+- provider 级脱敏回归通过四个物理选择依次执行四个 route，检查 clear flag 的自然累计、标题变体 0→1→2、每个 `.end` 返回 Title 且 session 不 terminal。它只覆盖 cross-module 控制流 E1，不替代真实四路线 Headless、完整鉴赏解锁、正式音频听审或 Windows E3。
+
 ## 2026-08-27：路线 choice 与自然 clear 状态
 
 - Minori VM 新增四分支路线回归，采用授权样本 `K06_01` 已确认的 choice → tail `chain` 结构。脱敏 fixture 逐项选择四个分支并执行对应 clear script，验证 global clear flag 跨脚本保留、标题变体按已确认规则从 0→1→2 变化；Title launch 下 `.end` 回到标题而不是终止 session。该测试固定控制流语义，仍不替代真实四路线自然运行、完整鉴赏解锁和 Windows E3。

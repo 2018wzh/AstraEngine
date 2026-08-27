@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026 年 8 月 27 日：修复 Title launch 在完成一条 route 后再次开始新游戏时沿用已结束脚本的状态错误。`MinoriSession` 现在保存经验证的 entry script URI；Title 的 `StartGame` 会重新从当前 VFS 读取并解析该入口，gallery script 的显式启动路径不受影响。新增 provider 级脱敏回归，使用物理选择依次走完四个 route，确认 `REN/AYAME/SUI/TOHKA` clear flag、标题变体 0→1→2 和每次返回 Title 的非 terminal 语义。该项把自然多路线的 cross-module 控制流覆盖从 VM-only 推进到 provider/VFS E1；真实四路线 Headless、完整鉴赏、正式音频听审和 Windows E3 仍保持 blocking。
+
 2026 年 8 月 27 日：FamilySupport 的 VFS extract 现在同时覆盖整树与单 entry 导出。两条路径都检查目标目录项（包括悬空符号链接）、相对 selector、容量、逐个 4 MiB range 的取消、短读、owner-only 权限和临时文件清理；Manager 的单文件导出不再直接写目标文件，而是强制经过当前 family mount 的原子 bounded extract。该项只收紧导出边界，Linux FUSE、macOS extract 和 Windows E3 仍需真实宿主证据。
 
 同日，通用 `vfs read --output` 改为复用 FamilySupport 的私有原子文件写入 helper：范围上限、目标目录项/符号链接、owner-only 权限、同步、提交失败和清理错误都统一 fail-fast，CLI 不再拥有第二套可能覆盖或吞掉清理错误的 writer。该项不改变默认 evidence-only stdout 语义。
