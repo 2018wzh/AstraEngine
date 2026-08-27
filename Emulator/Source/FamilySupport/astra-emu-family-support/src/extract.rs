@@ -361,6 +361,12 @@ pub fn extract_vfs(
             })?;
             let mut offset = 0u64;
             while offset < entry.decoded_size {
+                if cancelled.load(Ordering::Relaxed) {
+                    return Err(invalid(
+                        "ASTRA_EMU_VFS_EXTRACT_CANCELLED",
+                        "extract operation was cancelled",
+                    ));
+                }
                 let length = (entry.decoded_size - offset).min(EXTRACT_CHUNK_BYTES);
                 let read = vfs.read_range(&entry.uri, offset, length)?;
                 if read.bytes.len() as u64 != length {
@@ -376,7 +382,9 @@ pub fn extract_vfs(
                     )
                 })?;
                 aggregate.update(&read.bytes);
-                offset += length;
+                offset = offset.checked_add(length).ok_or_else(|| {
+                    invalid("ASTRA_EMU_VFS_EXTRACT_SIZE", "extract offset overflowed")
+                })?;
             }
             file.sync_all().map_err(|_| {
                 invalid(
