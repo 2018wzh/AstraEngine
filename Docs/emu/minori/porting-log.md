@@ -39,6 +39,12 @@
 
 - 在重装后的 stable 工具链上重新构建并签名 FFmpeg profile，当前样本的 A01 direct-entry 终点 slice 通过：3,084 fixed steps、5 个提交/栅格化帧、2,388,480 个音频帧、无 diagnostic，并到达 `terminal=true`。该运行没有保留正文、截图或媒体 payload，也没有把短程终点误记为首路线全流程、自然解锁、正式音频听审或 Windows E3 证据。
 
+## 2026 年 8 月 27 日：AstraMedia 增量 provider 实际接线复验
+
+- Manager 与 Headless CLI 已删除 `MinoriAviDecoder` family wrapper；两者通过 AstraMedia 的 `open_ffmpeg_incremental_reader` 显式绑定 `astra.decode.ffmpeg.incremental`，直接把有界 VFS reader 交给 `IncrementalMediaPlayback`。AstraMedia 负责 FFmpeg demux/codec、PTS、PCM、预算和取消，Minori 只保留 AVI 身份约束。
+- 同一当前样本的 direct-entry media slice 通过：3,084 fixed steps、2,697 个呈现帧、2,388,480 个音频帧、1 个 route checkpoint、`terminal=true`、诊断为空。FFmpeg 的 WMV3 packet 由 AstraMedia 逐步解码，未重新引入家族手写 decoder、平台 fallback 或整片预解码。
+- 该结果只验证新公共接线和实际影片流，不关闭完整路线、自然解锁、正式 WAV 听审、第二次 cache、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。报告和媒体文件继续留在 ignored 私有目录。
+
 ## 2026 年 8 月 27 日：PAZ 明文范围读取缓存
 
 - `MinoriMountedVfs::decoded_entry` 在完成 source mutation、encrypted hash、解密和明文尺寸校验后，保留一个有界的进程内明文 entry（最大 64 MiB）。同一 entry 的后续 4 MiB range 不再重复从磁盘 cache 读取完整明文；identity 变化会立即替换缓存，超过上限的 entry 不驻留进程内。
