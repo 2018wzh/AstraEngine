@@ -2652,6 +2652,8 @@ enum ActiveVideoStream {
 
 struct MinoriAviPlayback {
     cursor: astra_media::IncrementalMediaPlayback,
+    current: Option<DecodedVideoFrame>,
+    audio: Vec<FvpMovieAudioChunk>,
 }
 
 fn minori_media_error(error: MediaError) -> String {
@@ -2684,24 +2686,36 @@ impl MinoriAviPlayback {
                 astra_media::IncrementalPlaybackLimits::default(),
             )
             .map_err(minori_media_error)?,
+            current: None,
+            audio: Vec::new(),
         })
     }
 
     fn advance(&mut self, elapsed_us: u64) -> Result<bool, String> {
-        self.cursor.advance(elapsed_us).map_err(minori_media_error)
+        let changed = self
+            .cursor
+            .advance(elapsed_us)
+            .map_err(minori_media_error)?;
+        for output in self.cursor.take_ready_outputs() {
+            match output {
+                astra_media::IncrementalPlaybackOutput::Video(frame) => {
+                    self.current = Some(frame);
+                }
+                astra_media::IncrementalPlaybackOutput::Audio(chunk) => {
+                    self.audio.push(FvpMovieAudioChunk {
+                        pts_ms: chunk.pts_us / 1_000,
+                        sample_rate: chunk.sample_rate,
+                        channels: chunk.channels,
+                        samples: chunk.samples,
+                    });
+                }
+            }
+        }
+        Ok(changed)
     }
 
     fn drain_audio(&mut self) -> Vec<FvpMovieAudioChunk> {
-        self.cursor
-            .drain_audio()
-            .into_iter()
-            .map(|chunk| FvpMovieAudioChunk {
-                pts_ms: chunk.pts_us / 1_000,
-                sample_rate: chunk.sample_rate,
-                channels: chunk.channels,
-                samples: chunk.samples,
-            })
-            .collect()
+        std::mem::take(&mut self.audio)
     }
 
     fn telemetry(&self) -> astra_media::IncrementalPlaybackTelemetry {
@@ -2709,7 +2723,7 @@ impl MinoriAviPlayback {
     }
 
     fn current_frame(&self) -> Option<&DecodedVideoFrame> {
-        self.cursor.current_frame()
+        self.current.as_ref()
     }
 
     fn duration_us(&self) -> u64 {

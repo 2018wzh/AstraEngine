@@ -33,6 +33,30 @@ pub struct IncrementalAudioChunk {
     pub samples: Vec<f32>,
 }
 
+/// One ownership-transferred output produced by the shared incremental
+/// playback cursor.
+///
+/// The cursor retains the latest video frame for presentation and queues
+/// decoded audio until the host drains it.  `take_ready_outputs` moves those
+/// ready resources into this list in timestamp order, so family adapters do
+/// not need to duplicate packet ordering or payload conversion logic.  Once a
+/// video frame has been taken, the caller owns it and should retain it as its
+/// presentation frame until a later batch supplies a replacement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IncrementalPlaybackOutput {
+    Video(DecodedVideoFrame),
+    Audio(IncrementalAudioChunk),
+}
+
+impl IncrementalPlaybackOutput {
+    fn sort_key(&self) -> (u64, u8) {
+        match self {
+            Self::Video(frame) => (frame.pts_us, 0),
+            Self::Audio(chunk) => (chunk.pts_us, 1),
+        }
+    }
+}
+
 /// Counters collected by the shared cursor after a packet passes validation.
 ///
 /// These values are deliberately codec-neutral.  Encoded byte counts and
@@ -141,6 +165,26 @@ impl IncrementalMediaPlayback {
     /// pending timestamp on the next `advance` call.
     pub fn take_current_frame(&mut self) -> Option<DecodedVideoFrame> {
         self.current.take()
+    }
+
+    /// Moves the currently selected video frame and all queued audio chunks to
+    /// the caller in deterministic timestamp order.
+    ///
+    /// This is the host-adapter boundary for incremental playback.  It never
+    /// clones a decoded payload.  A caller that uses this method must retain
+    /// the returned video frame itself; after the transfer
+    /// [`current_frame`](Self::current_frame) is empty until the next frame is
+    /// selected by [`advance`](Self::advance).
+    pub fn take_ready_outputs(&mut self) -> Vec<IncrementalPlaybackOutput> {
+        let mut outputs =
+            Vec::with_capacity(self.audio.len() + usize::from(self.current.is_some()));
+        if let Some(frame) = self.current.take() {
+            outputs.push(IncrementalPlaybackOutput::Video(frame));
+        }
+        outputs.extend(self.audio.drain(..).map(IncrementalPlaybackOutput::Audio));
+        self.pending_audio_samples = 0;
+        outputs.sort_by_key(IncrementalPlaybackOutput::sort_key);
+        outputs
     }
 
     pub fn telemetry(&self) -> IncrementalPlaybackTelemetry {
@@ -610,6 +654,39 @@ mod tests {
             playback.current_frame().map(|frame| frame.sequence),
             Some(2)
         );
+    }
+
+    #[test]
+    fn cursor_transfers_ready_outputs_in_timestamp_order_without_copying() {
+        let mut playback = open(vec![video(1, 0), audio(1, 0), video(2, 50)]);
+        playback.advance(0).expect("first advance");
+
+        let frame_ptr = playback
+            .current_frame()
+            .expect("first frame is selected")
+            .bgra8
+            .as_ptr();
+        let outputs = playback.take_ready_outputs();
+        assert!(matches!(
+            outputs.as_slice(),
+            [
+                super::IncrementalPlaybackOutput::Video(frame),
+                super::IncrementalPlaybackOutput::Audio(chunk)
+            ] if frame.sequence == 1 && chunk.pts_us == 0
+        ));
+        let super::IncrementalPlaybackOutput::Video(frame) = &outputs[0] else {
+            panic!("first ready output must be the video frame");
+        };
+        assert_eq!(frame.bgra8.as_ptr(), frame_ptr);
+        assert!(playback.current_frame().is_none());
+        assert!(playback.drain_audio().is_empty());
+
+        playback.advance(50).expect("second frame becomes current");
+        let outputs = playback.take_ready_outputs();
+        assert!(matches!(
+            outputs.as_slice(),
+            [super::IncrementalPlaybackOutput::Video(frame)] if frame.sequence == 2
+        ));
     }
 
     #[test]

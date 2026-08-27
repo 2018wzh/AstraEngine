@@ -7,6 +7,7 @@
 - `IncrementalMediaPlayback` 现在在打开时校验完整的 `MediaPlaybackConfig`，每次推进都检查单调时钟和 `max_tick_us`，并拒绝与轨道声明不一致的 packet。视频、音频 packet 还会校验资源标识、尺寸、帧时长、声道、采样率、交错样本和 declared duration。
 - `max_video_frames`、`max_audio_packets`、`max_video_lead_us`、`max_video_lag_us` 和 `late_video_policy` 已进入同一游标边界。迟到帧在 `Block` 下返回 `ASTRA_MEDIA_INCREMENTAL_AV_SYNC_LATE`，在显式 `Drop` 下计入 `dropped_video_packets`；没有隐式丢帧或 provider 切换。
 - 新增的边界测试覆盖 tick 跳变、轨道错配、packet/音频队列预算、非法配置以及迟到帧的 block/drop 两种策略。FFmpeg 和 Minori 测试继续使用相同的共享游标。
+- `take_ready_outputs` 现在是宿主适配器的统一所有权边界：它将当前帧与待提交 PCM 按 PTS 稳定排序后移动给调用方，避免 Manager 与 CLI 各自实现 packet 排序和重复“新帧”判断。新增测试确认批次消费后游标不重复发出同一帧，下一次推进只转移真正的新输出。
 
 ### 当前 FFmpeg 真实样本 media slice
 

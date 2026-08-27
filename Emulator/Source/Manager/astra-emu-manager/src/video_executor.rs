@@ -12,7 +12,10 @@ use std::{
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
 use astra_emu_minori::MinoriAviDecoder;
-use astra_media::{IncrementalMediaPlayback, IncrementalPlaybackLimits, PlayerDecodedAudio};
+use astra_media::{
+    IncrementalMediaPlayback, IncrementalPlaybackLimits, IncrementalPlaybackOutput,
+    PlayerDecodedAudio,
+};
 use astra_platform::{
     DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
 };
@@ -76,7 +79,6 @@ enum MovieDecoder {
 struct MinoriAviStreamDecoder {
     playback: IncrementalMediaPlayback,
     pending: VecDeque<FvpMoviePacket>,
-    last_frame_sequence: u64,
     ended: bool,
 }
 
@@ -95,7 +97,6 @@ impl MinoriAviStreamDecoder {
         Ok(Self {
             playback,
             pending: VecDeque::new(),
-            last_frame_sequence: 0,
             ended: false,
         })
     }
@@ -117,32 +118,30 @@ impl MinoriAviStreamDecoder {
         self.playback
             .advance(elapsed_ns / 1_000)
             .map_err(|error| error.to_string())?;
-        let current_sequence = self.playback.current_frame().map(|frame| frame.sequence);
-        if current_sequence.is_some_and(|sequence| sequence > self.last_frame_sequence) {
-            let frame = self
-                .playback
-                .take_current_frame()
-                .ok_or_else(|| "ASTRA_EMU_MINORI_AVI_FRAME_OWNERSHIP".to_owned())?;
-            self.last_frame_sequence = frame.sequence;
-            let pts_ms = frame.pts_us / 1_000;
-            let width = frame.width;
-            let height = frame.height;
-            let rgba8 = frame.into_rgba8().map_err(|error| error.to_string())?;
-            self.pending.push_back(FvpMoviePacket::Video(FvpMovieFrame {
-                pts_ms,
-                width,
-                height,
-                rgba8,
-            }));
-        }
-        for chunk in self.playback.drain_audio() {
-            self.pending
-                .push_back(FvpMoviePacket::Audio(FvpMovieAudioChunk {
-                    pts_ms: chunk.pts_us / 1_000,
-                    sample_rate: chunk.sample_rate,
-                    channels: chunk.channels,
-                    samples: chunk.samples,
-                }));
+        for output in self.playback.take_ready_outputs() {
+            match output {
+                IncrementalPlaybackOutput::Video(frame) => {
+                    let pts_ms = frame.pts_us / 1_000;
+                    let width = frame.width;
+                    let height = frame.height;
+                    let rgba8 = frame.into_rgba8().map_err(|error| error.to_string())?;
+                    self.pending.push_back(FvpMoviePacket::Video(FvpMovieFrame {
+                        pts_ms,
+                        width,
+                        height,
+                        rgba8,
+                    }));
+                }
+                IncrementalPlaybackOutput::Audio(chunk) => {
+                    self.pending
+                        .push_back(FvpMoviePacket::Audio(FvpMovieAudioChunk {
+                            pts_ms: chunk.pts_us / 1_000,
+                            sample_rate: chunk.sample_rate,
+                            channels: chunk.channels,
+                            samples: chunk.samples,
+                        }));
+                }
+            }
         }
         self.pending
             .make_contiguous()

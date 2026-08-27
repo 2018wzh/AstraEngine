@@ -41,6 +41,8 @@ Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_
 
 增量播放的公共入口是 `IncrementalMediaDecoder` 与 `IncrementalMediaPlayback`。前者只描述有界的逐 packet 解码生命周期，后者统一做 timestamp read-ahead、BGRA frame 校验、PCM 转换、pending audio 上限、seek/cancel 和 telemetry；family 不再实现容器或 codec 分支。游标打开时验证完整 `MediaPlaybackConfig`，推进时验证单调 tick 与 `max_tick_us`，并按 `max_video_frames`、`max_audio_packets`、`max_video_lead_us`、`max_video_lag_us` 和 `late_video_policy` 执行边界；迟到视频只有在 profile 明确为 `Drop` 时才会计入丢帧计数，`Block` 直接返回诊断。`FfmpegPlaybackDecoder::open_reader` 将 VFS reader 以受限 chunk 写入 AstraMedia 私有临时 spool，再由 FFmpeg 完成 demux/codec；`ffmpeg-vcpkg` 未绑定时返回 blocking diagnostic，不切换到 WMF、平台 codec 或手写 decoder。
 
+宿主适配器通过 `IncrementalMediaPlayback::take_ready_outputs` 一次性移动当前视频帧和待提交 PCM chunk。该方法按 `(pts_us, track_order)` 稳定排序并转移所有权，不复制已解码 payload；调用方必须自行保留上一次视频帧，直到下一批提供替换帧。Manager 与 Minori Headless/CLI 均使用这条公共输出边界，family 代码不再重复维护 packet 排序或“新帧”判定。
+
 Headless 与 Windows 共享 typed incremental stream contract。`DecodeStreamAction::Start` 建立有界 session，后续 `Next` 每次消费一个 owned frame，EOF 返回 typed end marker。Player 同时最多保留一帧；snapshot 只保存 asset identity、revision、cursor、loop index 和逻辑起始时间。restore 重新创建 decode session并按 cursor continuation；skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`。
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
