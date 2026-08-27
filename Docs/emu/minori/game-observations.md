@@ -2,6 +2,8 @@
 
 ## 当前样本
 
+2026-08-28 cache second-run：同一八包 profile 连续两次 full verify 均覆盖 8 个 source、14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes。首轮 `cache_hit_count=29,648`，第二轮 `43,594`，aggregate hash 保持 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`；真实跨运行 second-run 已关闭，identity 漂移、淘汰和损坏恢复仍需独立测试。
+
 cache-enabled full verify 已在同一八包 profile 下完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。该结果不替代 cache identity 漂移、淘汰和损坏恢复测试。
 
 - 根目录存在 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive。

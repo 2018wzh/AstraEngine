@@ -9,7 +9,7 @@
 
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
 
-当前八包 cache-enabled full verify 已完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。清单中的 `cache second-run` 仍指跨运行 identity、淘汰和损坏恢复的独立门禁，不把本轮完整流读误写成全部 cache gate 已关闭。
+当前八包 cache-enabled full verify 已完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`。跨运行 second-run 已在同一 identity 下完成；identity 漂移、淘汰和损坏恢复仍是独立门禁。
 
 - [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
 - [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
@@ -87,7 +87,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - [x] Probe game root and classify `bg/bgm/scr/st/sys/se/voice/mov`，包括 `bg.pazA` 至 `bg.pazJ`。
 - [x] 通过本地私有 Luau patch 解出八个 index。
 - [x] 对八包执行 decoded full verify；cache 关闭的完整读取与首尾复读已通过。
-- [ ] 在具备足够私有存储空间的环境复核八包 cache identity 与第二轮全命中。
+- [x] 在同一 private-profile identity 下复核八包 cache second-run：首轮 `cache_hit_count=29,648`，第二轮 `43,594`，aggregate hash 保持一致。
 - [x] 对每个 entry descriptor 校验 offset、packed size、unpacked size 和 method。
 - [x] 拒绝 path traversal 和绝对路径 entry。
 

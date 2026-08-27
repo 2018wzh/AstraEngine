@@ -9,6 +9,12 @@
 
 Windows Sandbox E3 现场检查因 WASAPI 默认输出不可用而无法启动 native audio，随后 prewarm 未收敛并返回 `ASTRA_EMU_NATIVE_PREWARM_DID_NOT_CONVERGE`。随后以显式关闭音频的 direct native run 复核了真实 Minori 画面、消息层、转场/黑场与影片返回路径，并正常结束 `windowed-e2`；这只提供视觉现场证据，不满足音频 meter、artifact manifest 和可回收 machine-readable report 的 E3 门禁。共享目录为只读，未回收可发布 artifact，因此 Windows E3 仍保持 blocking。
 
+## 2026-08-28：真实八包 cache second-run
+
+- 在同一授权八包、同一 mount profile 和同一 private-profile identity 下连续执行两次 `astra-emu-cli vfs ... verify`。两次均覆盖 8 个 source、14,502 个 entry、43,818 次 bounded range read、6,624,958,365 个 decoded bytes，aggregate hash 均为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。
+- 首轮报告 `cache_hit_count=29,648`，第二轮报告 `cache_hit_count=43,594`；第二轮完整读取与首尾复读均命中既有 plaintext identity。输出仅保留计数和聚合 hash，原始 profile、cache、key 与 decoded 内容继续留在 ignored 私有目录。
+- 这项关闭真实跨运行 cache second-run；cache identity 漂移、损坏恢复和配额淘汰仍由 support 单测/独立门禁约束，不能用本轮命中数替代。
+
 ## 2026-08-27：FFmpeg 构建身份校正
 
 - Minori 动态插件 descriptor 现在从 Cargo build script 实际提供的 `CARGO_FEATURE_*` 变量收集可选 feature，并以 `CARGO_CFG_FEATURE` 作为补充后规范化去重，避免不同 Cargo 环境下 descriptor 与 `cdylib` 的 feature 描述漂移；当前 stable Release 构建已核对启用 `ffmpeg-vcpkg` 时两者身份一致。

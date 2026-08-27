@@ -1,6 +1,6 @@
 # Minori Tooling
 
-当前 cache-enabled full verify 已完成，覆盖 8 个 source、14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。该轮只记录脱敏计数与聚合 hash；跨运行 identity、淘汰和损坏恢复仍是独立门禁。
+当前 cache-enabled full verify 已连续执行两轮，覆盖 8 个 source、14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes；首轮 `cache_hit_count=29,648`，第二轮 `43,594`，aggregate hash 保持一致。该轮只记录脱敏计数与聚合 hash；identity 漂移、淘汰和损坏恢复仍是独立门禁。
 
 通用 VFS 操作统一走 `astra-emu-cli vfs`。CLI 只从显式 `--game-dir` 和严格 YAML mount profile 建立 family mount，不按注册顺序选择 provider，也不保留旧 `astra-emu-cli minori` 入口。
 
@@ -35,7 +35,7 @@ Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged
 
 脚本在等待输入时会暴露 host-owned 的 `runtime.awaiting_input` 观测值。它仅由等待所接受的物理输入 mask 聚合哈希，适合输入序列的 `await` 条件；不会输出 await token、脚本位置、商业文本或资源名。一次确认应将 press/release 排在同一 fixed tick，避免 release 在等待已解决后成为未消费 edge。
 
-当前合法样本已通过真实导入、八包 14502-entry manifest v2 full verify，以及 89 脚本的 payload-free census。full verify 共执行 43818 次 range read、读取 6624958365 个 decoded bytes；该轮显式关闭 cache。八包 cache identity 复核因平台缓存卷空间不足保持 blocking。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
+当前合法样本已通过真实导入、八包 14,502-entry manifest v2 full verify、同一 identity 的 cache second-run，以及 89 脚本的 payload-free census。两轮 full verify 均执行 43,818 次 range read、读取 6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
 
 `census-media` 只检查 `bg`、`bgm`，逐 frame 调用生产 ANI/SQZ adapter，并用 `image` 验证 PNG。报告仅含格式、entry/frame、像素和尺寸聚合计数；不含 URI、文件名或像素。当前样本通过 4665-entry census：2655 PNG、1951 ANI（6723 frames）、9 SQZ（224 frames）、49 Ogg 和 1 个 metadata database。
 

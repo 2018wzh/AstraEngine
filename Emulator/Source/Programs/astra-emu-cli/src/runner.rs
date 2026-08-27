@@ -6874,13 +6874,12 @@ impl<'a> RuntimeDriver<'a> {
             ObservationPredicate::Exists { key } => match key.as_str() {
                 "runtime.state_revision" | "runtime.tick" => true,
                 "runtime.terminal" => self.terminal,
-                "runtime.input_or_terminal" => {
-                    self.terminal
-                        || self
-                            .pending_waits
-                            .values()
-                            .any(|wait| matches!(wait, PendingWait::Input(_)))
-                }
+                "runtime.input_or_terminal" => input_or_terminal_observation(
+                    &self.family_id,
+                    self.terminal,
+                    &self.pending_waits,
+                    &self.observed_blackboard,
+                ),
                 "frame.presented" => !self.frame_samples.is_empty(),
                 _ => matches_blackboard_observation(&self.observed_blackboard, key),
             },
@@ -6892,6 +6891,27 @@ impl<'a> RuntimeDriver<'a> {
     fn progress_in_background(&self) -> Result<bool, String> {
         progress_background_from_observation(&self.observed_blackboard)
     }
+}
+
+fn input_or_terminal_observation(
+    family_id: &str,
+    terminal: bool,
+    pending_waits: &BTreeMap<String, PendingWait>,
+    observed_blackboard: &BTreeMap<String, String>,
+) -> bool {
+    terminal
+        || pending_waits
+            .values()
+            .any(|wait| matches!(wait, PendingWait::Input(_)))
+        // Minori's title and system pages are interactive states owned by the
+        // family provider. They do not install a generic Input await, but
+        // physical input is still consumed by the provider on the next fixed
+        // tick. Expose those pages as an input boundary while preserving the
+        // media/time-wait requirement above.
+        || (family_id == "minori"
+            && observed_blackboard
+                .get("minori.system_page")
+                .is_some_and(|page| page != "none"))
 }
 
 #[cfg(target_os = "windows")]
@@ -7285,6 +7305,29 @@ mod native_tests {
         assert!(!matches_blackboard_observation(
             &observed,
             "blackboard.minori.choice_active.false"
+        ));
+    }
+
+    #[test]
+    fn minori_system_pages_are_input_boundaries_without_relaxing_media_waits() {
+        let pages = BTreeMap::from([(String::from("minori.system_page"), String::from("title"))]);
+        let no_waits = BTreeMap::new();
+        assert!(input_or_terminal_observation(
+            "minori", false, &no_waits, &pages,
+        ));
+        assert!(!input_or_terminal_observation(
+            "fvp", false, &no_waits, &pages,
+        ));
+
+        let media_wait = BTreeMap::from([(
+            String::from("movie"),
+            PendingWait::Media(String::from("movie")),
+        )]);
+        assert!(!input_or_terminal_observation(
+            "minori",
+            false,
+            &media_wait,
+            &BTreeMap::new(),
         ));
     }
 
