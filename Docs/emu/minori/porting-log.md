@@ -13,6 +13,13 @@
 - 重新构建并签名当前 `ffmpeg-vcpkg` dynamic plugin 后，标题启动、配置页、影片播放、Control 跳过、影片 completion 和返回标题使用同一组 build、profile、mount 与输入身份执行。运行报告为 `passed`，完成 3102 个 fixed step、9 个 retained frame sample，诊断为空；影片 command、停止 command 和 owner-side completion 分别出现在连续的 3098、3099、3100 步，标题观察在 3101 步命中。
 - 这次运行确认 FFmpeg demux/codec、AstraMedia incremental cursor、媒体 fence 和 Minori 标题恢复接线可用。它没有到达剧情 terminal，也没有证明完整路线、gallery unlock、正式音频听审、第二次 cache 命中、Linux FUSE、macOS extract 或 Windows E3。
 
+### 当前 FFmpeg 首路线重验
+
+- 针对当前 v9 observation contract 重新生成物理输入后，签名 release plugin 以同一 `ffmpeg-vcpkg` 增量媒体绑定完成首路线。运行报告为 `passed`：3,034,309 个 fixed step、16,150 条物理输入、53 个 retained frame sample、31 个 checkpoint，抵达 route terminal，`route_complete` 与自然 unlock count=1 均命中，诊断为空。
+- 该运行覆盖标题、Config、backlog、真实影片 fence/completion、剧情演出、结局返回标题和最终 Exit。影片播放期间的 WMV3 解码仍由 FFmpeg 负责，未恢复 Minori 私有 decoder；报告只保存 identity、计数和 hash，不包含正文或媒体 payload。
+- 首路线的通用 await 曾使用已删除的 observation hash 形式，现已改为 v9 的 typed `exists` observation；同时删除了过时的首 choice 等待点。当前报告因此证明路线 terminal 和 post-choice continuation，但不把该次输入写成显式首 choice 视觉 checkpoint。独立 choice slice 仍用于 choice 语义验证。
+- 这轮仍不关闭四条自然路线、第四条路线后的完整 Memories/CG/BGM/回想、正式 WAV 逐段听审、cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。模型和人工 review 也不能覆盖这些自动门禁。
+
 ### 本轮验证
 
 - `astra-media` library 9/9、FFmpeg stream 9/9、`astra-emu-minori`（含和不含 `ffmpeg-vcpkg`）各 148/148 通过；`astra-media`、`astra-emu-minori`、`astra-emu-cli` 和 `astra-emu-manager` 的增量 `clippy -D warnings` 通过。

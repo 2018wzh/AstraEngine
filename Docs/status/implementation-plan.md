@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026 年 8 月 27 日：增量媒体游标在 `astra-media` 内完成一轮边界收紧。`IncrementalMediaPlayback` 打开时校验完整 `MediaPlaybackConfig`，推进时限制 tick 间隔、轨道和 packet 形状、音频/视频预算以及视频 lead/lag；迟到帧只按显式 `late_video_policy` block 或 drop，并输出脱敏计数。当前签名 FFmpeg Minori 标题→配置→影片→跳过→标题 slice 为 `passed`（3102 fixed steps、9 个 retained samples、零 diagnostic），但不是完整路线 terminal 证据。正式音频听审、自然解锁、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 继续开放。
+2026 年 8 月 27 日：增量媒体游标在 `astra-media` 内完成一轮边界收紧。`IncrementalMediaPlayback` 打开时校验完整 `MediaPlaybackConfig`，推进时限制 tick 间隔、轨道和 packet 形状、音频/视频预算以及视频 lead/lag；迟到帧只按显式 `late_video_policy` block 或 drop，并输出脱敏计数。当前签名 FFmpeg Minori 标题→配置→影片→跳过→标题 slice 为 `passed`（3102 fixed steps、9 个 retained samples、零 diagnostic）。同日按 v9 typed observation 重新生成物理输入后，首路线也以 `passed` 完成 3,034,309 fixed steps、16,150 条物理输入、53 个 retained samples、31 个 checkpoint、route terminal、自然 unlock count=1 和最终 Exit；该运行未计入过时的首 choice 等待点，choice 仍由独立 slice 覆盖。正式音频听审、四条路线后的完整 Memories/CG/BGM/回想、cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 继续开放。
 
 Minori native host 现已消费 `minori.progress_in_background` observation：Windows 失焦暂停/恢复由配置决定，其他 family 不受影响；provider/CLI focused tests 已通过。真实焦点、音频恢复、完整路线和 Windows E3 仍保持开放。
 
