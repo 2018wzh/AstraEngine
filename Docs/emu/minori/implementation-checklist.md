@@ -2,6 +2,8 @@
 
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
 
+当前八包 cache-enabled full verify 已完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。清单中的 `cache second-run` 仍指跨运行 identity、淘汰和损坏恢复的独立门禁，不把本轮完整流读误写成全部 cache gate 已关闭。
+
 - [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
 - [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
 - [x] 当前签名 release plugin 的 title→config→movie→skip→title slice 报告 `passed`：3102 fixed steps、9 个 retained frame sample、零 diagnostic；该结果只覆盖 media/provider 与标题恢复接线，不覆盖完整剧情 terminal。

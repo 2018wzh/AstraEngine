@@ -38,6 +38,10 @@ PAZ reader 采用三段式：
 
 mount 使用 `minori:/<role>/<entry>`。source hash 与各 entry encrypted hash 在同一次有界顺序流中计算，避免先哈希全包再逐 entry 随机重读；跨分卷 entry 仍保持同一逻辑范围。绝对路径、`..`、重复 URI/entry id、重叠 encrypted range、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
 
+## 当前 cache 复核
+
+启用明文 cache 的完整流读已通过：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。entry identity、配额淘汰、损坏恢复和跨运行复用仍按独立测试处理。
+
 ## Lookup
 
 Core 按 archive role 建立 VFS：

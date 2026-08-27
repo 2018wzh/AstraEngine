@@ -2118,6 +2118,33 @@ mod tests {
     }
 
     #[test]
+    fn plaintext_cache_identity_survives_a_fresh_mount() {
+        let temp = tempfile::tempdir().unwrap();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            fs::write(
+                temp.path().join(format!("{role}.paz")),
+                fixture_archive(role, 0),
+            )
+            .unwrap();
+        }
+        let cache_root = temp.path().join("cache");
+        {
+            let cache = PlaintextCache::new(cache_root.clone(), 1024 * 1024, 1024 * 1024).unwrap();
+            let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
+            let read = vfs.read_range("minori:/scr/scr.bin", 0, 4).unwrap();
+            assert_eq!(read.bytes.as_slice(), b"fixt");
+            assert!(!read.cache_hit);
+        }
+        {
+            let cache = PlaintextCache::new(cache_root, 1024 * 1024, 1024 * 1024).unwrap();
+            let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
+            let read = vfs.read_range("minori:/scr/scr.bin", 4, 3).unwrap();
+            assert_eq!(read.bytes.as_slice(), b"ure");
+            assert!(read.cache_hit);
+        }
+    }
+
+    #[test]
     fn raw_movie_range_uses_the_entry_relative_transform_offset() {
         let temp = tempfile::tempdir().unwrap();
         for role in REQUIRED_ARCHIVE_ROLES {

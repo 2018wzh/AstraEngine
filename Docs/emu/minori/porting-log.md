@@ -292,6 +292,8 @@
 
 ### PAZ 影片 reader 与 cache 边界复核
 
+后续的真实八包 cache-enabled full verify 已完成（8 个 source、14,502 个 entry、43,818 次 range read、`cache_hit_count=43,594`）；本节早期“仍需独立真实 cache hit”只保留为当时的历史状态，跨运行 identity、淘汰和损坏恢复仍未由该轮关闭。
+
 - 对照 GARbro 的 `MovPazArchive`，确认 v0 影片索引表是 plaintext-to-encrypted 映射；读取时必须构造逆表。新增非对合 substitution fixture，避免把恰好可逆的测试数据误当作格式证据。当前授权样本为 v2，此项不构成对其媒体内容的解码验收。
 - `MINORI_READER_ID` 升级为 `astra.emu.minori.paz.v2`，并进入 plaintext cache 的 codec identity。旧 reader 写出的明文 cache 因而不会跨实现版本复用；新版本仍需由独立的真实 cache hit 轮次验证。
 - v1/v2 的 RC4 entry key 改由 index 中保留的原始 CP932 名称字节派生，仅对 ASCII 字节做格式要求的大小写归一化。这样避免 Unicode decode/re-encode 改变密钥；原始字节只驻留 mount session 的 opaque descriptor，不进入 save、report 或 cache identity。

@@ -2,6 +2,8 @@
 
 ## 当前样本
 
+cache-enabled full verify 已在同一八包 profile 下完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。该结果不替代 cache identity 漂移、淘汰和损坏恢复测试。
+
 - 根目录存在 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive。
 - `bg` 由 `bg.paz` 与 `bg.pazA` 至 `bg.pazJ` 组成；全目录共 18 个 PAZ 物理文件、5742470010 bytes。
 - 八个 archive 均非空。使用本地私有补丁后，八个 index 均已解密并通过结构校验。

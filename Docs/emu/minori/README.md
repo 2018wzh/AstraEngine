@@ -23,6 +23,8 @@ Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-mi
 
 ## 边界
 
+当前 cache-enabled full verify 已完成，覆盖 8 个 source、14,502 个 entry 和 43,818 次 range read；`cache_hit_count=43,594`。这里的结果只证明当前 profile 下的完整流读和命中计数；cache identity 漂移、淘汰、损坏恢复与跨运行边界仍需独立验证。Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍不能由该结果替代。
+
 PAZ key、exe patch、安装器保护和 hook 资料不进入公共实现。`astraemu.patch.luau`、明文 cache、导出资源、脚本文本和 disassembly 都是本地私有数据，不进入 Git、package、report 或日志。
 
 当前授权样本包含 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive，其中 `bg.paz` 另有 A–J 十个连续分卷，合计 18 个物理文件。八包 manifest v2 full verify 已覆盖 14502 个 entry、43818 次 range read 和 6624958365 个 decoded bytes，验证时显式关闭明文 cache。89 个脚本的 payload-free census 已通过。cache identity 复核因平台缓存卷空间不足仍是 blocker；Linux FUSE 与 macOS 验收也需独立证据，不能由 Windows VFS 结果替代。

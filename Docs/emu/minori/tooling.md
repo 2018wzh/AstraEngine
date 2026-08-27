@@ -1,5 +1,7 @@
 # Minori Tooling
 
+当前 cache-enabled full verify 已完成，覆盖 8 个 source、14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。该轮只记录脱敏计数与聚合 hash；跨运行 identity、淘汰和损坏恢复仍是独立门禁。
+
 通用 VFS 操作统一走 `astra-emu-cli vfs`。CLI 只从显式 `--game-dir` 和严格 YAML mount profile 建立 family mount，不按注册顺序选择 provider，也不保留旧 `astra-emu-cli minori` 入口。
 
 ```sh

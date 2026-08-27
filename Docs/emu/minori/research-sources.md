@@ -2,6 +2,8 @@
 
 这份索引只记录可公开核验的来源。商业资源、解密材料、原版截图和逐帧观察放在 ignored 私有目录；公开仓库不保存副本或本地路径。
 
+当前八包 cache-enabled full verify 的脱敏结果已记录在移植日志：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。它是本地样本证据，不改变 GARbro contract 的来源优先级。
+
 ## 格式契约
 
 | 优先级 | 来源 | 固定版本或访问日期 | 许可证 | 适用范围 | 当前结论 |
