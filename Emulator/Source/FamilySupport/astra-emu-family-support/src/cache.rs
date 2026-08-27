@@ -82,6 +82,18 @@ impl PlaintextCache {
         let mut names = HashSet::new();
         for entry in fs::read_dir(&root).map_err(PlaintextCacheError::Io)? {
             let entry = entry.map_err(PlaintextCacheError::Io)?;
+            // A cache entry is opened by name later.  Following a symlink here
+            // would let a file outside the private cache root become part of
+            // the trusted plaintext store (and would apply the privacy mode to
+            // that unrelated target).  Treat every symlink as corrupt instead
+            // of trying to clean it up or silently ignoring it.
+            if entry
+                .file_type()
+                .map_err(PlaintextCacheError::Io)?
+                .is_symlink()
+            {
+                return Err(PlaintextCacheError::Corrupt);
+            }
             let metadata = entry.metadata().map_err(PlaintextCacheError::Io)?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if metadata.is_file() && valid_cache_name(&name) && names.insert(name.clone()) {
@@ -382,5 +394,21 @@ mod tests {
         cache.put(&three, b"3333").unwrap();
         assert!(cache.get(&two).unwrap().is_none());
         assert!(cache.get(&one).unwrap().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_inside_cache_root_is_corruption() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let cache = identity("symlink");
+        symlink(outside.path(), root.path().join(cache.file_name())).unwrap();
+
+        assert!(matches!(
+            PlaintextCache::new(root.path().to_path_buf(), 4096, 1024),
+            Err(PlaintextCacheError::Corrupt)
+        ));
     }
 }
