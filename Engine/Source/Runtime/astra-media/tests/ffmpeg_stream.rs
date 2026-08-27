@@ -3,9 +3,12 @@
 use std::io::Cursor;
 
 use astra_media::{
-    DecodedMediaPacket, FfmpegAudioOutputFormat, FfmpegDecodedPacket, FfmpegPlaybackDecoder,
-    FfmpegStreamLimits, IncrementalMediaPlayback, IncrementalPlaybackLimits, MediaPipelineLimits,
+    DecodedMediaPacket, FfmpegAudioOutputFormat, FfmpegDecodedPacket,
+    FfmpegIncrementalDecodeProvider, FfmpegPlaybackDecoder, FfmpegStreamLimits,
+    IncrementalDecodeBudget, IncrementalDecodeProviderRegistry, IncrementalDecodeRequest,
+    IncrementalMediaPlayback, IncrementalPlaybackLimits, MediaPipelineLimits,
     MediaPlaybackPipeline, MediaPlaybackSession, PlaybackTickRequest, QueuedMediaOutput,
+    FFMPEG_INCREMENTAL_PROVIDER_ID,
 };
 
 #[astra_headless_test::test]
@@ -29,6 +32,34 @@ fn ffmpeg_reader_api_feeds_the_shared_incremental_cursor() {
     let frame = playback.current_frame().expect("video fixture has a frame");
     assert!(frame.width > 0 && frame.height > 0);
     assert!(playback.telemetry().decoded_frames > 0);
+}
+
+#[astra_headless_test::test]
+fn ffmpeg_incremental_provider_is_selected_by_explicit_registry_binding() {
+    let provider = FfmpegIncrementalDecodeProvider::probe().unwrap();
+    let mut registry = IncrementalDecodeProviderRegistry::default();
+    registry.register(Box::new(provider)).unwrap();
+    let decoder = registry
+        .open(
+            FFMPEG_INCREMENTAL_PROVIDER_ID,
+            IncrementalDecodeRequest::new(
+                "mp4",
+                Box::new(Cursor::new(fixture_bytes("flower.mp4"))),
+            )
+            .with_budget(IncrementalDecodeBudget {
+                max_encoded_bytes: 256 * 1024 * 1024,
+                max_video_frame_bytes: 64 * 1024 * 1024,
+                max_pending_packets: 64,
+                max_video_frames: 64,
+                max_audio_packets: 64,
+            }),
+        )
+        .unwrap();
+    assert_eq!(decoder.provider_id(), FFMPEG_INCREMENTAL_PROVIDER_ID);
+    let mut playback =
+        IncrementalMediaPlayback::open(decoder, IncrementalPlaybackLimits::default()).unwrap();
+    assert!(playback.advance(0).unwrap());
+    assert!(playback.current_frame().is_some());
 }
 
 #[astra_headless_test::test]

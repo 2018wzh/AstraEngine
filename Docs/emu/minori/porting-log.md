@@ -143,7 +143,7 @@
 - The Minori runtime resource resolver now recognizes ANI/SQZ metadata through the same strict container adapters instead of sending those resources through `image::ImageReader`. It emits the family codec and verified first-frame dimensions to the host; multi-frame playback is still intentionally open.
 - The v9 `Layer2D` texture path now sends both standard image resources and ANI/SQZ resources through an explicit `DecodeProviderRegistry` binding. Standard images retain encoded-format identity checks; ANI/SQZ require the family provider's first-frame dimensions and output contract before Renderer2D upload.
 - The Manager's legacy `RuntimeLiveResourceScene` path now uses the same explicit image registry and codec identity checks. Minori ANI/SQZ never pass through generic `image::load_from_memory`; unsupported codecs, provider identity mismatches, malformed first-frame metadata, and decoded byte-size mismatches stop the transaction. This closes the host-side decode bypass for the retained resource-scene path; it does not add multi-frame animation playback.
-- Minori AVI playback is now shared by the family crate: Headless keeps its revision-pinned range-reader wrapper, while Manager consumes the same bounded WMV3/PCM decoder over an owned source. The adapter validates the single WMV3 video stream, optional 16-bit PCM stream, decoded BGRA length and monotonic audio/video timestamps before handing frames to the common timeline. Manager no longer routes Minori `.avi` through the FVP compatibility table or a platform codec; unsupported containers remain blocking.
+- Minori AVI playback now uses the shared AstraMedia incremental contract in both Headless and Manager. Each host registers the explicit `astra.decode.ffmpeg.incremental` provider, passes a bounded VFS reader, and consumes timestamped video/audio packets through `IncrementalMediaPlayback`; Minori only enforces the AVI family extension and RIFF/AVI container identity. Manager no longer routes Minori `.avi` through the FVP compatibility table or a platform codec; unsupported containers and missing FFmpeg bindings remain blocking.
 - 该历史 preview 绑定已在 2026-08-26 媒体迁移中替换：Manager VFS movie preview 与 timestamped playback 现在共同绑定 AstraMedia `ffmpeg-vcpkg` 的有界增量 provider；不再使用 `astra.decode.minori.avi` 纯 Rust decoder。其他 family 的视频仍使用各自显式 provider，缺失时保持 blocking。
 
 ### Manager family selection is explicit at startup
@@ -337,7 +337,7 @@
 - `MINORI_READER_ID` 升级为 `astra.emu.minori.paz.v2`，并进入 plaintext cache 的 codec identity。旧 reader 写出的明文 cache 因而不会跨实现版本复用；新版本仍需由独立的真实 cache hit 轮次验证。
 - v1/v2 的 RC4 entry key 改由 index 中保留的原始 CP932 名称字节派生，仅对 ASCII 字节做格式要求的大小写归一化。这样避免 Unicode decode/re-encode 改变密钥；原始字节只驻留 mount session 的 opaque descriptor，不进入 save、report 或 cache identity。
 - 真实首路线已到达影片指令。公共 VFS 已提供 range-backed reader，Minori 对未压缩 movie entry 以 entry-relative transform 直接读取请求范围；它不再因首个 header probe 物化整个影片。压缩 entry 仍走完整、受上限的解压路径，不能冒充流式实现。
-- 原程序的影片启动路径按扩展名选择文件流媒体图。AstraEMU 不复用该系统路径：Minori host 只用有界 reader 与显式的纯 Rust decoder binding。私有全量有界扫描确认五项授权 movie 都在 wrapper 后包含 MPEG start code；此前固定 4 MiB probe 把四项误归为未知容器，不能再作为 codec 结论。runtime 现逐块扫描并保留跨块签名尾部，找到偏移后才交给 decoder，不物化完整媒体。这不是 E2 路线通过证据。
+- 原程序的影片启动路径按扩展名选择文件流媒体图。AstraEMU 不复用该系统路径：Minori host 只用有界 reader 与显式 AstraMedia FFmpeg incremental provider。私有全量有界扫描确认五项授权 movie 都在 wrapper 后包含 MPEG start code；此前固定 4 MiB probe 把四项误归为未知容器，不能再作为 codec 结论。runtime 交给共享 FFmpeg demux/codec 逐 packet 读取，不物化第二份 caller-owned 媒体。这不是 E2 路线通过证据。
 
 ### MPEG 流式绑定
 
@@ -647,9 +647,9 @@ python Tools/check_docs.py
 - 新增 runtime grammar census 与 provider VFS audit 回归；目标 crate 测试、clippy 和格式检查在提交前复跑。该门禁只证明资源引用覆盖，不替代完整路线、codec、人工音频 review 或 Windows E3。
 ### 2026-08-25 Minori AVI 输入与帧预算收紧
 
-- 纯 Rust `MinoriAviDecodeProvider` 现在在容器解析前拒绝空输入和超过 64 MiB 的预览请求；该边界与公共 viewer 的媒体预览预算一致，避免直接 provider 调用绕过 viewer 预算。超限固定返回 `ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT`，不尝试其他 provider。
-- `MinoriAviDecoder` 在创建 WMV3 decoder 前校验非零尺寸、16,384 像素边长和 64 MiB RGBA 帧上限；demux 后单包同样限制为 64 MiB，并在解码后再次校验帧大小。尺寸、包或帧越界均返回 `ASTRA_EMU_MINORI_AVI_*` blocking diagnostic。
-- AVI stream table 现在只接受一个 WMV3 video 和最多一个 16-bit PCM audio；`AviStreamFormat::Other` 不再静默忽略，直接返回 `ASTRA_EMU_MINORI_AVI_STREAM_UNSUPPORTED`，避免未知 data/subtitle stream 被误认为已验证格式。
+- 当前 `MinoriAviDecodeProvider` 在容器解析前拒绝空输入和超过 512 MiB 的预览请求；该边界与公共 viewer 的媒体预览预算一致，避免直接 provider 调用绕过 viewer 预算。超限固定返回 `ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT`，不尝试其他 provider。
+- Minori AVI preview 与 playback 不再拥有 family codec wrapper；AstraMedia FFmpeg provider 在 demux、packet、timestamp、frame、PCM 和 cancellation 边界执行统一预算校验。Minori preview 只在调用 provider 前拒绝空输入、超限输入和非 RIFF/AVI 头，所有 provider/codec/帧越界均返回 `ASTRA_EMU_MINORI_AVI_*` 或 `ASTRA_FFMPEG_*` blocking diagnostic。
+- 旧的 family-owned AVI stream table（包括 `AviStreamFormat::Other` 与 WMV3/PCM 专用分支）已在后续媒体迁移中删除；现行测试只保留容器身份、输入/帧预算和 FFmpeg binding 的 blocking 回归，不把旧 decoder 证据计入当前 codec 覆盖。
 - 新增 4 个定向回归（预览输入预算、空/截断容器、尺寸/帧预算），`astra-emu-minori` AVI tests 为 4/4。该项只收紧资源边界，不扩大 codec 覆盖，也不改变真实 movie parity、完整路线或 Windows E3 的证据边界。
 
 Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求长度被截为零时直接返回空数据，不再把合法 EOF 误报为 `EIO`。该路径仍需真实 Linux mount/list/stat/random-read/unmount evidence，Windows 工作树不能据此标记 FUSE 完成。

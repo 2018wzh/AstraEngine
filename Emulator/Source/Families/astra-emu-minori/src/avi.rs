@@ -5,46 +5,20 @@
 //! provider. Packet validation, timestamp scheduling, and PCM conversion stay
 //! in AstraMedia.
 
-use std::{
-    io::{Read, Seek, SeekFrom},
-    marker::PhantomData,
-};
-
 use astra_media::{
-    DecodeCapability, DecodeKind, DecodeProvider, DecodeRequest, DecodeResult, DecodedMediaPacket,
-    IncrementalMediaDecoder, MediaError, MediaPlaybackConfig,
+    DecodeCapability, DecodeKind, DecodeProvider, DecodeRequest, DecodeResult, MediaError,
 };
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-use astra_media::{
-    DecodeOutput, FfmpegDecodeProvider, FfmpegIncrementalDecodeProvider, IncrementalDecodeBudget,
-    IncrementalDecodeProviderRegistry, IncrementalDecodeRequest,
-};
+use astra_media::{DecodeOutput, FfmpegDecodeProvider};
 
 pub const MINORI_AVI_DECODE_PROVIDER_ID: &str = "astra.decode.minori.avi";
-pub const MINORI_AVI_STREAM_PROVIDER_ID: &str = "astra.decode.ffmpeg.incremental";
 
 const MAX_PREVIEW_INPUT_BYTES: usize = 512 * 1024 * 1024;
 #[cfg(any(feature = "ffmpeg-vcpkg", test))]
 const MAX_PREVIEW_FRAME_BYTES: usize = 64 * 1024 * 1024;
 #[cfg(any(feature = "ffmpeg-vcpkg", test))]
 const MAX_VIDEO_DIMENSION: u32 = 16_384;
-
-#[cfg(feature = "ffmpeg-vcpkg")]
-enum MinoriAviBackend {
-    Ffmpeg(Box<dyn IncrementalMediaDecoder>),
-}
-
-/// Bounded family-owned handle around AstraMedia's incremental decoder.
-///
-/// `R` remains in the public type so bounded VFS readers can be passed without
-/// exposing paths or unbounded byte sources. The reader is consumed into
-/// AstraMedia's private, bounded FFmpeg spool during construction.
-pub struct MinoriAviDecoder<R> {
-    #[cfg(feature = "ffmpeg-vcpkg")]
-    backend: MinoriAviBackend,
-    _reader: PhantomData<fn() -> R>,
-}
 
 /// Explicit first-frame binding for Minori AVI previews.
 ///
@@ -185,115 +159,12 @@ fn validate_video_dimensions(width: u32, height: u32) -> Result<(), &'static str
     Ok(())
 }
 
-impl<R: Read + Seek + 'static> MinoriAviDecoder<R> {
-    pub fn new(mut reader: R) -> Result<Self, String> {
-        let mut header = [0_u8; 12];
-        reader
-            .read_exact(&mut header)
-            .map_err(|_| "ASTRA_EMU_MINORI_AVI_HEADER".to_owned())?;
-        reader
-            .seek(SeekFrom::Start(0))
-            .map_err(|_| "ASTRA_EMU_MINORI_AVI_READER".to_owned())?;
-        if !is_avi_container_header(&header) {
-            return Err("ASTRA_EMU_MINORI_AVI_HEADER".to_owned());
-        }
-
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        {
-            let mut registry = IncrementalDecodeProviderRegistry::default();
-            registry
-                .register(Box::new(FfmpegIncrementalDecodeProvider::probe().map_err(
-                    |error| minori_avi_error("ASTRA_EMU_MINORI_AVI_FFMPEG_PROBE", error),
-                )?))
-                .map_err(|error| minori_avi_error("ASTRA_EMU_MINORI_AVI_FFMPEG_PROVIDER", error))?;
-            let decoder = registry
-                .open(
-                    MINORI_AVI_STREAM_PROVIDER_ID,
-                    IncrementalDecodeRequest::new("avi", Box::new(reader)).with_budget(
-                        IncrementalDecodeBudget {
-                            max_encoded_bytes: MAX_PREVIEW_INPUT_BYTES,
-                            max_video_frame_bytes: MAX_PREVIEW_FRAME_BYTES,
-                            max_pending_packets: 64,
-                            max_video_frames: 64,
-                            max_audio_packets: 64,
-                        },
-                    ),
-                )
-                .map_err(|error| minori_avi_error("ASTRA_EMU_MINORI_AVI_FFMPEG_OPEN", error))?;
-            Ok(Self {
-                backend: MinoriAviBackend::Ffmpeg(decoder),
-                _reader: PhantomData,
-            })
-        }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        {
-            let _ = reader;
-            Err("ASTRA_EMU_MINORI_AVI_FFMPEG_UNAVAILABLE".to_owned())
-        }
-    }
-}
-
-impl<R> IncrementalMediaDecoder for MinoriAviDecoder<R> {
-    fn provider_id(&self) -> &'static str {
-        MINORI_AVI_STREAM_PROVIDER_ID
-    }
-
-    fn playback_config(&self) -> MediaPlaybackConfig {
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        match &self.backend {
-            MinoriAviBackend::Ffmpeg(decoder) => decoder.playback_config(),
-        }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        {
-            MediaPlaybackConfig::default()
-        }
-    }
-
-    fn read_next(&mut self) -> Result<Option<DecodedMediaPacket>, MediaError> {
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        {
-            match &mut self.backend {
-                MinoriAviBackend::Ffmpeg(decoder) => decoder.read_next(),
-            }
-        }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        Err(MediaError::message(
-            "ASTRA_EMU_MINORI_AVI_FFMPEG_UNAVAILABLE",
-        ))
-    }
-
-    fn seek(&mut self, position_us: u64) -> Result<u64, MediaError> {
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        match &mut self.backend {
-            MinoriAviBackend::Ffmpeg(decoder) => decoder.seek(position_us),
-        }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        {
-            let _ = position_us;
-            Err(MediaError::message(
-                "ASTRA_EMU_MINORI_AVI_FFMPEG_UNAVAILABLE",
-            ))
-        }
-    }
-
-    fn cancel(&mut self) -> Result<(), MediaError> {
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        match &mut self.backend {
-            MinoriAviBackend::Ffmpeg(decoder) => decoder.cancel(),
-        }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        Err(MediaError::message(
-            "ASTRA_EMU_MINORI_AVI_FFMPEG_UNAVAILABLE",
-        ))
-    }
-}
-
 fn is_avi_container_header(bytes: &[u8]) -> bool {
     bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
-fn minori_avi_error(prefix: &'static str, error: MediaError) -> String {
+fn avi_media_error(prefix: &'static str, error: MediaError) -> MediaError {
     let codes = match error {
         MediaError::Diagnostics(diagnostics) => diagnostics
             .iter()
@@ -302,52 +173,45 @@ fn minori_avi_error(prefix: &'static str, error: MediaError) -> String {
             .join(","),
         MediaError::Message(_) => String::new(),
     };
-    if codes.is_empty() {
-        tracing::error!(
-            event = "astra_emu_minori_avi_provider_error",
-            diagnostic_prefix = prefix,
-            "Minori AVI provider failed without a structured diagnostic code"
-        );
+    tracing::error!(
+        event = "astra_emu_minori_avi_provider_error",
+        diagnostic_prefix = prefix,
+        diagnostic_codes = %codes,
+        "AstraMedia FFmpeg provider rejected the Minori AVI preview"
+    );
+    let message = if codes.is_empty() {
         prefix.to_owned()
     } else {
-        tracing::error!(
-            event = "astra_emu_minori_avi_provider_error",
-            diagnostic_prefix = prefix,
-            diagnostic_codes = %codes,
-            "Minori AVI provider returned a structured diagnostic"
-        );
         format!("{prefix}:{codes}")
-    }
-}
-
-#[cfg(feature = "ffmpeg-vcpkg")]
-fn avi_media_error(prefix: &'static str, error: MediaError) -> MediaError {
-    let diagnostic = minori_avi_error(prefix, error);
+    };
     MediaError::Diagnostics(vec![astra_core::Diagnostic::blocking(
         "ASTRA_EMU_MINORI_AVI_PROVIDER",
-        diagnostic,
+        message,
     )])
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use astra_media::{DecodeKind, DecodeProvider, DecodeRequest, MediaError};
 
     use super::{
         is_avi_container_header, validate_preview_input_len, validate_video_dimensions,
-        MinoriAviDecodeProvider, MinoriAviDecoder, MAX_PREVIEW_INPUT_BYTES,
-        MINORI_AVI_DECODE_PROVIDER_ID,
+        MinoriAviDecodeProvider, MAX_PREVIEW_INPUT_BYTES, MINORI_AVI_DECODE_PROVIDER_ID,
     };
 
     #[test]
     fn container_identity_is_checked_before_provider_open() {
-        let result = MinoriAviDecoder::new(Cursor::new(b"not an AVI".to_vec()));
-        assert!(matches!(
-            result,
-            Err(error) if error == "ASTRA_EMU_MINORI_AVI_HEADER"
-        ));
+        let provider = MinoriAviDecodeProvider;
+        let result = provider.decode(&DecodeRequest {
+            kind: DecodeKind::Video,
+            codec: "avi".into(),
+            bytes: b"not an AVI".to_vec().into(),
+            profile: "astra.manager.preview.v1".into(),
+        });
+        let MediaError::Diagnostics(diagnostics) = result.expect_err("invalid AVI header") else {
+            panic!("invalid AVI header must remain a blocking diagnostic");
+        };
+        assert_eq!(diagnostics[0].code, "ASTRA_EMU_MINORI_AVI_PREVIEW_HEADER");
         assert!(is_avi_container_header(b"RIFF\x10\0\0\0AVI "));
         assert!(!is_avi_container_header(b"RIFF\x10\0\0\0WAVE"));
     }

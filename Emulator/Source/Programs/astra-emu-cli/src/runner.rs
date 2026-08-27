@@ -43,15 +43,18 @@ use astra_emu_manager_core::{
     DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits,
     SourceGrant,
 };
-use astra_emu_minori::{MinoriAviDecoder, MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
+use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_headless_protocol::{
     ArtifactEntry, ArtifactManifest, ButtonState, CheckpointResult, Diagnostic, GamepadControl,
     InputMessage, ObservationPredicate, PhysicalInput, PointerButton, RunReport, RunStatus,
     TouchPhase, HEADLESS_RUN_REPORT_SCHEMA as STANDARD_HEADLESS_RUN_REPORT_SCHEMA,
 };
+#[cfg(feature = "ffmpeg-vcpkg")]
+use astra_media::{open_ffmpeg_incremental_reader, IncrementalDecodeBudget};
 use astra_media::{
     DecodeBindingContext, DecodeOutput as MediaDecodeOutput, DecodeProviderRegistry, DecodeRequest,
-    DecodedVideoFrame, ImageDecodeProvider, MediaError, PlayerDecodedAudio,
+    DecodedVideoFrame, ImageDecodeProvider, IncrementalMediaDecoder, MediaError,
+    PlayerDecodedAudio,
 };
 use astra_media_core::{
     BlendMode, CpuFilterExecutor, CpuFrame, Layer2DContent, Layer2DState, Layer2DTransaction,
@@ -2678,12 +2681,10 @@ fn minori_media_error(error: MediaError) -> String {
 }
 
 impl MinoriAviPlayback {
-    fn open(
-        decoder: MinoriAviDecoder<astra_byte_source::BoundedByteSourceReader>,
-    ) -> Result<Self, String> {
+    fn open(decoder: Box<dyn IncrementalMediaDecoder>) -> Result<Self, String> {
         Ok(Self {
             cursor: astra_media::IncrementalMediaPlayback::open(
-                Box::new(decoder),
+                decoder,
                 astra_media::IncrementalPlaybackLimits::default(),
             )
             .map_err(minori_media_error)?,
@@ -6461,7 +6462,7 @@ impl<'a> RuntimeDriver<'a> {
             if !is_avi_container_header(&header) {
                 return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".into());
             }
-            let decoder = MinoriAviDecoder::new(reader)?;
+            let decoder = open_minori_avi_incremental_decoder(reader)?;
             let audio_stream_id =
                 if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
                     let stream_id = MOVIE_AUDIO_STREAM_BASE
@@ -6820,6 +6821,34 @@ fn matches_blackboard_observation(
                 .map(|actual| actual == expected)
         })
         .unwrap_or(false)
+}
+
+fn open_minori_avi_incremental_decoder<R>(
+    reader: R,
+) -> Result<Box<dyn IncrementalMediaDecoder>, String>
+where
+    R: Read + 'static,
+{
+    #[cfg(not(feature = "ffmpeg-vcpkg"))]
+    {
+        let _ = reader;
+        return Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned());
+    }
+    #[cfg(feature = "ffmpeg-vcpkg")]
+    {
+        open_ffmpeg_incremental_reader(
+            "avi",
+            reader,
+            IncrementalDecodeBudget {
+                max_encoded_bytes: MAX_MOVIE_DECODED_BYTES,
+                max_video_frame_bytes: 64 * 1024 * 1024,
+                max_pending_packets: 64,
+                max_video_frames: MAX_MOVIE_FRAMES,
+                max_audio_packets: MAX_MOVIE_FRAMES,
+            },
+        )
+        .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())
+    }
 }
 
 fn is_avi_container_header(bytes: &[u8]) -> bool {

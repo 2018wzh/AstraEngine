@@ -3,6 +3,7 @@
 2026 年 8 月 27 日：收紧 Minori 动态插件 descriptor 的 feature identity 来源。Cargo build script 现在以 `CARGO_FEATURE_*` 为主、`CARGO_CFG_FEATURE` 为补充并去重，避免不同 Cargo 环境下 descriptor 与实际 `cdylib` 的 feature 描述漂移；stable Release 构建已核对启用 `ffmpeg-vcpkg` 时的 descriptor 与二进制一致。该项不改变 decoder 选择，真实八包 Headless 仍需继续完成四路线和 E3 验收。
 
 2026 年 8 月 27 日：修复 Title launch 在完成一条 route 后再次开始新游戏时沿用已结束脚本的状态错误。`MinoriSession` 现在保存经验证的 entry script URI；Title 的 `StartGame` 会重新从当前 VFS 读取并解析该入口，gallery script 的显式启动路径不受影响。新增 provider 级脱敏回归，使用物理选择依次走完四个 route，确认 `REN/AYAME/SUI/TOHKA` clear flag、标题变体 0→1→2 和每次返回 Title 的非 terminal 语义。该项把自然多路线的 cross-module 控制流覆盖从 VM-only 推进到 provider/VFS E1；真实四路线 Headless、完整鉴赏、正式音频听审和 Windows E3 仍保持 blocking。
+2026 年 8 月 27 日：移除 Manager 与 Headless CLI 对 `MinoriAviDecoder` family wrapper 的生产依赖。两个消费端现在直接在 composition root 注册并打开 AstraMedia `FFMPEG_INCREMENTAL_PROVIDER_ID`，把有界 VFS reader 交给 `IncrementalMediaPlayback`；Minori 只保留 AVI 扩展名/RIFF 头约束和 preview provider binding。没有 `ffmpeg-vcpkg`、provider probe 失败、codec/container 不匹配或 FFmpeg decode 错误时直接 blocking，不存在手写 decoder、平台 fallback 或隐式 provider 选择。该项已通过 Minori lib、Manager/CLI default check；FFmpeg feature build 仍需在本机完成一次稳定的增量编译验证。
 
 2026 年 8 月 27 日：FamilySupport 的 VFS extract 现在同时覆盖整树与单 entry 导出。两条路径都检查目标目录项（包括悬空符号链接）、相对 selector、容量、逐个 4 MiB range 的取消、短读、owner-only 权限和临时文件清理；Manager 的单文件导出不再直接写目标文件，而是强制经过当前 family mount 的原子 bounded extract。该项只收紧导出边界，Linux FUSE、macOS extract 和 Windows E3 仍需真实宿主证据。
 

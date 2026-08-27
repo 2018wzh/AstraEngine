@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    io::Cursor,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender},
@@ -11,11 +10,11 @@ use std::{
 
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
-use astra_emu_minori::MinoriAviDecoder;
+#[cfg(feature = "ffmpeg-vcpkg")]
 use astra_media::{
-    IncrementalMediaPlayback, IncrementalPlaybackLimits, IncrementalPlaybackOutput,
-    PlayerDecodedAudio,
+    open_ffmpeg_incremental_reader, IncrementalDecodeBudget, IncrementalPlaybackLimits,
 };
+use astra_media::{IncrementalMediaPlayback, IncrementalPlaybackOutput, PlayerDecodedAudio};
 use astra_platform::{
     DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
 };
@@ -23,6 +22,8 @@ use rfvp_astra_provider::{
     fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
     FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
 };
+#[cfg(feature = "ffmpeg-vcpkg")]
+use std::io::Cursor;
 
 use crate::audio_executor::HostAudioExecutor;
 
@@ -85,22 +86,45 @@ struct MinoriAviStreamDecoder {
 
 impl MinoriAviStreamDecoder {
     fn open(bytes: OwnedByteBuffer) -> Result<Self, String> {
-        let decoder = MinoriAviDecoder::new(Cursor::new(bytes))?;
-        let playback = IncrementalMediaPlayback::open(
-            Box::new(decoder),
-            IncrementalPlaybackLimits {
-                max_video_frame_bytes: MAX_DECODED_BYTES,
-                max_audio_samples: MAX_AUDIO_SAMPLES,
-                max_pending_audio_samples: MAX_AUDIO_SAMPLES,
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(Self {
-            playback,
-            ready_outputs: Vec::new(),
-            pending: VecDeque::new(),
-            ended: false,
-        })
+        if !is_avi_container_header(&bytes) {
+            return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".to_owned());
+        }
+        #[cfg(not(feature = "ffmpeg-vcpkg"))]
+        {
+            let _ = bytes;
+            Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
+        }
+        #[cfg(feature = "ffmpeg-vcpkg")]
+        {
+            let decoder = open_ffmpeg_incremental_reader(
+                "avi",
+                Cursor::new(bytes),
+                IncrementalDecodeBudget {
+                    max_encoded_bytes: usize::try_from(MAX_ENCODED_BYTES)
+                        .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_BUDGET".to_owned())?,
+                    max_video_frame_bytes: MAX_DECODED_BYTES,
+                    max_pending_packets: VIDEO_RING_FRAMES * 4,
+                    max_video_frames: MAX_FRAMES,
+                    max_audio_packets: MAX_FRAMES,
+                },
+            )
+            .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())?;
+            let playback = IncrementalMediaPlayback::open(
+                decoder,
+                IncrementalPlaybackLimits {
+                    max_video_frame_bytes: MAX_DECODED_BYTES,
+                    max_audio_samples: MAX_AUDIO_SAMPLES,
+                    max_pending_audio_samples: MAX_AUDIO_SAMPLES,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(Self {
+                playback,
+                ready_outputs: Vec::new(),
+                pending: VecDeque::new(),
+                ended: false,
+            })
+        }
     }
 
     fn duration_ns(&self) -> Result<u64, String> {
@@ -175,6 +199,10 @@ fn minori_movie_packet_sort_key(packet: &FvpMoviePacket) -> (u64, u8) {
         FvpMoviePacket::Audio(chunk) => (chunk.pts_ms, 1),
         FvpMoviePacket::End => (u64::MAX, 2),
     }
+}
+
+fn is_avi_container_header(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"AVI "
 }
 
 struct PlatformMovieDecoder {

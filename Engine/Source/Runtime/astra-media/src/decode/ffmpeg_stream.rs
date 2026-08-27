@@ -8,8 +8,9 @@ use tempfile::{Builder, NamedTempFile};
 
 use super::{decode_error, MediaError};
 use crate::{
-    DecodedMediaPacket, IncrementalDecodeCapability, IncrementalDecodeProvider,
-    IncrementalDecodeRequest, IncrementalMediaDecoder, LateVideoPolicy, MediaPlaybackConfig,
+    DecodedMediaPacket, IncrementalDecodeBudget, IncrementalDecodeCapability,
+    IncrementalDecodeProvider, IncrementalDecodeProviderRegistry, IncrementalDecodeRequest,
+    IncrementalMediaDecoder, LateVideoPolicy, MediaPlaybackConfig,
 };
 
 mod backend;
@@ -67,6 +68,29 @@ impl FfmpegIncrementalDecodeProvider {
         })?;
         Ok(Self)
     }
+}
+
+/// Open the explicitly selected FFmpeg incremental provider for a bounded
+/// reader.  This is a convenience composition helper; provider selection is
+/// still fixed to [`FFMPEG_INCREMENTAL_PROVIDER_ID`] and the registry keeps
+/// rejecting duplicate, missing, or ineligible providers.  Callers that need
+/// a different backend continue to use [`IncrementalDecodeProviderRegistry`]
+/// directly.
+pub fn open_ffmpeg_incremental_reader<R>(
+    codec: impl Into<String>,
+    reader: R,
+    budget: IncrementalDecodeBudget,
+) -> Result<Box<dyn IncrementalMediaDecoder>, MediaError>
+where
+    R: Read + 'static,
+{
+    let provider = FfmpegIncrementalDecodeProvider::probe()?;
+    let mut registry = IncrementalDecodeProviderRegistry::default();
+    registry.register(Box::new(provider))?;
+    registry.open(
+        FFMPEG_INCREMENTAL_PROVIDER_ID,
+        IncrementalDecodeRequest::new(codec, Box::new(reader)).with_budget(budget),
+    )
 }
 
 impl IncrementalDecodeProvider for FfmpegIncrementalDecodeProvider {
