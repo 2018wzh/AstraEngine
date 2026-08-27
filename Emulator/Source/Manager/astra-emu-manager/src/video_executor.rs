@@ -145,11 +145,7 @@ impl MinoriAviStreamDecoder {
         }
         self.pending
             .make_contiguous()
-            .sort_by_key(|packet| match packet {
-                FvpMoviePacket::Video(frame) => frame.pts_ms,
-                FvpMoviePacket::Audio(chunk) => chunk.pts_ms,
-                FvpMoviePacket::End => u64::MAX,
-            });
+            .sort_by_key(minori_movie_packet_sort_key);
         if let Some(packet) = self.pending.pop_front() {
             return Ok(Some(packet));
         }
@@ -162,6 +158,19 @@ impl MinoriAviStreamDecoder {
 
     fn close(&mut self) -> Result<(), String> {
         self.playback.cancel().map_err(|error| error.to_string())
+    }
+}
+
+/// Keep the ordering emitted by `IncrementalMediaPlayback` after converting
+/// microsecond timestamps to the manager's millisecond timeline.  A timestamp
+/// alone is not enough: stable video-before-audio ordering at an equal PTS is
+/// part of the shared cursor contract and prevents an unstable sort from
+/// changing the presentation/audio edge order.
+fn minori_movie_packet_sort_key(packet: &FvpMoviePacket) -> (u64, u8) {
+    match packet {
+        FvpMoviePacket::Video(frame) => (frame.pts_ms, 0),
+        FvpMoviePacket::Audio(chunk) => (chunk.pts_ms, 1),
+        FvpMoviePacket::End => (u64::MAX, 2),
     }
 }
 
@@ -1222,5 +1231,22 @@ mod tests {
         );
         assert!(validate_family_video_provider("minori", MINORI_VIDEO_PROVIDER_BINDING).is_ok());
         assert!(validate_family_video_provider("fvp", "platform").is_ok());
+    }
+
+    #[test]
+    fn minori_media_sort_preserves_video_before_audio_at_equal_pts() {
+        let video = FvpMoviePacket::Video(FvpMovieFrame {
+            pts_ms: 10,
+            width: 1,
+            height: 1,
+            rgba8: vec![0, 0, 0, 255],
+        });
+        let audio = FvpMoviePacket::Audio(FvpMovieAudioChunk {
+            pts_ms: 10,
+            sample_rate: 48_000,
+            channels: 2,
+            samples: vec![0.0, 0.0],
+        });
+        assert!(minori_movie_packet_sort_key(&video) < minori_movie_packet_sort_key(&audio));
     }
 }

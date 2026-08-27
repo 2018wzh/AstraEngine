@@ -4,6 +4,8 @@
 
 同日修复 FFmpeg 增量 demux 的错误可见性：`FfmpegPlaybackDecoder` 直接读取 `Packet::read`，明确区分成功、EOF 和底层错误，避免 `Input::packets()` 迭代器把损坏输入吞成 EOF。该修复通过 `astra-media` library 与 FFmpeg stream focused tests；没有改变 provider 选择或引入 fallback。
 
+Manager 的 Minori movie adapter 现在在毫秒时间轴上保留公共游标的 `(PTS, track_order)` 顺序，同一时间戳固定先提交视频再提交音频；binary focused tests 验证该合并规则。该项只收紧确定性，不扩大已有媒体或平台 evidence。
+
 Minori native host 现已消费 `minori.progress_in_background` observation：Windows 失焦暂停/恢复由配置决定，其他 family 不受影响；provider/CLI focused tests 已通过。真实焦点、音频恢复、完整路线和 Windows E3 仍保持开放。
 
 Manager and Headless CLI family-mounted PNG/JPEG/BMP/WebP preview now bind `astra.decode.image` through `DecodeProviderRegistry` and transfer bounded RGBA8 pixels to their presentation paths. Minori ANI/SQZ previews bind the family-owned `astra.decode.minori.image` provider for a bounded first frame in both consumers. Family audio previews bind the pure-Rust `astra.decode.symphonia` provider explicitly and expose bounded metadata; Minori Manager AVI playback and VFS first-frame preview now use AstraMedia's shared incremental `ffmpeg-vcpkg` provider, while FVP Windows RIFF/AVI video binds the explicit Media Foundation provider and unsupported targets remain blocking. Minori production playback no longer depends on a handwritten WMV3/AVI decoder.

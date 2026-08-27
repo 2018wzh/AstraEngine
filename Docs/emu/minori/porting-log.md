@@ -9,6 +9,7 @@
 - 新增的边界测试覆盖 tick 跳变、轨道错配、packet/音频队列预算、非法配置以及迟到帧的 block/drop 两种策略。FFmpeg 和 Minori 测试继续使用相同的共享游标。
 - `take_ready_outputs` 现在是宿主适配器的统一所有权边界：它将当前帧与待提交 PCM 按 PTS 稳定排序后移动给调用方，避免 Manager 与 CLI 各自实现 packet 排序和重复“新帧”判断。新增测试确认批次消费后游标不重复发出同一帧，下一次推进只转移真正的新输出。
 - FFmpeg 的增量与首帧/整段 provider demux 都改为直接调用 `Packet::read`，不再使用会吞掉非 EOF 错误的 `Input::packets()` 迭代器。截断或损坏的媒体现在保留底层错误并返回结构化 diagnostic，不会静默变成正常 EOF；FFmpeg stream 的真实样本回归仍为 9/9，decode-provider 回归为 14/14。
+- Manager 将公共游标输出从微秒转换到毫秒时间轴后，仍按 `(PTS, track_order)` 合并 pending 队列，视频在相同 PTS 下先于音频；新增 binary 回归覆盖该稳定顺序，避免不稳定的同时间戳排序改变呈现/音频边沿。
 
 ### 当前 FFmpeg 真实样本 media slice
 
