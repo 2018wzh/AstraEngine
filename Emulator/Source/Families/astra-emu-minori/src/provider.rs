@@ -4527,10 +4527,10 @@ fn load_script_uri(
         .inspect_err(|error| {
             tracing::debug!(
                 target: "astra_emu_minori::resource",
-                event = "astra_emu_minori_chain_script_read_failed",
+                event = "astra_emu_minori_script_read_failed",
                 resource_identity = %Hash256::from_sha256(script_uri.as_bytes()),
                 diagnostic = %error.code(),
-                "chain script read failed"
+                "script read failed"
             );
         })?;
     let script_hash = Hash256::from_sha256(&source);
