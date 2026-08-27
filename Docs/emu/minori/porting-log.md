@@ -4,6 +4,10 @@
 
 - `PlaintextCache` 枚举缓存根目录时拒绝所有符号链接，并将其视为 `ASTRA_EMU_MINORI_CACHE_CORRUPT`。这样查找不会跟随目录外目标，也不会修改无关文件权限；Minori 重新挂载后对被篡改缓存保持阻断，不会重新解密或使用 fallback。
 
+## 2026 年 8 月 27 日：当前 ABI v9 direct-entry 终点复验
+
+- 在重装后的 stable 工具链上重新构建并签名 FFmpeg profile，当前样本的 A01 direct-entry 终点 slice 通过：3,084 fixed steps、5 个提交/栅格化帧、2,388,480 个音频帧、无 diagnostic，并到达 `terminal=true`。该运行没有保留正文、截图或媒体 payload，也没有把短程终点误记为首路线全流程、自然解锁、正式音频听审或 Windows E3 证据。
+
 ## 2026 年 8 月 27 日：PAZ 明文范围读取缓存
 
 - `MinoriMountedVfs::decoded_entry` 在完成 source mutation、encrypted hash、解密和明文尺寸校验后，保留一个有界的进程内明文 entry（最大 64 MiB）。同一 entry 的后续 4 MiB range 不再重复从磁盘 cache 读取完整明文；identity 变化会立即替换缓存，超过上限的 entry 不驻留进程内。
