@@ -12,6 +12,7 @@
 ## 2026 年 8 月 27 日：缓存私有目录边界
 
 - `PlaintextCache` 枚举缓存根目录时拒绝所有符号链接，并将其视为 `ASTRA_EMU_MINORI_CACHE_CORRUPT`。这样查找不会跟随目录外目标，也不会修改无关文件权限；Minori 重新挂载后对被篡改缓存保持阻断，不会重新解密或使用 fallback。
+- FamilySupport 还增加了跨实例 cache 回归：释放首个 cache 实例后，第二个实例从同一私有根目录验证并读取 envelope；private-profile identity 变化只产生 miss。该项是公共 cache contract 证据，不替代真实八包的第二次 full verify、容量淘汰和跨运行 volume evidence。
 
 ## 2026 年 8 月 27 日：当前 ABI v9 direct-entry 终点复验
 

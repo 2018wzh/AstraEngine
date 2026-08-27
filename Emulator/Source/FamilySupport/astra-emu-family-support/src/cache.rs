@@ -381,6 +381,32 @@ mod tests {
     }
 
     #[test]
+    fn cache_identity_survives_a_new_process_instance() {
+        let root = tempfile::tempdir().unwrap();
+        let first = identity("cross-run");
+        {
+            let cache = PlaintextCache::new(root.path().to_path_buf(), 4096, 1024).unwrap();
+            cache
+                .put(&first, b"plaintext from the first instance")
+                .unwrap();
+        }
+
+        // Re-open the same private root to model a later mount/session.  The
+        // second instance must discover the persisted envelope and validate
+        // its payload against the same identity instead of reusing a stale
+        // in-memory entry or silently treating corruption as a miss.
+        let cache = PlaintextCache::new(root.path().to_path_buf(), 4096, 1024).unwrap();
+        assert_eq!(
+            cache.get(&first).unwrap().as_deref(),
+            Some(b"plaintext from the first instance".as_slice())
+        );
+
+        let mut changed = first.clone();
+        changed.private_profile_hash = Hash256::from_sha256(b"changed-private-profile");
+        assert!(cache.get(&changed).unwrap().is_none());
+    }
+
+    #[test]
     fn lru_evicts_the_oldest_entry() {
         let root = tempfile::tempdir().unwrap();
         let per_file = CACHE_HEADER_BYTES as u64 + 4;
