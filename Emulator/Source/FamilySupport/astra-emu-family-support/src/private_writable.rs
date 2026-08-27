@@ -41,7 +41,7 @@ pub fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), Legacy
             "private file destination parent is not a directory",
         ));
     }
-    reject_symlink(parent)?;
+    reject_path_symlinks(parent)?;
     let name = path
         .file_name()
         .filter(|name| !name.is_empty())
@@ -365,6 +365,25 @@ fn path_entry_exists(path: &Path) -> Result<bool, LegacyProviderError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(error)),
     }
+}
+
+fn reject_path_symlinks(path: &Path) -> Result<(), LegacyProviderError> {
+    let mut cursor = PathBuf::new();
+    for component in path.components() {
+        cursor.push(component);
+        match fs::symlink_metadata(&cursor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(invalid(
+                    "ASTRA_EMU_WRITABLE_SYMLINK",
+                    "private file paths may not cross symlinks",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(error)),
+        }
+    }
+    Ok(())
 }
 
 fn reject_tree_symlinks(root: &Path, leaf: &Path) -> Result<(), LegacyProviderError> {
