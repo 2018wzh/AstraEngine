@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026-08-27: `PlaintextCache` initialization now rejects every symlink under the private cache root and reports it as corruption. This prevents a cache lookup from escaping the root and changing permissions on an unrelated target. The Minori mapping is covered by a focused corruption regression; cache identity, LRU, and atomic-write contracts are unchanged.
+
 2026 年 8 月 27 日：Minori PAZ `decoded_entry` 增加单 entry、64 MiB 上限的进程内明文缓存。首次读取仍执行 source mutation、encrypted hash、解密、尺寸校验和既有磁盘 cache 完整性校验；同一 identity 的后续 bounded range read 直接复用已验证明文，避免 full verify 顺序读取时重复加载整个磁盘 entry。超过上限或 identity 变化时不驻留；movie 的 source-backed range transform 保持不变。新增合成回归覆盖首读 miss 与后续 range hit。该项只改善 I/O 分配行为，真实八包 cache full verify 与 cache identity evidence 仍开放。
 
 同日，真实八包启用 cache 的 full verify 完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。这证明本轮完整流读在当前 identity 下可完成，但不关闭 identity 变化、淘汰、损坏恢复或跨运行 cache identity 等剩余门禁。

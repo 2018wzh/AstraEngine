@@ -1,5 +1,9 @@
 # Minori 移植日志
 
+## 2026 年 8 月 27 日：缓存私有目录边界
+
+- `PlaintextCache` 枚举缓存根目录时拒绝所有符号链接，并将其视为 `ASTRA_EMU_MINORI_CACHE_CORRUPT`。这样查找不会跟随目录外目标，也不会修改无关文件权限；Minori 重新挂载后对被篡改缓存保持阻断，不会重新解密或使用 fallback。
+
 ## 2026 年 8 月 27 日：PAZ 明文范围读取缓存
 
 - `MinoriMountedVfs::decoded_entry` 在完成 source mutation、encrypted hash、解密和明文尺寸校验后，保留一个有界的进程内明文 entry（最大 64 MiB）。同一 entry 的后续 4 MiB range 不再重复从磁盘 cache 读取完整明文；identity 变化会立即替换缓存，超过上限的 entry 不驻留进程内。
