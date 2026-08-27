@@ -36,13 +36,28 @@ fn main() {
     let rustc_fingerprint = format!("sha256.{}", hex_sha256(identity.as_bytes()));
     println!("cargo:rustc-env=ASTRA_MINORI_RUSTC_FINGERPRINT={rustc_fingerprint}");
 
-    let mut features = env::var("CARGO_CFG_FEATURE")
-        .expect("ASTRA_MINORI_BUILD_FEATURE_IDENTITY_MISSING")
-        .split(',')
-        .filter(|name| !matches!(*name, "default" | "dynamic-plugin-export"))
-        .map(str::to_owned)
+    // Cargo exposes activated package features to build scripts through the
+    // `CARGO_FEATURE_*` variables.  `CARGO_CFG_FEATURE` is a rustc cfg value,
+    // not a reliable build-script input (it is absent or empty on some Cargo
+    // versions).  Keep it as a supplemental source for older toolchains, then
+    // normalize and deduplicate both sources before hashing the identity so a
+    // descriptor always describes the binary that was actually built.
+    let mut features = env::vars()
+        .filter_map(|(name, value)| {
+            let feature = name.strip_prefix("CARGO_FEATURE_")?;
+            (value == "1").then(|| feature.to_ascii_lowercase().replace('_', "-"))
+        })
+        .chain(
+            env::var("CARGO_CFG_FEATURE")
+                .unwrap_or_default()
+                .split(',')
+                .filter(|name| !name.is_empty())
+                .map(str::to_ascii_lowercase),
+        )
+        .filter(|name| !matches!(name.as_str(), "default" | "dynamic-plugin-export"))
         .collect::<Vec<_>>();
     features.sort();
+    features.dedup();
     let feature_identity = format!(
         "garbro=b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0;features={}",
         if features.is_empty() {

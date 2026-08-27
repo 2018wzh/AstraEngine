@@ -1,5 +1,10 @@
 # Minori 移植日志
 
+## 2026-08-27：FFmpeg 构建身份校正
+
+- Minori 动态插件 descriptor 现在从 Cargo build script 实际提供的 `CARGO_FEATURE_*` 变量收集可选 feature，并以 `CARGO_CFG_FEATURE` 作为补充后规范化去重，避免不同 Cargo 环境下 descriptor 与 `cdylib` 的 feature 描述漂移；当前 stable Release 构建已核对启用 `ffmpeg-vcpkg` 时两者身份一致。
+- 该项只修复构建/签名边界，不改变 decoder 选择：Minori 仍必须显式绑定 AstraMedia `ffmpeg-vcpkg`，缺 provider 或运行时库直接 blocking。真实八包 Headless 仍需继续完成四路线、鉴赏、正式音频听审和 Windows E3 验收。
+
 ## 2026 年 8 月 27 日：Title route 重新进入
 
 - 修复一条 route 在 Title launch 中完成后再次按下 New Game 会继续使用已到达脚本末尾的 VM 状态的问题。session 现在保留经验证的初始 entry URI；Title 的 `StartGame` 先重新读取该脚本，gallery 仍使用自己的显式 script replacement。
