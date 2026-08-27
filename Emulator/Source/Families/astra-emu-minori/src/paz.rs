@@ -2177,6 +2177,47 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_plaintext_cache_is_a_blocking_mount_read_error() {
+        let temp = tempfile::tempdir().unwrap();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            fs::write(
+                temp.path().join(format!("{role}.paz")),
+                fixture_archive(role, 0),
+            )
+            .unwrap();
+        }
+        let cache_root = temp.path().join("cache");
+        {
+            let cache = PlaintextCache::new(cache_root.clone(), 1024 * 1024, 1024 * 1024).unwrap();
+            let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
+            let read = vfs.read_range("minori:/scr/scr.bin", 0, 4).unwrap();
+            assert_eq!(read.bytes.as_slice(), b"fixt");
+            assert!(!read.cache_hit);
+        }
+
+        let cache_file = fs::read_dir(&cache_root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "bin"))
+            .expect("the first read must materialize one cache entry");
+        let mut corrupted = fs::read(&cache_file).unwrap();
+        let last = corrupted
+            .last_mut()
+            .expect("cache entry contains a header and payload");
+        *last ^= 0xff;
+        fs::write(cache_file, corrupted).unwrap();
+
+        let cache = PlaintextCache::new(cache_root, 1024 * 1024, 1024 * 1024).unwrap();
+        let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
+        assert_eq!(
+            vfs.read_range("minori:/scr/scr.bin", 0, 4)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_CACHE_CORRUPT"
+        );
+    }
+
+    #[test]
     fn raw_movie_range_uses_the_entry_relative_transform_offset() {
         let temp = tempfile::tempdir().unwrap();
         for role in REQUIRED_ARCHIVE_ROLES {
