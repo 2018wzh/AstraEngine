@@ -1,6 +1,4 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
     sync::{atomic::AtomicBool, Arc},
 };
@@ -8,7 +6,7 @@ use std::{
 use astra_core::Hash256;
 use astra_emu_family_core::{LegacyCoreError, LegacyMountedVfs, LEGACY_VFS_MAX_READ_BYTES};
 use astra_emu_family_support::{
-    enforce_private_file_permissions, extract_vfs, mount_family_vfs, verify_vfs, ExtractSelection,
+    extract_vfs, mount_family_vfs, verify_vfs, write_private_file_atomic, ExtractSelection,
 };
 use astra_emu_minori::MinoriVfsFamilyFactory;
 use clap::{Args, Subcommand, ValueEnum};
@@ -207,7 +205,7 @@ fn read(
         return Err("ASTRA_EMU_VFS_READ_SHORT".into());
     }
     if let Some(path) = output {
-        write_private(path, &read.bytes)?;
+        write_private_file_atomic(path, &read.bytes)?;
         return Ok(());
     }
     match format {
@@ -241,46 +239,5 @@ fn read(
             })?
         ),
     }
-    Ok(())
-}
-
-fn write_private(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    if path.exists() {
-        return Err("ASTRA_EMU_VFS_READ_OUTPUT_EXISTS".into());
-    }
-    let parent = path
-        .parent()
-        .filter(|path| path.is_dir())
-        .ok_or("ASTRA_EMU_VFS_READ_OUTPUT_PARENT")?;
-    let name = path
-        .file_name()
-        .ok_or("ASTRA_EMU_VFS_READ_OUTPUT_NAME")?
-        .to_string_lossy();
-    let temporary = parent.join(format!(".{name}.astra-tmp"));
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&temporary)?;
-    if let Err(error) = enforce_private_file_permissions(&temporary) {
-        drop(file);
-        if fs::remove_file(&temporary).is_err() {
-            return Err("ASTRA_EMU_VFS_READ_OUTPUT_PERMISSION_CLEANUP".into());
-        }
-        return Err(error.into());
-    }
-    let result = (|| -> std::io::Result<()> {
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result?;
     Ok(())
 }

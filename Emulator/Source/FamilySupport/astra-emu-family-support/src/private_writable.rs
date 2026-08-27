@@ -4,12 +4,84 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use astra_core::Hash256;
 use astra_emu_family_api::{
     LegacyProviderError, LegacyWritableFileEntryV1, LegacyWritableFileHostV1,
     LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
 };
 
 const DEFAULT_MAX_IO_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Write a bounded caller-owned payload to a private destination using a
+/// temporary file and an atomic commit. The helper is shared by CLI range
+/// output and other host-side support paths; it never follows a destination
+/// symlink and never silently drops a cleanup failure.
+pub fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), LegacyProviderError> {
+    if bytes.len() as u64 > DEFAULT_MAX_IO_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_WRITABLE_RANGE",
+            "private file write exceeds the configured limit",
+        ));
+    }
+    if path_entry_exists(path)? {
+        return Err(invalid(
+            "ASTRA_EMU_WRITABLE_EXISTS",
+            "private file destination already exists",
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_WRITABLE_PARENT",
+            "private file destination has no parent",
+        )
+    })?;
+    if !parent.is_dir() {
+        return Err(invalid(
+            "ASTRA_EMU_WRITABLE_PARENT",
+            "private file destination parent is not a directory",
+        ));
+    }
+    reject_symlink(parent)?;
+    let name = path
+        .file_name()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_WRITABLE_NAME",
+                "private file destination name is invalid",
+            )
+        })?;
+    let temporary = parent.join(format!(
+        ".{}.astra-tmp-{}-{}",
+        name.to_string_lossy(),
+        std::process::id(),
+        Hash256::from_sha256(path.as_os_str().to_string_lossy().as_bytes()).to_hex()
+    ));
+    if path_entry_exists(&temporary)? {
+        return Err(invalid(
+            "ASTRA_EMU_WRITABLE_STAGING",
+            "private file staging path already exists",
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    set_private_create_mode(&mut options);
+    let mut file = options.open(&temporary).map_err(io_error)?;
+    let result = (|| {
+        set_private_file_permissions(&temporary)?;
+        file.write_all(bytes).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        drop(file);
+        fs::rename(&temporary, path).map_err(io_error)
+    })();
+    if result.is_err() && path_entry_exists(&temporary)? && fs::remove_file(&temporary).is_err() {
+        return Err(invalid(
+            "ASTRA_EMU_WRITABLE_CLEANUP",
+            "private file write failed and staging cleanup also failed",
+        ));
+    }
+    result
+}
 
 /// A session-scoped filesystem port rooted in a caller-selected private data
 /// directory. Every operation rejects symlinks and remains beneath that root.
@@ -287,6 +359,14 @@ fn reject_symlink(path: &Path) -> Result<(), LegacyProviderError> {
     Ok(())
 }
 
+fn path_entry_exists(path: &Path) -> Result<bool, LegacyProviderError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(error)),
+    }
+}
+
 fn reject_tree_symlinks(root: &Path, leaf: &Path) -> Result<(), LegacyProviderError> {
     let relative = leaf.strip_prefix(root).map_err(|_| {
         invalid(
@@ -449,5 +529,16 @@ mod tests {
                 },
             )
             .is_err());
+    }
+
+    #[test]
+    fn atomic_private_file_write_rejects_existing_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("range.bin");
+        write_private_file_atomic(&destination, &[1, 2, 3]).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), &[1, 2, 3]);
+        let error = write_private_file_atomic(&destination, &[9]).unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_WRITABLE_EXISTS");
+        assert_eq!(std::fs::read(destination).unwrap(), &[1, 2, 3]);
     }
 }

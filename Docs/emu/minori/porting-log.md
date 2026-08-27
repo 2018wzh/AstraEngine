@@ -4,6 +4,7 @@
 
 - FamilySupport 新增与整树导出共用约束的单 entry 原子导出：先验证 manifest entry、相对路径、容量和目标目录项，再以 owner-only 临时文件按 4 MiB range 流式读取，完成同步后提交到目标文件。
 - Manager 的 VFS 导出现在只接受当前 family mount，并通过该 helper 写入；既有文件（包含符号链接）、非法 selector、取消、短读和中途失败都会阻断并清理暂存，不再使用无界 `std::fs::write` 或暴露本地目标路径。该项仍不构成 macOS extract、Linux FUSE 或 Windows E3 证据。
+- 通用 `vfs read --output` 也复用同一类 FamilySupport 私有原子写入 helper，统一 64 MiB 上限、符号链接拒绝、owner-only 权限和失败清理；默认 report 模式与显式 hex/text stdout 模式保持互斥。
 
 ## 2026 年 8 月 27 日：缓存私有目录边界
 
