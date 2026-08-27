@@ -26,7 +26,7 @@ use std::{
     io::Cursor,
     path::PathBuf,
     rc::Rc,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -39,7 +39,8 @@ use astra_emu_family_api::{
     LegacyVideoMode,
 };
 use astra_emu_family_support::{
-    LegacyMountedVfsReaderAdapter, LegacyVfsFamilyRegistry, LegacyVfsViewer, ViewerPreview,
+    enforce_private_directory_permissions, extract_vfs_entry, LegacyMountedVfsReaderAdapter,
+    LegacyVfsFamilyRegistry, LegacyVfsViewer, ViewerPreview,
 };
 use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
@@ -4553,27 +4554,35 @@ impl ManagerController for AstraEmuManagerController {
     }
 
     fn export_vfs_file(&mut self, path: &str) -> Result<ManagerViewModel, String> {
-        let mount_set_id = self
-            .active_mount_set_id
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_VFS_NO_MOUNT".to_owned())?;
         let path = path.trim_matches('/');
-        let bytes = self
-            .vfs
-            .read_file(&mount_set_id, path, 256 * 1024 * 1024)
-            .map_err(|error| error.code().to_owned())?;
+        if path.is_empty() || path.contains('\\') {
+            return Err("ASTRA_EMU_VFS_EXPORT_PATH".into());
+        }
         let file_name = path
             .rsplit('/')
             .next()
-            .filter(|name| !name.is_empty())
-            .unwrap_or("export.bin");
+            .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+            .ok_or_else(|| "ASTRA_EMU_VFS_EXPORT_PATH".to_owned())?;
+        let mounted = self
+            .active_family_mount
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_VFS_NO_MOUNT".to_owned())?;
+        let prefix = mounted.manifest().prefix.trim_end_matches('/');
+        let uri = format!("{prefix}/{path}");
         let export_dir = self.data_dir.join("exports");
         std::fs::create_dir_all(&export_dir)
             .map_err(|_| "ASTRA_EMU_VFS_EXPORT_DIRECTORY_CREATE".to_owned())?;
+        enforce_private_directory_permissions(&export_dir)
+            .map_err(|_| "ASTRA_EMU_VFS_EXPORT_PERMISSION".to_owned())?;
         let destination = export_dir.join(file_name);
-        std::fs::write(&destination, &bytes)
-            .map_err(|_| "ASTRA_EMU_VFS_EXPORT_WRITE".to_owned())?;
-        self.diagnostic = format!("Exported {path} to {}", destination.to_string_lossy());
+        let report = extract_vfs_entry(
+            mounted.as_ref(),
+            &uri,
+            &destination,
+            &AtomicBool::new(false),
+        )
+        .map_err(|error| error.code().to_owned())?;
+        self.diagnostic = format!("Exported {path} ({} bytes)", report.byte_count);
         self.model()
     }
 

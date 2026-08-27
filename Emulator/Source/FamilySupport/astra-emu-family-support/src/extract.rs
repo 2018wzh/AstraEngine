@@ -33,6 +33,155 @@ pub struct ExtractReport {
     pub aggregate_hash: Hash256,
 }
 
+/// Extract one manifest entry to a host-selected file without exposing the
+/// source path or creating a partially committed destination.  This is the
+/// single-entry counterpart to [`extract_vfs`]; it intentionally keeps the
+/// same capacity, cancellation, bounded-range and owner-only permission
+/// guarantees as tree extraction.
+pub fn extract_vfs_entry(
+    vfs: &dyn LegacyMountedVfs,
+    uri: &str,
+    output: &Path,
+    cancelled: &AtomicBool,
+) -> Result<ExtractReport, LegacyCoreError> {
+    if output.exists() {
+        return Err(invalid(
+            "ASTRA_EMU_VFS_EXTRACT_EXISTS",
+            "extract destination already exists",
+        ));
+    }
+    let parent = output.parent().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_VFS_EXTRACT_DESTINATION",
+            "extract destination has no parent",
+        )
+    })?;
+    if !parent.is_dir() {
+        return Err(invalid(
+            "ASTRA_EMU_VFS_EXTRACT_DESTINATION",
+            "extract destination parent is not a directory",
+        ));
+    }
+    let manifest = vfs.manifest();
+    let entry = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.uri == uri)
+        .ok_or_else(|| invalid("ASTRA_EMU_VFS_EXTRACT_ENTRY", "VFS entry is not present"))?;
+    let relative = entry.uri.strip_prefix(&manifest.prefix).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_VFS_EXTRACT_URI",
+            "manifest entry is outside its prefix",
+        )
+    })?;
+    normalized_relative(relative)?;
+    let available = fs2::available_space(parent).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_VFS_EXTRACT_CAPACITY",
+            "destination capacity could not be inspected",
+        )
+    })?;
+    if available < entry.decoded_size {
+        return Err(invalid(
+            "ASTRA_EMU_VFS_EXTRACT_CAPACITY",
+            "destination has insufficient free space",
+        ));
+    }
+    let output_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_VFS_EXTRACT_DESTINATION",
+                "extract destination filename is invalid",
+            )
+        })?;
+    let temporary = parent.join(format!(
+        ".{output_name}.astra-vfs-{}-{}.tmp",
+        std::process::id(),
+        Hash256::from_sha256(uri.as_bytes()).to_hex()
+    ));
+    if temporary.exists() {
+        return Err(invalid(
+            "ASTRA_EMU_VFS_EXTRACT_STAGING",
+            "extract staging file already exists",
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_VFS_EXTRACT_FILE",
+            "extract temporary file could not be created",
+        )
+    })?;
+    let result = (|| {
+        enforce_private_file_permissions(&temporary).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_VFS_EXTRACT_PERMISSION",
+                "extract file permissions could not be restricted",
+            )
+        })?;
+        let mut aggregate = Sha256::new();
+        let mut offset = 0u64;
+        while offset < entry.decoded_size {
+            if cancelled.load(Ordering::Relaxed) {
+                return Err(invalid(
+                    "ASTRA_EMU_VFS_EXTRACT_CANCELLED",
+                    "extract operation was cancelled",
+                ));
+            }
+            let length = (entry.decoded_size - offset).min(EXTRACT_CHUNK_BYTES);
+            let read = vfs.read_range(&entry.uri, offset, length)?;
+            if read.bytes.len() as u64 != length {
+                return Err(invalid(
+                    "ASTRA_EMU_VFS_EXTRACT_SHORT_READ",
+                    "VFS returned a short extract range",
+                ));
+            }
+            file.write_all(&read.bytes).map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_VFS_EXTRACT_WRITE",
+                    "extract temporary file write failed",
+                )
+            })?;
+            aggregate.update(&read.bytes);
+            offset = offset.checked_add(length).ok_or_else(|| {
+                invalid("ASTRA_EMU_VFS_EXTRACT_SIZE", "extract offset overflowed")
+            })?;
+        }
+        file.sync_all().map_err(|_| {
+            invalid(
+                "ASTRA_EMU_VFS_EXTRACT_SYNC",
+                "extract temporary file sync failed",
+            )
+        })?;
+        drop(file);
+        fs::rename(&temporary, output)
+            .map_err(|_| invalid("ASTRA_EMU_VFS_EXTRACT_COMMIT", "extract file commit failed"))?;
+        Ok(ExtractReport {
+            schema: "astra.emu.vfs.extract.v1".into(),
+            family_id: manifest.family_id.clone(),
+            entry_count: 1,
+            byte_count: entry.decoded_size,
+            aggregate_hash: Hash256::from_bytes(aggregate.finalize().into()),
+        })
+    })();
+    if result.is_err() && temporary.exists() && fs::remove_file(&temporary).is_err() {
+        return Err(invalid(
+            "ASTRA_EMU_VFS_EXTRACT_CLEANUP",
+            "extract failed and staging cleanup also failed",
+        ));
+    }
+    result
+}
+
 pub fn extract_vfs(
     vfs: &dyn LegacyMountedVfs,
     output: &Path,
@@ -297,7 +446,7 @@ mod tests {
 
     use crate::test_support::MemoryVfs;
 
-    use super::{extract_vfs, ExtractSelection};
+    use super::{extract_vfs, extract_vfs_entry, ExtractSelection};
 
     #[test]
     fn selection_is_atomic_and_existing_destination_blocks() {
@@ -366,5 +515,26 @@ mod tests {
             "ASTRA_EMU_VFS_EXTRACT_CANCELLED"
         );
         assert!(!output.exists());
+    }
+
+    #[test]
+    fn single_entry_extract_is_atomic_and_bounded() {
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("single.bin");
+        let vfs = MemoryVfs::new(&[("test:/scr/a.sc", b"script", "script")]);
+        let report =
+            extract_vfs_entry(&vfs, "test:/scr/a.sc", &output, &AtomicBool::new(false)).unwrap();
+        assert_eq!(report.entry_count, 1);
+        assert_eq!(report.byte_count, 6);
+        assert_eq!(std::fs::read(&output).unwrap(), b"script");
+
+        let cancelled = temp.path().join("cancelled.bin");
+        assert_eq!(
+            extract_vfs_entry(&vfs, "test:/scr/a.sc", &cancelled, &AtomicBool::new(true),)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_VFS_EXTRACT_CANCELLED"
+        );
+        assert!(!cancelled.exists());
     }
 }
