@@ -205,7 +205,8 @@ fn read(
         return Err("ASTRA_EMU_VFS_READ_SHORT".into());
     }
     if let Some(path) = output {
-        write_private_file_atomic(path, &read.bytes)?;
+        write_private_file_atomic(path, &read.bytes)
+            .map_err(|error| map_private_output_diagnostic(error.code()).to_owned())?;
         return Ok(());
     }
     match format {
@@ -240,4 +241,18 @@ fn read(
         ),
     }
     Ok(())
+}
+
+fn map_private_output_diagnostic(code: &str) -> &'static str {
+    match code {
+        "ASTRA_EMU_WRITABLE_RANGE" => "ASTRA_EMU_VFS_READ_OUTPUT_LIMIT",
+        "ASTRA_EMU_WRITABLE_EXISTS" => "ASTRA_EMU_VFS_READ_OUTPUT_EXISTS",
+        "ASTRA_EMU_WRITABLE_PARENT" => "ASTRA_EMU_VFS_READ_OUTPUT_PARENT",
+        "ASTRA_EMU_WRITABLE_NAME" => "ASTRA_EMU_VFS_READ_OUTPUT_NAME",
+        "ASTRA_EMU_WRITABLE_SYMLINK" => "ASTRA_EMU_VFS_READ_OUTPUT_SYMLINK",
+        "ASTRA_EMU_WRITABLE_STAGING" => "ASTRA_EMU_VFS_READ_OUTPUT_STAGING",
+        "ASTRA_EMU_WRITABLE_PERMISSION" => "ASTRA_EMU_VFS_READ_OUTPUT_PERMISSION",
+        "ASTRA_EMU_WRITABLE_CLEANUP" => "ASTRA_EMU_VFS_READ_OUTPUT_CLEANUP",
+        _ => "ASTRA_EMU_VFS_READ_OUTPUT_WRITE",
+    }
 }

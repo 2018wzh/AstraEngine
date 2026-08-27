@@ -6,6 +6,8 @@
 
 该 helper 还会逐级检查输出父路径的目录项，拒绝通过任意祖先符号链接写入；元数据权限错误不再被 `Path::exists` 误判为不存在。
 
+CLI 仍将 support 层的 writable diagnostic 映射为稳定的 `ASTRA_EMU_VFS_READ_OUTPUT_*` 命名空间，避免通用 `vfs` 命令把内部 provider 错误泄露到机器可读输出。
+
 Linux 只读 FUSE 的 `read` 现在也把底层短读视为 `EIO`，不会将不完整 payload 当作成功响应；该修复仍需真实 Linux mount/list/stat/random-read/unmount evidence 才能关闭 FUSE gate。
 
 2026-08-27: `PlaintextCache` initialization now rejects every symlink under the private cache root and reports it as corruption. This prevents a cache lookup from escaping the root and changing permissions on an unrelated target. The Minori mapping is covered by a focused corruption regression; cache identity, LRU, and atomic-write contracts are unchanged.
