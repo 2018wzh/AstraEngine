@@ -17,6 +17,27 @@ pub(super) fn probe() -> Result<(), MediaError> {
     })
 }
 
+/// Read one demuxed packet without using `Input::packets()`.
+///
+/// ffmpeg-next's packet iterator discards every demux error except EOF.  The
+/// decode provider must preserve malformed/truncated input as a diagnostic, so
+/// the packet read is kept on the explicit `Result` path here and shared by
+/// the bounded audio and video decoders.
+pub(super) fn read_packet(
+    input: &mut ffmpeg::format::context::Input,
+) -> Result<Option<(usize, ffmpeg::Packet)>, MediaError> {
+    let mut packet = ffmpeg::Packet::empty();
+    match packet.read(input) {
+        Ok(()) => Ok(Some((packet.stream(), packet))),
+        Err(ffmpeg::Error::Eof) => Ok(None),
+        Err(error) => Err(ffmpeg_error(
+            "ASTRA_FFMPEG_PACKET_READ",
+            "read encoded packet",
+            error,
+        )),
+    }
+}
+
 pub(super) fn decode(
     provider_id: String,
     request: &DecodeRequest,
@@ -97,8 +118,8 @@ fn decode_audio(
     .map_err(|error| ffmpeg_error("ASTRA_FFMPEG_RESAMPLE", "create audio resampler", error))?;
     let mut pcm = Vec::<i16>::new();
 
-    for (packet_stream, packet) in input.packets() {
-        if packet_stream.index() != stream_index {
+    while let Some((packet_stream, packet)) = read_packet(input)? {
+        if packet_stream != stream_index {
             continue;
         }
         decoder
@@ -284,8 +305,8 @@ fn decode_video(
     .map_err(|error| ffmpeg_error("ASTRA_FFMPEG_SCALE", "create video scaler", error))?;
     let mut frame = None;
 
-    for (packet_stream, packet) in input.packets() {
-        if packet_stream.index() != stream_index {
+    while let Some((packet_stream, packet)) = read_packet(input)? {
+        if packet_stream != stream_index {
             continue;
         }
         decoder

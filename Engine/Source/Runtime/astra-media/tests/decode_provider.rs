@@ -427,8 +427,13 @@ fn ffmpeg_decode_provider_decodes_real_audio_and_video() {
         .unwrap();
     assert!(matches!(
         audio.output,
-        DecodeOutput::CpuBuffer { ref format, ref bytes, .. }
-            if format.starts_with("pcm_s16le:") && !bytes.is_empty()
+        DecodeOutput::AudioPcmI16 {
+            sample_rate,
+            channels,
+            ref samples,
+        } if (8_000..=384_000).contains(&sample_rate)
+            && (1..=8).contains(&channels)
+            && !samples.is_empty()
     ));
 
     let video = provider
