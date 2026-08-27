@@ -633,11 +633,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     "probe requires one unambiguous Minori entry script",
                 )
             })?;
-        let bytes = self
-            .vfs()?
-            .read_file(&request.root_mount_id, candidate, MAX_SCRIPT_BYTES)?;
-        parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
-        let identity = Hash256::from_sha256(&bytes);
+        let (_, identity, _) = load_script_uri(self.vfs()?, &request.root_mount_id, candidate)?;
         let marker_match =
             request.marker_hashes.is_empty() || request.marker_hashes.contains(&identity);
         Ok(LegacyProbeReport {
@@ -675,11 +671,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
         }
         validate_script_uri(&request.script_uri)?;
         let profile_fingerprint = profile_fingerprint(ctx, &request)?;
-        let bytes =
-            self.vfs()?
-                .read_file(&ctx.mount_set_id, &request.script_uri, MAX_SCRIPT_BYTES)?;
-        let script_hash = Hash256::from_sha256(&bytes);
-        let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
+        let (script_uri, script_hash, script) =
+            load_script_uri(self.vfs()?, &ctx.mount_set_id, &request.script_uri)?;
         match request
             .family_options
             .get("astra.resource_audit")
@@ -729,13 +722,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             title_launch,
             "received the explicit Minori launch profile"
         );
-        let mut vm = MinoriVm::new(
-            request.script_uri,
-            script_hash,
-            script,
-            request.session_seed,
-        )
-        .map_err(runtime_error)?;
+        let mut vm = MinoriVm::new(script_uri, script_hash, script, request.session_seed)
+            .map_err(runtime_error)?;
         if title_launch {
             vm.begin_title_launch().map_err(runtime_error)?;
             tracing::debug!(
@@ -4525,9 +4513,17 @@ fn load_script(
     target: &str,
 ) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
     let script_uri = format!("minori:/scr/{target}");
-    validate_script_uri(&script_uri)?;
+    load_script_uri(vfs, mount_set_id, &script_uri)
+}
+
+fn load_script_uri(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    script_uri: &str,
+) -> Result<(String, Hash256, crate::ScScript), LegacyProviderError> {
+    validate_script_uri(script_uri)?;
     let source = vfs
-        .read_file(mount_set_id, &script_uri, MAX_SCRIPT_BYTES)
+        .read_file(mount_set_id, script_uri, MAX_SCRIPT_BYTES)
         .inspect_err(|error| {
             tracing::debug!(
                 target: "astra_emu_minori::resource",
@@ -4538,18 +4534,18 @@ fn load_script(
             );
         })?;
     let script_hash = Hash256::from_sha256(&source);
-    let mut include_stack = vec![script_uri.clone()];
+    let mut include_stack = vec![script_uri.to_owned()];
     let mut expanded_bytes = 0usize;
     let bytes = expand_script_includes(
         vfs,
         mount_set_id,
-        &script_uri,
+        script_uri,
         source.as_slice(),
         &mut include_stack,
         &mut expanded_bytes,
     )?;
     let script = parse_sc(&bytes, &ScOpcodeCatalog::observed_minori()).map_err(script_error)?;
-    Ok((script_uri, script_hash, script))
+    Ok((script_uri.to_owned(), script_hash, script))
 }
 
 /// Validates the resource references of every `.sc` entry without loading an
@@ -4596,16 +4592,12 @@ fn audit_script_resources(
                 "a script entry is empty or exceeds the bounded source size",
             ));
         }
-        let source = vfs
-            .read_file(mount_set_id, &listed.uri, MAX_SCRIPT_BYTES)
-            .map_err(|_| {
-                invalid(
-                    "ASTRA_EMU_MINORI_RESOURCE_AUDIT_SCRIPT_READ",
-                    "a script entry could not be read consistently",
-                )
-            })?;
-        let script = parse_sc(source.as_slice(), &ScOpcodeCatalog::observed_minori())
-            .map_err(script_error)?;
+        let (_, _, script) = load_script_uri(vfs, mount_set_id, &listed.uri).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_RESOURCE_AUDIT_SCRIPT_READ",
+                "a script entry could not be read consistently",
+            )
+        })?;
         let script_references = collect_resource_references(&script).map_err(runtime_error)?;
         identity.extend_from_slice(Hash256::from_sha256(listed.uri.as_bytes()).as_bytes());
         identity.extend_from_slice(&listed.stat.len.to_le_bytes());
@@ -9630,6 +9622,49 @@ mod tests {
         });
         let error = load_script(&cycle_reader, "mount.test", "a.sc").unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_CYCLE");
+    }
+
+    #[test]
+    fn initial_open_executes_the_same_bounded_include_expansion_as_chain() {
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/root.sc".into(),
+                    b".include part.sc\r\n".to_vec(),
+                ),
+                (
+                    "minori:/scr/part.sc".into(),
+                    b".set included = 1\r\n.end\r\n".to_vec(),
+                ),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.initial-include".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/root.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        let output = provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        assert_eq!(output.status, LegacyRuntimeStatus::Terminal);
+        assert_eq!(
+            provider.sessions[&session.0]
+                .vm
+                .state()
+                .variables
+                .get("included"),
+            Some(&1)
+        );
     }
 
     #[test]

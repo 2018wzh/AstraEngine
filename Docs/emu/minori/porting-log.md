@@ -6,6 +6,8 @@
 
 - 同日补充 `K06_01` gate 回归：缺少 `REN/SUI/AYAME` 任一前置 clear 时只发布三项选择；三项满足且 `D06` 未置位时按原观察 tail-chain 到 `K06_05.sc`。测试只读取已持久化的 global state，不注入隐藏解锁，也不把不可达第四项当作可选项；真实多路线执行和全量鉴赏证据仍开放。
 
+- 脚本装载边界同步收紧：初始 `open`、`probe`、全量资源审计与 chain 目标统一使用 bounded `.include` 展开和循环检测，并保留根脚本 source identity。新增回归证明初始入口不会把 `.include` 当作未知 opcode；缺失引用仍直接 blocking。
+
 ## 2026 年 8 月 27 日：Family VFS 单文件导出边界
 
 - FamilySupport 新增与整树导出共用约束的单 entry 原子导出：先验证 manifest entry、相对路径、容量和目标目录项，再以 owner-only 临时文件按 4 MiB range 流式读取，完成同步后提交到目标文件。
