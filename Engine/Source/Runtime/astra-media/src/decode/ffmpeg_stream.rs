@@ -346,15 +346,25 @@ impl FfmpegPlaybackDecoder {
             if let Some(packet) = self.pending.pop_front() {
                 return Ok(Some(packet));
             }
-            let next = {
-                self.input
-                    .packets()
-                    .next()
-                    .map(|(stream, packet)| (stream.index(), packet))
-            };
-            let Some((stream_index, packet)) = next else {
-                self.demux_eof = true;
-                continue;
+            // Do not use `Input::packets()` here.  ffmpeg-next's iterator
+            // intentionally discards every demux error except EOF, which
+            // would turn a malformed or truncated source into a silent end
+            // of stream.  Reading the packet directly preserves the native
+            // error and lets the media boundary return a stable diagnostic.
+            let mut packet = ffmpeg::Packet::empty();
+            let stream_index = match packet.read(&mut self.input) {
+                Ok(()) => packet.stream(),
+                Err(ffmpeg::Error::Eof) => {
+                    self.demux_eof = true;
+                    continue;
+                }
+                Err(error) => {
+                    return Err(ffmpeg_error(
+                        "ASTRA_FFMPEG_STREAM_PACKET_READ",
+                        "read encoded packet",
+                        error,
+                    ));
+                }
             };
             if self
                 .audio
