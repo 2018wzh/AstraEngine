@@ -20,6 +20,8 @@ Linux 只读 FUSE 的 `read` 现在也把底层短读视为 `EIO`，不会将不
 
 2026-08-27：Minori VM 新增四分支路线回归，复现 `K06_01` 的 bounded choice → tail `chain` 结构。测试只使用脱敏结构化脚本，逐项通过物理选择推进 `REN_CLEAR`、`AYAME_CLEAR`、`SUI_CLEAR`、`TOHKA_CLEAR`，验证 clear flag 跨脚本保留、标题变体按已确认规则从 0→1→2 变化，并确认 `.end` 在 Title launch 中返回标题而不是伪造 terminal。该项是 VM 控制流 E1 证据，不替代真实四路线、自然鉴赏解锁或 Windows E3。
 
+同日补充 `K06_01` gate 回归：未满足 `REN/SUI/AYAME` 前置 clear 时只发布三项选择；三项满足且 `D06` 未置位时按原观察 tail-chain 到 `K06_05.sc`。测试确认条件读取 global state，不注入隐藏解锁，也不把不可达的第四项当作可选项；真实多路线执行和全量鉴赏证据仍开放。
+
 2026-08-27: 在重装后的 stable 工具链上重新构建并签名 FFmpeg profile，当前样本的 Minori direct-entry A01 影片终点 slice 通过：3,084 fixed steps、5 个提交/栅格化帧、2,388,480 个音频帧、无 diagnostic、`terminal=true`。该运行只验证当前 ABI v9 + AstraMedia FFmpeg 绑定和 direct-entry 终点，不包含首路线全流程 checkpoint、完整自然解锁或 Windows E3，因此不改变这些 gate 的 blocking 状态。
 
 2026 年 8 月 27 日：Minori PAZ `decoded_entry` 增加单 entry、64 MiB 上限的进程内明文缓存。首次读取仍执行 source mutation、encrypted hash、解密、尺寸校验和既有磁盘 cache 完整性校验；同一 identity 的后续 bounded range read 直接复用已验证明文，避免 full verify 顺序读取时重复加载整个磁盘 entry。超过上限或 identity 变化时不驻留；movie 的 source-backed range transform 保持不变。新增合成回归覆盖首读 miss 与后续 range hit。该项只改善 I/O 分配行为，真实八包 cache full verify 与 cache identity evidence 仍开放。

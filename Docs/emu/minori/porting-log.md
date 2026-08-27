@@ -4,6 +4,8 @@
 
 - Minori VM 新增四分支路线回归，采用授权样本 `K06_01` 已确认的 choice → tail `chain` 结构。脱敏 fixture 逐项选择四个分支并执行对应 clear script，验证 global clear flag 跨脚本保留、标题变体按已确认规则从 0→1→2 变化；Title launch 下 `.end` 回到标题而不是终止 session。该测试固定控制流语义，仍不替代真实四路线自然运行、完整鉴赏解锁和 Windows E3。
 
+- 同日补充 `K06_01` gate 回归：缺少 `REN/SUI/AYAME` 任一前置 clear 时只发布三项选择；三项满足且 `D06` 未置位时按原观察 tail-chain 到 `K06_05.sc`。测试只读取已持久化的 global state，不注入隐藏解锁，也不把不可达第四项当作可选项；真实多路线执行和全量鉴赏证据仍开放。
+
 ## 2026 年 8 月 27 日：Family VFS 单文件导出边界
 
 - FamilySupport 新增与整树导出共用约束的单 entry 原子导出：先验证 manifest entry、相对路径、容量和目标目录项，再以 owner-only 临时文件按 4 MiB range 流式读取，完成同步后提交到目标文件。

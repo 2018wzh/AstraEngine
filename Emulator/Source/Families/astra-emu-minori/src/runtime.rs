@@ -8056,6 +8056,53 @@ mod tests {
     }
 
     #[test]
+    fn route_gate_conditions_reduce_choice_or_tail_transfer_to_extra_route() {
+        // This is the control-flow shape observed at K06_01: until all three
+        // prerequisite clears exist, the fourth branch is not offered; once
+        // they exist, an unset D06 flag transfers to the extra-route script.
+        let gated_source = b".if REN_CLEAR == 0 select3\r\n.if SUI_CLEAR == 0 select3\r\n.if AYAME_CLEAR == 0 select3\r\n.if D06 == 0 label4\r\n.label select4\r\n.select ren:label_ren ayame:label_ayame sui:label_sui tohka:label_tohka\r\n.label select3\r\n.select ren:label_ren ayame:label_ayame sui:label_sui\r\n.label label_ren\r\n.end\r\n.label label_ayame\r\n.end\r\n.label label_sui\r\n.end\r\n.label label_tohka\r\n.end\r\n.label label4\r\n.chain K06_05.sc\r\n";
+        let catalog = ScOpcodeCatalog::observed_minori();
+        let mut gated = MinoriVm::new(
+            "minori:/scr/K06_01.sc".into(),
+            Hash256::from_sha256(gated_source),
+            parse_sc(gated_source, &catalog).unwrap(),
+            7,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Choice { option_hashes, .. }) = gated.step(1, 64).unwrap() else {
+            panic!("missing prerequisite flags should expose the reduced choice");
+        };
+        assert_eq!(option_hashes.len(), 3);
+
+        let all_flags_source = b".setglobal REN_CLEAR = 1\r\n.setglobal SUI_CLEAR = 1\r\n.setglobal AYAME_CLEAR = 1\r\n.if REN_CLEAR == 0 select3\r\n.if SUI_CLEAR == 0 select3\r\n.if AYAME_CLEAR == 0 select3\r\n.if D06 == 0 label4\r\n.label select4\r\n.select ren:label_ren ayame:label_ayame sui:label_sui tohka:label_tohka\r\n.label select3\r\n.select ren:label_ren ayame:label_ayame sui:label_sui\r\n.label label_ren\r\n.end\r\n.label label_ayame\r\n.end\r\n.label label_sui\r\n.end\r\n.label label_tohka\r\n.end\r\n.label label4\r\n.chain K06_05.sc\r\n";
+        let mut all_flags = MinoriVm::new(
+            "minori:/scr/K06_01.sc".into(),
+            Hash256::from_sha256(all_flags_source),
+            parse_sc(all_flags_source, &catalog).unwrap(),
+            7,
+        )
+        .unwrap();
+        assert_eq!(
+            all_flags.step(1, 64).unwrap(),
+            Some(MinoriVmEvent::Chain {
+                target: "K06_05.sc".into()
+            })
+        );
+        assert_eq!(
+            all_flags.state().global_variables.get("REN_CLEAR"),
+            Some(&1)
+        );
+        assert_eq!(
+            all_flags.state().global_variables.get("SUI_CLEAR"),
+            Some(&1)
+        );
+        assert_eq!(
+            all_flags.state().global_variables.get("AYAME_CLEAR"),
+            Some(&1)
+        );
+    }
+
+    #[test]
     fn assignment_uses_verified_three_and_five_token_forms() {
         let source = b".set base = 6\r\n.set sum = base + 4\r\n.set bits = sum | 1\r\n.set rem = sum % 4\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
