@@ -2652,6 +2652,7 @@ enum ActiveVideoStream {
 
 struct MinoriAviPlayback {
     cursor: astra_media::IncrementalMediaPlayback,
+    ready_outputs: Vec<astra_media::IncrementalPlaybackOutput>,
     current: Option<DecodedVideoFrame>,
     audio: Vec<FvpMovieAudioChunk>,
 }
@@ -2686,6 +2687,7 @@ impl MinoriAviPlayback {
                 astra_media::IncrementalPlaybackLimits::default(),
             )
             .map_err(minori_media_error)?,
+            ready_outputs: Vec::new(),
             current: None,
             audio: Vec::new(),
         })
@@ -2696,7 +2698,8 @@ impl MinoriAviPlayback {
             .cursor
             .advance(elapsed_us)
             .map_err(minori_media_error)?;
-        for output in self.cursor.take_ready_outputs() {
+        self.cursor.drain_ready_outputs(&mut self.ready_outputs);
+        for output in self.ready_outputs.drain(..) {
             match output {
                 astra_media::IncrementalPlaybackOutput::Video(frame) => {
                     self.current = Some(frame);

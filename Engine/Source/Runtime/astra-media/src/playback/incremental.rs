@@ -168,22 +168,34 @@ impl IncrementalMediaPlayback {
     }
 
     /// Moves the currently selected video frame and all queued audio chunks to
-    /// the caller in deterministic timestamp order.
+    /// a caller-owned output buffer in deterministic timestamp order.
     ///
-    /// This is the host-adapter boundary for incremental playback.  It never
-    /// clones a decoded payload.  A caller that uses this method must retain
-    /// the returned video frame itself; after the transfer
-    /// [`current_frame`](Self::current_frame) is empty until the next frame is
-    /// selected by [`advance`](Self::advance).
-    pub fn take_ready_outputs(&mut self) -> Vec<IncrementalPlaybackOutput> {
-        let mut outputs =
-            Vec::with_capacity(self.audio.len() + usize::from(self.current.is_some()));
+    /// Reusing the buffer is the preferred host-adapter path: the cursor never
+    /// allocates for the output list after the caller has reserved enough
+    /// capacity. It also never clones a decoded payload. A caller that uses
+    /// this method must retain the returned video frame itself; after the
+    /// transfer [`current_frame`](Self::current_frame) is empty until the next
+    /// frame is selected by [`advance`](Self::advance).
+    pub fn drain_ready_outputs(&mut self, outputs: &mut Vec<IncrementalPlaybackOutput>) {
+        outputs.clear();
+        outputs.reserve(self.audio.len() + usize::from(self.current.is_some()));
         if let Some(frame) = self.current.take() {
             outputs.push(IncrementalPlaybackOutput::Video(frame));
         }
         outputs.extend(self.audio.drain(..).map(IncrementalPlaybackOutput::Audio));
         self.pending_audio_samples = 0;
         outputs.sort_by_key(IncrementalPlaybackOutput::sort_key);
+    }
+
+    /// Moves ready outputs into a newly allocated vector.
+    ///
+    /// This convenience form is suitable for infrequent inspection. Hosts that
+    /// drain on every presentation tick should use
+    /// [`drain_ready_outputs`](Self::drain_ready_outputs) with a retained
+    /// buffer instead.
+    pub fn take_ready_outputs(&mut self) -> Vec<IncrementalPlaybackOutput> {
+        let mut outputs = Vec::new();
+        self.drain_ready_outputs(&mut outputs);
         outputs
     }
 
@@ -687,6 +699,23 @@ mod tests {
             outputs.as_slice(),
             [super::IncrementalPlaybackOutput::Video(frame)] if frame.sequence == 2
         ));
+    }
+
+    #[test]
+    fn cursor_reuses_caller_output_buffer() {
+        let mut playback = open(vec![video(1, 0), audio(1, 0)]);
+        playback.advance(0).expect("first advance");
+
+        let mut outputs = Vec::with_capacity(8);
+        let capacity = outputs.capacity();
+        playback.drain_ready_outputs(&mut outputs);
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs.capacity(), capacity);
+        assert!(playback.current_frame().is_none());
+
+        playback.drain_ready_outputs(&mut outputs);
+        assert!(outputs.is_empty());
+        assert_eq!(outputs.capacity(), capacity);
     }
 
     #[test]

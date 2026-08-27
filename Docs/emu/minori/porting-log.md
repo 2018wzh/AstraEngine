@@ -1,5 +1,9 @@
 # Minori 移植日志
 
+## 2026 年 8 月 27 日（AstraMedia 输出缓冲）
+
+- `IncrementalMediaPlayback::drain_ready_outputs` 允许宿主复用 output buffer；Manager 与 Minori CLI 不再在每个 presentation tick 分配新的输出列表。视频帧与 PCM chunk 仍按 `(PTS, track_order)` 稳定排序并转移所有权，`take_ready_outputs` 仅保留为一次性分配的便利包装。
+
 ## 2026 年 8 月 27 日
 
 ### AstraMedia 增量游标边界复核

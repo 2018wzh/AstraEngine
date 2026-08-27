@@ -78,6 +78,7 @@ enum MovieDecoder {
 
 struct MinoriAviStreamDecoder {
     playback: IncrementalMediaPlayback,
+    ready_outputs: Vec<IncrementalPlaybackOutput>,
     pending: VecDeque<FvpMoviePacket>,
     ended: bool,
 }
@@ -96,6 +97,7 @@ impl MinoriAviStreamDecoder {
         .map_err(|error| error.to_string())?;
         Ok(Self {
             playback,
+            ready_outputs: Vec::new(),
             pending: VecDeque::new(),
             ended: false,
         })
@@ -118,7 +120,8 @@ impl MinoriAviStreamDecoder {
         self.playback
             .advance(elapsed_ns / 1_000)
             .map_err(|error| error.to_string())?;
-        for output in self.playback.take_ready_outputs() {
+        self.playback.drain_ready_outputs(&mut self.ready_outputs);
+        for output in self.ready_outputs.drain(..) {
             match output {
                 IncrementalPlaybackOutput::Video(frame) => {
                     let pts_ms = frame.pts_us / 1_000;
