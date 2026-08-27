@@ -15,6 +15,7 @@
 - FamilySupport 还增加了跨实例 cache 回归：释放首个 cache 实例后，第二个实例从同一私有根目录验证并读取 envelope；private-profile identity 变化只产生 miss。该项是公共 cache contract 证据，不替代真实八包的第二次 full verify、容量淘汰和跨运行 volume evidence。
 
 - system/gallery 回归现在实际启动已验证的 `fb_ren_04.sc`：从 Title 进入 Memories 和 Replay，依次消费 transition、stage、audio、wait 边界，完成 `.end` 后回到 Title；这保持 direct-entry 的 terminal 语义不变。测试不注入 unlock，也不把该控制流证据扩展为四路线自然解锁、movie gallery 视觉 parity 或 Windows E3。
+- movie gallery 另有 provider 级回归：`fb_aya_12.sc` 在显式 VFS movie resource 上发布唯一 `LegacyVideoCommandV1::Play` 与 media fence，消费完成结果后按 `.end` 回到 Title；资源不可用仍是 blocking。它只覆盖脚本/ fence 生命周期，不宣称真实 FFmpeg 影片逐帧 parity。
 
 ## 2026 年 8 月 27 日：当前 ABI v9 direct-entry 终点复验
 

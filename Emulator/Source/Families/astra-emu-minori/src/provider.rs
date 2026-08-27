@@ -11158,6 +11158,135 @@ mod tests {
     }
 
     #[test]
+    fn provider_completes_movie_gallery_script_through_media_fence() {
+        let mut page_png = Vec::new();
+        PngEncoder::new(&mut page_png)
+            .write_image(
+                &vec![0; 1280 * 720 * 4],
+                1280,
+                720,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let movie_script = b".movie 9989 ed_ayame.avi 1280 720 t\r\n.end\r\n".to_vec();
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
+                ("minori:/scr/fb_aya_12.sc".into(), movie_script),
+                ("minori:/sys/topMenu2.png".into(), page_png.clone()),
+                ("minori:/sys/memories.png".into(), page_png),
+                (
+                    "minori:/mov/ed_ayame.avi".into(),
+                    b"RIFF-verified-fixture".to_vec(),
+                ),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.movie-gallery".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                        ("astra.launch_entry_explicit".into(), "false".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+        provider
+            .sessions
+            .get_mut(&session.0)
+            .unwrap()
+            .vm
+            .merge_verified_gallery_unlocks(&[Hash256::from_sha256(b"TOHKA_CLEAR")])
+            .unwrap();
+
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        let enter_page = |tick: u64, down_count: usize| LegacyStepInput {
+            input_edges: (0..down_count)
+                .map(|index| LegacyInputEdge {
+                    control: "arrow_down".into(),
+                    pressed: true,
+                    value: 1.0,
+                    sequence: index as u64 + 1,
+                })
+                .chain(std::iter::once(LegacyInputEdge {
+                    control: "enter".into(),
+                    pressed: true,
+                    value: 1.0,
+                    sequence: down_count as u64 + 1,
+                }))
+                .collect(),
+            ..step_input(tick, Vec::new())
+        };
+        provider.step(&ctx, &session, enter_page(2, 3)).unwrap();
+        let movie_page = provider.step(&ctx, &session, enter_page(3, 3)).unwrap();
+        assert_eq!(
+            movie_page.live.resource_scenes[0].value.texture_resources[0].resource_uri,
+            "minori:/sys/memories.png"
+        );
+        let started = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "enter".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(4, Vec::new())
+                },
+            )
+            .unwrap();
+        let (token_id, media_id) = match started.control.waits.as_slice() {
+            [LegacyWaitRequest::MediaFence { token_id, media_id }] => {
+                (token_id.clone(), media_id.clone())
+            }
+            other => panic!("expected movie media fence, got {other:?}"),
+        };
+        assert_eq!(started.status, LegacyRuntimeStatus::Awaiting);
+        assert!(matches!(
+            started.live.video.as_slice(),
+            [LegacySequenced {
+                value: LegacyVideoCommandV1::Play { playback_id, .. },
+                ..
+            }] if playback_id == &media_id
+        ));
+        let completed = provider
+            .step(
+                &ctx,
+                &session,
+                step_input(
+                    5,
+                    vec![LegacyAwaitResult {
+                        token_id,
+                        status: "completed".into(),
+                        payload_len: 0,
+                        sequence: 1,
+                    }],
+                ),
+            )
+            .unwrap();
+        assert_eq!(completed.status, LegacyRuntimeStatus::Active);
+        assert!(!provider.sessions[&session.0].vm.state().terminal);
+        assert_eq!(
+            provider.sessions[&session.0].vm.state().system_ui.page,
+            MinoriSystemPage::Title
+        );
+    }
+
+    #[test]
     fn shipping_session_does_not_collect_evidence_vm_trace() {
         let script = b".end\r\n".to_vec();
         let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {

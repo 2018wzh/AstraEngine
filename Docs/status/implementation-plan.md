@@ -16,6 +16,8 @@ Linux 只读 FUSE 的 `read` 现在也把底层短读视为 `EIO`，不会将不
 
 同日，Minori system/gallery 回归补齐真实 replay script 生命周期：从第四条 clear 后的 Title→Memories→Replay 页面启动已验证 `fb_ren_04.sc`，按其 transition/stage/audio/wait 边界消费时间等待，并在 `.end` 后回到 Title；direct-entry 仍保持 terminal。该项只证明 gallery script 的 provider 控制流，不等于四路线自然解锁、movie gallery 视觉 parity 或正式 Windows E3。
 
+同日，movie gallery 也通过 provider 级 media-fence 回归：`fb_aya_12.sc` 只在显式 VFS movie resource 可用时发布 `LegacyVideoCommandV1::Play`，等待唯一 fence 完成后执行 `.end` 并回到 Title；伪造或缺失 movie resource 仍阻断。该项不替代真实 FFmpeg 影片逐帧视觉审查。
+
 2026-08-27: 在重装后的 stable 工具链上重新构建并签名 FFmpeg profile，当前样本的 Minori direct-entry A01 影片终点 slice 通过：3,084 fixed steps、5 个提交/栅格化帧、2,388,480 个音频帧、无 diagnostic、`terminal=true`。该运行只验证当前 ABI v9 + AstraMedia FFmpeg 绑定和 direct-entry 终点，不包含首路线全流程 checkpoint、完整自然解锁或 Windows E3，因此不改变这些 gate 的 blocking 状态。
 
 2026 年 8 月 27 日：Minori PAZ `decoded_entry` 增加单 entry、64 MiB 上限的进程内明文缓存。首次读取仍执行 source mutation、encrypted hash、解密、尺寸校验和既有磁盘 cache 完整性校验；同一 identity 的后续 bounded range read 直接复用已验证明文，避免 full verify 顺序读取时重复加载整个磁盘 entry。超过上限或 identity 变化时不驻留；movie 的 source-backed range transform 保持不变。新增合成回归覆盖首读 miss 与后续 range hit。该项只改善 I/O 分配行为，真实八包 cache full verify 与 cache identity evidence 仍开放。
