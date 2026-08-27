@@ -48,19 +48,27 @@ use crate::{
 };
 
 pub fn evidence_vm_coverage_ids(
+    family_id: &str,
     trace: &[astra_emu_family_api::LegacyVmTraceRecord],
-) -> Vec<String> {
-    trace
+) -> Result<Vec<String>, String> {
+    if family_id.is_empty()
+        || family_id.chars().any(|character| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_'))
+        })
+    {
+        return Err("ASTRA_EMU_FAMILY_COVERAGE_ID_INVALID".into());
+    }
+    Ok(trace
         .iter()
         .map(|record| {
             format!(
-                "fvp.vm.c{}.pc{:08x}.op{:02x}",
+                "{family_id}.vm.c{}.pc{:08x}.op{:02x}",
                 record.context_id, record.program_counter, record.opcode
             )
         })
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
-        .collect()
+        .collect())
 }
 
 fn move_live_audio(packet: LegacyAudioPacketV7) -> Result<RuntimeLiveAudioPacket, String> {
@@ -1545,6 +1553,22 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         }
         let family_diagnostics = std::mem::take(&mut family_output.diagnostics);
         emit_family_diagnostics(input.fixed_step, &family_diagnostics)?;
+        if let Some(trace) = family_output.trace.last() {
+            tracing::debug!(
+                target: "astra_emu_manager_core::family",
+                event = "astra_emu_family_step_trace",
+                fixed_step = input.fixed_step,
+                trace_sequence = trace.sequence,
+                trace_pc = trace.pc,
+                trace_action = trace.action.as_deref().unwrap_or("none"),
+                trace_yield = trace.yield_reason.as_deref().unwrap_or("none"),
+                family_status = ?family_output.status,
+                family_wait_count = family_output.control.waits.len(),
+                family_event_count = family_output.control.events.len(),
+                family_state_revision = family_output.state_revision,
+                "recorded the family-owned runtime trace boundary"
+            );
+        }
         let status = format!("{:?}", family_output.status).to_ascii_lowercase();
         let state_revision = family_output.state_revision;
         let coverage = family_output.coverage.clone();
@@ -1654,7 +1678,9 @@ fn parse_package_hash(value: &str) -> Result<Hash256, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astra_emu_family_api::{LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader};
+    use astra_emu_family_api::{
+        LegacyProviderError, LegacyVfsListedFile, LegacyVfsReader, LegacyVmTraceRecord,
+    };
     use astra_emu_fvp::create_static_fvp_provider;
 
     #[test]
@@ -1669,6 +1695,31 @@ mod tests {
             .access
             .writes
             .contains(&ActionResourceKey::Blackboard));
+    }
+
+    #[test]
+    fn evidence_vm_coverage_is_namespaced_by_family() {
+        let trace = vec![LegacyVmTraceRecord {
+            context_id: 7,
+            program_counter: 3,
+            opcode: 0x1b,
+        }];
+        assert_eq!(
+            evidence_vm_coverage_ids("minori", &trace).unwrap(),
+            vec!["minori.vm.c7.pc00000003.op1b"]
+        );
+        assert_eq!(
+            evidence_vm_coverage_ids("fvp", &trace).unwrap(),
+            vec!["fvp.vm.c7.pc00000003.op1b"]
+        );
+        assert_eq!(
+            evidence_vm_coverage_ids("", &trace).unwrap_err(),
+            "ASTRA_EMU_FAMILY_COVERAGE_ID_INVALID"
+        );
+        assert_eq!(
+            evidence_vm_coverage_ids("minori/unsafe", &trace).unwrap_err(),
+            "ASTRA_EMU_FAMILY_COVERAGE_ID_INVALID"
+        );
     }
 
     struct MemoryVfs {

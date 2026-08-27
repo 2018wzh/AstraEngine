@@ -838,7 +838,8 @@ impl RuntimeBridge {
         let (_, family_report) = self
             .provider
             .shutdown_with_family_report(active.session_id)?;
-        let coverage_ids = evidence_vm_coverage_ids(&family_report.evidence_vm_trace);
+        let coverage_ids =
+            evidence_vm_coverage_ids(&self.family_id, &family_report.evidence_vm_trace)?;
         let coverage_ids = coverage_ids.join(",");
         if let Some(mut audio) = self.audio.take() {
             let audio_telemetry = audio.telemetry();

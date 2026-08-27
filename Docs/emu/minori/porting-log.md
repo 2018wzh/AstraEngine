@@ -18,6 +18,11 @@
 - `astra-media` library 9/9、FFmpeg stream 9/9、`astra-emu-minori`（含和不含 `ffmpeg-vcpkg`）各 148/148 通过；`astra-media`、`astra-emu-minori`、`astra-emu-cli` 和 `astra-emu-manager` 的增量 `clippy -D warnings` 通过。
 - 普通 Cargo release 构建、动态 plugin 签名、Headless media slice、`cargo fmt --check` 和文档检查通过。完整 workspace clippy/test 仍按仓库既有门禁单独处理，不能由这些聚焦结果替代。
 
+### Family trace 与输入边界补充
+
+- Manager core 现在按 family id 生成 VM coverage id，并对 family id 做稳定字符校验；Minori 与 FVP 的 coverage 不再共享 `fvp.vm.*` 命名空间。provider step、wait、choice 的日志只保留 step、PC、计数、timer 和 identity，不写正文、资源 payload、key 或本地路径。
+- Headless 的 F5/F9 物理按键边沿固定映射为 `function:5`/`function:9`，未绑定按键仍被拒绝。该修正通过 Minori provider、Manager core 和 CLI 的增量回归测试。
+
 ## 2026-08-26
 
 ### Retained Layer2D composite cache复验

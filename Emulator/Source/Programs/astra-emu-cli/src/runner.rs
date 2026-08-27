@@ -251,6 +251,24 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
     (token_id, condition)
 }
 
+fn runtime_wait_kind_name(wait: &RuntimeLiveWait) -> &'static str {
+    match wait.kind {
+        RuntimeLiveWaitKind::Frame { .. } => "frame",
+        RuntimeLiveWaitKind::Time { .. } => "time",
+        RuntimeLiveWaitKind::Input { .. } => "input",
+        RuntimeLiveWaitKind::MediaFence { .. } => "media",
+        RuntimeLiveWaitKind::PresentationFence { .. } => "presentation",
+        RuntimeLiveWaitKind::ProviderCompletion { .. } => "provider",
+    }
+}
+
+fn runtime_wait_milliseconds(wait: &RuntimeLiveWait) -> Option<u32> {
+    match wait.kind {
+        RuntimeLiveWaitKind::Time { milliseconds } => Some(milliseconds),
+        _ => None,
+    }
+}
+
 pub const HEADLESS_RUN_REPORT_SCHEMA: &str = "astra.emu.headless_run_report.v3";
 const FIXED_DELTA_NS: u64 = 16_666_667;
 const MAX_MOVIE_FRAMES: usize = 18_000;
@@ -1485,7 +1503,8 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             ))
         }
     };
-    let coverage_ids = evidence_vm_coverage_ids(&family_report.evidence_vm_trace);
+    let coverage_ids =
+        evidence_vm_coverage_ids(&launch.family_id, &family_report.evidence_vm_trace)?;
     if let Some(observer) = gpu_observer {
         execution.gpu_samples = observer.finish()?;
     }
@@ -4651,6 +4670,11 @@ fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&
         " " | "space" | "spacebar" => Some("space"),
         "shift" | "shiftleft" | "shiftright" => Some("shift"),
         "control" | "ctrl" | "controlleft" | "controlright" => Some("control"),
+        // Minori's shipped keyboard map reserves F5/F9 as non-modal physical
+        // controls. Keep them as explicit, bounded edges even when a family
+        // treats them as notifications instead of actions.
+        "f5" => Some("function:5"),
+        "f9" => Some("function:9"),
         _ => None,
     }
 }
@@ -5589,6 +5613,18 @@ impl<'a> RuntimeDriver<'a> {
             live_layer_count = output.live.layers.len(),
             live_resource_scene_count = output.live.resource_scenes.len(),
             wait_count = output.live.waits.len(),
+            wait_kind = output
+                .live
+                .waits
+                .first()
+                .map(runtime_wait_kind_name)
+                .unwrap_or("none"),
+            wait_milliseconds = output
+                .live
+                .waits
+                .first()
+                .and_then(runtime_wait_milliseconds)
+                .unwrap_or_default(),
             "received the bounded family provider step result"
         );
         let runtime_duration_ns = elapsed_ns(runtime_started)?;
@@ -7521,6 +7557,8 @@ mod native_tests {
             Some("shift")
         );
         assert_eq!(native_key_control(None, "ControlRight"), Some("control"));
+        assert_eq!(native_key_control(Some("F5"), "F5"), Some("function:5"));
+        assert_eq!(native_key_control(None, "F9"), Some("function:9"));
         assert_eq!(native_key_control(Some("F12"), "F12"), None);
     }
 

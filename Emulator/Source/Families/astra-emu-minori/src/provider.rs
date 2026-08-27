@@ -1824,6 +1824,51 @@ impl MinoriRuntimeProvider {
             terminal = session.vm.state().terminal,
             "advanced the verified Minori VM"
         );
+        if let Some((timer_ticks, milliseconds)) = event.as_ref().and_then(non_message_time_wait) {
+            tracing::info!(
+                target: "astra_emu_minori::runtime",
+                event = "astra_emu_minori_wait_created",
+                fixed_tick = input.tick_index,
+                script_identity = %session.vm.state().script_hash,
+                instruction_count = session.vm.state().instruction_count,
+                timer_ticks,
+                milliseconds,
+                "created a non-message Minori time wait"
+            );
+        }
+        if let Some(MinoriVmEvent::Message { wait, .. }) = event.as_ref() {
+            let timer_ticks = match wait {
+                MinoriWaitState::Time { timer_ticks, .. } => Some(*timer_ticks),
+                _ => None,
+            };
+            tracing::info!(
+                target: "astra_emu_minori::runtime",
+                event = "astra_emu_minori_message_wait_created",
+                fixed_tick = input.tick_index,
+                script_identity = %session.vm.state().script_hash,
+                instruction_count = session.vm.state().instruction_count,
+                wait_kind = minori_wait_kind(wait),
+                timer_ticks = timer_ticks.unwrap_or_default(),
+                "created a Minori message wait"
+            );
+        }
+        if let Some(MinoriVmEvent::Choice {
+            option_hashes,
+            selected_index,
+            ..
+        }) = event.as_ref()
+        {
+            tracing::info!(
+                target: "astra_emu_minori::runtime",
+                event = "astra_emu_minori_choice_wait_created",
+                fixed_tick = input.tick_index,
+                script_identity = %session.vm.state().script_hash,
+                instruction_count = session.vm.state().instruction_count,
+                option_count = option_hashes.len(),
+                selected_index,
+                "created a Minori choice wait"
+            );
+        }
         if matches!(
             event,
             Some(MinoriVmEvent::Chain { .. })
@@ -2708,6 +2753,38 @@ impl MinoriRuntimeProvider {
                 .collect(),
             diagnostics: Vec::new(),
         })
+    }
+}
+
+fn non_message_time_wait(event: &MinoriVmEvent) -> Option<(u32, u32)> {
+    let MinoriVmEvent::Wait(wait @ MinoriWaitState::Time { token_id, .. }) = event else {
+        return None;
+    };
+    if token_id.starts_with("minori.message.") {
+        return None;
+    }
+    let MinoriWaitState::Time {
+        timer_ticks,
+        milliseconds,
+        ..
+    } = wait
+    else {
+        unreachable!("non_message_time_wait matched a non-time wait")
+    };
+    Some((*timer_ticks, *milliseconds))
+}
+
+fn minori_wait_kind(wait: &MinoriWaitState) -> &'static str {
+    match wait {
+        MinoriWaitState::Time { .. } => "time",
+        MinoriWaitState::AxisScroll { .. } => "axis_scroll",
+        MinoriWaitState::LinearScroll { .. } => "linear_scroll",
+        MinoriWaitState::CharacterTransition { .. } => "character_transition",
+        MinoriWaitState::Input { .. } => "input",
+        MinoriWaitState::Choice { .. } => "choice",
+        MinoriWaitState::Media { .. } => "media",
+        MinoriWaitState::Presentation { .. } => "presentation",
+        MinoriWaitState::Provider { .. } => "provider",
     }
 }
 
