@@ -43,7 +43,7 @@ Decode 只能通过 `DecodeBindingContext { provider_id, target, profile, allow_
 
 宿主适配器通过 `IncrementalMediaPlayback::take_ready_outputs` 一次性移动当前视频帧和待提交 PCM chunk。该方法按 `(pts_us, track_order)` 稳定排序并转移所有权，不复制已解码 payload；调用方必须自行保留上一次视频帧，直到下一批提供替换帧。Manager 与 Minori Headless/CLI 均使用这条公共输出边界，family 代码不再重复维护 packet 排序或“新帧”判定。
 
-FFmpeg 增量 demux 使用 `Packet::read` 的显式结果路径，不使用会丢弃非 EOF 错误的 packet iterator。底层读取、截断和格式错误统一映射为稳定 diagnostic；只有明确的 EOF 才会进入媒体结束状态。
+FFmpeg 首帧/整段 provider 与增量 demux 都使用 `Packet::read` 的显式结果路径，不使用会丢弃非 EOF 错误的 packet iterator。底层读取、截断和格式错误统一映射为稳定 diagnostic；只有明确的 EOF 才会进入媒体结束状态。
 
 Headless 与 Windows 共享 typed incremental stream contract。`DecodeStreamAction::Start` 建立有界 session，后续 `Next` 每次消费一个 owned frame，EOF 返回 typed end marker。Player 同时最多保留一帧；snapshot 只保存 asset identity、revision、cursor、loop index 和逻辑起始时间。restore 重新创建 decode session并按 cursor continuation；skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`。
 
