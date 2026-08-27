@@ -2145,6 +2145,38 @@ mod tests {
     }
 
     #[test]
+    fn source_mutation_cannot_be_masked_by_a_plaintext_cache_hit() {
+        let temp = tempfile::tempdir().unwrap();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            fs::write(
+                temp.path().join(format!("{role}.paz")),
+                fixture_archive(role, 0),
+            )
+            .unwrap();
+        }
+        let cache_root = temp.path().join("cache");
+        let cache = PlaintextCache::new(cache_root, 1024 * 1024, 1024 * 1024).unwrap();
+        let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
+        let first = vfs.read_range("minori:/scr/scr.bin", 0, 4).unwrap();
+        assert_eq!(first.bytes.as_slice(), b"fixt");
+        assert!(!first.cache_hit);
+
+        fs::OpenOptions::new()
+            .append(true)
+            .open(temp.path().join("scr.paz"))
+            .unwrap()
+            .write_all(b"changed")
+            .unwrap();
+
+        assert_eq!(
+            vfs.read_range("minori:/scr/scr.bin", 4, 3)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_SOURCE_CHANGED"
+        );
+    }
+
+    #[test]
     fn raw_movie_range_uses_the_entry_relative_transform_offset() {
         let temp = tempfile::tempdir().unwrap();
         for role in REQUIRED_ARCHIVE_ROLES {
