@@ -1752,6 +1752,55 @@ mod tests {
     }
 
     #[test]
+    fn worker_selects_null_audio_when_host_reports_provider_unavailable() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let profile = astra_platform::HeadlessHostProfile::reference(
+            "null-audio-test",
+            "dev.astraengine.null-audio-test",
+            astra_core::Hash256::from_sha256(b"null-audio-build").to_string(),
+            astra_core::Hash256::from_sha256(b"null-audio-test").to_string(),
+        );
+        let (client, mut backend, _events) = astra_platform::host_channel(
+            astra_platform::HostLaunchProfile::headless(profile),
+            8,
+            8,
+        )
+        .unwrap();
+        let backend_task = runtime.spawn(async move {
+            match backend.next_command().await {
+                Some(astra_platform::HostCommand::OpenAudioOutput { reply, .. }) => {
+                    reply
+                        .send(Err(PlatformError::new(
+                            astra_platform::PlatformErrorCode::ProviderUnavailable,
+                            "audio.open",
+                            "test host has no physical audio device",
+                        )))
+                        .unwrap();
+                }
+                _ => panic!("audio worker did not request the output endpoint"),
+            }
+        });
+        let telemetry = Arc::new(TelemetryAtomics::default());
+        let audible = Arc::new(AtomicBool::new(false));
+        let null_device = Arc::new(AtomicBool::new(true));
+        let mut state = runtime
+            .block_on(WorkerState::open(
+                client,
+                telemetry,
+                audible,
+                Arc::clone(&null_device),
+            ))
+            .unwrap();
+        assert!(state.output.is_none());
+        assert!(null_device.load(Ordering::Acquire));
+        runtime.block_on(state.shutdown(false)).unwrap();
+        runtime.block_on(backend_task).unwrap();
+    }
+
+    #[test]
     fn completed_stream_params_update_without_recreating_kira_voice() {
         let mut streams =
             BTreeMap::from([(1, AudioStream::new(48_000, 2, LegacyAudioSampleFormat::F32))]);
