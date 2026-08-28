@@ -99,6 +99,15 @@ export component GameViewPage inherits Rectangle {
                     root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
                 }
             }
+            pointer-event(event) => {
+                if event.button == PointerEventButton.right && (event.kind == PointerEventKind.down || event.kind == PointerEventKind.up) {
+                    if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
+                        root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);
+                        root.game-input("pointer.y", true, (self.mouse-y - root.stage-y) / root.stage-height * root.stage-native-height);
+                        root.game-input("pointer.secondary", event.kind == PointerEventKind.down, event.kind == PointerEventKind.down ? 1 : 0);
+                    }
+                }
+            }
             clicked => {
                 if root.stage-width > 0px && root.stage-height > 0px && self.mouse-x >= root.stage-x && self.mouse-x < root.stage-x + root.stage-width && self.mouse-y >= root.stage-y && self.mouse-y < root.stage-y + root.stage-height {
                     root.game-input("pointer.x", true, (self.mouse-x - root.stage-x) / root.stage-width * root.stage-native-width);

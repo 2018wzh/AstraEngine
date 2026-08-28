@@ -188,6 +188,7 @@ struct ActiveRuntimeSession {
     fixed_delta_ns: u64,
     seed: u64,
     pending_waits: BTreeMap<String, PendingWait>,
+    system_ui_active: bool,
     await_sequence: u64,
     input_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
@@ -404,6 +405,7 @@ impl RuntimeBridge {
             fixed_delta_ns: emu_profile.fixed_delta_ns,
             seed,
             pending_waits: BTreeMap::new(),
+            system_ui_active: false,
             await_sequence: 0,
             input_sequence: 0,
             pending_inputs: Vec::new(),
@@ -623,21 +625,30 @@ impl RuntimeBridge {
             .iter()
             .map(|edge| edge.control.as_str())
             .collect::<BTreeSet<_>>();
+        let system_menu_open_requested = system_menu_open_requested(&active.pending_inputs);
+        let suppress_wait_completion = active.system_ui_active || system_menu_open_requested;
         let ready = active
             .pending_waits
             .iter()
-            .filter(|(_, wait)| match wait {
-                PendingWait::DueStep(due) => *due <= next_step,
-                // Escape is the Minori system-menu shortcut and may interrupt
-                // a message timer. Keep frame/presentation waits separate so
-                // they cannot be cancelled by unrelated UI input.
-                PendingWait::Time(due) => *due <= next_step || input_controls.contains("escape"),
-                PendingWait::Input(keys) => {
-                    keys.iter().any(|key| input_controls.contains(key.as_str()))
+            .filter(|(_, wait)| {
+                if suppress_wait_completion {
+                    return false;
                 }
-                PendingWait::PresentationFence
-                | PendingWait::MediaFence(_)
-                | PendingWait::ProviderCompletion => false,
+                match wait {
+                    PendingWait::DueStep(due) => *due <= next_step,
+                    // Escape is the Minori system-menu shortcut and may interrupt
+                    // a message timer. Keep frame/presentation waits separate so
+                    // they cannot be cancelled by unrelated UI input.
+                    PendingWait::Time(due) => {
+                        *due <= next_step || input_controls.contains("escape")
+                    }
+                    PendingWait::Input(keys) => {
+                        keys.iter().any(|key| input_controls.contains(key.as_str()))
+                    }
+                    PendingWait::PresentationFence
+                    | PendingWait::MediaFence(_)
+                    | PendingWait::ProviderCompletion => false,
+                }
             })
             .map(|(token, _)| token.clone())
             .collect::<Vec<_>>();
@@ -710,55 +721,64 @@ impl RuntimeBridge {
                 input_count = input_edges.len()
             );
         }
-        let output = self.provider.step(RuntimeStepInput {
-            session_id: active.session_id.clone(),
-            fixed_step: next_step,
-            delta_ns: active.fixed_delta_ns,
-            session_seed: active.seed,
-            mode: step_mode,
-            action: "emu.step".into(),
-            argument: None,
-            auxiliary: None,
-            flag: None,
-            input_edges: input_edges
-                .into_iter()
-                .map(|edge| RuntimeInputEdge {
-                    control: edge.control,
-                    pressed: edge.pressed,
-                    value: edge.value,
-                    sequence: edge.sequence,
-                })
-                .collect(),
-            await_results: await_results
-                .into_iter()
-                .map(|result| RuntimeAwaitResult {
-                    token_id: result.token_id,
-                    status: result.status,
-                    payload_len: result.payload_len,
-                    sequence: result.sequence,
-                })
-                .collect(),
-            provider_results: Vec::<RuntimeProviderResult>::new(),
-            budget: RuntimeStepBudget {
-                max_instructions: 100_000,
-                max_effects: 65_536,
-                max_trace_entries: 100_000,
-            },
-        })?;
-        let session_id = active.session_id.clone();
-        let fixed_delta_ns = active.fixed_delta_ns;
-        active.fixed_step = next_step;
-        active.next_tick += Duration::from_nanos(fixed_delta_ns);
-        active.next_step_mode = RuntimeStepMode::Live;
+        let (output, session_id, fixed_delta_ns) = {
+            let active = self
+                .active
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+            let session_id = active.session_id.clone();
+            let fixed_delta_ns = active.fixed_delta_ns;
+            let output = self.provider.step(RuntimeStepInput {
+                session_id: active.session_id.clone(),
+                fixed_step: next_step,
+                delta_ns: active.fixed_delta_ns,
+                session_seed: active.seed,
+                mode: step_mode,
+                action: "emu.step".into(),
+                argument: None,
+                auxiliary: None,
+                flag: None,
+                input_edges: input_edges
+                    .into_iter()
+                    .map(|edge| RuntimeInputEdge {
+                        control: edge.control,
+                        pressed: edge.pressed,
+                        value: edge.value,
+                        sequence: edge.sequence,
+                    })
+                    .collect(),
+                await_results: await_results
+                    .into_iter()
+                    .map(|result| RuntimeAwaitResult {
+                        token_id: result.token_id,
+                        status: result.status,
+                        payload_len: result.payload_len,
+                        sequence: result.sequence,
+                    })
+                    .collect(),
+                provider_results: Vec::<RuntimeProviderResult>::new(),
+                budget: RuntimeStepBudget {
+                    max_instructions: 100_000,
+                    max_effects: 65_536,
+                    max_trace_entries: 100_000,
+                },
+            })?;
+            active.fixed_step = next_step;
+            active.next_tick += Duration::from_nanos(fixed_delta_ns);
+            active.next_step_mode = RuntimeStepMode::Live;
+            (output, session_id, fixed_delta_ns)
+        };
         let live = output.live;
-        let active = self
-            .active
-            .as_mut()
-            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
-        active.coverage_syscalls = active
-            .coverage_syscalls
-            .checked_add(live.coverage.syscalls)
-            .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
+        {
+            let active = self
+                .active
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+            active.coverage_syscalls = active
+                .coverage_syscalls
+                .checked_add(live.coverage.syscalls)
+                .ok_or_else(|| "ASTRA_EMU_COVERAGE_COUNTER_OVERFLOW".to_owned())?;
+        }
         let mut audio_packets = Vec::new();
         let mut audio_commands = Vec::new();
         let mut video_commands = Vec::new();
@@ -797,6 +817,13 @@ impl RuntimeBridge {
         }
         validate_live_blackboard(&live.blackboard)?;
         validate_live_dirty_sections(&live.dirty_sections)?;
+        if let Some(system_ui_active) = system_ui_activity_from_blackboard(&live.blackboard)? {
+            let active = self
+                .active
+                .as_mut()
+                .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+            active.system_ui_active = system_ui_active;
+        }
         if !live.diagnostics.is_empty() {
             tracing::debug!(
                 event = "astra.emu.manager.live_diagnostics",
@@ -1552,6 +1579,33 @@ fn pending_wait_can_rebind(existing: &PendingWait, next: &PendingWait) -> bool {
         (PendingWait::Input(_), PendingWait::Time(_))
             | (PendingWait::Time(_), PendingWait::Input(_))
     )
+}
+
+fn system_menu_open_requested(input_edges: &[LegacyInputEdge]) -> bool {
+    input_edges
+        .iter()
+        .any(|edge| edge.pressed && edge.control == "pointer.secondary")
+}
+
+fn system_ui_activity_from_blackboard(
+    blackboard: &[RuntimeLiveBlackboardMutation],
+) -> Result<Option<bool>, String> {
+    let mut activity = None;
+    for mutation in blackboard {
+        if mutation.key != "minori.system_page" {
+            continue;
+        }
+        let next = match mutation.value.as_str() {
+            "none" => false,
+            "title" | "load" | "save" | "config" | "backlog" | "memories" | "gallery_cg"
+            | "gallery_bgm" | "gallery_replay" | "gallery_movie" => true,
+            _ => return Err("ASTRA_EMU_MINORI_SYSTEM_PAGE_OBSERVATION".into()),
+        };
+        if activity.replace(next).is_some() {
+            return Err("ASTRA_EMU_MINORI_SYSTEM_PAGE_DUPLICATE".into());
+        }
+    }
+    Ok(activity)
 }
 
 fn retain_non_completed_input_edges(
@@ -4915,6 +4969,7 @@ mod manager_tests {
 
     use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
 
+    use astra_emu_family_api::LegacyInputEdge;
     use astra_emu_manager_core::{
         CancellationToken, DesktopVfsRegistry, GrantedSourceEntry, GrantedSourceReader, Library,
         LibraryScanner, PatchHostAction, QueuedPatchEffect, ScanLimits, SourceGrant,
@@ -4925,7 +4980,8 @@ mod manager_tests {
         apply_audio_media_hook, decode_image_preview, decode_text_preview, fvp_pack_paths_option,
         media_preview_summary, parse_glossary, pending_wait_can_rebind, quick_entry_is_valid,
         quick_entry_matches, refresh_cover_cache, retain_non_completed_input_edges,
-        validate_patch_actions, PendingWait,
+        system_menu_open_requested, system_ui_activity_from_blackboard, validate_patch_actions,
+        PendingWait,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -5090,6 +5146,49 @@ mod manager_tests {
             &PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
             &PendingWait::Input(BTreeSet::from(["space".to_owned()])),
         ));
+    }
+
+    #[test]
+    fn system_menu_suspends_the_underlying_wait_until_page_closes() {
+        assert!(system_menu_open_requested(&[LegacyInputEdge {
+            control: "pointer.secondary".into(),
+            pressed: true,
+            value: 1.0,
+            sequence: 1,
+        }]));
+        assert!(!system_menu_open_requested(&[LegacyInputEdge {
+            control: "pointer.secondary".into(),
+            pressed: false,
+            value: 0.0,
+            sequence: 2,
+        }]));
+        let active = astra_plugin_abi::RuntimeLiveBlackboardMutation {
+            sequence: 1,
+            key: "minori.system_page".into(),
+            value: "save".into(),
+        };
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[active]).unwrap(),
+            Some(true)
+        );
+        let closed = astra_plugin_abi::RuntimeLiveBlackboardMutation {
+            sequence: 2,
+            key: "minori.system_page".into(),
+            value: "none".into(),
+        };
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[closed]).unwrap(),
+            Some(false)
+        );
+        let invalid = astra_plugin_abi::RuntimeLiveBlackboardMutation {
+            sequence: 3,
+            key: "minori.system_page".into(),
+            value: "unknown".into(),
+        };
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[invalid]).unwrap_err(),
+            "ASTRA_EMU_MINORI_SYSTEM_PAGE_OBSERVATION"
+        );
     }
 
     #[test]

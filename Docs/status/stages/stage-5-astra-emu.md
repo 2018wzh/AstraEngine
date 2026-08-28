@@ -534,3 +534,5 @@ Windows E3 parity claim is made here.
 2026-08-26：CLI checkpoint 捕获前新增 pending retained scene / prepared CPU layer 的显式物化，解决 `frame_sample_interval=60` 下首个 checkpoint 没有 submitted surface 的真实边界。当前签名 v9 短程通过 431 fixed steps、7 frames、27 条输入和零 diagnostic；该修复不改变 Stage 5 对完整路线、自然 unlock、正式 audio review、Linux FUSE、macOS extract、FVP v9 和 Windows E3 的 blocking 状态。
 
 2026-08-28：修正 Minori Control/Auto 活动消息等待的受限 modality rebinding。Manager Core 复用已有 `AwaitTokenId`，host 同步替换 pending `Input`/`Time` condition；同类重复和未知 wait 仍 fail fast。代码与定向回归已通过，真实 Sandbox 复测和 Stage 5 的完整路线、正式媒体/音频审查、Linux FUSE、macOS extract、FVP v9、Windows E3 仍保持开放。
+
+2026-08-28：GameView 右键已接入 Family API 的 system-menu contract，Sandbox 复测可显示真实 `Savedata` 页面。修复 Manager 在 system page 活动时误完成底层 gameplay await 的根因：打开请求 tick 与 `minori.system_page != none` 期间暂缓 await completion，关闭页面保留原 wait。定向回归通过；更新后的签名 Release 在 Sandbox 连续两次验证 Save→Escape→gameplay，Diagnostics 无 blocking diagnostic。该证据不改变 Stage 5 对完整路线、自然 unlock、正式音频 review、Linux FUSE、macOS extract、FVP v9 与 Windows E3 的 blocking 状态。

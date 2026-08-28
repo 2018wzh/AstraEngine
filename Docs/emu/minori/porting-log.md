@@ -714,3 +714,10 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - Sandbox 中连续按下 Control 暴露了新的 host/provider 边界：Minori 会把当前消息的同一 family token 在 `Input` 与 `Time` modality 之间重绑定，但 Manager Core 和 host 仍按“同 token 必须新建 await”处理，第二次 Control 因而错误返回 `ASTRA_EMU_AWAIT_TOKEN_DUPLICATE`。
 - Manager Core 现在为每个 family wait 保存受限的 `AwaitBinding`。只有 `Input`↔`Time` 的双向 modality 变更复用已有 `AwaitTokenId` 并更新绑定；相同 modality、其他 wait 类型或同一输出内重复 token 仍 fail fast。Manager host 同步替换 pending condition，不清空等待表、不丢弃 completion，也不推进额外 fixed tick。
 - 增加 core 与 Manager 定向回归，覆盖双向重绑定及同类重复阻断。真实 Sandbox 复测需使用更新后的签名 Release package；在复测完成前，本节只记录已验证的代码路径，不把 Windows E3 或完整路线状态前移。
+
+### 2026-08-28 右键系统菜单与活动消息等待
+
+- Manager GameView 现在把舞台内的物理 secondary-pointer 按下/释放事件按原坐标提交为 `pointer.x`、`pointer.y` 和 `pointer.secondary`；它只在 stage bounds 内生成输入，不把 Slint 的 left-click 事件猜测成系统菜单请求。Family API 已有的 system-menu contract 因而可以从真实窗口打开 Save 页。
+- 复测确认右键会显示真实 Minori `Savedata` 页面及 Auto/Quick Save 槽位。此前在该页按 Escape 会把底层 gameplay message await 一并完成，provider 随即以 `ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED` 终止；根因是 Manager 没有把系统页视为独占输入层。
+- 现行 host 在右键打开请求所在 tick 以及 `minori.system_page != none` 期间暂缓 gameplay await completion，同时保留 pending wait。关闭页面只更新系统页 observation；下一次普通确认才完成原有 message wait。未知页面值、同一批重复 page mutation 和非法等待类型仍 fail fast。
+- 新增 Manager 回归覆盖 secondary-pointer open、system-page activity observation 和 unknown page rejection。更新后的签名 Release 在 Windows Sandbox 中连续完成两次 Save→Escape→gameplay 循环：右键显示 Savedata 页面，Escape 返回 firefly gameplay 帧，Diagnostics 保持 `No blocking diagnostic`；Null audio endpoint 仍只提供无设备软件运行证据，不是物理音频 E3。完整路线、正式音频审查和 Windows E3 仍不提升证据等级。

@@ -737,3 +737,5 @@ not manual E3 or clean Release performance evidence.
 ## 2026-08-28 Minori wait modality rebinding
 
 Minori 的 Control/Auto 语义允许活动消息在 `Input` 与 `Time` 之间切换，而不改变 family wait identity。Manager Core 与 Manager host 已同步实现受限的同 token modality rebinding：复用已有 runtime await 和 pending condition；相同 modality、其它类型、批内重复或未知 token 仍直接阻断。新增定向测试通过。该修复只关闭一次 Sandbox 崩溃根因，不扩大完整路线、媒体、鉴赏、Linux FUSE、Windows E3 或正式音频 review 的证据范围。
+
+2026-08-28：补齐 Minori 右键系统菜单的窗口输入接线，并隔离系统页与底层 gameplay await。GameView 仅在舞台边界内发出 `pointer.secondary`；Manager 在打开请求和已知 `minori.system_page` 活动期间保留原 message wait，避免 Save 页 Escape 把旧等待错误提交给 family。定向 Manager 测试通过；签名 Release 的 Windows Sandbox 复测已连续两次完成 Save→Escape→gameplay，Diagnostics 无 blocking diagnostic。该证据不扩大完整路线、媒体/音频 review、Linux FUSE、macOS extract、FVP v9 和 Windows E3。
