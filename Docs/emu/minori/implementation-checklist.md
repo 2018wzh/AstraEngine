@@ -14,7 +14,7 @@
 - [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
 - [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
 - [x] 当前签名 release plugin 的 title→config→movie→skip→title slice 报告 `passed`：3102 fixed steps、9 个 retained frame sample、零 diagnostic；该结果只覆盖 media/provider 与标题恢复接线，不覆盖完整剧情 terminal。
-- [ ] 正式音频人工听审、完整路线与自然 unlock、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合。
+- [ ] 正式音频人工听审、完整路线与自然 unlock、gallery、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合；cache second-run 已在同一八包 identity 下完成，但不替代这些独立门禁。
 
 ## 当前媒体复核（2026-08-26）
 
@@ -80,7 +80,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
 | Config writable-file persistence | 已实现 | `astra.emu.minori.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |
 
-当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已完成八包 manifest v2 full verify：14502 个 entry、43818 次 range read、6624958365 个 decoded bytes。验证轮显式关闭 cache；启用 cache 的运行因平台缓存卷空间不足阻断，因此新的八包 cache identity 仍没有第二轮命中实证。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
+当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已在同一 mount/profile/private-profile identity 下完成两轮 manifest v2 full verify：每轮 14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`；aggregate hash 保持一致。该结果关闭真实 cache second-run，但不替代 identity 漂移、损坏恢复和配额淘汰门禁。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 
 ## 下一阶段 Archive
 
