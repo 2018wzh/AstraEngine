@@ -570,18 +570,23 @@ impl NullAudioLane {
     ) -> Result<Self, String> {
         let expected_samples = chunk_frames
             .checked_mul(usize::from(channels))
-            .filter(|samples| *samples > 0);
-        if sample_rate == 0 || chunk_frames == 0 || expected_samples.is_none() {
+            .filter(|samples| *samples > 0)
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".to_owned())?;
+        if sample_rate == 0 || chunk_frames == 0 {
             return Err("ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".into());
         }
-        let frame_duration = Duration::from_secs_f64(chunk_frames as f64 / sample_rate as f64);
-        if frame_duration.is_zero() {
-            return Err("ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".into());
-        }
+        let frame_duration_nanos = u128::try_from(chunk_frames)
+            .ok()
+            .and_then(|frames| frames.checked_mul(1_000_000_000))
+            .and_then(|nanos| nanos.checked_div(u128::from(sample_rate)))
+            .and_then(|nanos| u64::try_from(nanos).ok())
+            .filter(|nanos| *nanos > 0)
+            .ok_or_else(|| "ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".to_owned())?;
+        let frame_duration = Duration::from_nanos(frame_duration_nanos);
         Ok(Self {
             next_deadline: std::time::Instant::now(),
             frame_duration,
-            expected_samples: expected_samples.expect("validated above"),
+            expected_samples,
             consumed_samples: 0,
             paced,
         })
@@ -1758,6 +1763,17 @@ mod tests {
         samples[127] = f32::NAN;
         assert!(lane.submit(samples).is_err());
         assert_eq!(lane.consumed_samples(), 0);
+    }
+
+    #[test]
+    fn null_audio_lane_rejects_format_arithmetic_overflow_without_panicking() {
+        assert!(NullAudioLane::new(48_000, 2, usize::MAX, false).is_err());
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn null_audio_lane_rejects_unrepresentable_frame_duration_without_panicking() {
+        assert!(NullAudioLane::new(1, 1, usize::MAX, false).is_err());
     }
 
     #[test]
