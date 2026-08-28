@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-The signed Manager also reached its runtime-active window in the authorized Windows Sandbox with no default audio device; Diagnostics showed no blocking diagnostic after `NullAudioLane` selection. This is startup/UI evidence only. The null endpoint is excluded from physical-audio evidence and the Sandbox did not yield a writable artifact, so Windows E3 and formal audio review remain open.
+The signed Manager also reached its runtime-active window in the authorized Windows Sandbox with no default audio device; Diagnostics showed no blocking diagnostic after `NullAudioLane` selection and exposes `audio_endpoint=null` for the session. This is startup/UI evidence only. The null endpoint is excluded from physical-audio evidence and the Sandbox did not yield a writable artifact, so Windows E3 and formal audio review remain open.
 
 Current AstraEMU contract identity is Family ABI v10 (`astra.emu.family_abi.v10`), a hard cut from v9. The v10 step wire carries an ABI-owned typed `LegacySystemMenuRequestV1`; Manager promotes a physical pressed `pointer.secondary` edge into this request and removes the duplicate edge before the family call. Minori accepts `Open` only from a stable gameplay wait and opens its verified Save page through the existing writable-file host port. Duplicate, ambiguous, active-choice, active-media and missing-host-service cases remain blocking diagnostics.
 
