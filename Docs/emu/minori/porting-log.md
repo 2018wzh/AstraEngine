@@ -4,6 +4,7 @@
 
 - 在授权 Windows Sandbox 中用当前签名 Manager 启动 Minori。Host 的默认输出不可用时，`FamilyAudioService` 选择 `NullAudioLane`，Manager 窗口仍完成初始化，Diagnostics 面板显示 runtime active 且无 blocking diagnostic。
 - 该复核只证明无设备启动和 UI 生命周期不再因 WASAPI 失败而退出；null sink 不产生物理 audio meter，且本轮没有 artifact 输出，因此不能关闭正式音频听审或 Windows E3。
+- Diagnostics 摘要现显式显示 `audio_endpoint=none|native|null`；这是当前 session 的端点状态提示，不改变 blocking diagnostic，也不把 `null` 提升为物理音频 evidence。
 
 ## 2026-08-28：Family API v10 与右键系统菜单
 

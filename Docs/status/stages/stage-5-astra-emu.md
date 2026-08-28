@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-2026-08-28 no-device validation: the signed Manager opened its runtime-active window in the authorized Windows Sandbox despite the unavailable default output device; the Diagnostics panel showed no blocking diagnostic. This confirms the NullAudioLane startup path and not physical audio, formal review or Windows E3, because the sink is intentionally excluded from evidence and the Sandbox had no writable artifact channel.
+2026-08-28 no-device validation: the signed Manager opened its runtime-active window in the authorized Windows Sandbox despite the unavailable default output device; the Diagnostics panel showed no blocking diagnostic and now exposes `audio_endpoint=null` for the selected bounded sink. This confirms the NullAudioLane startup path and not physical audio, formal review or Windows E3, because the sink is intentionally excluded from evidence and the Sandbox had no writable artifact channel.
 
 2026-08-28 follow-up: 在无音频设备的 Sandbox 中，`ProviderUnavailable` 现在由 `FamilyAudioService` 选择 bounded `NullAudioLane`，继续走 Kira、重采样和 telemetry；非该错误仍直接阻断。Manager 同时报告 `audio_null_device`，不把 null sink 的非静音 meter 当成物理音频证据。另修正 Minori 消息 wait 的 host key 集合，加入 `pointer.primary`，避免 family 已推进而 Manager 保留旧 wait。定向 Minori/Manager 测试及点击后确认的 Sandbox 运行通过，未再出现重复 ready 诊断；该证据不关闭物理音频、完整路线或 Windows E3。
 同日的 NullAudioLane 边界复核还固定了输出声道、完整 mixer chunk 和有限浮点样本；错误长度或非有限值在 sink 计数更新前返回 typed diagnostic，避免无设备路径吞掉格式错误。

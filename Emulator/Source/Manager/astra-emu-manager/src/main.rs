@@ -1300,8 +1300,15 @@ impl RuntimeBridge {
         } else {
             "idle"
         };
+        let audio_endpoint = self.audio.as_ref().map_or("none", |audio| {
+            if audio.uses_null_device() {
+                "null"
+            } else {
+                "native"
+            }
+        });
         format!(
-            "runtime={state}; pending_scenes={}; pending_layers={}; video_active={}; translation_active={}; filter={}",
+            "runtime={state}; pending_scenes={}; pending_layers={}; video_active={}; translation_active={}; audio_endpoint={audio_endpoint}; filter={}",
             self.live_scene_commits.len(),
             self.live_layer_commits.len(),
             self.video.is_active(),
