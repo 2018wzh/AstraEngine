@@ -5029,14 +5029,22 @@ mod manager_tests {
                 sequence: 3,
             },
             astra_emu_family_api::LegacyInputEdge {
+                control: "pointer.primary".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 4,
+            },
+            astra_emu_family_api::LegacyInputEdge {
                 control: "enter".into(),
                 pressed: false,
                 value: 0.0,
-                sequence: 4,
+                sequence: 5,
             },
         ];
-        let retained =
-            retain_non_completed_input_edges(edges, &BTreeSet::from(["enter".to_owned()]));
+        let retained = retain_non_completed_input_edges(
+            edges,
+            &BTreeSet::from(["enter".to_owned(), "pointer.primary".to_owned()]),
+        );
         assert_eq!(
             retained
                 .iter()

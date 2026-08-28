@@ -399,11 +399,14 @@ fn choice_input_keys() -> Vec<String> {
 }
 
 const MINORI_MESSAGE_INPUT_CONTROLS: [&str; 3] = ["enter", "space", "pointer.primary"];
-// Escape is a host-owned system-menu shortcut, but it must also be present in
-// the wait contract so the host removes the active message wait in the same
-// tick that the family opens the save page.  The edge remains visible to the
-// family (see the CLI wait router), where it is consumed as the menu action.
-const MINORI_MESSAGE_HOST_AWAIT_CONTROLS: [&str; 3] = ["enter", "space", "escape"];
+// The host wait contract must cover every canonical message activation edge
+// that the family accepts directly.  Escape is also a host-owned system-menu
+// shortcut, but it remains in the contract so the host removes the active
+// message wait in the same tick that the family opens the save page.  The
+// escape edge remains visible to the family (see the CLI wait router), where
+// it is consumed as the menu action.
+const MINORI_MESSAGE_HOST_AWAIT_CONTROLS: [&str; 4] =
+    ["enter", "space", "escape", "pointer.primary"];
 
 fn minori_message_presentation(
     stage_size: Option<(u32, u32)>,
@@ -12364,9 +12367,14 @@ mod tests {
                 },
             )
             .unwrap();
-        provider
+        let first = provider
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
+        assert!(matches!(
+            first.control.waits.as_slice(),
+            [LegacyWaitRequest::Input { keys, .. }]
+                if keys.iter().any(|key| key == "pointer.primary")
+        ));
         let output = provider
             .step(
                 &ctx,

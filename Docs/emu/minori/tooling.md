@@ -46,3 +46,5 @@ Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged
 `Tools/AstraEMU/minori_probe.py`、`minori_paz.py` 和 `minori_sc.py` 只用于格式研究，不是生产 VFS 路径。`minori_paz.py` 不内置 key；没有显式 key file 时只做 probe。所有 decode/extract 产物必须写到 ignored 私有目录。
 
 Windows 无音频设备时，`FamilyAudioService` 仅在 `ProviderUnavailable` 下选择 bounded paced `NullAudioLane`，继续使用 Kira mixer 和有界提交路径，并以 `ASTRA_EMU_AUDIO_NULL_DEVICE` warning 标记。这只保证无设备时的软件运行，不代替 physical audio E3 证据。
+
+消息等待的 host key 集合必须覆盖 family 可直接消费的所有 canonical 输入。Minori 的消息 wait 现在同时声明 `enter`、`space`、`escape` 和 `pointer.primary`；这样鼠标确认会先由 Manager 完成同一个 await，再交给 family 处理 Escape 菜单语义，不会留下旧 wait 与新 wait 并存。该契约由 provider 与 Manager 的定向回归共同锁定。

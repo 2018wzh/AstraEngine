@@ -702,3 +702,9 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - `astra-emu-family-support::FamilyAudioService` 在选定的 native host 打开输出时仅对 `ProviderUnavailable` 启用有界、定速的 `NullAudioLane`，仍然经过同一个 Kira mixer、重采样和 telemetry 路径，并回收所有权限缓冲区。
 - native device 仍为首选；只有设备不可用时才选 Null endpoint，其他 platform error 仍然直接阻断。选择仅记录 `ASTRA_EMU_AUDIO_NULL_DEVICE` warning，不记录音频内容。
 - Windows Sandbox 现在可以在无音频设备的环境中启动并进入后续 runtime 路径；Null endpoint 不构成物理音频 E3 证据，当前剩余验证阻断状态仍需单独记录。
+
+### 2026-08-28 消息点击与 host await 合约对齐
+
+- Sandbox 的第一轮真实输入在画面区域点击后出现两个同时 ready 的 `input` wait。诊断记录确认 family 在同一固定步只发出一个新 wait，而 host 仍保留旧 wait；根因是 Minori family 直接接受 `pointer.primary` 完成消息，但对外的 host await key 集合没有声明该输入，导致 provider 已推进脚本而 Manager 没有移除对应的 await。
+- `MINORI_MESSAGE_HOST_AWAIT_CONTROLS` 现在显式包含 `enter`、`space`、`escape` 和 `pointer.primary`，与 `MINORI_MESSAGE_INPUT_CONTROLS` 的直接输入语义一致。Manager 仍只移除实际完成的 pressed edge，Escape 的系统菜单语义保持可见；没有清空 pending wait、忽略第二个 token 或添加 fallback。
+- 增加了 Minori provider wait-contract 与 Manager edge-retention 回归。当前签名 Release package 在 Windows Sandbox 中完成画面点击后再确认输入，firefly Layer2D 帧继续变化且未出现 `ASTRA_EMU_AWAIT_MULTIPLE_READY`；该运行没有声明完整路线、物理音频或 Windows E3 通过。
