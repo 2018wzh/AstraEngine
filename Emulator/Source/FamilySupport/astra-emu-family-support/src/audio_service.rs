@@ -547,13 +547,22 @@ struct WorkerState {
 struct NullAudioLane {
     next_deadline: std::time::Instant,
     frame_duration: Duration,
+    expected_samples: usize,
     consumed_samples: u64,
     paced: bool,
 }
 
 impl NullAudioLane {
-    fn new(sample_rate: u32, chunk_frames: usize, paced: bool) -> Result<Self, String> {
-        if sample_rate == 0 || chunk_frames == 0 {
+    fn new(
+        sample_rate: u32,
+        channels: u16,
+        chunk_frames: usize,
+        paced: bool,
+    ) -> Result<Self, String> {
+        let expected_samples = chunk_frames
+            .checked_mul(usize::from(channels))
+            .filter(|samples| *samples > 0);
+        if sample_rate == 0 || chunk_frames == 0 || expected_samples.is_none() {
             return Err("ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".into());
         }
         let frame_duration = Duration::from_secs_f64(chunk_frames as f64 / sample_rate as f64);
@@ -563,6 +572,7 @@ impl NullAudioLane {
         Ok(Self {
             next_deadline: std::time::Instant::now(),
             frame_duration,
+            expected_samples: expected_samples.expect("validated above"),
             consumed_samples: 0,
             paced,
         })
@@ -572,9 +582,16 @@ impl NullAudioLane {
 impl astra_platform::AudioOutputLane for NullAudioLane {
     fn wait_for_capacity(
         &mut self,
-        _requested_samples: usize,
+        requested_samples: usize,
         stop: &std::sync::atomic::AtomicBool,
     ) -> Result<(), PlatformError> {
+        if requested_samples != self.expected_samples {
+            return Err(PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "audio.null.wait",
+                "null audio request does not match the bound chunk shape",
+            ));
+        }
         if !self.paced {
             return Ok(());
         }
@@ -593,6 +610,15 @@ impl astra_platform::AudioOutputLane for NullAudioLane {
     }
 
     fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        if samples.len() != self.expected_samples
+            || samples.iter().any(|sample| !sample.is_finite())
+        {
+            return Err(PlatformError::new(
+                astra_platform::PlatformErrorCode::InvalidState,
+                "audio.null.submit",
+                "null audio chunk has an invalid shape or non-finite sample",
+            ));
+        }
         self.consumed_samples = self
             .consumed_samples
             .checked_add(samples.len() as u64)
@@ -713,8 +739,12 @@ impl WorkerState {
                     sample_rate: 48_000,
                     channels: 2,
                 };
-                let endpoint =
-                    NullAudioLane::new(format.sample_rate, chunk_frames, !deterministic)?;
+                let endpoint = NullAudioLane::new(
+                    format.sample_rate,
+                    format.channels,
+                    chunk_frames,
+                    !deterministic,
+                )?;
                 (
                     None,
                     format,
@@ -1698,7 +1728,7 @@ mod tests {
 
     #[test]
     fn null_audio_lane_consumes_and_recycles_owned_chunks() {
-        let mut lane = NullAudioLane::new(48_000, 480, false).unwrap();
+        let mut lane = NullAudioLane::new(48_000, 2, 480, false).unwrap();
         let stop = std::sync::atomic::AtomicBool::new(false);
         lane.wait_for_capacity(960, &stop).unwrap();
         let samples = vec![0.25; 960];
@@ -1707,6 +1737,18 @@ mod tests {
         assert_eq!(recycled.as_ptr(), pointer);
         assert_eq!(lane.consumed_samples(), 960);
         assert_eq!(lane.underflow_count(), 0);
+    }
+
+    #[test]
+    fn null_audio_lane_rejects_wrong_shape_and_non_finite_samples() {
+        let mut lane = NullAudioLane::new(48_000, 2, 480, false).unwrap();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        assert!(lane.wait_for_capacity(959, &stop).is_err());
+        assert!(lane.submit(vec![0.0; 959]).is_err());
+        let mut samples = vec![0.0; 960];
+        samples[127] = f32::NAN;
+        assert!(lane.submit(samples).is_err());
+        assert_eq!(lane.consumed_samples(), 0);
     }
 
     #[test]

@@ -6,6 +6,7 @@
 - Manager 将 `pointer.secondary` 的 pressed edge 提升为 typed request，并从传给 family 的 input stream 中移除重复的 pressed edge；release edge 仍留在普通 input stream。重复 pressed secondary、pointer 数值异常和 sequence 冲突都返回 `ASTRA_EMU_SYSTEM_MENU_*` diagnostic。
 - Minori 只在没有 system page、wait 状态为稳定 gameplay `Input`/`Time` wait、没有 await/provider completion 且已绑定 writable-file Host 时打开 Save page，并通过已验证 system assets 刷新 slot。choice、media、ambiguous input 和缺 Host service 都直接阻断。
 - Family API wire round-trip、validation、Manager promotion/duplicate 和 Minori provider 测试已经加入定向测试；该变更没有改变 Layer2D、音频或媒体 provider contract。
+- 无物理音频设备时的 `NullAudioLane` 现在也严格绑定输出声道与 chunk 形状，并拒绝错误长度或非有限样本；它只消费经过同一 Kira/resampler 路径的 owned buffer，不把无设备数据当作物理音频 evidence。
 
 ## 2026-08-28：global progress 的新 session 装载
 
