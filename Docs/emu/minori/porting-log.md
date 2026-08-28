@@ -1,5 +1,10 @@
 # Minori 移植日志
 
+## 2026-08-28：无音频设备启动复核
+
+- 在授权 Windows Sandbox 中用当前签名 Manager 启动 Minori。Host 的默认输出不可用时，`FamilyAudioService` 选择 `NullAudioLane`，Manager 窗口仍完成初始化，Diagnostics 面板显示 runtime active 且无 blocking diagnostic。
+- 该复核只证明无设备启动和 UI 生命周期不再因 WASAPI 失败而退出；null sink 不产生物理 audio meter，且本轮没有 artifact 输出，因此不能关闭正式音频听审或 Windows E3。
+
 ## 2026-08-28：Family API v10 与右键系统菜单
 
 - Family API 的 ABI hard cut 进入 `astra.emu.family_abi.v10`。`LegacyStepInput` 增加 `LegacySystemMenuRequestV1`，通过 `FfiSystemMenuRequestV1` 进入 ABI wire。request 目前只允许 `Open`，可携带有界 pointer 坐标和独立 sequence，不把右键当作键盘 alias。
