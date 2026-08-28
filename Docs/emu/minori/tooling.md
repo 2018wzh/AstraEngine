@@ -37,8 +37,12 @@ Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged
 
 当前合法样本已通过真实导入、八包 14,502-entry manifest v2 full verify、同一 identity 的 cache second-run，以及 89 脚本的 payload-free census。两轮 full verify 均执行 43,818 次 range read、读取 6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
 
+`census-scripts` 当前输出 `astra.emu.minori.sc_census.v5`。除总量、opcode、音频和角色聚合外，`scripts` 数组只保留稳定序号、解码大小、源字节 SHA-256、行/命令计数、opcode 计数和 unknown 计数；不写脚本 URI、正文、operand、label 或跳转目标。这样可以在不泄露商业脚本的前提下定位单文件 parser/runtime 覆盖差异。
+
 `census-media` 只检查 `bg`、`bgm`，逐 frame 调用生产 ANI/SQZ adapter，并用 `image` 验证 PNG。报告仅含格式、entry/frame、像素和尺寸聚合计数；不含 URI、文件名或像素。当前样本通过 4665-entry census：2655 PNG、1951 ANI（6723 frames）、9 SQZ（224 frames）、49 Ogg 和 1 个 metadata database。
 
 ## 辅助研究脚本
 
 `Tools/AstraEMU/minori_probe.py`、`minori_paz.py` 和 `minori_sc.py` 只用于格式研究，不是生产 VFS 路径。`minori_paz.py` 不内置 key；没有显式 key file 时只做 probe。所有 decode/extract 产物必须写到 ignored 私有目录。
+
+Windows 无音频设备时，`FamilyAudioService` 仅在 `ProviderUnavailable` 下选择 bounded paced `NullAudioLane`，继续使用 Kira mixer 和有界提交路径，并以 `ASTRA_EMU_AUDIO_NULL_DEVICE` warning 标记。这只保证无设备时的软件运行，不代替 physical audio E3 证据。

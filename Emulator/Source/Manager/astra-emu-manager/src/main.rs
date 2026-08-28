@@ -363,7 +363,7 @@ impl RuntimeBridge {
             platform_data_dir()?
                 .join("SavedGames")
                 .join(&self.family_id)
-                .join(package_hash.to_string()),
+                .join(package_hash.to_hex()),
         )?;
         let audio = HostAudioExecutor::open()?;
         self.video.bind_platform(audio.platform_client());
@@ -554,8 +554,11 @@ impl RuntimeBridge {
                 "astra.family_content_hash".into(),
                 report.content_identity.to_string(),
             ),
-            ("astra.stage_width".into(), "1024".into()),
-            ("astra.stage_height".into(), "768".into()),
+            // Minori resources and retained layers are authored against the
+            // verified 1280x720 reference stage.  The manager's FVP default
+            // would reject the first message before a surface is published.
+            ("astra.stage_width".into(), "1280".into()),
+            ("astra.stage_height".into(), "720".into()),
             ("astra.launch_entry_explicit".into(), "true".into()),
             (
                 "astra.provider.storage".into(),
@@ -587,6 +590,16 @@ impl RuntimeBridge {
             return Ok(false);
         }
         if Instant::now() < active.next_tick {
+            return Ok(false);
+        }
+        // A Family ABI v9 surface lease is single-owner: once a generation is
+        // published it remains the renderer's property until the retained
+        // transaction has been consumed and the buffer returned.  Do not
+        // advance the runtime while an older live transaction is queued, or a
+        // subsequent acquire could recycle that buffer and invalidate the
+        // generation referenced by the renderer.  The rendering notifier
+        // drains these queues and requests the next runtime deadline.
+        if !self.live_layer_commits.is_empty() || !self.live_scene_commits.is_empty() {
             return Ok(false);
         }
         let next_step = active.fixed_step.saturating_add(1);
@@ -628,9 +641,56 @@ impl RuntimeBridge {
             })
             .map(|(token, _)| token.clone())
             .collect::<Vec<_>>();
+        if ready.len() > 1 {
+            let ready_token_hashes = ready
+                .iter()
+                .map(|token| Hash256::from_sha256(token.as_bytes()).to_hex())
+                .collect::<Vec<_>>()
+                .join(",");
+            let ready_wait_kinds = ready
+                .iter()
+                .filter_map(|token| {
+                    active
+                        .pending_waits
+                        .get(token)
+                        .map(|wait| pending_wait_kind(wait))
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            tracing::error!(
+                event = "astra.emu.manager.await_multiple_ready",
+                fixed_step = next_step,
+                ready_count = ready.len(),
+                pending_wait_count = active.pending_waits.len(),
+                "more than one family wait became ready in a single tick"
+            );
+            return Err(format!(
+                "ASTRA_EMU_AWAIT_MULTIPLE_READY:ready_count={};pending_count={};token_hashes={};wait_kinds={}",
+                ready.len(),
+                active.pending_waits.len(),
+                ready_token_hashes,
+                ready_wait_kinds
+            ));
+        }
+        let mut completed_input_controls = BTreeSet::new();
         let mut await_results = Vec::new();
         for token_id in ready {
-            active.pending_waits.remove(&token_id);
+            let condition = active
+                .pending_waits
+                .remove(&token_id)
+                .ok_or_else(|| "ASTRA_EMU_AWAIT_TOKEN_MISSING".to_owned())?;
+            if let PendingWait::Input(keys) = condition {
+                for edge in active.pending_inputs.iter().filter(|edge| edge.pressed) {
+                    // The host translates the edge into the ordered await
+                    // completion below.  Keep Escape visible because it is
+                    // also the family system-menu shortcut; all other
+                    // controls that completed this input wait would be a
+                    // duplicate semantic completion at the provider.
+                    if edge.control != "escape" && keys.contains(&edge.control) {
+                        completed_input_controls.insert(edge.control.clone());
+                    }
+                }
+            }
             active.await_sequence = active.await_sequence.saturating_add(1);
             await_results.push(LegacyAwaitResult {
                 token_id,
@@ -639,7 +699,10 @@ impl RuntimeBridge {
                 sequence: active.await_sequence,
             });
         }
-        let input_edges = std::mem::take(&mut active.pending_inputs);
+        let input_edges = retain_non_completed_input_edges(
+            std::mem::take(&mut active.pending_inputs),
+            &completed_input_controls,
+        );
         if !input_edges.is_empty() {
             tracing::debug!(
                 event = "astra.emu.manager.input_consumed",
@@ -1461,6 +1524,29 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
         RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingWait::ProviderCompletion,
     };
     (token_id, condition)
+}
+
+fn pending_wait_kind(wait: &PendingWait) -> &'static str {
+    match wait {
+        PendingWait::DueStep(_) => "frame",
+        PendingWait::Time(_) => "time",
+        PendingWait::Input(_) => "input",
+        PendingWait::PresentationFence => "presentation",
+        PendingWait::MediaFence(_) => "media",
+        PendingWait::ProviderCompletion => "provider",
+    }
+}
+
+fn retain_non_completed_input_edges(
+    edges: Vec<LegacyInputEdge>,
+    completed_controls: &BTreeSet<String>,
+) -> Vec<LegacyInputEdge> {
+    edges
+        .into_iter()
+        .filter(|edge| {
+            !edge.pressed || edge.control == "escape" || !completed_controls.contains(&edge.control)
+        })
+        .collect()
 }
 
 fn parse_glossary(input: &str) -> Result<Vec<(String, String)>, String> {
@@ -2447,7 +2533,7 @@ impl AstraEmuManagerController {
         let engine = engine
             .and_then(|value| value.into_string().ok())
             .ok_or_else(|| "ASTRA_EMU_QUICK_ENGINE_REQUIRED".to_owned())?;
-        if engine != "fvp" {
+        if !matches!(engine.as_str(), "fvp" | "minori") {
             return Err("ASTRA_EMU_QUICK_ENGINE_UNSUPPORTED".into());
         }
         let game_dir = game_dir.ok_or_else(|| "ASTRA_EMU_QUICK_GAME_DIR_REQUIRED".to_owned())?;
@@ -2476,13 +2562,10 @@ impl AstraEmuManagerController {
             })
             .transpose()?
             .map(|value| value.replace('\\', "/"));
-        if requested_entry.as_ref().is_some_and(|value| {
-            value.is_empty()
-                || value.starts_with('/')
-                || value
-                    .split('/')
-                    .any(|part| part.is_empty() || matches!(part, "." | ".."))
-        }) {
+        if requested_entry
+            .as_ref()
+            .is_some_and(|value| !quick_entry_is_valid(&engine, value))
+        {
             return Err("ASTRA_EMU_QUICK_ENTRY_INVALID".into());
         }
         let candidates = self
@@ -2494,7 +2577,7 @@ impl AstraEmuManagerController {
             .filter(|case| {
                 requested_entry
                     .as_ref()
-                    .is_none_or(|entry| case.relative_path.replace('\\', "/") == *entry)
+                    .is_none_or(|entry| quick_entry_matches(&engine, entry, &case.relative_path))
             })
             .collect::<Vec<_>>();
         if candidates.is_empty() {
@@ -4228,7 +4311,10 @@ impl ManagerController for AstraEmuManagerController {
         if !matches!(family_id.as_str(), "fvp" | "minori") {
             return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
         }
-        let mount_identity = Hash256::from_sha256(case.content_hash.as_bytes()).to_string();
+        // `Hash256::to_string()` includes the `sha256:` display prefix, which
+        // is not a valid VFS mount-set symbol. Use the bounded hexadecimal
+        // representation for the stable identity instead.
+        let mount_identity = Hash256::from_sha256(case.content_hash.as_bytes()).to_hex();
         let mount_set_id = format!("mount-{}", &mount_identity[..32]);
         let grant_root = PathBuf::from(&grant.platform_token);
         let game_root = case
@@ -4259,20 +4345,43 @@ impl ManagerController for AstraEmuManagerController {
                 .family_vfs_registry
                 .mount("minori", &game_root, &loaded)
                 .map_err(|error| error.to_string())?;
-            let entry_uri = mounted
-                .manifest()
-                .entries
-                .iter()
-                .find(|entry| entry.media_kind == "script" && entry.uri.ends_with("/test.sc"))
+            let requested_entry = env::var("ASTRA_EMU_QUICK_ENTRY")
+                .ok()
+                .filter(|value| value.starts_with("minori:/"));
+            let entry_uri = requested_entry
+                .filter(|requested| {
+                    mounted
+                        .manifest()
+                        .entries
+                        .iter()
+                        .any(|entry| entry.media_kind == "script" && entry.uri == *requested)
+                })
                 .or_else(|| {
                     mounted
                         .manifest()
                         .entries
                         .iter()
-                        .find(|entry| entry.media_kind == "script")
+                        .find(|entry| {
+                            entry.media_kind == "script" && entry.uri.ends_with("/test.sc")
+                        })
+                        .or_else(|| {
+                            mounted
+                                .manifest()
+                                .entries
+                                .iter()
+                                .find(|entry| entry.media_kind == "script")
+                        })
+                        .map(|entry| entry.uri.clone())
                 })
-                .map(|entry| entry.uri.clone())
                 .ok_or_else(|| "ASTRA_EMU_MINORI_ENTRY_REQUIRED".to_owned())?;
+            if let Some(requested) = env::var("ASTRA_EMU_QUICK_ENTRY")
+                .ok()
+                .filter(|value| value.starts_with("minori:/"))
+            {
+                if requested != entry_uri {
+                    return Err("ASTRA_EMU_MINORI_ENTRY_NOT_FOUND".into());
+                }
+            }
             let adapter = Arc::new(
                 LegacyMountedVfsReaderAdapter::new(&mount_set_id, mounted.clone())
                     .map_err(|error| error.to_string())?,
@@ -4331,7 +4440,21 @@ impl ManagerController for AstraEmuManagerController {
             }
             detected.fixed_delta_ns = explicit.fixed_delta_ns;
             detected.compatibility_profile = explicit.compatibility_profile;
-            detected.family_options.extend(explicit.family_options);
+            let mut explicit_options = explicit.family_options;
+            if family_id == "minori" {
+                // These values are derived from the freshly mounted PAZ and
+                // are not user policy.  Do not let a profile persisted by an
+                // older probe overwrite the current content identity or the
+                // verified 1280x720 stage contract.
+                for key in [
+                    "astra.family_content_hash",
+                    "astra.stage_width",
+                    "astra.stage_height",
+                ] {
+                    explicit_options.remove(key);
+                }
+            }
+            detected.family_options.extend(explicit_options);
         }
         if let Err(error) = self.library.set_case_runtime_profile(&detected) {
             self.vfs.unbind(&mount_set_id);
@@ -4607,6 +4730,30 @@ impl Drop for AstraEmuManagerController {
     }
 }
 
+fn quick_entry_is_valid(engine: &str, value: &str) -> bool {
+    if engine == "minori" && value.starts_with("minori:/") {
+        let path = &value["minori:/".len()..];
+        return !path.is_empty()
+            && !path.starts_with('/')
+            && !path.contains('\\')
+            && path
+                .split('/')
+                .all(|part| !part.is_empty() && !matches!(part, "." | ".."));
+    }
+    !value.is_empty()
+        && !value.starts_with('/')
+        && !value.starts_with('\\')
+        && !value.contains('\\')
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
+}
+
+fn quick_entry_matches(engine: &str, requested: &str, case_path: &str) -> bool {
+    (engine == "minori" && requested.starts_with("minori:/"))
+        || case_path.replace('\\', "/") == requested
+}
+
 fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     let diagnostics_dir = platform_data_dir()?.join("diagnostics");
     std::fs::create_dir_all(&diagnostics_dir)?;
@@ -4614,20 +4761,47 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     observability.role = astra_observability::HostRole::Manager;
     observability.console = false;
     observability.log_dir = Some(diagnostics_dir);
-    let _observability = astra_observability::init_host(observability)?;
+    let observability = astra_observability::init_host(observability)?;
     tracing::info!(event = "astra.emu.manager.start");
     let mut controller = AstraEmuManagerController::open()?;
-    let quick_launch = controller.apply_quick_launch_from_environment()?;
+    let quick_launch = match controller.apply_quick_launch_from_environment() {
+        Ok(value) => value,
+        Err(error) => {
+            // The controller can fail before the Slint backend is selected. Flush
+            // the startup log here so a rejected quick launch remains observable
+            // even when the process exits before the event loop starts.
+            tracing::error!(
+                event = "astra.emu.manager.quick_launch_failed",
+                diagnostic_code = %error,
+            );
+            // Keep the process-level failure observable even when the
+            // structured sink redacts unknown error text. The controller only
+            // returns stable diagnostic codes at this boundary, so no path or
+            // payload is emitted here.
+            eprintln!(
+                "astra.emu.manager.quick_launch_failed: {}",
+                startup_diagnostic_code_text(&error)
+            );
+            let _ = observability.flush();
+            return Err(error.into());
+        }
+    };
+    let (stage_width, stage_height) =
+        if env::var("ASTRA_EMU_QUICK_ENGINE").as_deref() == Ok("minori") {
+            (1280, 720)
+        } else {
+            (1024, 768)
+        };
     let runtime = controller.runtime.clone();
-    run_manager_with_initial_state(
+    let manager_result = run_manager_with_initial_state(
         controller,
         ManagerStageRenderer {
             texture: None,
             scene_texture: None,
             runtime,
             gpu: None,
-            stage_width: 1024,
-            stage_height: 768,
+            stage_width,
+            stage_height,
             texture_dirty: false,
             scene_initialized: false,
             scene_compositing: None,
@@ -4637,7 +4811,19 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
             next_layer_texture_id: 1,
         },
         quick_launch,
-    )?;
+    );
+    if let Err(error) = manager_result {
+        tracing::error!(
+            event = "astra.emu.manager.runtime_failed",
+            diagnostic_code = %startup_diagnostic_code(&error),
+        );
+        eprintln!(
+            "astra.emu.manager.runtime_failed: {}",
+            startup_diagnostic_code(&error)
+        );
+        let _ = observability.flush();
+        return Err(error.into());
+    }
     Ok(())
 }
 
@@ -4666,7 +4852,10 @@ fn main() -> std::process::ExitCode {
 }
 
 fn startup_diagnostic_code(error: &(dyn std::error::Error + 'static)) -> String {
-    let text = error.to_string();
+    startup_diagnostic_code_text(&error.to_string())
+}
+
+fn startup_diagnostic_code_text(text: &str) -> String {
     let Some(start) = text.find("ASTRA_") else {
         return "ASTRA_EMU_MANAGER_STARTUP_FAILED".into();
     };
@@ -4700,7 +4889,12 @@ use audio_executor::HostAudioExecutor;
 
 #[cfg(test)]
 mod manager_tests {
-    use std::{collections::BTreeMap, fs, io::Cursor, sync::Arc};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        fs,
+        io::Cursor,
+        sync::Arc,
+    };
 
     use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
 
@@ -4712,7 +4906,8 @@ mod manager_tests {
 
     use super::{
         apply_audio_media_hook, decode_image_preview, decode_text_preview, fvp_pack_paths_option,
-        media_preview_summary, parse_glossary, refresh_cover_cache, validate_patch_actions,
+        media_preview_summary, parse_glossary, quick_entry_is_valid, quick_entry_matches,
+        refresh_cover_cache, retain_non_completed_input_edges, validate_patch_actions,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -4790,6 +4985,65 @@ mod manager_tests {
         assert_eq!(normalize_legacy_input_value("confirm", 1.25).unwrap(), 1.25);
         assert!(normalize_legacy_input_value("pointer.x", f32::NAN).is_err());
         assert!(normalize_legacy_input_value("pointer.y", i32::MAX as f32).is_err());
+    }
+
+    #[test]
+    fn minori_quick_launch_accepts_only_canonical_vfs_entries() {
+        assert!(quick_entry_is_valid("minori", "minori:/scr/A01.sc"));
+        assert!(!quick_entry_is_valid("minori", "minori:/scr/../sys/config"));
+        assert!(!quick_entry_is_valid("minori", "minori:\\scr\\A01.sc"));
+        assert!(quick_entry_is_valid("fvp", "game/main.hcb"));
+        assert!(!quick_entry_is_valid("fvp", "../game/main.hcb"));
+        assert!(quick_entry_matches(
+            "minori",
+            "minori:/scr/A01.sc",
+            "scr.paz"
+        ));
+        assert!(quick_entry_matches(
+            "fvp",
+            "game/main.hcb",
+            "game\\main.hcb"
+        ));
+        assert!(!quick_entry_matches("fvp", "minori:/scr/A01.sc", "scr.paz"));
+    }
+
+    #[test]
+    fn host_await_completion_removes_only_duplicate_trigger_edges() {
+        let edges = vec![
+            astra_emu_family_api::LegacyInputEdge {
+                control: "enter".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 1,
+            },
+            astra_emu_family_api::LegacyInputEdge {
+                control: "escape".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 2,
+            },
+            astra_emu_family_api::LegacyInputEdge {
+                control: "pointer.x".into(),
+                pressed: true,
+                value: 320.0,
+                sequence: 3,
+            },
+            astra_emu_family_api::LegacyInputEdge {
+                control: "enter".into(),
+                pressed: false,
+                value: 0.0,
+                sequence: 4,
+            },
+        ];
+        let retained =
+            retain_non_completed_input_edges(edges, &BTreeSet::from(["enter".to_owned()]));
+        assert_eq!(
+            retained
+                .iter()
+                .map(|edge| (edge.control.as_str(), edge.pressed))
+                .collect::<Vec<_>>(),
+            vec![("escape", true), ("pointer.x", true), ("enter", false)]
+        );
     }
 
     #[test]

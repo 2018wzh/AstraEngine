@@ -1794,13 +1794,46 @@ impl MinoriRuntimeProvider {
                 return waiting_output(session, wait, live, None, play_mode_wait_rebound, &input);
             }
             let expected = wait_token(&wait);
-            if input.await_results.len() != 1
-                || input.await_results[0].token_id != expected
-                || input.await_results[0].status != "completed"
-            {
+            if input.await_results.len() != 1 {
+                tracing::error!(
+                    target: "astra_emu_minori::runtime",
+                    event = "astra_emu_minori_await_result_count_mismatch",
+                    fixed_tick = input.tick_index,
+                    expected_token = %Hash256::from_sha256(expected.as_bytes()),
+                    received_count = input.await_results.len(),
+                    "await completion count does not match the active wait"
+                );
                 return Err(invalid(
-                    "ASTRA_EMU_MINORI_AWAIT_RESULT",
-                    "await result does not match the active wait token",
+                    "ASTRA_EMU_MINORI_AWAIT_RESULT_COUNT",
+                    "await result count does not match the active wait token",
+                ));
+            }
+            let result = &input.await_results[0];
+            if result.token_id != expected {
+                tracing::error!(
+                    target: "astra_emu_minori::runtime",
+                    event = "astra_emu_minori_await_result_token_mismatch",
+                    fixed_tick = input.tick_index,
+                    expected_token = %Hash256::from_sha256(expected.as_bytes()),
+                    received_token = %Hash256::from_sha256(result.token_id.as_bytes()),
+                    "await completion token does not match the active wait"
+                );
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_AWAIT_RESULT_TOKEN",
+                    "await result token does not match the active wait token",
+                ));
+            }
+            if result.status != "completed" {
+                tracing::error!(
+                    target: "astra_emu_minori::runtime",
+                    event = "astra_emu_minori_await_result_status_mismatch",
+                    fixed_tick = input.tick_index,
+                    expected_token = %Hash256::from_sha256(expected.as_bytes()),
+                    "await completion status is not completed"
+                );
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_AWAIT_RESULT_STATUS",
+                    "await result status is not completed",
                 ));
             }
             session.vm.resolve_wait(expected).map_err(runtime_error)?;

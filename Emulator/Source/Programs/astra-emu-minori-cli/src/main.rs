@@ -157,6 +157,7 @@ fn census(
     let vfs = mount_minori(game_dir, profile)?;
     let catalog = ScOpcodeCatalog::observed_minori();
     let mut scripts = Vec::new();
+    let mut script_entries = Vec::new();
     for entry in vfs
         .manifest()
         .entries
@@ -164,7 +165,14 @@ fn census(
         .filter(|entry| entry.media_kind == "script")
     {
         let bytes = vfs.read_range(&entry.uri, 0, entry.decoded_size)?.bytes;
-        scripts.push(parse_sc(&bytes, &catalog)?);
+        let script = parse_sc(&bytes, &catalog)?;
+        script_entries.push(ScriptCensusEntry::from_script(
+            script_entries.len() as u64,
+            entry.decoded_size,
+            Hash256::from_sha256(&bytes),
+            &script,
+        ));
+        scripts.push(script);
     }
     let census = ScCensus::from_scripts(&scripts);
     let audio_resources = census_audio_resources(&scripts, vfs.manifest())?;
@@ -172,14 +180,60 @@ fn census(
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "schema": "astra.emu.minori.sc_census.v4",
+            "schema": "astra.emu.minori.sc_census.v5",
             "script_count": scripts.len(),
+            "scripts": script_entries,
             "census": census,
             "audio_resources": audio_resources,
             "character_commands": character_commands,
         }))?
     );
     Ok(())
+}
+
+/// Per-script structural facts used to compare parser/runtime coverage without
+/// retaining names, source text, operands, or other commercial payload.
+#[derive(Debug, Serialize)]
+struct ScriptCensusEntry {
+    ordinal: u64,
+    decoded_size: u64,
+    source_hash: Hash256,
+    line_count: u64,
+    command_count: u64,
+    opcode_counts: BTreeMap<String, u64>,
+    unknown_opcode_count: u64,
+}
+
+impl ScriptCensusEntry {
+    fn from_script(
+        ordinal: u64,
+        decoded_size: u64,
+        source_hash: Hash256,
+        script: &ScScript,
+    ) -> Self {
+        let mut opcode_counts = BTreeMap::new();
+        let mut command_count = 0_u64;
+        let mut unknown_opcode_count = 0_u64;
+        for line in &script.lines {
+            let ScLineKind::Command { command } = &line.kind else {
+                continue;
+            };
+            command_count += 1;
+            *opcode_counts.entry(command.opcode.clone()).or_default() += 1;
+            if !command.known {
+                unknown_opcode_count += 1;
+            }
+        }
+        Self {
+            ordinal,
+            decoded_size,
+            source_hash,
+            line_count: script.lines.len() as u64,
+            command_count,
+            opcode_counts,
+            unknown_opcode_count,
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize)]

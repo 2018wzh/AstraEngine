@@ -18,8 +18,8 @@ use astra_emu_family_api::{
 };
 use astra_media::{open_symphonia_audio_stream, MediaError, SymphoniaAudioStreamDecoder};
 use astra_platform::{
-    AudioOutputHandle, AudioOutputRequest, AudioWakeRegistration, HostKind, HostLaunchProfile,
-    PlatformHostClient, PlatformHostFactory,
+    AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest, AudioWakeRegistration, HostKind,
+    HostLaunchProfile, PlatformError, PlatformHostClient, PlatformHostFactory,
 };
 use serde::Serialize;
 
@@ -510,7 +510,7 @@ fn prepare_fade_stop(
 
 struct WorkerState {
     client: PlatformHostClient,
-    output: AudioOutputHandle,
+    output: Option<AudioOutputHandle>,
     service: Option<AudioServiceSession>,
     streams: BTreeMap<u32, AudioStream>,
     master_volume: f32,
@@ -520,6 +520,87 @@ struct WorkerState {
     output_channels: u16,
     telemetry: Arc<TelemetryAtomics>,
     audible: Arc<AtomicBool>,
+}
+
+/// Bounded, paced sink used when the selected native host has no physical
+/// output device.  It preserves the same mixer, resampling and telemetry path
+/// as a native lane while consuming samples locally instead of dropping the
+/// command at the host boundary.  Native output is still preferred whenever
+/// the host can open it; this lane is selected only for the explicit
+/// `ProviderUnavailable` capability result.
+struct NullAudioLane {
+    next_deadline: std::time::Instant,
+    frame_duration: Duration,
+    consumed_samples: u64,
+    paced: bool,
+}
+
+impl NullAudioLane {
+    fn new(sample_rate: u32, chunk_frames: usize, paced: bool) -> Result<Self, String> {
+        if sample_rate == 0 || chunk_frames == 0 {
+            return Err("ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".into());
+        }
+        let frame_duration = Duration::from_secs_f64(chunk_frames as f64 / sample_rate as f64);
+        if frame_duration.is_zero() {
+            return Err("ASTRA_EMU_AUDIO_NULL_DEVICE_FORMAT".into());
+        }
+        Ok(Self {
+            next_deadline: std::time::Instant::now(),
+            frame_duration,
+            consumed_samples: 0,
+            paced,
+        })
+    }
+}
+
+impl astra_platform::AudioOutputLane for NullAudioLane {
+    fn wait_for_capacity(
+        &mut self,
+        _requested_samples: usize,
+        stop: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), PlatformError> {
+        if !self.paced {
+            return Ok(());
+        }
+        loop {
+            if stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let remaining = self
+                .next_deadline
+                .saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(());
+            }
+            thread::sleep(remaining.min(Duration::from_millis(5)));
+        }
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        self.consumed_samples = self
+            .consumed_samples
+            .checked_add(samples.len() as u64)
+            .ok_or_else(|| {
+                PlatformError::new(
+                    astra_platform::PlatformErrorCode::IntegrityMismatch,
+                    "audio.null.submit",
+                    "null audio consumed sample counter overflowed",
+                )
+            })?;
+        self.next_deadline = self
+            .next_deadline
+            .checked_add(self.frame_duration)
+            .unwrap_or_else(std::time::Instant::now);
+        Ok(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.consumed_samples
+    }
+
+    fn underflow_count(&self) -> u64 {
+        0
+    }
 }
 
 fn run_worker(
@@ -591,22 +672,39 @@ impl WorkerState {
         let deterministic = client.launch_profile().kind() == HostKind::Headless;
         let limits = client.launch_profile().limits();
         let chunk_frames = limits.audio_chunk_frames;
-        let opened = client
-            .open_audio_output(AudioOutputRequest {
-                sample_rate: 48_000,
-                channels: 2,
-                chunk_frames,
-                max_buffered_frames: chunk_frames.saturating_mul(STREAM_CHUNK_CAPACITY),
-                start_paused: false,
-                capture_samples: deterministic,
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        if opened.format.sample_rate == 0 || !matches!(opened.format.channels, 1 | 2) {
+        let request = AudioOutputRequest {
+            sample_rate: 48_000,
+            channels: 2,
+            chunk_frames,
+            max_buffered_frames: chunk_frames.saturating_mul(STREAM_CHUNK_CAPACITY),
+            start_paused: false,
+            capture_samples: deterministic,
+        };
+        let (output, format, endpoint) = match client.open_audio_output(request).await {
+            Ok(opened) => (Some(opened.handle), opened.format, opened.lane),
+            Err(error) if error.code == astra_platform::PlatformErrorCode::ProviderUnavailable => {
+                tracing::warn!(
+                    event = "astra_emu_audio_null_device_selected",
+                    diagnostic_code = "ASTRA_EMU_AUDIO_NULL_DEVICE",
+                    "native audio output is unavailable; using the bounded null endpoint"
+                );
+                let format = AudioDeviceFormat {
+                    sample_rate: 48_000,
+                    channels: 2,
+                };
+                let endpoint =
+                    NullAudioLane::new(format.sample_rate, chunk_frames, !deterministic)?;
+                (
+                    None,
+                    format,
+                    Box::new(endpoint) as Box<dyn astra_platform::AudioOutputLane>,
+                )
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        if format.sample_rate == 0 || !matches!(format.channels, 1 | 2) {
             return Err("ASTRA_EMU_AUDIO_DEVICE_FORMAT".into());
         }
-        let format = opened.format;
-        let output = opened.handle;
         let service = AudioServiceSession::new(
             AudioServiceConfig {
                 max_voices: 8,
@@ -615,10 +713,10 @@ impl WorkerState {
                 pcm_cache_bytes: limits.audio_pcm_cache_bytes,
             },
             AstraChunkBackendSettings {
-                sample_rate: opened.format.sample_rate,
-                channels: opened.format.channels,
+                sample_rate: format.sample_rate,
+                channels: format.channels,
                 chunk_frames,
-                endpoint: opened.lane,
+                endpoint,
                 deterministic_fixed_tick_hz: deterministic.then_some(60),
             },
         )
@@ -1318,10 +1416,12 @@ impl WorkerState {
         trace.push(b'\n');
         self.reset()?;
         drop(self.service.take());
-        self.client
-            .close_audio(self.output)
-            .await
-            .map_err(|error| error.to_string())?;
+        if let Some(output) = self.output.take() {
+            self.client
+                .close_audio(output)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
         if shutdown_host {
             self.client
                 .shutdown()
@@ -1538,6 +1638,8 @@ fn native_audio_factory() -> impl PlatformHostFactory {
 
 #[cfg(test)]
 mod tests {
+    use astra_platform::AudioOutputLane;
+
     use super::*;
 
     #[test]
@@ -1569,6 +1671,19 @@ mod tests {
     fn invalid_movie_segment_fails_fast() {
         assert!(validate_segment(48_000, 2, &[0.0]).is_err());
         assert!(validate_segment(48_000, 2, &[f32::NAN, 0.0]).is_err());
+    }
+
+    #[test]
+    fn null_audio_lane_consumes_and_recycles_owned_chunks() {
+        let mut lane = NullAudioLane::new(48_000, 480, false).unwrap();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        lane.wait_for_capacity(960, &stop).unwrap();
+        let samples = vec![0.25; 960];
+        let pointer = samples.as_ptr();
+        let recycled = lane.submit(samples).unwrap();
+        assert_eq!(recycled.as_ptr(), pointer);
+        assert_eq!(lane.consumed_samples(), 960);
+        assert_eq!(lane.underflow_count(), 0);
     }
 
     #[test]

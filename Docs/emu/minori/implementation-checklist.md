@@ -73,7 +73,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | 公共 desktop verify/extract | 已实现 | Windows 八包 manifest v2 full verify 已通过；extract contract 已接入，macOS 运行证据待补 |
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
 | GARbro scheme importer | 已实现 | 独立 CLI 使用纯 Rust 两阶段 NRBF reader；原子生成 patch/profile，不使用 managed helper 或 fallback |
-| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
+| `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`census-scripts` v5 另输出不含 URI/正文/operand 的逐文件序号、源 hash、大小和 opcode 计数；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
 | Minori deterministic VM state 与 control-flow | E2 route | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie 和 end；未确认 operand 继续阻断 |
 | Minori runtime provider / `cdylib` ABI | E2 增量 | Family ABI v9 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺完整四路线与正式 Windows host evidence |

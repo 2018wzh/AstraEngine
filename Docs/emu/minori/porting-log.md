@@ -666,6 +666,12 @@ python Tools/check_docs.py
 - runtime snapshot 硬切到 `astra.emu.minori.runtime_state.v24`。每次 message wait 由物理输入、Auto timer、Control/Skip timer 或 await completion 结束时，记录由当前脚本 hash、source span、message id 和正文 hash 组成的 read identity；identity 以排序 bounded vector 保存并参与 snapshot/state hash。
 - 该改动只固化“已确认消息”的持久状态，不猜测 `messageSpeedTBR`/`messageSpeedRead` 的逐字 reveal 公式，也不把 skip 的原版未读策略提前写成事实。重复文本在不同脚本 revision 或 source span 不会互相标记；损坏、重复、无序和超限 identity 在 restore 时阻断。
 - 新增 runtime grammar census 与 provider VFS audit 回归；目标 crate 测试、clippy 和格式检查在提交前复跑。该门禁只证明资源引用覆盖，不替代完整路线、codec、人工音频 review 或 Windows E3。
+
+### 2026-08-28 当前运行时接线修正
+
+- Manager 的 quick launch 现在接受显式 `ASTRA_EMU_QUICK_ENGINE=minori`，并校验 `ASTRA_EMU_QUICK_ENTRY` 的 canonical `minori:/...` URI。此前入口只允许 FVP，导致 Sandbox 的真实 Minori 窗口在扫描后被静默阻断；该路径已改为显式 family 选择，不按注册顺序或 case 名称猜测入口。
+- `census-scripts` 升级为 `astra.emu.minori.sc_census.v5`。逐文件结果只包含稳定序号、解码大小、源字节 SHA-256、行/命令/opcode 计数和 unknown 计数，正文、operand、label、跳转目标、URI 和 key 仍被排除。该报告用于定位 parser/runtime 覆盖，不构成商业脚本导出。
+- 本轮增量测试覆盖 `astra-emu-minori-cli` 13/13 与 Manager 3/3；Windows Sandbox 尚未形成可回收的音频/artifact E3，继续保持 blocking。
 ### 2026-08-25 Minori AVI 输入与帧预算收紧
 
 - 当前 `MinoriAviDecodeProvider` 在容器解析前拒绝空输入和超过 512 MiB 的预览请求；该边界与公共 viewer 的媒体预览预算一致，避免直接 provider 调用绕过 viewer 预算。超限固定返回 `ASTRA_EMU_MINORI_AVI_PREVIEW_INPUT_LIMIT`，不尝试其他 provider。
@@ -690,3 +696,9 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 
 - 复核发现：此前 `ensure_checkpoint_surface` 只在首次提交 surface 时工作，稀疏采样下后续 `config` checkpoint 可能重复写入标题帧。现已改为在每个 checkpoint 物化当前 pending retained scene、CPU layer 或 video overlay，不推进 fixed tick；没有可提交的当前 surface 仍直接阻断。
 - 修正后的短 Headless 运行通过 typed await，配置页截图已显示实际 Minori 系统页，且与标题帧分离；标题、配置、影片活动帧和首条消息均已实际查看。该证据只覆盖 checkpoint 当前帧和输入语义，不能替代完整首条路线、自然解锁、正式音频审查或 Windows E3。
+
+### 2026-08-28 Native audio 无设备时的 Null endpoint
+
+- `astra-emu-family-support::FamilyAudioService` 在选定的 native host 打开输出时仅对 `ProviderUnavailable` 启用有界、定速的 `NullAudioLane`，仍然经过同一个 Kira mixer、重采样和 telemetry 路径，并回收所有权限缓冲区。
+- native device 仍为首选；只有设备不可用时才选 Null endpoint，其他 platform error 仍然直接阻断。选择仅记录 `ASTRA_EMU_AUDIO_NULL_DEVICE` warning，不记录音频内容。
+- Windows Sandbox 现在可以在无音频设备的环境中启动并进入后续 runtime 路径；Null endpoint 不构成物理音频 E3 证据，当前剩余验证阻断状态仍需单独记录。

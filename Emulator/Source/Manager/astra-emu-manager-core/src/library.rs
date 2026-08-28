@@ -854,7 +854,7 @@ impl Library {
         }
         for (key, value) in &profile.family_options {
             validate_symbol(key)?;
-            validate_symbol(value)?;
+            validate_family_option_value(key, value)?;
         }
         let options = serde_json::to_string(&profile.family_options)
             .map_err(|_| LibraryError::InvalidSymbol("family_options".into()))?;
@@ -892,8 +892,12 @@ impl Library {
             .optional()?;
         raw.map(
             |(family_id, fixed_delta_ns, compatibility_profile, options)| {
-                let family_options = serde_json::from_str(&options)
+                let family_options: BTreeMap<String, String> = serde_json::from_str(&options)
                     .map_err(|_| LibraryError::InvalidSymbol("family_options_json".into()))?;
+                for (key, value) in &family_options {
+                    validate_symbol(key)?;
+                    validate_family_option_value(key, value)?;
+                }
                 Ok(CaseRuntimeProfileRecord {
                     case_identity: case_identity.to_owned(),
                     family_id,
@@ -1088,6 +1092,30 @@ pub(crate) fn validate_symbol(value: &str) -> Result<(), LibraryError> {
         return Err(LibraryError::InvalidSymbol(value.to_owned()));
     }
     Ok(())
+}
+
+fn validate_family_option_value(key: &str, value: &str) -> Result<(), LibraryError> {
+    if key != "astra.entry_uri" {
+        return validate_symbol(value);
+    }
+    let valid = value.len() <= 4096
+        && value.split_once(":/").is_some_and(|(scheme, path)| {
+            !scheme.is_empty()
+                && scheme
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+                && !path.is_empty()
+                && !path.starts_with('/')
+                && !path.contains('\\')
+                && path
+                    .split('/')
+                    .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(LibraryError::InvalidSymbol(key.to_owned()))
+    }
 }
 
 pub(crate) fn validate_relative_path(value: &str) -> Result<(), LibraryError> {
@@ -1376,6 +1404,36 @@ mod tests {
         };
         library.set_translation_profile(&profile).unwrap();
         assert_eq!(library.translation_profile().unwrap(), Some(profile));
+    }
+
+    #[test]
+    fn minori_entry_uri_family_option_round_trips_and_rejects_traversal() {
+        let mut library = Library::in_memory().unwrap();
+        scan_case(&mut library, "case-minori");
+        let profile = CaseRuntimeProfileRecord {
+            case_identity: "case-minori".into(),
+            family_id: "minori".into(),
+            fixed_delta_ns: 16_666_667,
+            compatibility_profile: "minori.reference".into(),
+            family_options: BTreeMap::from([(
+                "astra.entry_uri".into(),
+                "minori:/scr/A01.sc".into(),
+            )]),
+        };
+        library.set_case_runtime_profile(&profile).unwrap();
+        assert_eq!(
+            library.case_runtime_profile("case-minori").unwrap(),
+            Some(profile.clone())
+        );
+
+        let mut invalid = profile;
+        invalid
+            .family_options
+            .insert("astra.entry_uri".into(), "minori:/scr/../sys/config".into());
+        assert!(matches!(
+            library.set_case_runtime_profile(&invalid),
+            Err(LibraryError::InvalidSymbol(key)) if key == "astra.entry_uri"
+        ));
     }
 
     fn scan_case(library: &mut Library, case_identity: &str) {

@@ -23,8 +23,6 @@ use wgpu::util::DeviceExt;
 
 use crate::{video_executor::HostVideoFrame, RuntimeBridge};
 
-const STAGE_WIDTH: u32 = 1024;
-const STAGE_HEIGHT: u32 = 768;
 const VIDEO_TEXTURE_ID: u32 = u32::MAX - 1;
 
 pub(crate) struct ManagerStageRenderer {
@@ -99,10 +97,19 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
         if self.texture.is_some() || self.gpu.is_some() {
             return Err("ASTRA_EMU_STAGE_RENDERER_DUPLICATE_SETUP".into());
         }
-        self.texture = Some(create_stage_texture(context.device));
-        self.scene_texture = Some(create_stage_texture(context.device));
-        self.stage_width = STAGE_WIDTH;
-        self.stage_height = STAGE_HEIGHT;
+        if !(320..=8192).contains(&self.stage_width) || !(240..=8192).contains(&self.stage_height) {
+            return Err("ASTRA_EMU_STAGE_DIMENSIONS_INVALID".into());
+        }
+        self.texture = Some(create_stage_texture_with_dimensions(
+            context.device,
+            self.stage_width,
+            self.stage_height,
+        ));
+        self.scene_texture = Some(create_stage_texture_with_dimensions(
+            context.device,
+            self.stage_width,
+            self.stage_height,
+        ));
         self.scene_compositing = None;
         self.gpu = Some(StageGpu::new(context.device));
         Ok(())
@@ -1916,10 +1923,6 @@ fn filter_float(node: &astra_media_core::FilterNode, name: &str) -> Result<f32, 
         Some(FilterParam::Float(value)) => Ok(*value),
         _ => Err("ASTRA_EMU_LAYER_FILTER_PARAM_INVALID".into()),
     }
-}
-
-fn create_stage_texture(device: &wgpu::Device) -> wgpu::Texture {
-    create_stage_texture_with_dimensions(device, STAGE_WIDTH, STAGE_HEIGHT)
 }
 
 fn create_stage_texture_with_dimensions(

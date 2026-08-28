@@ -295,7 +295,12 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         let delay = deadline.saturating_duration_since(Instant::now());
         timer.start(slint::TimerMode::SingleShot, delay, move || {
             if let Some(window) = weak.upgrade() {
-                match controller.borrow_mut().advance_runtime() {
+                // End the controller borrow before the error path attempts the
+                // cleanup borrow.  Keeping the `RefMut` alive through the
+                // match arm causes a runtime `RefCell` panic exactly when a
+                // renderer/session error needs to be reported.
+                let advance_result = { controller.borrow_mut().advance_runtime() };
+                match advance_result {
                     Ok(Some(model)) => adapter.apply(&model),
                     Ok(None) => {}
                     Err(error) => {
