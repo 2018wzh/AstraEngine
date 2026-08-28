@@ -331,6 +331,15 @@ impl FamilyAudioService {
         self.audible.load(Ordering::Relaxed)
     }
 
+    /// Returns whether audible samples reached a physical output endpoint.
+    ///
+    /// The mixer still records audible samples while a bounded null endpoint
+    /// is active so runtime behavior and diagnostics stay observable. Callers
+    /// that produce host or evidence status must use this physical-only view.
+    pub fn has_physical_audible_output(&self) -> bool {
+        self.has_audible_output() && !self.uses_null_device()
+    }
+
     /// Returns whether this session is consuming audio through the bounded
     /// software sink because the native output provider was unavailable.
     /// A null sink keeps runtime timing and mixer behavior alive, but it must
@@ -1798,6 +1807,50 @@ mod tests {
         assert!(null_device.load(Ordering::Acquire));
         runtime.block_on(state.shutdown(false)).unwrap();
         runtime.block_on(backend_task).unwrap();
+    }
+
+    #[test]
+    fn service_lifecycle_survives_provider_unavailable_with_null_device() {
+        let profile = astra_platform::HeadlessHostProfile::reference(
+            "null-audio-service-test",
+            "dev.astraengine.null-audio-service-test",
+            astra_core::Hash256::from_sha256(b"null-audio-service-build").to_string(),
+            astra_core::Hash256::from_sha256(b"null-audio-service-test").to_string(),
+        );
+        let (client, mut backend, _events) = astra_platform::host_channel(
+            astra_platform::HostLaunchProfile::headless(profile),
+            8,
+            8,
+        )
+        .unwrap();
+        let backend_task = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                match backend.next_command().await {
+                    Some(astra_platform::HostCommand::OpenAudioOutput { reply, .. }) => {
+                        reply
+                            .send(Err(PlatformError::new(
+                                astra_platform::PlatformErrorCode::ProviderUnavailable,
+                                "audio.open",
+                                "test host has no physical audio device",
+                            )))
+                            .unwrap();
+                    }
+                    _ => panic!("audio worker did not request the output endpoint"),
+                }
+            });
+        });
+
+        let service = FamilyAudioService::start_with_client(client, false).unwrap();
+        let null_device = Arc::clone(&service.null_device);
+        service.set_suspended(true).unwrap();
+        assert!(!service.has_physical_audible_output());
+        service.shutdown().unwrap();
+        assert!(null_device.load(Ordering::Acquire));
+        backend_task.join().unwrap();
     }
 
     #[test]

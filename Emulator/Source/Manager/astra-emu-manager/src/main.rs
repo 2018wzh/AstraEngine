@@ -944,7 +944,7 @@ impl RuntimeBridge {
         if let Some(mut audio) = self.audio.take() {
             let audio_telemetry = audio.telemetry();
             let audio_null_device = audio.uses_null_device();
-            let audio_non_silent = audio.has_audible_output() && !audio_null_device;
+            let audio_non_silent = audio.has_physical_audible_output();
             self.video.reset(&mut audio)?;
             let _meter_trace = audio.shutdown()?;
             tracing::info!(

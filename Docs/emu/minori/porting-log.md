@@ -7,6 +7,8 @@
 - Minori 只在没有 system page、wait 状态为稳定 gameplay `Input`/`Time` wait、没有 await/provider completion 且已绑定 writable-file Host 时打开 Save page，并通过已验证 system assets 刷新 slot。choice、media、ambiguous input 和缺 Host service 都直接阻断。
 - Family API wire round-trip、validation、Manager promotion/duplicate 和 Minori provider 测试已经加入定向测试；该变更没有改变 Layer2D、音频或媒体 provider contract。
 - 无物理音频设备时的 `NullAudioLane` 现在也严格绑定输出声道与 chunk 形状，并拒绝错误长度或非有限样本；它只消费经过同一 Kira/resampler 路径的 owned buffer，不把无设备数据当作物理音频 evidence。
+- 新增 service 生命周期回归：Host 的 `OpenAudioOutput` 返回明确的 `ProviderUnavailable` 时，`FamilyAudioService::start_with_client` 仍能完成 worker 初始化、处理挂起请求并正常 shutdown；测试同时确认该 session 的 `null_device` 标记保持为真。这样验证的是公开启动/关闭边界，不是物理音频或 Windows E3 证据。
+- Support API 另外提供 `has_physical_audible_output()`，把“混音器产生了非静音样本”和“样本到达物理设备”分开；Manager 的 evidence 只使用后者，避免未来调用方误把 null sink 的 meter 当成硬件输出。
 
 ## 2026-08-28：global progress 的新 session 装载
 
