@@ -12,7 +12,7 @@
 - 新增 provider 级回归：第一 session 通过显式 `astra.provider.storage = astra.writable_file.v1` 自然写入 `REN_CLEAR`，第二个全新 session 在执行入口脚本前先从同一 writable-file port 装载 progress；脚本只在缺少该标记时设置 `SUI_CLEAR`，因此测试可以区分“先装载”与“本 tick 执行后才写入”。
 - 回归同时检查 `minori.gallery_unlock_count`、global variable 和持久化 unlock 数量，覆盖真实 provider open→step→shutdown 生命周期。它是脱敏的 E1 控制流证据，不代表四路线自然解锁或完整鉴赏页已经通过。
 
-Windows Sandbox E3 现场检查因 WASAPI 默认输出不可用而无法启动 native audio，随后 prewarm 未收敛并返回 `ASTRA_EMU_NATIVE_PREWARM_DID_NOT_CONVERGE`。随后以显式关闭音频的 direct native run 复核了真实 Minori 画面、消息层、转场/黑场与影片返回路径，并正常结束 `windowed-e2`；这只提供视觉现场证据，不满足音频 meter、artifact manifest 和可回收 machine-readable report 的 E3 门禁。共享目录为只读，未回收可发布 artifact，因此 Windows E3 仍保持 blocking。
+Windows Sandbox E3 现场检查因 WASAPI 默认输出不可用而无法启动 native audio，随后 prewarm 未收敛并返回 `ASTRA_EMU_NATIVE_PREWARM_DID_NOT_CONVERGE`。随后以显式关闭音频的 direct native run 复核了真实 Minori 画面、消息层、转场/黑场与影片返回路径，并正常结束 `windowed-e2`；这只提供视觉现场证据，不满足音频 meter、artifact manifest 和可回收 machine-readable report 的 E3 门禁。Manager 现在把 `audio_null_device=true` 写入受限 meter 事件，并将 null sink 的非静音数据排除出 `audio_non_silent`，避免无设备运行被误当成物理音频证据。共享目录为只读，未回收可发布 artifact，因此 Windows E3 仍保持 blocking。
 
 ## 2026-08-28：真实八包 cache second-run
 

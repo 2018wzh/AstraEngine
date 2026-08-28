@@ -943,12 +943,14 @@ impl RuntimeBridge {
         let coverage_ids = coverage_ids.join(",");
         if let Some(mut audio) = self.audio.take() {
             let audio_telemetry = audio.telemetry();
-            let audio_non_silent = audio.has_audible_output();
+            let audio_null_device = audio.uses_null_device();
+            let audio_non_silent = audio.has_audible_output() && !audio_null_device;
             self.video.reset(&mut audio)?;
             let _meter_trace = audio.shutdown()?;
             tracing::info!(
                 event = "astra.emu.manager.audio_meter_observed",
                 audio_non_silent,
+                audio_null_device,
                 submitted_frames = audio_telemetry.submitted_frames,
                 consumed_frames = audio_telemetry.consumed_frames,
                 underflow_count = audio_telemetry.underflow_count,

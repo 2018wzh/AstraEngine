@@ -156,6 +156,7 @@ pub struct FamilyAudioService {
     telemetry: Arc<TelemetryAtomics>,
     failure: Arc<Mutex<Option<String>>>,
     audible: Arc<AtomicBool>,
+    null_device: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     wake_stop: Arc<AtomicBool>,
     wake: AudioWakeRegistration,
@@ -186,9 +187,11 @@ impl FamilyAudioService {
         let telemetry = Arc::new(TelemetryAtomics::default());
         let failure = Arc::new(Mutex::new(None));
         let audible = Arc::new(AtomicBool::new(false));
+        let null_device = Arc::new(AtomicBool::new(false));
         let worker_telemetry = Arc::clone(&telemetry);
         let worker_failure = Arc::clone(&failure);
         let worker_audible = Arc::clone(&audible);
+        let worker_null_device = Arc::clone(&null_device);
         let worker_client = client.clone();
         let worker = thread::Builder::new()
             .name("astra-emu-kira-audio".into())
@@ -200,6 +203,7 @@ impl FamilyAudioService {
                         receiver,
                         worker_telemetry,
                         worker_audible,
+                        worker_null_device,
                     )
                 }));
                 let error = match result {
@@ -240,6 +244,7 @@ impl FamilyAudioService {
             telemetry,
             failure,
             audible,
+            null_device,
             worker: Some(worker),
             wake_stop,
             wake,
@@ -321,6 +326,14 @@ impl FamilyAudioService {
 
     pub fn has_audible_output(&self) -> bool {
         self.audible.load(Ordering::Relaxed)
+    }
+
+    /// Returns whether this session is consuming audio through the bounded
+    /// software sink because the native output provider was unavailable.
+    /// A null sink keeps runtime timing and mixer behavior alive, but it must
+    /// never be reported as physical audio evidence.
+    pub fn uses_null_device(&self) -> bool {
+        self.null_device.load(Ordering::Acquire)
     }
 
     pub fn reset(&self) -> Result<(), String> {
@@ -609,12 +622,13 @@ fn run_worker(
     receiver: Receiver<WorkerCommand>,
     telemetry: Arc<TelemetryAtomics>,
     audible: Arc<AtomicBool>,
+    null_device: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| "ASTRA_EMU_AUDIO_RUNTIME_CREATE".to_owned())?;
-    let mut state = runtime.block_on(WorkerState::open(client, telemetry, audible))?;
+    let mut state = runtime.block_on(WorkerState::open(client, telemetry, audible, null_device))?;
     loop {
         match receiver.recv() {
             Ok(WorkerCommand::Shutdown(reply)) => {
@@ -668,6 +682,7 @@ impl WorkerState {
         client: PlatformHostClient,
         telemetry: Arc<TelemetryAtomics>,
         audible: Arc<AtomicBool>,
+        null_device: Arc<AtomicBool>,
     ) -> Result<Self, String> {
         let deterministic = client.launch_profile().kind() == HostKind::Headless;
         let limits = client.launch_profile().limits();
@@ -680,8 +695,11 @@ impl WorkerState {
             start_paused: false,
             capture_samples: deterministic,
         };
-        let (output, format, endpoint) = match client.open_audio_output(request).await {
-            Ok(opened) => (Some(opened.handle), opened.format, opened.lane),
+        let (output, format, endpoint, uses_null_device) = match client
+            .open_audio_output(request)
+            .await
+        {
+            Ok(opened) => (Some(opened.handle), opened.format, opened.lane, false),
             Err(error) if error.code == astra_platform::PlatformErrorCode::ProviderUnavailable => {
                 tracing::warn!(
                     event = "astra_emu_audio_null_device_selected",
@@ -698,6 +716,7 @@ impl WorkerState {
                     None,
                     format,
                     Box::new(endpoint) as Box<dyn astra_platform::AudioOutputLane>,
+                    true,
                 )
             }
             Err(error) => return Err(error.to_string()),
@@ -721,6 +740,7 @@ impl WorkerState {
             },
         )
         .map_err(|error| error.to_string())?;
+        null_device.store(uses_null_device, Ordering::Release);
         Ok(Self {
             client,
             output,
