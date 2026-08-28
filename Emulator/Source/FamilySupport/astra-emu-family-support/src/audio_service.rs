@@ -187,7 +187,10 @@ impl FamilyAudioService {
         let telemetry = Arc::new(TelemetryAtomics::default());
         let failure = Arc::new(Mutex::new(None));
         let audible = Arc::new(AtomicBool::new(false));
-        let null_device = Arc::new(AtomicBool::new(false));
+        // Treat the endpoint as non-physical until the worker has completed
+        // the native open successfully. This keeps an early shutdown or
+        // worker-start failure from being reported as physical audio.
+        let null_device = Arc::new(AtomicBool::new(true));
         let worker_telemetry = Arc::clone(&telemetry);
         let worker_failure = Arc::clone(&failure);
         let worker_audible = Arc::clone(&audible);
