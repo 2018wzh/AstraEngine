@@ -248,14 +248,28 @@ impl FamilyAudioService {
             let forwarder_stop = Arc::clone(&wake_stop);
             let forwarder_commands = commands.clone();
             let forwarder_wake = wake.clone();
-            Some(
-                thread::Builder::new()
-                    .name("astra-emu-audio-wake".into())
-                    .spawn(move || {
-                        forward_audio_wakes(forwarder_wake, forwarder_stop, forwarder_commands)
-                    })
-                    .map_err(|_| "ASTRA_EMU_AUDIO_WAKE_START".to_owned())?,
-            )
+            match thread::Builder::new()
+                .name("astra-emu-audio-wake".into())
+                .spawn(move || {
+                    forward_audio_wakes(forwarder_wake, forwarder_stop, forwarder_commands)
+                }) {
+                Ok(forwarder) => Some(forwarder),
+                Err(_) => {
+                    // The worker is already live at this point.  Do not leave
+                    // it (or the host session) detached when the wake relay
+                    // cannot be created; close the same lifecycle that a
+                    // normal Drop/shutdown path uses before returning the
+                    // startup diagnostic.
+                    wake_stop.store(true, Ordering::Release);
+                    wake.notify();
+                    let (reply, response) = sync_channel(1);
+                    if commands.try_send(WorkerCommand::Shutdown(reply)).is_ok() {
+                        let _ = response.recv_timeout(Duration::from_secs(2));
+                    }
+                    let _ = worker.join();
+                    return Err("ASTRA_EMU_AUDIO_WAKE_START".to_owned());
+                }
+            }
         };
         Ok(Self {
             commands,
