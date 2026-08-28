@@ -196,6 +196,7 @@ impl FamilyAudioService {
         let worker_audible = Arc::clone(&audible);
         let worker_null_device = Arc::clone(&null_device);
         let worker_client = client.clone();
+        let (ready_sender, ready_receiver) = sync_channel(1);
         let worker = thread::Builder::new()
             .name("astra-emu-kira-audio".into())
             .spawn(move || {
@@ -207,6 +208,7 @@ impl FamilyAudioService {
                         worker_telemetry,
                         worker_audible,
                         worker_null_device,
+                        ready_sender.clone(),
                     )
                 }));
                 let error = match result {
@@ -214,6 +216,7 @@ impl FamilyAudioService {
                     Ok(Err(error)) => error,
                     Err(_) => "ASTRA_EMU_AUDIO_WORKER_PANIC".into(),
                 };
+                let _ = ready_sender.send(Err(error.clone()));
                 tracing::error!(
                     event = "astra_emu_audio_worker_failed",
                     diagnostic_code = error,
@@ -224,6 +227,19 @@ impl FamilyAudioService {
                 }
             })
             .map_err(|_| "ASTRA_EMU_AUDIO_WORKER_START".to_owned())?;
+        match ready_receiver.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                let _ = worker.join();
+                shutdown_host_after_startup_failure(&client, shutdown_host);
+                return Err(error);
+            }
+            Err(_) => {
+                let _ = worker.join();
+                shutdown_host_after_startup_failure(&client, shutdown_host);
+                return Err("ASTRA_EMU_AUDIO_WORKER_STARTUP".to_owned());
+            }
+        }
         let wake_stop = Arc::new(AtomicBool::new(false));
         let wake = client.audio_wake();
         let wake_forwarder = if deterministic {
@@ -405,6 +421,33 @@ impl FamilyAudioService {
             .map_err(|_| "ASTRA_EMU_AUDIO_FAILURE_LOCK_POISONED".to_owned())?
             .clone()
             .map_or(Ok(()), Err)
+    }
+}
+
+fn shutdown_host_after_startup_failure(client: &PlatformHostClient, shutdown_host: bool) {
+    if !shutdown_host {
+        return;
+    }
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            tracing::error!(
+                event = "astra_emu_audio_startup_host_shutdown_failed",
+                diagnostic_code = "ASTRA_EMU_AUDIO_RUNTIME_CREATE",
+                "could not create cleanup runtime after audio startup failure"
+            );
+            return;
+        }
+    };
+    if runtime.block_on(client.shutdown()).is_err() {
+        tracing::error!(
+            event = "astra_emu_audio_startup_host_shutdown_failed",
+            diagnostic_code = "ASTRA_EMU_AUDIO_HOST_SHUTDOWN",
+            "audio host cleanup failed after startup failure"
+        );
     }
 }
 
@@ -666,12 +709,23 @@ fn run_worker(
     telemetry: Arc<TelemetryAtomics>,
     audible: Arc<AtomicBool>,
     null_device: Arc<AtomicBool>,
+    ready: SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|_| "ASTRA_EMU_AUDIO_RUNTIME_CREATE".to_owned())?;
-    let mut state = runtime.block_on(WorkerState::open(client, telemetry, audible, null_device))?;
+    let mut state =
+        match runtime.block_on(WorkerState::open(client, telemetry, audible, null_device)) {
+            Ok(state) => {
+                let _ = ready.send(Ok(()));
+                state
+            }
+            Err(error) => {
+                let _ = ready.send(Err(error.clone()));
+                return Err(error);
+            }
+        };
     loop {
         match receiver.recv() {
             Ok(WorkerCommand::Shutdown(reply)) => {
@@ -1866,6 +1920,49 @@ mod tests {
         assert!(!service.has_physical_audible_output());
         service.shutdown().unwrap();
         assert!(null_device.load(Ordering::Acquire));
+        backend_task.join().unwrap();
+    }
+
+    #[test]
+    fn service_startup_propagates_non_unavailable_audio_error() {
+        let profile = astra_platform::HeadlessHostProfile::reference(
+            "audio-startup-error-test",
+            "dev.astraengine.audio-startup-error-test",
+            astra_core::Hash256::from_sha256(b"audio-startup-error-build").to_string(),
+            astra_core::Hash256::from_sha256(b"audio-startup-error-test").to_string(),
+        );
+        let (client, mut backend, _events) = astra_platform::host_channel(
+            astra_platform::HostLaunchProfile::headless(profile),
+            8,
+            8,
+        )
+        .unwrap();
+        let backend_task = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                match backend.next_command().await {
+                    Some(astra_platform::HostCommand::OpenAudioOutput { reply, .. }) => {
+                        reply
+                            .send(Err(PlatformError::new(
+                                astra_platform::PlatformErrorCode::InvalidState,
+                                "audio.open",
+                                "test host rejected the requested output format",
+                            )))
+                            .unwrap();
+                    }
+                    _ => panic!("audio worker did not request the output endpoint"),
+                }
+            });
+        });
+
+        let error = match FamilyAudioService::start_with_client(client, false) {
+            Ok(_) => panic!("non-unavailable audio errors must block startup"),
+            Err(error) => error,
+        };
+        assert!(error.starts_with("InvalidState during audio.open:"));
         backend_task.join().unwrap();
     }
 
