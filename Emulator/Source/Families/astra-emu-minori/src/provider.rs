@@ -10503,6 +10503,90 @@ mod tests {
     }
 
     #[test]
+    fn global_progress_is_loaded_before_a_fresh_session_executes_script() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/unlock.sc".into(),
+                    b".setglobal REN_CLEAR = 1\r\n.end\r\n".to_vec(),
+                ),
+                (
+                    "minori:/scr/load.sc".into(),
+                    b".if REN_CLEAR == 1 loaded\r\n.setglobal SUI_CLEAR = 1\r\n.label loaded\r\n.end\r\n"
+                        .to_vec(),
+                ),
+            ]),
+        });
+        let writable = Arc::new(InMemoryWritableFiles::default());
+        let writable_host: Arc<dyn LegacyWritableFileHostV1> = writable.clone();
+        let services = || LegacyFamilyHostServicesV9 {
+            vfs: Arc::clone(&vfs),
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::clone(&writable_host),
+        };
+        let storage_options = BTreeMap::from([(
+            MINORI_GLOBAL_PROGRESS_OPTION.into(),
+            MINORI_WRITABLE_FILE_BINDING_ID.into(),
+        )]);
+        let ctx = context();
+
+        let mut first_provider = MinoriRuntimeProvider::with_host_services(services());
+        let first_session = first_provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.progress.first".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/unlock.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: storage_options.clone(),
+                },
+            )
+            .unwrap();
+        let first = first_provider
+            .step(&ctx, &first_session, step_input(1, Vec::new()))
+            .unwrap();
+        assert_eq!(first.status, LegacyRuntimeStatus::Terminal);
+        assert!(writable
+            .files
+            .lock()
+            .unwrap()
+            .contains_key(MINORI_GLOBAL_PROGRESS_PATH));
+        first_provider.shutdown(&ctx, &first_session).unwrap();
+
+        let mut second_provider = MinoriRuntimeProvider::with_host_services(services());
+        let second_session = second_provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.progress.second".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/load.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: storage_options,
+                },
+            )
+            .unwrap();
+        let second = second_provider
+            .step(&ctx, &second_session, step_input(1, Vec::new()))
+            .unwrap();
+        assert_eq!(second.status, LegacyRuntimeStatus::Terminal);
+        assert!(second.control.blackboard.iter().any(|mutation| {
+            mutation.key == "minori.gallery_unlock_count" && mutation.value == "1"
+        }));
+        let state = second_provider.sessions[&second_session.0].vm.state();
+        assert_eq!(state.global_variables.get("REN_CLEAR"), Some(&1));
+        assert_eq!(state.global_variables.get("SUI_CLEAR"), None);
+        assert_eq!(state.gallery_unlocks.len(), 1);
+        second_provider.shutdown(&ctx, &second_session).unwrap();
+    }
+
+    #[test]
     fn persistent_config_round_trip_is_identity_bound_and_bounded() {
         let writable = InMemoryWritableFiles::default();
         let session_id = LegacyRuntimeSessionId("session.config".into());

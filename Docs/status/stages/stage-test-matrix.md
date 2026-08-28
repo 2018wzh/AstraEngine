@@ -13,6 +13,12 @@ and Minori opens the verified Save page only from a stable gameplay wait with a
 writable-file Host binding. Invalid combinations are blocking and covered by
 focused Family API, Manager and Minori tests.
 
+The Minori provider test `global_progress_is_loaded_before_a_fresh_session_executes_script`
+also covers the v9 writable-file storage binding across two independent sessions:
+the persisted clear flag is visible before the second script's conditional branch,
+without creating a second clear flag. It is an E1 regression and does not replace
+the natural multi-route or Windows E3 rows.
+
 2026-08-23 focused v9 consumer evidence: dynamic loader、CLI 和 Manager 已组合四个 Host port；Minori resource/text surface 与同步 translation Hook 已有定向回归。签名真实样本 slice 挂载 8 个 source、14502 个 entry，消费 42 条物理输入，提交 154 帧和 134144 个音频 frame，diagnostic 为 0。checkpoint 实际画面有变化，但首帧仍是黑色过渡，页面标签未完全对应，因此只计受限 E2 诊断，不关闭完整路线或视觉门禁。当前 open 阶段另有显式 `astra.resource_audit=full` policy，可复用同一 parser 对全部 `.sc` 资源引用做 bounded stat；消息完成的 v24 read identity 也有定向回归；不带这些显式策略的普通运行仍不宣称全量引用或完整 read/reveal 覆盖。
 
 FVP 已删除退役 consumer，并通过动态签名 lifecycle 与 Manager adapter 定向测试；scene/text 仍以稳定 migration diagnostic 阻断。这不覆盖 presentation 或 Headless E2。
