@@ -708,3 +708,9 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - Sandbox 的第一轮真实输入在画面区域点击后出现两个同时 ready 的 `input` wait。诊断记录确认 family 在同一固定步只发出一个新 wait，而 host 仍保留旧 wait；根因是 Minori family 直接接受 `pointer.primary` 完成消息，但对外的 host await key 集合没有声明该输入，导致 provider 已推进脚本而 Manager 没有移除对应的 await。
 - `MINORI_MESSAGE_HOST_AWAIT_CONTROLS` 现在显式包含 `enter`、`space`、`escape` 和 `pointer.primary`，与 `MINORI_MESSAGE_INPUT_CONTROLS` 的直接输入语义一致。Manager 仍只移除实际完成的 pressed edge，Escape 的系统菜单语义保持可见；没有清空 pending wait、忽略第二个 token 或添加 fallback。
 - 增加了 Minori provider wait-contract 与 Manager edge-retention 回归。当前签名 Release package 在 Windows Sandbox 中完成画面点击后再确认输入，firefly Layer2D 帧继续变化且未出现 `ASTRA_EMU_AWAIT_MULTIPLE_READY`；该运行没有声明完整路线、物理音频或 Windows E3 通过。
+
+### 2026-08-28 Control/Auto 消息等待重绑定
+
+- Sandbox 中连续按下 Control 暴露了新的 host/provider 边界：Minori 会把当前消息的同一 family token 在 `Input` 与 `Time` modality 之间重绑定，但 Manager Core 和 host 仍按“同 token 必须新建 await”处理，第二次 Control 因而错误返回 `ASTRA_EMU_AWAIT_TOKEN_DUPLICATE`。
+- Manager Core 现在为每个 family wait 保存受限的 `AwaitBinding`。只有 `Input`↔`Time` 的双向 modality 变更复用已有 `AwaitTokenId` 并更新绑定；相同 modality、其他 wait 类型或同一输出内重复 token 仍 fail fast。Manager host 同步替换 pending condition，不清空等待表、不丢弃 completion，也不推进额外 fixed tick。
+- 增加 core 与 Manager 定向回归，覆盖双向重绑定及同类重复阻断。真实 Sandbox 复测需使用更新后的签名 Release package；在复测完成前，本节只记录已验证的代码路径，不把 Windows E3 或完整路线状态前移。

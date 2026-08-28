@@ -809,10 +809,19 @@ impl RuntimeBridge {
                 .active
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+            let mut emitted_wait_tokens = BTreeSet::new();
             for wait in waits {
                 let (token, condition) = live_wait_condition(wait, next_step, fixed_delta_ns);
-                if active.pending_waits.insert(token, condition).is_some() {
+                if !emitted_wait_tokens.insert(token.clone()) {
                     return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
+                }
+                if let Some(existing) = active.pending_waits.get_mut(&token) {
+                    if !pending_wait_can_rebind(existing, &condition) {
+                        return Err("ASTRA_EMU_AWAIT_TOKEN_DUPLICATE".into());
+                    }
+                    *existing = condition;
+                } else {
+                    active.pending_waits.insert(token, condition);
                 }
             }
         }
@@ -1535,6 +1544,14 @@ fn pending_wait_kind(wait: &PendingWait) -> &'static str {
         PendingWait::MediaFence(_) => "media",
         PendingWait::ProviderCompletion => "provider",
     }
+}
+
+fn pending_wait_can_rebind(existing: &PendingWait, next: &PendingWait) -> bool {
+    matches!(
+        (existing, next),
+        (PendingWait::Input(_), PendingWait::Time(_))
+            | (PendingWait::Time(_), PendingWait::Input(_))
+    )
 }
 
 fn retain_non_completed_input_edges(
@@ -4906,8 +4923,9 @@ mod manager_tests {
 
     use super::{
         apply_audio_media_hook, decode_image_preview, decode_text_preview, fvp_pack_paths_option,
-        media_preview_summary, parse_glossary, quick_entry_is_valid, quick_entry_matches,
-        refresh_cover_cache, retain_non_completed_input_edges, validate_patch_actions,
+        media_preview_summary, parse_glossary, pending_wait_can_rebind, quick_entry_is_valid,
+        quick_entry_matches, refresh_cover_cache, retain_non_completed_input_edges,
+        validate_patch_actions, PendingWait,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -5052,6 +5070,26 @@ mod manager_tests {
                 .collect::<Vec<_>>(),
             vec![("escape", true), ("pointer.x", true), ("enter", false)]
         );
+    }
+
+    #[test]
+    fn host_rebinds_only_input_and_time_waits() {
+        assert!(pending_wait_can_rebind(
+            &PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
+            &PendingWait::Time(10),
+        ));
+        assert!(pending_wait_can_rebind(
+            &PendingWait::Time(10),
+            &PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
+        ));
+        assert!(!pending_wait_can_rebind(
+            &PendingWait::Time(10),
+            &PendingWait::Time(11),
+        ));
+        assert!(!pending_wait_can_rebind(
+            &PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
+            &PendingWait::Input(BTreeSet::from(["space".to_owned()])),
+        ));
     }
 
     #[test]

@@ -532,3 +532,5 @@ Windows E3 parity claim is made here.
 2026-08-25 后续（已由 2026-08-26 媒体迁移替换）：Minori AVI 的 64 MiB 预览输入上限、16,384 边长和 64 MiB RGBA 边界现由 AstraMedia FFmpeg adapter 在 demux/decode 前后执行；越界统一阻断，不进入 FVP 或平台 codec。定向 AVI 测试已通过，但这只是安全边界收紧，不改变完整路线、movie gallery parity、正式音频听审或 Windows E3 的开放状态。
 同一增量还关闭了未知 AVI stream type：Minori 只接受已验证的 WMV3 video 与 16-bit PCM audio，其他 `AviStreamFormat` 直接阻断；Linux FUSE EOF 读取返回空数据而不是 `EIO`。Windows 上的 support build 通过，Linux target check 受交叉编译环境缺少 GLib sysroot 阻断，真实 Linux mount evidence 仍未形成。
 2026-08-26：CLI checkpoint 捕获前新增 pending retained scene / prepared CPU layer 的显式物化，解决 `frame_sample_interval=60` 下首个 checkpoint 没有 submitted surface 的真实边界。当前签名 v9 短程通过 431 fixed steps、7 frames、27 条输入和零 diagnostic；该修复不改变 Stage 5 对完整路线、自然 unlock、正式 audio review、Linux FUSE、macOS extract、FVP v9 和 Windows E3 的 blocking 状态。
+
+2026-08-28：修正 Minori Control/Auto 活动消息等待的受限 modality rebinding。Manager Core 复用已有 `AwaitTokenId`，host 同步替换 pending `Input`/`Time` condition；同类重复和未知 wait 仍 fail fast。代码与定向回归已通过，真实 Sandbox 复测和 Stage 5 的完整路线、正式媒体/音频审查、Linux FUSE、macOS extract、FVP v9、Windows E3 仍保持开放。

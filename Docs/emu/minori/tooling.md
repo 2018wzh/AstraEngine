@@ -48,3 +48,5 @@ Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged
 Windows 无音频设备时，`FamilyAudioService` 仅在 `ProviderUnavailable` 下选择 bounded paced `NullAudioLane`，继续使用 Kira mixer 和有界提交路径，并以 `ASTRA_EMU_AUDIO_NULL_DEVICE` warning 标记。这只保证无设备时的软件运行，不代替 physical audio E3 证据。
 
 消息等待的 host key 集合必须覆盖 family 可直接消费的所有 canonical 输入。Minori 的消息 wait 现在同时声明 `enter`、`space`、`escape` 和 `pointer.primary`；这样鼠标确认会先由 Manager 完成同一个 await，再交给 family 处理 Escape 菜单语义，不会留下旧 wait 与新 wait 并存。该契约由 provider 与 Manager 的定向回归共同锁定。
+
+Control/Auto 改变当前消息的推进方式时，family 保持同一个 wait token，只在 `Input` 与 `Time` 两种 modality 之间重绑定。Manager Core 的 `AwaitBinding` 和 Manager host 的 pending condition 必须同时执行这项受限替换；相同 modality、其它 wait 类型或同一个输出批次内重复 token 都继续返回 `ASTRA_EMU_AWAIT_TOKEN_DUPLICATE`。这不是通用重复 token 宽免，也不允许通过丢弃旧等待或额外推进 tick 来规避错误。

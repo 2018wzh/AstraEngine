@@ -626,7 +626,7 @@ struct EmuSession {
     family_session_id: LegacyRuntimeSessionId,
     host_ctx: LegacyRuntimeHostCtx,
     pending_control: Arc<Mutex<Option<PendingControlStep>>>,
-    await_tokens: Arc<Mutex<BTreeMap<String, AwaitTokenId>>>,
+    await_tokens: Arc<Mutex<BTreeMap<String, AwaitBinding>>>,
     pending_patch_effects: Vec<QueuedPatchEffect>,
     poisoned: bool,
 }
@@ -639,7 +639,40 @@ struct PendingControlStep {
 
 struct ApplyLegacyControlAction {
     pending: Arc<Mutex<Option<PendingControlStep>>>,
-    await_tokens: Arc<Mutex<BTreeMap<String, AwaitTokenId>>>,
+    await_tokens: Arc<Mutex<BTreeMap<String, AwaitBinding>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AwaitBinding {
+    runtime_token: AwaitTokenId,
+    kind: AwaitBindingKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AwaitBindingKind {
+    Input,
+    Time,
+    Other,
+}
+
+impl AwaitBindingKind {
+    fn from_wait(wait: &LegacyWaitRequest) -> Self {
+        match wait {
+            LegacyWaitRequest::Input { .. } => Self::Input,
+            LegacyWaitRequest::Time { .. } => Self::Time,
+            LegacyWaitRequest::Frame { .. }
+            | LegacyWaitRequest::MediaFence { .. }
+            | LegacyWaitRequest::PresentationFence { .. }
+            | LegacyWaitRequest::ProviderCompletion { .. } => Self::Other,
+        }
+    }
+
+    fn can_rebind(self, next: Self) -> bool {
+        matches!(
+            (self, next),
+            (Self::Input, Self::Time) | (Self::Time, Self::Input)
+        )
+    }
 }
 
 impl RuntimeAction for ApplyLegacyControlAction {
@@ -699,19 +732,32 @@ impl RuntimeAction for ApplyLegacyControlAction {
         }
         for wait in &pending.control.waits {
             let family_token_id = wait_token_id(wait);
-            let token = ctx.create_await(astra_runtime::AwaitKind::Custom(wait_kind(wait)));
             let mut tokens = self
                 .await_tokens
                 .lock()
                 .map_err(|_| RuntimeError::message("ASTRA_EMU_AWAIT_LOCK_POISONED"))?;
-            if tokens.insert(family_token_id, token.token_id).is_some() {
+            let next_kind = AwaitBindingKind::from_wait(wait);
+            if let Some(binding) = tokens.get_mut(&family_token_id) {
+                if binding.kind.can_rebind(next_kind) {
+                    binding.kind = next_kind;
+                    continue;
+                }
                 return Err(RuntimeError::diagnostic(Diagnostic::blocking(
                     "ASTRA_EMU_AWAIT_TOKEN_DUPLICATE",
                     "family provider emitted a duplicate pending wait token",
                 )));
             }
-            drop(tokens);
+            let token = ctx.create_await(astra_runtime::AwaitKind::Custom(wait_kind(wait)));
+            let runtime_token = token.token_id;
             ctx.push_await(token)?;
+            tokens.insert(
+                family_token_id,
+                AwaitBinding {
+                    runtime_token,
+                    kind: next_kind,
+                },
+            );
+            drop(tokens);
         }
 
         Ok(ActionTrace {
@@ -1539,7 +1585,8 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 .ok_or_else(|| {
                     session.poisoned = true;
                     "ASTRA_EMU_AWAIT_TOKEN_UNKNOWN".to_string()
-                })?;
+                })?
+                .runtime_token;
             let mut event = EventPayload::new("await.completed");
             event
                 .data
@@ -1792,6 +1839,15 @@ mod tests {
             .access
             .writes
             .contains(&ActionResourceKey::Blackboard));
+    }
+
+    #[test]
+    fn legacy_wait_binding_rebinds_only_between_input_and_time() {
+        assert!(AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Time));
+        assert!(AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Input));
+        assert!(!AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Input));
+        assert!(!AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Time));
+        assert!(!AwaitBindingKind::Other.can_rebind(AwaitBindingKind::Input));
     }
 
     #[test]
