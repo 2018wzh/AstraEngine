@@ -1967,6 +1967,84 @@ mod tests {
     }
 
     #[test]
+    fn null_audio_service_consumes_commands_without_claiming_physical_output() {
+        let profile = astra_platform::HeadlessHostProfile::reference(
+            "audio-null-command-test",
+            "dev.astraengine.audio-null-command-test",
+            astra_core::Hash256::from_sha256(b"audio-null-command-build").to_string(),
+            astra_core::Hash256::from_sha256(b"audio-null-command-test").to_string(),
+        );
+        let (client, mut backend, _events) = astra_platform::host_channel(
+            astra_platform::HostLaunchProfile::headless(profile),
+            8,
+            8,
+        )
+        .unwrap();
+        let backend_task = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                match backend.next_command().await {
+                    Some(astra_platform::HostCommand::OpenAudioOutput { reply, .. }) => {
+                        reply
+                            .send(Err(PlatformError::new(
+                                astra_platform::PlatformErrorCode::ProviderUnavailable,
+                                "audio.open",
+                                "test host has no physical audio device",
+                            )))
+                            .unwrap();
+                    }
+                    _ => panic!("audio worker did not request the output endpoint"),
+                }
+            });
+        });
+
+        let service = FamilyAudioService::start_with_client(client, false).unwrap();
+        assert!(service.uses_null_device());
+        service
+            .execute(
+                LegacyAudioCommandV1::CreateStream {
+                    stream_id: 7,
+                    sample_rate: 48_000,
+                    channels: 2,
+                    sample_format: LegacyAudioSampleFormat::F32,
+                },
+                None,
+            )
+            .unwrap();
+        service
+            .execute(
+                LegacyAudioCommandV1::SubmitF32 {
+                    stream_id: 7,
+                    samples: vec![0.125; 9_600].into(),
+                },
+                None,
+            )
+            .unwrap();
+        service
+            .execute(
+                LegacyAudioCommandV1::Play {
+                    stream_id: 7,
+                    volume: 1.0,
+                    pan: 0.0,
+                    repeat: false,
+                    fade_in_ms: 0,
+                },
+                None,
+            )
+            .unwrap();
+        service.pump().unwrap();
+        let telemetry = service.telemetry();
+        assert!(telemetry.submitted_frames > 0);
+        assert_eq!(telemetry.underflow_count, 0);
+        assert!(!service.has_physical_audible_output());
+        service.shutdown().unwrap();
+        backend_task.join().unwrap();
+    }
+
+    #[test]
     fn completed_stream_params_update_without_recreating_kira_voice() {
         let mut streams =
             BTreeMap::from([(1, AudioStream::new(48_000, 2, LegacyAudioSampleFormat::F32))]);
