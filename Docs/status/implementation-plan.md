@@ -747,4 +747,4 @@ Minori 的 Control/Auto 语义允许活动消息在 `Input` 与 `Time` 之间切
 
 2026-08-28：补齐 Minori 右键系统菜单的窗口输入接线，并隔离系统页与底层 gameplay await。GameView 仅在舞台边界内发出 `pointer.secondary`；Manager 在打开请求和已知 `minori.system_page` 活动期间保留原 message wait，避免 Save 页 Escape 把旧等待错误提交给 family。定向 Manager 测试通过；签名 Release 的 Windows Sandbox 复测已连续两次完成 Save→Escape→gameplay，Diagnostics 无 blocking diagnostic。该证据不扩大完整路线、媒体/音频 review、Linux FUSE、macOS extract、FVP v9 和 Windows E3。
 
-2026-08-28 音频启动顺序修复：`FamilyAudioService::start_with_client` 增加 worker endpoint-selection handshake，只有 native 或 bounded `NullAudioLane` 完成选择后才向 Minori/Manager 发布 service。无设备的 `ProviderUnavailable` 因而在首个音频命令前稳定进入 null sink；其他输出错误同步返回，并在 service 不可用时清理由该入口拥有的 Host。Support 36 项、Minori 159 项和 Manager 21 项定向测试通过；该修复消除启动竞态，不改变物理音频、正式听审或 Windows E3 的阻断边界。
+2026-08-28 音频启动顺序修复：`FamilyAudioService::start_with_client` 增加 worker endpoint-selection handshake，只有 native 或 bounded `NullAudioLane` 完成选择后才向 Minori/Manager 发布 service。无设备的 `ProviderUnavailable` 因而在首个音频命令前稳定进入 null sink；其他输出错误同步返回，并在 service 不可用时清理由该入口拥有的 Host。Support 37 项、Minori 159 项和 Manager 21 项定向测试通过；该修复消除启动竞态，不改变物理音频、正式听审或 Windows E3 的阻断边界。
