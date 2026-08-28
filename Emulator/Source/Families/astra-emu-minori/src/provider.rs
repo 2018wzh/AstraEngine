@@ -1909,6 +1909,17 @@ impl MinoriRuntimeProvider {
                 return Err(error);
             }
         }
+        // A render-clock update is sampled before the VM command for this
+        // tick.  A command such as `transition` can replace that native
+        // presentation slot while the sampled frame is still in scope.  Do
+        // not feed a frame from the retired shake state to the presenter: the
+        // event belongs to the previous state and the replacement command is
+        // authoritative for this tick.
+        let animated_screen_shake = if session.vm.state().screen_shake.is_some() {
+            animated_screen_shake
+        } else {
+            None
+        };
         tracing::debug!(
             target: "astra_emu_minori::runtime",
             event = "astra_emu_minori_vm_tick",
@@ -13737,6 +13748,54 @@ mod tests {
         provider
             .restore_test_checkpoint(&ctx, &session, &snapshot)
             .unwrap();
+    }
+
+    #[test]
+    fn provider_discards_a_shake_frame_when_transition_replaces_the_slot() {
+        let script =
+            b".stage * BG.png 0 0\r\n.shakeScreen V 10 1\r\n.transition 0 * 0\r\n.end\r\n".to_vec();
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(&[255, 255, 255, 255], 1, 1, ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), script),
+                ("minori:/bg/BG.png".into(), png),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId(
+                        "session.screen-shake-transition".into(),
+                    ),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_000_000,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        provider
+            .step(&ctx, &session, step_input_with_delta(1, 16_000_000))
+            .unwrap();
+        provider
+            .step(&ctx, &session, step_input_with_delta(2, 16_000_000))
+            .unwrap();
+        let transitioned = provider
+            .step(&ctx, &session, step_input_with_delta(3, 16_000_000))
+            .unwrap();
+        assert_eq!(transitioned.status, LegacyRuntimeStatus::Terminal);
+        assert!(transitioned.live.resource_scenes.is_empty());
     }
 
     #[test]

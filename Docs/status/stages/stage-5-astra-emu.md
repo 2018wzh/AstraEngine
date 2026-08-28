@@ -11,6 +11,8 @@
 公开 `FamilyAudioService` 生命周期另有回归：`OpenAudioOutput` 明确返回 `ProviderUnavailable` 后，worker 仍能完成初始化、处理已排队的 suspend 请求并正常关闭，且 `null_device` 保持可观测。该测试只关闭无设备启动/关闭回归，不改变物理音频、正式音频 review 或 Windows E3 的 blocking 状态。
 Support 还把 `has_physical_audible_output()` 作为 evidence 专用判定，和包含 null sink 的 mixer-level audible telemetry 分离；Manager 已改用该 API，避免后续调用方重复组合两个标志时漏掉无设备边界。
 
+2026 年 8 月 28 日运行时复核：授权样本的短路线重跑在显式 FFmpeg provider、八包 mount 和序列化物理输入下完成 15,132 个 fixed step、5,523 个提交/栅格帧和 7,800,320 个音频帧，三个 checkpoint 与零 diagnostic 通过。另一条自然路线暴露了一个真实的时序边界：render clock 先取出的 screen-shake frame 可能在同一 tick 被 `.transition` 替换；provider 现会丢弃已失效的 frame，并以回归测试保证不把已退休的 presentation state 送入 renderer。该修复和本次 Headless 结果仍只属于局部 E2，四路线自然解锁、正式音频听审、Windows E3 与完整鉴赏继续保持 blocking。
+
 同日的 global-progress 回归用两个独立 provider/session 覆盖 writable-file 的真实装载顺序：第一 session 执行 `REN_CLEAR` 后原子持久化，第二 session 在 `.if REN_CLEAR ...` 之前完成读取，并保持 `SUI_CLEAR` 未设置。该项只增加 provider/VFS E1 证据，不把局部状态持久化提升为四路线自然解锁或完整鉴赏通过。
 
 2026 年 8 月 28 日：Family API 已进入 v10 hard cut（`astra.emu.family_abi.v10`）。`LegacyStepInput` 增加 typed `LegacySystemMenuRequestV1`，Manager 把物理右键按下事件提升为 `Open` 请求，Minori 只在稳定 gameplay wait 且已绑定 writable-file Host 时打开 family-owned Save 页；重复事件、并发 gameplay input、choice/media/completion 和缺 Host binding 均直接阻断。Family API、Manager 与 Minori 的定向回归已通过。Windows Sandbox E3 仍因 WASAPI 默认输出不可用及 native prewarm 未收敛而阻断，不能把该次运行计为 E3。
