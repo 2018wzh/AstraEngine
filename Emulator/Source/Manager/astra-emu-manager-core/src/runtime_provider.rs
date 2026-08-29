@@ -670,7 +670,10 @@ impl AwaitBindingKind {
     fn can_rebind(self, next: Self) -> bool {
         matches!(
             (self, next),
-            (Self::Input, Self::Time) | (Self::Time, Self::Input)
+            (Self::Input, Self::Input)
+                | (Self::Time, Self::Time)
+                | (Self::Input, Self::Time)
+                | (Self::Time, Self::Input)
         )
     }
 }
@@ -1842,11 +1845,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_wait_binding_rebinds_only_between_input_and_time() {
+    fn legacy_wait_binding_rebinds_persistent_input_and_time_waits() {
         assert!(AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Time));
         assert!(AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Input));
-        assert!(!AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Input));
-        assert!(!AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Time));
+        assert!(AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Input));
+        assert!(AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Time));
         assert!(!AwaitBindingKind::Other.can_rebind(AwaitBindingKind::Input));
     }
 

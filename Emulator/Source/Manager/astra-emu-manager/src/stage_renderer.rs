@@ -129,6 +129,20 @@ impl AstraUnderlayRenderer for ManagerStageRenderer {
             .map(|texture| (texture, self.stage_width, self.stage_height))
     }
 
+    fn reset_presentation(&mut self) {
+        self.scene_initialized = false;
+        self.scene_compositing = None;
+        self.layer_state = RetainedLayer2DState::default();
+        self.layer_texture_ids.clear();
+        self.layer_filter_texture_ids.clear();
+        self.next_layer_texture_id = 1;
+        if let Some(gpu) = self.gpu.as_mut() {
+            gpu.textures.clear();
+            gpu.layer_filters.clear();
+            gpu.video_source = None;
+        }
+    }
+
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String> {
         let (scene_commit, layer_commit, video, filter_preset) = {
             let mut runtime = self

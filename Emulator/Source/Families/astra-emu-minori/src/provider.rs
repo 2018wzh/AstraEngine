@@ -1439,12 +1439,41 @@ impl MinoriRuntimeProvider {
                     .contains(&session.vm.state().system_ui.pointer_y)
         });
         if game_menu_mode_pressed {
-            if !input.await_results.is_empty() || !input.provider_results.is_empty() {
+            if !input.provider_results.is_empty() || input.await_results.len() > 1 {
                 session.poisoned = true;
                 return Err(invalid(
                     "ASTRA_EMU_MINORI_PLAY_MODE_RESULT_UNEXPECTED",
-                    "play-mode menu input cannot consume an await or provider result",
+                    "play-mode menu input cannot consume an unexpected completion",
                 ));
+            }
+            if let Some(result) = input.await_results.first() {
+                let expected = session
+                    .vm
+                    .state()
+                    .wait
+                    .as_ref()
+                    .map(wait_token)
+                    .ok_or_else(|| {
+                        invalid(
+                            "ASTRA_EMU_MINORI_PLAY_MODE_RESULT_UNEXPECTED",
+                            "play-mode menu input completed without an active wait",
+                        )
+                    })?;
+                if result.token_id != expected
+                    || result.status != "completed"
+                    || result.payload_len != 0
+                {
+                    session.poisoned = true;
+                    return Err(invalid(
+                        "ASTRA_EMU_MINORI_PLAY_MODE_RESULT_UNEXPECTED",
+                        "play-mode menu input completion does not match the active wait",
+                    ));
+                }
+                // The host generated this completion because the same primary
+                // click also satisfies the message wait.  Play-mode toggling
+                // is intentionally out-of-band, so consume the owner-side
+                // completion without advancing the script.
+                input.await_results.clear();
             }
             play_mode_wait_rebound |= session
                 .vm
@@ -1504,6 +1533,12 @@ impl MinoriRuntimeProvider {
                         && MINORI_MESSAGE_INPUT_CONTROLS
                             .iter()
                             .any(|control| *control == edge.control)
+                        // The Manager deliberately retains Minori primary
+                        // clicks so the play-mode hitbox can be handled by
+                        // `game_menu_mode_pressed`.  A click elsewhere still
+                        // completes the host-owned await result and must not
+                        // be treated as a duplicate completion.
+                        && (edge.control != MINORI_POINTER_PRIMARY || game_menu_mode_pressed)
                 })
             {
                 return Err(invalid(

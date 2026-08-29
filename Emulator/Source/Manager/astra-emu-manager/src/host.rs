@@ -36,6 +36,13 @@ pub trait AstraUnderlayRenderer: 'static {
     fn take_stage_texture_update(&mut self) -> Option<(wgpu::Texture, u32, u32)> {
         None
     }
+    /// Drop retained presentation state between independent game sessions.
+    ///
+    /// A family session owns its Layer2D sequence space. The host renderer
+    /// therefore must not carry the previous session's retained transaction
+    /// sequence, resource ids, filters, or media frame into the next launch.
+    /// Renderers without retained state can keep the default no-op.
+    fn reset_presentation(&mut self) {}
     fn render(&mut self, context: WgpuFrameContext<'_>) -> Result<(), String>;
     fn teardown(&mut self);
 }
@@ -306,6 +313,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let runtime_weak = adapter.window().as_weak();
     let runtime_controller = controller.clone();
     let runtime_adapter = adapter.clone();
+    let runtime_renderer = renderer.clone();
     let runtime_timer_for_schedule = runtime_timer.clone();
     *runtime_schedule.borrow_mut() = Some(Box::new(move || {
         let timer = runtime_timer_for_schedule.clone();
@@ -313,6 +321,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         let weak = runtime_weak.clone();
         let controller = runtime_controller.clone();
         let adapter = runtime_adapter.clone();
+        let renderer = runtime_renderer.clone();
         let Some(deadline) = controller.borrow().runtime_deadline() else {
             return;
         };
@@ -331,6 +340,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         let termination = controller.borrow_mut().leave_game();
                         let message = match termination {
                             Ok(model) => {
+                                renderer.borrow_mut().reset_presentation();
                                 adapter.apply(&model);
                                 window.set_game_active(false);
                                 error
@@ -352,6 +362,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let launch_weak = adapter.window().as_weak();
     let launch_controller = controller.clone();
     let launch_adapter = adapter.clone();
+    let launch_renderer = renderer.clone();
     let launch_gamepad = gamepad.clone();
     let launch_runtime_schedule = runtime_schedule.clone();
     adapter.window().on_launch(move |case_id| {
@@ -375,6 +386,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 );
                 let mapping = launch_controller.borrow().input_mapping();
                 launch_gamepad.borrow_mut().set_mapping(mapping);
+                launch_renderer.borrow_mut().reset_presentation();
                 tracing::info!(
                     event = "astra.emu.host.launch.apply_model.begin",
                     diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_APPLY_BEGIN",
@@ -407,6 +419,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let leave_weak = adapter.window().as_weak();
     let leave_controller = controller.clone();
     let leave_adapter = adapter.clone();
+    let leave_renderer = renderer.clone();
     let leave_gamepad = gamepad.clone();
     let leave_runtime_schedule = runtime_schedule.clone();
     let leave_runtime_timer = runtime_timer.clone();
@@ -428,6 +441,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             Ok(model) => {
                 let mapping = leave_controller.borrow().input_mapping();
                 leave_gamepad.borrow_mut().set_mapping(mapping);
+                leave_renderer.borrow_mut().reset_presentation();
                 leave_adapter.apply(&model);
                 window.set_game_active(false);
                 fire_host_callback(&leave_runtime_schedule);

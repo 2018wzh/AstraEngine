@@ -189,6 +189,10 @@ struct ActiveRuntimeSession {
     seed: u64,
     pending_waits: BTreeMap<String, PendingWait>,
     system_ui_active: bool,
+    observed_play_mode: String,
+    last_pointer_x: i32,
+    last_pointer_y: i32,
+    last_input_controls: String,
     await_sequence: u64,
     input_sequence: u64,
     pending_inputs: Vec<LegacyInputEdge>,
@@ -406,6 +410,10 @@ impl RuntimeBridge {
             seed,
             pending_waits: BTreeMap::new(),
             system_ui_active: false,
+            observed_play_mode: "unknown".into(),
+            last_pointer_x: 0,
+            last_pointer_y: 0,
+            last_input_controls: String::new(),
             await_sequence: 0,
             input_sequence: 0,
             pending_inputs: Vec::new(),
@@ -684,6 +692,12 @@ impl RuntimeBridge {
             ));
         }
         let mut completed_input_controls = BTreeSet::new();
+        // Minori uses a primary click in the lower-right play-mode hitbox as
+        // an out-of-band control while a message wait is active.  Keep that
+        // edge visible to the family provider so it can distinguish the
+        // toggle from an ordinary message confirmation.  Other families keep
+        // the legacy host-side completion filtering.
+        let preserve_minori_play_mode_click = self.family_id == "minori";
         let mut await_results = Vec::new();
         for token_id in ready {
             let condition = active
@@ -697,7 +711,10 @@ impl RuntimeBridge {
                     // also the family system-menu shortcut; all other
                     // controls that completed this input wait would be a
                     // duplicate semantic completion at the provider.
-                    if edge.control != "escape" && keys.contains(&edge.control) {
+                    if edge.control != "escape"
+                        && !(preserve_minori_play_mode_click && edge.control == "pointer.primary")
+                        && keys.contains(&edge.control)
+                    {
                         completed_input_controls.insert(edge.control.clone());
                     }
                 }
@@ -714,12 +731,34 @@ impl RuntimeBridge {
             std::mem::take(&mut active.pending_inputs),
             &completed_input_controls,
         );
+        if self.family_id == "minori" {
+            for edge in &input_edges {
+                match edge.control.as_str() {
+                    "pointer.x" => active.last_pointer_x = edge.value as i32,
+                    "pointer.y" => active.last_pointer_y = edge.value as i32,
+                    _ => {}
+                }
+            }
+        }
         if !input_edges.is_empty() {
             tracing::debug!(
                 event = "astra.emu.manager.input_consumed",
                 fixed_step = next_step,
                 input_count = input_edges.len()
             );
+        }
+        if let Some(active) = self.active.as_mut() {
+            active.last_input_controls = input_edges
+                .iter()
+                .map(|edge| {
+                    if edge.pressed {
+                        edge.control.clone()
+                    } else {
+                        format!("{}:up", edge.control)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(",");
         }
         let (output, session_id, fixed_delta_ns) = {
             let active = self
@@ -823,6 +862,27 @@ impl RuntimeBridge {
                 .as_mut()
                 .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
             active.system_ui_active = system_ui_active;
+        }
+        if self.family_id == "minori" {
+            let mut observed_play_mode = None;
+            for mutation in &live.blackboard {
+                if mutation.key != "minori.play_mode" {
+                    continue;
+                }
+                let mode = match mutation.value.as_str() {
+                    "normal" | "auto" | "skip" => mutation.value.clone(),
+                    _ => return Err("ASTRA_EMU_MINORI_PLAY_MODE_OBSERVATION".into()),
+                };
+                if observed_play_mode.replace(mode).is_some() {
+                    return Err("ASTRA_EMU_MINORI_PLAY_MODE_DUPLICATE".into());
+                }
+            }
+            if let Some(mode) = observed_play_mode {
+                self.active
+                    .as_mut()
+                    .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?
+                    .observed_play_mode = mode;
+            }
         }
         if !live.diagnostics.is_empty() {
             tracing::debug!(
@@ -1307,8 +1367,35 @@ impl RuntimeBridge {
                 "native"
             }
         });
+        let (
+            system_ui_active,
+            pending_waits,
+            observed_play_mode,
+            pointer_x,
+            pointer_y,
+            last_input_controls,
+        ) = self
+            .active
+            .as_ref()
+            .map(|active| {
+                let pending_waits = active
+                    .pending_waits
+                    .values()
+                    .map(pending_wait_kind)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                (
+                    active.system_ui_active,
+                    pending_waits,
+                    active.observed_play_mode.as_str(),
+                    active.last_pointer_x,
+                    active.last_pointer_y,
+                    active.last_input_controls.as_str(),
+                )
+            })
+            .unwrap_or((false, String::new(), "unknown", 0, 0, ""));
         format!(
-            "runtime={state}; pending_scenes={}; pending_layers={}; video_active={}; translation_active={}; audio_endpoint={audio_endpoint}; filter={}",
+            "runtime={state}; pending_scenes={}; pending_layers={}; pending_waits={pending_waits}; play_mode={observed_play_mode}; pointer={pointer_x},{pointer_y}; input={last_input_controls}; system_ui_active={system_ui_active}; video_active={}; translation_active={}; audio_endpoint={audio_endpoint}; filter={}",
             self.live_scene_commits.len(),
             self.live_layer_commits.len(),
             self.video.is_active(),
@@ -1587,6 +1674,12 @@ fn pending_wait_can_rebind(existing: &PendingWait, next: &PendingWait) -> bool {
         (existing, next),
         (PendingWait::Input(_), PendingWait::Time(_))
             | (PendingWait::Time(_), PendingWait::Input(_))
+            // A single message token may move between two timed waits when
+            // the family changes its playback mode (for example Auto to the
+            // Control fast path).  The token identity remains authoritative;
+            // only its deadline changes, so replacing the condition is a
+            // valid rebind rather than a duplicate wait.
+            | (PendingWait::Time(_), PendingWait::Time(_))
     )
 }
 
@@ -5138,7 +5231,7 @@ mod manager_tests {
     }
 
     #[test]
-    fn host_rebinds_only_input_and_time_waits() {
+    fn host_rebinds_input_and_timed_waits() {
         assert!(pending_wait_can_rebind(
             &PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
             &PendingWait::Time(10),
@@ -5147,7 +5240,7 @@ mod manager_tests {
             &PendingWait::Time(10),
             &PendingWait::Input(BTreeSet::from(["enter".to_owned()])),
         ));
-        assert!(!pending_wait_can_rebind(
+        assert!(pending_wait_can_rebind(
             &PendingWait::Time(10),
             &PendingWait::Time(11),
         ));
