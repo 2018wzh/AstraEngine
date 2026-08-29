@@ -21,6 +21,8 @@ type HostCallbackSlot = std::rc::Rc<std::cell::RefCell<Option<HostCallback>>>;
 /// controller or renderer state from a worker.
 pub type HostWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
+type PanicHook = Box<dyn for<'a> Fn(&std::panic::PanicHookInfo<'a>) + Send + Sync + 'static>;
+
 pub struct WgpuFrameContext<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -246,6 +248,27 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let adapter = std::rc::Rc::new(SlintManagerAdapter::new()?);
     adapter.apply(&controller.model().map_err(HostError::Renderer)?);
     adapter.window().set_game_active(game_active);
+    // The release manager is a GUI subsystem binary, so an unwind from a
+    // Slint callback otherwise looks like a silent process exit on Windows.
+    // Keep the panic observable without recording panic payloads (which may
+    // contain paths or game data).  Rendering panics are still converted to a
+    // fatal renderer diagnostic by the notifier below.
+    let previous_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {
+        tracing::error!(
+            event = "astra.emu.host.panic",
+            diagnostic_code = "ASTRA_EMU_HOST_PANIC",
+        );
+    }));
+    struct PanicHookRestore(Option<PanicHook>);
+    impl Drop for PanicHookRestore {
+        fn drop(&mut self) {
+            if let Some(previous) = self.0.take() {
+                std::panic::set_hook(previous);
+            }
+        }
+    }
+    let _panic_hook_restore = PanicHookRestore(Some(previous_panic_hook));
     let controller = std::rc::Rc::new(std::cell::RefCell::new(controller));
     let renderer = std::rc::Rc::new(std::cell::RefCell::new(renderer));
     let fatal_error = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -283,8 +306,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let runtime_weak = adapter.window().as_weak();
     let runtime_controller = controller.clone();
     let runtime_adapter = adapter.clone();
+    let runtime_timer_for_schedule = runtime_timer.clone();
     *runtime_schedule.borrow_mut() = Some(Box::new(move || {
-        let timer = runtime_timer.clone();
+        let timer = runtime_timer_for_schedule.clone();
         let slot = runtime_schedule_slot.clone();
         let weak = runtime_weak.clone();
         let controller = runtime_controller.clone();
@@ -334,15 +358,50 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         let Some(window) = launch_weak.upgrade() else {
             return;
         };
-        match launch_controller.borrow_mut().launch(case_id.as_str()) {
+        tracing::info!(
+            event = "astra.emu.host.launch.begin",
+            diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_BEGIN",
+        );
+        // End the mutable controller borrow before the success path reads the
+        // input mapping.  Keeping the `RefMut` temporary alive through the
+        // match arm triggers a `RefCell` panic in the release GUI process,
+        // which otherwise looks like an unexplained manager exit.
+        let launch_result = { launch_controller.borrow_mut().launch(case_id.as_str()) };
+        match launch_result {
             Ok(model) => {
+                tracing::info!(
+                    event = "astra.emu.host.launch.controller_complete",
+                    diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_CONTROLLER_COMPLETE",
+                );
                 let mapping = launch_controller.borrow().input_mapping();
                 launch_gamepad.borrow_mut().set_mapping(mapping);
+                tracing::info!(
+                    event = "astra.emu.host.launch.apply_model.begin",
+                    diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_APPLY_BEGIN",
+                );
                 launch_adapter.apply(&model);
+                tracing::info!(
+                    event = "astra.emu.host.launch.apply_model.complete",
+                    diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_APPLY_COMPLETE",
+                );
                 window.set_game_active(true);
+                tracing::info!(
+                    event = "astra.emu.host.launch.game_active",
+                    diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_GAME_ACTIVE",
+                );
                 fire_host_callback(&launch_runtime_schedule);
+                tracing::info!(
+                    event = "astra.emu.host.launch.schedule_complete",
+                    diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_SCHEDULE_COMPLETE",
+                );
             }
-            Err(error) => window.set_global_diagnostic(error.into()),
+            Err(error) => {
+                tracing::error!(
+                    event = "astra.emu.host.launch.failed",
+                    diagnostic_code = "ASTRA_EMU_HOST_LAUNCH_FAILED",
+                );
+                window.set_global_diagnostic(error.into())
+            }
         }
     });
     let leave_weak = adapter.window().as_weak();
@@ -350,11 +409,22 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     let leave_adapter = adapter.clone();
     let leave_gamepad = gamepad.clone();
     let leave_runtime_schedule = runtime_schedule.clone();
+    let leave_runtime_timer = runtime_timer.clone();
     adapter.window().on_leave_game(move || {
         let Some(window) = leave_weak.upgrade() else {
             return;
         };
-        match leave_controller.borrow_mut().leave_game() {
+        // Stop any single-shot callback that is already queued before
+        // tearing down the session. Otherwise the stale callback observes an
+        // intentionally inactive runtime and reports a fatal
+        // ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE diagnostic after a successful
+        // leave.
+        leave_runtime_timer.stop();
+        // Keep the controller's mutable borrow scoped to the call.  The
+        // success path re-reads the input mapping and would otherwise panic
+        // through `RefCell` during the first release build's leave action.
+        let leave_result = { leave_controller.borrow_mut().leave_game() };
+        match leave_result {
             Ok(model) => {
                 let mapping = leave_controller.borrow().input_mapping();
                 leave_gamepad.borrow_mut().set_mapping(mapping);
@@ -960,7 +1030,15 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             }
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;
+    tracing::info!(
+        event = "astra.emu.host.event_loop.begin",
+        diagnostic_code = "ASTRA_EMU_HOST_EVENT_LOOP_BEGIN",
+    );
     adapter.window().run()?;
+    tracing::info!(
+        event = "astra.emu.host.event_loop.complete",
+        diagnostic_code = "ASTRA_EMU_HOST_EVENT_LOOP_COMPLETE",
+    );
     if let Some(error) = fatal_error.borrow_mut().take() {
         return Err(HostError::Renderer(error));
     }
