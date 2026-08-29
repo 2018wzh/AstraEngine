@@ -1,4 +1,8 @@
 //! Native AstraVN gameplay runtime provider and ABI-safe FFI adapter.
+//! TODO(harness-merge): 单文件 3372 行违反 Charter `>600 拆模块`，已规划拆
+//! `factory.rs`（Factory/Session wrapper）`session.rs`（NativeVnSession/VnStepAction）
+//! `provider.rs`（NativeVnRuntimeProvider impl）`command.rs`（command 转换）
+//! `ffi.rs`（FfiProviderInstance 1200+ 行）；本轮仅库内Headless/指纹/Hash优先，拆分延至下次 PR 避免与 `973191ede` 合并冲突。
 
 #[cfg(feature = "ffi")]
 use std::sync::OnceLock;

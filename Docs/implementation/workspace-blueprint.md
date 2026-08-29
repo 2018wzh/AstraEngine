@@ -11,7 +11,7 @@ historical status rows describe migrations that preceded the v9 hard cut.
 | --- | --- | --- |
 | `Engine/Source/Runtime/` | Stage 1/2 implemented, Stage 3 in progress, Stage 7 planned | EngineCore runtime crate：`astra-core`、`astra-runtime`、`astra-engine` Rust dylib facade、`astra-plugin-abi`、`astra-plugin`；Stage 2 `astra-media-core` 提供轻量 media contract，`astra-asset` 已成为 Provider URI VFS contract owner；Stage 3 `astra-player-core` automation report contract 已开始落地；Stage 7 planned `astra-policy` 承载通用 Luau policy runtime |
 | `Engine/Source/Modules/` | Stage 3 implemented for AstraVN split, Stage 7 planned for AstraRPG | 产品垂直模块 crate。AstraVN 已位于 `Engine/Source/Modules/AstraVN/`，其中 `astra-vn` 只作为 facade，具体实现拆到 `astra-vn-script`、`astra-vn-core`、`astra-vn-policy`、`astra-vn-presentation`、`astra-vn-commands`、`astra-vn-system`、`astra-vn-save`、`astra-vn-package`、`astra-vn-plugin`、`astra-vn-editor` 和 `astra-vn-runtime-provider`；AstraRPG planned 路径为 `Engine/Source/Modules/AstraRPG/`，TRPG 作为 `astra-rpg-trpg` 子 crate 存在 |
-| `Engine/Source/Platform/` | Stage 1/2 implemented, formal verification in progress | Target 与 Platform crate：`astra-target`、`astra-platform`、六个平台 host crate，以及 `publish = false` 的 `astra-platform-headless`；Scene2D indexed Mesh UI consumer、UIA/ARIA bridge 与 context restore 已落地 |
+| `Engine/Source/Platform/` | Stage 1/2 implemented, Tier0 Windows/Web per-PR, Tier1 Linux/macOS nightly, Tier2 Android/iOS feature-gated | Target 与 Platform crate：`astra-target`（拟并入 `astra-platform`）、`astra-platform`、六个平台 host crate，以及 `publish = false` 的 `astra-platform-headless`（`performance` 抽至 `astra-observability:perf-trace` feature）；Scene2D indexed Mesh UI consumer、UIA/ARIA bridge 与 context restore 已落地 |
 | `Engine/Fixtures/PublicDomainMedia/` | Stage 2 implemented | CC0 public media fixture：`flower.mp4`、`flower.webm`、`t-rex-roar.mp3` 和 manifest，用于真实 decode/browser media evidence |
 | `Engine/Source/Developer/` | Stage 1 implemented, Stage 3 in progress | 开发期工具 crate：`astra-property`、`astra-property-derive`、`astra-test`、共享 host 日志与 fatal ring `astra-observability`；Stage 3 已接入 VN scenario slice 和 VN release gate |
 | `Engine/Source/Programs/` | Stage 1 implemented, Stage 3 in progress | CLI 和独立程序：`astra-cli` 提供 cook/package/test/report；`astra-player` 提供 live automation report 校验入口；Windows `astra-crash-reporter` 提供进程外 minidump helper；Stage 3 已接入 NativeVN sample cook/package |
@@ -151,8 +151,11 @@ python Tools/check_dynamic_artifacts.py
 - `rpg.trpg` is an AstraRPG profile crate; do not create a top-level `AstraTRPG` module, standalone TRPG runtime provider or top-level `trpg.*` package section namespace.
 - `luau` enables AstraVN and AstraEMU policy host integration. Legacy family adapters may parse historical script names inside their private core.
 - `wgpu` is default Renderer2D provider. Platform decode features are profile-specific.
-- Migration 11 已把 Runtime/Media/Test 收束为统一 Headless implementation；所有平台无关 Runtime 测试必须创建 `HeadlessTestContext`。受控 library target 显式禁用 doctest，并由 checker 阻断绕过 lifecycle 的新 target；完整后端仍不得进入 shipping dependency graph。Stage 2 只以 Windows native CI、具名 review 与真实平台 linked evidence 关闭，Linux/macOS portability 进入 Stage 6。
-- Target manifest is required for package validation. Missing SDK reports block native platform completion, but schema and CLI checks still run on ordinary CI.
+ - Migration 11 已把 Runtime/Media/Test 收束为库内 Headless：`astra-headless-test` 为 `TempDir` 隔离 + `astra-platform-headless` 离屏 `wgpu_offscreen/kira` 库内直调，`OnceLock/Mutex/JSONL/serve --stdio` 已删除；纯单元 crate（`astra-core/asset/byte-source` 等）改 `#[test]` 不再 `dev-dep astra-headless-test`。`perf-trace` 移 `astra-observability:perf-trace` 可选 feature，默认关闭。
+ - `astra-headless-protocol` 的 `submitted_scene_stream_hash/rasterized_frame_stream_hash/audio_stream_hash` 已彻底删除（`schema v2→v3`），`Shipping` 仅校验 `step+seed`，`Evidence` 亦不计帧内 `blake3/postcard` 哈希。
+ - 插件指纹仅 `engine_version+abi_fingerprint` blocking，`rustc/feature` 降为 `tracing::warn!`，符合 `AGENTS.md:2.2` 精简约束。
+ - `astra-vn` 的 `save+editor→astra-vn-persist` 与 `commands+plugin+system→astra-vn-extension` 已规划，`astra-vn-runtime-provider` 单文件 `3501` 拟拆 `factory/session/provider/command/ffi` 四模块（`<600` 行）；`Emulator` 的 `evidence/e3/schema/family-package→astra-emu-tool` 拟合并，`na_wmv/mpeg2/anzu` 改 `cargo patch optional` 外置。
+ - Target manifest is required for package validation. Missing SDK reports block native platform completion, but schema and CLI checks still run on ordinary CI.
 
 ## Verification
 
