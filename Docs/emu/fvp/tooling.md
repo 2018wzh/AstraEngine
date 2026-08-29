@@ -6,14 +6,17 @@
 
 ## 通用 VFS
 
-FVP 与 Minori 共用 `astra-emu-cli vfs` 和 `LegacyVfsFamilyRegistry`。FVP mount profile 必须显式列出根目录 `.bin` archive；这比 rfvp 扫描 `*.bin` 后跳过解析失败文件更严格，避免损坏包或误识别被静默隐藏。FVP 原始 archive 不需要 private patch，因此 profile 必须省略 `private_patch`；出现该字段会由 FVP factory 阻断。示例只描述格式，不是商业样本清单：
+FVP 与 Minori 共用 `astra-emu-cli vfs` 和 `LegacyVfsFamilyRegistry`。FVP launch profile 必须显式列出根目录 `.bin` archive；这比 rfvp 扫描 `*.bin` 后跳过解析失败文件更严格，避免损坏包或误识别被静默隐藏。旧 mount profile 与 `private_patch` 字段均会被严格 schema 阻断。示例只描述格式，不是商业样本清单：
 
 ```yaml
-schema: astra.emu.vfs_mount_profile.v1
+schema: astra.emu.family_launch_profile.v1
 profile_id: fvp-local
 family_id: fvp
 mount_id: fvp-main
 prefix: "fvp:/"
+runtime:
+  entry_uri: fvp:/script/start.bin
+  launch_mode: direct
 family_options_schema: astra.emu.fvp_vfs_options.v1
 family_options:
   nls: shift_jis
@@ -24,9 +27,9 @@ family_options:
 ```
 
 ```sh
-cargo run -p astra-emu-cli -- vfs --family fvp --game-dir <case-root> --mount-profile <profile.yaml> verify
-cargo run -p astra-emu-cli -- vfs --family fvp --game-dir <case-root> --mount-profile <profile.yaml> list --uri fvp:/
-cargo run -p astra-emu-cli -- vfs --family fvp --game-dir <case-root> --mount-profile <profile.yaml> stat --uri fvp:/graph/<entry>
+cargo run -p astra-emu-cli -- vfs --family fvp --game-dir <case-root> --launch-profile <profile.yaml> verify
+cargo run -p astra-emu-cli -- vfs --family fvp --game-dir <case-root> --launch-profile <profile.yaml> list --uri fvp:/
+cargo run -p astra-emu-cli -- vfs --family fvp --game-dir <case-root> --launch-profile <profile.yaml> stat --uri fvp:/graph/<entry>
 ```
 
 mount 先有界读取 header 与 filename table，再建立规范化、大小写无关的 `fvp:/<archive-role>/<entry>` URI。为生成 manifest v2 的 source/entry hash，通用 inspection mount 以单次顺序流同时计算 archive 与各 entry hash，不会二次扫描 payload，也不会按 archive 或大 entry 分配整块内存；重叠 entry range 会阻断。`verify` 会再次复核 source identity、完整 entry stream 和首尾重复 range。`read_range` 的公共上限为 64 MiB，底层每次 `BoundedByteSource` 请求仍不超过 16 MiB；大 entry 的 `open_stream` 不整项驻留。重复 range 内容变化、revision 漂移、archive 越界、重复 role/URI/entry id 和 source audit mismatch 都是 blocking diagnostic。正常 FVP runtime 启动不走 inspection mount 的全量审计，仍通过 ABI v4 按需读取 archive metadata 和已访问资源。

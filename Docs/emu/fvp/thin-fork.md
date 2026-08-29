@@ -17,7 +17,7 @@ RFVP fork 直接 acquire Host writable lease
 ```
 
 当前 pinned RFVP revision 为
-`f4f64a5bb726c1759350a666a35e0a454b810f61`。这个 revision 的 provider 已经能
+`23ae395bcc0499f737d63759902308b30ca37800`。这个 revision 的 provider 已经能
 走 `Ported + SingleLayer`、Hook、writable-file 和 surface lease，但 fork 内仍
 保留旧的通用 hosted semantic-delta、snapshot/restore 和策略-limit 层，尚未达到
 最终 v9 形态。具体证据见 [RFVP fork audit](rfvp-fork-audit.md)。

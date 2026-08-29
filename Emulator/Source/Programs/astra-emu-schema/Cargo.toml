@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 astra-emu-cli = { path = "../astra-emu-cli" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
+astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-emu-manager-core = { path = "../../Manager/astra-emu-manager-core" }
 astra-emu-translation-openai-compatible = { path = "../../Providers/astra-emu-translation-openai-compatible" }
 schemars.workspace = true

@@ -3,7 +3,7 @@
 ## 审计结论
 
 结论为 **不通过**。AstraEngine 的 `astra-emu-fvp` adapter 已经足够薄，但
-pinned RFVP fork `f4f64a5bb726c1759350a666a35e0a454b810f61` 仍带有一层旧的
+pinned RFVP fork `23ae395bcc0499f737d63759902308b30ca37800` 仍带有一层旧的
 通用 hosted adapter。它可以作为当前开发 pin 使用，但不能作为已经完成的
 Family ABI v9 release pin，也不能把现有 58 个增量提交直接标记为单一生产提交。
 
@@ -12,7 +12,7 @@ Family ABI v9 release pin，也不能把现有 58 个增量提交直接标记为
 | 项目 | 值 |
 | --- | --- |
 | RFVP upstream base | `3b5ea6c96a925c12f95aef8554905e8fecbc77c3` |
-| hosted fork head | `f4f64a5bb726c1759350a666a35e0a454b810f61` |
+| hosted fork head | `23ae395bcc0499f737d63759902308b30ca37800` |
 | 增量提交数 | 58 |
 | 文件差异 | 74 files, `+12,232/-648`（相对 upstream base） |
 | AstraEngine dependency | Git revision 固定，但 fork crate 仍把 AstraEngine dependency 写成旧的 `e6bc3d960b87373160acd8507faeac4cc589975b` |

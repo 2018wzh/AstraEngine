@@ -238,40 +238,8 @@ astra test run scenarios/emu/artemis_full_flow.yaml --headless --report target/r
 
 Expected report includes `emu.legacy_runtime_provider`, `emu.artemis_full_flow`, `emu.report_redaction` and `plugin.extension_registry`.
 
-## Windowed E2 report
+## Native replay
 
-The developer-only `windowed-e2` command uses the native PlatformHost path while
-replaying the same `astra.user_input_sequence.v1` JSONL accepted by Headless.
-The sequence is validated before the host starts and must terminate with a
-single `Shutdown`. Gameplay input from the native window (keyboard, pointer,
-touch, gamepad and IME) is rejected and counted at the host boundary; focus and
-resize are lifecycle events, and an external close is a fail-fast diagnostic.
+`astra-emu-cli run --input` 在正式 native host 中消费同一份 `astra.user_input_sequence.v1` JSONL。输入序列会在 host 启动前完整校验；replay 存在时，窗口键盘、指针、触摸、手柄和 IME gameplay input 会在 host 边界被拒绝。窗口生命周期事件仍按平台契约处理。
 
-The output schema is `astra.emu.windowed_e2_report.v1`:
-
-```rust
-pub struct WindowedE2ReportV1 {
-    pub schema: String,
-    pub family_id: String,
-    pub family_provider_id: String,
-    pub family_binary_hash: Hash256,
-    pub build_identity_hash: Hash256,
-    pub profile_hash: Hash256,
-    pub game_identity_hash: Hash256,
-    pub entry_identity_hash: Hash256,
-    pub session_id_hash: Hash256,
-    pub input_hash: Hash256,
-    pub fixed_steps: u64,
-    pub terminal_reached: bool,
-    pub external_input_rejected: u64,
-    pub checkpoints: Vec<WindowedE2CheckpointV1>,
-    pub diagnostics: Vec<String>,
-}
-```
-
-Only identity hashes, bounded counts, diagnostic codes and checkpoint hashes are
-persisted. Commercial payload, local paths, text, encoded media and ordinary
-frame readbacks are excluded. Headless/Windowed E2 parity compares control state,
-scene identity, audio identity and declared checkpoints under the same package,
-family, profile and input identity; platform-specific pixels and device fields
-remain separate evidence.
+`run` 不生成 E2 report。自动截图、WAV、checkpoint 和 machine-readable run report 只归 Headless E2；Release CLI 的 Sandbox 结果只能记录为行为/视觉验收，不能替代正式 Windows E3。

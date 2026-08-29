@@ -104,7 +104,7 @@ Expected report: `astra.editor_report.v1` with source span links for failed chec
 
 ## Stage 5：AstraEMU
 
-**闭环：** Slint Manager 启动 `AstraEmuRuntimeProvider` gameplay runtime，provider 创建并驱动 RuntimeWorld，再通过 `LegacyRuntimeProvider` family facade、auto probe、Trusted Luau、文本翻译、FilterGraph preset、legacy pack VFS mount 和 FVP family plugin 通过 gate。Artemis 与其他 family 可以停在 alpha profile，但必须有 probe report。Stage 5 当前保持 `IN_PROGRESS`：contract、Windows 本机构建和跨模块 E2 已存在，Windows/Android E3、完整 media parity 与正式签名证据仍未关闭。
+**闭环：** Slint Manager 启动 `AstraEmuRuntimeProvider` gameplay runtime，provider 创建并驱动 RuntimeWorld，再通过 `LegacyRuntimeProvider` family facade、auto probe、文本翻译 Hook、FilterGraph preset、legacy pack VFS mount 和 family plugin 通过 gate。AstraEMU 的 Luau patch/decode 路径已删除；family 需要的私有数据由显式 launch profile 和安全相对私有文件提供。Artemis 与其他 family 可以停在 alpha profile，但必须有 probe report。Stage 5 当前保持 `IN_PROGRESS`：contract、Windows 本机构建和跨模块 E2 已存在，Windows/Android E3、完整 media parity 与正式签名证据仍未关闭。
 
 **Test IDs:** `T-S5-GAME-RUNTIME-01`、`T-S5-EMUCORE-SM-01`、`T-S5-LEGACY-VFS-01`、`T-S5-MANAGER-01`、`T-S5-MANAGER-UI-01`、`T-S5-PROGRAM-TARGET-01`、`T-S5-FAMILY-01`、`T-S5-ARTEMIS-01`、`T-S5-FVP-01`、`T-S5-GATE-01`
 

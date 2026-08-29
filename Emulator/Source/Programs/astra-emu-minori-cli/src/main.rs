@@ -15,8 +15,6 @@ use astra_emu_minori::{
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
-mod garbro_nrbf;
-mod importer;
 mod inventory;
 
 #[derive(Debug, Parser)]
@@ -32,35 +30,17 @@ enum Command {
         #[arg(long)]
         game_dir: PathBuf,
     },
-    ImportGarbroScheme {
-        #[arg(long)]
-        formats: PathBuf,
-        #[arg(long)]
-        title: String,
-        #[arg(long)]
-        game_dir: PathBuf,
-    },
-    RecoverGarbroProfile {
-        #[arg(long)]
-        formats: PathBuf,
-        #[arg(long)]
-        title: String,
-        #[arg(long)]
-        game_dir: PathBuf,
-        #[arg(long)]
-        private_patch: PathBuf,
-    },
     CensusScripts {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
+        launch_profile: PathBuf,
     },
     CensusMedia {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
+        launch_profile: PathBuf,
         /// Optional local-private path for the sanitized aggregate report.
         #[arg(long)]
         output: Option<PathBuf>,
@@ -69,7 +49,7 @@ enum Command {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
+        launch_profile: PathBuf,
         /// Optional local-private path for the sanitized aggregate report.
         #[arg(long)]
         output: Option<PathBuf>,
@@ -86,8 +66,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = Cli::parse().command;
     let action = match &command {
         Command::ScanArchives { .. } => "scan_archives",
-        Command::ImportGarbroScheme { .. } => "import_garbro_scheme",
-        Command::RecoverGarbroProfile { .. } => "recover_garbro_profile",
         Command::CensusScripts { .. } => "census_scripts",
         Command::CensusMedia { .. } => "census_media",
         Command::CensusMovies { .. } => "census_movies",
@@ -99,32 +77,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string(&report)?);
             Ok(())
         }
-        Command::ImportGarbroScheme {
-            formats,
-            title,
-            game_dir,
-        } => importer::import(&formats, &title, &game_dir),
-        Command::RecoverGarbroProfile {
-            formats,
-            title,
-            game_dir,
-            private_patch,
-        } => importer::recover_profile(&formats, &title, &game_dir, &private_patch),
         Command::CensusScripts {
             game_dir,
-            mount_profile,
-        } => census(&game_dir, &mount_profile),
+            launch_profile,
+        } => census(&game_dir, &launch_profile),
         Command::CensusMedia {
             game_dir,
-            mount_profile,
+            launch_profile,
             output,
-        } => census_media(&game_dir, &mount_profile, output.as_deref()),
+        } => census_media(&game_dir, &launch_profile, output.as_deref()),
         Command::CensusMovies {
             game_dir,
-            mount_profile,
+            launch_profile,
             output,
             full_scan,
-        } => census_movies(&game_dir, &mount_profile, output.as_deref(), full_scan),
+        } => census_movies(&game_dir, &launch_profile, output.as_deref(), full_scan),
     };
     if result.is_err() {
         tracing::error!(

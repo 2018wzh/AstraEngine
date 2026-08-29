@@ -887,6 +887,7 @@ dependencies = [
  "proptest",
  "schemars",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 
@@ -921,17 +922,11 @@ dependencies = [
  "astra-platform-linux",
  "astra-platform-macos",
  "astra-platform-windows",
- "blowfish",
- "crc32fast",
  "encoding_rs",
- "flate2",
  "fs2",
  "fuser",
  "globset",
  "libc",
- "lru",
- "mlua",
- "rc4",
  "schemars",
  "serde",
  "serde_json",
@@ -1018,7 +1013,6 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "libloading 0.8.9",
- "mlua",
  "postcard",
  "rusqlite",
  "schemars",
@@ -1080,6 +1074,7 @@ dependencies = [
  "directories",
  "encoding_rs",
  "flate2",
+ "hex",
  "image 0.25.10",
  "lru",
  "postcard",
@@ -1090,6 +1085,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 1.0.69",
+ "toml 0.8.23",
  "tracing",
 ]
 
@@ -1103,11 +1099,9 @@ dependencies = [
  "astra-emu-minori",
  "astra-observability",
  "clap",
- "flate2",
  "image 0.25.10",
  "serde",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "tracing",
 ]
@@ -1118,6 +1112,7 @@ version = "0.1.0"
 dependencies = [
  "astra-emu-cli",
  "astra-emu-family-api",
+ "astra-emu-family-support",
  "astra-emu-manager-core",
  "astra-emu-translation-openai-compatible",
  "schemars",
@@ -6711,7 +6706,7 @@ checksum = "956787520e75e9bd233246045d19f42fb73242759cc57fba9611d940ae96d4b0"
 [[package]]
 name = "na_mpeg2_decoder"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=23ae395bcc0499f737d63759902308b30ca37800#23ae395bcc0499f737d63759902308b30ca37800"
 dependencies = [
  "byteorder",
  "log",
@@ -8770,7 +8765,7 @@ dependencies = [
 [[package]]
 name = "rfvp"
 version = "0.5.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=23ae395bcc0499f737d63759902308b30ca37800#23ae395bcc0499f737d63759902308b30ca37800"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -8803,7 +8798,7 @@ dependencies = [
 [[package]]
 name = "rfvp-astra-provider"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=23ae395bcc0499f737d63759902308b30ca37800#23ae395bcc0499f737d63759902308b30ca37800"
 dependencies = [
  "abi_stable",
  "anyhow",
@@ -12458,7 +12453,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "wmv-decoder"
 version = "0.2.0"
-source = "git+https://github.com/2018wzh/rfvp.git?rev=f4f64a5bb726c1759350a666a35e0a454b810f61#f4f64a5bb726c1759350a666a35e0a454b810f61"
+source = "git+https://github.com/2018wzh/rfvp.git?rev=23ae395bcc0499f737d63759902308b30ca37800#23ae395bcc0499f737d63759902308b30ca37800"
 dependencies = [
  "byteorder",
  "log",

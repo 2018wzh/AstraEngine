@@ -5,11 +5,12 @@ use astra_emu_family_api::{
     LegacyFamilyPluginDescriptor, LegacyLayerTransactionV9, LegacyProbeReport, LegacyStepInput,
     LegacyWritableFileRequestV1,
 };
+use astra_emu_family_support::LegacyFamilyLaunchProfile;
 use astra_emu_manager_core::{
     AndroidNativePluginManifest, EmuCaseProfile, EmuPlatformRunEvidenceV1,
     EmuProviderBindingEvidenceV1, EmuReleaseManifestV1, FamilyPluginManifest, FvpParityEvidence,
     FvpSyscallCoverageEvidence, LibraryMigrationEvidence, ProbeEvidence, TranslationConsent,
-    TranslationEvidence, TrustedLuauEvidenceV1, UiHostIdentityEvidence,
+    TranslationEvidence, UiHostIdentityEvidence,
 };
 use astra_emu_translation_openai_compatible::TranslationProfile;
 use schemars::{schema::RootSchema, schema_for};
@@ -46,6 +47,10 @@ pub fn schemas() -> BTreeMap<&'static str, RootSchema> {
             schema_for!(FamilyPluginManifest),
         ),
         (
+            "family-launch-profile.schema.json",
+            schema_for!(LegacyFamilyLaunchProfile),
+        ),
+        (
             "fvp-coverage.schema.json",
             schema_for!(FvpSyscallCoverageEvidence),
         ),
@@ -79,10 +84,6 @@ pub fn schemas() -> BTreeMap<&'static str, RootSchema> {
         (
             "translation-profile.schema.json",
             schema_for!(TranslationProfile),
-        ),
-        (
-            "trusted-luau-evidence.schema.json",
-            schema_for!(TrustedLuauEvidenceV1),
         ),
         (
             "ui-host-identity.schema.json",

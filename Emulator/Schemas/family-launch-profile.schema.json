@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyFamilyLaunchProfile",
+  "type": "object",
+  "required": [
+    "family_id",
+    "family_options",
+    "family_options_schema",
+    "mount_id",
+    "prefix",
+    "profile_id",
+    "runtime",
+    "schema"
+  ],
+  "properties": {
+    "family_id": {
+      "type": "string"
+    },
+    "family_options": true,
+    "family_options_schema": {
+      "type": "string"
+    },
+    "mount_id": {
+      "type": "string"
+    },
+    "prefix": {
+      "type": "string"
+    },
+    "profile_id": {
+      "type": "string"
+    },
+    "runtime": {
+      "$ref": "#/definitions/LegacyRuntimeLaunch"
+    },
+    "schema": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "LegacyRuntimeLaunch": {
+      "type": "object",
+      "required": [
+        "entry_uri",
+        "launch_mode"
+      ],
+      "properties": {
+        "entry_uri": {
+          "type": "string"
+        },
+        "launch_mode": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

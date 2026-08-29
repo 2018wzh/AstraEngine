@@ -49,9 +49,8 @@ use astra_emu_manager_core::{
     evidence_vm_coverage_ids, AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken,
     CaseRuntimeProfileRecord, CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile,
     ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
-    MatchDecisionRecord, MetadataSnapshotRecord, PatchContext, PatchDiagnostic, PatchHostAction,
-    PatchVfsReader, ProviderConsentRecord, QueuedPatchEffect, ScanLimits, SourceGrant,
-    TranslationConsent, TranslationProfileRecord, TrustedPatchRuntime, VfsResourceInfo,
+    MatchDecisionRecord, MetadataSnapshotRecord, ProviderConsentRecord, ScanLimits, SourceGrant,
+    TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -222,7 +221,6 @@ struct RuntimeBridge {
     audio: Option<HostAudioExecutor>,
     video: HostVideoExecutor,
     translation: Option<TranslationRuntime>,
-    media_hooks: BTreeMap<String, String>,
     filter_preset: String,
     suspended: bool,
     host_wake: Option<HostWake>,
@@ -254,7 +252,6 @@ impl RuntimeBridge {
             audio: None,
             video,
             translation: None,
-            media_hooks: BTreeMap::new(),
             filter_preset: "none".into(),
             suspended: false,
             host_wake: None,
@@ -306,7 +303,6 @@ impl RuntimeBridge {
         profile: CaseRuntimeProfileRecord,
         mount_set_id: String,
         translation_config: TranslationLaunchConfig,
-        patch_actions: Vec<PatchHostAction>,
     ) -> Result<(), String> {
         if self.active.is_some() {
             return Err("ASTRA_EMU_RUNTIME_SESSION_ALREADY_ACTIVE".into());
@@ -314,7 +310,6 @@ impl RuntimeBridge {
         if profile.family_id != self.family_id || profile.case_identity != case.case_identity {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
         }
-        let (media_hooks, deterministic_effects) = validate_patch_actions(patch_actions)?;
         let package_hash: Hash256 = case
             .content_hash
             .parse()
@@ -390,17 +385,6 @@ impl RuntimeBridge {
             package_hash: case.content_hash.clone(),
             sections: vec![section],
         })?;
-        for effect in deterministic_effects {
-            if let Err(error) = self.provider.queue_patch_effect(&open.session_id, effect) {
-                let cleanup = self.provider.shutdown(open.session_id.clone());
-                return match cleanup {
-                    Ok(_) => Err(error),
-                    Err(cleanup_error) => Err(format!(
-                        "ASTRA_EMU_PATCH_QUEUE_AND_CLEANUP_FAILED:{error};{cleanup_error}"
-                    )),
-                };
-            }
-        }
         self.active = Some(ActiveRuntimeSession {
             session_id: open.session_id.clone(),
             package_hash,
@@ -429,7 +413,6 @@ impl RuntimeBridge {
         );
         self.audio = Some(audio);
         self.translation = Some(translation);
-        self.media_hooks = media_hooks;
         self.terminal = false;
         self.failed = false;
         self.live_scene_commits.clear();
@@ -514,7 +497,6 @@ impl RuntimeBridge {
                 ),
                 ("fvp.stage_width".into(), stage_width.to_string()),
                 ("fvp.stage_height".into(), stage_height.to_string()),
-                ("patch.mode".into(), "no_patch".into()),
             ]
             .into_iter()
             .collect(),
@@ -526,6 +508,7 @@ impl RuntimeBridge {
         case: &astra_emu_manager_core::CaseRecord,
         mount_set_id: &str,
         entry_uri: &str,
+        launch_entry_explicit: bool,
     ) -> Result<CaseRuntimeProfileRecord, String> {
         if self.family_id != "minori" {
             return Err("ASTRA_EMU_FAMILY_BINDING_MISMATCH".into());
@@ -569,12 +552,14 @@ impl RuntimeBridge {
             // would reject the first message before a surface is published.
             ("astra.stage_width".into(), "1280".into()),
             ("astra.stage_height".into(), "720".into()),
-            ("astra.launch_entry_explicit".into(), "true".into()),
+            (
+                "astra.launch_entry_explicit".into(),
+                launch_entry_explicit.to_string(),
+            ),
             (
                 "astra.provider.storage".into(),
                 "astra.writable_file.v1".into(),
             ),
-            ("patch.mode".into(), "no_patch".into()),
         ]);
         if env::var("ASTRA_EMU_QUICK_EVIDENCE").as_deref() == Ok("1") {
             family_options.insert("astra.hosted_trace_profile".into(), "evidence".into());
@@ -915,8 +900,8 @@ impl RuntimeBridge {
 
         let mut resolved_audio = Vec::with_capacity(audio_commands.len());
         for command in audio_commands {
-            let mut command = legacy_live_audio_command(command);
-            apply_audio_media_hook(&mut command, &self.media_hooks)?;
+            let command = legacy_live_audio_command(command);
+            command.validate().map_err(|error| error.to_string())?;
             let resource = match &command {
                 LegacyAudioCommandV1::LoadResource { resource_uri, .. } => {
                     Some(self.provider.read_vfs_resource(
@@ -931,8 +916,8 @@ impl RuntimeBridge {
         }
         let mut resolved_video = Vec::with_capacity(video_commands.len());
         for command in video_commands {
-            let mut command = legacy_live_video_command(command);
-            apply_video_media_hook(&mut command, &self.media_hooks)?;
+            let command = legacy_live_video_command(command);
+            command.validate().map_err(|error| error.to_string())?;
             let resource = match &command {
                 LegacyVideoCommandV1::Play { resource_uri, .. } => {
                     Some(self.provider.read_vfs_resource(
@@ -1022,7 +1007,6 @@ impl RuntimeBridge {
         self.live_layer_commits.clear();
         self.resource_revisions.clear();
         self.translation = None;
-        self.media_hooks.clear();
         self.suspended = false;
         tracing::info!(
             event = "astra.emu.manager.coverage_observed",
@@ -1437,68 +1421,6 @@ impl Drop for RuntimeBridge {
     }
 }
 
-type PatchBindings = (BTreeMap<String, String>, Vec<QueuedPatchEffect>);
-
-fn validate_patch_actions(actions: Vec<PatchHostAction>) -> Result<PatchBindings, String> {
-    let mut media_hooks = BTreeMap::new();
-    let mut effects = Vec::new();
-    for action in actions {
-        match action {
-            PatchHostAction::DecodeTransform { .. } => {
-                return Err("ASTRA_EMU_PATCH_DECODE_TRANSFORM_NOT_INSTALLED".into());
-            }
-            PatchHostAction::MediaHook {
-                resource_uri,
-                replacement_uri,
-            } => {
-                if media_hooks.insert(resource_uri, replacement_uri).is_some() {
-                    return Err("ASTRA_EMU_PATCH_MEDIA_HOOK_DUPLICATE".into());
-                }
-            }
-            PatchHostAction::DeterministicEffect { target, payload } => {
-                let value = String::from_utf8(payload)
-                    .map_err(|_| "ASTRA_EMU_PATCH_EFFECT_UTF8".to_owned())?;
-                let effect = if target.starts_with("event.") {
-                    QueuedPatchEffect::RuntimeEvent {
-                        event: target,
-                        value,
-                    }
-                } else if target.starts_with("blackboard.") {
-                    QueuedPatchEffect::SetBlackboard { key: target, value }
-                } else {
-                    return Err("ASTRA_EMU_PATCH_EFFECT_TARGET".into());
-                };
-                effects.push(effect);
-            }
-        }
-    }
-    Ok((media_hooks, effects))
-}
-
-fn apply_audio_media_hook(
-    command: &mut LegacyAudioCommandV1,
-    hooks: &BTreeMap<String, String>,
-) -> Result<(), String> {
-    if let LegacyAudioCommandV1::LoadResource { resource_uri, .. } = command {
-        if let Some(replacement) = hooks.get(resource_uri) {
-            resource_uri.clone_from(replacement);
-        }
-    }
-    command.validate().map_err(|error| error.to_string())
-}
-
-fn apply_video_media_hook(
-    command: &mut LegacyVideoCommandV1,
-    hooks: &BTreeMap<String, String>,
-) -> Result<(), String> {
-    if let LegacyVideoCommandV1::Play { resource_uri, .. } = command {
-        if let Some(replacement) = hooks.get(resource_uri) {
-            resource_uri.clone_from(replacement);
-        }
-    }
-    command.validate().map_err(|error| error.to_string())
-}
-
 fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
     LegacyAudioPacketV7 {
         sequence: packet.sequence,
@@ -1772,8 +1694,6 @@ struct AstraEmuManagerController {
     library_sort: String,
     compatibility_filter: String,
     data_dir: PathBuf,
-    patch_summary: String,
-    pending_patch_actions: Vec<PatchHostAction>,
     metadata: MetadataRuntime,
     metadata_request_sequence: u64,
     bangumi_sync_summary: String,
@@ -1782,22 +1702,6 @@ struct AstraEmuManagerController {
     vfs_selected_path: String,
     input_config: InputConfigViewModel,
     appearance: AppearanceViewModel,
-}
-
-struct MountedPatchReader {
-    vfs: Arc<VfsRegistry>,
-    mount_set_id: String,
-}
-impl PatchVfsReader for MountedPatchReader {
-    fn read(&self, path: &str, max_bytes: usize) -> Result<Vec<u8>, PatchDiagnostic> {
-        self.vfs
-            .read_file(&self.mount_set_id, path, max_bytes as u64)
-            .map(|bytes| bytes.as_slice().to_vec())
-            .map_err(|error| PatchDiagnostic {
-                code: error.code().into(),
-                message: "trusted patch VFS read failed".into(),
-            })
-    }
 }
 
 /// In-memory directory node used to render the VFS tree from a flat listing.
@@ -1945,8 +1849,6 @@ impl AstraEmuManagerController {
             library_sort: "title".into(),
             compatibility_filter: "all".into(),
             data_dir,
-            patch_summary: "Explicit no-patch mode is active.".into(),
-            pending_patch_actions: Vec::new(),
             metadata,
             metadata_request_sequence: 0,
             bangumi_sync_summary: "Not synchronized".into(),
@@ -2889,69 +2791,6 @@ impl AstraEmuManagerController {
             .map_err(|error| error.to_string())?;
         self.scan_grant(&grant)
     }
-
-    fn apply_trusted_patch(
-        &mut self,
-        profile: &CaseRuntimeProfileRecord,
-        mount_set_id: &str,
-    ) -> Result<(), String> {
-        match profile
-            .family_options
-            .get("patch.mode")
-            .map(String::as_str)
-            .unwrap_or("no_patch")
-        {
-            "no_patch" => {
-                self.patch_summary = "Explicit no-patch mode is active.".into();
-                self.pending_patch_actions.clear();
-                Ok(())
-            }
-            "trusted" => {
-                self.pending_patch_actions.clear();
-                let source = self
-                    .vfs
-                    .read_file(mount_set_id, "astraemu.patch.luau", 256 * 1024)
-                    .map_err(|error| format!("ASTRA_EMU_PATCH_SOURCE_READ:{}", error.code()))?;
-                let source = std::str::from_utf8(&source)
-                    .map_err(|_| "ASTRA_EMU_PATCH_SOURCE_UTF8".to_owned())?;
-                let runtime =
-                    TrustedPatchRuntime::new(1_000_000).map_err(|diagnostic| diagnostic.code)?;
-                let execution = runtime
-                    .evaluate(
-                        source,
-                        &PatchContext {
-                            files: BTreeMap::new(),
-                            reader: Some(Arc::new(MountedPatchReader {
-                                vfs: self.vfs.clone(),
-                                mount_set_id: mount_set_id.into(),
-                            })),
-                        },
-                    )
-                    .map_err(|diagnostic| diagnostic.code)?;
-                let mut overlays = execution.overlays;
-                let mut pending_actions = Vec::new();
-                for action in execution.host_actions {
-                    match action {
-                        PatchHostAction::DecodeTransform { path, bytes } => {
-                            if overlays.insert(path, bytes).is_some() {
-                                return Err("ASTRA_EMU_PATCH_DECODE_OVERLAY_CONFLICT".into());
-                            }
-                        }
-                        action => pending_actions.push(action),
-                    }
-                }
-                let overlay_count = overlays.len();
-                let intent_count = execution.intents.len();
-                self.vfs.install_overlays(mount_set_id, overlays)?;
-                self.pending_patch_actions = pending_actions;
-                self.patch_summary = format!(
-                    "Trusted patch isolated successfully; intents={intent_count}; overlays={overlay_count}. Reports retain hashes and counts only."
-                );
-                Ok(())
-            }
-            _ => Err("ASTRA_EMU_PATCH_MODE_INVALID".into()),
-        }
-    }
 }
 
 fn decode_image_preview(bytes: &[u8], path: &str) -> Result<(Vec<u8>, u32, u32), String> {
@@ -3159,9 +2998,7 @@ fn default_case_profile(case_identity: String) -> CaseRuntimeProfileRecord {
         family_id: "fvp".into(),
         fixed_delta_ns: 16_666_667,
         compatibility_profile: "rfvp-v1".into(),
-        family_options: [("patch.mode".into(), "no_patch".into())]
-            .into_iter()
-            .collect(),
+        family_options: BTreeMap::new(),
     }
 }
 
@@ -3801,7 +3638,6 @@ impl ManagerController for AstraEmuManagerController {
                 .try_borrow()
                 .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
                 .diagnostics_summary(),
-            patches_summary: self.patch_summary.clone(),
             vndb_consent,
             bangumi_consent,
             sensitive_covers,
@@ -4404,34 +4240,6 @@ impl ManagerController for AstraEmuManagerController {
         self.model()
     }
 
-    fn set_patch_mode(&mut self, mode: &str) -> Result<ManagerViewModel, String> {
-        if !matches!(mode, "no_patch" | "trusted") {
-            return Err("ASTRA_EMU_PATCH_MODE_INVALID".into());
-        }
-        let case_identity = self
-            .selected_case_id
-            .clone()
-            .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
-        let mut profile = self
-            .library
-            .case_runtime_profile(&case_identity)
-            .map_err(|error| error.to_string())?
-            .unwrap_or_else(|| default_case_profile(case_identity));
-        profile
-            .family_options
-            .insert("patch.mode".into(), mode.into());
-        self.library
-            .set_case_runtime_profile(&profile)
-            .map_err(|error| error.to_string())?;
-        self.patch_summary = if mode == "trusted" {
-            "Trusted mode selected. Launch requires a valid UTF-8 astraemu.patch.luau in the authorized case root; any violation blocks launch.".into()
-        } else {
-            "Explicit no-patch mode is active.".into()
-        };
-        self.diagnostic.clear();
-        self.model()
-    }
-
     fn rescan(&mut self) -> Result<ManagerViewModel, String> {
         let grants = self
             .library
@@ -4509,51 +4317,28 @@ impl ManagerController for AstraEmuManagerController {
         };
         let mut family_mount = None;
         let mut family_reader = None;
-        let entry_uri = if family_id == "minori" {
+        let (entry_uri, launch_entry_explicit) = if family_id == "minori" {
             let loaded = self
                 .family_vfs_registry
-                .load_profile(&game_root.join("astraemu.minori.mount.yaml"))
+                .load_profile(&game_root.join("astraemu.minori.launch.yaml"))
                 .map_err(|error| error.to_string())?;
+            let entry_uri = loaded.profile.runtime.entry_uri.clone();
+            let launch_entry_explicit = match loaded.profile.runtime.launch_mode.as_str() {
+                "direct" => true,
+                "title" => false,
+                _ => return Err("ASTRA_EMU_VFS_PROFILE_IDENTITY".into()),
+            };
             let mounted = self
                 .family_vfs_registry
                 .mount("minori", &game_root, &loaded)
                 .map_err(|error| error.to_string())?;
-            let requested_entry = env::var("ASTRA_EMU_QUICK_ENTRY")
-                .ok()
-                .filter(|value| value.starts_with("minori:/"));
-            let entry_uri = requested_entry
-                .filter(|requested| {
-                    mounted
-                        .manifest()
-                        .entries
-                        .iter()
-                        .any(|entry| entry.media_kind == "script" && entry.uri == *requested)
-                })
-                .or_else(|| {
-                    mounted
-                        .manifest()
-                        .entries
-                        .iter()
-                        .find(|entry| {
-                            entry.media_kind == "script" && entry.uri.ends_with("/test.sc")
-                        })
-                        .or_else(|| {
-                            mounted
-                                .manifest()
-                                .entries
-                                .iter()
-                                .find(|entry| entry.media_kind == "script")
-                        })
-                        .map(|entry| entry.uri.clone())
-                })
-                .ok_or_else(|| "ASTRA_EMU_MINORI_ENTRY_REQUIRED".to_owned())?;
-            if let Some(requested) = env::var("ASTRA_EMU_QUICK_ENTRY")
-                .ok()
-                .filter(|value| value.starts_with("minori:/"))
+            if !mounted
+                .manifest()
+                .entries
+                .iter()
+                .any(|entry| entry.media_kind == "script" && entry.uri == entry_uri)
             {
-                if requested != entry_uri {
-                    return Err("ASTRA_EMU_MINORI_ENTRY_NOT_FOUND".into());
-                }
+                return Err("ASTRA_EMU_MINORI_ENTRY_INVALID".into());
             }
             let adapter = Arc::new(
                 LegacyMountedVfsReaderAdapter::new(&mount_set_id, mounted.clone())
@@ -4565,13 +4350,13 @@ impl ManagerController for AstraEmuManagerController {
                 .ensure_family("minori", adapter.clone())?;
             family_mount = Some(mounted);
             family_reader = Some(adapter);
-            entry_uri
+            (entry_uri, launch_entry_explicit)
         } else {
             self.runtime
                 .try_borrow_mut()
                 .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
                 .ensure_family("fvp", self.vfs.clone())?;
-            case.relative_path.clone()
+            (case.relative_path.clone(), true)
         };
         self.vfs.bind(&mount_set_id, &grant.platform_token)?;
         let (mut detected, pack_paths) = if family_id == "minori" {
@@ -4579,7 +4364,7 @@ impl ManagerController for AstraEmuManagerController {
                 .runtime
                 .try_borrow()
                 .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-                .probe_minori_profile(&case, &mount_set_id, &entry_uri)
+                .probe_minori_profile(&case, &mount_set_id, &entry_uri, launch_entry_explicit)
                 .inspect_err(|_| {
                     self.vfs.unbind(&mount_set_id);
                 })?;
@@ -4623,6 +4408,7 @@ impl ManagerController for AstraEmuManagerController {
                     "astra.family_content_hash",
                     "astra.stage_width",
                     "astra.stage_height",
+                    "astra.launch_entry_explicit",
                 ] {
                     explicit_options.remove(key);
                 }
@@ -4641,31 +4427,11 @@ impl ManagerController for AstraEmuManagerController {
                 .family_options
                 .insert("fvp.pack_paths".into(), pack_paths);
         }
-        if family_id == "minori"
-            && profile
-                .family_options
-                .get("patch.mode")
-                .is_some_and(|mode| mode == "trusted")
-        {
-            self.vfs.unbind(&mount_set_id);
-            return Err("ASTRA_EMU_MINORI_TRUSTED_PATCH_UNSUPPORTED".into());
-        }
-        if let Err(error) = self.apply_trusted_patch(&profile, &mount_set_id) {
-            self.vfs.unbind(&mount_set_id);
-            return Err(error);
-        }
-        let patch_actions = std::mem::take(&mut self.pending_patch_actions);
         let launch = self
             .runtime
             .try_borrow_mut()
             .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
-            .launch(
-                &case,
-                profile,
-                mount_set_id.clone(),
-                translation_config,
-                patch_actions,
-            );
+            .launch(&case, profile, mount_set_id.clone(), translation_config);
         if let Err(error) = launch {
             self.vfs.unbind(&mount_set_id);
             return Err(error);
@@ -5074,16 +4840,14 @@ mod manager_tests {
     use astra_emu_family_api::LegacyInputEdge;
     use astra_emu_manager_core::{
         CancellationToken, DesktopVfsRegistry, GrantedSourceEntry, GrantedSourceReader, Library,
-        LibraryScanner, PatchHostAction, QueuedPatchEffect, ScanLimits, SourceGrant,
-        SourceScanError,
+        LibraryScanner, ScanLimits, SourceGrant, SourceScanError,
     };
 
     use super::{
-        apply_audio_media_hook, decode_image_preview, decode_text_preview, fvp_pack_paths_option,
-        media_preview_summary, parse_glossary, pending_wait_can_rebind, quick_entry_is_valid,
-        quick_entry_matches, refresh_cover_cache, retain_non_completed_input_edges,
-        system_menu_open_requested, system_ui_activity_from_blackboard, validate_patch_actions,
-        PendingWait,
+        decode_image_preview, decode_text_preview, fvp_pack_paths_option, media_preview_summary,
+        parse_glossary, pending_wait_can_rebind, quick_entry_is_valid, quick_entry_matches,
+        refresh_cover_cache, retain_non_completed_input_edges, system_menu_open_requested,
+        system_ui_activity_from_blackboard, PendingWait,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -5391,51 +5155,5 @@ mod manager_tests {
         let cover = library.cover_cache(&case.case_identity).unwrap().unwrap();
         assert_eq!((cover.width, cover.height), (32, 48));
         assert!(directory.path().join(cover.cache_relative_path).is_file());
-    }
-
-    #[test]
-    fn patch_host_bindings_are_unique_and_media_rewrites_are_revalidated() {
-        let original = "audio/original.ogg";
-        let (media, effects) = validate_patch_actions(vec![
-            PatchHostAction::MediaHook {
-                resource_uri: original.into(),
-                replacement_uri: "audio/replacement.ogg".into(),
-            },
-            PatchHostAction::DeterministicEffect {
-                target: "event.patch_ready".into(),
-                payload: vec![1, 2, 3],
-            },
-        ])
-        .unwrap();
-        assert_eq!(media[original], "audio/replacement.ogg");
-        assert!(matches!(
-            &effects[0],
-            QueuedPatchEffect::RuntimeEvent { event, value }
-                if event == "event.patch_ready" && value == "\u{1}\u{2}\u{3}"
-        ));
-
-        let mut command = astra_emu_family_api::LegacyAudioCommandV1::LoadResource {
-            stream_id: 1,
-            encoding: astra_emu_family_api::LegacyAudioEncoding::Ogg,
-            resource_uri: original.into(),
-        };
-        apply_audio_media_hook(&mut command, &media).unwrap();
-        assert!(matches!(
-            command,
-            astra_emu_family_api::LegacyAudioCommandV1::LoadResource { resource_uri, .. }
-                if resource_uri == "audio/replacement.ogg"
-        ));
-
-        assert!(validate_patch_actions(vec![
-            PatchHostAction::MediaHook {
-                resource_uri: original.into(),
-                replacement_uri: "audio/a.ogg".into(),
-            },
-            PatchHostAction::MediaHook {
-                resource_uri: original.into(),
-                replacement_uri: "audio/b.ogg".into(),
-            },
-        ])
-        .is_err());
     }
 }

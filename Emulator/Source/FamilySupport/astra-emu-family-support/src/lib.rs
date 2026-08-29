@@ -1,12 +1,10 @@
 //! Host-side support services shared by AstraEMU family adapters.
 
 mod audio_service;
-mod cache;
-mod decoder;
 mod extract;
 #[cfg(target_os = "linux")]
 mod fuse;
-mod private_profile;
+mod permissions;
 mod private_writable;
 mod profile;
 mod registry;
@@ -19,12 +17,10 @@ mod verify;
 mod viewer;
 
 pub use audio_service::*;
-pub use cache::*;
-pub use decoder::*;
 pub use extract::*;
 #[cfg(target_os = "linux")]
 pub use fuse::*;
-pub use private_profile::*;
+pub use permissions::*;
 pub use private_writable::*;
 pub use profile::*;
 pub use registry::*;

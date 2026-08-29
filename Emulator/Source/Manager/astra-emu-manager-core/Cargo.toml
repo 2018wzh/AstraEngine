@@ -20,7 +20,6 @@ astra-runtime = { path = "../../../../Engine/Source/Runtime/astra-runtime" }
 ed25519-dalek.workspace = true
 hex.workspace = true
 libloading.workspace = true
-mlua.workspace = true
 postcard.workspace = true
 rusqlite.workspace = true
 schemars.workspace = true

@@ -182,21 +182,6 @@ pub struct EmuProviderBindingEvidenceV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TrustedLuauEvidenceV1 {
-    pub schema: String,
-    pub policy_id: String,
-    pub capability_ids: Vec<String>,
-    pub denied_capability_ids: Vec<String>,
-    pub evaluated_script_hashes: Vec<Hash256>,
-    pub violation_codes: Vec<String>,
-    pub commercial_payload_present: bool,
-    pub local_path_present: bool,
-    pub deterministic_effect_count: u64,
-    pub status: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct EmuPlatformRunEvidenceV1 {
     pub schema: String,
     pub platform: String,
@@ -236,7 +221,6 @@ pub struct AstraEmuEvidenceBundleV1 {
     pub ui_host_identity: UiHostIdentityEvidence,
     pub fvp_coverage: FvpSyscallCoverageEvidence,
     pub fvp_parity: FvpParityEvidence,
-    pub trusted_luau: TrustedLuauEvidenceV1,
     pub translation: TranslationEvidence,
     pub metadata: MetadataEvidenceV1,
     pub platforms: BTreeMap<String, EmuPlatformRunEvidenceV1>,
@@ -249,7 +233,6 @@ impl AstraEmuEvidenceBundleV1 {
         validate_ui_host_identity(&self.ui_host_identity)?;
         validate_fvp_coverage(&self.fvp_coverage)?;
         validate_fvp_parity(&self.fvp_parity)?;
-        validate_trusted_luau(&self.trusted_luau)?;
         validate_translation_evidence(&self.translation)?;
         validate_metadata_evidence(&self.metadata)?;
         if self.platforms.len() != EMU_RELEASE_PLATFORMS.len() {
@@ -294,7 +277,6 @@ pub fn validate_release_manifest(value: &EmuReleaseManifestV1) -> Result<(), Str
         "ui_host_identity",
         "fvp_coverage",
         "fvp_parity",
-        "trusted_luau",
         "translation",
         "metadata",
     ];
@@ -458,53 +440,6 @@ pub fn validate_fvp_parity(value: &FvpParityEvidence) -> Result<(), String> {
         || !value.diagnostic_codes.is_empty()
     {
         return Err("ASTRA_EMU_FVP_PARITY_DIVERGENCE".into());
-    }
-    Ok(())
-}
-
-pub fn validate_trusted_luau(value: &TrustedLuauEvidenceV1) -> Result<(), String> {
-    let granted = value
-        .capability_ids
-        .iter()
-        .map(String::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    let denied = value
-        .denied_capability_ids
-        .iter()
-        .map(String::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    if value.schema != "astra.emu.trusted_luau_evidence.v1"
-        || value.policy_id.is_empty()
-        || [
-            "vfs.read",
-            "patch.overlay",
-            "decode_transform",
-            "media_hook",
-            "deterministic_effect",
-        ]
-        .iter()
-        .any(|id| !granted.contains(id))
-        || ["filesystem", "network", "system", "native_handle"]
-            .iter()
-            .any(|id| !denied.contains(id))
-        || value.evaluated_script_hashes.is_empty()
-        || value
-            .evaluated_script_hashes
-            .iter()
-            .any(|hash| is_zero(*hash))
-        || value
-            .evaluated_script_hashes
-            .iter()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len()
-            != value.evaluated_script_hashes.len()
-        || !value.violation_codes.is_empty()
-        || value.commercial_payload_present
-        || value.local_path_present
-        || value.deterministic_effect_count == 0
-        || value.status != "pass"
-    {
-        return Err("ASTRA_EMU_TRUSTED_LUAU_EVIDENCE_INVALID".into());
     }
     Ok(())
 }

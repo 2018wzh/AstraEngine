@@ -15,11 +15,9 @@ astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-suppor
 astra-emu-minori = { path = "../../Families/astra-emu-minori" }
 astra-observability = { path = "../../../../Engine/Source/Developer/astra-observability" }
 clap.workspace = true
-flate2.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

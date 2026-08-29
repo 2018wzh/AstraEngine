@@ -6,5 +6,4 @@ pub mod runner;
 pub use runner::{
     run_headless, run_native, ExtensionBinding, FamilyLaunchMode, HeadlessFrameSampleV1,
     HeadlessLaunch, HeadlessPerformanceArtifacts, HeadlessRunReportV3, NativeLaunch,
-    NativeLaunchMode, WindowedE2ReportV1,
 };

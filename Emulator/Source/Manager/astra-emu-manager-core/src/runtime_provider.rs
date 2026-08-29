@@ -11,12 +11,12 @@ use astra_core::SchemaVersion;
 use astra_core::{Diagnostic, Hash256, StableId};
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyBlackboardMutation, LegacyControlTransaction, LegacyDiagnostic,
-    LegacyEvent, LegacyInputEdge, LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7,
-    LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyProviderResult,
-    LegacyReplayMode, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
-    LegacyShutdownReport, LegacyStepInput, LegacySystemMenuActionV1, LegacySystemMenuRequestV1,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyWaitRequest,
+    LegacyAwaitResult, LegacyControlTransaction, LegacyDiagnostic, LegacyInputEdge,
+    LegacyLiveOutput, LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
+    LegacyProviderError, LegacyProviderResult, LegacyReplayMode, LegacyRuntimeHostCtx,
+    LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyShutdownReport, LegacyStepInput,
+    LegacySystemMenuActionV1, LegacySystemMenuRequestV1, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyWaitRequest,
 };
 use astra_plugin::{ProductRuntimeProvider, ProductRuntimeProviderFactory, ProductRuntimeSession};
 #[cfg(test)]
@@ -614,12 +614,6 @@ pub struct EmuCaseProfile {
     pub family_options: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum QueuedPatchEffect {
-    RuntimeEvent { event: String, value: String },
-    SetBlackboard { key: String, value: String },
-}
-
 struct EmuSession {
     world: RuntimeWorld,
     layer_state: astra_media_core::RetainedLayer2DState,
@@ -627,7 +621,6 @@ struct EmuSession {
     host_ctx: LegacyRuntimeHostCtx,
     pending_control: Arc<Mutex<Option<PendingControlStep>>>,
     await_tokens: Arc<Mutex<BTreeMap<String, AwaitBinding>>>,
-    pending_patch_effects: Vec<QueuedPatchEffect>,
     poisoned: bool,
 }
 
@@ -1071,25 +1064,6 @@ impl AstraEmuRuntimeProvider {
         Ok(report)
     }
 
-    pub fn queue_patch_effect(
-        &mut self,
-        session_id: &GameRuntimeSessionId,
-        effect: QueuedPatchEffect,
-    ) -> Result<(), String> {
-        let session = self
-            .sessions
-            .get_mut(&session_id.0)
-            .ok_or_else(|| "ASTRA_EMU_SESSION_MISSING".to_owned())?;
-        if session.poisoned {
-            return Err("ASTRA_EMU_SESSION_POISONED".into());
-        }
-        if session.pending_patch_effects.len() >= 4096 {
-            return Err("ASTRA_EMU_PATCH_EFFECT_COUNT".into());
-        }
-        session.pending_patch_effects.push(effect);
-        Ok(())
-    }
-
     pub fn read_vfs_resource(
         &self,
         session_id: &GameRuntimeSessionId,
@@ -1425,7 +1399,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 host_ctx,
                 pending_control,
                 await_tokens,
-                pending_patch_effects: Vec::new(),
                 poisoned: false,
             },
         );
@@ -1514,35 +1487,6 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 return Err(error.to_string());
             }
         };
-        if !session.pending_patch_effects.is_empty() {
-            let mut next_sequence = family_output
-                .live
-                .max_sequence()
-                .into_iter()
-                .chain(family_output.control.max_sequence())
-                .max()
-                .map_or(0, |sequence| sequence.saturating_add(1));
-            for effect in std::mem::take(&mut session.pending_patch_effects) {
-                match effect {
-                    QueuedPatchEffect::RuntimeEvent { event, value } => {
-                        family_output.control.events.push(LegacyEvent {
-                            sequence: next_sequence,
-                            event,
-                            value,
-                        })
-                    }
-                    QueuedPatchEffect::SetBlackboard { key, value } => family_output
-                        .control
-                        .blackboard
-                        .push(LegacyBlackboardMutation {
-                            sequence: next_sequence,
-                            key,
-                            value,
-                        }),
-                }
-                next_sequence = next_sequence.saturating_add(1);
-            }
-        }
         family_output.validate().map_err(|error| {
             session.poisoned = true;
             error.to_string()
@@ -2041,15 +1985,6 @@ mod tests {
                 }],
             })
             .unwrap();
-        provider
-            .queue_patch_effect(
-                &open.session_id,
-                QueuedPatchEffect::RuntimeEvent {
-                    event: "patch.synthetic".into(),
-                    value: "typed-value".into(),
-                },
-            )
-            .unwrap();
         let output = provider
             .step(RuntimeStepInput {
                 session_id: open.session_id.clone(),
@@ -2068,10 +2003,6 @@ mod tests {
             .unwrap();
         assert_eq!(output.status, "active");
         let live = output.live;
-        assert!(live
-            .events
-            .iter()
-            .any(|event| event.event == "patch.synthetic" && event.value == "typed-value"));
         let mut output_observations = vec![(
             live.state_revision,
             live.events

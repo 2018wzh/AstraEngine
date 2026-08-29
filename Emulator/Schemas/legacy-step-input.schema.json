@@ -43,6 +43,17 @@
       "format": "uint64",
       "minimum": 0.0
     },
+    "system_menu": {
+      "description": "A host-originated request to open the family-owned system menu.\n\nThis is intentionally separate from the generic input-edge stream: opening a system menu is a semantic family operation, not a keyboard alias.  The request remains optional so families that do not expose a system menu can reject it explicitly instead of guessing from a key.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LegacySystemMenuRequestV1"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "tick_index": {
       "type": "integer",
       "format": "uint64",
@@ -139,6 +150,44 @@
       "enum": [
         "live"
       ]
+    },
+    "LegacySystemMenuActionV1": {
+      "description": "Typed semantic request emitted by a host when the physical secondary pointer button opens the family-owned system menu.",
+      "type": "string",
+      "enum": [
+        "open"
+      ]
+    },
+    "LegacySystemMenuRequestV1": {
+      "type": "object",
+      "required": [
+        "action",
+        "sequence"
+      ],
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/LegacySystemMenuActionV1"
+        },
+        "pointer_x": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "pointer_y": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
     }
   }
 }

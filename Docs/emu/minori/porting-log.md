@@ -1,5 +1,12 @@
 # Minori 移植日志
 
+## 2026-08-29：key file 与流式解密 hard cut
+
+- Minori launch profile 改用安全相对 `key_file`。mount 通过 `astra-emu-family-core` 的有界只读接口读取一次严格 `astra.emu.minori.keys.v1`，后续不监控、不重载，也不保存 key hash。
+- PAZ index 仍做有界整块解密；entry 改为按 range 或顺序 stream 从密文 source 解密。packed entry 每次从起点建立 zlib 流并丢弃 offset 前明文，不生成 seek index、明文 cache 或临时文件。
+- AstraEMU 的 Luau private profile、decoder callback、patch overlay、plaintext cache、GARbro importer、相关 Manager UI/evidence，以及 `windowed-e2` 命令已经删除。AstraVN/AstraRPG 的 Luau policy 不受影响。
+- 当前通过的是 strict key parser、private-file boundary、Minori/FamilySupport、CLI 和 evidence 的局部回归。旧八包 full verify 只作历史对照；新 key-file/streaming identity 的真实 full verify、四路线 GPU E2、Release CLI Sandbox 视觉验收和正式 Windows E3 都没有完成。
+
 ## 2026-08-28：无音频设备启动复核
 
 - 在授权 Windows Sandbox 中用当前签名 Manager 启动 Minori。Host 的默认输出不可用时，`FamilyAudioService` 选择 `NullAudioLane`，Manager 窗口仍完成初始化，Diagnostics 面板显示 runtime active 且无 blocking diagnostic。

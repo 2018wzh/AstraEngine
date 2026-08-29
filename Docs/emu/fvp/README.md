@@ -22,7 +22,7 @@
 
 FVP 在 AstraEMU 中是 `Ported + SingleLayer` 的 engine-native family plugin。RFVP fork 直接实现 Family ABI v9 provider：它消费 Host input/wait/audio/control DTO，在 Hook 后取得唯一 writable surface lease，直接光栅化并提交 `Unchanged`、`Full` 或像素坐标 `Rects` damage；存档只通过 per-game writable-file Host port。AstraEngine 内的 `astra-emu-fvp` 只保留 dylib root export、build identity、descriptor、panic containment 和最终错误边界，不转换 scene、texture、text 或 save DTO。
 
-当前 pinned fork revision 为 `f4f64a5bb726c1759350a666a35e0a454b810f61`。该 revision 的 Astra adapter-facing 结构已符合上述边界，但 fork 内仍有旧 hosted semantic-delta、snapshot/restore 和策略-limit 实现；详见 [RFVP fork audit](rfvp-fork-audit.md)。在这些旧路径移除并由 fork 仓库形成单一审查提交前，FVP v9 release gate 保持 blocking。
+当前 pinned fork revision 为 `23ae395bcc0499f737d63759902308b30ca37800`。该 revision 已迁移到 manifest v3/launch-profile contract，并删除退役 VFS decrypt/private-profile/cache identity consumer。fork 内仍有旧 hosted semantic-delta、snapshot/restore 和策略-limit 实现；详见 [RFVP fork audit](rfvp-fork-audit.md)。在这些旧路径移除并由 fork 仓库形成单一审查提交前，FVP release gate 保持 blocking。
 
 FVP 不改变 EngineCore 的 Actor/Component + StateMachine 权威模型，也不把 rfvp 的单 family 主循环、no_std 约束或平台 host 细节变成公共 Runtime contract。Family core 自己完成字体 fallback、shaping、换行和绘制；Host 不提供文本 overlay、翻译 cache 或 save-slot 语义。
 

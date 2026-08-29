@@ -15,15 +15,9 @@ astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-media = { path = "../../../../Engine/Source/Runtime/astra-media" }
 astra-audio-kira = { path = "../../../../Engine/Source/Runtime/astra-audio-kira" }
 astra-platform = { path = "../../../../Engine/Source/Platform/astra-platform" }
-blowfish.workspace = true
-crc32fast = "1.5"
 encoding_rs.workspace = true
-flate2.workspace = true
 fs2 = "0.4"
 globset = "0.4"
-lru.workspace = true
-mlua.workspace = true
-rc4.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

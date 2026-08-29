@@ -2,10 +2,10 @@ use astra_core::Diagnostic;
 use astra_emu_manager_core::{
     validate_fvp_coverage, validate_fvp_parity, validate_metadata_evidence,
     validate_platform_evidence, validate_provider_binding, validate_release_manifest,
-    validate_translation_evidence, validate_trusted_luau, validate_ui_host_identity,
-    AstraEmuEvidenceBundleV1, EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1,
-    EmuReleaseManifestV1, FvpParityEvidence, FvpSyscallCoverageEvidence, MetadataEvidenceV1,
-    TranslationEvidence, TrustedLuauEvidenceV1, UiHostIdentityEvidence,
+    validate_translation_evidence, validate_ui_host_identity, AstraEmuEvidenceBundleV1,
+    EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1, EmuReleaseManifestV1,
+    FvpParityEvidence, FvpSyscallCoverageEvidence, MetadataEvidenceV1, TranslationEvidence,
+    UiHostIdentityEvidence,
 };
 use astra_package::{PackageReader, SectionEntry};
 use serde::de::DeserializeOwned;
@@ -31,7 +31,6 @@ pub(super) fn emu_release_checks(
     checks.push(ui_check(package, &manifest));
     checks.push(fvp_coverage_check(package, &manifest));
     checks.push(fvp_parity_check(package, &manifest));
-    checks.push(luau_check(package, &manifest));
     checks.push(translation_check(package, &manifest));
     checks.push(metadata_check(package, &manifest));
     checks.extend(platform_checks(package, &manifest));
@@ -136,20 +135,6 @@ fn fvp_parity_check(
     )
 }
 
-fn luau_check(package: &PackageReader, manifest: &EmuReleaseManifestV1) -> ReleaseCheckRecord {
-    let decoded = decode_named::<TrustedLuauEvidenceV1>(package, manifest, "trusted_luau");
-    let Ok(value) = decoded else {
-        return *decoded.unwrap_err();
-    };
-    let valid = validate_trusted_luau(&value).is_ok();
-    record(
-        "emu.trusted_luau",
-        valid,
-        "Trusted Luau capability and redaction evidence is isolated",
-        "ASTRA_EMU_TRUSTED_LUAU_EVIDENCE_INVALID",
-    )
-}
-
 fn translation_check(
     package: &PackageReader,
     manifest: &EmuReleaseManifestV1,
@@ -210,18 +195,11 @@ fn continuity_check(
         decode_named::<UiHostIdentityEvidence>(package, manifest, "ui_host_identity"),
         decode_named::<FvpSyscallCoverageEvidence>(package, manifest, "fvp_coverage"),
         decode_named::<FvpParityEvidence>(package, manifest, "fvp_parity"),
-        decode_named::<TrustedLuauEvidenceV1>(package, manifest, "trusted_luau"),
         decode_named::<TranslationEvidence>(package, manifest, "translation"),
         decode_named::<MetadataEvidenceV1>(package, manifest, "metadata"),
     );
-    let (
-        Ok(ui_host_identity),
-        Ok(fvp_coverage),
-        Ok(fvp_parity),
-        Ok(trusted_luau),
-        Ok(translation),
-        Ok(metadata),
-    ) = values
+    let (Ok(ui_host_identity), Ok(fvp_coverage), Ok(fvp_parity), Ok(translation), Ok(metadata)) =
+        values
     else {
         return blocked(
             "emu.evidence.continuity",
@@ -245,7 +223,6 @@ fn continuity_check(
         ui_host_identity,
         fvp_coverage,
         fvp_parity,
-        trusted_luau,
         translation,
         metadata,
         platforms,
@@ -331,7 +308,7 @@ mod tests {
     use astra_core::Hash256;
     use astra_emu_manager_core::{
         EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1, FvpParityEvidence,
-        FvpSyscallCoverageEvidence, MetadataEvidenceV1, TranslationEvidence, TrustedLuauEvidenceV1,
+        FvpSyscallCoverageEvidence, MetadataEvidenceV1, TranslationEvidence,
         UiHostIdentityEvidence, RFVP_REFERENCE_REVISION,
     };
     use astra_package::{PackageBuildRequest, PackageBuilder, PackageReader, SectionPayload};
@@ -342,7 +319,7 @@ mod tests {
         let package = package_with_complete_evidence();
         let reader = PackageReader::open(&package).unwrap();
         let checks = emu_release_checks(&reader, "fvp-v1", Some("astra-emu-case"));
-        assert_eq!(checks.len(), 15);
+        assert_eq!(checks.len(), 14);
         assert!(
             checks.iter().all(|check| check.status == CheckStatus::Pass),
             "unexpected blocked checks: {:?}",
@@ -368,7 +345,6 @@ mod tests {
             ("ui_host_identity".into(), "emu.evidence.ui".into()),
             ("fvp_coverage".into(), "emu.evidence.coverage".into()),
             ("fvp_parity".into(), "emu.evidence.parity".into()),
-            ("trusted_luau".into(), "emu.evidence.luau".into()),
             ("translation".into(), "emu.evidence.translation".into()),
             ("metadata".into(), "emu.evidence.metadata".into()),
         ]);
@@ -445,34 +421,6 @@ mod tests {
                 first_divergence_sequence: None,
                 status: "pass".into(),
                 diagnostic_codes: Vec::new(),
-            },
-        ));
-        sections.push(postcard_section(
-            "emu.evidence.luau",
-            "astra.emu.trusted_luau_evidence.v1",
-            &TrustedLuauEvidenceV1 {
-                schema: "astra.emu.trusted_luau_evidence.v1".into(),
-                policy_id: "astra.emu.trusted.v1".into(),
-                capability_ids: [
-                    "vfs.read",
-                    "patch.overlay",
-                    "decode_transform",
-                    "media_hook",
-                    "deterministic_effect",
-                ]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-                denied_capability_ids: ["filesystem", "network", "system", "native_handle"]
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
-                evaluated_script_hashes: vec![hash(b"patch")],
-                violation_codes: Vec::new(),
-                commercial_payload_present: false,
-                local_path_present: false,
-                deterministic_effect_count: 1,
-                status: "pass".into(),
             },
         ));
         sections.push(postcard_section(

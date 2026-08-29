@@ -2049,8 +2049,13 @@ mod tests {
                 None,
             )
             .unwrap();
-        service.pump().unwrap();
-        let telemetry = service.telemetry();
+        let telemetry = (0..8)
+            .find_map(|_| {
+                service.pump().unwrap();
+                let telemetry = service.telemetry();
+                (telemetry.submitted_frames > 0).then_some(telemetry)
+            })
+            .expect("deterministic null audio must submit within the bounded tick window");
         assert!(telemetry.submitted_frames > 0);
         assert_eq!(telemetry.underflow_count, 0);
         assert!(!service.has_physical_audible_output());

@@ -20,7 +20,7 @@ MinoriSnapshot
 
 ## Lifecycle
 
-`probe` 识别 PAZ、MYS、patch package、`.sc` script 和 key requirement。缺少外部 key 时只输出 diagnostic，不尝试提取材料。`open` 建立 archive set、script decoder、VM、presentation/audio state。`step` 推进 `.sc` 指令流，直到 message wait、choice、media wait、unsupported opcode、fault 或 halt。
+`probe` 识别 PAZ 与 `.sc` script。VFS mount 在 runtime open 前读取 launch profile 指定的 `key.toml`；缺 key 或 schema 不匹配时直接阻断，不尝试提取材料。`open` 建立 archive set、script decoder、VM、presentation/audio state。`step` 推进 `.sc` 指令流，直到 message wait、choice、media wait、unsupported opcode、fault 或 halt。
 
 ## Step Output
 
@@ -37,7 +37,7 @@ Session 输出：
 
 | 情况 | Diagnostic | 行为 |
 | --- | --- | --- |
-| 缺 private profile 或 key | `ASTRA_EMU_MINORI_PRIVATE_PROFILE_*` | 阻止 mount |
+| 缺少或非法 key file | `ASTRA_EMU_MINORI_KEY_*` | 阻止 mount |
 | entry 缺失 | `ASTRA_EMU_VFS_ENTRY_MISSING` | 阻止该次读取，不生成替代资源 |
 | opcode 未识别 | `UnknownOpcode` | parser 保留 raw operand；执行核心实现前不得猜测语义 |
 | payload 解码失败 | `ASTRA_EMU_MINORI_DECRYPT_*` | 阻止读取，不切换 provider 或算法 |

@@ -38,7 +38,7 @@
 | [mcp-context-tooling.md](mcp-context-tooling.md) | 外部 AI 工具、MCP context、命令白名单和 audit |
 | [ai-release-gate.md](ai-release-gate.md) | AI/MCP release check、debug trace、玩家同意和 provider-free replay |
 | [platform-host.md](platform-host.md) | 六平台 host trait、capability report、profile gate |
-| [astraemu-legacy-runtime-framework.md](astraemu-legacy-runtime-framework.md) | AstraEMU LegacyRuntimeProvider、session、auto probe、Trusted Luau、文本翻译、filter preset 和 release gate |
+| [astraemu-legacy-runtime-framework.md](astraemu-legacy-runtime-framework.md) | AstraEMU LegacyRuntimeProvider、session、auto probe、family VFS、文本翻译、filter preset 和 release gate |
 | [emulator-core-state-machine.md](emulator-core-state-machine.md) | EmulatorCore 复用 RuntimeWorld/StateMachine/VFS 的旧 VM 映射、scheduler 和 family 样板 |
 | [astraemu-artemis-core.md](astraemu-artemis-core.md) | Artemis 后续 family blueprint、probe、snapshot、report |
 | [release-gate-report.md](release-gate-report.md) | machine-readable report、blocking checks、证据格式 |

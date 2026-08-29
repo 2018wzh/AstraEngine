@@ -247,11 +247,11 @@
     },
     "astra-emu-family-core": {
       "status": "not_applicable",
-      "reason": "pure in-process VFS, decrypt transport and family factory contract"
+      "reason": "pure in-process VFS, bounded private-file reader and family factory contract"
     },
     "astra-emu-family-support": {
       "status": "instrumented",
-      "reason": "trusted Luau, private profile, cache, verify, extract and viewer failure lifecycle"
+      "reason": "launch profile, verify, extract and viewer failure lifecycle"
     },
     "astra-emu-fvp": {
       "status": "instrumented",
@@ -259,7 +259,7 @@
     },
     "astra-emu-minori": {
       "status": "instrumented",
-      "reason": "Minori PAZ mount, source validation, decrypt and cache lifecycle"
+      "reason": "Minori PAZ mount, key-file validation and streaming decrypt lifecycle"
     },
     "astra-emu-manager-core": {
       "status": "instrumented",
@@ -320,6 +320,10 @@
     "tsuinosora-original-patcher": {
       "status": "not_applicable",
       "reason": "pure offline original-game patch transformation tool outside engine runtime and host sessions"
+    },
+    "xtask": {
+      "status": "not_applicable",
+      "reason": "pure offline workspace maintenance tool outside runtime and host sessions"
     }
   }
 }

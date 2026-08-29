@@ -9,7 +9,6 @@ mod identity;
 mod input_mapping;
 mod library;
 mod live_mapping;
-mod patch;
 mod play_record;
 mod probe;
 mod runtime_provider;
@@ -42,15 +41,11 @@ pub use live_mapping::{
     legacy_live_audio_command, legacy_live_audio_packet, legacy_live_video_command,
     legacy_texture_format, live_wait_condition, PendingLiveWait,
 };
-pub use patch::{
-    PatchContext, PatchDiagnostic, PatchEffectIntent, PatchExecution, PatchHostAction,
-    PatchVfsReader, TrustedPatchRuntime,
-};
 pub use play_record::{PlaySessionRecord, PlayStats, RecentWorkRecord};
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};
 pub use runtime_provider::{
     evidence_vm_coverage_ids, AstraEmuRuntimeProvider, AstraEmuRuntimeProviderFactory,
-    EmuCaseProfile, QueuedPatchEffect,
+    EmuCaseProfile,
 };
 pub use scanner::{
     DiscoveryMarker, FamilyDiscoveryDescriptor, GrantedSourceEntry, GrantedSourceReader,

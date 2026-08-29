@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::LegacyCoreError;
 
 pub const LEGACY_VFS_MAX_READ_BYTES: u64 = 64 * 1024 * 1024;
-pub const LEGACY_PACK_MANIFEST_SCHEMA: &str = "astra.emu.legacy_pack_manifest.v2";
+pub const LEGACY_PACK_MANIFEST_SCHEMA: &str = "astra.emu.legacy_pack_manifest.v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -43,7 +43,6 @@ pub struct LegacyVfsReadResult {
     pub offset: u64,
     pub bytes: OwnedByteBuffer,
     pub eof: bool,
-    pub cache_hit: bool,
 }
 
 pub trait LegacyVfsStream: Read + Send {}
@@ -95,9 +94,7 @@ pub struct LegacyPackManifest {
     pub prefix: String,
     pub reader_id: String,
     pub reader_hash: Hash256,
-    pub decrypt_provider_id: String,
-    pub private_profile_hash: Hash256,
-    pub mount_profile_hash: Hash256,
+    pub launch_profile_hash: Hash256,
     pub sources: Vec<LegacyVfsSource>,
     pub entries: Vec<LegacyVfsEntry>,
 }
@@ -108,7 +105,6 @@ impl LegacyPackManifest {
             || !safe_symbol(&self.family_id)
             || !safe_symbol(&self.mount_id)
             || !safe_symbol(&self.reader_id)
-            || !safe_symbol(&self.decrypt_provider_id)
             || self.sources.is_empty()
             || self.prefix.is_empty()
             || !self.prefix.ends_with(":/")
@@ -239,9 +235,7 @@ mod tests {
             prefix: "fixture:/".into(),
             reader_id: "fixture.reader.v1".into(),
             reader_hash: Hash256::from_sha256(b"reader"),
-            decrypt_provider_id: "fixture.decrypt.v1".into(),
-            private_profile_hash: Hash256::from_sha256(b"private"),
-            mount_profile_hash: Hash256::from_sha256(b"mount"),
+            launch_profile_hash: Hash256::from_sha256(b"launch"),
             sources: vec![LegacyVfsSource {
                 source_id: "scr".into(),
                 archive_role: Some("scr".into()),
@@ -265,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_v2_accepts_distinct_source_and_content_hashes() {
+    fn manifest_v3_accepts_distinct_source_and_content_hashes() {
         let mut manifest = manifest();
         manifest.entries[0].content_hash = Some(Hash256::from_sha256(b"plain"));
         manifest.validate(8).unwrap();

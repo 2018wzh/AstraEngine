@@ -1,23 +1,21 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::File,
+    fs::{self, File},
     io::{Cursor, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::SystemTime,
 };
 
-use astra_byte_source::OwnedByteBuffer;
+use crate::MINORI_READER_ID;
 use astra_core::Hash256;
 use astra_emu_family_core::{
-    validate_decrypt_output, validate_decrypt_request, validate_legacy_vfs_directory_uri,
-    validate_legacy_vfs_uri, LegacyCoreError, LegacyDecryptPhase, LegacyDecryptProvider,
-    LegacyDecryptRequest, LegacyDecryptTransport, LegacyMountedVfs, LegacyOpaqueDescriptor,
+    validate_legacy_vfs_directory_uri, validate_legacy_vfs_uri, LegacyCoreError, LegacyMountedVfs,
     LegacyPackManifest, LegacyVfsEntry, LegacyVfsNode, LegacyVfsNodeKind, LegacyVfsReadResult,
-    LegacyVfsSource, LegacyVfsStat, LegacyVfsStream, LEGACY_DECRYPT_CHUNK_BYTES,
-    LEGACY_DECRYPT_MAX_BATCH_BYTES, LEGACY_PACK_MANIFEST_SCHEMA, LEGACY_VFS_MAX_READ_BYTES,
+    LegacyVfsSource, LegacyVfsStat, LegacyVfsStream, LEGACY_PACK_MANIFEST_SCHEMA,
+    LEGACY_VFS_MAX_READ_BYTES,
 };
-use blowfish::cipher::{BlockCipherDecrypt, KeyInit};
+use blowfish::cipher::{BlockCipherDecrypt, KeyInit as BlowfishKeyInit};
 use blowfish::Blowfish;
 use encoding_rs::SHIFT_JIS;
 use flate2::read::ZlibDecoder;
@@ -25,16 +23,13 @@ use rc4::{Rc4, StreamCipher};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use astra_emu_family_support::{CacheIdentity, PlaintextCache, PlaintextCacheError};
-
-use crate::{MINORI_DECRYPT_DESCRIPTOR_SCHEMA, MINORI_DECRYPT_PROVIDER_ID, MINORI_READER_ID};
-
 type PazError = LegacyCoreError;
 
 pub const REQUIRED_ARCHIVE_ROLES: [&str; 8] =
     ["bg", "bgm", "scr", "st", "sys", "se", "voice", "mov"];
 pub const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
+const STREAM_CHUNK_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct PazArchiveConfig {
@@ -50,9 +45,8 @@ pub struct PazEntryDescriptor {
     pub archive_role: String,
     pub entry_id: String,
     pub name: String,
-    /// Original CP932 index bytes, retained only in the mount session for
-    /// index traceability. RC4 material follows the GARbro contract: lower the
-    /// decoded name, then encode it as CP932.
+    /// Original CP932 index bytes retained only in the mount session. The
+    /// entry RC4 key follows GARbro's decoded-name-to-CP932 derivation.
     pub crypto_name: Vec<u8>,
     pub offset: u64,
     pub unpacked_size: u64,
@@ -67,154 +61,62 @@ pub struct PazRoleScheme {
     pub index_key: Vec<u8>,
     pub data_key: Vec<u8>,
     pub type_passwords: BTreeMap<String, String>,
-    pub archive_xor: Option<u32>,
-    pub video_key: Option<[u8; 256]>,
 }
 
-/// The only production decrypt provider for Minori PAZ archives.
-/// Key material remains process-local and is never serializable.
-pub struct MinoriPazDecryptProvider {
-    private_profile_hash: Hash256,
+/// Family-owned PAZ transform state. Keys are loaded once by the factory and
+/// remain private to the VFS mount; no callback or generic decrypt trait is
+/// involved in entry reads.
+#[derive(Debug)]
+pub struct MinoriPazDecryptor {
     roles: BTreeMap<String, PazRoleScheme>,
 }
 
-impl MinoriPazDecryptProvider {
-    pub fn new(
-        private_profile_hash: Hash256,
-        roles: BTreeMap<String, PazRoleScheme>,
-    ) -> Result<Self, PazError> {
+impl MinoriPazDecryptor {
+    pub fn new(roles: BTreeMap<String, PazRoleScheme>) -> Result<Self, PazError> {
         if roles
             .keys()
             .any(|role| !REQUIRED_ARCHIVE_ROLES.contains(&role.as_str()))
         {
             return Err(error(
-                "ASTRA_EMU_MINORI_DECODER_CONFIG",
-                "decoder id or archive role is invalid",
+                "ASTRA_EMU_MINORI_KEY_ROLES",
+                "Minori key set contains an unknown archive role",
             ));
         }
         for role in REQUIRED_ARCHIVE_ROLES {
             let scheme = roles.get(role).ok_or_else(|| {
                 error(
-                    "ASTRA_EMU_MINORI_DECODER_ROLE",
-                    "decoder is missing a required archive role",
+                    "ASTRA_EMU_MINORI_KEY_ROLES",
+                    "Minori key set is missing a required archive role",
                 )
             })?;
             validate_blowfish_key(&scheme.index_key)?;
-            if role != "mov" {
+            if role == "mov" {
+                if !scheme.data_key.is_empty() {
+                    return Err(error(
+                        "ASTRA_EMU_MINORI_MOVIE_KEY",
+                        "movie archive must not provide a data key",
+                    ));
+                }
+            } else {
                 validate_blowfish_key(&scheme.data_key)?;
-            } else if scheme.data_key.len() > 56 {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_BLOWFISH_KEY",
-                    "movie data key exceeds the supported bound",
-                ));
             }
         }
-        Ok(Self {
-            private_profile_hash,
-            roles,
-        })
+        Ok(Self { roles })
     }
 
     fn scheme(&self, role: &str) -> Result<&PazRoleScheme, PazError> {
         self.roles.get(role).ok_or_else(|| {
             error(
-                "ASTRA_EMU_MINORI_DECODER_ROLE",
-                "decoder has no scheme for the archive role",
+                "ASTRA_EMU_MINORI_KEY_ROLES",
+                "Minori key set has no scheme for the archive role",
             )
         })
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "phase", rename_all = "snake_case")]
-enum MinoriDecryptDescriptor {
-    Index {
-        role: String,
-        version: u8,
-        stream_offset: u64,
-    },
-    Entry {
-        version: u8,
-        entry: PazEntryDescriptor,
-        stream_offset: u64,
-    },
-}
-
-impl LegacyDecryptProvider for MinoriPazDecryptProvider {
-    fn provider_id(&self) -> &str {
-        MINORI_DECRYPT_PROVIDER_ID
-    }
-    fn private_profile_hash(&self) -> Hash256 {
-        self.private_profile_hash
-    }
-    fn descriptor_schema_id(&self) -> &str {
-        MINORI_DECRYPT_DESCRIPTOR_SCHEMA
-    }
-    fn descriptor_schema_hash(&self) -> Hash256 {
-        Hash256::from_sha256(MINORI_DECRYPT_DESCRIPTOR_SCHEMA.as_bytes())
+    fn decrypt_index(&self, role: &str, encrypted: &[u8]) -> Result<Vec<u8>, PazError> {
+        blowfish_decrypt(&self.scheme(role)?.index_key, encrypted)
     }
 
-    fn decrypt(&self, request: LegacyDecryptRequest<'_>) -> Result<Vec<u8>, PazError> {
-        validate_decrypt_request(self, &request)?;
-        if request.descriptors.len() != 1 {
-            return Err(error(
-                "ASTRA_EMU_MINORI_DESCRIPTOR_BATCH",
-                "Minori decrypt batches require exactly one descriptor",
-            ));
-        }
-        let descriptor: MinoriDecryptDescriptor =
-            serde_json::from_slice(&request.descriptors[0].payload).map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_DESCRIPTOR",
-                    "Minori decrypt descriptor is invalid",
-                )
-            })?;
-        if !matches!(
-            (&request.phase, &descriptor),
-            (
-                LegacyDecryptPhase::Index,
-                MinoriDecryptDescriptor::Index { .. }
-            ) | (
-                LegacyDecryptPhase::Entry,
-                MinoriDecryptDescriptor::Entry { .. }
-            )
-        ) {
-            return Err(error(
-                "ASTRA_EMU_MINORI_DESCRIPTOR_PHASE",
-                "Minori decrypt descriptor phase does not match the request",
-            ));
-        }
-        let absolute_offset = match &descriptor {
-            MinoriDecryptDescriptor::Index { stream_offset, .. }
-            | MinoriDecryptDescriptor::Entry { stream_offset, .. } => stream_offset
-                .checked_add(request.transport.chunk_offset)
-                .ok_or_else(|| {
-                    error(
-                        "ASTRA_EMU_MINORI_DECRYPT_OFFSET",
-                        "decrypt stream offset overflowed",
-                    )
-                })?,
-        };
-        let output = match descriptor {
-            MinoriDecryptDescriptor::Index { role, .. } => {
-                blowfish_decrypt(self.scheme(&role)?.index_key.as_slice(), request.bytes)?
-            }
-            MinoriDecryptDescriptor::Entry { version, entry, .. } => {
-                self.decrypt_entry_chunk(version, &entry, absolute_offset, request.bytes)?
-            }
-        };
-        validate_decrypt_output(&request, &output)?;
-        if output.len() != request.bytes.len() {
-            return Err(error(
-                "ASTRA_EMU_MINORI_DECRYPT_SIZE",
-                "Minori transform changed the chunk size",
-            ));
-        }
-        Ok(output)
-    }
-}
-
-impl MinoriPazDecryptProvider {
     fn decrypt_entry_chunk(
         &self,
         version: u8,
@@ -228,27 +130,25 @@ impl MinoriPazDecryptProvider {
             let video_key = entry.video_key.as_ref().ok_or_else(|| {
                 error(
                     "ASTRA_EMU_MINORI_VIDEO_KEY",
-                    "video entry is missing its index key",
+                    "movie entry is missing its decrypted index key",
                 )
             })?;
+            if video_key.len() != 256 {
+                return Err(error(
+                    "ASTRA_EMU_MINORI_VIDEO_KEY",
+                    "movie index key must contain exactly 256 bytes",
+                ));
+            }
             if version == 0 {
-                // The v0 index table maps plaintext byte -> encrypted byte.  Build
-                // its inverse before transforming the entry stream, matching GARbro's
-                // preprocessed `MovKey` contract.
-                let mut table = [0u8; 256];
-                for (index, value) in video_key.iter().enumerate() {
-                    table[*value as usize] = index as u8;
+                let mut inverse = [0u8; 256];
+                for (plain, encrypted_byte) in video_key.iter().enumerate() {
+                    inverse[*encrypted_byte as usize] = plain as u8;
                 }
                 for byte in &mut bytes {
-                    *byte = table[*byte as usize];
+                    *byte = inverse[*byte as usize];
                 }
                 return Ok(bytes);
             }
-            // Musica v1+ derives the movie RC4 material from the same
-            // extension-specific password table as ordinary entries.  The
-            // archive's 256-byte video key is then XORed with that complete
-            // entry key.  Omitting the AVI password produces a valid-looking
-            // byte stream but never the original container header.
             let entry_key = entry_key_material(entry, password_for_entry(entry, scheme))?;
             let key = (0..256)
                 .map(|index| video_key[index] ^ entry_key[index % entry_key.len()])
@@ -256,7 +156,7 @@ impl MinoriPazDecryptProvider {
             let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
                 error(
                     "ASTRA_EMU_MINORI_RC4_KEY",
-                    "video RC4 key length is invalid",
+                    "movie RC4 key length is invalid",
                 )
             })?;
             let block_len = usize::try_from(entry.aligned_size.min(0x10000)).map_err(|_| {
@@ -268,48 +168,51 @@ impl MinoriPazDecryptProvider {
             if block_len == 0 {
                 return Ok(bytes);
             }
-            let mut block = vec![0; block_len];
-            cipher.apply_keystream(&mut block);
+            let mut keystream = vec![0; block_len];
+            cipher.apply_keystream(&mut keystream);
+            let offset = usize::try_from(absolute_offset).map_err(|_| {
+                error(
+                    "ASTRA_EMU_MINORI_RC4_OFFSET",
+                    "movie transform offset exceeds the platform bound",
+                )
+            })?;
             for (index, byte) in bytes.iter_mut().enumerate() {
-                *byte ^= block[(absolute_offset as usize + index) % block.len()];
+                *byte ^= keystream[(offset + index) % keystream.len()];
             }
             return Ok(bytes);
         }
+
         bytes = blowfish_decrypt(&scheme.data_key, &bytes)?;
-        if version > 0 && password_for_entry(entry, scheme).is_some() {
-            let password = password_for_entry(entry, scheme).unwrap_or_default();
-            let key = entry_key_material(entry, Some(password))?;
-            let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_RC4_KEY",
-                    "entry RC4 key length is invalid",
-                )
-            })?;
-            let version_skip = if version >= 2 {
-                ((crc32fast::hash(&key) >> 12) & 0xff) as u64
-            } else {
-                0
-            };
-            let skip = version_skip
-                .checked_add(absolute_offset)
-                .ok_or_else(|| error("ASTRA_EMU_MINORI_RC4_SKIP", "entry RC4 offset overflowed"))?;
-            if skip > 0 {
+        if version > 0 {
+            if let Some(password) = password_for_entry(entry, scheme) {
+                let key = entry_key_material(entry, Some(password))?;
+                let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MINORI_RC4_KEY",
+                        "entry RC4 key length is invalid",
+                    )
+                })?;
+                let version_skip = if version >= 2 {
+                    (crc32(&key) >> 12 & 0xff) as u64
+                } else {
+                    0
+                };
+                let skip = version_skip.checked_add(absolute_offset).ok_or_else(|| {
+                    error("ASTRA_EMU_MINORI_RC4_SKIP", "entry RC4 offset overflowed")
+                })?;
                 let mut remaining = skip;
-                let mut discarded = vec![0; LEGACY_DECRYPT_CHUNK_BYTES];
-                while remaining > 0 {
-                    let length =
+                let mut discarded = [0u8; 64 * 1024];
+                while remaining != 0 {
+                    let count =
                         usize::try_from(remaining.min(discarded.len() as u64)).map_err(|_| {
-                            error(
-                                "ASTRA_EMU_MINORI_RC4_SKIP",
-                                "entry RC4 offset exceeds the platform bound",
-                            )
+                            error("ASTRA_EMU_MINORI_RC4_SKIP", "entry RC4 skip is too large")
                         })?;
-                    cipher.apply_keystream(&mut discarded[..length]);
-                    discarded[..length].fill(0);
-                    remaining -= length as u64;
+                    cipher.apply_keystream(&mut discarded[..count]);
+                    discarded[..count].fill(0);
+                    remaining -= count as u64;
                 }
+                cipher.apply_keystream(&mut bytes);
             }
-            cipher.apply_keystream(&mut bytes);
         }
         Ok(bytes)
     }
@@ -337,7 +240,6 @@ struct MountedEntry {
     descriptor: PazEntryDescriptor,
     uri: String,
     archive: usize,
-    encrypted_hash: Hash256,
 }
 
 pub struct MinoriMountedVfs {
@@ -346,47 +248,16 @@ pub struct MinoriMountedVfs {
     manifest: LegacyPackManifest,
     archives: Vec<ArchiveSource>,
     entries: BTreeMap<String, MountedEntry>,
-    decrypt_provider: Arc<MinoriPazDecryptProvider>,
-    cache: Option<PlaintextCache>,
-    memory_cache: Mutex<Option<MemoryDecodedEntry>>,
+    decryptor: Arc<MinoriPazDecryptor>,
 }
-
-/// A single bounded in-process plaintext entry retained while a host consumes
-/// sequential ranges. Disk cache reads are integrity-checked by
-/// `PlaintextCache`; retaining one verified entry here avoids re-reading the
-/// complete disk entry for every 4 MiB verification range.
-struct MemoryDecodedEntry {
-    identity: String,
-    bytes: Arc<[u8]>,
-}
-
-const MAX_MEMORY_CACHE_ENTRY_BYTES: usize = 64 * 1024 * 1024;
 
 impl MinoriMountedVfs {
     pub fn mount(
         mount_id: impl Into<String>,
         prefix: impl Into<String>,
         configs: Vec<PazArchiveConfig>,
-        decrypt_provider: Arc<MinoriPazDecryptProvider>,
-        mount_profile_hash: Hash256,
-    ) -> Result<Self, PazError> {
-        Self::mount_with_cache(
-            mount_id,
-            prefix,
-            configs,
-            decrypt_provider,
-            mount_profile_hash,
-            None,
-        )
-    }
-
-    pub fn mount_with_cache(
-        mount_id: impl Into<String>,
-        prefix: impl Into<String>,
-        configs: Vec<PazArchiveConfig>,
-        decrypt_provider: Arc<MinoriPazDecryptProvider>,
-        mount_profile_hash: Hash256,
-        cache: Option<PlaintextCache>,
+        decryptor: Arc<MinoriPazDecryptor>,
+        launch_profile_hash: Hash256,
     ) -> Result<Self, PazError> {
         let mount_id = mount_id.into();
         let prefix = prefix.into();
@@ -402,25 +273,15 @@ impl MinoriMountedVfs {
         let mut entry_ids = BTreeSet::new();
         let mut prepared = Vec::with_capacity(configs.len());
         for config in configs {
-            tracing::info!(
-                event = "astra_emu_minori_archive_mount_started",
-                archive_role = %config.role,
-                version = config.version
-            );
             let parts = discover_parts(&config.path, &config.game_root)?;
             let total_length = parts
                 .iter()
                 .try_fold(0u64, |total, part| total.checked_add(part.length))
-                .ok_or_else(|| {
-                    error(
-                        "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
-                        "multipart PAZ size overflowed",
-                    )
-                })?;
-            if parts[0].length == 0 {
+                .ok_or_else(|| error("ASTRA_EMU_MINORI_ARCHIVE_SIZE", "PAZ size overflowed"))?;
+            if parts.first().is_none_or(|part| part.length == 0) {
                 return Err(error(
                     "ASTRA_EMU_MINORI_ARCHIVE_EMPTY",
-                    format!("required archive role {} is empty", config.role),
+                    "required PAZ archive is empty",
                 ));
             }
             if config.version > 2 {
@@ -437,29 +298,15 @@ impl MinoriMountedVfs {
                 hash: Hash256::from_sha256(&[]),
                 xor_key: 0,
             };
-            let parsed = parse_archive_index(
-                &mut source,
-                config.index_size_xor,
-                decrypt_provider.as_ref(),
-            )?;
-            tracing::info!(
-                event = "astra_emu_minori_archive_index_decoded",
-                archive_role = %config.role,
-                entry_count = parsed.len()
-            );
+            let parsed =
+                parse_archive_index(&mut source, config.index_size_xor, decryptor.as_ref())?;
             prepared.push((config, source, parsed));
         }
         for (config, mut source, parsed) in prepared {
-            let (source_hash, encrypted_hashes) =
-                hash_parts_and_entries(&source.parts, source.length, &parsed)?;
+            let source_hash = hash_parts(&source.parts)?;
             source.hash = source_hash;
-            tracing::info!(
-                event = "astra_emu_minori_archive_hashed",
-                archive_role = %config.role,
-                archive_hash = %source.hash
-            );
             let archive_index = archives.len();
-            for (entry, encrypted_hash) in parsed.into_iter().zip(encrypted_hashes) {
+            for entry in parsed {
                 let uri = format!(
                     "{}{}/{}",
                     prefix,
@@ -479,16 +326,12 @@ impl MinoriMountedVfs {
                         descriptor: entry,
                         uri,
                         archive: archive_index,
-                        encrypted_hash,
                     },
                 );
             }
             archives.push(source);
-            tracing::info!(
-                event = "astra_emu_minori_archive_mount_completed",
-                archive_role = %config.role
-            );
         }
+
         let reader_material = archives
             .iter()
             .flat_map(|archive| archive.hash.as_bytes().iter().copied())
@@ -516,9 +359,7 @@ impl MinoriMountedVfs {
             prefix: prefix.clone(),
             reader_id: MINORI_READER_ID.into(),
             reader_hash,
-            decrypt_provider_id: decrypt_provider.provider_id().into(),
-            private_profile_hash: decrypt_provider.private_profile_hash(),
-            mount_profile_hash,
+            launch_profile_hash,
             sources: archives
                 .iter()
                 .map(|archive| LegacyVfsSource {
@@ -538,218 +379,106 @@ impl MinoriMountedVfs {
             manifest,
             archives,
             entries,
-            decrypt_provider,
-            cache,
-            memory_cache: Mutex::new(None),
+            decryptor,
         })
     }
 
-    fn decoded_entry(&self, entry: &MountedEntry) -> Result<(Arc<[u8]>, bool), PazError> {
-        let archive = &self.archives[entry.archive];
-        verify_source_unchanged(archive)?;
-        let identity = CacheIdentity {
-            family_id: "minori".into(),
-            source_hash: archive.hash,
-            entry_id: entry.descriptor.entry_id.clone(),
-            private_profile_hash: self.decrypt_provider.private_profile_hash(),
-            decrypt_provider_id: self.decrypt_provider.provider_id().into(),
-            descriptor_schema_hash: self.decrypt_provider.descriptor_schema_hash(),
-            codec_identity: format!(
-                "{MINORI_READER_ID}:{}",
-                if entry.descriptor.packed {
-                    "zlib"
-                } else {
-                    "raw"
-                }
-            ),
-        };
-        let identity_name = identity.file_name();
-        if let Some(memory) = self
-            .memory_cache
-            .lock()
-            .map_err(|_| {
-                error(
-                    "ASTRA_EMU_MINORI_CACHE_STATE",
-                    "in-process cache state is poisoned",
-                )
-            })?
-            .as_ref()
-            .filter(|cached| cached.identity == identity_name)
-        {
-            return Ok((Arc::clone(&memory.bytes), true));
-        }
-        if let Some(bytes) = self
-            .cache
-            .as_ref()
-            .map(|cache| cache.get(&identity))
-            .transpose()
-            .map_err(cache_error)?
-            .flatten()
-        {
-            if bytes.len() as u64 != entry.descriptor.unpacked_size {
-                return Err(error(
-                    "ASTRA_EMU_MINORI_CACHE_SIZE",
-                    "cached plaintext size does not match the entry descriptor",
-                ));
-            }
-            let bytes = Arc::<[u8]>::from(bytes.into_boxed_slice());
-            self.remember_memory_entry(identity_name, Arc::clone(&bytes))?;
-            return Ok((bytes, true));
-        }
-        let mut encrypted = read_source_range(
+    fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
+        validate_legacy_vfs_uri(&self.prefix, uri)?;
+        self.entries
+            .get(uri)
+            .ok_or_else(|| error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found"))
+    }
+
+    fn stream_for(&self, entry: &MountedEntry) -> Result<MinoriDecodedStream, PazError> {
+        let archive = self.archives[entry.archive].clone();
+        verify_source_unchanged(&archive)?;
+        let raw = MinoriEntryStream {
             archive,
-            entry.descriptor.offset,
-            entry.descriptor.aligned_size,
-        )?;
-        if Hash256::from_sha256(&encrypted) != entry.encrypted_hash {
-            return Err(error(
-                "ASTRA_EMU_MINORI_SOURCE_CHANGED",
-                "archive bytes changed after mount",
-            ));
-        }
-        xor_byte(&mut encrypted, archive.xor_key);
-        let mut decoded = decrypt_bytes(
-            self.decrypt_provider.as_ref(),
-            MinoriDecryptDescriptor::Entry {
-                version: archive.version,
-                entry: entry.descriptor.clone(),
-                stream_offset: 0,
-            },
-            &encrypted,
-        )?;
-        decoded.truncate(entry.descriptor.stored_size as usize);
-        if entry.descriptor.packed {
-            let mut unpacked = Vec::with_capacity(entry.descriptor.unpacked_size as usize);
-            ZlibDecoder::new(decoded.as_slice())
-                .read_to_end(&mut unpacked)
-                .map_err(|_| error("ASTRA_EMU_MINORI_ZLIB", "entry zlib stream is invalid"))?;
-            decoded = unpacked;
-        }
-        let expected_size = entry.descriptor.unpacked_size as usize;
-        if decoded.len() > expected_size
-            && decoded.len() - expected_size <= 16
-            && decoded[expected_size..].iter().all(|byte| *byte == 0)
-        {
-            tracing::info!(
-                event = "astra_emu_minori_entry_zero_padding_removed",
-                archive_role = %entry.descriptor.archive_role,
-                entry_id = %entry.descriptor.entry_id,
-                padding_size = decoded.len() - expected_size
-            );
-            decoded.truncate(expected_size);
-        }
-        if decoded.len() != expected_size {
-            tracing::error!(
-                event = "astra_emu_minori_entry_size_mismatch",
-                archive_role = %entry.descriptor.archive_role,
-                entry_id = %entry.descriptor.entry_id,
-                packed = entry.descriptor.packed,
-                stored_size = entry.descriptor.stored_size,
-                unpacked_size = entry.descriptor.unpacked_size,
-                decoded_size = decoded.len()
-            );
-            return Err(error(
-                "ASTRA_EMU_MINORI_ENTRY_SIZE",
-                "decoded entry size does not match its index descriptor",
-            ));
-        }
-        if let Some(cache) = &self.cache {
-            cache.put(&identity, &decoded).map_err(cache_error)?;
-        }
-        let decoded = Arc::<[u8]>::from(decoded.into_boxed_slice());
-        self.remember_memory_entry(identity_name, Arc::clone(&decoded))?;
-        Ok((decoded, false))
-    }
-
-    fn remember_memory_entry(&self, identity: String, bytes: Arc<[u8]>) -> Result<(), PazError> {
-        let mut memory = self.memory_cache.lock().map_err(|_| {
-            error(
-                "ASTRA_EMU_MINORI_CACHE_STATE",
-                "in-process cache state is poisoned",
-            )
-        })?;
-        if bytes.len() <= MAX_MEMORY_CACHE_ENTRY_BYTES {
-            *memory = Some(MemoryDecodedEntry { identity, bytes });
+            entry: entry.descriptor.clone(),
+            decryptor: Arc::clone(&self.decryptor),
+            encrypted_position: 0,
+            pending: Vec::new(),
+            pending_position: 0,
+        };
+        let inner = if entry.descriptor.packed {
+            MinoriDecodedInner::Zlib(ZlibDecoder::new(raw))
         } else {
-            *memory = None;
-        }
-        Ok(())
+            MinoriDecodedInner::Raw(raw)
+        };
+        Ok(MinoriDecodedStream {
+            inner,
+            remaining: entry.descriptor.unpacked_size,
+            eof_checked: false,
+        })
     }
 
-    fn decoded_raw_entry_range(
+    fn read_raw_range(
         &self,
         entry: &MountedEntry,
         offset: u64,
         length: u64,
-    ) -> Result<Option<(Vec<u8>, bool)>, PazError> {
-        // Blowfish is a block transform over the full aligned stored entry.
-        // Only movie entries have the entry-relative RC4 transform that can
-        // safely service arbitrary VFS ranges.  A non-movie raw entry must
-        // therefore take the verified full-entry path below rather than feed
-        // an unaligned subrange into Blowfish.
-        if entry.descriptor.packed || entry.descriptor.archive_role != "mov" {
+    ) -> Result<Option<Vec<u8>>, PazError> {
+        if entry.descriptor.packed {
             return Ok(None);
-        }
-        let end = offset
-            .checked_add(length)
-            .ok_or_else(|| error("ASTRA_EMU_VFS_READ_OVERFLOW", "range read overflowed"))?;
-        if end > entry.descriptor.unpacked_size {
-            return Err(error(
-                "ASTRA_EMU_VFS_READ_BOUNDS",
-                "range read is outside the entry",
-            ));
         }
         let archive = &self.archives[entry.archive];
         verify_source_unchanged(archive)?;
-        // A disk-cache hit returns the complete plaintext entry.  Reading that
-        // complete movie for every 4 MiB range would turn sequential FFmpeg
-        // spooling into an O(n^2) workload (and repeatedly re-read hundreds of
-        // MiB from the cache).  Raw movie ranges therefore stay source-backed;
-        // the entry cache remains available through `decoded_entry`/`open_stream`
-        // for callers that explicitly request a complete plaintext resource.
-        let source_offset = entry
-            .descriptor
-            .offset
-            .checked_add(offset)
-            .ok_or_else(|| error("ASTRA_EMU_MINORI_SOURCE_BOUNDS", "entry range overflowed"))?;
-        let mut encrypted = read_source_range(archive, source_offset, length)?;
-        xor_byte(&mut encrypted, archive.xor_key);
-        let decoded = decrypt_bytes(
-            self.decrypt_provider.as_ref(),
-            MinoriDecryptDescriptor::Entry {
-                version: archive.version,
-                entry: entry.descriptor.clone(),
-                stream_offset: offset,
-            },
-            &encrypted,
-        )?;
-        if decoded.len() as u64 != length {
+        let end = offset
+            .checked_add(length)
+            .ok_or_else(|| error("ASTRA_EMU_VFS_READ_OVERFLOW", "range read overflowed"))?;
+        let encrypted_start = if entry.descriptor.archive_role == "mov" {
+            offset
+        } else {
+            offset & !7
+        };
+        let requested_end = end.max(encrypted_start);
+        let encrypted_end = if entry.descriptor.archive_role == "mov" {
+            requested_end
+        } else {
+            requested_end
+                .checked_add(7)
+                .ok_or_else(|| error("ASTRA_EMU_MINORI_SOURCE_BOUNDS", "range end overflowed"))?
+                & !7
+        }
+        .min(entry.descriptor.aligned_size);
+        if encrypted_end < encrypted_start {
             return Err(error(
-                "ASTRA_EMU_MINORI_DECRYPT_SIZE",
-                "raw entry range transform changed the requested length",
+                "ASTRA_EMU_MINORI_SOURCE_BOUNDS",
+                "entry encrypted range is invalid",
             ));
         }
-        Ok(Some((decoded, false)))
-    }
-
-    fn entry(&self, uri: &str) -> Result<&MountedEntry, PazError> {
-        tracing::debug!(
-            target: "astra_emu_minori::paz",
-            event = "astra_emu_minori_vfs_entry_lookup_started",
-            resource_identity = %Hash256::from_sha256(uri.as_bytes()),
-            uri_length = uri.len(),
-            "mounted PAZ entry lookup started"
-        );
-        validate_legacy_vfs_uri(&self.prefix, uri)?;
-        self.entries.get(uri).ok_or_else(|| {
-            tracing::info!(
-                target: "astra_emu_minori::paz",
-                event = "astra_emu_minori_vfs_entry_lookup_failed",
-                resource_identity = %Hash256::from_sha256(uri.as_bytes()),
-                "mounted PAZ entry lookup failed"
-            );
-            error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found")
-        })
+        let encrypted_offset = entry
+            .descriptor
+            .offset
+            .checked_add(encrypted_start)
+            .ok_or_else(|| error("ASTRA_EMU_MINORI_SOURCE_BOUNDS", "entry offset overflowed"))?;
+        let mut encrypted =
+            read_source_range(archive, encrypted_offset, encrypted_end - encrypted_start)?;
+        xor_byte(&mut encrypted, archive.xor_key);
+        let decoded = self.decryptor.decrypt_entry_chunk(
+            archive.version,
+            &entry.descriptor,
+            encrypted_start,
+            &encrypted,
+        )?;
+        let stored_end = entry.descriptor.stored_size.min(decoded.len() as u64);
+        let local_start = offset.saturating_sub(encrypted_start);
+        let local_end = end.saturating_sub(encrypted_start).min(stored_end);
+        if local_end < local_start || local_end > decoded.len() as u64 {
+            return Err(error(
+                "ASTRA_EMU_MINORI_ENTRY_SIZE",
+                "raw entry range exceeds the stored payload",
+            ));
+        }
+        let output = decoded[local_start as usize..local_end as usize].to_vec();
+        if output.len() as u64 != length {
+            return Err(error(
+                "ASTRA_EMU_MINORI_ENTRY_SIZE",
+                "raw entry range transform returned a short payload",
+            ));
+        }
+        Ok(Some(output))
     }
 }
 
@@ -757,6 +486,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
     fn mount_id(&self) -> &str {
         &self.mount_id
     }
+
     fn manifest(&self) -> &LegacyPackManifest {
         &self.manifest
     }
@@ -859,56 +589,217 @@ impl LegacyMountedVfs for MinoriMountedVfs {
         let end = offset
             .checked_add(length)
             .ok_or_else(|| error("ASTRA_EMU_VFS_READ_OVERFLOW", "range read overflowed"))?;
-        if offset > entry.descriptor.unpacked_size || end > entry.descriptor.unpacked_size {
+        if end > entry.descriptor.unpacked_size {
             return Err(error(
                 "ASTRA_EMU_VFS_READ_BOUNDS",
                 "range read is outside the entry",
             ));
         }
-        if let Some((bytes, cache_hit)) = self.decoded_raw_entry_range(entry, offset, length)? {
+        if length == 0 {
             return Ok(LegacyVfsReadResult {
                 uri: uri.into(),
                 offset,
-                bytes: bytes.into(),
+                bytes: Vec::<u8>::new().into(),
                 eof: end == entry.descriptor.unpacked_size,
-                cache_hit,
             });
         }
-        let (decoded, cache_hit) = self.decoded_entry(entry)?;
-        let bytes = OwnedByteBuffer::from_owner(
-            DecodedRange {
-                bytes: decoded,
-                start: offset as usize,
-                end: end as usize,
-            },
-            DecodedRange::as_slice,
-        );
+        let bytes = if let Some(bytes) = self.read_raw_range(entry, offset, length)? {
+            bytes
+        } else {
+            let mut stream = self.stream_for(entry)?;
+            discard_stream(&mut stream, offset)?;
+            let mut bytes = vec![0u8; length as usize];
+            stream.read_exact(&mut bytes).map_err(|_| {
+                error(
+                    "ASTRA_EMU_MINORI_ENTRY_SHORT",
+                    "decoded entry stream returned a short read",
+                )
+            })?;
+            if end == entry.descriptor.unpacked_size {
+                let mut probe = [0u8; 1];
+                if stream.read(&mut probe).map_err(|_| {
+                    error(
+                        "ASTRA_EMU_MINORI_ENTRY_READ",
+                        "decoded entry stream failed at EOF",
+                    )
+                })? != 0
+                {
+                    return Err(error(
+                        "ASTRA_EMU_MINORI_ENTRY_SIZE",
+                        "decoded entry exceeds its index size",
+                    ));
+                }
+            }
+            bytes
+        };
         Ok(LegacyVfsReadResult {
             uri: uri.into(),
             offset,
-            bytes,
+            bytes: bytes.into(),
             eof: end == entry.descriptor.unpacked_size,
-            cache_hit,
         })
     }
 
     fn open_stream(&self, uri: &str) -> Result<Box<dyn LegacyVfsStream>, PazError> {
-        Ok(Box::new(Cursor::new(
-            self.decoded_entry(self.entry(uri)?)?.0,
-        )))
+        Ok(Box::new(self.stream_for(self.entry(uri)?)?))
     }
 }
 
-struct DecodedRange {
-    bytes: Arc<[u8]>,
-    start: usize,
-    end: usize,
+enum MinoriDecodedInner {
+    Raw(MinoriEntryStream),
+    Zlib(ZlibDecoder<MinoriEntryStream>),
 }
 
-impl DecodedRange {
-    fn as_slice(&self) -> &[u8] {
-        &self.bytes[self.start..self.end]
+struct MinoriDecodedStream {
+    inner: MinoriDecodedInner,
+    remaining: u64,
+    eof_checked: bool,
+}
+
+impl Read for MinoriDecodedStream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.remaining == 0 {
+            if self.eof_checked {
+                return Ok(0);
+            }
+            let mut probe = [0u8; 1];
+            let count = match &mut self.inner {
+                MinoriDecodedInner::Raw(stream) => stream.read(&mut probe),
+                MinoriDecodedInner::Zlib(stream) => stream.read(&mut probe),
+            }?;
+            self.eof_checked = true;
+            if count != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "ASTRA_EMU_MINORI_ENTRY_SIZE",
+                ));
+            }
+            return Ok(0);
+        }
+        let limit = usize::try_from(self.remaining.min(buffer.len() as u64))
+            .map_err(|_| std::io::Error::other("ASTRA_EMU_MINORI_ENTRY_SIZE"))?;
+        let count = match &mut self.inner {
+            MinoriDecodedInner::Raw(stream) => stream.read(&mut buffer[..limit]),
+            MinoriDecodedInner::Zlib(stream) => stream.read(&mut buffer[..limit]),
+        }?;
+        if count == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "ASTRA_EMU_MINORI_ENTRY_SHORT",
+            ));
+        }
+        self.remaining -= count as u64;
+        Ok(count)
     }
+}
+
+struct MinoriEntryStream {
+    archive: ArchiveSource,
+    entry: PazEntryDescriptor,
+    decryptor: Arc<MinoriPazDecryptor>,
+    encrypted_position: u64,
+    pending: Vec<u8>,
+    pending_position: usize,
+}
+
+impl Read for MinoriEntryStream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let mut written = 0usize;
+        while written < buffer.len() {
+            if self.pending_position < self.pending.len() {
+                let count =
+                    (self.pending.len() - self.pending_position).min(buffer.len() - written);
+                buffer[written..written + count].copy_from_slice(
+                    &self.pending[self.pending_position..self.pending_position + count],
+                );
+                self.pending_position += count;
+                written += count;
+                continue;
+            }
+            if self.encrypted_position >= self.entry.aligned_size {
+                break;
+            }
+            self.fill_pending().map_err(to_io_error)?;
+            if self.pending.is_empty() {
+                break;
+            }
+        }
+        Ok(written)
+    }
+}
+
+impl MinoriEntryStream {
+    fn fill_pending(&mut self) -> Result<(), PazError> {
+        let remaining = self.entry.aligned_size - self.encrypted_position;
+        let mut count = remaining.min(STREAM_CHUNK_BYTES);
+        if self.entry.archive_role != "mov" {
+            count &= !7;
+        }
+        if count == 0 {
+            return Err(error(
+                "ASTRA_EMU_MINORI_ENTRY_ALIGNMENT",
+                "entry stream lost block alignment",
+            ));
+        }
+        let offset = self
+            .entry
+            .offset
+            .checked_add(self.encrypted_position)
+            .ok_or_else(|| {
+                error(
+                    "ASTRA_EMU_MINORI_SOURCE_BOUNDS",
+                    "entry stream offset overflowed",
+                )
+            })?;
+        let mut encrypted = read_source_range(&self.archive, offset, count)?;
+        xor_byte(&mut encrypted, self.archive.xor_key);
+        let decoded = self.decryptor.decrypt_entry_chunk(
+            self.archive.version,
+            &self.entry,
+            self.encrypted_position,
+            &encrypted,
+        )?;
+        let output_end = self
+            .entry
+            .stored_size
+            .min(self.encrypted_position + decoded.len() as u64);
+        let output_len = output_end.saturating_sub(self.encrypted_position) as usize;
+        self.pending = decoded.into_iter().take(output_len).collect();
+        self.pending_position = 0;
+        self.encrypted_position += count;
+        Ok(())
+    }
+}
+
+fn discard_stream(stream: &mut MinoriDecodedStream, mut count: u64) -> Result<(), PazError> {
+    let mut scratch = [0u8; 64 * 1024];
+    while count != 0 {
+        let wanted = (count as usize).min(scratch.len());
+        let read = stream.read(&mut scratch[..wanted]).map_err(|_| {
+            error(
+                "ASTRA_EMU_MINORI_ENTRY_READ",
+                "decoded entry stream failed while seeking",
+            )
+        })?;
+        if read == 0 {
+            return Err(error(
+                "ASTRA_EMU_MINORI_ENTRY_SHORT",
+                "decoded entry stream ended before the requested range",
+            ));
+        }
+        count -= read as u64;
+    }
+    Ok(())
+}
+
+fn to_io_error(error: PazError) -> std::io::Error {
+    std::io::Error::other(error.to_string())
 }
 
 fn validate_role_set(configs: &[PazArchiveConfig]) -> Result<(), PazError> {
@@ -930,7 +821,7 @@ fn validate_role_set(configs: &[PazArchiveConfig]) -> Result<(), PazError> {
         {
             return Err(error(
                 "ASTRA_EMU_MINORI_ARCHIVE_NAME",
-                "archive file name does not match its declared role",
+                "archive file name does not match its role",
             ));
         }
     }
@@ -949,13 +840,11 @@ fn validate_role_set(configs: &[PazArchiveConfig]) -> Result<(), PazError> {
 fn parse_archive_index(
     source: &mut ArchiveSource,
     expected_index_xor: u32,
-    decrypt_provider: &MinoriPazDecryptProvider,
+    decryptor: &MinoriPazDecryptor,
 ) -> Result<Vec<PazEntryDescriptor>, PazError> {
-    let (index_offset, encrypted_size) = if source.version == 0 {
-        let bytes = read_source_range(source, 0, 4)?;
-        let mut size = [0u8; 4];
-        size.copy_from_slice(&bytes);
-        (4u64, u32::from_le_bytes(size) as u64)
+    let (index_offset, encrypted_size): (u64, u64) = if source.version == 0 {
+        let raw = read_source_range(source, 0, 4)?;
+        (4, u32::from_le_bytes(raw.try_into().unwrap()) as u64)
     } else {
         let raw = read_source_range(source, 0x20, 4)?;
         let raw_size = u32::from_le_bytes(raw.try_into().unwrap());
@@ -967,29 +856,23 @@ fn parse_archive_index(
                 "configured index XOR does not match the archive header",
             ));
         }
-        (0x24u64, (raw_size ^ derived) as u64)
+        (0x24, (raw_size ^ derived) as u64)
     };
     if encrypted_size == 0
         || encrypted_size > MAX_INDEX_BYTES
         || !encrypted_size.is_multiple_of(8)
-        || index_offset + encrypted_size > source.length
+        || index_offset
+            .checked_add(encrypted_size)
+            .is_none_or(|end| end > source.length)
     {
         return Err(error(
             "ASTRA_EMU_MINORI_INDEX_SIZE",
-            "PAZ index size is empty, unaligned, or out of bounds",
+            "PAZ index size is invalid or out of bounds",
         ));
     }
     let mut encrypted = read_source_range(source, index_offset, encrypted_size)?;
     xor_byte(&mut encrypted, source.xor_key);
-    let decoded = decrypt_bytes(
-        decrypt_provider,
-        MinoriDecryptDescriptor::Index {
-            role: source.role.clone(),
-            version: source.version,
-            stream_offset: 0,
-        },
-        &encrypted,
-    )?;
+    let decoded = decryptor.decrypt_index(&source.role, &encrypted)?;
     let mut cursor = Cursor::new(decoded.as_slice());
     let count = read_u32(&mut cursor)? as usize;
     if count > 1_000_000 {
@@ -1002,7 +885,7 @@ fn parse_archive_index(
         let mut key = vec![0u8; 256];
         cursor
             .read_exact(&mut key)
-            .map_err(|_| error("ASTRA_EMU_MINORI_VIDEO_KEY", "PAZ video key is truncated"))?;
+            .map_err(|_| error("ASTRA_EMU_MINORI_VIDEO_KEY", "PAZ movie key is truncated"))?;
         Some(key)
     } else {
         None
@@ -1022,19 +905,10 @@ fn parse_archive_index(
                 .checked_add(aligned_size)
                 .is_none_or(|end| end > source.length)
         {
-            tracing::error!(
-                event = "astra_emu_minori_entry_bounds_invalid",
-                archive_role = %source.role,
-                entry_index = index,
-                offset,
-                unpacked_size,
-                stored_size,
-                aligned_size,
-                archive_size = source.length
-            );
+            tracing::error!(event = "astra_emu_minori_entry_bounds_invalid", archive_role = %source.role, entry_index = index);
             return Err(error(
                 "ASTRA_EMU_MINORI_ENTRY_BOUNDS",
-                "PAZ entry descriptor is oversized, unaligned, or out of bounds",
+                "PAZ entry descriptor is invalid or out of bounds",
             ));
         }
         entries.push(PazEntryDescriptor {
@@ -1049,12 +923,6 @@ fn parse_archive_index(
             packed,
             video_key: video_key.clone(),
         });
-    }
-    if cursor.position() as usize > decoded.len() {
-        return Err(error(
-            "ASTRA_EMU_MINORI_INDEX_SHORT",
-            "PAZ index is truncated",
-        ));
     }
     Ok(entries)
 }
@@ -1113,9 +981,11 @@ fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, PazError> {
         .map_err(|_| error("ASTRA_EMU_MINORI_INDEX_SHORT", "PAZ index is truncated"))?;
     Ok(u32::from_le_bytes(bytes))
 }
+
 fn read_i32(cursor: &mut Cursor<&[u8]>) -> Result<i32, PazError> {
     Ok(read_u32(cursor)? as i32)
 }
+
 fn read_u64(cursor: &mut Cursor<&[u8]>) -> Result<u64, PazError> {
     let mut bytes = [0; 8];
     cursor
@@ -1185,8 +1055,7 @@ fn read_source_range(
         }
         let local = start.saturating_sub(logical);
         let count = remaining.min(part.length - local);
-        let bytes = read_exact_range(&part.path, local, count, part.length)?;
-        output.extend_from_slice(&bytes);
+        output.extend_from_slice(&read_exact_range(&part.path, local, count, part.length)?);
         remaining -= count;
         start += count;
         logical = part_end;
@@ -1203,51 +1072,8 @@ fn read_source_range(
     Ok(output)
 }
 
-fn hash_parts_and_entries(
-    parts: &[ArchivePart],
-    source_length: u64,
-    entries: &[PazEntryDescriptor],
-) -> Result<(Hash256, Vec<Hash256>), PazError> {
-    let mut ranges = Vec::with_capacity(entries.len());
-    let mut entry_hashes = vec![None; entries.len()];
-    for (index, entry) in entries.iter().enumerate() {
-        let end = entry
-            .offset
-            .checked_add(entry.aligned_size)
-            .ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MINORI_ENTRY_BOUNDS",
-                    "entry encrypted range overflowed",
-                )
-            })?;
-        if end > source_length {
-            return Err(error(
-                "ASTRA_EMU_MINORI_ENTRY_BOUNDS",
-                "entry encrypted range exceeds the archive",
-            ));
-        }
-        if entry.aligned_size == 0 {
-            entry_hashes[index] = Some(Hash256::from_sha256(&[]));
-        } else {
-            ranges.push((entry.offset, end, index));
-        }
-    }
-    ranges.sort_unstable_by_key(|(start, end, index)| (*start, *end, *index));
-    for pair in ranges.windows(2) {
-        if pair[1].0 < pair[0].1 {
-            return Err(error(
-                "ASTRA_EMU_MINORI_ENTRY_OVERLAP",
-                "PAZ encrypted entry ranges overlap",
-            ));
-        }
-    }
-
+fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
     let mut source_hasher = Sha256::new();
-    let mut active_entry = None::<Sha256>;
-    let mut range_index = 0usize;
-    let mut logical_offset = 0u64;
-    // Windows reserves a relatively small main-thread stack. Archive hashing is a
-    // normal host operation, so its MiB-sized scratch area belongs on the heap.
     let mut buffer = vec![0u8; 1024 * 1024];
     for part in parts {
         let file = File::open(&part.path).map_err(|_| {
@@ -1256,13 +1082,12 @@ fn hash_parts_and_entries(
                 "PAZ archive cannot be opened",
             )
         })?;
-        let read_bound = part.length.checked_add(1).ok_or_else(|| {
+        let mut file = file.take(part.length.checked_add(1).ok_or_else(|| {
             error(
                 "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
-                "archive part read bound overflowed",
+                "archive part bound overflowed",
             )
-        })?;
-        let mut file = file.take(read_bound);
+        })?);
         let mut part_bytes = 0u64;
         loop {
             let count = file.read(&mut buffer).map_err(|_| {
@@ -1274,56 +1099,8 @@ fn hash_parts_and_entries(
             if count == 0 {
                 break;
             }
-            part_bytes = part_bytes.checked_add(count as u64).ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
-                    "archive part read size overflowed",
-                )
-            })?;
+            part_bytes += count as u64;
             source_hasher.update(&buffer[..count]);
-            let chunk_end = logical_offset.checked_add(count as u64).ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
-                    "archive logical offset overflowed",
-                )
-            })?;
-            while let Some(&(range_start, range_end, original_index)) = ranges.get(range_index) {
-                if range_start >= chunk_end {
-                    break;
-                }
-                if range_end <= logical_offset {
-                    return Err(error(
-                        "ASTRA_EMU_MINORI_ENTRY_HASH",
-                        "entry encrypted range was not covered by the archive stream",
-                    ));
-                }
-                let overlap_start = range_start.max(logical_offset);
-                let overlap_end = range_end.min(chunk_end);
-                let start = usize::try_from(overlap_start - logical_offset).map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MINORI_ENTRY_HASH",
-                        "entry chunk start exceeds host bounds",
-                    )
-                })?;
-                let end = usize::try_from(overlap_end - logical_offset).map_err(|_| {
-                    error(
-                        "ASTRA_EMU_MINORI_ENTRY_HASH",
-                        "entry chunk end exceeds host bounds",
-                    )
-                })?;
-                active_entry
-                    .get_or_insert_with(Sha256::new)
-                    .update(&buffer[start..end]);
-                if overlap_end != range_end {
-                    break;
-                }
-                let digest = active_entry.take().ok_or_else(|| {
-                    error("ASTRA_EMU_MINORI_ENTRY_HASH", "entry hash state is missing")
-                })?;
-                entry_hashes[original_index] = Some(Hash256::from_bytes(digest.finalize().into()));
-                range_index += 1;
-            }
-            logical_offset = chunk_end;
         }
         if part_bytes != part.length {
             return Err(error(
@@ -1332,18 +1109,8 @@ fn hash_parts_and_entries(
             ));
         }
     }
-    if logical_offset != source_length
-        || range_index != ranges.len()
-        || active_entry.is_some()
-        || entry_hashes.iter().any(Option::is_none)
-    {
-        return Err(error(
-            "ASTRA_EMU_MINORI_ARCHIVE_SHORT_READ",
-            "archive stream did not cover every declared byte and entry",
-        ));
-    }
     for part in parts {
-        let metadata = std::fs::metadata(&part.path).map_err(|_| {
+        let metadata = fs::metadata(&part.path).map_err(|_| {
             error(
                 "ASTRA_EMU_MINORI_SOURCE_CHANGED",
                 "archive part disappeared while hashing",
@@ -1352,42 +1119,16 @@ fn hash_parts_and_entries(
         if metadata.len() != part.length || metadata.modified().ok() != part.modified {
             return Err(error(
                 "ASTRA_EMU_MINORI_SOURCE_CHANGED",
-                "archive part metadata changed while hashing",
+                "archive metadata changed while hashing",
             ));
         }
     }
-    let entry_hashes = entry_hashes
-        .into_iter()
-        .map(|hash| {
-            hash.ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MINORI_ENTRY_HASH",
-                    "entry hash was not finalized",
-                )
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((
-        Hash256::from_bytes(source_hasher.finalize().into()),
-        entry_hashes,
-    ))
-}
-
-fn hash_parts(parts: &[ArchivePart]) -> Result<Hash256, PazError> {
-    let source_length = parts.iter().try_fold(0u64, |total, part| {
-        total.checked_add(part.length).ok_or_else(|| {
-            error(
-                "ASTRA_EMU_MINORI_ARCHIVE_SIZE",
-                "multipart PAZ size overflowed",
-            )
-        })
-    })?;
-    hash_parts_and_entries(parts, source_length, &[]).map(|(hash, _)| hash)
+    Ok(Hash256::from_bytes(source_hasher.finalize().into()))
 }
 
 fn verify_source_unchanged(source: &ArchiveSource) -> Result<(), PazError> {
     for part in &source.parts {
-        let metadata = std::fs::metadata(&part.path).map_err(|_| {
+        let metadata = fs::metadata(&part.path).map_err(|_| {
             error(
                 "ASTRA_EMU_MINORI_SOURCE_CHANGED",
                 "archive part disappeared after mount",
@@ -1396,7 +1137,7 @@ fn verify_source_unchanged(source: &ArchiveSource) -> Result<(), PazError> {
         if metadata.len() != part.length || metadata.modified().ok() != part.modified {
             return Err(error(
                 "ASTRA_EMU_MINORI_SOURCE_CHANGED",
-                "archive part metadata changed after mount",
+                "archive metadata changed after mount",
             ));
         }
     }
@@ -1416,10 +1157,10 @@ fn discover_parts(base: &Path, game_root: &Path) -> Result<Vec<ArchivePart>, Paz
     if !base.starts_with(&game_root) {
         return Err(error(
             "ASTRA_EMU_MINORI_ARCHIVE_PATH",
-            "PAZ archive resolves outside the game root",
+            "PAZ archive resolves outside game root",
         ));
     }
-    let metadata = std::fs::metadata(&base).map_err(|_| {
+    let metadata = fs::metadata(&base).map_err(|_| {
         error(
             "ASTRA_EMU_MINORI_ARCHIVE_OPEN",
             "required PAZ archive cannot be opened",
@@ -1434,7 +1175,7 @@ fn discover_parts(base: &Path, game_root: &Path) -> Result<Vec<ArchivePart>, Paz
     let mut missing_seen = false;
     for suffix in b'A'..=b'Z' {
         let path = PathBuf::from(format!("{base_text}{}", suffix as char));
-        match std::fs::metadata(&path) {
+        match fs::metadata(&path) {
             Ok(metadata) => {
                 if missing_seen {
                     return Err(error(
@@ -1457,7 +1198,7 @@ fn discover_parts(base: &Path, game_root: &Path) -> Result<Vec<ArchivePart>, Paz
                 if !path.starts_with(&game_root) {
                     return Err(error(
                         "ASTRA_EMU_MINORI_ARCHIVE_PATH",
-                        "PAZ multipart volume resolves outside the game root",
+                        "PAZ multipart volume resolves outside game root",
                     ));
                 }
                 parts.push(ArchivePart {
@@ -1528,15 +1269,6 @@ fn entry_key_material(
     entry: &PazEntryDescriptor,
     password: Option<&str>,
 ) -> Result<Vec<u8>, PazError> {
-    if entry.crypto_name.is_empty() {
-        return Err(error(
-            "ASTRA_EMU_MINORI_RC4_KEY",
-            "entry CP932 name bytes are unavailable for RC4 derivation",
-        ));
-    }
-    // GARbro lowercases the decoded entry name, then encodes that string as
-    // CP932.  Lowercasing the original byte sequence is observably different
-    // for non-ASCII names and yields the wrong RC4 material.
     let lowered_name = entry.name.to_lowercase();
     let (encoded_name, _, malformed) = SHIFT_JIS.encode(&lowered_name);
     if malformed {
@@ -1561,125 +1293,6 @@ fn entry_key_material(
         return Err(error("ASTRA_EMU_MINORI_RC4_KEY", "entry RC4 key is empty"));
     }
     Ok(key)
-}
-
-fn decrypt_bytes(
-    provider: &MinoriPazDecryptProvider,
-    descriptor: MinoriDecryptDescriptor,
-    bytes: &[u8],
-) -> Result<Vec<u8>, PazError> {
-    if bytes.is_empty() {
-        return Err(error(
-            "ASTRA_EMU_MINORI_DECRYPT_EMPTY",
-            "Minori decrypt input is empty",
-        ));
-    }
-    let mut output = Vec::with_capacity(bytes.len());
-    for (batch_index, batch) in bytes.chunks(LEGACY_DECRYPT_MAX_BATCH_BYTES).enumerate() {
-        let batch_offset = u64::try_from(batch_index)
-            .ok()
-            .and_then(|index| index.checked_mul(LEGACY_DECRYPT_MAX_BATCH_BYTES as u64))
-            .ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MINORI_DECRYPT_OFFSET",
-                    "decrypt batch offset overflowed",
-                )
-            })?;
-        let batch_descriptor = descriptor.with_stream_offset(batch_offset)?;
-        let payload = serde_json::to_vec(&batch_descriptor).map_err(|_| {
-            error(
-                "ASTRA_EMU_MINORI_DESCRIPTOR",
-                "Minori decrypt descriptor could not be encoded",
-            )
-        })?;
-        let opaque = LegacyOpaqueDescriptor {
-            schema_id: MINORI_DECRYPT_DESCRIPTOR_SCHEMA.into(),
-            schema_hash: provider.descriptor_schema_hash(),
-            payload,
-        };
-        let phase = match batch_descriptor {
-            MinoriDecryptDescriptor::Index { .. } => LegacyDecryptPhase::Index,
-            MinoriDecryptDescriptor::Entry { .. } => LegacyDecryptPhase::Entry,
-        };
-        for (chunk_index, chunk) in batch.chunks(LEGACY_DECRYPT_CHUNK_BYTES).enumerate() {
-            let chunk_offset = (chunk_index * LEGACY_DECRYPT_CHUNK_BYTES) as u64;
-            output.extend_from_slice(&provider.decrypt(LegacyDecryptRequest {
-                phase,
-                descriptors: std::slice::from_ref(&opaque),
-                transport: LegacyDecryptTransport {
-                    chunk_offset,
-                    total_size: batch.len() as u64,
-                    batch_index: batch_index as u32,
-                    input_bound: batch.len() as u64,
-                    output_bound: chunk.len() as u64,
-                },
-                bytes: chunk,
-            })?);
-        }
-    }
-    if output.len() != bytes.len() {
-        return Err(error(
-            "ASTRA_EMU_MINORI_DECRYPT_SIZE",
-            "Minori decrypt output size is inconsistent",
-        ));
-    }
-    Ok(output)
-}
-
-impl MinoriDecryptDescriptor {
-    fn with_stream_offset(&self, stream_offset: u64) -> Result<Self, PazError> {
-        let stream_offset = self
-            .stream_offset()
-            .checked_add(stream_offset)
-            .ok_or_else(|| {
-                error(
-                    "ASTRA_EMU_MINORI_DECRYPT_OFFSET",
-                    "decrypt stream offset overflowed",
-                )
-            })?;
-        Ok(match self {
-            Self::Index { role, version, .. } => Self::Index {
-                role: role.clone(),
-                version: *version,
-                stream_offset,
-            },
-            Self::Entry { version, entry, .. } => Self::Entry {
-                version: *version,
-                entry: entry.clone(),
-                stream_offset,
-            },
-        })
-    }
-
-    fn stream_offset(&self) -> u64 {
-        match self {
-            Self::Index { stream_offset, .. } | Self::Entry { stream_offset, .. } => *stream_offset,
-        }
-    }
-}
-
-fn error(code: &'static str, message: impl Into<String>) -> PazError {
-    PazError::invalid(code, message)
-}
-
-fn cache_error(error_value: PlaintextCacheError) -> PazError {
-    match error_value {
-        PlaintextCacheError::EntryLimit => error(
-            "ASTRA_EMU_MINORI_CACHE_ENTRY_LIMIT",
-            "plaintext cache entry exceeds its configured budget",
-        ),
-        PlaintextCacheError::Corrupt => error(
-            "ASTRA_EMU_MINORI_CACHE_CORRUPT",
-            "plaintext cache metadata or content is corrupt",
-        ),
-        PlaintextCacheError::Permission(_) => error(
-            "ASTRA_EMU_MINORI_CACHE_PERMISSION",
-            "plaintext cache privacy permissions could not be enforced",
-        ),
-        PlaintextCacheError::Io(_) => {
-            error("ASTRA_EMU_MINORI_CACHE_IO", "plaintext cache I/O failed")
-        }
-    }
 }
 
 fn validate_blowfish_key(key: &[u8]) -> Result<(), PazError> {
@@ -1721,582 +1334,70 @@ fn xor_byte(bytes: &mut [u8], key: u8) {
     }
 }
 
+fn crc32(bytes: &[u8]) -> u32 {
+    crc32fast::hash(bytes)
+}
+
+fn error(code: &'static str, message: impl Into<String>) -> PazError {
+    PazError::invalid(code, message)
+}
+
+#[cfg(test)]
+#[path = "paz_stream_tests.rs"]
+mod stream_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blowfish::cipher::BlockCipherEncrypt;
-    use rc4::{KeyInit, Rc4, StreamCipher};
-    use std::{fs, io::Write};
 
-    const FIXTURE_KEY: &[u8] = b"fixture-key";
-    const FIXTURE_MOVIE_PASSWORD: &str = "fixture-movie-password";
-
-    fn fixture_archive(role: &str, version: u8) -> Vec<u8> {
-        fixture_archive_with_packing(role, version, false)
-    }
-
-    fn fixture_archive_with_packing(role: &str, version: u8, packed: bool) -> Vec<u8> {
-        let plaintext = b"fixture\0";
-        let mut stored = if packed {
-            let mut encoder =
-                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-            encoder.write_all(plaintext).unwrap();
-            encoder.finish().unwrap()
-        } else {
-            plaintext.to_vec()
-        };
-        let stored_size = stored.len() as u32;
-        while !stored.len().is_multiple_of(8) {
-            stored.push(0);
-        }
-        let aligned_size = stored.len() as u32;
-        let mut index = Vec::new();
-        index.extend_from_slice(&1u32.to_le_bytes());
-        if role == "mov" {
-            index.extend(0u8..=255);
-        }
-        let entry_name = if role == "mov" {
-            "mov.avi".to_owned()
-        } else {
-            format!("{role}.bin")
-        };
-        index.extend_from_slice(entry_name.as_bytes());
-        index.push(0);
-        let descriptor_offset = index.len();
-        index.extend_from_slice(&0u64.to_le_bytes());
-        index.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
-        index.extend_from_slice(&stored_size.to_le_bytes());
-        index.extend_from_slice(&aligned_size.to_le_bytes());
-        index.extend_from_slice(&(i32::from(packed)).to_le_bytes());
-        while !index.len().is_multiple_of(8) {
-            index.push(0);
-        }
-        let header_size = if version == 0 { 4 } else { 0x24 };
-        let payload_offset = header_size + index.len() as u64;
-        index[descriptor_offset..descriptor_offset + 8]
-            .copy_from_slice(&payload_offset.to_le_bytes());
-
-        let index = blowfish_encrypt(FIXTURE_KEY, &index);
-        let payload = if role == "mov" && version > 0 {
-            movie_rc4_encrypt(entry_name.as_bytes(), &stored, FIXTURE_MOVIE_PASSWORD)
-        } else if role == "mov" {
-            stored
-        } else {
-            blowfish_encrypt(FIXTURE_KEY, &stored)
-        };
-        let mut archive = Vec::new();
-        if version == 0 {
-            archive.extend_from_slice(&(index.len() as u32).to_le_bytes());
-            archive.extend_from_slice(&index);
-            archive.extend_from_slice(&payload);
-        } else {
-            let xor_key = 0x5au8;
-            let derived = u32::from_le_bytes([xor_key; 4]);
-            archive.resize(0x20, 0);
-            archive.extend_from_slice(&((index.len() as u32) ^ derived).to_le_bytes());
-            archive.extend(index.into_iter().map(|byte| byte ^ xor_key));
-            archive.extend(payload.iter().map(|byte| *byte ^ xor_key));
-        }
-        archive
-    }
-
-    fn mount_fixture(root: &Path, version: u8) -> MinoriMountedVfs {
-        mount_fixture_with_cache(root, version, None)
-    }
-
-    fn mount_fixture_with_cache(
-        root: &Path,
-        version: u8,
-        cache: Option<PlaintextCache>,
-    ) -> MinoriMountedVfs {
-        let configs = REQUIRED_ARCHIVE_ROLES
-            .iter()
-            .map(|role| PazArchiveConfig {
-                role: (*role).into(),
-                path: root.join(format!("{role}.paz")),
-                game_root: root.to_path_buf(),
-                version,
-                index_size_xor: if version == 0 { 0 } else { 0x5a5a5a5a },
-            })
-            .collect();
-        let provider = mount_fixture_provider();
-        MinoriMountedVfs::mount_with_cache(
-            "fixture",
-            "minori:/",
-            configs,
-            provider,
-            Hash256::from_sha256(b"fixture-mount-profile"),
-            cache,
-        )
-        .unwrap()
-    }
-
-    fn mount_fixture_provider() -> Arc<MinoriPazDecryptProvider> {
-        let roles = REQUIRED_ARCHIVE_ROLES
-            .into_iter()
-            .map(|role| {
-                (
-                    role.into(),
-                    PazRoleScheme {
-                        index_key: FIXTURE_KEY.to_vec(),
-                        data_key: if role == "mov" {
-                            Vec::new()
-                        } else {
-                            FIXTURE_KEY.to_vec()
-                        },
-                        type_passwords: if role == "mov" {
-                            BTreeMap::from([("avi".into(), FIXTURE_MOVIE_PASSWORD.into())])
-                        } else {
-                            BTreeMap::new()
-                        },
-                        archive_xor: None,
-                        video_key: None,
-                    },
-                )
-            })
-            .collect();
-        Arc::new(
-            MinoriPazDecryptProvider::new(Hash256::from_sha256(b"fixture-profile"), roles).unwrap(),
-        )
-    }
-
-    fn blowfish_encrypt(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
-        assert!(plaintext.len().is_multiple_of(8));
-        let cipher: Blowfish = Blowfish::new_from_slice(key).unwrap();
-        let mut bytes = plaintext.to_vec();
-        for chunk in bytes.as_chunks_mut::<8>().0.iter_mut() {
-            chunk[..4].reverse();
-            chunk[4..].reverse();
-            cipher.encrypt_block((&mut *chunk).into());
-            chunk[..4].reverse();
-            chunk[4..].reverse();
-        }
-        bytes
-    }
-
-    fn movie_rc4_encrypt(name: &[u8], plaintext: &[u8], password: &str) -> Vec<u8> {
-        let mut entry_key = name.iter().map(u8::to_ascii_lowercase).collect::<Vec<_>>();
-        entry_key.extend_from_slice(format!(" {:08X} ", plaintext.len()).as_bytes());
-        entry_key.extend_from_slice(password.as_bytes());
-        let key = (0u8..=255)
-            .enumerate()
-            .map(|(index, video_key)| video_key ^ entry_key[index % entry_key.len()])
-            .collect::<Vec<_>>();
-        let mut cipher = Rc4::new_from_slice(&key).unwrap();
-        let mut block = vec![0; plaintext.len().min(0x10000)];
-        cipher.apply_keystream(&mut block);
-        plaintext
-            .iter()
-            .enumerate()
-            .map(|(index, byte)| byte ^ block[index % block.len()])
-            .collect()
-    }
-
-    fn hash_fixture_entry(id: &str, offset: u64, size: u64) -> PazEntryDescriptor {
-        PazEntryDescriptor {
-            archive_role: "bg".into(),
-            entry_id: id.into(),
-            name: format!("{id}.bin"),
-            crypto_name: format!("{id}.bin").into_bytes(),
-            offset,
-            unpacked_size: size,
-            stored_size: size,
-            aligned_size: size,
+    #[test]
+    fn entry_key_uses_lowercase_cp932_name_and_size() {
+        let entry = PazEntryDescriptor {
+            archive_role: "scr".into(),
+            entry_id: "scr:0".into(),
+            name: "SCRIPT.SC".into(),
+            crypto_name: b"SCRIPT.SC".to_vec(),
+            offset: 0,
+            unpacked_size: 0x12,
+            stored_size: 8,
+            aligned_size: 8,
             packed: false,
             video_key: None,
-        }
-    }
-
-    fn movie_fixture_entry(name: &str, size: u64, video_key: Vec<u8>) -> PazEntryDescriptor {
-        PazEntryDescriptor {
-            archive_role: "mov".into(),
-            entry_id: "mov:0".into(),
-            name: name.into(),
-            crypto_name: name.as_bytes().to_vec(),
-            offset: 0,
-            unpacked_size: size,
-            stored_size: size,
-            aligned_size: size,
-            packed: false,
-            video_key: Some(video_key),
-        }
-    }
-
-    #[test]
-    fn archive_and_entry_hashes_share_one_ordered_stream() {
-        let temp = tempfile::tempdir().unwrap();
-        let bytes = (0u8..100).collect::<Vec<_>>();
-        let first = temp.path().join("archive.paz");
-        let second = temp.path().join("archive.pazA");
-        fs::write(&first, &bytes[..47]).unwrap();
-        fs::write(&second, &bytes[47..]).unwrap();
-        let parts = [&first, &second]
-            .into_iter()
-            .map(|path| {
-                let metadata = fs::metadata(path).unwrap();
-                ArchivePart {
-                    path: path.clone(),
-                    length: metadata.len(),
-                    modified: metadata.modified().ok(),
-                }
-            })
-            .collect::<Vec<_>>();
-        let entries = vec![
-            hash_fixture_entry("first", 3, 17),
-            hash_fixture_entry("cross-part", 40, 20),
-            hash_fixture_entry("empty", 80, 0),
-        ];
-
-        let (source_hash, entry_hashes) =
-            hash_parts_and_entries(&parts, bytes.len() as u64, &entries).unwrap();
-
-        assert_eq!(source_hash, Hash256::from_sha256(&bytes));
-        assert_eq!(entry_hashes[0], Hash256::from_sha256(&bytes[3..20]));
-        assert_eq!(entry_hashes[1], Hash256::from_sha256(&bytes[40..60]));
-        assert_eq!(entry_hashes[2], Hash256::from_sha256(&[]));
-    }
-
-    #[test]
-    fn overlapping_encrypted_entry_ranges_are_blocking() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("archive.paz");
-        fs::write(&path, [0u8; 32]).unwrap();
-        let metadata = fs::metadata(&path).unwrap();
-        let parts = vec![ArchivePart {
-            path,
-            length: metadata.len(),
-            modified: metadata.modified().ok(),
-        }];
-        let entries = vec![
-            hash_fixture_entry("first", 0, 16),
-            hash_fixture_entry("second", 8, 16),
-        ];
-
+        };
         assert_eq!(
-            hash_parts_and_entries(&parts, 32, &entries)
-                .unwrap_err()
-                .code(),
-            "ASTRA_EMU_MINORI_ENTRY_OVERLAP"
+            entry_key_material(&entry, Some("pw")).unwrap(),
+            b"script.sc 00000012 pw"
         );
     }
 
     #[test]
-    fn traversal_is_rejected() {
+    fn movie_data_key_is_rejected() {
+        let mut roles = BTreeMap::new();
+        for role in REQUIRED_ARCHIVE_ROLES {
+            roles.insert(
+                role.to_owned(),
+                PazRoleScheme {
+                    index_key: b"index-key".to_vec(),
+                    data_key: if role == "mov" {
+                        b"bad".to_vec()
+                    } else {
+                        b"data-key".to_vec()
+                    },
+                    type_passwords: BTreeMap::new(),
+                },
+            );
+        }
         assert_eq!(
-            normalize_entry_name("../secret.sc").unwrap_err().code(),
+            MinoriPazDecryptor::new(roles).unwrap_err().code(),
+            "ASTRA_EMU_MINORI_MOVIE_KEY"
+        );
+    }
+
+    #[test]
+    fn traversal_is_blocking() {
+        assert_eq!(
+            normalize_entry_name("../secret").unwrap_err().code(),
             "ASTRA_EMU_MINORI_ENTRY_PATH"
-        );
-    }
-
-    #[test]
-    fn v0_movie_inverts_the_index_substitution_table() {
-        let provider = mount_fixture_provider();
-        let movie_key = (0u8..=255)
-            .map(|byte| byte.wrapping_add(1))
-            .collect::<Vec<_>>();
-        let plaintext = b"RIFF";
-        let encrypted = plaintext
-            .iter()
-            .map(|byte| byte.wrapping_add(1))
-            .collect::<Vec<_>>();
-        let entry = movie_fixture_entry("fixture.avi", plaintext.len() as u64, movie_key);
-
-        assert_eq!(
-            provider
-                .decrypt_entry_chunk(0, &entry, 0, &encrypted)
-                .unwrap(),
-            plaintext
-        );
-    }
-
-    #[test]
-    fn entry_rc4_material_reencodes_the_lowercased_cp932_name() {
-        let mut entry = movie_fixture_entry("decoded-name.avi", 0x2a, (0u8..=255).collect());
-        entry.crypto_name = vec![b'A', 0x81, 0x5c, b'Z', b'.', b'A', b'V', b'I'];
-        let (decoded_name, _, malformed) = SHIFT_JIS.decode(&entry.crypto_name);
-        assert!(!malformed);
-        entry.name = decoded_name.into_owned();
-
-        assert_eq!(
-            entry_key_material(&entry, None).unwrap(),
-            [b'a', 0x81, 0x5c, b'z', b'.', b'a', b'v', b'i']
-                .into_iter()
-                .chain(b" 0000002A ".iter().copied())
-                .collect::<Vec<_>>()
-        );
-    }
-    #[test]
-    fn required_roles_are_strict() {
-        let configs = vec![];
-        assert_eq!(
-            validate_role_set(&configs).unwrap_err().code(),
-            "ASTRA_EMU_MINORI_ARCHIVE_MISSING"
-        );
-    }
-
-    #[test]
-    fn v0_fixture_mounts_all_roles_and_reads_across_a_volume_boundary() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            let archive = fixture_archive(role, 0);
-            let path = temp.path().join(format!("{role}.paz"));
-            if role == "scr" {
-                let split = archive.len() - 6;
-                fs::write(&path, &archive[..split]).unwrap();
-                fs::write(temp.path().join("scr.pazA"), &archive[split..]).unwrap();
-            } else {
-                fs::write(path, archive).unwrap();
-            }
-        }
-        let vfs = mount_fixture(temp.path(), 0);
-        assert_eq!(vfs.manifest().entries.len(), REQUIRED_ARCHIVE_ROLES.len());
-        for entry in &vfs.manifest().entries {
-            let source = vfs
-                .manifest()
-                .sources
-                .iter()
-                .find(|source| source.source_id == entry.source_id)
-                .unwrap();
-            assert_eq!(entry.source_hash, source.source_hash);
-        }
-        let root = vfs.read_dir("minori:/").unwrap();
-        assert_eq!(root.len(), REQUIRED_ARCHIVE_ROLES.len());
-        assert!(root
-            .iter()
-            .all(|node| node.kind == LegacyVfsNodeKind::Directory));
-        let read = vfs.read_range("minori:/scr/scr.bin", 3, 4).unwrap();
-        assert_eq!(read.bytes.as_slice(), b"ture");
-        assert!(!read.cache_hit);
-    }
-
-    #[test]
-    fn source_mutation_after_mount_is_blocking() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive(role, 0),
-            )
-            .unwrap();
-        }
-        let vfs = mount_fixture(temp.path(), 0);
-        fs::OpenOptions::new()
-            .append(true)
-            .open(temp.path().join("scr.paz"))
-            .unwrap()
-            .write_all(b"changed")
-            .unwrap();
-        assert_eq!(
-            vfs.read_range("minori:/scr/scr.bin", 0, 1)
-                .unwrap_err()
-                .code(),
-            "ASTRA_EMU_MINORI_SOURCE_CHANGED"
-        );
-    }
-
-    #[test]
-    fn decoded_entry_reuses_verified_plaintext_for_range_reads() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive(role, 0),
-            )
-            .unwrap();
-        }
-        let cache =
-            PlaintextCache::new(temp.path().join("cache"), 1024 * 1024, 1024 * 1024).unwrap();
-        let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
-
-        let first = vfs.read_range("minori:/scr/scr.bin", 0, 2).unwrap();
-        assert_eq!(first.bytes.as_slice(), b"fi");
-        assert!(!first.cache_hit);
-
-        let second = vfs.read_range("minori:/scr/scr.bin", 2, 2).unwrap();
-        assert_eq!(second.bytes.as_slice(), b"xt");
-        assert!(second.cache_hit);
-    }
-
-    #[test]
-    fn plaintext_cache_identity_survives_a_fresh_mount() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive(role, 0),
-            )
-            .unwrap();
-        }
-        let cache_root = temp.path().join("cache");
-        {
-            let cache = PlaintextCache::new(cache_root.clone(), 1024 * 1024, 1024 * 1024).unwrap();
-            let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
-            let read = vfs.read_range("minori:/scr/scr.bin", 0, 4).unwrap();
-            assert_eq!(read.bytes.as_slice(), b"fixt");
-            assert!(!read.cache_hit);
-        }
-        {
-            let cache = PlaintextCache::new(cache_root, 1024 * 1024, 1024 * 1024).unwrap();
-            let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
-            let read = vfs.read_range("minori:/scr/scr.bin", 4, 3).unwrap();
-            assert_eq!(read.bytes.as_slice(), b"ure");
-            assert!(read.cache_hit);
-        }
-    }
-
-    #[test]
-    fn source_mutation_cannot_be_masked_by_a_plaintext_cache_hit() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive(role, 0),
-            )
-            .unwrap();
-        }
-        let cache_root = temp.path().join("cache");
-        let cache = PlaintextCache::new(cache_root, 1024 * 1024, 1024 * 1024).unwrap();
-        let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
-        let first = vfs.read_range("minori:/scr/scr.bin", 0, 4).unwrap();
-        assert_eq!(first.bytes.as_slice(), b"fixt");
-        assert!(!first.cache_hit);
-
-        fs::OpenOptions::new()
-            .append(true)
-            .open(temp.path().join("scr.paz"))
-            .unwrap()
-            .write_all(b"changed")
-            .unwrap();
-
-        assert_eq!(
-            vfs.read_range("minori:/scr/scr.bin", 4, 3)
-                .unwrap_err()
-                .code(),
-            "ASTRA_EMU_MINORI_SOURCE_CHANGED"
-        );
-    }
-
-    #[test]
-    fn corrupt_plaintext_cache_is_a_blocking_mount_read_error() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive(role, 0),
-            )
-            .unwrap();
-        }
-        let cache_root = temp.path().join("cache");
-        {
-            let cache = PlaintextCache::new(cache_root.clone(), 1024 * 1024, 1024 * 1024).unwrap();
-            let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
-            let read = vfs.read_range("minori:/scr/scr.bin", 0, 4).unwrap();
-            assert_eq!(read.bytes.as_slice(), b"fixt");
-            assert!(!read.cache_hit);
-        }
-
-        let cache_file = fs::read_dir(&cache_root)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| path.extension().is_some_and(|extension| extension == "bin"))
-            .expect("the first read must materialize one cache entry");
-        let mut corrupted = fs::read(&cache_file).unwrap();
-        let last = corrupted
-            .last_mut()
-            .expect("cache entry contains a header and payload");
-        *last ^= 0xff;
-        fs::write(cache_file, corrupted).unwrap();
-
-        let cache = PlaintextCache::new(cache_root, 1024 * 1024, 1024 * 1024).unwrap();
-        let vfs = mount_fixture_with_cache(temp.path(), 0, Some(cache));
-        assert_eq!(
-            vfs.read_range("minori:/scr/scr.bin", 0, 4)
-                .unwrap_err()
-                .code(),
-            "ASTRA_EMU_MINORI_CACHE_CORRUPT"
-        );
-    }
-
-    #[test]
-    fn raw_movie_range_uses_the_entry_relative_transform_offset() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive(role, 0),
-            )
-            .unwrap();
-        }
-        let vfs = mount_fixture(temp.path(), 0);
-
-        let read = vfs.read_range("minori:/mov/mov.avi", 1, 6).unwrap();
-
-        assert_eq!(read.bytes.as_slice(), b"ixture");
-        assert!(!read.cache_hit);
-    }
-
-    #[test]
-    fn v1_and_v2_raw_movie_ranges_use_the_rc4_entry_offset() {
-        for version in [1, 2] {
-            let temp = tempfile::tempdir().unwrap();
-            for role in REQUIRED_ARCHIVE_ROLES {
-                fs::write(
-                    temp.path().join(format!("{role}.paz")),
-                    fixture_archive(role, version),
-                )
-                .unwrap();
-            }
-            let vfs = mount_fixture(temp.path(), version);
-
-            let read = vfs.read_range("minori:/mov/mov.avi", 1, 6).unwrap();
-
-            assert_eq!(read.bytes.as_slice(), b"ixture");
-            assert!(!read.cache_hit);
-        }
-    }
-
-    #[test]
-    fn v1_and_v2_fixtures_apply_archive_xor_and_random_reads() {
-        for version in [1, 2] {
-            let temp = tempfile::tempdir().unwrap();
-            for role in REQUIRED_ARCHIVE_ROLES {
-                fs::write(
-                    temp.path().join(format!("{role}.paz")),
-                    fixture_archive(role, version),
-                )
-                .unwrap();
-            }
-            let vfs = mount_fixture(temp.path(), version);
-            let read = vfs.read_range("minori:/voice/voice.bin", 1, 6).unwrap();
-            assert_eq!(read.bytes.as_slice(), b"ixture");
-        }
-    }
-
-    #[test]
-    fn packed_entries_use_zlib_while_unpacked_entries_remain_raw() {
-        let temp = tempfile::tempdir().unwrap();
-        for role in REQUIRED_ARCHIVE_ROLES {
-            fs::write(
-                temp.path().join(format!("{role}.paz")),
-                fixture_archive_with_packing(role, 2, role == "scr"),
-            )
-            .unwrap();
-        }
-        let vfs = mount_fixture(temp.path(), 2);
-
-        assert_eq!(
-            vfs.read_range("minori:/scr/scr.bin", 1, 6)
-                .unwrap()
-                .bytes
-                .as_slice(),
-            b"ixture"
-        );
-        assert_eq!(
-            vfs.read_range("minori:/voice/voice.bin", 1, 6)
-                .unwrap()
-                .bytes
-                .as_slice(),
-            b"ixture"
         );
     }
 }

@@ -69,7 +69,6 @@ pub trait ManagerController: 'static {
     ) -> Result<ManagerViewModel, String>;
     fn grant_translation_consent(&mut self) -> Result<ManagerViewModel, String>;
     fn set_filter_preset(&mut self, preset_id: &str) -> Result<ManagerViewModel, String>;
-    fn set_patch_mode(&mut self, mode: &str) -> Result<ManagerViewModel, String>;
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String>;
     fn rescan(&mut self) -> Result<ManagerViewModel, String>;
     fn launch(&mut self, case_id: &str) -> Result<ManagerViewModel, String>;
@@ -575,32 +574,8 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     adapter.window().on_open_diagnostics(move || {
         if let Some(window) = diagnostics_weak.upgrade() {
             window.set_translation_overlay_active(false);
-            window.set_patches_overlay_active(false);
             window.set_filters_overlay_active(false);
             window.set_diagnostics_overlay_active(!window.get_diagnostics_overlay_active());
-        }
-    });
-    let patches_weak = adapter.window().as_weak();
-    adapter.window().on_open_patches(move || {
-        if let Some(window) = patches_weak.upgrade() {
-            window.set_translation_overlay_active(false);
-            window.set_diagnostics_overlay_active(false);
-            window.set_filters_overlay_active(false);
-            window.set_patches_overlay_active(!window.get_patches_overlay_active());
-        }
-    });
-    let patch_mode_weak = adapter.window().as_weak();
-    let patch_mode_controller = controller.clone();
-    let patch_mode_adapter = adapter.clone();
-    adapter.window().on_set_patch_mode(move |mode| {
-        let result = patch_mode_controller
-            .borrow_mut()
-            .set_patch_mode(mode.as_str());
-        if let Some(window) = patch_mode_weak.upgrade() {
-            match result {
-                Ok(model) => patch_mode_adapter.apply(&model),
-                Err(error) => window.set_global_diagnostic(error.into()),
-            }
         }
     });
     let filters_weak = adapter.window().as_weak();
@@ -608,7 +583,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         if let Some(window) = filters_weak.upgrade() {
             window.set_translation_overlay_active(false);
             window.set_diagnostics_overlay_active(false);
-            window.set_patches_overlay_active(false);
             window.set_filters_overlay_active(!window.get_filters_overlay_active());
         }
     });
@@ -997,7 +971,6 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                         let input_blocked = !window.get_game_active()
                             || window.get_translation_overlay_active()
                             || window.get_diagnostics_overlay_active()
-                            || window.get_patches_overlay_active()
                             || window.get_filters_overlay_active();
                         match event_gamepad.borrow_mut().poll() {
                             Ok(events) => {

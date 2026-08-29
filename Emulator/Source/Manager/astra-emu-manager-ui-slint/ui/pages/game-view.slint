@@ -16,9 +16,8 @@ export component GameViewPage inherits Rectangle {
     // Overlay panel visibility
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
-    in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.diagnostics-overlay-active || root.patches-overlay-active || root.filters-overlay-active;
+    property <bool> overlay-active: root.diagnostics-overlay-active || root.filters-overlay-active;
 
     // Toolbar auto-hide: visible while pointer is near the top edge
     property <length> last-pointer-y: 0px;
@@ -35,13 +34,6 @@ export component GameViewPage inherits Rectangle {
     in-out property <bool> diagnostics-collapsed: false;
     in property <string> diagnostics-summary;
     in property <string> global-diagnostic;
-
-    // Patches panel state
-    in-out property <length> patches-x: 60px;
-    in-out property <length> patches-y: 160px;
-    in-out property <bool> patches-collapsed: false;
-    in property <string> patches-summary;
-    callback set-patch-mode(string);
 
     // Filters panel state
     in-out property <length> filters-x: 80px;
@@ -156,19 +148,8 @@ export component GameViewPage inherits Rectangle {
                     checked: root.diagnostics-overlay-active;
                     clicked => {
                         root.translation-overlay-active = false;
-                        root.patches-overlay-active = false;
                         root.filters-overlay-active = false;
                         root.diagnostics-overlay-active = !root.diagnostics-overlay-active;
-                    }
-                }
-                CheckButton {
-                    label: "Patches";
-                    checked: root.patches-overlay-active;
-                    clicked => {
-                        root.translation-overlay-active = false;
-                        root.diagnostics-overlay-active = false;
-                        root.filters-overlay-active = false;
-                        root.patches-overlay-active = !root.patches-overlay-active;
                     }
                 }
                 CheckButton {
@@ -177,7 +158,6 @@ export component GameViewPage inherits Rectangle {
                     clicked => {
                         root.translation-overlay-active = false;
                         root.diagnostics-overlay-active = false;
-                        root.patches-overlay-active = false;
                         root.filters-overlay-active = !root.filters-overlay-active;
                     }
                 }
@@ -211,37 +191,6 @@ export component GameViewPage inherits Rectangle {
                 color: root.global-diagnostic == "" ? Theme.primary : Theme.danger;
                 wrap: word-wrap;
                 font-size: 13px;
-            }
-        }
-    }
-
-    if root.patches-overlay-active : FloatingPanel {
-        panel-title: "Trusted patches";
-        panel-x <=> root.patches-x;
-        panel-y <=> root.patches-y;
-        collapsed <=> root.patches-collapsed;
-        panel-width: 380px;
-        panel-height: 240px;
-        z: 60;
-        close => { root.patches-overlay-active = false; }
-
-        VerticalLayout {
-            padding: 12px;
-            spacing: 8px;
-
-            Text {
-                text: root.patches-summary;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: 13px;
-            }
-            Button {
-                text: "Use explicit no-patch mode";
-                clicked => { root.set-patch-mode("no_patch"); }
-            }
-            Button {
-                text: "Require trusted astraemu.patch.luau";
-                clicked => { root.set-patch-mode("trusted"); }
             }
         }
     }

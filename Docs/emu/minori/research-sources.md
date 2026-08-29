@@ -2,7 +2,7 @@
 
 这份索引只记录可公开核验的来源。商业资源、解密材料、原版截图和逐帧观察放在 ignored 私有目录；公开仓库不保存副本或本地路径。
 
-当前八包 cache-enabled full verify 的脱敏结果已记录在移植日志：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`。它是本地样本证据，不改变 GARbro contract 的来源优先级。
+旧 private-profile/cache identity 的八包 full verify 只作为迁移前历史保留。当前 key-file/streaming reader 必须重新形成八包脱敏证据；这不改变 GARbro contract 的来源优先级。
 
 ## 格式契约
 
@@ -11,7 +11,7 @@
 | 1 | [GARbro](https://github.com/morkt/GARbro) `ArcFormats/Musica/ArcPAZ.cs` | `b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0` | MIT | PAZ v0-v2、Blowfish、RC4、zlib、movie 与分卷 | 作为格式 contract；差异仍由授权样本阻断验证 |
 | 1 | [GARbro](https://github.com/morkt/GARbro) `ArcFormats/Musica/ArcANI.cs` | 同上 | MIT | ANI frame table、offset、BPP 与 raw pixel layout | 已实现有界纯 Rust container adapter；通用像素 buffer 交给 `image` |
 | 1 | [GARbro](https://github.com/morkt/GARbro) `ArcFormats/Musica/ArcSQZ.cs` | 同上 | MIT | SQZ1 index、双倍 frame count、zlib BGRA32 frame | 已实现有界纯 Rust container adapter；严格校验解压大小 |
-| 2 | 当前授权样本 | 2026-07-21 | local-private | 八个逻辑 PAZ、18 个物理文件、14502 个 entry | 八包 decoded full verify 已通过；cache identity 复核另有 blocker |
+| 2 | 当前授权样本 | 2026-07-21 | local-private | 八个逻辑 PAZ、18 个物理文件、14502 个 entry | 旧 identity 曾通过；当前 key-file/streaming full verify 待重跑 |
 | 3 | 原程序可观察行为 | 尚未形成正式 E3 证据 | local-private | 脚本 VM、系统 UI、输入、存档和演出时序 | GARbro 未覆盖，不从格式 reader 反推语义 |
 
 ## 复用组件

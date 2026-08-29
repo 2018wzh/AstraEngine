@@ -20,7 +20,7 @@ for family-owned right-click system menus; no compatibility shim is retained.
 | `Engine/Plugins/Fixtures/` | Stage 1/3 implemented | 测试插件 fixture，覆盖真实 load/unload；`headless-presentation-provider` 覆盖 Stage 1 presentation/action provider，`vn-extension-provider` 覆盖 Stage 3 VN extension provider slots |
 | `Engine/Plugins/Providers/` | Stage 2 implemented, Stage 4 reopened | 通用 provider 插件由 Stage 1/2 registry 和 gate 管理；VFS backend provider 统一走 `vfs_provider` slot，NativeVN runtime provider 位于 AstraVN module，第三方 gameplay runtime provider、OpenAI、Ollama、ComfyUI 和 ONNX 仍是后续 provider |
 | `Editor/Source/` | Stage 4 not implemented | Qt/QML editor bridge 和应用入口 |
-| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v9 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、FVP/Minori provider boundary、修复后的 fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、Trusted Luau、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
+| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v10 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、FVP/Minori provider boundary、fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；AstraEMU Luau patch/decode 已删除，RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
 | `Examples/` | Stage 3 in progress | 产品样例和发布样例；`Examples/NativeVN` 是可提交 commercial baseline sample，`Examples/TsuiNoSora/Docs/Title.png`、`Game.png` 作为 TsuiNoSora 视觉参考证据；`Examples/TsuiNoSora/Tools/original-patcher` 是不发布到 crates.io 的 1999 原版独立副本补丁器 |
 | `Tools/TsuiNoSora/` | Stage 3 in progress | 本地合法数据的 inventory、visual reference report 和 Asset analysis helper；输出脱敏 report，不提交商业 payload |
 
@@ -114,7 +114,7 @@ python Tools/check_dynamic_artifacts.py
 | `astra-ai` | 4 reopened | Runtime Director、provider profile、Asset VFS-backed ONNX ModelBundle、memory ledger、Editor AI audit | `astra-core`, `astra-runtime`, `astra-package`, `astra-asset` | provider secret in replay, loose shipping sidecar |
 | `astra-mcp` | 4 | MCP tool descriptor、Context Pack、permission、audit、command allowlist | `astra-core`, `astra-plugin` | Editor widget in Runtime tools |
 | `astra-emu-family-core` | 5 in progress | in-process legacy VFS、manifest v2、opaque decrypt transport 与 family factory contract | `astra-core`, `serde`, `schemars` | ABI trait object、family key、商业 payload、本地路径 |
-| `astra-emu-family-support` | 5 in progress | 显式 factory registry、strict mount profile、Trusted Luau、private cache、viewer、verify、extract 与 Linux FUSE | `astra-emu-family-core`, `astra-media`, `mlua`, `lru` | family 解密算法、隐式 provider 选择、media fallback |
+| `astra-emu-family-support` | 5 in progress | 显式 factory registry、strict launch profile、viewer、verify、extract 与 Linux FUSE | `astra-emu-family-core`, `astra-media` | family 解密算法、私有 key 格式、隐式 provider 选择、media fallback |
 | `astra-emu-family-api` | 5 in progress | Family ABI v9 descriptor、probe/session/step、surface lease、Layer2D、Hook、writable-file、audio/video/wait/control DTO | `astra-core`, `astra-byte-source`, `astra-media-core`, `abi_stable`, `serde` | snapshot/save slot、text lease、Manager UI、RuntimeWorld、GPU/audio native handle |
 | `astra-emu-extension-api` | 5 in progress | Extension ABI v1 descriptor/lifecycle、同步 opaque Hook 与 UTF-8 translation companion contract | `astra-emu-family-api`, `abi_stable`, `serde`, `schemars` | HTTP provider、cache、字体布局、Host overlay、save/load slot |
 | `astra-emu-manager-core` | 5 in progress | SQLite Library、probe、family loading、RuntimeWorld lifecycle、patch policy、FilterGraph 与 evidence schema | `astra-emu-family-api`, `astra-runtime`, `astra-plugin`, `rusqlite`, `mlua` | Slint、winit、wgpu、family VFS implementation |
@@ -125,7 +125,7 @@ python Tools/check_dynamic_artifacts.py
 | `astra-emu-translation-openai-compatible` | 5 in progress | ECNU/OpenAI-compatible Responses SSE、显式 Chat adapter、预算、熔断与平台 secret store | `reqwest`, `tokio`, `keyring` | Manager Core HTTP DTO、shipping credential persistence |
 | `astra-emu-schema` | 5 in progress | 从 Rust 真源生成 AstraEMU JSON Schema | `schemars` 与 AstraEMU contract crates | 手写 schema 真源 |
 | `astra-emu-minori` | 5 in progress | Minori PAZ v0-v2 family factory、纯 Rust decrypt、`.sc` VM、Family ABI v9 `Native + MultiLayer`、core-owned text raster 与原生 writable-file save | `astra-emu-family-core`, `astra-emu-family-support`, `astra-emu-family-api`, `cosmic-text`, `blowfish`, `rc4`, `flate2` | key、商业 payload、Luau decrypt callback、Host text presentation、save slot API 或本地路径 |
-| `astra-emu-minori-cli` | 5 in progress | 纯 Rust GARbro scheme import、data-only private profile 与 `.sc` census | `astra-emu-minori`, `astra-emu-family-support`, `flate2` | key 输出、managed helper、runtime fallback |
+| `astra-emu-minori-cli` | 5 in progress | archive/media inventory 与 `.sc` census | `astra-emu-minori`, `astra-emu-family-support` | key 生成、GARbro import、managed helper、runtime fallback |
 | `astra-emu-evidence` | 5 in progress | 校验 runtime/family/UI/FVP/Luau/translation/六平台 continuity，生成原子 Postcard evidence sections、hash summary 和 project-relative package fragment | `astra-emu-manager-core`, `postcard`, `serde_yaml` | 商业 payload、绝对路径、secret、手填 passing evidence |
 | `astra-emu-family-package` | 5 in progress | 检查 desktop/Android dynamic descriptor 或 iOS static archive identity，重算 binary hash，并通过 secure environment key 生成 detached Ed25519 manifest | `astra-emu-manager-core`, `ed25519-dalek`, `object` | 私钥文件、未签名发布包、运行时下载 |
 
@@ -137,7 +137,7 @@ python Tools/check_dynamic_artifacts.py
 | `astra-headless` | `astra-headless` | `astra-headless run`、`astra-headless serve --stdio` 与 `bootstrap-test-env`；Developer/test only |
 | `astra-player` | `astra-player` | `astra-player --script <automation.json> --transcript <transcript.json>` |
 | `astra-emu-cli` | `astra-emu-cli` | `astra-emu-cli vfs --family <family> ...`；旧 `minori` 命令已删除 |
-| `astra-emu-minori-cli` | `astra-emu-minori-cli` | `import-garbro-scheme`、`census-scripts` |
+| `astra-emu-minori-cli` | `astra-emu-minori-cli` | `scan-archives`、`census-scripts`、`census-media` |
 | `astra-crash-reporter` | `AstraCrashReporter` | 由 bundled Player 启动；`--self-test` 仅用于 bundle gate |
 | `astra target` | `astra-cli` | `astra target list`, `astra target validate` |
 | `astra platform` | `astra-cli` | `astra platform probe` |

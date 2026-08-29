@@ -1354,7 +1354,6 @@ mod tests {
         let settings = crate::work_settings::WorkSettings {
             input_mapping: Some(crate::input_mapping::default_vn_preset()),
             filter_preset: Some("crt-soft".into()),
-            patch_mode: None,
         };
         library.set_work_settings(&work_id, &settings).unwrap();
         let loaded = library.work_settings(&work_id).unwrap().unwrap();

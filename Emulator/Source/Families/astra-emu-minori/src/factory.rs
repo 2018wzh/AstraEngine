@@ -1,56 +1,58 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
     sync::Arc,
 };
 
 use astra_core::Hash256;
 use astra_emu_family_core::{
-    LegacyCoreError, LegacyMountedVfs, LegacyVfsFamilyFactory, LegacyVfsMountContext,
+    read_private_file, LegacyCoreError, LegacyMountedVfs, LegacyVfsFamilyFactory,
+    LegacyVfsMountContext,
 };
-use astra_emu_family_support::{load_private_profile, PlaintextCache, PlaintextCacheError};
+use encoding_rs::SHIFT_JIS;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    MinoriMountedVfs, MinoriPazDecryptProvider, PazArchiveConfig, PazRoleScheme,
-    MINORI_DECRYPT_PROVIDER_ID, MINORI_FAMILY_OPTIONS_SCHEMA, MINORI_PRIVATE_PROFILE_SCHEMA,
-    REQUIRED_ARCHIVE_ROLES,
+    MinoriMountedVfs, MinoriPazDecryptor, PazArchiveConfig, PazRoleScheme,
+    MINORI_FAMILY_OPTIONS_SCHEMA, REQUIRED_ARCHIVE_ROLES,
 };
+
+pub const MINORI_KEY_FILE_SCHEMA: &str = "astra.emu.minori.keys.v1";
+pub const MAX_KEY_FILE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MinoriFamilyOptions {
     pub paz_version: u8,
     pub index_size_xor: u32,
-    pub private_profile_id: String,
-    pub private_profile_schema: String,
-    pub cache: MinoriCacheOptions,
+    pub key_file: PathBuf,
     pub archive_roles: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MinoriCacheOptions {
-    pub enabled: bool,
-    pub total_bytes: u64,
-    pub entry_bytes: u64,
+struct MinoriKeyFile {
+    schema: String,
+    #[serde(default)]
+    type_passwords: MinoriTypePasswords,
+    archive_keys: BTreeMap<String, MinoriArchiveKeyFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MinoriPrivateProfilePayload {
-    pub schema: String,
-    pub roles: BTreeMap<String, MinoriRolePrivateProfile>,
+struct MinoriTypePasswords {
+    png: Option<String>,
+    ogg: Option<String>,
+    sc: Option<String>,
+    avi: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MinoriRolePrivateProfile {
-    pub index_key: Vec<u8>,
-    pub data_key: Vec<u8>,
-    pub type_passwords: BTreeMap<String, String>,
-    pub archive_xor: Option<u32>,
-    pub video_key: Option<Vec<u8>>,
+struct MinoriArchiveKeyFile {
+    index_key_hex: String,
+    data_key_hex: String,
 }
 
 #[derive(Debug, Default)]
@@ -60,14 +62,13 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
     fn family_id(&self) -> &str {
         "minori"
     }
-    fn mount_profile_schema_id(&self) -> &str {
+
+    fn family_options_schema_id(&self) -> &str {
         MINORI_FAMILY_OPTIONS_SCHEMA
     }
-    fn mount_profile_schema_hash(&self) -> Hash256 {
+
+    fn family_options_schema_hash(&self) -> Hash256 {
         Hash256::from_sha256(MINORI_FAMILY_OPTIONS_SCHEMA.as_bytes())
-    }
-    fn decrypt_provider_id(&self) -> &str {
-        MINORI_DECRYPT_PROVIDER_ID
     }
 
     fn mount(
@@ -75,7 +76,7 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
         context: &LegacyVfsMountContext,
     ) -> Result<Arc<dyn LegacyMountedVfs>, LegacyCoreError> {
         if context.family_config.schema_id != MINORI_FAMILY_OPTIONS_SCHEMA
-            || context.family_config.schema_hash != self.mount_profile_schema_hash()
+            || context.family_config.schema_hash != self.family_options_schema_hash()
             || context.prefix != "minori:/"
         {
             return Err(invalid(
@@ -91,37 +92,22 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
             )
         })?;
         validate_options(&options)?;
-        let patch = context.private_patch.as_deref().ok_or_else(|| {
+        let key_bytes =
+            read_private_file(&context.game_root, &options.key_file, MAX_KEY_FILE_BYTES)?;
+        let key_text = std::str::from_utf8(&key_bytes).map_err(|_| {
             invalid(
-                "ASTRA_EMU_MINORI_PRIVATE_PATCH",
-                "Minori requires a trusted private patch",
+                "ASTRA_EMU_MINORI_KEY_ENCODING",
+                "Minori key file must be UTF-8 TOML",
             )
         })?;
-        let private = load_private_profile(
-            patch,
-            &options.private_profile_id,
-            &options.private_profile_schema,
-        )?;
-        if private.schema_id != MINORI_PRIVATE_PROFILE_SCHEMA
-            || private.schema_hash != Hash256::from_sha256(MINORI_PRIVATE_PROFILE_SCHEMA.as_bytes())
-        {
-            return Err(invalid(
-                "ASTRA_EMU_MINORI_PRIVATE_SCHEMA",
-                "Minori private profile schema is invalid",
-            ));
-        }
-        let payload: MinoriPrivateProfilePayload = serde_json::from_slice(private.payload())
-            .map_err(|_| {
-                invalid(
-                    "ASTRA_EMU_MINORI_PRIVATE_PAYLOAD",
-                    "Minori private profile payload is invalid",
-                )
-            })?;
-        let schemes = payload.into_schemes(options.index_size_xor)?;
-        let decrypt_provider = Arc::new(MinoriPazDecryptProvider::new(
-            private.payload_hash,
-            schemes,
-        )?);
+        let key_file: MinoriKeyFile = toml::from_str(key_text).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_KEY_PARSE",
+                "Minori key file is not valid strict TOML",
+            )
+        })?;
+        let schemes = key_file.into_schemes()?;
+        let decryptor = Arc::new(MinoriPazDecryptor::new(schemes)?);
         let configs = options
             .archive_roles
             .iter()
@@ -133,101 +119,100 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
                 index_size_xor: options.index_size_xor,
             })
             .collect();
-        let cache = if options.cache.enabled {
-            let root = directories::ProjectDirs::from("org", "AstraEngine", "AstraEMU")
-                .ok_or_else(|| {
-                    invalid(
-                        "ASTRA_EMU_MINORI_CACHE_ROOT",
-                        "platform private cache root is unavailable",
-                    )
-                })?
-                .cache_dir()
-                .join("family")
-                .join("minori")
-                .join(context.profile_hash.to_hex());
-            Some(
-                PlaintextCache::new(root, options.cache.total_bytes, options.cache.entry_bytes)
-                    .map_err(cache_init_error)?,
-            )
-        } else {
-            None
-        };
-        Ok(Arc::new(MinoriMountedVfs::mount_with_cache(
+        Ok(Arc::new(MinoriMountedVfs::mount(
             context.mount_id.clone(),
             context.prefix.clone(),
             configs,
-            decrypt_provider,
+            decryptor,
             context.profile_hash,
-            cache,
         )?))
     }
 }
 
-impl MinoriPrivateProfilePayload {
-    fn into_schemes(
-        self,
-        expected_xor: u32,
-    ) -> Result<BTreeMap<String, PazRoleScheme>, LegacyCoreError> {
-        if self.schema != MINORI_PRIVATE_PROFILE_SCHEMA {
+impl MinoriKeyFile {
+    fn into_schemes(self) -> Result<BTreeMap<String, PazRoleScheme>, LegacyCoreError> {
+        if self.schema != MINORI_KEY_FILE_SCHEMA {
             return Err(invalid(
-                "ASTRA_EMU_MINORI_PRIVATE_SCHEMA",
-                "Minori private payload schema is invalid",
+                "ASTRA_EMU_MINORI_KEY_SCHEMA",
+                "Minori key file schema is invalid",
             ));
         }
         let roles = self
-            .roles
+            .archive_keys
             .keys()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
         if roles != REQUIRED_ARCHIVE_ROLES.into_iter().collect() {
             return Err(invalid(
-                "ASTRA_EMU_MINORI_PRIVATE_ROLES",
-                "Minori private payload does not contain the required archive roles",
+                "ASTRA_EMU_MINORI_KEY_ROLES",
+                "Minori key file does not contain exactly the required archive roles",
             ));
         }
-        self.roles
+        let type_passwords = [
+            ("png", self.type_passwords.png),
+            ("ogg", self.type_passwords.ogg),
+            ("sc", self.type_passwords.sc),
+            ("avi", self.type_passwords.avi),
+        ]
+        .into_iter()
+        .filter_map(|(kind, value)| value.map(|value| (kind.to_owned(), value)))
+        .collect::<BTreeMap<_, _>>();
+        for password in type_passwords.values() {
+            let (_, _, malformed) = SHIFT_JIS.encode(password);
+            if malformed {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_KEY_CP932",
+                    "Minori type password cannot be encoded as CP932",
+                ));
+            }
+        }
+        self.archive_keys
             .into_iter()
-            .map(|(role, value)| {
-                if value.archive_xor.is_some_and(|xor| xor != expected_xor) {
+            .map(|(role, key)| {
+                let index_key = decode_hex_key(&key.index_key_hex, false)?;
+                let data_key = decode_hex_key(&key.data_key_hex, role != "mov")?;
+                if role == "mov" && !key.data_key_hex.is_empty() {
                     return Err(invalid(
-                        "ASTRA_EMU_MINORI_PRIVATE_XOR",
-                        "Minori private archive XOR does not match mount options",
-                    ));
-                }
-                let video_key = value
-                    .video_key
-                    .map(|key| {
-                        key.try_into().map_err(|_| {
-                            invalid(
-                                "ASTRA_EMU_MINORI_PRIVATE_VIDEO_KEY",
-                                "Minori video key must contain exactly 256 bytes",
-                            )
-                        })
-                    })
-                    .transpose()?;
-                if value
-                    .type_passwords
-                    .keys()
-                    .any(|key| !matches!(key.as_str(), "png" | "ogg" | "sc" | "avi"))
-                {
-                    return Err(invalid(
-                        "ASTRA_EMU_MINORI_PRIVATE_TYPE_KEY",
-                        "Minori private payload contains an unknown type key",
+                        "ASTRA_EMU_MINORI_KEY_MOVIE",
+                        "movie archive data_key_hex must be empty",
                     ));
                 }
                 Ok((
                     role,
                     PazRoleScheme {
-                        index_key: value.index_key,
-                        data_key: value.data_key,
-                        type_passwords: value.type_passwords,
-                        archive_xor: value.archive_xor,
-                        video_key,
+                        index_key,
+                        data_key,
+                        type_passwords: type_passwords.clone(),
                     },
                 ))
             })
             .collect()
     }
+}
+
+fn decode_hex_key(value: &str, required: bool) -> Result<Vec<u8>, LegacyCoreError> {
+    if !value.len().is_multiple_of(2) || value.bytes().any(|byte| !byte.is_ascii_hexdigit()) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_KEY_HEX",
+            "Minori key file contains invalid even-length hex",
+        ));
+    }
+    if value.is_empty() && !required {
+        return Ok(Vec::new());
+    }
+    let bytes = hex::decode(value).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_KEY_HEX",
+            "Minori key file contains invalid hex",
+        )
+    })?;
+    if !(4..=56).contains(&bytes.len()) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_KEY_LENGTH",
+            "Minori Blowfish key length must be between 4 and 56 bytes",
+        ));
+    }
+    Ok(bytes)
 }
 
 fn validate_options(options: &MinoriFamilyOptions) -> Result<(), LegacyCoreError> {
@@ -237,13 +222,14 @@ fn validate_options(options: &MinoriFamilyOptions) -> Result<(), LegacyCoreError
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
     if options.paz_version > 2
-        || options.private_profile_schema != MINORI_PRIVATE_PROFILE_SCHEMA
-        || options.private_profile_id.is_empty()
+        || options.key_file.as_os_str().is_empty()
+        || options.key_file.is_absolute()
+        || options
+            .key_file
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
         || roles.len() != options.archive_roles.len()
         || roles != REQUIRED_ARCHIVE_ROLES.into_iter().collect()
-        || options.cache.enabled
-            && (options.cache.entry_bytes == 0
-                || options.cache.total_bytes < options.cache.entry_bytes)
     {
         return Err(invalid(
             "ASTRA_EMU_MINORI_MOUNT_OPTIONS",
@@ -257,22 +243,93 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
     LegacyCoreError::invalid(code, message)
 }
 
-fn cache_init_error(error: PlaintextCacheError) -> LegacyCoreError {
-    match error {
-        PlaintextCacheError::EntryLimit => invalid(
-            "ASTRA_EMU_MINORI_CACHE_ENTRY_LIMIT",
-            "Minori cache quotas are invalid",
-        ),
-        PlaintextCacheError::Corrupt => invalid(
-            "ASTRA_EMU_MINORI_CACHE_CORRUPT",
-            "Minori cache metadata is corrupt",
-        ),
-        PlaintextCacheError::Permission(_) => invalid(
-            "ASTRA_EMU_MINORI_CACHE_PERMISSION",
-            "Minori cache privacy permissions could not be enforced",
-        ),
-        PlaintextCacheError::Io(_) => {
-            invalid("ASTRA_EMU_MINORI_CACHE_IO", "Minori cache I/O failed")
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_file() -> MinoriKeyFile {
+        MinoriKeyFile {
+            schema: MINORI_KEY_FILE_SCHEMA.into(),
+            type_passwords: MinoriTypePasswords {
+                png: Some("画像".into()),
+                ogg: None,
+                sc: Some("script".into()),
+                avi: None,
+            },
+            archive_keys: REQUIRED_ARCHIVE_ROLES
+                .into_iter()
+                .map(|role| {
+                    (
+                        role.into(),
+                        MinoriArchiveKeyFile {
+                            index_key_hex: "00112233".into(),
+                            data_key_hex: if role == "mov" {
+                                String::new()
+                            } else {
+                                "44556677".into()
+                            },
+                        },
+                    )
+                })
+                .collect(),
         }
+    }
+
+    #[test]
+    fn strict_key_file_accepts_exact_roles_and_cp932_passwords() {
+        let schemes = key_file().into_schemes().unwrap();
+        assert_eq!(schemes.len(), REQUIRED_ARCHIVE_ROLES.len());
+        assert!(schemes["mov"].data_key.is_empty());
+        assert_eq!(schemes["scr"].type_passwords["png"], "画像");
+    }
+
+    #[test]
+    fn strict_key_file_rejects_role_hex_movie_and_cp932_violations() {
+        let mut missing = key_file();
+        missing.archive_keys.remove("sys");
+        assert!(missing.into_schemes().is_err());
+
+        let mut bad_hex = key_file();
+        bad_hex.archive_keys.get_mut("scr").unwrap().index_key_hex = "abc".into();
+        assert!(bad_hex.into_schemes().is_err());
+
+        let mut movie = key_file();
+        movie.archive_keys.get_mut("mov").unwrap().data_key_hex = "00112233".into();
+        assert!(movie.into_schemes().is_err());
+
+        let mut password = key_file();
+        password.type_passwords.png = Some("🙂".into());
+        assert!(password.into_schemes().is_err());
+    }
+
+    #[test]
+    fn strict_toml_rejects_unknown_fields_and_duplicate_roles() {
+        let unknown = "schema = 'astra.emu.minori.keys.v1'\nunknown = true\n[archive_keys]\n";
+        assert!(toml::from_str::<MinoriKeyFile>(unknown).is_err());
+
+        let duplicate = "schema = 'astra.emu.minori.keys.v1'\n[archive_keys.scr]\nindex_key_hex='00112233'\ndata_key_hex='44556677'\n[archive_keys.scr]\nindex_key_hex='00112233'\ndata_key_hex='44556677'\n";
+        assert!(toml::from_str::<MinoriKeyFile>(duplicate).is_err());
+    }
+
+    #[test]
+    fn family_options_require_exact_roles_and_safe_key_path() {
+        let valid = MinoriFamilyOptions {
+            paz_version: 2,
+            index_size_xor: 0,
+            key_file: PathBuf::from("key.toml"),
+            archive_roles: REQUIRED_ARCHIVE_ROLES
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        };
+        assert!(validate_options(&valid).is_ok());
+
+        let mut traversal = valid.clone();
+        traversal.key_file = PathBuf::from("../key.toml");
+        assert!(validate_options(&traversal).is_err());
+
+        let mut duplicate = valid;
+        duplicate.archive_roles[0] = duplicate.archive_roles[1].clone();
+        assert!(validate_options(&duplicate).is_err());
     }
 }

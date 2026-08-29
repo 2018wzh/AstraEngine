@@ -1,41 +1,57 @@
 # Minori Tooling
 
-当前 cache-enabled full verify 已连续执行两轮，覆盖 8 个 source、14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes；首轮 `cache_hit_count=29,648`，第二轮 `43,594`，aggregate hash 保持一致。该轮只记录脱敏计数与聚合 hash；identity 漂移、淘汰和损坏恢复仍是独立门禁。
+旧 profile/cache identity 下的八包 full verify 已归档为历史结果。key-file/streaming hard cut 后需要重新执行同等范围的真实 verify，旧 aggregate hash 不能作为新 identity 的通过证据。
 
-通用 VFS 操作统一走 `astra-emu-cli vfs`。CLI 只从显式 `--game-dir` 和严格 YAML mount profile 建立 family mount，不按注册顺序选择 provider，也不保留旧 `astra-emu-cli minori` 入口。
+通用 VFS 操作统一走 `astra-emu-cli vfs`。CLI 只从显式 `--game-dir` 和严格 YAML launch profile 建立 family mount，不按注册顺序选择 provider，也不保留旧 `astra-emu-cli minori` 入口。
 
 ```sh
-cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> verify
-cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> list --uri minori:/
-cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> stat --uri minori:/scr/example.sc
-cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> read --uri minori:/scr/example.sc --offset 0 --length 4096
-cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --mount-profile <profile.yaml> extract --output <private-output> --prefix minori:/scr/
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launch-profile <profile.yaml> verify
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launch-profile <profile.yaml> list --uri minori:/
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launch-profile <profile.yaml> stat --uri minori:/scr/example.sc
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launch-profile <profile.yaml> read --uri minori:/scr/example.sc --offset 0 --length 4096
+cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launch-profile <profile.yaml> extract --output <private-output> --prefix minori:/scr/
 ```
 
-`verify` 以 4 MiB range 完整流读每个 entry，校验 decoded size、可用 content hash、source mutation，并复读首尾最多 4 KiB。报告只包含 family、source/entry/range/byte/cache 计数与聚合 hash。`read` 默认也只输出 hash 和范围信息；只有显式 `--format hex` 或 `--format text --encoding <encoding>` 才向 stdout 输出最多 64 KiB 内容。`--output` 可原子写出最多 64 MiB 的私有 range。
+`verify` 以 4 MiB range 完整流读每个 entry，校验 decoded size、可用 content hash、source mutation，并复读首尾最多 4 KiB。报告只包含 family、source/entry/range/byte 计数与聚合 hash。`read` 默认也只输出 hash 和范围信息；只有显式 `--format hex` 或 `--format text --encoding <encoding>` 才向 stdout 输出最多 64 KiB 内容。`--output` 可原子写出最多 64 MiB 的私有 range。
 
 `extract` 的 `--prefix`、`--glob` 和 `--entry` 互斥；不传 selector 表示整树。写入前检查容量、大小写冲突、既有目标和路径，全部文件写入 staging tree 后才提交。Linux 提供前台只读 `mount --mountpoint <directory>`；Windows 和 macOS 不声明 FUSE。
 
-Minori 专用导入与脚本研究放在独立 CLI：
-
-当根目录的旧 patch 已存在而对应 mount profile 缺失时，可使用 `recover-garbro-profile` 恢复 profile。调用方必须显式提供相对游戏根的 data-only private patch；工具以当前 GARbro scheme 重建私有 payload 后与该 patch 的注册 payload 做精确字节比较。只在 profile 和临时目标都不存在且比较一致时原子写入 profile；不覆盖 patch、不转换旧 decoder callback patch，也不输出 key、payload 或本地路径。
+Minori 专用 inventory 与脚本研究放在独立 CLI。工具不生成 key，不读取 GARbro `Formats.dat`，也不迁移旧 patch/profile：
 
 ```sh
 cargo run -p astra-emu-minori-cli -- scan-archives --game-dir <case-root>
-cargo run -p astra-emu-minori-cli -- import-garbro-scheme --formats <Formats.dat> --title <title> --game-dir <case-root>
-cargo run -p astra-emu-minori-cli -- census-scripts --game-dir <case-root> --mount-profile <profile.yaml>
-cargo run -p astra-emu-minori-cli -- census-media --game-dir <case-root> --mount-profile <profile.yaml>
+cargo run -p astra-emu-minori-cli -- census-scripts --game-dir <case-root> --launch-profile <profile.yaml>
+cargo run -p astra-emu-minori-cli -- census-media --game-dir <case-root> --launch-profile <profile.yaml>
 ```
 
 `scan-archives` 递归识别 `.paz` 与 `.pazA` 至 `.pazZ`，阻断 symlink、空文件、重复 role/part 和不连续分卷。输出只包含 role、文件数、字节数和 inventory hash，不写本地路径或 payload。当前样本结果为 8 个逻辑 archive、18 个物理文件、5742470010 bytes，required role set 完整匹配。
 
-`import-garbro-scheme` 使用纯 Rust 两阶段 NRBF reader，只接受预期的 Musica/PAZ graph。它原子生成 data-only `astraemu.patch.luau` 与 `astraemu.minori.mount.yaml`；任一目标或临时文件已存在即阻断，成对提交失败会回滚本次新文件。Luau 只调用 `astra.family.register_private_profile` 注册 opaque key/policy payload，不参与 index 或 entry 解密。key 不进入 YAML、stdout、report 或日志。
+Launch profile 使用 `astra.emu.family_launch_profile.v1`。Minori `family_options` 必须声明 PAZ version、index XOR、八个 archive role 和相对 `key_file`。`key.toml` 由用户手工维护，严格使用 `astra.emu.minori.keys.v1`；不能通过 CLI 参数传 key，也不能写入 YAML、stdout、report 或日志。
+
+```yaml
+schema: astra.emu.family_launch_profile.v1
+profile_id: minori-local
+family_id: minori
+mount_id: minori-game
+prefix: "minori:/"
+runtime:
+  entry_uri: "minori:/scr/start.sc"
+  launch_mode: title
+family_options_schema: astra.emu.minori.mount_options.v2
+family_options:
+  paz_version: 2
+  index_size_xor: 0
+  key_file: key.toml
+  archive_roles: [bg, bgm, scr, st, sys, se, voice, mov]
+```
+
+旧 `astraemu.minori.mount.yaml` 不再读取。Manager 只读取游戏目录内的 `astraemu.minori.launch.yaml`；CLI 和研究工具通过 `--launch-profile` 显式接收同一 schema。runtime entry 和 `direct`/`title` 启动模式只来自该文件，不扫描第一个脚本，也不读取环境变量覆盖。
 
 Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged `event` 形状，例如键盘输入使用 `{"type":"keyboard","state":"pressed",...}`，退出使用 `{"type":"shutdown"}`。旧 externally-tagged 的 `{"Keyboard":...}`、PascalCase button state 与裸 `"Shutdown"` 会以 `ASTRA_EMU_HEADLESS_INPUT_PARSE` 阻断；调用方必须重新序列化同一物理事件，不能让 reader 兼容两种 wire format。
 
 脚本在等待输入时会暴露 host-owned 的 `runtime.awaiting_input` 观测值。它仅由等待所接受的物理输入 mask 聚合哈希，适合输入序列的 `await` 条件；不会输出 await token、脚本位置、商业文本或资源名。一次确认应将 press/release 排在同一 fixed tick，避免 release 在等待已解决后成为未消费 edge。
 
-当前合法样本已通过真实导入、八包 14,502-entry manifest v2 full verify、同一 identity 的 cache second-run，以及 89 脚本的 payload-free census。两轮 full verify 均执行 43,818 次 range read、读取 6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`。补丁、key、输入数据库、明文 cache、导出内容和 disassembly 都留在本地私有目录。
+当前合法样本的旧 no-cache identity 已完成八包 14,502-entry full verify，89 脚本的 payload-free census 也已通过。key-file/streaming identity 的真实 verify 仍待重跑。key、导出内容和 disassembly 都留在本地私有目录。
 
 `census-scripts` 当前输出 `astra.emu.minori.sc_census.v5`。除总量、opcode、音频和角色聚合外，`scripts` 数组只保留稳定序号、解码大小、源字节 SHA-256、行/命令计数、opcode 计数和 unknown 计数；不写脚本 URI、正文、operand、label 或跳转目标。这样可以在不泄露商业脚本的前提下定位单文件 parser/runtime 覆盖差异。
 

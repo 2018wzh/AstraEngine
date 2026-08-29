@@ -9,12 +9,12 @@
 
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
 
-当前八包 cache-enabled full verify 已完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`。跨运行 second-run 已在同一 identity 下完成；identity 漂移、淘汰和损坏恢复仍是独立门禁。
+旧 private-profile/cache identity 下曾完成八包 full verify；该结果仅保留为迁移前历史，不是当前 key-file/streaming identity 的通过证据。当前实现必须重新执行无明文缓存的 full verify，并验证重复读取重新访问密文 source。
 
 - [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
 - [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
 - [x] 当前签名 release plugin 的 title→config→movie→skip→title slice 报告 `passed`：3102 fixed steps、9 个 retained frame sample、零 diagnostic；该结果只覆盖 media/provider 与标题恢复接线，不覆盖完整剧情 terminal。
-- [ ] 正式音频人工听审、完整路线与自然 unlock、gallery、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合；cache second-run 已在同一八包 identity 下完成，但不替代这些独立门禁。
+- [ ] 正式音频人工听审、完整路线与自然 unlock、gallery、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合；旧 cache second-run 不属于当前 key-file/streaming identity，不能替代这些门禁。
 
 ## 当前媒体复核（2026-08-26）
 
@@ -32,7 +32,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。
 
-- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori mount profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
+- Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori launch profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
 
 - 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、同步 translation Hook、CosmicText text layer 和 writable-file save/global-progress port；旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
 - 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
@@ -66,13 +66,11 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | --- | --- | --- |
 | `family-core` mount/read_dir/stat/read_range/open_stream 契约与 manifest v2 | 已实现 | unit/compile；`family-api` 已硬迁移为 ABI DTO，不保留 VFS re-export |
 | PAZ v0-v2、分卷、zlib、随机读取 | 已实现 | GARbro contract + synthetic tests；真实八包 14502 个 entry 完成 decoded full verify |
-| 纯 Rust `MinoriPazDecryptProvider` | 已实现 | Blowfish、RC4 skip、archive XOR、zlib、movie transform；没有 Luau callback 或 fallback |
-| Trusted Luau v2 private profile | 已实现 | data-only 一次注册、sandbox 与预算 tests；Minori Luau 不执行逐 entry 解密 |
-| 公共 plaintext cache、identity、权限、atomic/LRU | 已实现 | corruption/identity/LRU tests；Windows owner-only DACL 与 Unix mode 失败即阻断 |
+| Minori family-owned 流式解密 | 已实现 | Blowfish、RC4 skip、archive XOR、zlib、movie transform；没有 Luau callback、明文 cache 或 fallback |
+| 严格 `key.toml` | 已实现 | 有界私有文件读取、八 role、hex/Blowfish 长度、CP932 和 movie key 约束已有 unit tests |
 | 公共 viewer tree/stat/page/search/text/hex/media binding | backend 已实现 | image/audio/video 必须显式 `DecodeProviderRegistry` binding；Manager UI 接线和真实预览验收待补 |
 | 公共 desktop verify/extract | 已实现 | Windows 八包 manifest v2 full verify 已通过；extract contract 已接入，macOS 运行证据待补 |
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
-| GARbro scheme importer | 已实现 | 独立 CLI 使用纯 Rust 两阶段 NRBF reader；原子生成 patch/profile，不使用 managed helper 或 fallback |
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`census-scripts` v5 另输出不含 URI/正文/operand 的逐文件序号、源 hash、大小和 opcode 计数；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
 | Minori deterministic VM state 与 control-flow | E2 route | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie 和 end；未确认 operand 继续阻断 |
@@ -80,20 +78,19 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
 | Config writable-file persistence | 已实现 | `astra.emu.minori.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |
 
-当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。纯 Rust GARbro scheme importer 生成的私有补丁已在同一 mount/profile/private-profile identity 下完成两轮 manifest v2 full verify：每轮 14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，第二轮 `cache_hit_count=43,594`；aggregate hash 保持一致。该结果关闭真实 cache second-run，但不替代 identity 漂移、损坏恢复和配额淘汰门禁。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
+当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。旧 no-cache identity 曾完成 14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes；key-file/streaming hard cut 后必须重新执行同等范围的真实 full verify。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 
 ## 下一阶段 Archive
 
 - [x] Probe game root and classify `bg/bgm/scr/st/sys/se/voice/mov`，包括 `bg.pazA` 至 `bg.pazJ`。
-- [x] 通过本地私有 Luau patch 解出八个 index。
-- [x] 对八包执行 decoded full verify；cache 关闭的完整读取与首尾复读已通过。
-- [x] 在同一 private-profile identity 下复核八包 cache second-run：首轮 `cache_hit_count=29,648`，第二轮 `43,594`，aggregate hash 保持一致。
+- [x] 严格解析八 role `key.toml` 并在 mount 时一次性读取。
+- [ ] 对八包执行 key-file/streaming identity 的 decoded full verify；旧 no-cache 结果不作为本项通过证据。
 - [x] 对每个 entry descriptor 校验 offset、packed size、unpacked size 和 method。
 - [x] 拒绝 path traversal 和绝对路径 entry。
 
 ## Script
 
-- [x] 从 `scr.paz` 与原程序候选确认入口文件 `test.sc`；多脚本时 CLI 要求完整稳定 URI `--entry minori:/scr/test.sc`，不接受裸文件名，也不隐式选择。
+- [x] 从 `scr.paz` 与原程序候选确认入口文件 `test.sc`；完整稳定 URI 由 launch profile 的 `runtime.entry_uri` 唯一指定，CLI 不接受 `--entry` 覆盖。
 - [x] 拆分 select、普通 voice、stand 与本轮路线用到的主要演出 operand；未知形态仍按 source span/raw operand 阻断。
 - [x] 未确认 command/operand 保留 raw bytes、source span 和 `Unknown`。
 - [x] 完成全部已确认资源引用映射；BGM/SE、message voice、movie、stage 前景/背景、stand、CrossFade2、Firefly、SnowH、panel、chain script 均复用 VM 的已验证 operand grammar。显式 `astra.resource_audit=full`（CLI `--audit-all-resources`）会先有界枚举所有 `.sc`、读取并解析引用，再逐项 stat 非空资源；缺失、短读、超限或 VFS 不支持枚举均阻断。未知 opcode/effect 仍不猜测，按执行路径阻断。

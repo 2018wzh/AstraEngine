@@ -150,7 +150,6 @@ pub struct ManagerViewModel {
     pub translation_consent_present: bool,
     pub filter_preset: String,
     pub diagnostics_summary: String,
-    pub patches_summary: String,
     pub vndb_consent: bool,
     pub bangumi_consent: bool,
     pub sensitive_covers: bool,
@@ -383,8 +382,6 @@ impl SlintManagerAdapter {
             .set_filter_preset(model.filter_preset.as_str().into());
         self.window
             .set_diagnostics_summary(model.diagnostics_summary.as_str().into());
-        self.window
-            .set_patches_summary(model.patches_summary.as_str().into());
         self.window.set_vndb_consent(model.vndb_consent);
         self.window.set_bangumi_consent(model.bangumi_consent);
         self.window.set_sensitive_covers(model.sensitive_covers);

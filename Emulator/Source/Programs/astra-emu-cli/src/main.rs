@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use astra_emu_cli::{
-    run_headless, run_native, ExtensionBinding, FamilyLaunchMode, HeadlessLaunch,
-    HeadlessPerformanceArtifacts, NativeLaunch, NativeLaunchMode,
+    run_headless, run_native, ExtensionBinding, HeadlessLaunch, HeadlessPerformanceArtifacts,
+    NativeLaunch,
 };
 use clap::{Parser, Subcommand};
 
@@ -54,11 +54,7 @@ enum CliCommand {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
-        #[arg(long)]
-        entry: Option<String>,
-        #[arg(long, value_enum, default_value = "direct")]
-        launch_mode: FamilyLaunchMode,
+        launch_profile: PathBuf,
         #[arg(long, requires = "family_library")]
         family_manifest: Option<PathBuf>,
         #[arg(long, requires = "family_manifest")]
@@ -85,39 +81,6 @@ enum CliCommand {
         #[arg(long, requires = "input")]
         max_fixed_steps: Option<u64>,
     },
-    /// Launch a real native window/device path while replaying only the
-    /// validated Headless physical-input JSONL sequence.
-    WindowedE2 {
-        #[arg(long)]
-        family: String,
-        #[arg(long)]
-        game_dir: PathBuf,
-        #[arg(long)]
-        mount_profile: PathBuf,
-        #[arg(long)]
-        entry: Option<String>,
-        #[arg(long, value_enum, default_value = "direct")]
-        launch_mode: FamilyLaunchMode,
-        #[arg(long, requires = "family_library")]
-        family_manifest: Option<PathBuf>,
-        #[arg(long, requires = "family_manifest")]
-        family_library: Option<PathBuf>,
-        #[arg(long)]
-        extension_library: Option<PathBuf>,
-        #[arg(long, requires = "extension_library")]
-        extension_timeout_ms: Option<u32>,
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long)]
-        artifacts: PathBuf,
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        enable_audio: bool,
-        /// Explicit media decode provider. Minori requires the shared FFmpeg provider.
-        #[arg(long, default_value = "ffmpeg-vcpkg", value_parser = ["disabled", "ffmpeg-vcpkg"])]
-        video_provider: String,
-        #[arg(long)]
-        perfetto_trace: Option<PathBuf>,
-    },
     /// Run the same AstraEMU RuntimeWorld/provider path on astra-platform-headless.
     Headless {
         #[arg(long)]
@@ -125,11 +88,7 @@ enum CliCommand {
         #[arg(long)]
         game_dir: PathBuf,
         #[arg(long)]
-        mount_profile: PathBuf,
-        #[arg(long)]
-        entry: Option<String>,
-        #[arg(long, value_enum, default_value = "direct")]
-        launch_mode: FamilyLaunchMode,
+        launch_profile: PathBuf,
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
@@ -199,9 +158,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::Run {
             family,
             game_dir,
-            mount_profile,
-            entry,
-            launch_mode,
+            launch_profile,
             family_manifest,
             family_library,
             extension_library,
@@ -219,9 +176,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             run_native(NativeLaunch {
                 family_id: family.clone(),
                 game_dir,
-                mount_profile,
-                entry,
-                launch_mode,
+                launch_profile,
                 family_manifest,
                 family_library,
                 extension: extension_binding(extension_library, extension_timeout_ms),
@@ -230,7 +185,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 perfetto_trace,
                 input_path: input,
                 max_fixed_steps,
-                mode: NativeLaunchMode::Interactive,
             })
             .await?;
             tracing::info!(
@@ -238,56 +192,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 family = family.as_str()
             );
         }
-        CliCommand::WindowedE2 {
-            family,
-            game_dir,
-            mount_profile,
-            entry,
-            launch_mode,
-            family_manifest,
-            family_library,
-            extension_library,
-            extension_timeout_ms,
-            input,
-            artifacts,
-            enable_audio,
-            video_provider,
-            perfetto_trace,
-        } => {
-            tracing::info!(
-                event = "astra_emu_cli_windowed_e2_started",
-                family = family.as_str()
-            );
-            run_native(NativeLaunch {
-                family_id: family.clone(),
-                game_dir,
-                mount_profile,
-                entry,
-                launch_mode,
-                family_manifest,
-                family_library,
-                extension: extension_binding(extension_library, extension_timeout_ms),
-                enable_audio,
-                video_provider,
-                perfetto_trace,
-                input_path: Some(input),
-                max_fixed_steps: None,
-                mode: NativeLaunchMode::WindowedE2 {
-                    artifact_root: artifacts,
-                },
-            })
-            .await?;
-            tracing::info!(
-                event = "astra_emu_cli_windowed_e2_completed",
-                family = family.as_str()
-            );
-        }
         CliCommand::Headless {
             family,
             game_dir,
-            mount_profile,
-            entry,
-            launch_mode,
+            launch_profile,
             input,
             artifacts,
             family_manifest,
@@ -330,9 +238,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let report = run_headless(HeadlessLaunch {
                 family_id: family.clone(),
                 game_dir,
-                mount_profile,
-                entry,
-                launch_mode,
+                launch_profile,
                 input_path: input,
                 artifact_root: artifacts,
                 family_manifest,
@@ -377,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_commands_hard_cut_from_engine_to_family_and_mount_profile() {
+    fn runtime_commands_hard_cut_to_family_launch_profile() {
         assert!(Cli::try_parse_from([
             "astra-emu-cli",
             "headless",
@@ -411,13 +317,38 @@ mod tests {
             "minori",
             "--game-dir",
             "game",
-            "--mount-profile",
-            "mount.yaml",
+            "--launch-profile",
+            "launch.yaml",
             "--input",
             "input.jsonl",
             "--artifacts",
             "artifacts"
         ])
         .is_ok());
+        assert!(Cli::try_parse_from(["astra-emu-cli", "windowed-e2"]).is_err());
+        assert!(Cli::try_parse_from([
+            "astra-emu-cli",
+            "run",
+            "--family",
+            "minori",
+            "--game-dir",
+            "game",
+            "--mount-profile",
+            "mount.yaml"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "astra-emu-cli",
+            "run",
+            "--family",
+            "minori",
+            "--game-dir",
+            "game",
+            "--launch-profile",
+            "launch.yaml",
+            "--entry",
+            "minori:/scr/main.sc"
+        ])
+        .is_err());
     }
 }

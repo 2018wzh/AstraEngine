@@ -22,11 +22,11 @@ pub use provider::*;
 pub use runtime::*;
 pub use script::*;
 
-/// Bumped whenever a decoded PAZ byte contract changes so stale plaintext
-/// cache entries cannot cross reader implementations.
-pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v3";
-pub const MINORI_DECRYPT_PROVIDER_ID: &str = "astra.emu.minori.paz.decrypt.v2";
-pub const MINORI_DECRYPT_DESCRIPTOR_SCHEMA: &str = "astra.emu.minori.paz.decrypt_descriptor.v1";
-pub const MINORI_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.minori.mount_options.v1";
-pub const MINORI_PRIVATE_PROFILE_SCHEMA: &str = "astra.emu.minori.private_profile.v2";
+/// Bumped whenever the decoded PAZ byte contract changes.  The identity is
+/// part of the manifest reader hash and does not identify a separate crypto
+/// provider or cache namespace.
+pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v4";
+/// Retained as the family format identity required by the legacy factory ABI;
+/// it is not a registry, callback or manifest provider identity.
+pub const MINORI_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.minori.mount_options.v2";
 pub const MINORI_SCRIPT_IR_SCHEMA: &str = "astra.emu.minori.script_ir.v2";

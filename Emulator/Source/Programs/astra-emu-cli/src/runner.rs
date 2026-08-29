@@ -287,9 +287,7 @@ const MAX_NATIVE_SCENE_UPLOAD_BYTES: usize = 64 * 1024 * 1024;
 pub struct HeadlessLaunch {
     pub family_id: String,
     pub game_dir: PathBuf,
-    pub mount_profile: PathBuf,
-    pub entry: Option<String>,
-    pub launch_mode: FamilyLaunchMode,
+    pub launch_profile: PathBuf,
     pub input_path: PathBuf,
     pub artifact_root: PathBuf,
     pub family_manifest: Option<PathBuf>,
@@ -329,9 +327,7 @@ pub struct HeadlessPerformanceArtifacts {
 pub struct NativeLaunch {
     pub family_id: String,
     pub game_dir: PathBuf,
-    pub mount_profile: PathBuf,
-    pub entry: Option<String>,
-    pub launch_mode: FamilyLaunchMode,
+    pub launch_profile: PathBuf,
     pub family_manifest: Option<PathBuf>,
     pub family_library: Option<PathBuf>,
     pub extension: Option<ExtensionBinding>,
@@ -344,52 +340,12 @@ pub struct NativeLaunch {
     pub perfetto_trace: Option<PathBuf>,
     pub input_path: Option<PathBuf>,
     pub max_fixed_steps: Option<u64>,
-    pub mode: NativeLaunchMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum FamilyLaunchMode {
     Direct,
     Title,
-}
-
-#[derive(Debug, Clone)]
-pub enum NativeLaunchMode {
-    Interactive,
-    WindowedE2 { artifact_root: PathBuf },
-}
-
-pub const WINDOWED_E2_REPORT_SCHEMA: &str = "astra.emu.windowed_e2_report.v1";
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WindowedE2CheckpointV1 {
-    pub checkpoint_id: String,
-    pub fixed_step: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WindowedE2ReportV1 {
-    pub schema: String,
-    pub family_id: String,
-    pub family_provider_id: String,
-    pub family_binary_hash: Hash256,
-    pub build_identity_hash: Hash256,
-    pub profile_hash: Hash256,
-    pub package_hash: Hash256,
-    pub fixed_steps: u64,
-    pub terminal_reached: bool,
-    pub external_input_rejected: u64,
-    pub checkpoints: Vec<WindowedE2CheckpointV1>,
-    pub diagnostics: Vec<String>,
-}
-
-impl NativeLaunchMode {
-    #[cfg(target_os = "windows")]
-    fn is_windowed_e2(&self) -> bool {
-        matches!(self, Self::WindowedE2 { .. })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -486,6 +442,7 @@ struct PreparedFamilyCase {
     case_identity: String,
     package_hash: Hash256,
     entry_uri: String,
+    launch_mode: FamilyLaunchMode,
     fvp_pack_paths: Option<Vec<String>>,
     reader: Arc<dyn LegacyVfsReader>,
     evidence: VfsEvidenceBackend,
@@ -581,24 +538,22 @@ impl VfsEvidenceBackend {
 fn prepare_family_case(
     family_id: &str,
     game_root: &Path,
-    mount_profile: &Path,
-    entry: Option<&str>,
+    launch_profile: &Path,
     mount_set_id: &str,
 ) -> Result<PreparedFamilyCase, String> {
     match family_id {
-        "fvp" => prepare_fvp_case(game_root, mount_profile, entry, mount_set_id),
-        "minori" => prepare_minori_case(game_root, mount_profile, entry, mount_set_id),
+        "fvp" => prepare_fvp_case(game_root, launch_profile, mount_set_id),
+        "minori" => prepare_minori_case(game_root, launch_profile, mount_set_id),
         _ => Err("ASTRA_EMU_CLI_FAMILY_UNSUPPORTED".into()),
     }
 }
 
 fn prepare_fvp_case(
     game_root: &Path,
-    mount_profile: &Path,
-    entry: Option<&str>,
+    launch_profile: &Path,
     mount_set_id: &str,
 ) -> Result<PreparedFamilyCase, String> {
-    let loaded = astra_emu_family_support::load_mount_profile(mount_profile)
+    let loaded = astra_emu_family_support::load_launch_profile(launch_profile)
         .map_err(|error| error.to_string())?;
     if loaded.profile.family_id != "fvp" {
         return Err("ASTRA_EMU_VFS_FAMILY_MISMATCH".into());
@@ -616,7 +571,14 @@ fn prepare_fvp_case(
             return Err("ASTRA_EMU_FVP_ARCHIVE_DUPLICATE".into());
         }
     }
-    let case = scan_case(game_root, entry)?;
+    let launch_mode = parse_family_launch_mode(&loaded.profile.runtime.launch_mode)?;
+    let runtime_entry = loaded
+        .profile
+        .runtime
+        .entry_uri
+        .strip_prefix("fvp:/")
+        .unwrap_or(&loaded.profile.runtime.entry_uri);
+    let case = scan_case(game_root, Some(runtime_entry))?;
     let package_hash: Hash256 = case
         .content_hash
         .parse()
@@ -628,6 +590,7 @@ fn prepare_fvp_case(
         case_identity: case.case_identity,
         package_hash,
         entry_uri: case.relative_path,
+        launch_mode,
         fvp_pack_paths: Some(pack_paths.into_iter().collect()),
         reader: registry.clone(),
         evidence: VfsEvidenceBackend::Desktop {
@@ -654,8 +617,7 @@ fn normalize_fvp_pack_path(path: &str) -> Result<String, String> {
 
 fn prepare_minori_case(
     game_root: &Path,
-    mount_profile: &Path,
-    entry: Option<&str>,
+    launch_profile: &Path,
     mount_set_id: &str,
 ) -> Result<PreparedFamilyCase, String> {
     let mut registry = LegacyVfsFamilyRegistry::default();
@@ -663,36 +625,21 @@ fn prepare_minori_case(
         .register(Arc::new(MinoriVfsFamilyFactory))
         .map_err(|error| error.to_string())?;
     let loaded = registry
-        .load_profile(mount_profile)
+        .load_profile(launch_profile)
         .map_err(|error| error.to_string())?;
     let mounted = registry
         .mount("minori", game_root, &loaded)
         .map_err(|error| error.to_string())?;
-    let entry_uri = match entry {
-        Some(uri)
-            if mounted
-                .manifest()
-                .entries
-                .iter()
-                .any(|candidate| candidate.uri == uri && candidate.media_kind == "script") =>
-        {
-            uri.to_owned()
-        }
-        Some(_) => return Err("ASTRA_EMU_MINORI_ENTRY_INVALID".into()),
-        None => {
-            let scripts = mounted
-                .manifest()
-                .entries
-                .iter()
-                .filter(|candidate| candidate.media_kind == "script")
-                .map(|candidate| candidate.uri.clone())
-                .collect::<Vec<_>>();
-            if scripts.len() != 1 {
-                return Err("ASTRA_EMU_MINORI_ENTRY_REQUIRED".into());
-            }
-            scripts[0].clone()
-        }
-    };
+    let entry_uri = loaded.profile.runtime.entry_uri.clone();
+    if !mounted
+        .manifest()
+        .entries
+        .iter()
+        .any(|candidate| candidate.uri == entry_uri && candidate.media_kind == "script")
+    {
+        return Err("ASTRA_EMU_MINORI_ENTRY_INVALID".into());
+    }
+    let launch_mode = parse_family_launch_mode(&loaded.profile.runtime.launch_mode)?;
     let manifest_bytes = postcard::to_allocvec(mounted.manifest())
         .map_err(|_| "ASTRA_EMU_VFS_MANIFEST_HASH".to_owned())?;
     let package_hash = Hash256::from_sha256(&manifest_bytes);
@@ -705,6 +652,7 @@ fn prepare_minori_case(
         case_identity: format!("minori-{}", &package_hash.to_string()[7..23]),
         package_hash,
         entry_uri,
+        launch_mode,
         fvp_pack_paths: None,
         reader: adapter.clone(),
         evidence: VfsEvidenceBackend::Mounted(adapter),
@@ -726,18 +674,6 @@ pub async fn run_native(launch: NativeLaunch) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let launch_started = Instant::now();
-    let windowed_e2 = launch.mode.is_windowed_e2();
-    let windowed_artifact_root = match &launch.mode {
-        NativeLaunchMode::Interactive => None,
-        NativeLaunchMode::WindowedE2 { artifact_root } => {
-            if launch.input_path.is_none() {
-                return Err("ASTRA_EMU_WINDOWED_E2_INPUT_REQUIRED".into());
-            }
-            fs::create_dir_all(artifact_root)
-                .map_err(|_| "ASTRA_EMU_WINDOWED_E2_ARTIFACT_ROOT".to_owned())?;
-            Some(artifact_root.clone())
-        }
-    };
     if launch.max_fixed_steps == Some(0) {
         return Err("ASTRA_EMU_NATIVE_MAX_FIXED_STEPS_INVALID".into());
     }
@@ -752,9 +688,6 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         return Err("ASTRA_EMU_CLI_GAME_DIR_INVALID".into());
     }
     let executable = std::env::current_exe().map_err(|_| "ASTRA_EMU_EXECUTABLE_PATH".to_owned())?;
-    let build_identity_hash = Hash256::from_sha256(
-        &fs::read(&executable).map_err(|_| "ASTRA_EMU_EXECUTABLE_READ".to_owned())?,
-    );
     let mount_seed = Hash256::from_sha256(
         format!("{}\0{}", launch.family_id, game_root.to_string_lossy()).as_bytes(),
     );
@@ -763,8 +696,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let prepared = prepare_family_case(
         &launch.family_id,
         &game_root,
-        &launch.mount_profile,
-        launch.entry.as_deref(),
+        &launch.launch_profile,
         &mount_set_id,
     )?;
     record_native_launch_phase("case_prepare", phase_started, launch_started);
@@ -780,9 +712,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     };
     let phase_started = Instant::now();
     let family_host = astra_emu_manager_core::AstraEmuFamilyHost::new(prepared.reader.clone());
-    let (family, family_binary_hash) =
-        family_config.create_provider_with_identity(family_host.services())?;
-    let family_provider_id = family.descriptor().provider_id.clone();
+    let (family, _) = family_config.create_provider_with_identity(family_host.services())?;
     record_native_launch_phase("family_load", phase_started, launch_started);
     let mut runtime = AstraEmuRuntimeProvider::new(family, family_host)?;
     runtime.create_instance(ProviderInstanceId("astra.emu.cli.native.instance".into()))?;
@@ -797,7 +727,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             media_service_id: "astra.platform.windows.media",
             report_sink_id: "astra.emu.cli.native.report",
             stage_size: (1280, 720),
-            launch_mode: launch.launch_mode,
+            launch_mode: prepared.launch_mode,
         },
     )?;
     record_native_launch_phase("family_probe", phase_started, launch_started);
@@ -861,11 +791,6 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .ok_or_else(|| "ASTRA_EMU_NATIVE_FRAME_BOUNDS".to_owned())?;
     host_profile.limits.max_frame_bytes =
         native_rgba_frame_bytes.max(MAX_NATIVE_SCENE_UPLOAD_BYTES);
-    let profile_hash: Hash256 = host_profile
-        .hash()
-        .map_err(|error| error.to_string())?
-        .parse()
-        .map_err(|_| "ASTRA_EMU_NATIVE_PROFILE_HASH".to_owned())?;
     let phase_started = Instant::now();
     let mut host = astra_platform_windows::factory()
         .start(HostLaunchProfile::platform(host_profile))
@@ -932,26 +857,11 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let mut suspended = false;
     let mut native_input_cursor = 0usize;
     let mut native_shutdown_requested = false;
-    let mut windowed_checkpoints = Vec::<WindowedE2CheckpointV1>::new();
-    let mut external_input_rejected = 0_u64;
     let fixed_step_duration = std::time::Duration::from_nanos(probe.runtime.fixed_delta_ns);
-    let windowed_diagnostics = Vec::new();
     if let Some(input) = native_input.as_ref() {
-        let due = consume_native_inputs_due(
-            &mut driver,
-            &input.messages,
-            &mut native_input_cursor,
-            windowed_e2,
-        )?;
+        let due =
+            consume_native_inputs_due(&mut driver, &input.messages, &mut native_input_cursor)?;
         native_shutdown_requested = due.shutdown_requested;
-        if windowed_e2 {
-            for checkpoint_id in due.checkpoints {
-                windowed_checkpoints.push(
-                    capture_windowed_checkpoint(&driver, &host.client, surface, checkpoint_id)
-                        .await?,
-                );
-            }
-        }
     }
     // Build the initial retained resource set before starting the absolute-
     // deadline scheduler or accepting gameplay input. Three quiet steps after
@@ -990,21 +900,9 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
             "completed native retained-resource prewarm"
         );
         if let Some(input) = native_input.as_ref() {
-            let input_due = consume_native_inputs_due(
-                &mut driver,
-                &input.messages,
-                &mut native_input_cursor,
-                windowed_e2,
-            )?;
+            let input_due =
+                consume_native_inputs_due(&mut driver, &input.messages, &mut native_input_cursor)?;
             native_shutdown_requested = input_due.shutdown_requested;
-            if windowed_e2 {
-                for checkpoint_id in input_due.checkpoints {
-                    windowed_checkpoints.push(
-                        capture_windowed_checkpoint(&driver, &host.client, surface, checkpoint_id)
-                            .await?,
-                    );
-                }
-            }
         }
         if launch
             .max_fixed_steps
@@ -1032,22 +930,8 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                         &mut driver,
                         &input.messages,
                         &mut native_input_cursor,
-                        windowed_e2,
                     )?;
                     native_shutdown_requested = input_due.shutdown_requested;
-                    if windowed_e2 {
-                        for checkpoint_id in input_due.checkpoints {
-                            windowed_checkpoints.push(
-                                capture_windowed_checkpoint(
-                                    &driver,
-                                    &host.client,
-                                    surface,
-                                    checkpoint_id,
-                                )
-                                .await?,
-                            );
-                        }
-                    }
                 }
                 if launch
                     .max_fixed_steps
@@ -1075,8 +959,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                     window,
                     &mut viewport,
                     event.kind,
-                    windowed_e2,
-                    &mut external_input_rejected,
+                    native_input.is_some(),
                 ) {
                     Ok(NativeEventAction::Continue) => {}
                     Ok(NativeEventAction::Suspend(value)) => {
@@ -1106,8 +989,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                             window,
                             &mut viewport,
                             event.kind,
-                            windowed_e2,
-                            &mut external_input_rejected,
+                            native_input.is_some(),
                         ) {
                             Ok(NativeEventAction::Continue) => {}
                             Ok(NativeEventAction::Suspend(value)) => {
@@ -1171,8 +1053,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                         window,
                         &mut viewport,
                         event.kind,
-                        windowed_e2,
-                        &mut external_input_rejected,
+                        native_input.is_some(),
                     ) {
                         Ok(NativeEventAction::Continue) => {}
                         Ok(NativeEventAction::Suspend(value)) => {
@@ -1188,7 +1069,6 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     }
     .await;
     let fixed_step = driver.fixed_step;
-    let terminal_reached = driver.terminal;
     let audio_resource_cleanup = driver.flush_pending_audio_commands().await;
     let scene_cleanup = driver.drain_pending_scene_presents().await;
     let perfetto_cleanup = driver.finish_perfetto().map(|_| ());
@@ -1242,29 +1122,6 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         }
         (Ok(()), true) => {}
     }
-    if let Some(artifact_root) = windowed_artifact_root {
-        if native_input.is_none() {
-            return Err("ASTRA_EMU_WINDOWED_E2_INPUT_REQUIRED".into());
-        }
-        let report = WindowedE2ReportV1 {
-            schema: WINDOWED_E2_REPORT_SCHEMA.to_owned(),
-            family_id: launch.family_id.clone(),
-            family_provider_id,
-            family_binary_hash,
-            build_identity_hash,
-            profile_hash,
-            package_hash: game_identity_hash,
-            fixed_steps: fixed_step,
-            terminal_reached,
-            external_input_rejected,
-            checkpoints: windowed_checkpoints,
-            diagnostics: windowed_diagnostics,
-        };
-        let report_bytes = serde_json::to_vec_pretty(&report)
-            .map_err(|_| "ASTRA_EMU_WINDOWED_E2_REPORT_ENCODE".to_owned())?;
-        fs::write(artifact_root.join("windowed-e2-report.json"), report_bytes)
-            .map_err(|_| "ASTRA_EMU_WINDOWED_E2_REPORT_WRITE".to_owned())?;
-    }
     tracing::info!(
         event = "astra_emu_cli_native_session_closed",
         fixed_step,
@@ -1304,8 +1161,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     let prepared = prepare_family_case(
         &launch.family_id,
         &game_root,
-        &launch.mount_profile,
-        launch.entry.as_deref(),
+        &launch.launch_profile,
         &mount_set_id,
     )?;
     let game_identity_hash = prepared.package_hash;
@@ -1334,7 +1190,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             media_service_id: "astra.platform.headless.media",
             report_sink_id: "astra.emu.cli.headless.report",
             stage_size: (launch.viewport_width, launch.viewport_height),
-            launch_mode: launch.launch_mode,
+            launch_mode: prepared.launch_mode,
         },
     )?;
     if launch.audit_all_resources && launch.family_id == "minori" {
@@ -1359,7 +1215,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     tracing::info!(
         event = "astra_emu_cli_headless_profile_selected",
         family = launch.family_id.as_str(),
-        launch_mode = ?launch.launch_mode,
+        launch_mode = ?prepared.launch_mode,
         launch_entry_explicit = probe
             .runtime
             .family_options
@@ -2388,6 +2244,14 @@ fn launch_entry_explicit(mode: FamilyLaunchMode) -> &'static str {
     }
 }
 
+fn parse_family_launch_mode(value: &str) -> Result<FamilyLaunchMode, String> {
+    match value {
+        "direct" => Ok(FamilyLaunchMode::Direct),
+        "title" => Ok(FamilyLaunchMode::Title),
+        _ => Err("ASTRA_EMU_LAUNCH_MODE_INVALID".into()),
+    }
+}
+
 #[cfg(test)]
 fn fvp_probe_request(mount_set_id: &str, script_uri: &str) -> LegacyProbeRequest {
     LegacyProbeRequest {
@@ -2435,7 +2299,6 @@ fn profile_from_probe_report(
                 ("fvp.stage_height".into(), height.clone()),
                 ("astra.stage_width".into(), width),
                 ("astra.stage_height".into(), height),
-                ("patch.mode".into(), "no_patch".into()),
             ]
             .into_iter()
             .collect(),
@@ -2555,7 +2418,6 @@ fn probe_profile(
                 ("fvp.stage_height".into(), height.clone()),
                 ("astra.stage_width".into(), width),
                 ("astra.stage_height".into(), height),
-                ("patch.mode".into(), "no_patch".into()),
             ]
             .into_iter()
             .collect(),
@@ -4712,10 +4574,9 @@ fn process_native_event(
     window: WindowHandle,
     viewport: &mut NativeViewport,
     event: PlatformEventKind,
-    windowed_e2: bool,
-    external_input_rejected: &mut u64,
+    replay_active: bool,
 ) -> Result<NativeEventAction, String> {
-    if !windowed_e2 {
+    if !replay_active {
         return route_native_event(driver, window, viewport, event);
     }
     match event {
@@ -4730,36 +4591,14 @@ fn process_native_event(
         | PlatformEventKind::GamepadConnected { .. }
         | PlatformEventKind::GamepadDisconnected { .. }
         | PlatformEventKind::GamepadInput { .. } => {
-            *external_input_rejected = external_input_rejected.saturating_add(1);
             tracing::debug!(
-                event = "astra.emu.windowed_e2.external_input_rejected",
-                count = *external_input_rejected,
-                "external gameplay input was rejected by the automated windowed host"
+                event = "astra_emu_native_replay_external_gameplay_input_rejected",
+                "external gameplay input was rejected while host-internal replay was active"
             );
             Ok(NativeEventAction::Continue)
         }
-        PlatformEventKind::WindowClosed {
-            window: event_window,
-        } if event_window == window => Err("ASTRA_EMU_WINDOWED_E2_EXTERNAL_CLOSE".into()),
         other => route_native_event(driver, window, viewport, other),
     }
-}
-
-#[cfg(target_os = "windows")]
-async fn capture_windowed_checkpoint(
-    driver: &RuntimeDriver<'_>,
-    platform: &PlatformHostClient,
-    surface: SurfaceHandle,
-    checkpoint_id: String,
-) -> Result<WindowedE2CheckpointV1, String> {
-    let _captured = platform
-        .capture_surface(surface)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(WindowedE2CheckpointV1 {
-        checkpoint_id,
-        fixed_step: driver.fixed_step,
-    })
 }
 
 fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&'static str> {
@@ -4796,7 +4635,6 @@ fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&
 #[derive(Debug, Default)]
 struct NativeInputDue {
     shutdown_requested: bool,
-    checkpoints: Vec<String>,
 }
 
 #[cfg(target_os = "windows")]
@@ -4804,7 +4642,6 @@ fn consume_native_inputs_due(
     driver: &mut RuntimeDriver<'_>,
     messages: &[InputMessage],
     cursor: &mut usize,
-    allow_checkpoints: bool,
 ) -> Result<NativeInputDue, String> {
     let mut due = NativeInputDue::default();
     while let Some(message) = messages.get(*cursor) {
@@ -4814,9 +4651,6 @@ fn consume_native_inputs_due(
         match &message.event {
             PhysicalInput::Shutdown => due.shutdown_requested = true,
             PhysicalInput::Checkpoint { id } => {
-                if allow_checkpoints {
-                    due.checkpoints.push(id.clone());
-                }
                 tracing::debug!(
                     event = "astra_emu_native_input_checkpoint",
                     fixed_step = driver.fixed_step,

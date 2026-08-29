@@ -12,6 +12,7 @@ use crate::input_mapping::InputMapping;
 
 /// Per-game settings overrides. `None` fields inherit the global settings.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkSettings {
     /// Per-game device-to-key input mapping override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -19,15 +20,12 @@ pub struct WorkSettings {
     /// Per-game filter preset override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter_preset: Option<String>,
-    /// Per-game patch mode override.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub patch_mode: Option<String>,
 }
 
 impl WorkSettings {
     /// Whether no override is set at all.
     pub fn is_empty(&self) -> bool {
-        self.input_mapping.is_none() && self.filter_preset.is_none() && self.patch_mode.is_none()
+        self.input_mapping.is_none() && self.filter_preset.is_none()
     }
 }
 
@@ -62,5 +60,13 @@ mod tests {
     fn absent_fields_deserialize_as_none() {
         let restored: WorkSettings = serde_json::from_str("{}").unwrap();
         assert!(restored.is_empty());
+    }
+
+    #[test]
+    fn legacy_patch_and_cache_fields_are_rejected() {
+        for field in ["patch_mode", "private_patch", "cache_enabled"] {
+            let json = format!(r#"{{"{field}":true}}"#);
+            assert!(serde_json::from_str::<WorkSettings>(&json).is_err());
+        }
     }
 }

@@ -2,18 +2,16 @@
 
 ## 当前样本
 
-2026-08-28 cache second-run：同一八包 profile 连续两次 full verify 均覆盖 8 个 source、14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes。首轮 `cache_hit_count=29,648`，第二轮 `43,594`，aggregate hash 保持 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`；真实跨运行 second-run 已关闭，identity 漂移、淘汰和损坏恢复仍需独立测试。
-
-cache-enabled full verify 已在同一八包 profile 下完成：8 个 source、14,502 个 entry、43,818 次 range read、6,624,958,365 个 decoded bytes，`cache_hit_count=43,594`，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。该结果不替代 cache identity 漂移、淘汰和损坏恢复测试。
+2026-08-29 起，Minori 已硬切为 `key.toml` 与无明文缓存的流式解密。此前 private-profile/cache profile 下的八包 full verify 只保留为历史观察，不能作为当前 reader identity 的通过证据；当前八包 full verify、重复密文读取和峰值内存验证均待重跑。
 
 - 根目录存在 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive。
 - `bg` 由 `bg.paz` 与 `bg.pazA` 至 `bg.pazJ` 组成；全目录共 18 个 PAZ 物理文件、5742470010 bytes。
-- 八个 archive 均非空。使用本地私有补丁后，八个 index 均已解密并通过结构校验。
+- 八个 archive 均非空。旧 private-profile 下八个 index 曾通过结构校验；当前 key-file identity 尚待重新验证。
 - 已验证的 entry 数为 `bg=4616`、`bgm=49`、`scr=89`、`st=2321`、`sys=302`、`se=73`、`voice=7047`、`mov=5`，合计 14502。
 
 ## 未知
 
-manifest v2 full verify 已完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 次 range read、6624958365 个 decoded bytes，aggregate hash 为 `sha256:2ff4eef4c496a04643aa703a9bd0c22d27a626d77968b6e11ea954397cbdb640`。该轮使用显式 no-cache profile，`cache_hit_count=0`。启用 cache 的前一次尝试因平台缓存卷空间不足，在首个 cache write 处阻断；没有改用隐式目录。`scr.paz` 的 89 文件 census 记录 33728 行、33695 个 command、29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。
+manifest v2 旧 identity 曾完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 次 range read、6624958365 个 decoded bytes。该轮不是当前 manifest v3/key-file reader identity 的证据。`scr.paz` 的 89 文件 census 记录 33728 行、33695 个 command、29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。
 
 ## `夏空のペルセウス`
 

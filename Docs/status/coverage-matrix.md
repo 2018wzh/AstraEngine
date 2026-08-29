@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 29 日 Minori key-file/streaming hard cut：现行 VFS 不再执行 AstraEMU Luau patch，也不建立明文 cache。旧 cache second-run 与 aggregate hash 仅保留为迁移历史，不能证明新 identity。当前已完成严格 key parser、有界私有文件、流式 PAZ reader、旧命令/schema 删除和受影响 crate 回归；真实八包 full verify、四路线 Headless GPU E2 与 Release CLI Sandbox 验收仍开放。
+
 The signed Manager also reached its runtime-active window in the authorized Windows Sandbox with no default audio device; Diagnostics showed no blocking diagnostic after `NullAudioLane` selection and exposes `audio_endpoint=null` for the session. This is startup/UI evidence only. The null endpoint is excluded from physical-audio evidence and the Sandbox did not yield a writable artifact, so Windows E3 and formal audio review remain open.
 
 Current AstraEMU contract identity is Family ABI v10 (`astra.emu.family_abi.v10`), a hard cut from v9. The v10 step wire carries an ABI-owned typed `LegacySystemMenuRequestV1`; Manager promotes a physical pressed `pointer.secondary` edge into this request and removes the duplicate edge before the family call. Minori accepts `Open` only from a stable gameplay wait and opens its verified Save page through the existing writable-file host port. Duplicate, ambiguous, active-choice, active-media and missing-host-service cases remain blocking diagnostics.
@@ -15,7 +17,7 @@ The public `FamilyAudioService` lifecycle is also covered when `OpenAudioOutput`
 
 2026-08-28 Control/Auto follow-up: an active Minori message may rebind its existing family wait token between `Input` and `Time`. Manager Core reuses the existing runtime await identity and Manager host replaces only the pending condition; same-kind, non-message and batch-duplicate tokens remain blocking. This closes the observed duplicate-token crash path only and does not change AstraEMU `IN_PROGRESS` or Windows E3 status.
 
-2026-08-28 cache second-run evidence: the same authorized eight-archive profile passed two consecutive `astra-emu-cli vfs ... verify` runs with 8 sources, 14,502 entries, 43,818 ranges and 6,624,958,365 decoded bytes on each run. Aggregate hash stayed `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`; `cache_hit_count` increased from 29,648 to 43,594. This closes the real cross-run second-run gate, but not identity drift, corruption recovery or quota eviction.
+2026-08-29 hard cut：此前 private-profile/cache identity 的八包 second-run 只保留为历史，不能关闭当前 key-file/streaming reader 的覆盖门禁。当前 identity 需要重新执行八包 full verify、重复密文读取和峰值内存验证。
 
 2026 年 8 月 27 日增量媒体复核：`astra-media::IncrementalMediaPlayback` 已把播放配置、单调 tick、轨道/packet 形状、视频 lead/lag、迟到策略和音频/视频 packet 预算收进公共游标；`dropped_video_packets` 只在显式 `Drop` 策略下增加。当前签名 FFmpeg Minori slice 以 3102 个 fixed step、9 个 retained frame sample、连续 movie stop/completion 和标题观察完成，报告为 `passed` 且无诊断。该结果仍是 Headless E2 provider/media 证据，不关闭完整路线、正式音频听审、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
 
@@ -58,7 +60,7 @@ AstraEMU 当前实现边界以 Family ABI v10 为准：Host-owned surface、reta
 
 FVP 已进一步移除退役的 snapshot、text lease、session resource 和 step budget consumer，并恢复动态签名 lifecycle 测试。scene/text 仍以明确 migration diagnostic 阻断，因而不能把这一结果计作 presentation、Headless 或产品 E2 coverage。
 
-ABI consumer implementation 基线已更新到 `635527831e89e5ff9b87ac165b5b5532e28356c6`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `f4f64a5bb726c1759350a666a35e0a454b810f61` 并绑定唯一 workspace ABI source。
+ABI consumer implementation 基线已更新到 `635527831e89e5ff9b87ac165b5b5532e28356c6`。Filter graph 以 typed node、target 和 parameter 穿过 Family 与 Product 边界；提交 schema 已重新生成，不存在 string/hash graph resolution。RFVP fork 更新为 `23ae395bcc0499f737d63759902308b30ca37800`，已删除退役 VFS decrypt/private-profile/cache identity consumer，并绑定唯一 workspace ABI source。
 
 2026-08-03 的 Windows native 诊断另确认 PlatformHost command queue 未唤醒 Winit 是 present backlog 的直接根因。当前 command submit 和 HTTPS completion 已通过 `EventLoopProxy` 事件驱动，800-step signed Release 复跑无 backlog，scene present 间隔中位数 16.677 ms、WGPU present p99 6.129 ms；该短跑不替代 hover 动画语义、Family ABI scene bulk 零拷贝、10 分钟 audio soak 或 Manager E3。
 

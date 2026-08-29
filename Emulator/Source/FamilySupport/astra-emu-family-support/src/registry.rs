@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc};
 use astra_core::is_safe_symbol as safe_symbol;
 use astra_emu_family_core::{LegacyCoreError, LegacyMountedVfs, LegacyVfsFamilyFactory};
 
-use crate::{load_mount_profile, LoadedMountProfile};
+use crate::{load_launch_profile, LoadedLaunchProfile};
 
 #[derive(Default)]
 pub struct LegacyVfsFamilyRegistry {
@@ -26,15 +26,15 @@ impl LegacyVfsFamilyRegistry {
         Ok(())
     }
 
-    pub fn load_profile(&self, path: &Path) -> Result<LoadedMountProfile, LegacyCoreError> {
-        load_mount_profile(path)
+    pub fn load_profile(&self, path: &Path) -> Result<LoadedLaunchProfile, LegacyCoreError> {
+        load_launch_profile(path)
     }
 
     pub fn mount(
         &self,
         requested_family: &str,
         game_root: &Path,
-        loaded: &LoadedMountProfile,
+        loaded: &LoadedLaunchProfile,
     ) -> Result<Arc<dyn LegacyMountedVfs>, LegacyCoreError> {
         if requested_family != loaded.profile.family_id {
             return Err(LegacyCoreError::invalid(
@@ -48,8 +48,8 @@ impl LegacyVfsFamilyRegistry {
                 "requested family factory is not registered",
             )
         })?;
-        if factory.mount_profile_schema_id() != loaded.profile.family_options_schema
-            || factory.mount_profile_schema_hash() != loaded.family_config.schema_hash
+        if factory.family_options_schema_id() != loaded.profile.family_options_schema
+            || factory.family_options_schema_hash() != loaded.family_config.schema_hash
         {
             return Err(LegacyCoreError::invalid(
                 "ASTRA_EMU_VFS_OPTIONS_SCHEMA",
@@ -59,10 +59,9 @@ impl LegacyVfsFamilyRegistry {
         let mounted = factory.mount(&loaded.mount_context(game_root)?)?;
         let manifest = mounted.manifest();
         if manifest.family_id != requested_family
-            || manifest.mount_profile_hash != loaded.profile_hash
+            || manifest.launch_profile_hash != loaded.profile_hash
             || manifest.mount_id != loaded.profile.mount_id
             || manifest.prefix != loaded.profile.prefix
-            || manifest.decrypt_provider_id != factory.decrypt_provider_id()
         {
             return Err(LegacyCoreError::invalid(
                 "ASTRA_EMU_VFS_FACTORY_RESULT_IDENTITY",
@@ -101,7 +100,10 @@ mod tests {
         LegacyVfsMountContext,
     };
 
-    use crate::{LegacyVfsMountProfile, LoadedMountProfile, VFS_MOUNT_PROFILE_SCHEMA};
+    use crate::{
+        LegacyFamilyLaunchProfile, LegacyRuntimeLaunch, LoadedLaunchProfile,
+        FAMILY_LAUNCH_PROFILE_SCHEMA,
+    };
 
     use super::LegacyVfsFamilyRegistry;
 
@@ -111,14 +113,11 @@ mod tests {
         fn family_id(&self) -> &str {
             "fixture"
         }
-        fn mount_profile_schema_id(&self) -> &str {
+        fn family_options_schema_id(&self) -> &str {
             "fixture.options.v1"
         }
-        fn mount_profile_schema_hash(&self) -> Hash256 {
+        fn family_options_schema_hash(&self) -> Hash256 {
             Hash256::from_sha256(b"fixture.options.v1")
-        }
-        fn decrypt_provider_id(&self) -> &str {
-            "fixture.decrypt.v1"
         }
         fn mount(
             &self,
@@ -131,15 +130,18 @@ mod tests {
         }
     }
 
-    fn loaded(family: &str, schema_hash: Hash256) -> LoadedMountProfile {
-        LoadedMountProfile {
-            profile: LegacyVfsMountProfile {
-                schema: VFS_MOUNT_PROFILE_SCHEMA.into(),
+    fn loaded(family: &str, schema_hash: Hash256) -> LoadedLaunchProfile {
+        LoadedLaunchProfile {
+            profile: LegacyFamilyLaunchProfile {
+                schema: FAMILY_LAUNCH_PROFILE_SCHEMA.into(),
                 profile_id: "fixture-profile".into(),
                 family_id: family.into(),
                 mount_id: "fixture-mount".into(),
                 prefix: "fixture:/".into(),
-                private_patch: Some("private.luau".into()),
+                runtime: LegacyRuntimeLaunch {
+                    entry_uri: "fixture:/scr/main".into(),
+                    launch_mode: "direct".into(),
+                },
                 family_options_schema: "fixture.options.v1".into(),
                 family_options: serde_json::json!({}),
             },
@@ -164,7 +166,6 @@ mod tests {
             "ASTRA_EMU_VFS_FACTORY_DUPLICATE"
         );
         let temp = tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join("private.luau"), b"private").unwrap();
         assert_eq!(
             registry
                 .mount(

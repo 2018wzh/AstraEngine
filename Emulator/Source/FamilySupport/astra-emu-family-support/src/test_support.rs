@@ -47,9 +47,7 @@ impl MemoryVfs {
                 prefix: "test:/".into(),
                 reader_id: "test-reader".into(),
                 reader_hash: Hash256::from_sha256(b"reader"),
-                decrypt_provider_id: "test-decrypt".into(),
-                private_profile_hash: Hash256::from_sha256(b"profile"),
-                mount_profile_hash: Hash256::from_sha256(b"mount"),
+                launch_profile_hash: Hash256::from_sha256(b"launch"),
                 sources: vec![LegacyVfsSource {
                     source_id: "source".into(),
                     archive_role: Some("test".into()),
@@ -155,7 +153,6 @@ impl LegacyMountedVfs for MemoryVfs {
                 MemoryRange::as_slice,
             ),
             eof: end == bytes.len(),
-            cache_hit: true,
         })
     }
 

@@ -8,7 +8,7 @@ use astra_core::{is_safe_symbol, Hash256};
 use astra_emu_manager_core::{
     AstraEmuEvidenceBundleV1, EmuPlatformRunEvidenceV1, EmuProviderBindingEvidenceV1,
     EmuReleaseManifestV1, FvpParityEvidence, FvpSyscallCoverageEvidence, MetadataEvidenceV1,
-    TranslationEvidence, TrustedLuauEvidenceV1, UiHostIdentityEvidence, EMU_RELEASE_PLATFORMS,
+    TranslationEvidence, UiHostIdentityEvidence, EMU_RELEASE_PLATFORMS,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -81,7 +81,6 @@ pub fn encode_bundle(
         ("ui_host_identity".into(), "emu.evidence.ui".into()),
         ("fvp_coverage".into(), "emu.evidence.coverage".into()),
         ("fvp_parity".into(), "emu.evidence.parity".into()),
-        ("trusted_luau".into(), "emu.evidence.luau".into()),
         ("translation".into(), "emu.evidence.translation".into()),
         ("metadata".into(), "emu.evidence.metadata".into()),
     ]);
@@ -110,7 +109,6 @@ pub fn encode_bundle(
     let fvp_coverage =
         read_json::<FvpSyscallCoverageEvidence>(&input_dir.join("fvp-coverage.json"))?;
     let fvp_parity = read_json::<FvpParityEvidence>(&input_dir.join("fvp-parity.json"))?;
-    let trusted_luau = read_json::<TrustedLuauEvidenceV1>(&input_dir.join("trusted-luau.json"))?;
     let translation = read_json::<TranslationEvidence>(&input_dir.join("translation.json"))?;
     let metadata = read_json::<MetadataEvidenceV1>(&input_dir.join("metadata.json"))?;
     let mut platforms = BTreeMap::new();
@@ -128,7 +126,6 @@ pub fn encode_bundle(
         ui_host_identity,
         fvp_coverage,
         fvp_parity,
-        trusted_luau,
         translation,
         metadata,
         platforms,
@@ -183,14 +180,6 @@ pub fn encode_bundle(
         "astra.emu.fvp_parity.v1",
         "fvp-parity.bin",
         &bundle.fvp_parity,
-        &mut files,
-    )?;
-    encode(
-        &output_dir,
-        "emu.evidence.luau",
-        "astra.emu.trusted_luau_evidence.v1",
-        "trusted-luau.bin",
-        &bundle.trusted_luau,
         &mut files,
     )?;
     encode(
@@ -433,7 +422,7 @@ mod tests {
         let fragment: PackageSectionsFragment =
             serde_yaml::from_slice(&fs::read(output.join("package-sections.yaml")).unwrap())
                 .unwrap();
-        assert_eq!(fragment.package_sections.len(), 14);
+        assert_eq!(fragment.package_sections.len(), 13);
         assert!(fragment.package_sections.iter().all(|section| {
             section.path.starts_with("Evidence/AstraEMU/")
                 && section.targets == ["astra-emu-case"]
@@ -445,7 +434,7 @@ mod tests {
         let summary: BundleSummary =
             serde_json::from_slice(&fs::read(output.join("evidence-bundle.json")).unwrap())
                 .unwrap();
-        assert_eq!(summary.files.len(), 14);
+        assert_eq!(summary.files.len(), 13);
         for file in summary.files {
             let bytes = fs::read(output.join(&file.file_name)).unwrap();
             assert_eq!(file.sha256, Hash256::from_sha256(&bytes));
@@ -527,34 +516,6 @@ mod tests {
                 first_divergence_sequence: None,
                 status: "pass".into(),
                 diagnostic_codes: Vec::new(),
-            },
-        );
-        write_json(
-            input,
-            "trusted-luau.json",
-            &TrustedLuauEvidenceV1 {
-                schema: "astra.emu.trusted_luau_evidence.v1".into(),
-                policy_id: "astra.emu.trusted.v1".into(),
-                capability_ids: [
-                    "vfs.read",
-                    "patch.overlay",
-                    "decode_transform",
-                    "media_hook",
-                    "deterministic_effect",
-                ]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-                denied_capability_ids: ["filesystem", "network", "system", "native_handle"]
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
-                evaluated_script_hashes: vec![hash("patch")],
-                violation_codes: Vec::new(),
-                commercial_payload_present: false,
-                local_path_present: false,
-                deterministic_effect_count: 1,
-                status: "pass".into(),
             },
         );
         write_json(

@@ -98,14 +98,14 @@ pub struct RuntimeEditorMetadata {
 }
 ```
 
-Editor shell 读取 metadata 后决定 Project Wizard 模板、面板可见性、Content Browser 过滤、PIE adapter、Debugger view 和 Release Gate 跳转。AstraVN 暴露 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface；AstraEMU 只暴露 planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay、Trusted Luau 和 FilterGraph preset；AstraRPG 暴露 planned Map、Quest、Battle/Party/Inventory、Encounter、Behavior Graph、RPG Inspector、TRPG sheet、seat 和 transcript metadata。
+Editor shell 读取 metadata 后决定 Project Wizard 模板、面板可见性、Content Browser 过滤、PIE adapter、Debugger view 和 Release Gate 跳转。AstraVN 暴露 `.astra` Script、VN Graph、Timeline、System UI 和 Luau policy surface；AstraEMU 只暴露 planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay 和 FilterGraph preset；AstraRPG 暴露 planned Map、Quest、Battle/Party/Inventory、Encounter、Behavior Graph、RPG Inspector、TRPG sheet、seat 和 transcript metadata。
 
 ## Peer Runtimes
 
 | Runtime provider | 产品职责 | 当前边界 |
 | --- | --- | --- |
 | `NativeVnRuntimeProvider` | `.astra` canonical story、VN Core、choice/backlog/save/read-state/voice replay、Luau policy、presentation/system UI、VN package sections 和 VN release checks | 已由 `astra-vn-runtime-provider` 落地；in-process 与 FFI 都执行真实 create/open/step/save/restore/shutdown lifecycle，session 内由 RuntimeWorld StateMachine 的 `astra.vn.step` action 推进；不成为 RPG 或 EMU 的基类 |
-| `AstraEmuRuntimeProvider` | legacy case launch、family selection、old VM step bridge、text capture、Trusted Luau patch/decode、FilterGraph preset、local case report 和 EMU release checks | 内部继续使用 family `LegacyRuntimeProvider`；family plugin 不能替换 Runtime tick、Save container 或 Release Gate |
+| `AstraEmuRuntimeProvider` | legacy case launch、family selection、old VM step bridge、text capture、FilterGraph preset、local case report 和 EMU release checks | 内部继续使用 family `LegacyRuntimeProvider`；family plugin 不能替换 Runtime tick、Save container 或 Release Gate |
 | `AstraRpgRuntimeProvider` | map、party、battle、inventory、quest、encounter、AI behavior、committed output、`rpg.trpg` ruleset/profile 和 RPG-specific editor metadata | planned peer runtime；TRPG 是内部 profile，不是独立 provider；没有现有实现迁移 |
 
 ## Runtime Flow

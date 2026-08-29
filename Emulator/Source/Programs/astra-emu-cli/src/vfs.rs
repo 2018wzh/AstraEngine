@@ -23,7 +23,7 @@ pub struct VfsArgs {
     #[arg(long)]
     game_dir: PathBuf,
     #[arg(long)]
-    mount_profile: PathBuf,
+    launch_profile: PathBuf,
     #[command(subcommand)]
     command: VfsCommand,
 }
@@ -84,7 +84,6 @@ struct ReadEvidence {
     length: u64,
     hash: Hash256,
     eof: bool,
-    cache_hit: bool,
 }
 
 pub fn run(arguments: VfsArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -171,7 +170,7 @@ fn mount(arguments: &VfsArgs) -> Result<Arc<dyn LegacyMountedVfs>, LegacyCoreErr
     mount_family_vfs(
         &arguments.family,
         &arguments.game_dir,
-        &arguments.mount_profile,
+        &arguments.launch_profile,
         vec![
             Arc::new(FvpVfsFamilyFactory),
             Arc::new(MinoriVfsFamilyFactory),
@@ -230,13 +229,12 @@ fn read(
         None => println!(
             "{}",
             serde_json::to_string(&ReadEvidence {
-                schema: "astra.emu.vfs.read.v1",
+                schema: "astra.emu.vfs.read.v2",
                 family_id: vfs.manifest().family_id.clone(),
                 offset,
                 length,
                 hash: Hash256::from_sha256(&read.bytes),
-                eof: read.eof,
-                cache_hit: read.cache_hit
+                eof: read.eof
             })?
         ),
     }

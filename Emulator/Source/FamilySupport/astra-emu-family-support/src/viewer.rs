@@ -18,7 +18,6 @@ pub struct ViewerPage {
     pub offset: u64,
     pub bytes: OwnedByteBuffer,
     pub eof: bool,
-    pub cache_hit: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,7 +68,6 @@ impl LegacyVfsViewer {
             offset: read.offset,
             bytes: read.bytes,
             eof: read.eof,
-            cache_hit: read.cache_hit,
         })
     }
 

@@ -19,7 +19,7 @@ Support 还把 `has_physical_audible_output()` 作为 evidence 专用判定，�
 
 2026 年 8 月 27 日媒体复核：`astra-media::IncrementalMediaPlayback` 已统一校验播放配置、单调 tick、轨道/packet 形状、音频/视频 packet 预算、视频 lead/lag 与迟到策略；Minori 继续只绑定显式 `ffmpeg-vcpkg`，不保留手写 AVI/WMV decoder 或平台 fallback。当前签名 release plugin 的标题→配置→影片→Control 跳过→标题 Headless slice 报告 `passed`，完成 3102 fixed steps、9 个 retained frame sample，诊断为空。按当前 v9 typed observation 重新生成的首路线也已报告 `passed`：3,034,309 fixed steps、16,150 条物理输入、53 个 retained frame sample、31 个 checkpoint、route terminal、自然 unlock count=1 和最终 Exit 均成立。该输入未把已删除的首 choice 等待点计入本次 checkpoint，choice 仍由独立真实 slice 覆盖。正式音频听审、四条路线后的完整 Memories/CG/BGM/回想、cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍为 blocking。
 
-Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 仍是 Program target；legacy case 通过 `AstraEmuRuntimeProvider` 运行，每个 session 持有独立 `RuntimeWorld`。family 只注册 `LegacyRuntimeProvider` facade，私有 VM、VFS、媒体状态和诊断留在 provider session 内。Manager/RuntimeWorld 负责统一管理、Trusted Luau、文本翻译和滤镜 preset。Family ABI 已 hard cut 到 v9，Product Runtime Provider 使用 ABI v4；旧 scene/snapshot/text/session-resource/budget 路径全部删除。Minori 的唯一合法组合是 `Native + MultiLayer`，必须通过同步 Hook、Host-owned surface、retained `Layer2D` transaction 和 writable-file port 工作。Minori consumer 已完成编译迁移，并恢复受限的签名真实样本 Headless slice；open 阶段现在可按显式 resource-audit policy 对全部 `.sc` 引用做有界完整校验，消息完成也会把脚本 revision/source span/message id/text hash 固化为 v24 snapshot 的 bounded read identity，但逐字 reveal 公式仍未知。完整路线、checkpoint 语义、正式视觉/音频 review 和平台 E3 尚未闭合，因此 Stage 5 继续保持 `IN_PROGRESS`。
+Stage 5 实现旧 VN 兼容与现代化套件。AstraEMU Manager 仍是 Program target；legacy case 通过 `AstraEmuRuntimeProvider` 运行，每个 session 持有独立 `RuntimeWorld`。family 只注册 `LegacyRuntimeProvider` facade，私有 VM、VFS、媒体状态和诊断留在 provider session 内。Manager/RuntimeWorld 负责统一管理、文本翻译 Hook 和滤镜 preset；AstraEMU 不再提供 Luau patch/decode runtime。Family ABI 已 hard cut 到 v10，Product Runtime Provider 使用 ABI v4；旧 scene/snapshot/text/session-resource/budget 路径全部删除。Minori 的唯一合法组合是 `Native + MultiLayer`，必须通过同步 Hook、Host-owned surface、retained `Layer2D` transaction 和 writable-file port 工作。Minori consumer 已完成编译迁移，并恢复受限的签名真实样本 Headless slice；open 阶段现在可按显式 resource-audit policy 对全部 `.sc` 引用做有界完整校验。完整路线、checkpoint 语义、正式视觉/音频 review 和平台 E3 尚未闭合，因此 Stage 5 继续保持 `IN_PROGRESS`。
 
 2026 年 8 月 23 日增量：动态 family loader、CLI 与 Manager 已绑定 ABI v9 四个 Host port，公共 support 层提供 retained surface store、私有 writable-file Host 和像素规范化。Minori resource/text 已走 `Native + MultiLayer`；文字先经过同步 translation Hook，再由 CosmicText 与 Astra Renderer2D 写入 Host surface。consumer implementation 基线为 `635527831e89e5ff9b87ac165b5b5532e28356c6`，Manager 使用公共 validator 和 WGPU 执行，不再使用字符串 binding 或 CPU fallback；旧 Scene2D transaction consumer 已删除。真实样本 slice 已输出 154 帧、非静音音频和零 diagnostic，但 checkpoint 标签与实际画面阶段仍有偏差，Stage 状态不变。
 
@@ -154,7 +154,7 @@ Windows E3 harness 已作为 `publish = false` 的 `astra-emu-e3` 接入 workspa
 
 **Done Evidence:** `cargo test -p astra-emu-family-api legacy_pack_vfs` 和 `cargo test -p astra-release emu_gate` 通过；report 输出 `emu.legacy_pack_vfs`，且不写本地 root、payload、完整脚本或 bytecode。
 
-**Current Evidence:** in-process VFS 已从 ABI API 硬迁移到 `astra-emu-family-core`，公共 profile/Luau/cache/viewer/verify/extract/FUSE 实现进入 `astra-emu-family-support`。通用 CLI 固定为 `vfs --family`，GARbro import 与 census 位于独立 Minori CLI。Minori 只使用纯 Rust decrypt provider；Luau 只注册 data-only private profile，不存在逐 entry callback 或 fallback。重新递归扫描后确认 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive，其中 `bg` 由主包和 A–J 分卷组成，全目录共 18 个物理 PAZ 文件。合成测试覆盖 manifest v2、opaque transport、八 role、v0/v1/v2、分卷跨界、archive XOR、随机读取、源文件突变、cache identity/corruption/LRU、NRBF、ANI/SQZ 和 provider lifecycle。真实 no-cache full verify 覆盖 8 source、14502 entry、43818 range read 与 6624958365 decoded bytes；source/entry hash 合并为一次有界顺序流后，真实 mount 由约 466 秒降至约 367–403 秒。4665 个 `bg/bgm` entry 完成 media census。89 个 CP932 脚本、33728 行、33695 command、29 token 的 payload-free census 通过，unknown opcode 为 0。IDA 已闭合连续分隔符的空 positional operand、`message` 字段、音频 `*` stop、transition 配置、stage 前景/背景字段、`CrossFade2` timeline、`CMessagePanel` mode 1 和 panel 坐标公式。stage/effect/panel 只携带 VFS URI、编码 hash、尺寸和绘制指令，Host 通过 session resource channel 与唯一显式绑定的纯 Rust `ImageDecodeProvider` 解码；message 正文通过一次性 lease、显式 Noto Sans JP、CosmicText 和 Renderer2D 合成，不走 fallback，商业正文和 RGBA 都不进入 snapshot 或 report。snapshot v7 保存 CrossFade2 accumulator、最后可见 frame 和 message panel；旧 v5/v6 只作 fail-fast rejection。Await request 只在等待创建时提交，持续等待不会重发同一 token，用于完成 input await 的 edge 由 Host 消费。迁移后，签名动态 Minori plugin 经通用 `--family`/`--mount-profile` composition 完成真实八包 Headless 373 tick，形成黑场、竖排标题、可见 CrossFade2、底部 panel 与前两条 message 共 6 个 checkpoint、9 个实际呈现帧、BGM/SE artifact 与 snapshot round-trip，diagnostic 为 0。两条日文正文无缺字、横向裁剪、拉伸或旧文本残留。runner 生成与专用 report 同 identity 的公共 `astra.headless_run_report.v2` sidecar；真实 `prepare-review`、bundle 模型检查和 `validate-review` 已通过当前 slice。cache identity、完整 effect 周期、stand、transition 动画、select、普通 voice、Linux FUSE、macOS extract 和 Manager media preview 仍缺完整证据，因此本项保持 `IN_PROGRESS`。
+**Current Evidence:** in-process VFS 位于 `astra-emu-family-core`，profile/viewer/verify/extract/FUSE 位于 `astra-emu-family-support`。2026-08-29 已从 AstraEMU Luau/private-profile/plaintext-cache 硬切到严格 `key.toml` 与 family-owned 流式解密；GARbro importer、NRBF reader、patch UI/evidence 和 `windowed-e2` 同步删除。重新扫描确认 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive，其中 `bg` 由主包和 A–J 分卷组成，全目录共 18 个物理 PAZ 文件。迁移前 identity 的 full verify 与 Headless slice 仅保留为历史；当前 manifest v3/key-file identity 的八包 full verify、四路线 GPU E2 和 Release CLI Sandbox 视觉验收必须重新执行，因此本项保持 `IN_PROGRESS`。
 
 2026-08-26 follow-up：Manager 的 Minori AVI streaming 与 first-frame preview 已统一到 AstraMedia 的显式增量契约；Manager/Headless 在 composition root 直接注册 `astra.decode.ffmpeg.incremental`，Minori 只保留 AVI 扩展名/RIFF 身份和 preview binding。Minori video extension 在进入 FVP/Windows provider 前严格只接受 `avi`，其他 codec 返回 `ASTRA_EMU_MINORI_VIDEO_CODEC_UNSUPPORTED`。生产路径通过显式 `ffmpeg-vcpkg` 绑定使用 FFmpeg 的 demux/codec，`wmv-decoder`/手写 AVI 路径已从 Minori 和 CLI 依赖移除。未编译 FFmpeg 时直接返回 blocking diagnostic，不回退到平台 codec。真实样本 Headless media slice 已完成 60 fixed ticks、16 帧、111104 音频帧、非静音和零 diagnostic；这仍只是 provider-boundary/E2 evidence，未生成 Windows E3 或完整路线 artifact。
 
@@ -278,30 +278,6 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 **Done Evidence:** 自动选择结果可复现，report 能解释命中、跳过、覆盖和最终 family。
 
 **Linked Test IDs:** `T-S5-AUTOPROBE-01`
-
-## S5-SCRIPT-01 Trusted Luau patch/decode runtime
-
-**ID:** `S5-SCRIPT-01`
-
-**Status:** `IN_PROGRESS`
-
-**Goal:** AstraEMU 支持用户 Luau 脚本在 Trusted Project Profile 下执行 patch、decode、text/media hook 和 deterministic effect injection。
-
-**Depends On:** `S5-FAMILY-01`、`S3-LUAU-01`、`Docs/contracts/script-vn.md`
-
-**Target Paths:** `Emulator/Source/Manager/astra-emu-manager-core/src/patch.rs`、`Emulator/Source/Manager/astra-emu-manager/src/desktop_source.rs`、Manager launch orchestration
-
-**Steps:**
-
-1. 定义 `TrustedEmuScriptProfile`，统一使用 Luau，不把 Lua/TJS 作为用户脚本语言。
-2. 暴露 read-only VFS、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 effect intent host API。
-3. 状态注入只能提交 typed Blackboard、input、tag 或 media intent，并在 fixed tick 边界应用。
-4. 禁止 native handle、Actor 指针、raw filesystem、raw network、system call、未授权 key 提取和访问控制规避。
-5. 脚本触发禁止能力时隔离禁用该脚本并写入 redacted diagnostic；只有 case profile 明确允许无补丁模式时继续，否则阻断启动。
-
-**Current Evidence:** 每次执行创建 fresh isolated Luau VM；source、memory、instruction、VFS read、intent、overlay count/bytes 均有界，overlay 只在当前 mount memory 中生效并在 unbind 销毁。Manager 只有 profile 显式选择 `trusted` 才读取固定相对 URI `astraemu.patch.luau`；违规或缺文件直接阻断启动，`no_patch` 也必须显式记录。decode transform 会生成 mount-scoped overlay；text/media hook 会在 host 应用前重新校验 replacement 与 VFS URI；deterministic effect 只在 fixed tick 进入 Runtime。正式 release evidence 尚未生成，所以本项仍为 `IN_PROGRESS`。
-
-**Linked Test IDs:** `T-S5-SCRIPT-01`
 
 ## S5-TEXT-01 Text dump and translation provider
 
@@ -489,7 +465,7 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Status:** `IN_PROGRESS`
 
-**Goal:** Release Gate 检查 FVP full-flow、`LegacyRuntimeProvider` facade、显式 runtime/family/UI binding、Slint/WGPU/toolchain/license identity、Trusted Luau、ECNU translation policy、filter、snapshot/replay、host identity 与 report redaction。
+**Goal:** Release Gate 检查 FVP full-flow、`LegacyRuntimeProvider` facade、显式 runtime/family/UI binding、Slint/WGPU/toolchain/license identity、Minori key-file/streaming identity、ECNU translation policy、filter、host identity 与 report redaction。
 
 **Depends On:** `S5-FAMILY-01`、`S5-AUTOPROBE-01`、`S5-SCRIPT-01`、`S5-TEXT-01`、`S5-FILTER-01`、`S5-FVP-01`、`S5-MANAGER-UI-01`
 
@@ -497,13 +473,13 @@ FVP 补充证据：FVP 与 Minori factory 由 CLI/Manager 显式注册。FVP fac
 
 **Steps:**
 
-1. 增加 explicit runtime/family/UI binding、Slint/wgpu/toolchain/license identity、FVP full-flow/syscall/parity/snapshot/replay、Trusted Luau 与 translation consent/provider/cache checks。
+1. 增加 explicit runtime/family/UI binding、Slint/wgpu/toolchain/license identity、FVP full-flow/syscall/parity、Minori key-file/streaming 与 translation consent/provider checks。
 2. 校验 plugin ABI/engine/rustc/feature fingerprint、binary hash、package eligibility、官方签名、Android APK/native manifest 或 iOS static registration binding。
 3. 校验 Windows/Android run identity 绑定同一 build/profile/package/session/input sequence，以及视觉、音频、输入消费、route/terminal 和 surface lifecycle evidence。
 4. 所有 report 只允许 alias/hash/offset/size/count/diagnostic；绝对路径、URI、商业 payload、secret、未授权截图/音频或访问控制规避材料必须 blocking。
-5. 编写 missing/conflicting provider、missing syscall、signature mismatch、denied script、translation consent/cache 和 payload redaction 失败测试。
+5. 编写 missing/conflicting provider、missing syscall、signature mismatch、非法 key file、translation consent 和 payload redaction 失败测试。
 
-**Current Evidence:** release gate 已有 14 项 fail-closed check，并以完整 passing fixture 验证 provider/UI/FVP/Luau/translation/六平台 continuity。`astra-emu-evidence` 会在写入 package sections 前拒绝 unknown field、payload-like field、绝对路径、identity drift 和不完整 E2/E3 lifecycle。真实平台 evidence 尚未生成，不能把 passing fixture 当作发布证据。
+**Current Evidence:** release gate 已删除 AstraEMU Luau evidence 与 cache identity 输入；`astra-emu-evidence` 会在写入 package sections 前拒绝 unknown field、payload-like field、绝对路径、identity drift 和不完整 E2/E3 lifecycle。当前 key-file/streaming identity 的真实平台 evidence 尚未生成，不能把 passing fixture 当作发布证据。
 
 **Linked Test IDs:** `T-S5-GATE-01`
 

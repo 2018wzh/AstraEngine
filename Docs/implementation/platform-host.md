@@ -25,25 +25,11 @@ budget before the consumer's in-place BGRA-to-RGBA conversion. A hardware
 transform request is not treated as proof that a particular adapter selected a
 hardware transform; that proof remains an explicit release-gate artifact.
 
-### Windowed E2 host path
+### Native replay host path
 
-`astra-emu-cli windowed-e2` is a developer-only conformance path. It creates the
-same native Windows window, WGPU device/queue, PlatformHost audio service and
-decode workers used by the native launch, but the JSONL file remains the sole
-gameplay input source. The input must be the validated
-`astra.user_input_sequence.v1` sequence and must end with `Shutdown`; keyboard,
-pointer, touch, gamepad, IME and external close events are rejected at the host
-boundary and counted instead of entering `RuntimeWorld`. Resize and focus are
-lifecycle events only.
+`astra-emu-cli run --input` 使用正式 native PlatformHost，并让经过校验的 `astra.user_input_sequence.v1` 成为唯一 gameplay input。replay 活动时，窗口键盘、指针、触摸、手柄和 IME 输入在 host 边界被拒绝；resize、focus 和 close 仍按生命周期事件处理。
 
-The run writes `astra.emu.windowed_e2_report.v1`. The report binds the family
-provider and binary, executable build, platform profile, package and entry,
-session and input hashes, and records only fixed-step counts, rejected-input
-counts, diagnostics and checkpoint frame/observation hashes. Surface readback is
-allowed at declared checkpoints only; ordinary frames record present/deadline,
-scene/upload, audio queue/refill and resource-lifecycle telemetry. The report is
-not an E3 sign-off and cannot be used to claim clean Release performance without
-the matching native identity and soak evidence.
+Native replay 不生成 Headless artifact 或 E2 report。自动 checkpoint、PNG/WAV 和 machine-readable run report 只由 Headless host 产生；Release CLI 的 Sandbox 运行只能形成行为/视觉验收，不能替代正式 Windows E3。
 
 ```rust
 pub trait PlatformHostFactory {

@@ -160,7 +160,7 @@ cargo run -p astra-emu-family-package -- native-sign \
 同一分发目录包含 `astra-emu-cli`。`run` 用于不受 Manager/overlay 影响的原生视觉验收：它会校验显式 family、授权目录、唯一 case、签名 manifest 和动态库 identity，随后直接创建 `AstraEmuRuntimeProvider` session 与 Windows platform host。窗口只显示 family 输出的 legacy 舞台，键盘、鼠标、触摸和手柄事件按舞台宽高比映射回 runtime。该模式默认静音，避免音频设备配置影响纯视觉对照；需要同时检查原生音频时显式传入 `--enable-audio`。
 
 ```bash
-astra-emu-cli run --family fvp --game-dir ./Games/Example --mount-profile ./private/fvp.mount.yaml --entry Game.hcb
+astra-emu-cli run --family fvp --game-dir ./Games/Example --launch-profile ./private/fvp.launch.yaml
 ```
 
 `run` 不启动 Slint，也不读取 Manager Library、translation、patch 或 FilterGraph 配置。关闭窗口会依次 shutdown session、surface、window 和 platform host。Linux、macOS、iOS、Android 与 Web 尚未接入该原生 CLI host 时必须返回稳定的 `PLATFORM_NOT_IMPLEMENTED`，不能回退到 Manager 或 Headless 冒充原生验收。
@@ -171,7 +171,7 @@ astra-emu-cli run --family fvp --game-dir ./Games/Example --mount-profile ./priv
 astra-emu-cli headless \
   --family fvp \
   --game-dir ./Games/Example \
-  --mount-profile ./private/fvp.mount.yaml \
+  --launch-profile ./private/fvp.launch.yaml \
   --entry Game.hcb \
   --input ./Automation/example-input.jsonl \
   --artifacts ./Build/AstraEMU-Evidence

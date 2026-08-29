@@ -15,7 +15,7 @@
 Editor shell 固定承担窗口、layout、Content Browser、Plugin Manager、PIE lifecycle、Debugger host、Package/Release Gate 和 AI Review Queue。玩法相关创作面由 selected `ProductRuntimeProvider` 的 `RuntimeEditorMetadata` 决定：
 
 - NativeVN：`.astra` Script Editor、VN Graph、Timeline、System UI、Luau policy、VN package/release checks。
-- AstraEMU：planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay、Trusted Luau 和 FilterGraph preset。
+- AstraEMU：planned case profile/probe、legacy pack VFS browser、family trace、text/translation overlay 和 FilterGraph preset。
 - AstraRPG：planned Map、Quest、Battle/Party/Inventory、Behavior Graph 和 RPG Inspector。
 
 `RuntimeEditorMetadata` 只能携带 template、surface id、schema、command id、source ref、VFS locator、diagnostic 和 release check id。Editor 不能接收插件 UI widget、`RuntimeWorld` 指针、legacy VM object、native renderer/audio handle、本地 root 或商业 payload。

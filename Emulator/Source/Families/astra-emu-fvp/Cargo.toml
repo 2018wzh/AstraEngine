@@ -15,7 +15,7 @@ dynamic-plugin-export = []
 [dependencies]
 abi_stable.workspace = true
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-rfvp-astra-provider = { git = "https://github.com/2018wzh/rfvp.git", rev = "f4f64a5bb726c1759350a666a35e0a454b810f61" }
+rfvp-astra-provider = { git = "https://github.com/2018wzh/rfvp.git", rev = "23ae395bcc0499f737d63759902308b30ca37800" }
 tracing.workspace = true
 
 [build-dependencies]
@@ -27,5 +27,5 @@ sha2.workspace = true
 upstream = "https://github.com/xmoezzz/rfvp"
 upstream_revision = "3b5ea6c96a925c12f95aef8554905e8fecbc77c3"
 hosted_fork = "https://github.com/2018wzh/rfvp"
-hosted_fork_revision = "f4f64a5bb726c1759350a666a35e0a454b810f61"
+hosted_fork_revision = "23ae395bcc0499f737d63759902308b30ca37800"
 license_notice = "THIRD_PARTY_NOTICES.md"

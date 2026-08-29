@@ -21,7 +21,7 @@ astra-emu-manager
   RuntimeWorld bridge
   family enablement
   auto probe policy
-  trusted Luau host
+  family VFS and key-file boundary
   text capture pipeline
   filter preset binding
   StateMachine action adapter
@@ -42,7 +42,7 @@ astra-emu-family-*
 
 Family ABI v8 把完整 lifecycle 和 host VFS 固定为显式 `StableAbi` wire DTO，并加入 retained ephemeral text 的显式对齐与清除语义；VFS range 每次携带 expected revision、offset、length 和 max bytes，单次读取不能超过 16 MiB。v5/v6/v7 插件与 fingerprint 硬拒绝，不退回旧 whole-file callback 或 postcard FFI envelope。FVP runtime snapshot 仍使用独立的 v7 schema，旧 v5/v6 snapshot 硬拒绝。大块 scene/encoded/PCM payload 使用 ABI-owned 引用计数 buffer；控制 effect 仍可序列化，但 bulk body 不进入 RuntimeWorld、save、replay、report 或日志。`read_session_resource` 只负责 family virtual VFS 与通用媒体 host 之间的已解析资源交付：family 负责 archive/path 语义，Manager、CLI 与共享 PlatformHost audio service 负责 decode/playback。
 
-Trusted Luau 是 Manager host API，不是 EngineCore public API。Trusted Project Profile 可以打开 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 typed intent。脚本只能提交 typed Blackboard、input、tag 或 media intent，host adapter 在 fixed tick 边界应用。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用脚本，并写入 redacted diagnostic。
+AstraEMU 不执行 Luau patch/decode。Family VFS 通过 `astra-emu-family-core` 的有界私有文件接口读取 family-owned key 格式，解密逻辑留在对应纯 Rust reader；Manager 不接触 key、明文 payload 或解密 callback。文本翻译 Hook 和 FilterGraph 继续是独立、显式绑定的 host 能力。
 
 `TextCapturePipeline` 消费 `LegacyLiveOutput.text`。默认 report 只存长度、source ref 和 speaker metadata；用户本地 opt-in 后才写全文 dump。`TranslationProvider` 由 Plugin Manager 显式绑定，`translate_batch` 必须实现，`translate_stream` 是可选 capability。翻译 overlay 非权威，不进入 Runtime state；术语表和角色上下文可以读取授权的 runtime memory。
 
@@ -148,4 +148,4 @@ Release Gate checks:
 - Report redaction omits payload, screenshots, audio samples, full script text, private absolute paths, key material and provider secrets.
 - Replay hash matches recorded input and provider results.
 
-该 framework 的 ABI-safe DTO、FVP provider、`AstraEmuRuntimeProvider`、RuntimeWorld lifecycle、Manager Library/auto-probe/Trusted Luau/translation/FilterGraph 与 release evidence validator 已进入 workspace。Stage 5 仍是 `IN_PROGRESS`：现有 unit/E2 和 sanitized differential golden 不能证明完整 media parity、正式签名包或 Windows/Android E3，其他 family 也不能按本页 blueprint 计为已实现。
+该 framework 的 ABI-safe DTO、FVP provider、`AstraEmuRuntimeProvider`、RuntimeWorld lifecycle、Manager Library/auto-probe/translation/FilterGraph 与 release evidence validator 已进入 workspace。Stage 5 仍是 `IN_PROGRESS`：现有 unit/E2 和 sanitized differential golden 不能证明完整 media parity、正式签名包或 Windows/Android E3，其他 family 也不能按本页 blueprint 计为已实现。

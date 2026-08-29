@@ -10,7 +10,7 @@ environment override.
 The fork is based on upstream [`xmoezzz/rfvp`](https://github.com/xmoezzz/rfvp)
 0.5.0 and keeps the upstream MPL-2.0 licensing and source-offer obligations.
 The Astra hosted feature is fixed at RFVP revision
-`f4f64a5bb726c1759350a666a35e0a454b810f61`.
+`23ae395bcc0499f737d63759902308b30ca37800`.
 
 RFVP directly owns the `Ported + SingleLayer` Family ABI v9 provider:
 

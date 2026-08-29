@@ -8,7 +8,6 @@ import { SettingsCategoryItem } from "../components/settings-card.slint";
 import { MatchReview, MetadataSettingsPage } from "../settings/metadata.slint";
 import { TranslationSettingsPage } from "../settings/translation.slint";
 import { FilterSettingsPage } from "../settings/filters.slint";
-import { PatchSettingsPage } from "../settings/patches.slint";
 import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
 import { GamepadBinding, InputSettingsPage } from "../settings/input.slint";
 import { AppearanceSettingsPage } from "../settings/appearance.slint";
@@ -82,11 +81,6 @@ export component SettingsPage inherits Rectangle {
     in property <string> compatibility-source-url;
     in property <string> compatibility-sync-summary;
     callback refresh-compatibility();
-
-    // Patches
-    in property <string> patches-summary;
-    in property <string> patch-mode;
-    callback set-patch-mode(string);
 
     // Input
     in-out property <string> confirm-key;
@@ -169,13 +163,6 @@ export component SettingsPage inherits Rectangle {
                     clicked => { root.category = "filters"; }
                 }
                 SettingsCategoryItem {
-                    label: "Patches";
-                    icon: Icons.puzzle-piece;
-                    description: "Trusted Luau patches";
-                    active: root.category == "patches";
-                    clicked => { root.category = "patches"; }
-                }
-                SettingsCategoryItem {
                     label: "Appearance";
                     icon: Icons.palette;
                     description: "Theme, layout";
@@ -241,11 +228,6 @@ export component SettingsPage inherits Rectangle {
                 refresh-compatibility => { root.refresh-compatibility(); }
             }
 
-            if root.category == "patches" : PatchSettingsPage {
-                patches-summary: root.patches-summary;
-                patch-mode: root.patch-mode;
-                set-patch-mode(mode) => { root.set-patch-mode(mode); }
-            }
 
             if root.category == "input" : InputSettingsPage {
                 confirm-key <=> root.confirm-key;
@@ -296,7 +278,6 @@ export component SettingsPage inherits Rectangle {
                     MobileCategoryChip { label: "Metadata"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
                     MobileCategoryChip { label: "Compatibility"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
                     MobileCategoryChip { label: "Filters"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
-                    MobileCategoryChip { label: "Patches"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
                     MobileCategoryChip { label: "Appearance"; active: root.category == "appearance"; clicked => { root.category = "appearance"; } }
                 }
             }
@@ -358,11 +339,6 @@ export component SettingsPage inherits Rectangle {
                 refresh-compatibility => { root.refresh-compatibility(); }
             }
 
-            if root.category == "patches" : PatchSettingsPage {
-                patches-summary: root.patches-summary;
-                patch-mode: root.patch-mode;
-                set-patch-mode(mode) => { root.set-patch-mode(mode); }
-            }
 
             if root.category == "input" : InputSettingsPage {
                 confirm-key <=> root.confirm-key;

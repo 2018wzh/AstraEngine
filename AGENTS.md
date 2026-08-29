@@ -9,7 +9,7 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 | AstraEngine | EngineCore、Runtime、Asset、Media、Script、插件 ABI、公共测试框架和跨仓契约 |
 | AstraVN | `.astra` canonical story、VN preset、商业 VN 基线系统、Luau policy 和发布样例 |
 | AstraEditor | Qt/QML creator editor、PIE、Inspector、Graph/Timeline、Package/Release Gate UI |
-| AstraEMU | 旧 VN manager、engine-native family plugin、auto probe、Trusted Luau patch/decode、文本翻译和 FilterGraph preset |
+| AstraEMU | 旧 VN manager、engine-native family plugin、auto probe、family-owned VFS/decode、文本翻译和 FilterGraph preset |
 | AstraRPG | `AstraRpgRuntimeProvider`、通用 RPG runtime、AI 自主 RPG、`rpg.trpg` ruleset/profile、local-private tabletop adapter 和后续 Server/Client protocol |
 | AstraPlatform | 桌面、移动、Web、实验旧主机平台壳和原生能力适配 |
 
@@ -29,7 +29,7 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 - Provider 只能通过 ServiceRegistry、ExtensionRegistry、EngineModuleSlot 暴露能力。不能跨 ABI 传递对象所有权、Actor 指针、Editor widget、GPU/audio native handle。
 - `.astra` 是 AstraVN canonical story source。Graph、Timeline 和 Editor layout 只能保存作者元数据，必须能往返到同一 IR、source map 和 debug symbol。
 - AstraVN Core 持有 dialogue、choice、backlog、save/load、read-state、voice replay 等权威语义；Rust 插件提供机制，Luau policy 提供表现、系统页和复杂演出策略。
-- Luau 通过 `mlua` 进入 AstraVN/AstraEMU policy。默认 capability sandbox，无文件、网络或系统调用；EMU 只提供 patch/decode runtime 和 API，不负责绕过 DRM、商业保护或访问控制。AstraEMU 研究文档保留 Lua/TJS 等旧引擎事实，不作为 AstraVN policy 术语。
+- Luau 通过 `mlua` 进入 AstraVN policy。默认 capability sandbox，无文件、网络或系统调用。AstraEMU 不提供 Luau patch/decode runtime；旧引擎 key 由 family 通过有界私有文件接口读取，不能用于绕过 DRM、商业保护或访问控制。AstraEMU 研究文档保留 Lua/TJS 等旧引擎事实，不作为 AstraVN policy 术语。
 - Luau policy 写入、command request、query trace、diagnostic trace 和 snapshot 必须落成可序列化 state；function、thread、userdata、native handle、商业 payload 和本地路径不得进入 save/replay/package/report。
 - Save 和 package 是自描述二进制容器，section payload 使用 `postcard`/serde。外部 YAML descriptor 只作为 text-first source，Cook 后不得成为 runtime 必需文件。
 - `postcard` save/package section 类型必须对二进制格式稳定；除非有显式自定义 codec，不要在会进入 `postcard` 的 struct 字段上使用 `skip_serializing_if`，否则 save/load 可能只可写不可读。
@@ -54,14 +54,14 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 - Package/save 容器支持 `Postcard`、`Raw` 和 `Zstd` section codec。加密只通过 provider trait、`EncryptionDescriptor`、AAD/hash 和 release gate 表达；仓库不得内置发布密钥或 DRM/访问控制绕过实现。
 - Project-level `package_sections` 只能引用项目内相对路径，并用 `targets`/`profiles` 明确限定写入范围。它只适合脱敏 manifest/report section；不得把商业 payload、本地绝对路径、截图、文本、音频、影片或可复原源数据作为 section 写入。
 - Runtime AI 与 Editor AI 同等重要。联网 Runtime AI 可发布，但输出通过 IntentValidator 后必须固化进 save/replay，回放不重新请求 provider。
-- AstraEMU 使用 Manager + AstraEngine RuntimeWorld + in-process family plugin 架构。family plugin 只注册 `LegacyRuntimeProvider` facade；auto probe、Trusted Luau、文本翻译和 FilterGraph preset 位于 Manager/RuntimeWorld 层，family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
+- AstraEMU 使用 Manager + AstraEngine RuntimeWorld + in-process family plugin 架构。family plugin 只注册 `LegacyRuntimeProvider` facade；auto probe、文本翻译和 FilterGraph preset 位于 Manager/RuntimeWorld 层，family plugin 不能替换 Runtime tick、MutationLog、Save container 或 Release Gate core checks。
 - AstraEMU Family ABI 当前 hard cut 为 v9：所有 dylib lifecycle、VFS、surface、Hook 与 writable-file 调用使用显式 `StableAbi` wire DTO；v7/v8 binary、fingerprint 与旧 runtime snapshot 必须 fail-fast，不保留 compatibility shim。descriptor 只接受 `Native + MultiLayer` 与 `Ported + SingleLayer`。family 通过 Host-owned writable surface lease 直接绘制并提交 `Unchanged`、`Full` 或像素坐标 `Rects` damage；provider step 和整笔 retained Layer2D transaction 验证成功后才能公开 staged generation，失败时整批回滚。Manager 与 native CLI 的 legacy audio 统一由 PlatformHost-backed bounded worker 补水，不能再由 fixed tick 或 Slint event loop 驱动，也不能保留 Manager 私有 CPAL 链。Windows/Linux/macOS host 的 gamepad 使用独立 bounded worker + `EventLoopProxy`/host wake，生产渲染、解码和输入路径不得由 fixed polling timer 推进；无 hotplug handle 时才允许显式低频 discovery wait。
 - AstraEMU Extension ABI v1 提供同步 opaque Hook lifecycle；translation companion 只定义 UTF-8 request/response。Manager、CLI 与 Headless 必须按 `(family_id, family_game_id)` 显式选择唯一 provider 与 `u32 timeout_ms`，默认 2000 ms，0 表示立即超时。Hook 必须发生在 surface acquire 前；未绑定、timeout、认证、限流、网络、协议、缺字或布局失败时，family core 保留原文并返回 typed diagnostic。正文、secret、payload 与文本 hash 不得进入日志、SQLite、report 或 package，Host 不提供翻译 overlay 或 cache。
 - Family ABI v9 不提供 snapshot/save/restore、text lease、session resource presentation 或 step budget。游戏存档由 family core 通过 per-game writable root 的安全相对路径 API 管理；同一 `(family_id, family_game_id)` 只允许一个 writable session。Host 只提供 stat/list/create-dir/read-range/write-range/set-length/remove/atomic-replace，不跨 ABI 传路径或文件句柄。AstraEMU runtime provider 对共享 save/restore lifecycle 返回 unsupported。AstraEMU runtime state/text/frame/audio/route/session/input 与 RFVP live 路径不得生成语义 hash；package、plugin binary、source/archive entry、schema、build、profile 与 artifact-file 完整性 hash 保留。除 Performance E2 外，预算不作为 AstraEMU blocking policy；ABI 表示、checked arithmetic、buffer/stride、所有权、路径隔离和系统错误仍必须 fail-fast。
 - AstraEMU v1 首发 family 是 FVP；固定 rfvp revision 的合法输入可观察行为、完整 syscall coverage、原生存档冷启动与脱敏 parity report 是 FVP release gate。Artemis 和其他 family 以后续 probe report 接入，不能阻塞 EngineCore、AstraVN、Editor 和六平台 gate。默认 auto-probe 顺序保持 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori，显式 case profile 始终优先。
 - Minori GARbro scheme 导入必须使用仓库内纯 Rust 两阶段 NRBF reader，先收集对象、metadata、library 与有符号 object id，再解析 forward reference。不得调用 .NET `BinaryFormatter`、managed helper、外部进程、启发式扫描或任何 fallback；未知 record、断裂 reference、重复 id、越界、非预期 Musica/PAZ graph 和 role/key 约束不满足都必须阻断。
-- AstraEMU in-process legacy VFS 契约归 `astra-emu-family-core`，Trusted Luau、mount profile、cache、viewer、verify、extract 与 Linux FUSE 归 `astra-emu-family-support`；`astra-emu-family-api` 只保留 ABI-safe DTO，不得重新导出进程内 trait。
-- 通用 VFS 命令固定为 `astra-emu-cli vfs --family <family>`，family 专用研究命令放独立 CLI。Minori 只能使用纯 Rust `MinoriPazDecryptProvider`；Luau 只注册 data-only private profile，不得参与逐 entry 解密，也不得保留 native/Luau fallback。
+- AstraEMU in-process legacy VFS 契约和有界私有文件读取归 `astra-emu-family-core`，launch profile、viewer、verify、extract 与 Linux FUSE 归 `astra-emu-family-support`；`astra-emu-family-api` 只保留 ABI-safe DTO，不得重新导出进程内 trait。
+- 通用 VFS 命令固定为 `astra-emu-cli vfs --family <family>`，family 专用研究命令放独立 CLI。Minori 从 launch profile 指定的相对 `key_file` 读取严格 `astra.emu.minori.keys.v1`，只使用 family-owned 纯 Rust 流式解密；不得建立明文 cache、Luau callback、自动 key importer 或任何 fallback。
 - AstraRPG 是后续同级 gameplay runtime provider。`AstraTRPG` 不作为独立顶层模块或 provider 落地，只能作为 AstraRPG 的 `rpg.trpg` ruleset/profile layer；package/save/report namespace 使用 `rpg.*` 和 `rpg.trpg.*`，不得新增顶层 `trpg.*`。
 - CP2020 等规则书适配只能作为 local-private adapter：仓库可提交 schema、manifest、resolver skeleton、公开最小 fixture、hash、coverage 和 diagnostic，不得提交完整规则正文、表格、扫描图、职业/装备/义体完整清单或可复原 payload。
 

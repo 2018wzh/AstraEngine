@@ -80,12 +80,9 @@ export component ManagerWindow inherits Window {
     // ===== Overlay panels (game view) =====
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
-    in-out property <bool> patches-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
     in-out property <string> filter-preset: "none";
     in property <string> diagnostics-summary;
-    in property <string> patches-summary;
-    in property <string> patch-mode: "no_patch";
 
     // ===== Translation =====
     in-out property <string> translation-endpoint-kind: "ecnu";
@@ -151,7 +148,6 @@ export component ManagerWindow inherits Window {
     callback leave-game();
     callback open-diagnostics();
     callback open-translation();
-    callback open-patches();
     callback open-filters();
     callback rescan();
     callback open-settings();
@@ -163,7 +159,6 @@ export component ManagerWindow inherits Window {
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
     callback set-filter-preset(string);
-    callback set-patch-mode(string);
     callback refresh-metadata(string);
     callback accept-match(string);
     callback reject-match(string);
@@ -205,13 +200,10 @@ export component ManagerWindow inherits Window {
 
         translation-overlay-active <=> root.translation-overlay-active;
         diagnostics-overlay-active <=> root.diagnostics-overlay-active;
-        patches-overlay-active <=> root.patches-overlay-active;
         filters-overlay-active <=> root.filters-overlay-active;
         filter-preset <=> root.filter-preset;
         diagnostics-summary: root.diagnostics-summary;
         global-diagnostic: root.global-diagnostic;
-        patches-summary: root.patches-summary;
-        set-patch-mode(mode) => { root.set-patch-mode(mode); }
         set-filter-preset(preset) => { root.set-filter-preset(preset); }
 
     }
@@ -347,11 +339,6 @@ export component ManagerWindow inherits Window {
                     compatibility-source-url: root.compatibility-source-url;
                     compatibility-sync-summary: root.compatibility-sync-summary;
                     refresh-compatibility => { root.refresh-compatibility(); }
-
-                    // Patches
-                    patches-summary: root.patches-summary;
-                    patch-mode: root.patch-mode;
-                    set-patch-mode(mode) => { root.set-patch-mode(mode); }
 
                     // Input
                     confirm-key <=> root.confirm-key;

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const VFS_VERIFY_REPORT_SCHEMA: &str = "astra.emu.vfs.verify.v1";
+pub const VFS_VERIFY_REPORT_SCHEMA: &str = "astra.emu.vfs.verify.v2";
 const VERIFY_CHUNK_BYTES: u64 = 4 * 1024 * 1024;
 const REREAD_BYTES: u64 = 4 * 1024;
 
@@ -16,7 +16,6 @@ pub struct LegacyVfsVerifyReport {
     pub entry_count: u64,
     pub range_count: u64,
     pub byte_count: u64,
-    pub cache_hit_count: u64,
     pub aggregate_hash: Hash256,
 }
 
@@ -27,7 +26,6 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
     let mut aggregate = Sha256::new();
     let mut range_count = 0u64;
     let mut byte_count = 0u64;
-    let mut cache_hit_count = 0u64;
 
     for entry in &manifest.entries {
         let mut offset = 0u64;
@@ -73,7 +71,6 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
                     "verification byte count overflowed",
                 )
             })?;
-            cache_hit_count += u64::from(read.cache_hit);
         }
         let digest: [u8; 32] = entry_hash.finalize().into();
         let content_hash = Hash256::from_bytes(digest);
@@ -102,14 +99,6 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
                     "verification byte count overflowed",
                 )
             })?;
-            cache_hit_count = cache_hit_count
-                .checked_add(u64::from(read.cache_hit))
-                .ok_or_else(|| {
-                    invalid(
-                        "ASTRA_EMU_VFS_VERIFY_OVERFLOW",
-                        "verification cache hit count overflowed",
-                    )
-                })?;
         }
         aggregate.update(entry.entry_id.as_bytes());
         aggregate.update(entry.decoded_size.to_le_bytes());
@@ -124,7 +113,6 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
         entry_count: manifest.entries.len() as u64,
         range_count,
         byte_count,
-        cache_hit_count,
         aggregate_hash,
     })
 }
@@ -147,13 +135,11 @@ fn reread(
     }
     Ok(Some(RereadEvidence {
         byte_count: expected.len() as u64,
-        cache_hit: read.cache_hit,
     }))
 }
 
 struct RereadEvidence {
     byte_count: u64,
-    cache_hit: bool,
 }
 
 fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
@@ -173,6 +159,5 @@ mod tests {
         assert_eq!(report.entry_count, 1);
         assert_eq!(report.range_count, 3);
         assert_eq!(report.byte_count, 18);
-        assert_eq!(report.cache_hit_count, 3);
     }
 }

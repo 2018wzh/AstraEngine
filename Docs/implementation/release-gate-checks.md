@@ -110,7 +110,6 @@ pub struct ReleaseCheckRecord {
 | emu | `emu.vm_state_machine_trace` | family scheduler/context trace | context ordering unstable, await boundary missing, basic block not bounded, snapshot hash mismatch or fault isolation missing | family id, context count, trace hash, snapshot hash |
 | emu | `emu.legacy_pack_vfs` | legacy pack VFS report | reader identity missing, pack entry out of bounds, hash mismatch, overlay not allowed or local root/payload leaked | family id, pack alias, entry count, redaction status |
 | emu | `emu.auto_probe` | auto probe report | selected family is not reproducible or override reason missing | selected family, priority list, override reason |
-| emu | `emu.trusted_luau_policy` | trusted script report | denied capability mutates runtime or script isolation missing | script id, denied capability, isolation status |
 | emu | `emu.text_redaction` | text pipeline report | report contains full commercial text without local opt-in | text hash, source ref, dump policy |
 | emu | `emu.filter_preset` | filter preset report | preset bypasses FilterGraph validation or leaks native handle | preset id, target layer, validation status |
 
