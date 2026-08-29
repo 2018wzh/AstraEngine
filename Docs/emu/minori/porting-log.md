@@ -1,5 +1,13 @@
 # Minori 移植日志
 
+## 2026-08-30：packed stream 的声明尺寸边界
+
+- 新 key-file identity 的真实八包 full verify 在 `bg` 中稳定复现一个边界：zlib 完整解压结果比 index 的 `unpacked_size` 多 8 个全零字节。一次性 reader 过去会在验证尾部全零且不超过 16 字节后裁剪，流式迁移遗漏了这项格式语义，因此在声明 EOF 处错误阻断。
+- `MinoriDecodedStream` 现在到达声明尺寸后继续读取底层 raw/zlib stream，直到确认真实 EOF；只接受最多 16 字节的全零尾部。出现非零尾部、第 17 字节、zlib 错误或提前 EOF仍返回 `ASTRA_EMU_MINORI_ENTRY_SIZE`，没有放宽 checksum，也没有恢复明文缓存或 fallback。
+- 合成回归覆盖跨 64 MiB decrypt chunk 的 zlib checksum、8/16 字节全零尾部、17 字节和非零尾部。通用 full verify 同时改为每个 entry 单次 `open_stream` 顺序读取，再用独立 `read_range` 复读首尾，避免无缓存 packed entry 按块反复从头解压。
+- Release reader 随后在当前 key-file/streaming identity 下完成真实八包校验：8 个 source、14502 个 entry、43818 个逻辑读取范围、6624958365 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。该结果关闭本轮 full verify，不代表峰值内存、四路线 GPU E2、Sandbox 视觉验收或正式 Windows E3 已完成。
+- 同一 identity 的脱敏研究工具随后完成 89 个脚本 census：33728 行、33695 条命令、29 个 opcode，unknown opcode 为 0。媒体 census 覆盖 `bg`、`bgm` 和 `mov`：4665 个图像/音频条目、1951 ANI（6723 frames）、9 SQZ（224 frames）、2655 PNG、49 Ogg，以及 5 个 AVI container。它证明生产 reader/adapter 能完整遍历当前素材，不等于影片逐帧播放、音频听审或视觉 parity。
+
 ## 2026-08-30：Family API v11 与原版右键菜单
 
 - 原版现场观察确认：右键打开的是系统菜单，不是 Save 页。标题与剧情阶段的根菜单不同；剧情菜单包含消息框显示、Auto、Skip、Quick Save、Save、Load 和 Config，窗口、Help、Game 子菜单位于其后。转场期间右键不生效。
@@ -13,7 +21,7 @@
 - Minori launch profile 改用安全相对 `key_file`。mount 通过 `astra-emu-family-core` 的有界只读接口读取一次严格 `astra.emu.minori.keys.v1`，后续不监控、不重载，也不保存 key hash。
 - PAZ index 仍做有界整块解密；entry 改为按 range 或顺序 stream 从密文 source 解密。packed entry 每次从起点建立 zlib 流并丢弃 offset 前明文，不生成 seek index、明文 cache 或临时文件。
 - AstraEMU 的 Luau private profile、decoder callback、patch overlay、plaintext cache、GARbro importer、相关 Manager UI/evidence，以及 `windowed-e2` 命令已经删除。AstraVN/AstraRPG 的 Luau policy 不受影响。
-- 当前通过的是 strict key parser、private-file boundary、Minori/FamilySupport、CLI 和 evidence 的局部回归。旧八包 full verify 只作历史对照；新 key-file/streaming identity 的真实 full verify、四路线 GPU E2、Release CLI Sandbox 视觉验收和正式 Windows E3 都没有完成。
+- strict key parser、private-file boundary、Minori/FamilySupport、CLI 和 evidence 的局部回归已经通过。2026-08-30 的后续 Release reader 也完成了新 key-file/streaming identity 的真实八包 full verify；四路线 GPU E2、Release CLI Sandbox 视觉验收和正式 Windows E3 仍未完成。
 
 ## 2026-08-28：无音频设备启动复核
 

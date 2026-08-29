@@ -215,6 +215,120 @@ fn multipart_zlib_stream_is_incremental_and_enforces_decoded_size() {
 }
 
 #[test]
+fn v2_zlib_stream_preserves_checksum_across_decrypt_chunks() {
+    let root = tempfile::tempdir().unwrap();
+    let mut state = 0x6d2b_79f5_u32;
+    let plain = (0..2 * STREAM_CHUNK_BYTES)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as u8
+        })
+        .collect::<Vec<_>>();
+    let mut encoded_plain = plain.clone();
+    encoded_plain.extend_from_slice(&[0; 8]);
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    std::io::Write::write_all(&mut encoder, &encoded_plain).unwrap();
+    let compressed = encoder.finish().unwrap();
+    assert!(compressed.len() as u64 > STREAM_CHUNK_BYTES);
+    let stored_size = compressed.len();
+    let mut padded = compressed;
+    padded.resize(stored_size.next_multiple_of(8), 0);
+    let expected_padded = padded.clone();
+    let entry = PazEntryDescriptor {
+        archive_role: "scr".into(),
+        entry_id: "scr:0".into(),
+        name: "payload.sc".into(),
+        crypto_name: b"payload.sc".to_vec(),
+        offset: 0,
+        unpacked_size: plain.len() as u64,
+        stored_size: stored_size as u64,
+        aligned_size: padded.len() as u64,
+        packed: true,
+        video_key: None,
+    };
+    let encrypted = blowfish_encrypt(DATA_KEY, &padded);
+    for (index, chunk) in encrypted.chunks(STREAM_CHUNK_BYTES as usize).enumerate() {
+        let offset = index as u64 * STREAM_CHUNK_BYTES;
+        let decoded = decryptor(BTreeMap::from([("sc".into(), "pw".into())]))
+            .decrypt_entry_chunk(2, &entry, offset, chunk)
+            .unwrap();
+        assert!(
+            decoded == expected_padded[offset as usize..offset as usize + chunk.len()],
+            "decrypt chunk {index} did not preserve the Blowfish block stream"
+        );
+    }
+    let mut archive = archive_from_parts(root.path(), &encrypted, encrypted.len() / 2 + 3);
+    archive.version = 2;
+    let raw = MinoriEntryStream {
+        archive,
+        entry: entry.clone(),
+        decryptor: decryptor(BTreeMap::from([("sc".into(), "pw".into())])),
+        encrypted_position: 0,
+        pending: Vec::new(),
+        pending_position: 0,
+    };
+    let mut stream = MinoriDecodedStream {
+        inner: MinoriDecodedInner::Zlib(ZlibDecoder::new(raw)),
+        remaining: entry.unpacked_size,
+        eof_checked: false,
+    };
+    let mut decoded = Vec::new();
+    stream.read_to_end(&mut decoded).unwrap();
+    assert_eq!(decoded, plain);
+}
+
+#[test]
+fn decoded_zero_padding_is_bounded_and_nonzero_padding_is_rejected() {
+    for (padding, accepted) in [(vec![0; 16], true), (vec![0; 17], false), (vec![1], false)] {
+        let root = tempfile::tempdir().unwrap();
+        let plain = b"decoded payload".to_vec();
+        let mut encoded_plain = plain.clone();
+        encoded_plain.extend_from_slice(&padding);
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        std::io::Write::write_all(&mut encoder, &encoded_plain).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let stored_size = compressed.len();
+        let mut padded = compressed;
+        padded.resize(stored_size.next_multiple_of(8), 0);
+        let encrypted = blowfish_encrypt(DATA_KEY, &padded);
+        let archive = archive_from_parts(root.path(), &encrypted, 0);
+        let entry = PazEntryDescriptor {
+            archive_role: "scr".into(),
+            entry_id: "scr:0".into(),
+            name: "payload.bin".into(),
+            crypto_name: b"payload.bin".to_vec(),
+            offset: 0,
+            unpacked_size: plain.len() as u64,
+            stored_size: stored_size as u64,
+            aligned_size: padded.len() as u64,
+            packed: true,
+            video_key: None,
+        };
+        let raw = MinoriEntryStream {
+            archive,
+            entry: entry.clone(),
+            decryptor: decryptor(BTreeMap::new()),
+            encrypted_position: 0,
+            pending: Vec::new(),
+            pending_position: 0,
+        };
+        let mut stream = MinoriDecodedStream {
+            inner: MinoriDecodedInner::Zlib(ZlibDecoder::new(raw)),
+            remaining: entry.unpacked_size,
+            eof_checked: false,
+        };
+        let mut decoded = Vec::new();
+        let result = stream.read_to_end(&mut decoded);
+        assert_eq!(result.is_ok(), accepted);
+        if accepted {
+            assert_eq!(decoded, plain);
+        }
+    }
+}
+
+#[test]
 fn random_raw_ranges_reopen_the_encrypted_source_without_plaintext_cache() {
     let root = tempfile::tempdir().unwrap();
     let mut passwords = BTreeMap::new();

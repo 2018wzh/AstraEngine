@@ -17,7 +17,7 @@ The public `FamilyAudioService` lifecycle is also covered when `OpenAudioOutput`
 
 2026-08-28 Control/Auto follow-up: an active Minori message may rebind its existing family wait token between `Input` and `Time`. Manager Core reuses the existing runtime await identity and Manager host replaces only the pending condition; same-kind, non-message and batch-duplicate tokens remain blocking. This closes the observed duplicate-token crash path only and does not change AstraEMU `IN_PROGRESS` or Windows E3 status.
 
-2026-08-29 hard cut：此前 private-profile/cache identity 的八包 second-run 只保留为历史，不能关闭当前 key-file/streaming reader 的覆盖门禁。当前 identity 需要重新执行八包 full verify、重复密文读取和峰值内存验证。
+2026-08-29 hard cut：此前 private-profile/cache identity 的八包 second-run 只保留为历史。当前 key-file/streaming reader 已重新完成八包 full verify；重复密文读取有合成回归，峰值内存规模验证仍保持开放。
 
 2026 年 8 月 27 日增量媒体复核：`astra-media::IncrementalMediaPlayback` 已把播放配置、单调 tick、轨道/packet 形状、视频 lead/lag、迟到策略和音频/视频 packet 预算收进公共游标；`dropped_video_packets` 只在显式 `Drop` 策略下增加。当前签名 FFmpeg Minori slice 以 3102 个 fixed step、9 个 retained frame sample、连续 movie stop/completion 和标题观察完成，报告为 `passed` 且无诊断。该结果仍是 Headless E2 provider/media 证据，不关闭完整路线、正式音频听审、gallery/cache second-run、Linux FUSE、macOS extract、Manager 实机预览或 Windows E3。
 

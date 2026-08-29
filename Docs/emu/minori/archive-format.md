@@ -32,9 +32,9 @@ PAZ reader 采用三段式：
 | `.pazA` 至 `.pazZ` 是连续逻辑分卷 | GARbro contract | 已实现；空分卷和后缀缺口阻断 |
 | Blowfish block 由两个 little-endian `u32` word 组成 | GARbro contract + 本地样本 | 已实现，并由八个真实 index 复核 |
 | `mov` entry 不要求 8 字节对齐；movie 分支使用独立 transform | GARbro contract + 本地样本 | 已实现，5 个真实 descriptor 通过 |
-| packed entry 解压结果可能带不超过 16 字节的全零尾部 | 本地样本观察 | 仅在可证明全零时裁剪；非零或更长尾部阻断 |
+| packed entry 解压结果可能比 index 声明值多出不超过 16 字节的全零尾部 | GARbro reader contract + 本地样本 | 顺序流在声明 EOF 后继续验证真实 EOF；仅裁剪全零尾部，非零或第 17 字节阻断 |
 | 当前样本八包可完成 mount preflight | 本地样本 | 已成立，共 14502 个 entry；`bg` 的 11 卷连续读取通过 |
-| 当前样本八包 decoded full verify | 本地样本 | 旧 no-cache identity 已通过；新 key-file/streaming identity 待重跑 |
+| 当前样本八包 decoded full verify | 本地样本 | key-file/streaming identity 已通过：14502 entries、6624958365 decoded bytes |
 
 mount 使用 `minori:/<role>/<entry>`。source hash 通过有界顺序流计算；跨分卷 entry 保持同一逻辑范围。绝对路径、`..`、重复 URI/entry id、短读、越界、未对齐 block、未知 version、源文件 metadata/hash 变化都返回稳定 diagnostic。
 

@@ -2,7 +2,7 @@
 
 这份索引只记录可公开核验的来源。商业资源、解密材料、原版截图和逐帧观察放在 ignored 私有目录；公开仓库不保存副本或本地路径。
 
-旧 private-profile/cache identity 的八包 full verify 只作为迁移前历史保留。当前 key-file/streaming reader 必须重新形成八包脱敏证据；这不改变 GARbro contract 的来源优先级。
+旧 private-profile/cache identity 的八包 full verify 只作为迁移前历史保留。当前 key-file/streaming reader 已重新形成八包脱敏证据；这不改变 GARbro contract 的来源优先级。
 
 ## 格式契约
 

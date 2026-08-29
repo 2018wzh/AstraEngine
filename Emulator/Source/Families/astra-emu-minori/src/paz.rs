@@ -665,19 +665,31 @@ impl Read for MinoriDecodedStream {
             if self.eof_checked {
                 return Ok(0);
             }
-            let mut probe = [0u8; 1];
-            let count = match &mut self.inner {
-                MinoriDecodedInner::Raw(stream) => stream.read(&mut probe),
-                MinoriDecodedInner::Zlib(stream) => stream.read(&mut probe),
-            }?;
-            self.eof_checked = true;
-            if count != 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "ASTRA_EMU_MINORI_ENTRY_SIZE",
-                ));
+            let mut padding = [0u8; 17];
+            let mut padding_len = 0usize;
+            loop {
+                let count = match &mut self.inner {
+                    MinoriDecodedInner::Raw(stream) => stream.read(&mut padding[padding_len..]),
+                    MinoriDecodedInner::Zlib(stream) => stream.read(&mut padding[padding_len..]),
+                }?;
+                if count == 0 {
+                    self.eof_checked = true;
+                    if padding[..padding_len].iter().all(|byte| *byte == 0) {
+                        return Ok(0);
+                    }
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "ASTRA_EMU_MINORI_ENTRY_SIZE",
+                    ));
+                }
+                padding_len += count;
+                if padding_len == padding.len() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "ASTRA_EMU_MINORI_ENTRY_SIZE",
+                    ));
+                }
             }
-            return Ok(0);
         }
         let limit = usize::try_from(self.remaining.min(buffer.len() as u64))
             .map_err(|_| std::io::Error::other("ASTRA_EMU_MINORI_ENTRY_SIZE"))?;

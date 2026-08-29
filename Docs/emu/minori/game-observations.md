@@ -2,16 +2,16 @@
 
 ## 当前样本
 
-2026-08-29 起，Minori 已硬切为 `key.toml` 与无明文缓存的流式解密。此前 private-profile/cache profile 下的八包 full verify 只保留为历史观察，不能作为当前 reader identity 的通过证据；当前八包 full verify、重复密文读取和峰值内存验证均待重跑。
+2026-08-29 起，Minori 已硬切为 `key.toml` 与无明文缓存的流式解密。此前 private-profile/cache profile 下的八包 full verify 只保留为历史观察；当前 reader identity 已在 2026-08-30 重新完成八包 full verify。重复密文读取有合成回归，峰值内存规模验证仍待执行。
 
 - 根目录存在 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive。
 - `bg` 由 `bg.paz` 与 `bg.pazA` 至 `bg.pazJ` 组成；全目录共 18 个 PAZ 物理文件、5742470010 bytes。
-- 八个 archive 均非空。旧 private-profile 下八个 index 曾通过结构校验；当前 key-file identity 尚待重新验证。
+- 八个 archive 均非空。当前 key-file identity 已通过八个 index 和全部 entry 的 full verify。
 - 已验证的 entry 数为 `bg=4616`、`bgm=49`、`scr=89`、`st=2321`、`sys=302`、`se=73`、`voice=7047`、`mov=5`，合计 14502。
 
 ## 未知
 
-manifest v2 旧 identity 曾完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 次 range read、6624958365 个 decoded bytes。该轮不是当前 manifest v3/key-file reader identity 的证据。`scr.paz` 的 89 文件 census 记录 33728 行、33695 个 command、29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。
+当前 manifest v3/key-file reader identity 已完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 个逻辑读取范围、6624958365 个 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。同一 identity 的 `scr.paz` census 包含 89 个文件、33728 行、33695 个 command 和 29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。
 
 ## `夏空のペルセウス`
 

@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use astra_core::Hash256;
 use astra_emu_family_core::{LegacyCoreError, LegacyMountedVfs};
 use schemars::JsonSchema;
@@ -27,37 +29,57 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
     let mut range_count = 0u64;
     let mut byte_count = 0u64;
 
-    for entry in &manifest.entries {
+    for (entry_ordinal, entry) in manifest.entries.iter().enumerate() {
         let mut offset = 0u64;
         let mut entry_hash = Sha256::new();
         let mut first = Vec::new();
         let mut tail = Vec::new();
+        let mut stream = vfs.open_stream(&entry.uri).inspect_err(|error| {
+            tracing::error!(
+                event = "astra_emu_vfs_verify_entry_failed",
+                diagnostic_code = error.code(),
+                source_id = %entry.source_id,
+                entry_ordinal,
+                source_offset = entry.source_offset,
+                stored_size = entry.stored_size,
+                decoded_size = entry.decoded_size,
+                phase = "open_stream"
+            );
+        })?;
         while offset < entry.decoded_size {
             let length = (entry.decoded_size - offset).min(VERIFY_CHUNK_BYTES);
-            let read = vfs.read_range(&entry.uri, offset, length)?;
             let expected = usize::try_from(length).map_err(|_| {
                 invalid(
                     "ASTRA_EMU_VFS_VERIFY_RANGE",
                     "verify range does not fit memory bounds",
                 )
             })?;
-            if read.offset != offset
-                || read.bytes.len() != expected
-                || (offset + length == entry.decoded_size) != read.eof
-            {
-                return Err(invalid(
-                    "ASTRA_EMU_VFS_VERIFY_SHORT_READ",
-                    "VFS returned a short or inconsistent verification range",
-                ));
-            }
+            let mut bytes = vec![0u8; expected];
+            stream.read_exact(&mut bytes).map_err(|_| {
+                tracing::error!(
+                    event = "astra_emu_vfs_verify_entry_failed",
+                    diagnostic_code = "ASTRA_EMU_VFS_VERIFY_STREAM",
+                    source_id = %entry.source_id,
+                    entry_ordinal,
+                    source_offset = entry.source_offset,
+                    stored_size = entry.stored_size,
+                    decoded_size = entry.decoded_size,
+                    decoded_offset = offset,
+                    phase = "stream_read"
+                );
+                invalid(
+                    "ASTRA_EMU_VFS_VERIFY_STREAM",
+                    "VFS decoded stream failed before its declared size",
+                )
+            })?;
             if offset == 0 {
-                first.extend_from_slice(&read.bytes[..read.bytes.len().min(REREAD_BYTES as usize)]);
+                first.extend_from_slice(&bytes[..bytes.len().min(REREAD_BYTES as usize)]);
             }
-            tail.extend_from_slice(&read.bytes);
+            tail.extend_from_slice(&bytes);
             if tail.len() > REREAD_BYTES as usize {
                 tail.drain(..tail.len() - REREAD_BYTES as usize);
             }
-            entry_hash.update(&read.bytes);
+            entry_hash.update(&bytes);
             offset = offset.checked_add(length).ok_or_else(|| {
                 invalid(
                     "ASTRA_EMU_VFS_VERIFY_OVERFLOW",
@@ -71,6 +93,33 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
                     "verification byte count overflowed",
                 )
             })?;
+        }
+        let mut eof_probe = [0u8; 1];
+        match stream.read(&mut eof_probe) {
+            Ok(0) => {}
+            Ok(_) => {
+                return Err(invalid(
+                    "ASTRA_EMU_VFS_VERIFY_STREAM_SIZE",
+                    "VFS decoded stream exceeds its declared size",
+                ));
+            }
+            Err(_) => {
+                tracing::error!(
+                    event = "astra_emu_vfs_verify_entry_failed",
+                    diagnostic_code = "ASTRA_EMU_VFS_VERIFY_STREAM",
+                    source_id = %entry.source_id,
+                    entry_ordinal,
+                    source_offset = entry.source_offset,
+                    stored_size = entry.stored_size,
+                    decoded_size = entry.decoded_size,
+                    decoded_offset = entry.decoded_size,
+                    phase = "stream_eof"
+                );
+                return Err(invalid(
+                    "ASTRA_EMU_VFS_VERIFY_STREAM",
+                    "VFS decoded stream failed while validating EOF",
+                ));
+            }
         }
         let digest: [u8; 32] = entry_hash.finalize().into();
         let content_hash = Hash256::from_bytes(digest);
@@ -103,6 +152,16 @@ pub fn verify_vfs(vfs: &dyn LegacyMountedVfs) -> Result<LegacyVfsVerifyReport, L
         aggregate.update(entry.entry_id.as_bytes());
         aggregate.update(entry.decoded_size.to_le_bytes());
         aggregate.update(content_hash.as_bytes());
+        let entries_verified = entry_ordinal + 1;
+        if entries_verified.is_multiple_of(256) || entries_verified == manifest.entries.len() {
+            tracing::info!(
+                event = "astra_emu_vfs_verify_progress",
+                entries_verified,
+                entry_count = manifest.entries.len(),
+                range_count,
+                byte_count
+            );
+        }
     }
     vfs.validate_sources()?;
     let aggregate_hash = Hash256::from_bytes(aggregate.finalize().into());

@@ -1,6 +1,6 @@
 # Minori Tooling
 
-旧 profile/cache identity 下的八包 full verify 已归档为历史结果。key-file/streaming hard cut 后需要重新执行同等范围的真实 verify，旧 aggregate hash 不能作为新 identity 的通过证据。
+旧 profile/cache identity 下的八包 full verify 只作为迁移历史保留。当前 key-file/streaming identity 已重新完成同等范围的真实 verify；两次 aggregate hash 相同，但证据身份仍分别记录。
 
 通用 VFS 操作统一走 `astra-emu-cli vfs`。CLI 只从显式 `--game-dir` 和严格 YAML launch profile 建立 family mount，不按注册顺序选择 provider，也不保留旧 `astra-emu-cli minori` 入口。
 
@@ -12,7 +12,7 @@ cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launc
 cargo run -p astra-emu-cli -- vfs --family minori --game-dir <case-root> --launch-profile <profile.yaml> extract --output <private-output> --prefix minori:/scr/
 ```
 
-`verify` 以 4 MiB range 完整流读每个 entry，校验 decoded size、可用 content hash、source mutation，并复读首尾最多 4 KiB。报告只包含 family、source/entry/range/byte 计数与聚合 hash。`read` 默认也只输出 hash 和范围信息；只有显式 `--format hex` 或 `--format text --encoding <encoding>` 才向 stdout 输出最多 64 KiB 内容。`--output` 可原子写出最多 64 MiB 的私有 range。
+`verify` 对每个 entry 只打开一次顺序 `open_stream`，以 4 MiB 逻辑块完整读取，校验 decoded size、可用 content hash 和 source mutation；随后再用 `read_range` 独立复读首尾最多 4 KiB。这样 packed entry 不会因每个 4 MiB 块重新建立 zlib 流而形成平方级解压开销，同时仍保留随机读取复核。报告只包含 family、source/entry/range/byte 计数与聚合 hash。`read` 默认也只输出 hash 和范围信息；只有显式 `--format hex` 或 `--format text --encoding <encoding>` 才向 stdout 输出最多 64 KiB 内容。`--output` 可原子写出最多 64 MiB 的私有 range。
 
 `extract` 的 `--prefix`、`--glob` 和 `--entry` 互斥；不传 selector 表示整树。写入前检查容量、大小写冲突、既有目标和路径，全部文件写入 staging tree 后才提交。Linux 提供前台只读 `mount --mountpoint <directory>`；Windows 和 macOS 不声明 FUSE。
 
@@ -51,11 +51,13 @@ Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged
 
 脚本在等待输入时会暴露 host-owned 的 `runtime.awaiting_input` 观测值。它仅由等待所接受的物理输入 mask 聚合哈希，适合输入序列的 `await` 条件；不会输出 await token、脚本位置、商业文本或资源名。一次确认应将 press/release 排在同一 fixed tick，避免 release 在等待已解决后成为未消费 edge。
 
-当前合法样本的旧 no-cache identity 已完成八包 14,502-entry full verify，89 脚本的 payload-free census 也已通过。key-file/streaming identity 的真实 verify 仍待重跑。key、导出内容和 disassembly 都留在本地私有目录。
+当前合法样本的 key-file/streaming identity 已完成八包 14,502-entry full verify：43,818 个逻辑读取范围、6,624,958,365 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。key、导出内容和 disassembly 都留在本地私有目录。
 
 `census-scripts` 当前输出 `astra.emu.minori.sc_census.v5`。除总量、opcode、音频和角色聚合外，`scripts` 数组只保留稳定序号、解码大小、源字节 SHA-256、行/命令计数、opcode 计数和 unknown 计数；不写脚本 URI、正文、operand、label 或跳转目标。这样可以在不泄露商业脚本的前提下定位单文件 parser/runtime 覆盖差异。
 
 `census-media` 只检查 `bg`、`bgm`，逐 frame 调用生产 ANI/SQZ adapter，并用 `image` 验证 PNG。报告仅含格式、entry/frame、像素和尺寸聚合计数；不含 URI、文件名或像素。当前样本通过 4665-entry census：2655 PNG、1951 ANI（6723 frames）、9 SQZ（224 frames）、49 Ogg 和 1 个 metadata database。
+
+当前 key-file/streaming identity 的 `census-scripts` 也已通过：89 个脚本、33728 行、33695 条命令、29 个 opcode，unknown opcode 为 0。`census-media` 同轮确认上述 4665 个 `bg`/`bgm` 条目，并清点 5 个 AVI container；这些都是脱敏 inventory 证据，不代表媒体播放时序或视觉结果已经验收。
 
 ## 辅助研究脚本
 

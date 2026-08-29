@@ -10,7 +10,7 @@
 
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
 
-旧 private-profile/cache identity 下曾完成八包 full verify；该结果仅保留为迁移前历史，不是当前 key-file/streaming identity 的通过证据。当前实现必须重新执行无明文缓存的 full verify，并验证重复读取重新访问密文 source。
+旧 private-profile/cache identity 下的八包 full verify 仅保留为迁移历史。当前 key-file/streaming identity 已重新完成无明文缓存的八包 full verify，并通过合成 source 计数回归确认重复 range read 会重新访问密文 source；峰值内存的独立规模门禁仍未关闭。
 
 - [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
 - [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
@@ -79,7 +79,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
 | Config writable-file persistence | 已实现 | `astra.emu.minori.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |
 
-当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。旧 no-cache identity 曾完成 14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes；key-file/streaming hard cut 后必须重新执行同等范围的真实 full verify。89 个脚本的 payload-free census 已通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
+当前合法样本包含八个非空逻辑 archive 和 18 个物理文件。key-file/streaming identity 已完成 14,502 个 entry、43,818 个逻辑读取范围和 6,624,958,365 个 decoded bytes；89 个脚本的 payload-free census 也已在同一 identity 下通过。Linux FUSE、macOS extract、Manager media preview 和 VM 仍各自保留独立证据边界。
 
 ## 下一阶段 Archive
 
