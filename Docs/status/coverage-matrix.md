@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-2026 年 8 月 29 日 Minori key-file/streaming hard cut：现行 VFS 不再执行 AstraEMU Luau patch，也不建立明文 cache。旧 cache second-run 与 aggregate hash 仅保留为迁移历史，不能证明新 identity。当前已完成严格 key parser、有界私有文件、流式 PAZ reader、旧命令/schema 删除和受影响 crate 回归；真实八包 full verify、四路线 Headless GPU E2 与 Release CLI Sandbox 验收仍开放。
+2026 年 8 月 29 日 Minori key-file/streaming hard cut：现行 VFS 不再执行 AstraEMU Luau patch，也不建立明文 cache。旧 cache second-run 与 aggregate hash 仅保留为迁移历史，不能证明新 identity。当前已完成严格 key parser、有界私有文件、流式 PAZ reader、旧命令/schema 删除和受影响 crate 回归；当前 identity 的真实八包 full verify 已覆盖 14502 entries 和 6624958365 decoded bytes。FFmpeg 增量入口已改为 custom AVIO，120 Hz GPU Headless 完成首段真实影片全流解码与 fence；诊断路线没有形成最终 artifact 或 route-pass report，因此四路线 Headless GPU E2 与 Release CLI Sandbox 验收仍开放。
 
 The signed Manager also reached its runtime-active window in the authorized Windows Sandbox with no default audio device; Diagnostics showed no blocking diagnostic after `NullAudioLane` selection and exposes `audio_endpoint=null` for the session. This is startup/UI evidence only. The null endpoint is excluded from physical-audio evidence and the Sandbox did not yield a writable artifact, so Windows E3 and formal audio review remain open.
 

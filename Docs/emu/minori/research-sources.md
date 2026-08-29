@@ -11,7 +11,7 @@
 | 1 | [GARbro](https://github.com/morkt/GARbro) `ArcFormats/Musica/ArcPAZ.cs` | `b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0` | MIT | PAZ v0-v2、Blowfish、RC4、zlib、movie 与分卷 | 作为格式 contract；差异仍由授权样本阻断验证 |
 | 1 | [GARbro](https://github.com/morkt/GARbro) `ArcFormats/Musica/ArcANI.cs` | 同上 | MIT | ANI frame table、offset、BPP 与 raw pixel layout | 已实现有界纯 Rust container adapter；通用像素 buffer 交给 `image` |
 | 1 | [GARbro](https://github.com/morkt/GARbro) `ArcFormats/Musica/ArcSQZ.cs` | 同上 | MIT | SQZ1 index、双倍 frame count、zlib BGRA32 frame | 已实现有界纯 Rust container adapter；严格校验解压大小 |
-| 2 | 当前授权样本 | 2026-07-21 | local-private | 八个逻辑 PAZ、18 个物理文件、14502 个 entry | 旧 identity 曾通过；当前 key-file/streaming full verify 待重跑 |
+| 2 | 当前授权样本 | 2026-08-30 | local-private | 八个逻辑 PAZ、18 个物理文件、14502 个 entry | 当前 key-file/streaming identity 的 full verify 已通过；不外推为路线或平台证据 |
 | 3 | 原程序可观察行为 | 尚未形成正式 E3 证据 | local-private | 脚本 VM、系统 UI、输入、存档和演出时序 | GARbro 未覆盖，不从格式 reader 反推语义 |
 
 ## 复用组件
@@ -21,6 +21,7 @@
 | [image](https://docs.rs/image/latest/image/) | workspace lockfile `0.25.10` | MIT OR Apache-2.0 | PNG/JPEG/BMP 和 RGBA buffer；ANI/SQZ 只负责专有 container 解包 |
 | [cosmic-text](https://docs.rs/crate/cosmic-text/latest) | workspace lockfile `0.18.2` | MIT OR Apache-2.0 | 日文 shaping、fallback、度量和换行；Minori 不实现私有字体排版器 |
 | [Symphonia](https://docs.rs/symphonia/latest/symphonia/) | workspace lockfile `0.6.0` | MPL-2.0 | 音频 demux/decode；解码后的 owned PCM 进入统一 Kira `AudioServiceSession`，不保留 Minori 私有 mixer |
+| [FFmpeg custom AVIO](https://ffmpeg.org/doxygen/7.1/avformat_8h_source.html) | workspace `ffmpeg-vcpkg` binding | LGPL-2.1-or-later / configured build | AVI/WMV3/PCM 增量 demux/decode；custom AVIO 直接读取有界 seekable VFS source，不建立明文 spool，也不作为其他 provider 失败后的 fallback |
 | `flate2` | workspace lockfile `1.1.9` | MIT OR Apache-2.0 | PAZ/SQZ zlib；所有输出都受 descriptor 与 host budget 限制 |
 | `blowfish` / `rc4` | workspace lockfile `0.10.0` / `0.2.0` | MIT OR Apache-2.0 | 旧 PAZ 兼容；不作为新数据的安全加密方案 |
 

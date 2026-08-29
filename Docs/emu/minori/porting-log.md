@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：FFmpeg custom AVIO 与当前 E2 边界
+
+- AstraMedia 的 FFmpeg 增量入口已从明文临时 spool 改为 custom AVIO。Host 把有界 `Read + Seek + Send` reader 的所有权交给 decoder；FFmpeg 通过 64 KiB callback buffer 直接读取和定位 VFS 明文流，不再生成第二份完整明文文件。reader、AVIO context 和 demux context 按显式所有权顺序释放，回调 panic、I/O 错误、越界 seek 和输入预算异常都会阻断。
+- 同一接口完成了直接文件与 VFS reader 的逐次 read/seek 对照，真实 AVI 全流解码到 EOS；`astra-media` 的 FFmpeg 定向测试、受影响 `clippy` 和 CLI feature 构建通过。Minori 影片 completion 现在同时要求播放时钟到达 duration 且 decoder 到达 EOS，不能用首帧或时长猜测完成。
+- 当前签名 Release identity 的 120 Hz Headless GPU 运行已完成首段真实影片的全流解码与 media fence。随后发现既有私有路线输入在当前脚本节奏下包含大量重复推进，单次运行无法在合理时间内闭合四路线；诊断运行已主动中止，因此没有最终 artifact 或 route-pass report。当前只能记作媒体子链 E2，完整路线、Release Sandbox 视觉验收和正式 Windows E3 仍开放。
+
 ## 2026-08-30：packed stream 的声明尺寸边界
 
 - 新 key-file identity 的真实八包 full verify 在 `bg` 中稳定复现一个边界：zlib 完整解压结果比 index 的 `unpacked_size` 多 8 个全零字节。一次性 reader 过去会在验证尾部全零且不超过 16 字节后裁剪，流式迁移遗漏了这项格式语义，因此在声明 EOF 处错误阻断。
@@ -149,7 +155,7 @@ Windows Sandbox E3 现场检查因 WASAPI 默认输出不可用而无法启动 n
 ### 增量视频播放迁移到 AstraMedia
 
 - Minori 的 `.avi` 运行时现在只保留 RIFF/AVI 身份检查和 family provider binding。增量解码生命周期由 `astra-media::IncrementalMediaDecoder` / `IncrementalMediaPlayback` 管理，统一处理 PTS read-ahead、BGRA 帧边界、PCM 转换、pending audio 限额、seek/cancel 和 codec-neutral telemetry。
-- `FfmpegPlaybackDecoder::open_reader` 以有界 reader 写入 AstraMedia 私有临时 spool，再由成熟的 FFmpeg demux/codec 完成逐 packet 解码。Minori 的 Manager、CLI Headless 和 preview 均绑定同一 `ffmpeg-vcpkg` provider；FFmpeg feature 未启用或 probe/decode 失败时返回稳定 blocking diagnostic，不调用 WMF、平台 codec、RFVP 或手写 decoder。
+- 本节最初使用私有临时 spool 连接 reader 与 FFmpeg；2026-08-30 已由 custom AVIO 取代。现行路径由 FFmpeg 直接回调有界 `Read + Seek + Send` reader，不生成第二份完整明文文件。Minori 的 Manager、CLI Headless 和 preview 均绑定同一 `ffmpeg-vcpkg` provider；FFmpeg feature 未启用或 probe/decode 失败时返回稳定 blocking diagnostic，不调用 WMF、平台 codec、RFVP 或手写 decoder。
 - Manager 的 Minori host cursor 也已切换到 `IncrementalMediaPlayback`，只把当前时间窗内的新帧和有界 PCM chunk转移到通用 timeline，避免再次复制完整 decoded movie；`take_current_frame` 用所有权移动保持跨层零拷贝边界。CLI/native/headless composition 现在都把 video provider 作为显式 launch binding，Minori 在 `disabled` 或未知 binding 下直接阻断。
 - 已删除 CLI 的 `avi_range` 解码路径以及 Minori 对 `na_mpeg2_decoder`/`wmv-decoder` 的生产依赖；RFVP 自身的 transitive decoder 仍属于 FVP provider 边界，不由 Minori 复用或改写。该项已通过 `astra-media` 增量 cursor 单元测试、`astra-emu-minori` focused tests 和 Manager/CLI 增量编译；真实影片 FFmpeg feature run 与 Windows E3 仍未形成公开证据。
 - 当前授权样本的五个 `.avi` 均确认是 `AVI/WMV3/PCM s16le/48 kHz/stereo`。FFmpeg feature 的真实 Headless media slice 已完成：60 个固定 tick、16 个呈现帧、111104 个音频帧、音频非静音、`diagnostic_codes` 为空；`movie_60` checkpoint 的渲染 hash 与此前参考运行一致。该证据只说明增量 provider、VFS range、音频队列和 Headless artifact 接线可用，不等同 Windows E3 或完整路线通过。

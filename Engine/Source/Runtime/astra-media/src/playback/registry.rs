@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fmt, io::Read};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    io::{Read, Seek},
+};
 
 use super::{playback_error, IncrementalMediaDecoder};
 use crate::MediaError;
@@ -41,9 +45,13 @@ impl Default for IncrementalDecodeBudget {
 /// Owned request passed to exactly one incrementally bound decode provider.
 /// The reader is intentionally opaque to the registry, so platform and family
 /// adapters can provide VFS-backed sources without exposing paths or payloads.
+pub trait IncrementalReadSeek: Read + Seek + Send {}
+
+impl<T> IncrementalReadSeek for T where T: Read + Seek + Send {}
+
 pub struct IncrementalDecodeRequest {
     pub codec: String,
-    pub reader: Box<dyn Read>,
+    pub reader: Box<dyn IncrementalReadSeek>,
     pub budget: IncrementalDecodeBudget,
 }
 
@@ -58,7 +66,7 @@ impl fmt::Debug for IncrementalDecodeRequest {
 }
 
 impl IncrementalDecodeRequest {
-    pub fn new(codec: impl Into<String>, reader: Box<dyn Read>) -> Self {
+    pub fn new(codec: impl Into<String>, reader: Box<dyn IncrementalReadSeek>) -> Self {
         Self {
             codec: codec.into().to_ascii_lowercase(),
             reader,

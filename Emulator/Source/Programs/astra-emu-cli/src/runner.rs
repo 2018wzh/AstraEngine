@@ -2667,6 +2667,10 @@ impl MinoriAviPlayback {
         self.cursor.duration_us()
     }
 
+    fn is_ended(&self) -> bool {
+        self.cursor.is_ended()
+    }
+
     fn close(&mut self) -> Result<(), String> {
         self.cursor.cancel().map_err(minori_media_error)
     }
@@ -3320,6 +3324,13 @@ impl ActiveVideoStream {
             Self::Native(cursor) => cursor.duration_us,
             Self::MinoriAvi(cursor) => Some(cursor.duration_us()),
             Self::Platform(cursor) => cursor.duration_us(),
+        }
+    }
+
+    fn decoded_stream_ended(&self) -> bool {
+        match self {
+            Self::MinoriAvi(cursor) => cursor.is_ended(),
+            Self::Native(_) | Self::Platform(_) => true,
         }
     }
 
@@ -4913,6 +4924,19 @@ async fn execute_sequence(
                         matched = driver.observation_matches(observation);
                     }
                     if !matched {
+                        let active_video = driver.video.as_ref();
+                        let video_started_step = active_video.map(|video| video.started_step);
+                        let video_duration_us =
+                            active_video.and_then(|video| video.stream.duration_us());
+                        let video_elapsed_us = active_video.map(|video| {
+                            driver
+                                .fixed_step
+                                .saturating_sub(video.started_step)
+                                .saturating_mul(driver.delta_ns)
+                                / 1_000
+                        });
+                        let video_decoded_stream_ended =
+                            active_video.map(|video| video.stream.decoded_stream_ended());
                         tracing::error!(
                             target: "astra_emu_cli::runner",
                             event = "astra_emu_headless_await_timeout",
@@ -4940,6 +4964,10 @@ async fn execute_sequence(
                                 .filter(|wait| matches!(wait, PendingWait::Media(_)))
                                 .count(),
                             active_video = driver.video.is_some(),
+                            video_started_step,
+                            video_duration_us,
+                            video_elapsed_us,
+                            video_decoded_stream_ended,
                             observed_blackboard_count = driver.observed_blackboard.len(),
                             runtime_status = driver.last_runtime_status.as_str(),
                             runtime_wait_count = driver.last_runtime_wait_count,
@@ -6724,7 +6752,8 @@ impl<'a> RuntimeDriver<'a> {
                 }
             }
         };
-        tracing::debug!(
+        tracing::info!(
+            target: "astra_emu_cli::media",
             event = "astra_emu_headless_video_opened",
             codec = extension,
             decoded_frame_count = match &stream {
@@ -6733,6 +6762,7 @@ impl<'a> RuntimeDriver<'a> {
                 ActiveVideoStream::Platform(_) => 1,
             },
             duration_us = stream.duration_us(),
+            started_step,
             audio_stream_active = audio_stream_id.is_some(),
             "opened bounded Headless video stream"
         );
@@ -6867,7 +6897,11 @@ impl<'a> RuntimeDriver<'a> {
                 )?;
             }
         }
-        if duration_us.is_some_and(|duration| elapsed_us >= duration) {
+        let decoded_stream_ended = self
+            .video
+            .as_ref()
+            .is_some_and(|video| video.stream.decoded_stream_ended());
+        if duration_us.is_some_and(|duration| elapsed_us >= duration) && decoded_stream_ended {
             let mut completed = self
                 .video
                 .take()
@@ -6989,7 +7023,7 @@ fn open_minori_avi_incremental_decoder<R>(
     reader: R,
 ) -> Result<Box<dyn IncrementalMediaDecoder>, String>
 where
-    R: Read + 'static,
+    R: Read + Seek + Send + 'static,
 {
     #[cfg(not(feature = "ffmpeg-vcpkg"))]
     {

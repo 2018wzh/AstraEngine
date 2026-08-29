@@ -37,7 +37,7 @@ BGM、SE、voice 分离。Voice replay 从 backlog 触发时不能推进脚本 V
 
 ## Movie
 
-当前样本 `mov.paz` 非空并含 5 个 entry。VFS 负责准确解密和读取；`PlayMovie` 在 Headless、Manager 和 CLI 的 Minori 路径都绑定 AstraMedia 的 `ffmpeg-vcpkg` 增量 provider，以有界 `Read + Seek` 源逐包产生单调 PTS、BGRA 帧和交错 PCM，再交给公共 `IncrementalMediaPlayback`、media fence、Renderer2D 和 Kira 音频队列。游标同时执行 tick、packet、视频 lead/lag 和迟到策略边界，`Drop` 仅在 profile 明确允许时计数，`Block` 直接阻断。Manager VFS viewer 的 `.avi` 首帧同样要求显式 FFmpeg binding；没有 FFmpeg 或 provider binding 不匹配时直接返回稳定 diagnostic，不调用系统 codec、手写 AVI/WMV 解码器或 fallback。movie gallery 的脚本目标和标签已校验，但样本没有独立的 gallery 背景资源，因此当前页面保留严格有界的已验证 Memories 背景近似，不能作为原版逐像素 parity 证据。
+当前样本 `mov.paz` 非空并含 5 个 entry。VFS 负责准确解密和读取；`PlayMovie` 在 Headless、Manager 和 CLI 的 Minori 路径都绑定 AstraMedia 的 `ffmpeg-vcpkg` 增量 provider，以有界 `Read + Seek + Send` 源逐包产生单调 PTS、BGRA 帧和交错 PCM，再交给公共 `IncrementalMediaPlayback`、media fence、Renderer2D 和 Kira 音频队列。FFmpeg 通过 custom AVIO 的 64 KiB callback buffer 直接读取该源，不建立明文临时文件。游标同时执行 tick、packet、视频 lead/lag 和迟到策略边界，`Drop` 仅在 profile 明确允许时计数，`Block` 直接阻断；影片完成还要求 decoder 到达 EOS。Manager VFS viewer 的 `.avi` 首帧同样要求显式 FFmpeg binding；没有 FFmpeg 或 provider binding 不匹配时直接返回稳定 diagnostic，不调用系统 codec、手写 AVI/WMV 解码器或 fallback。movie gallery 的脚本目标和标签已校验，但样本没有独立的 gallery 背景资源，因此当前页面保留严格有界的已验证 Memories 背景近似，不能作为原版逐像素 parity 证据。
 
 当前 Family ABI v9 的 `LegacyAudioCommandV1::Play` 与 `LegacyVideoCommandV1::Play` 没有起始 PTS 或 seek 字段。Minori snapshot 会保存活动资源、编码、循环和 continuation marker，并在 restore 时重新校验资源 identity；Host 只能按公共 ABI 重新提交从起点开始的 `Play`，不能把 marker 冒充成可寻址的媒体续播。需要原位置恢复的音频/影片 continuation 是明确的 blocking 项，必须先由 ABI/Host 提供经过验证的 seek contract，再补实现和 evidence；当前不使用平台播放器、私有 decoder 或伪造 completion 绕过该边界。
 

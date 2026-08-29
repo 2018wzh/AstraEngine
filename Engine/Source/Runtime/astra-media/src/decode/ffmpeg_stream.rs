@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Seek};
 
 use ffmpeg_next as ffmpeg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tempfile::{Builder, NamedTempFile};
 
 use super::{decode_error, MediaError};
 use crate::{
@@ -14,7 +13,9 @@ use crate::{
 };
 
 mod backend;
+mod custom_io;
 use backend::*;
+use custom_io::{open_seekable_input, SeekableInputOwner};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FfmpegStreamLimits {
@@ -82,7 +83,7 @@ pub fn open_ffmpeg_incremental_reader<R>(
     budget: IncrementalDecodeBudget,
 ) -> Result<Box<dyn IncrementalMediaDecoder>, MediaError>
 where
-    R: Read + 'static,
+    R: Read + Seek + Send + 'static,
 {
     let provider = FfmpegIncrementalDecodeProvider::probe()?;
     let mut registry = IncrementalDecodeProviderRegistry::default();
@@ -144,10 +145,9 @@ pub struct FfmpegAudioOutputFormat {
 
 pub struct FfmpegPlaybackDecoder {
     input: ffmpeg::format::context::Input,
-    // Keep the FFmpeg input context ahead of the spool in declaration order so
-    // the demuxer closes its OS file handle before NamedTempFile attempts the
-    // Windows unlink during drop.
-    _source: NamedTempFile,
+    // Field order is intentional: the format context must close before the
+    // custom AVIO owner releases its callbacks and reader.
+    _source: SeekableInputOwner,
     audio: Option<AudioDecoder>,
     video: Option<VideoDecoder>,
     limits: FfmpegStreamLimits,
@@ -166,16 +166,17 @@ impl FfmpegPlaybackDecoder {
         Self::open_with_audio_output(codec, bytes, limits, None)
     }
 
-    /// Open an encoded source without first materialising a second caller-owned
-    /// byte vector.  The reader is copied in bounded chunks into the private
-    /// FFmpeg spool file and is rejected as soon as it exceeds the profile
-    /// limit.
-    pub fn open_reader<R: Read>(
+    /// Open an encoded source through FFmpeg custom AVIO. The provider retains
+    /// the seekable reader and never materialises a second plaintext copy.
+    pub fn open_reader<R>(
         codec: &str,
-        mut reader: R,
+        reader: R,
         limits: FfmpegStreamLimits,
-    ) -> Result<Self, MediaError> {
-        Self::open_reader_with_audio_output(codec, &mut reader, limits, None)
+    ) -> Result<Self, MediaError>
+    where
+        R: Read + Seek + Send + 'static,
+    {
+        Self::open_reader_with_audio_output(codec, reader, limits, None)
     }
 
     pub fn open_with_audio_output(
@@ -199,22 +200,23 @@ impl FfmpegPlaybackDecoder {
                 "FFmpeg stream codec or encoded byte budget is invalid",
             ));
         }
-        let mut source = new_source(codec)?;
-        source
-            .write_all(bytes)
-            .map_err(|error| io_error("write FFmpeg stream input", error))?;
-        source
-            .flush()
-            .map_err(|error| io_error("flush FFmpeg stream input", error))?;
-        Self::open_source(source, limits, audio_output)
+        Self::open_reader_with_audio_output(
+            codec,
+            Cursor::new(bytes.to_vec()),
+            limits,
+            audio_output,
+        )
     }
 
-    pub fn open_reader_with_audio_output<R: Read>(
+    pub fn open_reader_with_audio_output<R>(
         codec: &str,
-        reader: &mut R,
+        reader: R,
         limits: FfmpegStreamLimits,
         audio_output: Option<FfmpegAudioOutputFormat>,
-    ) -> Result<Self, MediaError> {
+    ) -> Result<Self, MediaError>
+    where
+        R: Read + Seek + Send + 'static,
+    {
         validate_limits(&limits)?;
         if audio_output.is_some_and(|format| {
             format.sample_rate == 0 || format.channels == 0 || format.channels > 8
@@ -230,42 +232,16 @@ impl FfmpegPlaybackDecoder {
                 "FFmpeg stream codec is not enabled by the profile",
             ));
         }
-        let mut source = new_source(codec)?;
-        let read_limit = u64::try_from(limits.max_encoded_bytes)
-            .ok()
-            .and_then(|limit| limit.checked_add(1))
-            .ok_or_else(|| {
-                decode_error(
-                    "ASTRA_FFMPEG_STREAM_INPUT",
-                    "FFmpeg stream encoded byte budget exceeds the playback clock",
-                )
-            })?;
-        let mut bounded_reader = reader.take(read_limit);
-        let copied = std::io::copy(&mut bounded_reader, &mut source)
-            .map_err(|error| io_error("copy FFmpeg stream input", error))?;
-        if copied == 0 || copied > limits.max_encoded_bytes as u64 {
-            return Err(decode_error(
-                "ASTRA_FFMPEG_STREAM_INPUT",
-                "FFmpeg stream encoded byte budget is invalid",
-            ));
-        }
-        source
-            .flush()
-            .map_err(|error| io_error("flush FFmpeg stream input", error))?;
-        Self::open_source(source, limits, audio_output)
+        let (input, source) = open_seekable_input(reader, limits.max_encoded_bytes)?;
+        Self::open_source(input, source, limits, audio_output)
     }
 
     fn open_source(
-        source: NamedTempFile,
+        input: ffmpeg::format::context::Input,
+        source: SeekableInputOwner,
         limits: FfmpegStreamLimits,
         audio_output: Option<FfmpegAudioOutputFormat>,
     ) -> Result<Self, MediaError> {
-        ffmpeg::init().map_err(|error| {
-            ffmpeg_error("ASTRA_FFMPEG_STREAM_PROBE", "initialize FFmpeg", error)
-        })?;
-        let input = ffmpeg::format::input(source.path()).map_err(|error| {
-            ffmpeg_error("ASTRA_FFMPEG_STREAM_DEMUX", "open encoded stream", error)
-        })?;
         let duration = input.duration();
         if duration <= 0 {
             return Err(decode_error(
@@ -605,12 +581,4 @@ impl crate::IncrementalMediaDecoder for FfmpegPlaybackDecoder {
     fn cancel(&mut self) -> Result<(), MediaError> {
         Self::cancel(self)
     }
-}
-
-fn new_source(codec: &str) -> Result<NamedTempFile, MediaError> {
-    Builder::new()
-        .prefix("astra-media-stream-")
-        .suffix(&format!(".{codec}"))
-        .tempfile()
-        .map_err(|error| io_error("create FFmpeg stream input", error))
 }

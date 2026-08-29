@@ -754,10 +754,3 @@ pub(super) fn ffmpeg_error(
 ) -> MediaError {
     decode_error(code, format!("FFmpeg failed to {operation}: {error}"))
 }
-
-pub(super) fn io_error(operation: &'static str, error: std::io::Error) -> MediaError {
-    decode_error(
-        "ASTRA_FFMPEG_STREAM_IO",
-        format!("failed to {operation}: {}", error.kind()),
-    )
-}
