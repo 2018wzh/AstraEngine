@@ -3245,6 +3245,23 @@ fn describe_stage_frame(
         &mut texture_resources,
         &mut draws,
     )?;
+    if let Some(panel) = state.panel.as_ref() {
+        if panel.mode != 1 {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_PANEL_MODE",
+                "panel state contains an unverified mode",
+            ));
+        }
+        append_panel_layer(
+            vfs,
+            mount_set_id,
+            &panel.resource_uri,
+            height,
+            200,
+            &mut texture_resources,
+            &mut draws,
+        )?;
+    }
     let frame = LegacyRenderResourceFrameV1 {
         width,
         height,
@@ -13918,6 +13935,66 @@ mod tests {
         assert_eq!(frame.texture_resources[0].decoded_height, 263);
         assert_eq!(frame.draws[0].vertices[0].position[1], 521.0);
         assert_eq!(frame.draws[0].vertices[2].position[1], 784.0);
+    }
+
+    #[test]
+    fn provider_stage_presentation_retains_active_message_panel() {
+        let script = b".stage * BG.png 0 0\r\n.panel 1\r\n.stage * BG.png 0 0\r\n.end\r\n".to_vec();
+        let mut background_png = Vec::new();
+        PngEncoder::new(&mut background_png)
+            .write_image(&[0, 0, 0, 255], 1, 1, ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut panel_png = Vec::new();
+        PngEncoder::new(&mut panel_png)
+            .write_image(&vec![0; 4 * 263], 1, 263, ExtendedColorType::Rgba8)
+            .unwrap();
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/scr/test.sc".into(), script),
+                ("minori:/bg/BG.png".into(), background_png),
+                ("minori:/sys/msgPanel.png".into(), panel_png),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.stage-panel".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        provider
+            .step(&ctx, &session, step_input(2, Vec::new()))
+            .unwrap();
+        let stage = provider
+            .step(&ctx, &session, step_input(3, Vec::new()))
+            .unwrap();
+        let frame = &stage.live.resource_scenes[0].value;
+        assert!(frame
+            .texture_resources
+            .iter()
+            .any(|resource| resource.resource_uri == "minori:/sys/msgPanel.png"));
+        let panel_draw = frame
+            .draws
+            .iter()
+            .find(|draw| draw.texture_id == 200)
+            .expect("active message panel must be drawn over a stage update");
+        assert_eq!(panel_draw.vertices[0].position[1], 521.0);
+        assert_eq!(panel_draw.vertices[2].position[1], 784.0);
     }
 
     fn context() -> LegacyRuntimeHostCtx {

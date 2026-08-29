@@ -106,8 +106,8 @@ mod windows {
         SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
-        AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
-        VerifiedPackageCache,
+        AtomicSaveStore, CachedPackageSource, FilePackageSource, NullAudioProducer, ResourceTable,
+        SaveTransaction, VerifiedPackageCache,
     };
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use tokio::sync::oneshot;
@@ -271,7 +271,7 @@ mod windows {
                                 Ok(OpenedAudioOutput {
                                     handle,
                                     format,
-                                    lane: Box::new(lane),
+                                    lane,
                                     capture: None,
                                 })
                             },
@@ -1114,7 +1114,7 @@ mod windows {
                     Ok(OpenedAudioOutput {
                         handle,
                         format,
-                        lane: Box::new(lane),
+                        lane,
                         capture: None,
                     })
                 });
@@ -1277,7 +1277,7 @@ mod windows {
         result: Result<
             (
                 AudioResource,
-                astra_platform_common::NativeAudioProducer,
+                Box<dyn astra_platform::AudioOutputLane>,
                 AudioDeviceFormat,
             ),
             PlatformError,
@@ -1488,11 +1488,16 @@ mod windows {
         readback.finish()
     }
 
-    struct AudioResource {
-        stream: cpal::Stream,
-        #[cfg(feature = "platform-test-driver")]
-        stream_error: Arc<AtomicBool>,
-        paused: bool,
+    enum AudioResource {
+        Device {
+            stream: cpal::Stream,
+            #[cfg(feature = "platform-test-driver")]
+            stream_error: Arc<AtomicBool>,
+            paused: bool,
+        },
+        Null {
+            paused: bool,
+        },
     }
 
     impl AudioResource {
@@ -1502,12 +1507,15 @@ mod windows {
         ) -> Result<
             (
                 Self,
-                astra_platform_common::NativeAudioProducer,
+                Box<dyn astra_platform::AudioOutputLane>,
                 AudioDeviceFormat,
             ),
             PlatformError,
         > {
-            if request.sample_rate == 0 || request.channels == 0 || request.max_buffered_frames == 0
+            if request.sample_rate == 0
+                || request.channels == 0
+                || request.chunk_frames == 0
+                || request.max_buffered_frames == 0
             {
                 return Err(PlatformError::new(
                     PlatformErrorCode::InvalidState,
@@ -1515,10 +1523,37 @@ mod windows {
                     "audio output format and queue capacity must be non-zero",
                 ));
             }
+            let chunk_samples = request
+                .chunk_frames
+                .checked_mul(usize::from(request.channels))
+                .ok_or_else(|| {
+                    PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "audio.open",
+                        "audio output queue capacity overflows",
+                    )
+                })?;
             let host = cpal::default_host();
-            let device = host.default_output_device().ok_or_else(|| {
-                host_error("audio.open", "WASAPI default output device is unavailable")
-            })?;
+            let Some(device) = host.default_output_device() else {
+                tracing::warn!(
+                    target: "astra_platform_windows::audio",
+                    event = "astra_platform_windows_audio_null_device",
+                    diagnostic_code = "ASTRA_PLATFORM_WINDOWS_AUDIO_NULL_DEVICE",
+                    sample_rate = request.sample_rate,
+                    channels = request.channels,
+                    "WASAPI output device is unavailable; using the explicit null endpoint"
+                );
+                return Ok((
+                    Self::Null {
+                        paused: request.start_paused,
+                    },
+                    Box::new(NullAudioProducer::new(chunk_samples)?),
+                    AudioDeviceFormat {
+                        sample_rate: request.sample_rate,
+                        channels: request.channels,
+                    },
+                ));
+            };
             let requested_rate = request.sample_rate;
             let supported = device
                 .supported_output_configs()
@@ -1538,16 +1573,6 @@ mod windows {
                     )
                 })?;
             let config: cpal::StreamConfig = supported.clone().into();
-            let chunk_samples = request
-                .chunk_frames
-                .checked_mul(usize::from(request.channels))
-                .ok_or_else(|| {
-                    PlatformError::new(
-                        PlatformErrorCode::InvalidState,
-                        "audio.open",
-                        "audio output queue capacity overflows",
-                    )
-                })?;
             let chunk_capacity = request.max_buffered_frames.div_ceil(request.chunk_frames);
             let (producer, consumer, _queue_telemetry) =
                 astra_platform_common::NativeAudioQueue::create(
@@ -1625,13 +1650,13 @@ mod windows {
                 })?;
             }
             Ok((
-                Self {
+                Self::Device {
                     stream,
                     #[cfg(feature = "platform-test-driver")]
                     stream_error,
                     paused: request.start_paused,
                 },
-                producer,
+                Box::new(producer),
                 AudioDeviceFormat {
                     sample_rate: request.sample_rate,
                     channels: request.channels,
@@ -1640,38 +1665,70 @@ mod windows {
         }
 
         fn pause(&mut self) -> Result<(), PlatformError> {
-            if self.paused {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::InvalidState,
-                    "audio.pause",
-                    "WASAPI output is already paused",
-                ));
+            match self {
+                Self::Device { stream, paused, .. } => {
+                    if *paused {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "audio.pause",
+                            "WASAPI output is already paused",
+                        ));
+                    }
+                    stream
+                        .pause()
+                        .map_err(|_| host_error("audio.pause", "WASAPI output could not pause"))?;
+                    *paused = true;
+                    Ok(())
+                }
+                Self::Null { paused } => {
+                    if *paused {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "audio.pause",
+                            "null audio output is already paused",
+                        ));
+                    }
+                    *paused = true;
+                    Ok(())
+                }
             }
-            self.stream
-                .pause()
-                .map_err(|_| host_error("audio.pause", "WASAPI output could not pause"))?;
-            self.paused = true;
-            Ok(())
         }
 
         fn resume(&mut self) -> Result<(), PlatformError> {
-            if !self.paused {
-                return Err(PlatformError::new(
-                    PlatformErrorCode::InvalidState,
-                    "audio.resume",
-                    "WASAPI output is not paused",
-                ));
+            match self {
+                Self::Device { stream, paused, .. } => {
+                    if !*paused {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "audio.resume",
+                            "WASAPI output is not paused",
+                        ));
+                    }
+                    stream.play().map_err(|_| {
+                        host_error("audio.resume", "WASAPI output could not resume")
+                    })?;
+                    *paused = false;
+                    Ok(())
+                }
+                Self::Null { paused } => {
+                    if !*paused {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "audio.resume",
+                            "null audio output is not paused",
+                        ));
+                    }
+                    *paused = false;
+                    Ok(())
+                }
             }
-            self.stream
-                .play()
-                .map_err(|_| host_error("audio.resume", "WASAPI output could not resume"))?;
-            self.paused = false;
-            Ok(())
         }
 
         #[cfg(feature = "platform-test-driver")]
         fn inject_device_loss(&mut self) {
-            self.stream_error.store(true, Ordering::Release);
+            if let Self::Device { stream_error, .. } = self {
+                stream_error.store(true, Ordering::Release);
+            }
         }
     }
 

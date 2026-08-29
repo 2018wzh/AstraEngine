@@ -64,6 +64,79 @@ impl NativeAudioProducer {
     }
 }
 
+/// Bounded sink used when a native host has no physical audio endpoint.
+///
+/// The sink preserves the ownership and chunk-size contract of
+/// [`NativeAudioProducer`] while consuming samples immediately.  It is not a
+/// decoder or a mixer fallback: the selected host explicitly reports the
+/// null endpoint and the caller still observes submitted/consumed counters.
+pub struct NullAudioProducer {
+    chunk_samples: usize,
+    consumed_samples: u64,
+}
+
+impl NullAudioProducer {
+    pub fn new(chunk_samples: usize) -> Result<Self, PlatformError> {
+        if chunk_samples == 0 {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "audio.null",
+                "null audio output chunk size must be non-zero",
+            ));
+        }
+        Ok(Self {
+            chunk_samples,
+            consumed_samples: 0,
+        })
+    }
+}
+
+impl AudioOutputLane for NullAudioProducer {
+    fn wait_for_capacity(
+        &mut self,
+        requested_samples: usize,
+        _stop: &AtomicBool,
+    ) -> Result<(), PlatformError> {
+        if requested_samples != self.chunk_samples {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.lane.wait",
+                "mixer chunk size does not match the opened null output lane",
+            ));
+        }
+        Ok(())
+    }
+
+    fn submit(&mut self, samples: Vec<f32>) -> Result<Vec<f32>, PlatformError> {
+        if samples.len() != self.chunk_samples {
+            return Err(PlatformError::new(
+                PlatformErrorCode::IntegrityMismatch,
+                "audio.lane.submit",
+                "mixer chunk size does not match the opened null output lane",
+            ));
+        }
+        self.consumed_samples = self
+            .consumed_samples
+            .checked_add(samples.len() as u64)
+            .ok_or_else(|| {
+                PlatformError::new(
+                    PlatformErrorCode::IntegrityMismatch,
+                    "audio.lane.submit",
+                    "null audio consumed sample counter overflowed",
+                )
+            })?;
+        Ok(samples)
+    }
+
+    fn consumed_samples(&self) -> u64 {
+        self.consumed_samples
+    }
+
+    fn underflow_count(&self) -> u64 {
+        0
+    }
+}
+
 impl AudioOutputLane for NativeAudioProducer {
     fn wait_for_capacity(
         &mut self,
@@ -280,4 +353,38 @@ impl NativeAudioQueue {
 
 fn queue_overflow(message: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::QueueOverflow, "audio.submit", message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn null_output_preserves_chunk_ownership_and_telemetry() {
+        let mut lane = NullAudioProducer::new(4).expect("non-zero chunk is valid");
+        let stop = AtomicBool::new(false);
+        lane.wait_for_capacity(4, &stop)
+            .expect("null output is immediately available");
+        let samples = vec![0.25; 4];
+        let returned = lane
+            .submit(samples)
+            .expect("null output accepts a full chunk");
+        assert_eq!(returned, vec![0.25; 4]);
+        assert_eq!(lane.consumed_samples(), 4);
+        assert_eq!(lane.underflow_count(), 0);
+    }
+
+    #[test]
+    fn null_output_rejects_wrong_chunk_size() {
+        let mut lane = NullAudioProducer::new(4).expect("non-zero chunk is valid");
+        let stop = AtomicBool::new(false);
+        let error = lane
+            .wait_for_capacity(2, &stop)
+            .expect_err("wrong chunk size must be rejected");
+        assert_eq!(error.code, PlatformErrorCode::IntegrityMismatch);
+        let error = lane
+            .submit(vec![0.0; 2])
+            .expect_err("wrong chunk size must be rejected");
+        assert_eq!(error.code, PlatformErrorCode::IntegrityMismatch);
+    }
 }

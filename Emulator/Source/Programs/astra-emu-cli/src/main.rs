@@ -182,7 +182,14 @@ enum CliCommand {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("ASTRA_EMU_CLI_FAILED:{error}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let filter = std::env::var("ASTRA_LOG").unwrap_or_else(|_| "info".to_owned());
     let mut observability = astra_observability::HostObservabilityConfig::for_cli(&filter);
     observability.role = astra_observability::HostRole::Cli;
