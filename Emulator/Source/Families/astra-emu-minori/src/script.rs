@@ -652,6 +652,10 @@ mod tests {
             tokenize_operands(b"100\t\tspeaker\tbody", 0).unwrap(),
             vec!["100", "", "speaker", "body"]
         );
+        assert_eq!(
+            tokenize_operands(b"front.png:* back.png 0 0 ", 0).unwrap(),
+            vec!["front.png:*", "back.png", "0", "0", ""]
+        );
         assert_eq!(tokenize_operands(b"", 0).unwrap(), Vec::<String>::new());
     }
 

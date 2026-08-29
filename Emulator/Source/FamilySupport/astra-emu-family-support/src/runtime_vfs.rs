@@ -96,13 +96,13 @@ impl LegacyMountedVfsReaderAdapter {
         uri: &str,
     ) -> Result<(ByteSourceStat, astra_emu_family_core::LegacyVfsStat, u32), LegacyProviderError>
     {
-        let resource_identity = Hash256::from_sha256(uri.as_bytes());
+        let requested_identity = Hash256::from_sha256(uri.as_bytes());
         let stat = self.vfs.stat(uri).map_err(|error| {
             let error = core_error(error);
             tracing::debug!(
                 target: "astra_emu_family_support::runtime_vfs",
                 event = "astra_emu_vfs_runtime_stat_failed",
-                resource_identity = %resource_identity,
+                resource_identity = %requested_identity,
                 diagnostic = %error.code(),
                 "runtime VFS stat failed"
             );
@@ -114,12 +114,13 @@ impl LegacyMountedVfsReaderAdapter {
                 "runtime VFS request requires a file URI",
             ));
         }
-        let resource_id = self
+        let (resource_id, manifest_entry) = self
             .vfs
             .manifest()
             .entries
             .iter()
-            .position(|entry| entry.uri == uri)
+            .enumerate()
+            .find(|(_, entry)| entry.uri == stat.uri)
             .ok_or_else(|| {
                 let error = invalid(
                     "ASTRA_EMU_VFS_RUNTIME_MANIFEST_ENTRY",
@@ -128,20 +129,31 @@ impl LegacyMountedVfsReaderAdapter {
                 tracing::debug!(
                     target: "astra_emu_family_support::runtime_vfs",
                     event = "astra_emu_vfs_runtime_manifest_lookup_failed",
-                    resource_identity = %resource_identity,
+                    resource_identity = %requested_identity,
                     diagnostic = %error.code(),
                     "runtime VFS manifest lookup failed"
                 );
                 error
             })
-            .and_then(|index| {
-                u32::try_from(index).map_err(|_| {
-                    invalid(
-                        "ASTRA_EMU_VFS_RUNTIME_RESOURCE_ID",
-                        "runtime VFS manifest resource index overflowed",
-                    )
-                })
+            .and_then(|(index, entry)| {
+                u32::try_from(index)
+                    .map(|resource_id| (resource_id, entry))
+                    .map_err(|_| {
+                        invalid(
+                            "ASTRA_EMU_VFS_RUNTIME_RESOURCE_ID",
+                            "runtime VFS manifest resource index overflowed",
+                        )
+                    })
             })?;
+        if stat.entry_id.as_deref() != Some(manifest_entry.entry_id.as_str())
+            || stat.size != manifest_entry.decoded_size
+            || stat.method.as_deref() != Some(manifest_entry.method.as_str())
+        {
+            return Err(invalid(
+                "ASTRA_EMU_VFS_RUNTIME_MANIFEST_MISMATCH",
+                "runtime VFS stat does not match its canonical manifest entry",
+            ));
+        }
         Ok((
             ByteSourceStat {
                 len: stat.size,
@@ -235,7 +247,7 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
         max_bytes: u64,
     ) -> Result<RangeReadResult, LegacyProviderError> {
         self.validate_mount(mount_set_id)?;
-        let (before, _, resource_id) = self.stat_and_revision(uri)?;
+        let (before, before_stat, resource_id) = self.stat_and_revision(uri)?;
         range.validate(before.len, max_bytes).map_err(|error| {
             tracing::error!(
                 target: "astra_emu_family_support::runtime_vfs",
@@ -262,9 +274,12 @@ impl LegacyVfsReader for LegacyMountedVfsReaderAdapter {
         }
         let read = self
             .vfs
-            .read_range(uri, range.offset, range.len)
+            .read_range(&before_stat.uri, range.offset, range.len)
             .map_err(core_error)?;
-        if read.offset != range.offset || read.bytes.len() as u64 != range.len {
+        if read.uri != before_stat.uri
+            || read.offset != range.offset
+            || read.bytes.len() as u64 != range.len
+        {
             return Err(invalid(
                 "ASTRA_EMU_VFS_RUNTIME_SHORT_READ",
                 "mounted VFS returned an invalid range length",
@@ -410,6 +425,26 @@ mod tests {
                 .code(),
             "ASTRA_EMU_VFS_RUNTIME_MOUNT_MISMATCH"
         );
+    }
+
+    #[test]
+    fn mounted_reader_uses_the_family_canonical_manifest_uri() {
+        let vfs: Arc<dyn LegacyMountedVfs> =
+            Arc::new(MemoryVfs::new(&[("test:/img/WHITE.png", b"rgba", "image")]));
+        let reader = LegacyMountedVfsReaderAdapter::new("mount.test", vfs).unwrap();
+        let requested = "test:/img/White.png";
+        let stat = reader.stat_file("mount.test", requested).unwrap();
+        let read = reader
+            .read_file_range(
+                "mount.test",
+                requested,
+                stat.revision,
+                ByteRange { offset: 0, len: 4 },
+                4,
+            )
+            .unwrap();
+        assert_eq!(read.bytes.as_slice(), b"rgba");
+        assert_eq!(reader.access_metrics().unwrap().resource_count, 1);
     }
 
     #[test]

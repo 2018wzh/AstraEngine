@@ -373,6 +373,7 @@ fn random_raw_ranges_reopen_the_encrypted_source_without_plaintext_cache() {
         },
         archives: vec![archive],
         entries: BTreeMap::new(),
+        folded_entries: BTreeMap::new(),
         decryptor,
     };
     assert_eq!(
@@ -390,4 +391,86 @@ fn random_raw_ranges_reopen_the_encrypted_source_without_plaintext_cache() {
             .code(),
         "ASTRA_EMU_MINORI_SOURCE_CHANGED"
     );
+}
+
+#[test]
+fn entry_lookup_matches_windows_ascii_case_and_rejects_folded_conflicts() {
+    let descriptor = PazEntryDescriptor {
+        archive_role: "bg".into(),
+        entry_id: "bg:0".into(),
+        name: "WHITE.png".into(),
+        crypto_name: b"WHITE.png".to_vec(),
+        offset: 0,
+        unpacked_size: 8,
+        stored_size: 8,
+        aligned_size: 8,
+        packed: false,
+        video_key: None,
+    };
+    let canonical_uri = "minori:/bg/WHITE.png".to_owned();
+    let entry = MountedEntry {
+        descriptor: descriptor.clone(),
+        uri: canonical_uri.clone(),
+        archive: 0,
+    };
+    let mut entries = BTreeMap::new();
+    let mut folded_entries = BTreeMap::new();
+    let mut entry_ids = BTreeSet::new();
+    insert_mounted_entry(&mut entries, &mut folded_entries, &mut entry_ids, entry).unwrap();
+
+    let mounted = MinoriMountedVfs {
+        mount_id: "test".into(),
+        prefix: "minori:/".into(),
+        manifest: LegacyPackManifest {
+            schema: LEGACY_PACK_MANIFEST_SCHEMA.into(),
+            family_id: "minori".into(),
+            mount_id: "test".into(),
+            prefix: "minori:/".into(),
+            reader_id: "test".into(),
+            reader_hash: Hash256::from_sha256(b"reader"),
+            launch_profile_hash: Hash256::from_sha256(b"launch"),
+            sources: Vec::new(),
+            entries: Vec::new(),
+        },
+        archives: Vec::new(),
+        entries,
+        folded_entries,
+        decryptor: decryptor(BTreeMap::new()),
+    };
+    assert_eq!(
+        mounted.entry("minori:/bg/White.png").unwrap().uri,
+        canonical_uri
+    );
+
+    let mut entries = BTreeMap::new();
+    let mut folded_entries = BTreeMap::new();
+    let mut entry_ids = BTreeSet::new();
+    insert_mounted_entry(
+        &mut entries,
+        &mut folded_entries,
+        &mut entry_ids,
+        MountedEntry {
+            descriptor: descriptor.clone(),
+            uri: "minori:/bg/WHITE.png".into(),
+            archive: 0,
+        },
+    )
+    .unwrap();
+    let mut conflict_descriptor = descriptor;
+    conflict_descriptor.entry_id = "bg:1".into();
+    conflict_descriptor.name = "White.png".into();
+    conflict_descriptor.crypto_name = b"White.png".to_vec();
+    conflict_descriptor.offset = 8;
+    let conflict = insert_mounted_entry(
+        &mut entries,
+        &mut folded_entries,
+        &mut entry_ids,
+        MountedEntry {
+            descriptor: conflict_descriptor,
+            uri: "minori:/bg/White.png".into(),
+            archive: 0,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(conflict.code(), "ASTRA_EMU_MINORI_ENTRY_CASE_CONFLICT");
 }

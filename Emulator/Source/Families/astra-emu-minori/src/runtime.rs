@@ -807,7 +807,7 @@ pub(crate) fn collect_resource_references(
                     });
                 }
             }
-            "stage" => collect_stage_resources(&tokens, &mut resources)?,
+            "stage" => collect_stage_resources(stage_operand_tokens(&tokens)?, &mut resources)?,
             "char" => {
                 if tokens
                     .first()
@@ -906,6 +906,20 @@ fn collect_stage_resources(
         cursor += 2;
     }
     Ok(())
+}
+
+fn stage_operand_tokens(tokens: &[String]) -> Result<&[String], MinoriRuntimeError> {
+    let Some(last) = tokens.last() else {
+        return Ok(tokens);
+    };
+    if !last.is_empty() {
+        return Ok(tokens);
+    }
+    let trimmed = &tokens[..tokens.len() - 1];
+    if trimmed.last().is_some_and(String::is_empty) {
+        return Err(MinoriRuntimeError::Operand);
+    }
+    Ok(trimmed)
 }
 
 fn collect_primary_effect_resources(
@@ -2740,8 +2754,14 @@ fn execute_control(
             Ok(None)
         }
         "wait" => {
-            let [ScOperand::Integer { value }] = command.operands.as_slice() else {
-                return Err(MinoriRuntimeError::Operand);
+            let value = match command.operands.as_slice() {
+                [ScOperand::Integer { value }] => value,
+                [ScOperand::Integer { value }, ScOperand::Text { value: trailing }]
+                    if trailing.is_empty() =>
+                {
+                    value
+                }
+                _ => return Err(MinoriRuntimeError::Operand),
             };
             let timer_ticks = u32::try_from(*value).map_err(|_| MinoriRuntimeError::Operand)?;
             // The original Control fast path bypasses timing work only while
@@ -3108,6 +3128,17 @@ fn execute_effect(
         return Ok(Some(MinoriVmEvent::EffectCleared {
             sequence: state.effect_sequence,
         }));
+    }
+    if tokens[0] == "fadeout" {
+        if tokens.len() != 1 {
+            return Err(MinoriRuntimeError::Firefly);
+        }
+        let firefly = state.firefly.as_mut().ok_or(MinoriRuntimeError::Firefly)?;
+        firefly.ending = true;
+        next_effect_sequence(state)?;
+        return Ok(Some(MinoriVmEvent::Firefly(MinoriFireflyFrame {
+            sequence: state.effect_sequence,
+        })));
     }
     if tokens[0] == "Firefly" {
         if tokens.len() != 4 {
@@ -4608,6 +4639,7 @@ fn execute_stage(
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MinoriRuntimeError::Operand)?;
+    let tokens = stage_operand_tokens(&tokens)?;
     if tokens.len() < 4 || tokens.len() > 26 {
         return Err(MinoriRuntimeError::Operand);
     }
@@ -6573,6 +6605,40 @@ mod tests {
     }
 
     #[test]
+    fn primary_fadeout_ends_only_an_active_firefly() {
+        let source = b".effect Firefly Firefly_c 1 1000\r\n.effect fadeout\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Firefly(_))
+        ));
+        assert!(matches!(
+            vm.step(2, 4).unwrap(),
+            Some(MinoriVmEvent::Firefly(_))
+        ));
+        assert!(vm.state().firefly.as_ref().unwrap().ending);
+
+        let source = b".effect fadeout\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        assert!(matches!(vm.step(1, 4), Err(MinoriRuntimeError::Firefly)));
+    }
+
+    #[test]
     fn movie_opens_a_modal_media_wait_and_clears_it_on_completion() {
         let source = b".movie 9989 op.avi 1280 720 t\r\n.end\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
@@ -6995,6 +7061,54 @@ mod tests {
         assert_eq!(stage.transition.mode, 0);
         assert_eq!(stage.transition.resource, None);
         assert_eq!(stage.transition.duration_ticks, 10);
+    }
+
+    #[test]
+    fn stage_accepts_the_verified_single_trailing_empty_position() {
+        let source = b".stage PRELOAD.png:* BG.png 0 0 \r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        let Some(MinoriVmEvent::Stage(stage)) = vm.step(1, 4).unwrap() else {
+            panic!("expected stage event")
+        };
+        assert_eq!(
+            stage.resource_sequence,
+            vec![Some("minori:/bg/PRELOAD.png".into()), None]
+        );
+
+        let malformed = b".stage * BG.png 0 0  \r\n.end\r\n";
+        let script = parse_sc(malformed, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(malformed),
+            script,
+            1,
+        )
+        .unwrap();
+        assert_eq!(vm.step(1, 4), Err(MinoriRuntimeError::Operand));
+    }
+
+    #[test]
+    fn wait_accepts_the_verified_single_trailing_empty_position() {
+        let source = b".wait 50 \r\n.end\r\n";
+        let mut vm = firefly_vm(source, 1);
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Wait(MinoriWaitState::Time {
+                timer_ticks: 50,
+                milliseconds: 500,
+                ..
+            }))
+        ));
+
+        let mut malformed = firefly_vm(b".wait 50  \r\n.end\r\n", 1);
+        assert_eq!(malformed.step(1, 4), Err(MinoriRuntimeError::Operand));
     }
 
     #[test]

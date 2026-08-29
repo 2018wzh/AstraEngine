@@ -64,6 +64,15 @@ impl MemoryVfs {
     fn invalid() -> LegacyCoreError {
         LegacyCoreError::invalid("ASTRA_EMU_VFS_TEST_MISSING", "test entry is missing")
     }
+
+    fn canonical_uri<'a>(&'a self, uri: &str) -> Result<&'a str, LegacyCoreError> {
+        self.manifest
+            .entries
+            .iter()
+            .find(|entry| entry.uri.eq_ignore_ascii_case(uri))
+            .map(|entry| entry.uri.as_str())
+            .ok_or_else(Self::invalid)
+    }
 }
 
 impl LegacyMountedVfs for MemoryVfs {
@@ -112,14 +121,15 @@ impl LegacyMountedVfs for MemoryVfs {
     }
 
     fn stat(&self, uri: &str) -> Result<LegacyVfsStat, LegacyCoreError> {
+        let canonical_uri = self.canonical_uri(uri)?;
         let entry = self
             .manifest
             .entries
             .iter()
-            .find(|entry| entry.uri == uri)
+            .find(|entry| entry.uri == canonical_uri)
             .ok_or_else(Self::invalid)?;
         Ok(LegacyVfsStat {
-            uri: uri.to_owned(),
+            uri: canonical_uri.to_owned(),
             entry_id: Some(entry.entry_id.clone()),
             kind: LegacyVfsNodeKind::File,
             size: entry.decoded_size,
@@ -134,7 +144,8 @@ impl LegacyMountedVfs for MemoryVfs {
         offset: u64,
         length: u64,
     ) -> Result<LegacyVfsReadResult, LegacyCoreError> {
-        let bytes = self.bytes.get(uri).ok_or_else(Self::invalid)?;
+        let canonical_uri = self.canonical_uri(uri)?;
+        let bytes = self.bytes.get(canonical_uri).ok_or_else(Self::invalid)?;
         let start = usize::try_from(offset).map_err(|_| Self::invalid())?;
         let end = usize::try_from(offset.checked_add(length).ok_or_else(Self::invalid)?)
             .map_err(|_| Self::invalid())?;
@@ -142,7 +153,7 @@ impl LegacyMountedVfs for MemoryVfs {
             return Err(Self::invalid());
         }
         Ok(LegacyVfsReadResult {
-            uri: uri.to_owned(),
+            uri: canonical_uri.to_owned(),
             offset,
             bytes: astra_byte_source::OwnedByteBuffer::from_owner(
                 MemoryRange {
@@ -157,9 +168,10 @@ impl LegacyMountedVfs for MemoryVfs {
     }
 
     fn open_stream(&self, uri: &str) -> Result<Box<dyn LegacyVfsStream>, LegacyCoreError> {
+        let canonical_uri = self.canonical_uri(uri)?;
         Ok(Box::new(Cursor::new(
             self.bytes
-                .get(uri)
+                .get(canonical_uri)
                 .ok_or_else(Self::invalid)?
                 .as_ref()
                 .clone(),

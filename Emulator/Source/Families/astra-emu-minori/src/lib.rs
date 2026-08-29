@@ -25,7 +25,7 @@ pub use script::*;
 /// Bumped whenever the decoded PAZ byte contract changes.  The identity is
 /// part of the manifest reader hash and does not identify a separate crypto
 /// provider or cache namespace.
-pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v4";
+pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v5";
 /// Retained as the family format identity required by the legacy factory ABI;
 /// it is not a registry, callback or manifest provider identity.
 pub const MINORI_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.minori.mount_options.v2";

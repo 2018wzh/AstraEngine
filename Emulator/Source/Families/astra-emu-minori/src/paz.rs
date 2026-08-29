@@ -248,6 +248,10 @@ pub struct MinoriMountedVfs {
     manifest: LegacyPackManifest,
     archives: Vec<ArchiveSource>,
     entries: BTreeMap<String, MountedEntry>,
+    /// Minori runs on a case-insensitive Windows filesystem, while the PAZ
+    /// index preserves the original spelling. Keep canonical URIs in
+    /// `entries` and use this unique ASCII-folded index only for lookup.
+    folded_entries: BTreeMap<String, String>,
     decryptor: Arc<MinoriPazDecryptor>,
 }
 
@@ -270,6 +274,7 @@ impl MinoriMountedVfs {
         validate_role_set(&configs)?;
         let mut archives = Vec::with_capacity(configs.len());
         let mut entries = BTreeMap::new();
+        let mut folded_entries = BTreeMap::new();
         let mut entry_ids = BTreeSet::new();
         let mut prepared = Vec::with_capacity(configs.len());
         for config in configs {
@@ -314,20 +319,16 @@ impl MinoriMountedVfs {
                     normalize_entry_name(&entry.name)?
                 );
                 validate_legacy_vfs_uri(&prefix, &uri)?;
-                if !entry_ids.insert(entry.entry_id.clone()) || entries.contains_key(&uri) {
-                    return Err(error(
-                        "ASTRA_EMU_MINORI_ENTRY_DUPLICATE",
-                        "PAZ set contains a duplicate URI or entry id",
-                    ));
-                }
-                entries.insert(
-                    uri.clone(),
+                insert_mounted_entry(
+                    &mut entries,
+                    &mut folded_entries,
+                    &mut entry_ids,
                     MountedEntry {
                         descriptor: entry,
                         uri,
                         archive: archive_index,
                     },
-                );
+                )?;
             }
             archives.push(source);
         }
@@ -379,6 +380,7 @@ impl MinoriMountedVfs {
             manifest,
             archives,
             entries,
+            folded_entries,
             decryptor,
         })
     }
@@ -387,6 +389,11 @@ impl MinoriMountedVfs {
         validate_legacy_vfs_uri(&self.prefix, uri)?;
         self.entries
             .get(uri)
+            .or_else(|| {
+                self.folded_entries
+                    .get(&fold_entry_uri(uri))
+                    .and_then(|canonical| self.entries.get(canonical))
+            })
             .ok_or_else(|| error("ASTRA_EMU_VFS_NOT_FOUND", "VFS entry was not found"))
     }
 
@@ -482,6 +489,34 @@ impl MinoriMountedVfs {
     }
 }
 
+fn insert_mounted_entry(
+    entries: &mut BTreeMap<String, MountedEntry>,
+    folded_entries: &mut BTreeMap<String, String>,
+    entry_ids: &mut BTreeSet<String>,
+    entry: MountedEntry,
+) -> Result<(), PazError> {
+    if !entry_ids.insert(entry.descriptor.entry_id.clone()) || entries.contains_key(&entry.uri) {
+        return Err(error(
+            "ASTRA_EMU_MINORI_ENTRY_DUPLICATE",
+            "PAZ set contains a duplicate URI or entry id",
+        ));
+    }
+    let folded = fold_entry_uri(&entry.uri);
+    if folded_entries.contains_key(&folded) {
+        return Err(error(
+            "ASTRA_EMU_MINORI_ENTRY_CASE_CONFLICT",
+            "PAZ set contains URIs that collide under Windows case folding",
+        ));
+    }
+    folded_entries.insert(folded, entry.uri.clone());
+    entries.insert(entry.uri.clone(), entry);
+    Ok(())
+}
+
+fn fold_entry_uri(uri: &str) -> String {
+    uri.to_ascii_lowercase()
+}
+
 impl LegacyMountedVfs for MinoriMountedVfs {
     fn mount_id(&self) -> &str {
         &self.mount_id
@@ -564,7 +599,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
         }
         let entry = self.entry(uri)?;
         Ok(LegacyVfsStat {
-            uri: uri.into(),
+            uri: entry.uri.clone(),
             entry_id: Some(entry.descriptor.entry_id.clone()),
             kind: LegacyVfsNodeKind::File,
             size: entry.descriptor.unpacked_size,
@@ -597,7 +632,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
         }
         if length == 0 {
             return Ok(LegacyVfsReadResult {
-                uri: uri.into(),
+                uri: entry.uri.clone(),
                 offset,
                 bytes: Vec::<u8>::new().into(),
                 eof: end == entry.descriptor.unpacked_size,
@@ -633,7 +668,7 @@ impl LegacyMountedVfs for MinoriMountedVfs {
             bytes
         };
         Ok(LegacyVfsReadResult {
-            uri: uri.into(),
+            uri: entry.uri.clone(),
             offset,
             bytes: bytes.into(),
             eof: end == entry.descriptor.unpacked_size,
