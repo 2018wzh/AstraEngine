@@ -708,8 +708,6 @@ async fn serve(build_identity: &Path, gpu: bool) -> Result<(), String> {
                     render_policy: manifest.render_policy.clone(),
                     submitted_frame_count: manifest.submitted_frame_count,
                     rasterized_frame_count: manifest.rasterized_frame_count,
-                    submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
-                    rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
                     audio_frame_count: manifest.audio_frame_count,
                     duration_ns: session
                         .last_tick
@@ -872,9 +870,6 @@ async fn finalize_blocked_live_session(mut session: LiveSession, error: &str) {
             submitted_frame_count: 0,
             rasterized_frame_count: 0,
             audio_frame_count: 0,
-            submitted_scene_stream_hash: empty_hash(),
-            rasterized_frame_stream_hash: empty_hash(),
-            audio_stream_hash: empty_hash(),
             audio_peak_dbfs: None,
             audio_rms_dbfs: None,
             silence: true,
@@ -912,8 +907,6 @@ async fn finalize_blocked_live_session(mut session: LiveSession, error: &str) {
         render_policy: manifest.render_policy.clone(),
         submitted_frame_count: manifest.submitted_frame_count,
         rasterized_frame_count: manifest.rasterized_frame_count,
-        submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
-        rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
         audio_frame_count: manifest.audio_frame_count,
         duration_ns: session.last_tick.saturating_mul(TICK_DURATION_NS),
         completed_sequence: session.last_sequence,
@@ -1012,8 +1005,6 @@ async fn run(request: RunRequest<'_>) -> Result<(), String> {
                 .unwrap_or_else(|| "checkpoints".into()),
                 submitted_frame_count: 0,
                 rasterized_frame_count: 0,
-                submitted_scene_stream_hash: empty_hash(),
-                rasterized_frame_stream_hash: empty_hash(),
                 audio_frame_count: 0,
                 duration_ns: 0,
                 completed_sequence: 0,
@@ -1067,9 +1058,6 @@ fn ensure_blocked_manifest(
             submitted_frame_count: 0,
             rasterized_frame_count: 0,
             audio_frame_count: 0,
-            submitted_scene_stream_hash: empty_hash(),
-            rasterized_frame_stream_hash: empty_hash(),
-            audio_stream_hash: empty_hash(),
             audio_peak_dbfs: None,
             audio_rms_dbfs: None,
             silence: true,
@@ -1423,8 +1411,6 @@ async fn run_execution(request: RunRequest<'_>) -> Result<(), String> {
         render_policy: manifest.render_policy.clone(),
         submitted_frame_count: manifest.submitted_frame_count,
         rasterized_frame_count: manifest.rasterized_frame_count,
-        submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
-        rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
         audio_frame_count: manifest.audio_frame_count,
         duration_ns: final_tick
             .checked_mul(TICK_DURATION_NS)
@@ -2109,8 +2095,6 @@ fn prepare_review(
         || manifest.render_policy != report.render_policy
         || manifest.submitted_frame_count != report.submitted_frame_count
         || manifest.rasterized_frame_count != report.rasterized_frame_count
-        || manifest.submitted_scene_stream_hash != report.submitted_scene_stream_hash
-        || manifest.rasterized_frame_stream_hash != report.rasterized_frame_stream_hash
         || manifest.audio_frame_count != report.audio_frame_count
     {
         return Err(
@@ -2683,9 +2667,6 @@ mod evidence_tests {
             submitted_frame_count: 1,
             rasterized_frame_count: 1,
             audio_frame_count: 800,
-            submitted_scene_stream_hash: hash(b"scene-stream"),
-            rasterized_frame_stream_hash: hash(b"frame-stream"),
-            audio_stream_hash: hash(b"audio-stream"),
             audio_peak_dbfs: Some(-1.0),
             audio_rms_dbfs: Some(-3.0),
             silence: false,
@@ -2733,8 +2714,6 @@ mod evidence_tests {
             render_policy: manifest.render_policy.clone(),
             submitted_frame_count: 1,
             rasterized_frame_count: 1,
-            submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
-            rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
             audio_frame_count: 800,
             duration_ns: 16_666_667,
             completed_sequence: 4,

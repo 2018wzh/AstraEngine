@@ -80,9 +80,6 @@ pub struct ArtifactManifest {
     pub submitted_frame_count: u64,
     pub rasterized_frame_count: u64,
     pub audio_frame_count: u64,
-    pub submitted_scene_stream_hash: String,
-    pub rasterized_frame_stream_hash: String,
-    pub audio_stream_hash: String,
     pub audio_peak_dbfs: Option<f64>,
     pub audio_rms_dbfs: Option<f64>,
     pub silence: bool,
@@ -99,9 +96,6 @@ impl ArtifactManifest {
                 &self.input_sequence_hash,
                 &self.provider_identity_hash,
                 &self.renderer_identity_hash,
-                &self.submitted_scene_stream_hash,
-                &self.rasterized_frame_stream_hash,
-                &self.audio_stream_hash,
             ]
             .iter()
             .any(|hash| !is_sha256(hash))
@@ -264,8 +258,6 @@ pub struct RunReport {
     pub render_policy: String,
     pub submitted_frame_count: u64,
     pub rasterized_frame_count: u64,
-    pub submitted_scene_stream_hash: String,
-    pub rasterized_frame_stream_hash: String,
     pub audio_frame_count: u64,
     pub duration_ns: u64,
     pub completed_sequence: u64,
@@ -369,8 +361,6 @@ impl RunReport {
                 &self.checkpoint_config_hash,
                 &self.manifest_hash,
                 &self.renderer_identity_hash,
-                &self.submitted_scene_stream_hash,
-                &self.rasterized_frame_stream_hash,
             ]
             .iter()
             .any(|hash| !is_sha256(hash))

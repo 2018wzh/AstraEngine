@@ -2,7 +2,6 @@
 //! 新代码请直接使用 `concurrent_runtime_host::ConcurrentProductRuntimeHost`（`ProductRuntimeHostV2`）。
 
 use std::{
-    collections::BTreeSet,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -13,8 +12,8 @@ use astra_plugin_abi::{
     GameRuntimeSessionId, ProductRuntimeDescriptor, ProviderInstanceId, RuntimeOpenReport,
     RuntimeOpenRequest, RuntimePrepareReport, RuntimePrepareRequest, RuntimeProbeReport,
     RuntimeProbeRequest, RuntimeProviderInstanceReport, RuntimeRestoreReport,
-    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections, RuntimeSectionPayload,
-    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepMode, RuntimeStepOutput,
+    RuntimeRestoreRequest, RuntimeSaveRequest, RuntimeSaveSections,
+    RuntimeShutdownReport, RuntimeStepInput, RuntimeStepOutput,
     ValidatedRuntimeProviderSelection,
 };
 
@@ -215,7 +214,8 @@ impl<P: ProductRuntimeProvider + 'static> ProductRuntimeProviderFactory for Prov
         let report = self.inner.lock().unwrap().open(request)?;
         let session_id = report.session_id.clone();
         let inner = Arc::clone(&self.inner);
-        let session: Box<dyn ProductRuntimeSession> = Box::new(ProviderAsSession { inner, session_id });
+        let session: Box<dyn ProductRuntimeSession> =
+            Box::new(ProviderAsSession { inner, session_id });
         Ok((report, session))
     }
 }
@@ -267,7 +267,9 @@ impl ProductRuntimeHost {
         F::Output: Send + 'static,
     {
         let rt = Arc::clone(&self.rt);
-        std::thread::spawn(move || rt.block_on(future)).join().unwrap()
+        std::thread::spawn(move || rt.block_on(future))
+            .join()
+            .unwrap()
     }
 }
 
@@ -297,7 +299,12 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()),
+            rt: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         })
     }
 
@@ -318,7 +325,12 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()),
+            rt: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         })
     }
 
@@ -339,7 +351,12 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()),
+            rt: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         })
     }
 
@@ -358,7 +375,12 @@ impl ProductRuntimeHost {
         Ok(Self {
             inner,
             open_sessions: Arc::new(Mutex::new(Vec::new())),
-            rt: Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()),
+            rt: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         })
     }
 
@@ -385,7 +407,10 @@ impl ProductRuntimeHost {
         let inner = self.inner.clone();
         let session_store = Arc::clone(&self.open_sessions);
         let report = self.block_on_self(async move { inner.open(request).await })?;
-        session_store.lock().unwrap().push(report.session_id.clone());
+        session_store
+            .lock()
+            .unwrap()
+            .push(report.session_id.clone());
         Ok(report)
     }
 
@@ -529,7 +554,10 @@ impl AsyncProductRuntimeHost {
     ) -> Result<Self, RuntimeHostError> {
         Ok(Self {
             inner: ConcurrentProductRuntimeHost::reference_ffi(
-                instance_id, registration, limits, timeout,
+                instance_id,
+                registration,
+                limits,
+                timeout,
             )?,
         })
     }

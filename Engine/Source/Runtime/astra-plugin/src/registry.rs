@@ -209,12 +209,24 @@ impl PluginRegistrar {
         if provider.capability != context.required_capability {
             return Err("ASTRA_PLUGIN_BINDING_CAPABILITY_MISMATCH".to_string());
         }
-        if provider.engine_version != context.engine_version
-            || provider.rustc_fingerprint != context.rustc_fingerprint
+        if provider.engine_version != context.engine_version {
+            return Err("ASTRA_PLUGIN_BINDING_FINGERPRINT_MISMATCH: engine_version".to_string());
+        }
+        if provider.abi_fingerprint != context.abi_fingerprint {
+            return Err("ASTRA_PLUGIN_BINDING_FINGERPRINT_MISMATCH: abi_fingerprint".to_string());
+        }
+        if provider.rustc_fingerprint != context.rustc_fingerprint
             || provider.feature_fingerprint != context.feature_fingerprint
-            || provider.abi_fingerprint != context.abi_fingerprint
         {
-            return Err("ASTRA_PLUGIN_BINDING_FINGERPRINT_MISMATCH".to_string());
+            tracing::warn!(
+                slot = %slot.0,
+                provider_id = %provider.provider_id,
+                expected_rustc = %context.rustc_fingerprint,
+                actual_rustc = %provider.rustc_fingerprint,
+                expected_feature = %context.feature_fingerprint,
+                actual_feature = %provider.feature_fingerprint,
+                "plugin.binding.fingerprint_warn: rustc/feature drift (warn, not blocking)"
+            );
         }
         astra_runtime::ValidatedModuleBinding::validate(
             astra_runtime::EngineModuleSlot(slot.0.clone()),

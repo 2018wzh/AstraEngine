@@ -25,9 +25,6 @@ pub(crate) struct ArtifactRecorder {
     audio_artifact_count: u64,
     open_audio_bytes: u64,
     final_frame: Option<(u64, u32, u32, Vec<u8>)>,
-    submitted_scene_digest: Sha256,
-    rasterized_frame_digest: Sha256,
-    audio_digest: Sha256,
     audio_square_sum: f64,
     audio_sample_count: u64,
     audio_peak: f64,
@@ -105,9 +102,6 @@ impl ArtifactRecorder {
                 submitted_frame_count: 0,
                 rasterized_frame_count: 0,
                 audio_frame_count: 0,
-                submitted_scene_stream_hash: empty_hash(),
-                rasterized_frame_stream_hash: empty_hash(),
-                audio_stream_hash: empty_hash(),
                 audio_peak_dbfs: None,
                 audio_rms_dbfs: None,
                 silence: true,
@@ -121,9 +115,6 @@ impl ArtifactRecorder {
             audio_artifact_count: 0,
             open_audio_bytes: 0,
             final_frame: None,
-            submitted_scene_digest: Sha256::new(),
-            rasterized_frame_digest: Sha256::new(),
-            audio_digest: Sha256::new(),
             audio_square_sum: 0.0,
             audio_sample_count: 0,
             audio_peak: 0.0,
@@ -132,8 +123,8 @@ impl ArtifactRecorder {
 
     pub(crate) fn record_submission(
         &mut self,
-        sequence: u64,
-        scene_bytes: &[u8],
+        _sequence: u64,
+        _scene_bytes: &[u8],
     ) -> Result<(), PlatformError> {
         let next_count = self
             .submitted_frame_count
@@ -143,10 +134,6 @@ impl ArtifactRecorder {
             return Err(limit("artifact.scene", "submitted frame limit exceeded"));
         }
         self.submitted_frame_count = next_count;
-        self.submitted_scene_digest.update(sequence.to_le_bytes());
-        self.submitted_scene_digest
-            .update((scene_bytes.len() as u64).to_le_bytes());
-        self.submitted_scene_digest.update(scene_bytes);
         self.refresh_analysis();
         Ok(())
     }
@@ -166,10 +153,6 @@ impl ArtifactRecorder {
             return Err(limit("artifact.frame", "rasterized frame limit exceeded"));
         }
         self.rasterized_frame_count = next_count;
-        self.rasterized_frame_digest.update(sequence.to_le_bytes());
-        self.rasterized_frame_digest.update(width.to_le_bytes());
-        self.rasterized_frame_digest.update(height.to_le_bytes());
-        self.rasterized_frame_digest.update(rgba8);
         self.refresh_analysis();
         if self.policy.retention == HeadlessArtifactRetention::Final {
             self.final_frame = Some((sequence, width, height, rgba8.to_vec()));
@@ -408,7 +391,6 @@ impl ArtifactRecorder {
         self.audio_frames = next_audio_frames;
         for sample in samples {
             let value = f64::from(*sample);
-            self.audio_digest.update(sample.to_le_bytes());
             self.audio_square_sum += value * value;
             self.audio_peak = self.audio_peak.max(value.abs());
             self.audio_sample_count = self.audio_sample_count.saturating_add(1);
@@ -478,16 +460,6 @@ impl ArtifactRecorder {
         self.manifest.submitted_frame_count = self.submitted_frame_count;
         self.manifest.rasterized_frame_count = self.rasterized_frame_count;
         self.manifest.audio_frame_count = self.audio_frames;
-        self.manifest.submitted_scene_stream_hash = format!(
-            "sha256:{:x}",
-            self.submitted_scene_digest.clone().finalize()
-        );
-        self.manifest.rasterized_frame_stream_hash = format!(
-            "sha256:{:x}",
-            self.rasterized_frame_digest.clone().finalize()
-        );
-        self.manifest.audio_stream_hash =
-            format!("sha256:{:x}", self.audio_digest.clone().finalize());
         self.manifest.audio_peak_dbfs = finite_db(self.audio_peak);
         let rms = if self.audio_sample_count == 0 {
             0.0

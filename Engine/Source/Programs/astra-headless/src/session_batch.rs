@@ -659,8 +659,6 @@ fn read_child_evidence(
         &report.status,
         report.submitted_frame_count,
         report.rasterized_frame_count,
-        &report.submitted_scene_stream_hash,
-        &report.rasterized_frame_stream_hash,
         report.audio_frame_count,
         report.completed_sequence,
         &report.checkpoint_results,

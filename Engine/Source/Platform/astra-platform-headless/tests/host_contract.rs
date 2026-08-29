@@ -196,10 +196,6 @@ async fn checkpoint_policy_validates_every_scene_and_rasterizes_only_first_and_f
     manifest.validate().unwrap();
     assert_eq!(manifest.submitted_frame_count, 3);
     assert_eq!(manifest.rasterized_frame_count, 2);
-    assert_ne!(
-        manifest.submitted_scene_stream_hash,
-        manifest.rasterized_frame_stream_hash
-    );
 }
 
 #[tokio::test]

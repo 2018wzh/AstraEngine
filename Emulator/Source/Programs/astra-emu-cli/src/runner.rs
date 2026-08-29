@@ -1456,8 +1456,6 @@ fn standard_headless_run_report(
         render_policy: manifest.render_policy.clone(),
         submitted_frame_count: manifest.submitted_frame_count,
         rasterized_frame_count: manifest.rasterized_frame_count,
-        submitted_scene_stream_hash: manifest.submitted_scene_stream_hash.clone(),
-        rasterized_frame_stream_hash: manifest.rasterized_frame_stream_hash.clone(),
         audio_frame_count: manifest.audio_frame_count,
         duration_ns: input
             .final_tick
@@ -6363,9 +6361,6 @@ mod native_tests {
             submitted_frame_count: 1,
             rasterized_frame_count: 1,
             audio_frame_count: 0,
-            submitted_scene_stream_hash: test_hash(b"scenes"),
-            rasterized_frame_stream_hash: test_hash(b"frames"),
-            audio_stream_hash: test_hash(b"audio"),
             audio_peak_dbfs: None,
             audio_rms_dbfs: None,
             silence: true,

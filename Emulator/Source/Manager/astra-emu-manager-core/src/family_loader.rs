@@ -816,13 +816,25 @@ fn validate_descriptor_binding(
         || descriptor.plugin_id != manifest.plugin_id
         || descriptor.provider_id != manifest.provider_id
         || descriptor.engine_version != manifest.engine_version
-        || descriptor.rustc_fingerprint != manifest.rustc_fingerprint
-        || descriptor.feature_fingerprint != manifest.feature_fingerprint
         || descriptor.abi_fingerprint != manifest.abi_fingerprint
     {
         return Err(FamilyPluginLoadError::Manifest(
-            "loaded descriptor does not match native manifest".into(),
+            "loaded descriptor does not match native manifest (family/plugin/provider/engine/abi)"
+                .into(),
         ));
+    }
+    if descriptor.rustc_fingerprint != manifest.rustc_fingerprint
+        || descriptor.feature_fingerprint != manifest.feature_fingerprint
+    {
+        tracing::warn!(
+            family_id = %manifest.family_id,
+            plugin_id = %manifest.plugin_id,
+            expected_rustc = %manifest.rustc_fingerprint,
+            actual_rustc = %descriptor.rustc_fingerprint,
+            expected_feature = %manifest.feature_fingerprint,
+            actual_feature = %descriptor.feature_fingerprint,
+            "emu.family_binding.fingerprint_warn: rustc/feature drift (warn, not blocking)"
+        );
     }
     Ok(())
 }

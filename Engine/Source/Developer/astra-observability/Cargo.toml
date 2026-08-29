@@ -4,6 +4,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = []
+perf-trace = []
+
 [dependencies]
 astra-core = { path = "../../Runtime/astra-core" }
 file-rotate.workspace = true

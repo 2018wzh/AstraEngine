@@ -755,8 +755,6 @@ mod headless_preflight_tests {
                 render_policy: "checkpoints".into(),
                 submitted_frame_count: 3,
                 rasterized_frame_count: 1,
-                submitted_scene_stream_hash: hash("scene-stream"),
-                rasterized_frame_stream_hash: hash("frame-stream"),
                 audio_frame_count: 800,
                 duration_ns: 16_666_667,
                 completed_sequence: 3,
