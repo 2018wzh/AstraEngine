@@ -49,8 +49,8 @@ use astra_emu_manager_core::{
     evidence_vm_coverage_ids, AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken,
     CaseRuntimeProfileRecord, CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile,
     ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
-    MatchDecisionRecord, MetadataSnapshotRecord, ProviderConsentRecord, ScanLimits, SourceGrant,
-    TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
+    MatchDecisionRecord, MetadataSnapshotRecord, PendingFamilySystemMenu, ProviderConsentRecord,
+    ScanLimits, SourceGrant, TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -295,6 +295,33 @@ impl RuntimeBridge {
 
     fn set_host_wake(&mut self, wake: HostWake) {
         self.host_wake = Some(wake);
+    }
+
+    fn take_pending_system_menu(&self) -> Result<Option<PendingFamilySystemMenu>, String> {
+        self.provider
+            .system_menu_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())
+    }
+
+    fn resolve_system_menu(&mut self, menu_id: &str, item_id: Option<&str>) -> Result<(), String> {
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        active.input_sequence = active
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        self.provider
+            .system_menu_host()
+            .resolve(
+                &active.session_id.0,
+                menu_id,
+                item_id,
+                active.input_sequence,
+            )
+            .map_err(|error| error.to_string())
     }
 
     fn launch(
@@ -619,7 +646,14 @@ impl RuntimeBridge {
             .map(|edge| edge.control.as_str())
             .collect::<BTreeSet<_>>();
         let system_menu_open_requested = system_menu_open_requested(&active.pending_inputs);
-        let suppress_wait_completion = active.system_ui_active || system_menu_open_requested;
+        let system_menu_interaction_pending = self
+            .provider
+            .system_menu_host()
+            .has_pending_interaction()
+            .map_err(|error| error.to_string())?;
+        let suppress_wait_completion = active.system_ui_active
+            || system_menu_open_requested
+            || system_menu_interaction_pending;
         let ready = active
             .pending_waits
             .iter()
@@ -3170,6 +3204,20 @@ impl ManagerController for AstraEmuManagerController {
     fn set_host_wake(&mut self, wake: HostWake) {
         self.metadata.set_wake(wake.clone());
         self.runtime.borrow_mut().set_host_wake(wake);
+    }
+
+    fn take_pending_system_menu(&mut self) -> Result<Option<PendingFamilySystemMenu>, String> {
+        self.runtime
+            .try_borrow()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .take_pending_system_menu()
+    }
+
+    fn resolve_system_menu(&mut self, menu_id: &str, item_id: Option<&str>) -> Result<(), String> {
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .resolve_system_menu(menu_id, item_id)
     }
 
     fn model(&self) -> Result<ManagerViewModel, String> {

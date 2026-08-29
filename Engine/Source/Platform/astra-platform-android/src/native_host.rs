@@ -341,6 +341,13 @@ impl AndroidHostApp {
 
     fn process_command(&mut self, event_loop: &ActiveEventLoop, command: HostCommand) {
         match command {
+            HostCommand::ShowContextMenu { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.context_menu",
+                    "Android does not expose a native context-menu host command",
+                )));
+            }
             HostCommand::CreateWindow { request, reply } => {
                 let result = if !self.resumed {
                     Err(host_error(

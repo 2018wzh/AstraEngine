@@ -20,9 +20,10 @@ use astra_emu_family_api::{
     LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
     LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacyStepInput,
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
-    LegacySurfaceFormatV9, LegacySystemMenuActionV1, LegacyTextureFilter, LegacyTextureFormat,
-    LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader,
-    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacySurfaceFormatV9, LegacySystemMenuActionV1, LegacySystemMenuItemKindV1,
+    LegacySystemMenuItemV1, LegacySystemMenuTransactionV1, LegacyTextureFilter,
+    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
+    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
     LEGACY_FAMILY_ABI_FINGERPRINT,
 };
 use astra_emu_family_core::LegacyCoreError;
@@ -521,7 +522,7 @@ struct MinoriSession {
     /// Last resource-backed presentation descriptor committed to the host.
     ///
     /// The descriptor contains only bounded URI/geometry metadata; retaining
-    /// it lets the family keep the ABI v10 Layer2D scene retained across fixed
+    /// it lets the family keep the ABI v11 Layer2D scene retained across fixed
     /// ticks instead of re-decoding every unchanged frame. It is deliberately
     /// session-local and is cleared on restore, so it can never stand in for
     /// a restored host surface.
@@ -533,6 +534,7 @@ struct MinoriSession {
     /// invalidated on restore or when the role's bounded descriptors change.
     presentation_layers: BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
     last_layer_sequence: u64,
+    active_system_menu: Option<String>,
     poisoned: bool,
 }
 
@@ -862,6 +864,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 last_resource_frame: None,
                 presentation_layers: BTreeMap::new(),
                 last_layer_sequence: 0,
+                active_system_menu: None,
                 poisoned: false,
             },
         );
@@ -987,26 +990,23 @@ impl MinoriRuntimeProvider {
                 session.vm.set_pointer_primary_pressed(edge.pressed);
             }
         }
-        let context_menu_requested = if let Some(request) = input.system_menu.as_ref() {
-            match request.action {
-                LegacySystemMenuActionV1::Open => {}
+        let system_menu_request = input.system_menu.clone();
+        if let Some(request) = system_menu_request.as_ref() {
+            if request.action == LegacySystemMenuActionV1::Open {
+                if let Some(pointer_x) = request.pointer_x {
+                    session
+                        .vm
+                        .set_pointer_axis('x', pointer_x as f32)
+                        .map_err(runtime_error)?;
+                }
+                if let Some(pointer_y) = request.pointer_y {
+                    session
+                        .vm
+                        .set_pointer_axis('y', pointer_y as f32)
+                        .map_err(runtime_error)?;
+                }
             }
-            if let Some(pointer_x) = request.pointer_x {
-                session
-                    .vm
-                    .set_pointer_axis('x', pointer_x as f32)
-                    .map_err(runtime_error)?;
-            }
-            if let Some(pointer_y) = request.pointer_y {
-                session
-                    .vm
-                    .set_pointer_axis('y', pointer_y as f32)
-                    .map_err(runtime_error)?;
-            }
-            true
-        } else {
-            false
-        };
+        }
         if !input.provider_results.is_empty() {
             session.poisoned = true;
             return Err(invalid(
@@ -1034,35 +1034,38 @@ impl MinoriRuntimeProvider {
                 return Err(error);
             }
         };
-        if context_menu_requested {
-            if session.vm.state().system_ui.page != MinoriSystemPage::None {
-                session.poisoned = true;
-                return Err(invalid(
-                    "ASTRA_EMU_MINORI_SYSTEM_MENU_PAGE_ACTIVE",
-                    "right-click system-menu open requires gameplay without an active system page",
-                ));
-            }
-            validate_system_menu_open(&session.vm, &input)?;
-            session.vm.open_save_page().map_err(runtime_error)?;
-            refresh_save_slots(
-                host_services
-                    .as_ref()
-                    .ok_or_else(|| {
-                        invalid(
-                            "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                            "system-menu open requires current Family ABI Host services",
-                        )
-                    })?
-                    .writable_files
-                    .as_ref(),
+        if let Some(request) = system_menu_request.as_ref() {
+            return handle_system_menu_request(
+                host_services.as_ref().ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                        "system menu requires current Family ABI Host services",
+                    )
+                })?,
                 session_id,
                 session,
-            )?;
+                &vfs,
+                &input,
+                request,
+                restore_audio,
+            );
+        }
+        if session.active_system_menu.is_some() {
+            if !input.input_edges.is_empty()
+                || !input.await_results.is_empty()
+                || !input.provider_results.is_empty()
+            {
+                session.poisoned = true;
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_INPUT_WHILE_ACTIVE",
+                    "active native system menu must suspend gameplay input and completions",
+                ));
+            }
             session
                 .vm
-                .advance_system_tick(input.tick_index)
+                .advance_provider_tick(input.tick_index)
                 .map_err(runtime_error)?;
-            return system_ui_output(session, &vfs, &input, restore_audio);
+            return idle_system_menu_output(session, &vfs, &input, restore_audio, None);
         }
         if session.vm.state().system_ui.page == MinoriSystemPage::None
             && backlog_wheel_direction(&input)? == Some(-1)
@@ -2207,7 +2210,9 @@ impl MinoriRuntimeProvider {
             speaker,
             audio_commands: _,
             wait: _,
-        }) = &event
+        }) = event
+            .as_ref()
+            .filter(|_| !session.vm.state().system_ui.message_panel_hidden)
         {
             if text.len() > MAX_EPHEMERAL_TEXT_BYTES
                 || speaker
@@ -3245,7 +3250,11 @@ fn describe_stage_frame(
         &mut texture_resources,
         &mut draws,
     )?;
-    if let Some(panel) = state.panel.as_ref() {
+    if let Some(panel) = state
+        .panel
+        .as_ref()
+        .filter(|_| !state.system_ui.message_panel_hidden)
+    {
         if panel.mode != 1 {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_PANEL_MODE",
@@ -3621,7 +3630,11 @@ fn describe_effect_frame_without_secondary(
             &mut draws,
         )?;
     }
-    if let Some(panel) = state.panel.as_ref().filter(|_| include_panel) {
+    if let Some(panel) = state
+        .panel
+        .as_ref()
+        .filter(|_| include_panel && !state.system_ui.message_panel_hidden)
+    {
         if panel.mode != 1 {
             return Err(invalid(
                 "ASTRA_EMU_MINORI_PANEL_MODE",
@@ -6187,6 +6200,446 @@ fn apply_system_ui_input(
     Ok(action)
 }
 
+fn handle_system_menu_request(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &LegacyRuntimeSessionId,
+    session: &mut MinoriSession,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    input: &LegacyStepInput,
+    request: &astra_emu_family_api::LegacySystemMenuRequestV1,
+    audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
+) -> Result<LegacyStepOutput, LegacyProviderError> {
+    match request.action {
+        LegacySystemMenuActionV1::Open => {
+            if session.active_system_menu.is_some() {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_ALREADY_ACTIVE",
+                    "right-click cannot open a second system menu",
+                ));
+            }
+            validate_system_menu_open(&session.vm, input)?;
+            let sequence = session
+                .vm
+                .allocate_effect_sequence()
+                .map_err(runtime_error)?;
+            let menu = minori_system_menu(&session.vm, request, sequence)?;
+            services.system_menus.publish(&session_id.0, menu.clone())?;
+            session.active_system_menu = Some(menu.menu_id);
+            session
+                .vm
+                .advance_provider_tick(input.tick_index)
+                .map_err(runtime_error)?;
+            idle_system_menu_output(session, vfs, input, audio_commands, None)
+        }
+        LegacySystemMenuActionV1::Dismiss => {
+            validate_active_system_menu(session, request)?;
+            session.active_system_menu = None;
+            session
+                .vm
+                .advance_provider_tick(input.tick_index)
+                .map_err(runtime_error)?;
+            idle_system_menu_output(session, vfs, input, audio_commands, None)
+        }
+        LegacySystemMenuActionV1::Select => {
+            validate_active_system_menu(session, request)?;
+            session.active_system_menu = None;
+            let item_id = request.item_id.as_deref().ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM",
+                    "system-menu selection is missing its item id",
+                )
+            })?;
+            match item_id {
+                "message_panel" => {
+                    session
+                        .vm
+                        .toggle_message_panel_hidden()
+                        .map_err(runtime_error)?;
+                    session
+                        .vm
+                        .advance_provider_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    gameplay_resume_output(session, vfs, input, audio_commands)
+                }
+                "auto" | "skip" => {
+                    let rebound = session
+                        .vm
+                        .toggle_play_mode(if item_id == "auto" {
+                            MinoriPlayMode::Auto
+                        } else {
+                            MinoriPlayMode::Skip
+                        })
+                        .map_err(runtime_error)?;
+                    session
+                        .vm
+                        .advance_provider_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    let wait = session
+                        .vm
+                        .state()
+                        .wait
+                        .clone()
+                        .ok_or_else(|| runtime_error(MinoriRuntimeError::Waiting))?;
+                    waiting_output(
+                        session,
+                        wait,
+                        LegacyLiveOutput {
+                            audio_commands,
+                            ..LegacyLiveOutput::default()
+                        },
+                        None,
+                        rebound,
+                        input,
+                    )
+                }
+                "quick_save" => {
+                    session.vm.open_save_page().map_err(runtime_error)?;
+                    save_slot(services.writable_files.as_ref(), session_id, session, 0)?;
+                    session
+                        .vm
+                        .close_gameplay_system_page()
+                        .map_err(runtime_error)?;
+                    session.save_slots.insert(0);
+                    session
+                        .vm
+                        .advance_provider_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    idle_system_menu_output(session, vfs, input, audio_commands, None)
+                }
+                "save" | "load" => {
+                    if item_id == "save" {
+                        session.vm.open_save_page().map_err(runtime_error)?;
+                    } else {
+                        session.vm.open_load_page().map_err(runtime_error)?;
+                    }
+                    refresh_save_slots(services.writable_files.as_ref(), session_id, session)?;
+                    session
+                        .vm
+                        .advance_system_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    system_ui_output(session, vfs, input, audio_commands)
+                }
+                "config" => {
+                    session.vm.open_gameplay_config().map_err(runtime_error)?;
+                    session
+                        .vm
+                        .advance_system_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    system_ui_output(session, vfs, input, audio_commands)
+                }
+                "window_fullscreen"
+                | "window_original_size"
+                | "window_precision"
+                | "window_antialias"
+                | "help_manual"
+                | "help_about"
+                | "help_homepage"
+                | "game_return_title"
+                | "game_exit" => {
+                    let sequence = session
+                        .vm
+                        .allocate_effect_sequence()
+                        .map_err(runtime_error)?;
+                    session
+                        .vm
+                        .advance_provider_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    idle_system_menu_output(
+                        session,
+                        vfs,
+                        input,
+                        audio_commands,
+                        Some(LegacyEvent {
+                            sequence,
+                            event: "minori.system_menu.command".into(),
+                            value: item_id.into(),
+                        }),
+                    )
+                }
+                _ => Err(invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM_UNKNOWN",
+                    "system-menu selection references an unknown Minori command",
+                )),
+            }
+        }
+    }
+}
+
+fn idle_system_menu_output(
+    session: &mut MinoriSession,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    input: &LegacyStepInput,
+    audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
+    event: Option<LegacyEvent>,
+) -> Result<LegacyStepOutput, LegacyProviderError> {
+    if session.vm.state().system_ui.page == MinoriSystemPage::Title {
+        let mut output = system_ui_output(session, vfs, input, audio_commands)?;
+        if let Some(event) = event {
+            output.control.events.push(event);
+            output.validate()?;
+        }
+        return Ok(output);
+    }
+    let wait = session
+        .vm
+        .state()
+        .wait
+        .clone()
+        .ok_or_else(|| runtime_error(MinoriRuntimeError::Waiting))?;
+    waiting_output(
+        session,
+        wait,
+        LegacyLiveOutput {
+            audio_commands,
+            ..LegacyLiveOutput::default()
+        },
+        event,
+        false,
+        input,
+    )
+}
+
+fn validate_active_system_menu(
+    session: &MinoriSession,
+    request: &astra_emu_family_api::LegacySystemMenuRequestV1,
+) -> Result<(), LegacyProviderError> {
+    if session.active_system_menu.as_deref() != request.menu_id.as_deref() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_ID_MISMATCH",
+            "system-menu result does not match the active Minori menu",
+        ));
+    }
+    Ok(())
+}
+
+fn minori_system_menu(
+    vm: &MinoriVm,
+    request: &astra_emu_family_api::LegacySystemMenuRequestV1,
+    sequence: u64,
+) -> Result<LegacySystemMenuTransactionV1, LegacyProviderError> {
+    let title = vm.state().system_ui.page == MinoriSystemPage::Title;
+    let mut items = Vec::new();
+    let mut push = |item_id: &str,
+                    parent_id: Option<&str>,
+                    order: u16,
+                    kind: LegacySystemMenuItemKindV1,
+                    label: &str,
+                    enabled: bool,
+                    checked: bool| {
+        items.push(LegacySystemMenuItemV1 {
+            item_id: item_id.into(),
+            parent_id: parent_id.map(Into::into),
+            order,
+            kind,
+            label: label.into(),
+            enabled,
+            checked,
+        });
+    };
+    if !title {
+        push(
+            "message_panel",
+            None,
+            0,
+            LegacySystemMenuItemKindV1::Command,
+            if vm.state().system_ui.message_panel_hidden {
+                "メッセージパネルを表示する (&H)"
+            } else {
+                "メッセージパネルを隠す (&H)"
+            },
+            true,
+            false,
+        );
+        push(
+            "auto",
+            None,
+            1,
+            LegacySystemMenuItemKindV1::Command,
+            "オートプレイ (&A)",
+            true,
+            vm.state().system_ui.play_mode == MinoriPlayMode::Auto,
+        );
+        push(
+            "skip",
+            None,
+            2,
+            LegacySystemMenuItemKindV1::Command,
+            "スキップ (&K)",
+            vm.state().system_ui.skip_enabled,
+            vm.state().system_ui.play_mode == MinoriPlayMode::Skip,
+        );
+        push(
+            "quick_save",
+            None,
+            3,
+            LegacySystemMenuItemKindV1::Command,
+            "クイックセーブ (&Q)",
+            true,
+            false,
+        );
+        push(
+            "save",
+            None,
+            4,
+            LegacySystemMenuItemKindV1::Command,
+            "セーブ (&S)",
+            true,
+            false,
+        );
+        push(
+            "load",
+            None,
+            5,
+            LegacySystemMenuItemKindV1::Command,
+            "ロード (&L)",
+            true,
+            false,
+        );
+        push(
+            "config",
+            None,
+            6,
+            LegacySystemMenuItemKindV1::Command,
+            "システム設定 (&C)",
+            true,
+            false,
+        );
+        push(
+            "sep_gameplay",
+            None,
+            7,
+            LegacySystemMenuItemKindV1::Separator,
+            "",
+            false,
+            false,
+        );
+    }
+    let base = if title { 0 } else { 8 };
+    push(
+        "window_fullscreen",
+        None,
+        base,
+        LegacySystemMenuItemKindV1::Command,
+        if vm.state().system_ui.config.fullscreen {
+            "フルスクリーン解除 (&O)"
+        } else {
+            "フルスクリーン (&O)"
+        },
+        true,
+        vm.state().system_ui.config.fullscreen,
+    );
+    push(
+        "window_original_size",
+        None,
+        base + 1,
+        LegacySystemMenuItemKindV1::Command,
+        "ウインドウをオリジナルサイズに (&W)",
+        true,
+        false,
+    );
+    push(
+        "window_precision",
+        None,
+        base + 2,
+        LegacySystemMenuItemKindV1::Command,
+        "高精度サイズ変更 (&Y)",
+        false,
+        true,
+    );
+    push(
+        "window_antialias",
+        None,
+        base + 3,
+        LegacySystemMenuItemKindV1::Command,
+        "サイズ変更時にアンチエイリアス (&A)",
+        true,
+        true,
+    );
+    push(
+        "sep_window",
+        None,
+        base + 4,
+        LegacySystemMenuItemKindV1::Separator,
+        "",
+        false,
+        false,
+    );
+    push(
+        "help",
+        None,
+        base + 5,
+        LegacySystemMenuItemKindV1::Submenu,
+        "Help",
+        true,
+        false,
+    );
+    push(
+        "help_manual",
+        Some("help"),
+        0,
+        LegacySystemMenuItemKindV1::Command,
+        "ヘルプ (&H)",
+        true,
+        false,
+    );
+    push(
+        "help_about",
+        Some("help"),
+        1,
+        LegacySystemMenuItemKindV1::Command,
+        "アプリケーションについて (&A)",
+        true,
+        false,
+    );
+    push(
+        "help_homepage",
+        Some("help"),
+        2,
+        LegacySystemMenuItemKindV1::Command,
+        "minoriホームページ (&P)",
+        true,
+        false,
+    );
+    push(
+        "game",
+        None,
+        base + 6,
+        LegacySystemMenuItemKindV1::Submenu,
+        "Game",
+        true,
+        false,
+    );
+    if !title {
+        push(
+            "game_return_title",
+            Some("game"),
+            0,
+            LegacySystemMenuItemKindV1::Command,
+            "トップメニューに戻る (&M)",
+            true,
+            false,
+        );
+    }
+    push(
+        "game_exit",
+        Some("game"),
+        if title { 0 } else { 1 },
+        LegacySystemMenuItemKindV1::Command,
+        "プログラムの終了 (&X)",
+        true,
+        false,
+    );
+    let menu = LegacySystemMenuTransactionV1 {
+        sequence,
+        menu_id: format!("minori.system_menu.{sequence}"),
+        pointer_x: request.pointer_x,
+        pointer_y: request.pointer_y,
+        items,
+    };
+    menu.validate()?;
+    Ok(menu)
+}
+
 fn validate_system_menu_open(
     vm: &MinoriVm,
     input: &LegacyStepInput,
@@ -6207,6 +6660,15 @@ fn validate_system_menu_open(
         return Err(invalid(
             "ASTRA_EMU_MINORI_SYSTEM_MENU_INPUT_AMBIGUOUS",
             "right-click system-menu open cannot share a tick with gameplay input",
+        ));
+    }
+    if vm.state().system_ui.page == MinoriSystemPage::Title {
+        return Ok(());
+    }
+    if vm.state().system_ui.page != MinoriSystemPage::None {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_PAGE_ACTIVE",
+            "right-click system menu is unavailable while a family system page is active",
         ));
     }
     match vm.state().wait.as_ref() {
@@ -6616,6 +7078,8 @@ fn gameplay_resume_output(
         audio_commands,
         ..LegacyLiveOutput::default()
     };
+    let current_message =
+        current_message.filter(|_| !session.vm.state().system_ui.message_panel_hidden);
     if let Some((text, speaker)) = current_message {
         append_resumed_message_text(session, input.tick_index, text, speaker, &mut live)?;
     }
@@ -9508,7 +9972,7 @@ mod tests {
                 assert!(hook_count.load(std::sync::atomic::Ordering::Acquire) > 0);
             }
             assert_eq!(session_id, "session.surface");
-            assert!(matches!(fixed_step, 1 | 2));
+            assert!(matches!(fixed_step, 1..=3));
             assert_eq!(format, LegacySurfaceFormatV9::Rgba8SrgbPremultiplied);
             let stride = width.checked_mul(4).unwrap().checked_add(8).unwrap();
             let len = usize::try_from(u64::from(stride) * u64::from(height)).unwrap();
@@ -9537,7 +10001,7 @@ mod tests {
             commit: LegacySurfaceCommitV9,
         ) -> Result<(), LegacyProviderError> {
             assert_eq!(session_id, "session.surface");
-            assert!(matches!(fixed_step, 1 | 2));
+            assert!(matches!(fixed_step, 1..=3));
             commit.validate()?;
             assert_eq!(commit.damage, LegacySurfaceDamageV9::Full);
             self.commits.lock().unwrap().push(RecordedSurfaceCommit {
@@ -9562,6 +10026,26 @@ mod tests {
                 payload: Vec::new().into(),
                 diagnostics: Vec::new(),
             })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingSystemMenuHost {
+        published: std::sync::Mutex<Vec<(String, LegacySystemMenuTransactionV1)>>,
+    }
+
+    impl astra_emu_family_api::LegacySystemMenuHostV1 for RecordingSystemMenuHost {
+        fn publish(
+            &self,
+            session_id: &str,
+            menu: LegacySystemMenuTransactionV1,
+        ) -> Result<(), LegacyProviderError> {
+            menu.validate()?;
+            self.published
+                .lock()
+                .unwrap()
+                .push((session_id.into(), menu));
+            Ok(())
         }
     }
 
@@ -9956,7 +10440,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_system_menu_request_opens_verified_save_page_from_message_wait() {
+    fn typed_system_menu_publishes_original_commands_before_save_selection() {
         let encode_rgba = |width: u32, height: u32| {
             let mut png = Vec::new();
             PngEncoder::new(&mut png)
@@ -10001,11 +10485,13 @@ mod tests {
         });
         let surfaces = Arc::new(RecordingSurfaceHost::default());
         let writable = Arc::new(InMemoryWritableFiles::default());
+        let system_menus = Arc::new(RecordingSystemMenuHost::default());
         let services = LegacyFamilyHostServicesV9 {
             vfs: Arc::clone(&vfs),
             surfaces,
             hooks: Arc::new(UnboundHookHost),
             writable_files: writable,
+            system_menus: system_menus.clone(),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -10037,6 +10523,8 @@ mod tests {
                 LegacyStepInput {
                     system_menu: Some(LegacySystemMenuRequestV1 {
                         action: LegacySystemMenuActionV1::Open,
+                        menu_id: None,
+                        item_id: None,
                         pointer_x: Some(640),
                         pointer_y: Some(360),
                         sequence: 1,
@@ -10049,10 +10537,42 @@ mod tests {
         let session_state = provider.sessions.get(&session.0).unwrap();
         assert_eq!(
             session_state.vm.state().system_ui.page,
-            MinoriSystemPage::Save
+            MinoriSystemPage::None
         );
         assert_eq!(session_state.vm.state().system_ui.pointer_x, 640);
         assert_eq!(session_state.vm.state().system_ui.pointer_y, 360);
+        assert!(output.live.resource_scenes.is_empty());
+        let published = system_menus.published.lock().unwrap();
+        let menu = &published[0].1;
+        assert!(menu
+            .items
+            .iter()
+            .any(|item| item.item_id == "message_panel"));
+        assert!(menu.items.iter().any(|item| item.item_id == "save"));
+        let menu_id = menu.menu_id.clone();
+        drop(published);
+
+        let output = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Select,
+                        menu_id: Some(menu_id),
+                        item_id: Some("save".into()),
+                        pointer_x: None,
+                        pointer_y: None,
+                        sequence: 2,
+                    }),
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            provider.sessions[&session.0].vm.state().system_ui.page,
+            MinoriSystemPage::Save
+        );
         assert!(output.live.resource_scenes.iter().any(|scene| {
             scene
                 .value
@@ -10170,6 +10690,7 @@ mod tests {
             surfaces: surfaces.clone(),
             hooks: Arc::new(UnboundHookHost),
             writable_files: Arc::new(RejectWritableFiles),
+            system_menus: Arc::new(RecordingSystemMenuHost::default()),
         };
         let mut published_layers = BTreeSet::new();
         let mut presentation_layers = BTreeMap::new();
@@ -10254,6 +10775,7 @@ mod tests {
                 count: hook_count.clone(),
             }),
             writable_files: Arc::new(RejectWritableFiles),
+            system_menus: Arc::new(RecordingSystemMenuHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -10587,6 +11109,7 @@ mod tests {
             surfaces: Arc::new(RecordingSurfaceHost::default()),
             hooks: Arc::new(UnboundHookHost),
             writable_files: Arc::clone(&writable_host),
+            system_menus: Arc::new(RecordingSystemMenuHost::default()),
         };
         let storage_options = BTreeMap::from([(
             MINORI_GLOBAL_PROGRESS_OPTION.into(),

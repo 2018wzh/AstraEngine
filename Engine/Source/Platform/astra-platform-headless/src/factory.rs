@@ -831,6 +831,13 @@ impl HostState {
             HostCommand::CreateWindow { reply, .. } => {
                 let _ = reply.send(self.windows.insert(WindowState { surface_count: 0 }));
             }
+            HostCommand::ShowContextMenu { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.context_menu",
+                    "Headless does not present native context menus",
+                )));
+            }
             HostCommand::CreateSurface { request, reply } => {
                 let gpu_renderer = if self.profile.providers.renderer == "wgpu_offscreen" {
                     let renderer = if self.performance_observer.is_some() {

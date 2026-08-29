@@ -109,6 +109,8 @@ fn system_menu_request(
     }
     Ok(request_sequence.map(|sequence| LegacySystemMenuRequestV1 {
         action: LegacySystemMenuActionV1::Open,
+        menu_id: None,
+        item_id: None,
         pointer_x,
         pointer_y,
         sequence,
@@ -997,6 +999,10 @@ impl AstraEmuRuntimeProvider {
             .map_err(|error| error.to_string())
     }
 
+    pub fn system_menu_host(&self) -> Arc<crate::FamilySystemMenuHost> {
+        Arc::clone(&self.host.system_menus)
+    }
+
     /// Shuts down one concrete AstraEMU session and returns the family-owned
     /// cold-path evidence alongside the generic provider lifecycle report.
     pub fn shutdown_with_family_report(
@@ -1420,7 +1426,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                     .into(),
             );
         }
-        let system_menu = system_menu_request(&input.input_edges)?;
+        let physical_system_menu = system_menu_request(&input.input_edges)?;
         let input_edges = input
             .input_edges
             .into_iter()
@@ -1461,6 +1467,16 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         if session.poisoned {
             return Err("ASTRA_EMU_SESSION_POISONED".into());
         }
+        let resolved_system_menu = self
+            .host
+            .system_menus
+            .take_resolution(&session.family_session_id.0)
+            .map_err(|error| error.to_string())?;
+        if physical_system_menu.is_some() && resolved_system_menu.is_some() {
+            session.poisoned = true;
+            return Err("ASTRA_EMU_SYSTEM_MENU_RESULT_AND_OPEN_CONFLICT".into());
+        }
+        let system_menu = resolved_system_menu.or(physical_system_menu);
         let await_results = await_results.clone();
         let mut surface_guard = SurfaceStepGuard::new(
             surface_host,

@@ -228,6 +228,7 @@ wasmparser = "0.253"
 web-sys = "0.3"
 windows = { version = "0.62", default-features = false }
 winit = { version = "0.30", default-features = false }
+muda-win = "=0.1.3"
 keyring = "=4.1.5"
 wgpu = { version = "29", features = ["static-dxc"] }
 rayon = "1.12"

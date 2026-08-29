@@ -1,17 +1,19 @@
 # Stage Test Matrix
 
-`T-S5-FVP-01` current identity is `astra.emu.family_abi.v10` and Product Runtime
+`T-S5-FVP-01` current identity is `astra.emu.family_abi.v11` and Product Runtime
 Provider ABI v4. Minori is reopening its current E2 while migrating to
 `Native + MultiLayer`, Host-owned surfaces, synchronous Hook and writable-file
 ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
 
-The v10 step contract also carries `LegacySystemMenuRequestV1`. Manager maps a
-pressed physical `pointer.secondary` edge to `Open`, strips that duplicate edge,
-and Minori opens the verified Save page only from a stable gameplay wait with a
-writable-file Host binding. Invalid combinations are blocking and covered by
-focused Family API, Manager and Minori tests.
+The v11 contract carries `LegacySystemMenuRequestV1` plus a bounded
+`LegacySystemMenuTransactionV1` Host publication port. A physical secondary click
+opens the family-owned title or gameplay menu. Windows native, Manager and Headless
+consume the same hierarchy and return `Select` or `Dismiss`; Minori applies Save,
+Load, Config, message-panel and play-mode commands only after that result. Invalid
+hierarchies, stale results and ambiguous gameplay states are blocking and covered by
+focused Family API, Manager, CLI and Minori tests.
 
 The Minori provider test `global_progress_is_loaded_before_a_fresh_session_executes_script`
 also covers the v9 writable-file storage binding across two independent sessions:

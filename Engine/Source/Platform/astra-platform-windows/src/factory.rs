@@ -98,8 +98,9 @@ mod windows {
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
         host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
-        AudioWakeRegistration, CapturedFrame, DecodeKind, DecodeOutput, DecodeSessionHandle,
-        HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput, PackageSourceHandle,
+        AudioWakeRegistration, CapturedFrame, ContextMenuItemKind, ContextMenuRequest,
+        ContextMenuResult, DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand,
+        HostLaunchProfile, InputState, OpenedAudioOutput, PackageSourceHandle,
         PackageSourceRequest, PlatformBackendChannels, PlatformCommandWakeRegistration,
         PlatformDecodeRequest, PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind,
         PlatformHostProfile, PlatformHostSession, PointerButton, SaveTransactionHandle,
@@ -110,6 +111,10 @@ mod windows {
         SaveTransaction, VerifiedPackageCache,
     };
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use muda_win::{
+        CheckMenuItem, ContextMenu, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem,
+        PredefinedMenuItem, Submenu,
+    };
     use tokio::sync::oneshot;
     use winit::{
         application::ApplicationHandler,
@@ -119,6 +124,7 @@ mod windows {
         },
         event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
         platform::windows::EventLoopBuilderExtWindows,
+        raw_window_handle::{HasWindowHandle, RawWindowHandle},
         window::{Window, WindowAttributes, WindowId},
     };
 
@@ -623,6 +629,13 @@ mod windows {
                 let operation = command.operation();
                 let command_started = Instant::now();
                 match command {
+                    HostCommand::ShowContextMenu { request, reply } => {
+                        let result = self
+                            .windows
+                            .get(request.window)
+                            .and_then(|window| show_context_menu(window, request));
+                        let _ = reply.send(result);
+                    }
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
                             .with_title(request.title)
@@ -2183,6 +2196,111 @@ mod windows {
                 message,
             ),
         }
+    }
+
+    fn show_context_menu(
+        window: &Window,
+        request: ContextMenuRequest,
+    ) -> Result<ContextMenuResult, PlatformError> {
+        while MenuEvent::receiver().try_recv().is_ok() {}
+        let menu = Menu::new();
+        let submenus = request
+            .items
+            .iter()
+            .filter(|item| item.kind == ContextMenuItemKind::Submenu)
+            .map(|item| {
+                (
+                    item.item_id.clone(),
+                    Submenu::with_id(MenuId::new(item.item_id.clone()), &item.label, item.enabled),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut items = request.items.iter().collect::<Vec<_>>();
+        items.sort_by_key(|item| (item.parent_id.as_deref(), item.order));
+        for item in items {
+            let append = |entry: &dyn IsMenuItem| -> Result<(), PlatformError> {
+                if let Some(parent_id) = item.parent_id.as_deref() {
+                    submenus
+                        .get(parent_id)
+                        .ok_or_else(|| {
+                            host_error(
+                                "window.context_menu",
+                                "context menu submenu parent is missing",
+                            )
+                        })?
+                        .append(entry)
+                        .map_err(|_| {
+                            host_error(
+                                "window.context_menu",
+                                "context menu child could not be appended",
+                            )
+                        })
+                } else {
+                    menu.append(entry).map_err(|_| {
+                        host_error(
+                            "window.context_menu",
+                            "context menu root item could not be appended",
+                        )
+                    })
+                }
+            };
+            match item.kind {
+                ContextMenuItemKind::Submenu => {
+                    append(submenus.get(&item.item_id).ok_or_else(|| {
+                        host_error(
+                            "window.context_menu",
+                            "context menu submenu was not constructed",
+                        )
+                    })?)?
+                }
+                ContextMenuItemKind::Separator => append(&PredefinedMenuItem::separator())?,
+                ContextMenuItemKind::Command if item.checked => append(&CheckMenuItem::with_id(
+                    MenuId::new(item.item_id.clone()),
+                    &item.label,
+                    item.enabled,
+                    item.checked,
+                    None,
+                ))?,
+                ContextMenuItemKind::Command => append(&MenuItem::with_id(
+                    MenuId::new(item.item_id.clone()),
+                    &item.label,
+                    item.enabled,
+                    None,
+                ))?,
+            }
+        }
+        let hwnd = match window
+            .window_handle()
+            .map_err(|_| host_error("window.context_menu", "window handle is unavailable"))?
+            .as_raw()
+        {
+            RawWindowHandle::Win32(handle) => handle.hwnd.get(),
+            _ => {
+                return Err(host_error(
+                    "window.context_menu",
+                    "Windows host returned a non-Win32 window handle",
+                ));
+            }
+        };
+        let position = request
+            .x
+            .zip(request.y)
+            .map(|(x, y)| muda_win::dpi::PhysicalPosition::new(f64::from(x), f64::from(y)).into());
+        // SAFETY: the HWND comes from the live winit Window retained by the
+        // platform resource table for the duration of native menu tracking.
+        let selected = unsafe { menu.show_context_menu_for_hwnd(hwnd, position) };
+        if !selected {
+            return Ok(ContextMenuResult { item_id: None });
+        }
+        let event = MenuEvent::receiver().try_recv().map_err(|_| {
+            host_error(
+                "window.context_menu",
+                "native context menu selected without an item event",
+            )
+        })?;
+        Ok(ContextMenuResult {
+            item_id: Some(event.id.0),
+        })
     }
 
     fn host_error(operation: &'static str, message: &'static str) -> PlatformError {

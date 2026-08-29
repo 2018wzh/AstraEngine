@@ -117,6 +117,13 @@ mod browser {
         let mut decoders = ResourceTable::<WebDecodeSession, DecodeSessionHandle>::new("decode");
         while let Some(command) = backend.next_command().await {
             match command {
+                HostCommand::ShowContextMenu { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "window.context_menu",
+                        "Web does not expose a native context-menu host command",
+                    )));
+                }
                 HostCommand::CreateWindow { request, reply } => {
                     let result = CanvasResource::new(
                         request.title,

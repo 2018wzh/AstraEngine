@@ -15,7 +15,7 @@ Support 还把 `has_physical_audible_output()` 作为 evidence 专用判定，�
 
 同日的 global-progress 回归用两个独立 provider/session 覆盖 writable-file 的真实装载顺序：第一 session 执行 `REN_CLEAR` 后原子持久化，第二 session 在 `.if REN_CLEAR ...` 之前完成读取，并保持 `SUI_CLEAR` 未设置。该项只增加 provider/VFS E1 证据，不把局部状态持久化提升为四路线自然解锁或完整鉴赏通过。
 
-2026 年 8 月 28 日：Family API 已进入 v10 hard cut（`astra.emu.family_abi.v10`）。`LegacyStepInput` 增加 typed `LegacySystemMenuRequestV1`，Manager 把物理右键按下事件提升为 `Open` 请求，Minori 只在稳定 gameplay wait 且已绑定 writable-file Host 时打开 family-owned Save 页；重复事件、并发 gameplay input、choice/media/completion 和缺 Host binding 均直接阻断。Family API、Manager 与 Minori 的定向回归已通过。Windows Sandbox E3 仍因 WASAPI 默认输出不可用及 native prewarm 未收敛而阻断，不能把该次运行计为 E3。
+2026 年 8 月 30 日：Family API 已进入 v11 hard cut（`astra.emu.family_abi.v11`）。右键只提交 `Open`；Minori 在稳定 title 或 gameplay 状态发布有界菜单 transaction，Host 回送 `Select`/`Dismiss` 后才执行 family 命令。Windows native、Manager Slint overlay 与 Headless 物理输入导航共用同一层级。Family API、平台、CLI、Manager 与 Minori 的定向回归已通过；当前身份尚未完成 Headless GPU E2 或 Release Sandbox 视觉复测，更不能计为 Windows E3。
 
 2026 年 8 月 27 日媒体复核：`astra-media::IncrementalMediaPlayback` 已统一校验播放配置、单调 tick、轨道/packet 形状、音频/视频 packet 预算、视频 lead/lag 与迟到策略；Minori 继续只绑定显式 `ffmpeg-vcpkg`，不保留手写 AVI/WMV decoder 或平台 fallback。当前签名 release plugin 的标题→配置→影片→Control 跳过→标题 Headless slice 报告 `passed`，完成 3102 fixed steps、9 个 retained frame sample，诊断为空。按当前 v9 typed observation 重新生成的首路线也已报告 `passed`：3,034,309 fixed steps、16,150 条物理输入、53 个 retained frame sample、31 个 checkpoint、route terminal、自然 unlock count=1 和最终 Exit 均成立。该输入未把已删除的首 choice 等待点计入本次 checkpoint，choice 仍由独立真实 slice 覆盖。正式音频听审、四条路线后的完整 Memories/CG/BGM/回想、cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍为 blocking。
 
@@ -524,4 +524,4 @@ Windows E3 parity claim is made here.
 
 2026-08-28：修正 Minori Control/Auto 活动消息等待的受限 modality rebinding。Manager Core 复用已有 `AwaitTokenId`，host 同步替换 pending `Input`/`Time` condition；同类重复和未知 wait 仍 fail fast。代码与定向回归已通过，真实 Sandbox 复测和 Stage 5 的完整路线、正式媒体/音频审查、Linux FUSE、macOS extract、FVP v9、Windows E3 仍保持开放。
 
-2026-08-28：GameView 右键已接入 Family API 的 system-menu contract，Sandbox 复测可显示真实 `Savedata` 页面。修复 Manager 在 system page 活动时误完成底层 gameplay await 的根因：打开请求 tick 与 `minori.system_page != none` 期间暂缓 await completion，关闭页面保留原 wait。定向回归通过；更新后的签名 Release 在 Sandbox 连续两次验证 Save→Escape→gameplay，Diagnostics 无 blocking diagnostic。该证据不改变 Stage 5 对完整路线、自然 unlock、正式音频 review、Linux FUSE、macOS extract、FVP v9 与 Windows E3 的 blocking 状态。
+2026-08-30：v11 修正了旧实现把右键直接映射到 Save 的语义错误。Minori 现在发布已观察到的 title/gameplay 菜单层级；Host 不解释 item id，只显示并回送结果。Manager 和 Headless 在交互期间暂缓底层 gameplay await。当前完成的是定向回归，不继承旧 ABI 的 Sandbox 现场证据；完整路线、自然 unlock、正式音频 review、Linux FUSE、macOS extract 与 Windows E3 仍保持 blocking。

@@ -11,8 +11,10 @@ use astra_emu_family_api::{
     validate_relative_writable_path, LegacyFamilyHostServicesV9, LegacyHookHostV1,
     LegacyHookInvocationV1, LegacyHookResultV1, LegacyHookStatusV1, LegacyProviderError,
     LegacySurfaceCommitV9, LegacySurfaceFormatV9, LegacySurfaceHostV9, LegacySurfaceLeaseV9,
-    LegacyVfsReader, LegacyWritableFileEntryV1, LegacyWritableFileHostV1,
-    LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
+    LegacySystemMenuActionV1, LegacySystemMenuHostV1, LegacySystemMenuItemKindV1,
+    LegacySystemMenuRequestV1, LegacySystemMenuTransactionV1, LegacyVfsReader,
+    LegacyWritableFileEntryV1, LegacyWritableFileHostV1, LegacyWritableFileRequestV1,
+    LegacyWritableFileResultV1,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -764,11 +766,185 @@ impl LegacyWritableFileHostV1 for FamilyWritableFileHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFamilySystemMenu {
+    pub session_id: String,
+    pub menu: LegacySystemMenuTransactionV1,
+}
+
+#[derive(Default)]
+struct FamilySystemMenuState {
+    active: BTreeMap<String, LegacySystemMenuTransactionV1>,
+    delivered: BTreeMap<String, bool>,
+    resolutions: BTreeMap<String, LegacySystemMenuRequestV1>,
+}
+
+#[derive(Default)]
+pub struct FamilySystemMenuHost {
+    state: Mutex<FamilySystemMenuState>,
+}
+
+impl FamilySystemMenuHost {
+    pub fn has_pending_interaction(&self) -> Result<bool, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| {
+                LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_LOCK_POISONED",
+                    "system-menu host lock is poisoned",
+                )
+            })
+            .map(|state| !state.active.is_empty() || !state.resolutions.is_empty())
+    }
+
+    pub fn take_next_pending(
+        &self,
+    ) -> Result<Option<PendingFamilySystemMenu>, LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_LOCK_POISONED",
+                "system-menu host lock is poisoned",
+            )
+        })?;
+        let session_id = state
+            .active
+            .keys()
+            .find(|session_id| !state.delivered.contains_key(*session_id))
+            .cloned();
+        let Some(session_id) = session_id else {
+            return Ok(None);
+        };
+        let menu = state.active.get(&session_id).cloned().ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_STATE",
+                "pending system-menu state changed unexpectedly",
+            )
+        })?;
+        state.delivered.insert(session_id.clone(), true);
+        Ok(Some(PendingFamilySystemMenu { session_id, menu }))
+    }
+
+    pub fn resolve(
+        &self,
+        session_id: &str,
+        menu_id: &str,
+        item_id: Option<&str>,
+        sequence: u64,
+    ) -> Result<(), LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_LOCK_POISONED",
+                "system-menu host lock is poisoned",
+            )
+        })?;
+        if state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_RESULT_DUPLICATE",
+                "system-menu host already queued a result for the session",
+            ));
+        }
+        let menu = state.active.get(session_id).ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_NOT_ACTIVE",
+                "system-menu result has no active menu",
+            )
+        })?;
+        if menu.menu_id != menu_id {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_ID_MISMATCH",
+                "system-menu result does not match the active menu",
+            ));
+        }
+        let action = if let Some(item_id) = item_id {
+            let item = menu
+                .items
+                .iter()
+                .find(|item| item.item_id == item_id)
+                .ok_or_else(|| {
+                    LegacyProviderError::invalid(
+                        "ASTRA_EMU_SYSTEM_MENU_ITEM_UNKNOWN",
+                        "system-menu result references an unknown item",
+                    )
+                })?;
+            if item.kind != LegacySystemMenuItemKindV1::Command || !item.enabled {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_ITEM_NOT_SELECTABLE",
+                    "system-menu result references a disabled or non-command item",
+                ));
+            }
+            LegacySystemMenuActionV1::Select
+        } else {
+            LegacySystemMenuActionV1::Dismiss
+        };
+        let request = LegacySystemMenuRequestV1 {
+            action,
+            menu_id: Some(menu_id.into()),
+            item_id: item_id.map(Into::into),
+            pointer_x: None,
+            pointer_y: None,
+            sequence,
+        };
+        request.validate()?;
+        state.active.remove(session_id);
+        state.delivered.remove(session_id);
+        state.resolutions.insert(session_id.into(), request);
+        Ok(())
+    }
+
+    pub fn take_resolution(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LegacySystemMenuRequestV1>, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| {
+                LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_LOCK_POISONED",
+                    "system-menu host lock is poisoned",
+                )
+            })
+            .map(|mut state| state.resolutions.remove(session_id))
+    }
+
+    pub fn release_session(&self, session_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active.remove(session_id);
+            state.delivered.remove(session_id);
+            state.resolutions.remove(session_id);
+        }
+    }
+}
+
+impl LegacySystemMenuHostV1 for FamilySystemMenuHost {
+    fn publish(
+        &self,
+        session_id: &str,
+        menu: LegacySystemMenuTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        menu.validate()?;
+        let mut state = self.state.lock().map_err(|_| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_LOCK_POISONED",
+                "system-menu host lock is poisoned",
+            )
+        })?;
+        if state.active.contains_key(session_id) || state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_ALREADY_ACTIVE",
+                "system-menu host accepts only one active transaction per session",
+            ));
+        }
+        state.active.insert(session_id.into(), menu);
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct AstraEmuFamilyHost {
     pub surfaces: Arc<FamilySurfaceHost>,
     pub hooks: Arc<FamilyHookHost>,
     pub writable_files: Arc<FamilyWritableFileHost>,
+    pub system_menus: Arc<FamilySystemMenuHost>,
     vfs: Arc<dyn LegacyVfsReader>,
     services: LegacyFamilyHostServicesV9,
 }
@@ -778,16 +954,19 @@ impl AstraEmuFamilyHost {
         let surfaces = Arc::new(FamilySurfaceHost::default());
         let hooks = Arc::new(FamilyHookHost::default());
         let writable_files = Arc::new(FamilyWritableFileHost::default());
+        let system_menus = Arc::new(FamilySystemMenuHost::default());
         let services = LegacyFamilyHostServicesV9 {
             vfs: vfs.clone(),
             surfaces: surfaces.clone(),
             hooks: hooks.clone(),
             writable_files: writable_files.clone(),
+            system_menus: system_menus.clone(),
         };
         Self {
             surfaces,
             hooks,
             writable_files,
+            system_menus,
             vfs,
             services,
         }
@@ -804,6 +983,7 @@ impl AstraEmuFamilyHost {
     pub fn release_session(&self, session_id: &str) {
         self.surfaces.release_session(session_id);
         self.writable_files.release_session(session_id);
+        self.system_menus.release_session(session_id);
     }
 }
 
@@ -1092,5 +1272,39 @@ mod tests {
             .code(),
             "ASTRA_EMU_WRITABLE_PATH"
         );
+    }
+
+    #[test]
+    fn system_menu_host_enforces_one_transaction_and_typed_resolution() {
+        let host = FamilySystemMenuHost::default();
+        let menu = LegacySystemMenuTransactionV1 {
+            sequence: 7,
+            menu_id: "menu.7".into(),
+            pointer_x: Some(10),
+            pointer_y: Some(20),
+            items: vec![astra_emu_family_api::LegacySystemMenuItemV1 {
+                item_id: "save".into(),
+                parent_id: None,
+                order: 0,
+                kind: LegacySystemMenuItemKindV1::Command,
+                label: "Save".into(),
+                enabled: true,
+                checked: false,
+            }],
+        };
+        host.publish("session", menu.clone()).unwrap();
+        assert_eq!(
+            host.publish("session", menu).unwrap_err().code(),
+            "ASTRA_EMU_SYSTEM_MENU_ALREADY_ACTIVE"
+        );
+        let pending = host.take_next_pending().unwrap().unwrap();
+        assert_eq!(pending.session_id, "session");
+        assert_eq!(pending.menu.menu_id, "menu.7");
+        assert!(host.take_next_pending().unwrap().is_none());
+        host.resolve("session", "menu.7", Some("save"), 9).unwrap();
+        let result = host.take_resolution("session").unwrap().unwrap();
+        assert_eq!(result.action, LegacySystemMenuActionV1::Select);
+        assert_eq!(result.item_id.as_deref(), Some("save"));
+        assert!(host.take_resolution("session").unwrap().is_none());
     }
 }

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     future::Future,
     pin::Pin,
     sync::{
@@ -65,6 +66,112 @@ pub struct WindowRequest {
     pub width: u32,
     pub height: u32,
     pub visible: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuItemKind {
+    Command,
+    Separator,
+    Submenu,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextMenuItem {
+    pub item_id: String,
+    pub parent_id: Option<String>,
+    pub order: u16,
+    pub kind: ContextMenuItemKind,
+    pub label: String,
+    pub enabled: bool,
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextMenuRequest {
+    pub window: WindowHandle,
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    pub items: Vec<ContextMenuItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextMenuResult {
+    pub item_id: Option<String>,
+}
+
+impl ContextMenuRequest {
+    fn validate(&self) -> Result<(), PlatformError> {
+        if self.items.is_empty() || self.items.len() > 64 || self.x.is_some() != self.y.is_some() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.context_menu",
+                "context menu bounds or anchor are invalid",
+            ));
+        }
+        if self.x.is_some_and(|value| value < 0) || self.y.is_some_and(|value| value < 0) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.context_menu",
+                "context menu anchor must be non-negative",
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        let mut orders = BTreeSet::new();
+        for item in &self.items {
+            if item.item_id.is_empty()
+                || item.item_id.len() > 128
+                || item.item_id.chars().any(|character| {
+                    !(character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_'))
+                })
+                || !ids.insert(item.item_id.as_str())
+                || !orders.insert((item.parent_id.as_deref(), item.order))
+                || item.label.len() > 256
+                || item.label.chars().any(char::is_control)
+            {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "window.context_menu",
+                    "context menu item identity, order, or label is invalid",
+                ));
+            }
+            match item.kind {
+                ContextMenuItemKind::Separator
+                    if item.label.is_empty() && !item.enabled && !item.checked => {}
+                ContextMenuItemKind::Command | ContextMenuItemKind::Submenu
+                    if !item.label.trim().is_empty() => {}
+                _ => {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "window.context_menu",
+                        "context menu item shape does not match its kind",
+                    ));
+                }
+            }
+        }
+        for item in &self.items {
+            if let Some(parent_id) = item.parent_id.as_deref() {
+                let parent = self
+                    .items
+                    .iter()
+                    .find(|candidate| candidate.item_id == parent_id)
+                    .ok_or_else(|| {
+                        PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "window.context_menu",
+                            "context menu parent is missing",
+                        )
+                    })?;
+                if parent.kind != ContextMenuItemKind::Submenu {
+                    return Err(PlatformError::new(
+                        PlatformErrorCode::InvalidState,
+                        "window.context_menu",
+                        "context menu parent is not a submenu",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -374,6 +481,10 @@ pub enum HostCommand {
         request: SurfaceRequest,
         reply: oneshot::Sender<Result<SurfaceHandle, PlatformError>>,
     },
+    ShowContextMenu {
+        request: ContextMenuRequest,
+        reply: oneshot::Sender<Result<ContextMenuResult, PlatformError>>,
+    },
     CaptureSurface {
         surface: SurfaceHandle,
         reply: oneshot::Sender<Result<CapturedFrame, PlatformError>>,
@@ -491,6 +602,7 @@ impl HostCommand {
         match self {
             Self::CreateWindow { .. } => "window.create",
             Self::CreateSurface { .. } => "surface.create",
+            Self::ShowContextMenu { .. } => "window.context_menu",
             Self::CaptureSurface { .. } => "surface.capture",
             Self::PresentRgba { .. } => "surface.present_rgba",
             Self::PresentScene { .. } => "surface.present_scene",
@@ -563,6 +675,7 @@ impl HostCommand {
         match self {
             Self::CreateWindow { reply, .. } => send_error!(reply),
             Self::CreateSurface { reply, .. } => send_error!(reply),
+            Self::ShowContextMenu { reply, .. } => send_error!(reply),
             Self::CaptureSurface { reply, .. } => send_error!(reply),
             Self::PresentRgba { reply, .. } => send_error!(reply),
             Self::PresentScene { reply, .. } => send_error!(reply),
@@ -832,6 +945,19 @@ impl PlatformHostClient {
         let (reply, response) = oneshot::channel();
         self.try_send(HostCommand::CreateSurface { request, reply })?;
         response.await.map_err(|_| queue_closed("surface.create"))?
+    }
+
+    pub async fn show_context_menu(
+        &self,
+        request: ContextMenuRequest,
+    ) -> Result<ContextMenuResult, PlatformError> {
+        request.validate()?;
+        self.ensure_running("window.context_menu")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ShowContextMenu { request, reply })?;
+        response
+            .await
+            .map_err(|_| queue_closed("window.context_menu"))?
     }
 
     pub async fn capture_surface(
@@ -2104,7 +2230,8 @@ fn https_origin(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::AudioWakeRegistration;
+    use super::{AudioWakeRegistration, ContextMenuItem, ContextMenuItemKind, ContextMenuRequest};
+    use crate::WindowHandle;
     use std::{sync::Arc, thread, time::Duration};
 
     #[test]
@@ -2142,5 +2269,58 @@ mod tests {
             .expect("a later edge should still wake the waiter");
         assert_eq!(sequence, 1);
         worker.join().expect("audio wake worker must stop");
+    }
+
+    #[test]
+    fn context_menu_validates_hierarchy_shape_and_anchor() {
+        let request = ContextMenuRequest {
+            window: WindowHandle::from_parts(1, 1).unwrap(),
+            x: Some(12),
+            y: Some(34),
+            items: vec![
+                ContextMenuItem {
+                    item_id: "save".into(),
+                    parent_id: None,
+                    order: 0,
+                    kind: ContextMenuItemKind::Command,
+                    label: "Save".into(),
+                    enabled: true,
+                    checked: false,
+                },
+                ContextMenuItem {
+                    item_id: "game".into(),
+                    parent_id: None,
+                    order: 1,
+                    kind: ContextMenuItemKind::Submenu,
+                    label: "Game".into(),
+                    enabled: true,
+                    checked: false,
+                },
+                ContextMenuItem {
+                    item_id: "exit".into(),
+                    parent_id: Some("game".into()),
+                    order: 0,
+                    kind: ContextMenuItemKind::Command,
+                    label: "Exit".into(),
+                    enabled: true,
+                    checked: false,
+                },
+            ],
+        };
+        request.validate().unwrap();
+
+        let mut invalid = request.clone();
+        invalid.items[2].parent_id = Some("save".into());
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.context_menu"
+        );
+
+        let mut invalid = request;
+        invalid.x = None;
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.context_menu"
+        );
     }
 }

@@ -45,12 +45,26 @@ pub trait LegacyWritableFileHostV1: Send + Sync {
     ) -> Result<LegacyWritableFileResultV1, LegacyProviderError>;
 }
 
+/// Non-blocking native-menu publication port.
+///
+/// The family owns menu semantics and publishes one bounded model. The host
+/// presents it on its UI thread and returns selection or dismissal through the
+/// next `LegacyStepInput`; the family step never blocks an event loop.
+pub trait LegacySystemMenuHostV1: Send + Sync {
+    fn publish(
+        &self,
+        session_id: &str,
+        menu: crate::LegacySystemMenuTransactionV1,
+    ) -> Result<(), LegacyProviderError>;
+}
+
 #[derive(Clone)]
 pub struct LegacyFamilyHostServicesV9 {
     pub vfs: Arc<dyn crate::LegacyVfsReader>,
     pub surfaces: Arc<dyn LegacySurfaceHostV9>,
     pub hooks: Arc<dyn LegacyHookHostV1>,
     pub writable_files: Arc<dyn LegacyWritableFileHostV1>,
+    pub system_menus: Arc<dyn LegacySystemMenuHostV1>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -686,12 +700,120 @@ pub struct FfiWritableFileResultV1 {
     pub written: u64,
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiSystemMenuItemKindV1 {
+    Command,
+    Separator,
+    Submenu,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiSystemMenuItemV1 {
+    pub item_id: RString,
+    pub parent_id: ROption<RString>,
+    pub order: u16,
+    pub kind: FfiSystemMenuItemKindV1,
+    pub label: RString,
+    pub enabled: bool,
+    pub checked: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiSystemMenuTransactionV1 {
+    pub sequence: u64,
+    pub menu_id: RString,
+    pub pointer_x: ROption<i32>,
+    pub pointer_y: ROption<i32>,
+    pub items: RVec<FfiSystemMenuItemV1>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiPublishSystemMenuCallV1 {
+    pub host_token: RString,
+    pub session_id: RString,
+    pub menu: FfiSystemMenuTransactionV1,
+}
+
 pub type FfiAcquireSurfaceV9 =
     extern "C" fn(FfiAcquireSurfaceCallV9) -> FfiLegacyResult<FfiSurfaceLeaseV9>;
 pub type FfiCommitSurfaceV9 = extern "C" fn(FfiCommitSurfaceCallV9) -> FfiLegacyResult<()>;
 pub type FfiInvokeHookV1 = extern "C" fn(FfiHookInvocationV1) -> FfiLegacyResult<FfiHookResultV1>;
 pub type FfiWritableFileV1 =
     extern "C" fn(FfiWritableFileCallV1) -> FfiLegacyResult<FfiWritableFileResultV1>;
+pub type FfiPublishSystemMenuV1 = extern "C" fn(FfiPublishSystemMenuCallV1) -> FfiLegacyResult<()>;
+
+impl From<crate::LegacySystemMenuTransactionV1> for FfiSystemMenuTransactionV1 {
+    fn from(value: crate::LegacySystemMenuTransactionV1) -> Self {
+        Self {
+            sequence: value.sequence,
+            menu_id: value.menu_id.into(),
+            pointer_x: value.pointer_x.into(),
+            pointer_y: value.pointer_y.into(),
+            items: value
+                .items
+                .into_iter()
+                .map(|item| FfiSystemMenuItemV1 {
+                    item_id: item.item_id.into(),
+                    parent_id: item.parent_id.map(Into::into).into(),
+                    order: item.order,
+                    kind: match item.kind {
+                        crate::LegacySystemMenuItemKindV1::Command => {
+                            FfiSystemMenuItemKindV1::Command
+                        }
+                        crate::LegacySystemMenuItemKindV1::Separator => {
+                            FfiSystemMenuItemKindV1::Separator
+                        }
+                        crate::LegacySystemMenuItemKindV1::Submenu => {
+                            FfiSystemMenuItemKindV1::Submenu
+                        }
+                    },
+                    label: item.label.into(),
+                    enabled: item.enabled,
+                    checked: item.checked,
+                })
+                .collect::<Vec<_>>()
+                .into(),
+        }
+    }
+}
+
+impl From<FfiSystemMenuTransactionV1> for crate::LegacySystemMenuTransactionV1 {
+    fn from(value: FfiSystemMenuTransactionV1) -> Self {
+        Self {
+            sequence: value.sequence,
+            menu_id: value.menu_id.to_string(),
+            pointer_x: value.pointer_x.into_option(),
+            pointer_y: value.pointer_y.into_option(),
+            items: value
+                .items
+                .into_iter()
+                .map(|item| crate::LegacySystemMenuItemV1 {
+                    item_id: item.item_id.to_string(),
+                    parent_id: item.parent_id.into_option().map(|value| value.to_string()),
+                    order: item.order,
+                    kind: match item.kind {
+                        FfiSystemMenuItemKindV1::Command => {
+                            crate::LegacySystemMenuItemKindV1::Command
+                        }
+                        FfiSystemMenuItemKindV1::Separator => {
+                            crate::LegacySystemMenuItemKindV1::Separator
+                        }
+                        FfiSystemMenuItemKindV1::Submenu => {
+                            crate::LegacySystemMenuItemKindV1::Submenu
+                        }
+                    },
+                    label: item.label.to_string(),
+                    enabled: item.enabled,
+                    checked: item.checked,
+                })
+                .collect(),
+        }
+    }
+}
 
 impl From<LegacySurfaceDamageV9> for FfiSurfaceDamageV9 {
     fn from(value: LegacySurfaceDamageV9) -> Self {

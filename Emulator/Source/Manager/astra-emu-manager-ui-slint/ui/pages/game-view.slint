@@ -5,6 +5,16 @@ import { Theme } from "../theme.slint";
 import { CheckButton } from "../components/icons.slint";
 import { FloatingPanel } from "../components/floating-panel.slint";
 
+export struct SystemMenuItem {
+    item-id: string,
+    label: string,
+    depth: int,
+    enabled: bool,
+    checked: bool,
+    separator: bool,
+    submenu: bool,
+}
+
 export component GameViewPage inherits Rectangle {
     // Stage
     in property <image> stage-frame;
@@ -12,12 +22,18 @@ export component GameViewPage inherits Rectangle {
     in-out property <float> stage-native-height: 768;
     callback game-input(string, bool, float);
     callback leave-game();
+    in property <[SystemMenuItem]> system-menu-items;
+    in property <bool> system-menu-active: false;
+    in property <float> system-menu-x: 0;
+    in property <float> system-menu-y: 0;
+    callback system-menu-select(string);
+    callback system-menu-dismiss();
 
     // Overlay panel visibility
     in-out property <bool> translation-overlay-active: false;
     in-out property <bool> diagnostics-overlay-active: false;
     in-out property <bool> filters-overlay-active: false;
-    property <bool> overlay-active: root.diagnostics-overlay-active || root.filters-overlay-active;
+    property <bool> overlay-active: root.diagnostics-overlay-active || root.filters-overlay-active || root.system-menu-active;
 
     // Toolbar auto-hide: visible while pointer is near the top edge
     property <length> last-pointer-y: 0px;
@@ -219,6 +235,50 @@ export component GameViewPage inherits Rectangle {
             CheckButton { label: "Grayscale"; checked: root.filter-preset == "grayscale"; clicked => { root.set-filter-preset("grayscale"); } }
             CheckButton { label: "CRT Soft"; checked: root.filter-preset == "crt-soft"; clicked => { root.set-filter-preset("crt-soft"); } }
             CheckButton { label: "Warm"; checked: root.filter-preset == "warm"; clicked => { root.set-filter-preset("warm"); } }
+        }
+    }
+
+    if root.system-menu-active : TouchArea {
+        z: 80;
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.system-menu-dismiss(); }
+
+        menu-panel := Rectangle {
+            x: min(root.width - self.width - 8px, max(8px, root.stage-x + root.system-menu-x / root.stage-native-width * root.stage-width));
+            y: min(root.height - self.height - 8px, max(8px, root.stage-y + root.system-menu-y / root.stage-native-height * root.stage-height));
+            width: 380px;
+            height: menu-layout.preferred-height + 12px;
+            background: Theme.surface-overlay;
+            border-color: Theme.border;
+            border-width: 1px;
+            border-radius: 4px;
+
+            menu-layout := VerticalLayout {
+                x: 6px;
+                y: 6px;
+                width: parent.width - 12px;
+                spacing: 0px;
+                for item in root.system-menu-items : Rectangle {
+                    height: item.separator ? 9px : 30px;
+                    background: transparent;
+                    if item.separator : Rectangle {
+                        x: 4px;
+                        y: 4px;
+                        width: parent.width - 8px;
+                        height: 1px;
+                        background: Theme.border;
+                    }
+                    if !item.separator : Button {
+                        x: item.depth * 16px;
+                        width: parent.width - self.x;
+                        height: parent.height;
+                        enabled: item.enabled && !item.submenu;
+                        text: (item.checked ? "✓  " : "    ") + item.label + (item.submenu ? "  ▶" : "");
+                        clicked => { root.system-menu-select(item.item-id); }
+                    }
+                }
+            }
         }
     }
 }

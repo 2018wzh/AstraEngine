@@ -21,7 +21,8 @@ impl FfiLegacyFamilyHostAdapter {
             vfs: shared.clone(),
             surfaces: shared.clone(),
             hooks: shared.clone(),
-            writable_files: shared,
+            writable_files: shared.clone(),
+            system_menus: shared,
         }
     }
 }
@@ -256,5 +257,22 @@ impl LegacyWritableFileHostV1 for FfiLegacyFamilyHostAdapter {
             bytes: result.bytes.into_owned(),
             written: result.written,
         })
+    }
+}
+
+impl LegacySystemMenuHostV1 for FfiLegacyFamilyHostAdapter {
+    fn publish(
+        &self,
+        session_id: &str,
+        menu: LegacySystemMenuTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        menu.validate()?;
+        native_result((self.services.publish_system_menu)(
+            FfiPublishSystemMenuCallV1 {
+                host_token: self.services.host_token.clone(),
+                session_id: session_id.into(),
+                menu: menu.into(),
+            },
+        ))
     }
 }

@@ -304,10 +304,16 @@ impl LegacyStepInput {
         )?;
         if let Some(request) = self.system_menu.as_ref() {
             request.validate()?;
-            if self.input_edges.iter().any(|edge| {
-                edge.sequence == request.sequence
-                    || (edge.control == "pointer.secondary" && edge.pressed)
-            }) {
+            if self
+                .input_edges
+                .iter()
+                .any(|edge| edge.sequence == request.sequence)
+                || (request.action == LegacySystemMenuActionV1::Open
+                    && self
+                        .input_edges
+                        .iter()
+                        .any(|edge| edge.control == "pointer.secondary" && edge.pressed))
+            {
                 return Err(LegacyProviderError::invalid(
                     "ASTRA_EMU_SYSTEM_MENU_SEQUENCE_DUPLICATE",
                     "system-menu request duplicates a physical secondary-button edge",
@@ -347,11 +353,15 @@ impl LegacyStepInput {
 #[serde(rename_all = "snake_case")]
 pub enum LegacySystemMenuActionV1 {
     Open,
+    Select,
+    Dismiss,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacySystemMenuRequestV1 {
     pub action: LegacySystemMenuActionV1,
+    pub menu_id: Option<String>,
+    pub item_id: Option<String>,
     pub pointer_x: Option<i32>,
     pub pointer_y: Option<i32>,
     pub sequence: u64,
@@ -370,6 +380,184 @@ impl LegacySystemMenuRequestV1 {
                 return Err(LegacyProviderError::invalid(
                     "ASTRA_EMU_SYSTEM_MENU_POINTER",
                     format!("system-menu pointer {axis} coordinate must be non-negative"),
+                ));
+            }
+        }
+        match self.action {
+            LegacySystemMenuActionV1::Open
+                if self.menu_id.is_none()
+                    && self.item_id.is_none()
+                    && self.pointer_x.is_some() == self.pointer_y.is_some() => {}
+            LegacySystemMenuActionV1::Select
+                if self.pointer_x.is_none()
+                    && self.pointer_y.is_none()
+                    && self.menu_id.is_some()
+                    && self.item_id.is_some() =>
+            {
+                validate_symbol(
+                    "system_menu_id",
+                    self.menu_id.as_deref().expect("guarded menu id"),
+                )?;
+                validate_symbol(
+                    "system_menu_item_id",
+                    self.item_id.as_deref().expect("guarded item id"),
+                )?;
+            }
+            LegacySystemMenuActionV1::Dismiss
+                if self.pointer_x.is_none()
+                    && self.pointer_y.is_none()
+                    && self.menu_id.is_some()
+                    && self.item_id.is_none() =>
+            {
+                validate_symbol(
+                    "system_menu_id",
+                    self.menu_id.as_deref().expect("guarded menu id"),
+                )?;
+            }
+            _ => {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_ACTION_FIELDS",
+                    "system-menu action fields do not match open, select, or dismiss",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacySystemMenuItemKindV1 {
+    Command,
+    Separator,
+    Submenu,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySystemMenuItemV1 {
+    pub item_id: String,
+    pub parent_id: Option<String>,
+    pub order: u16,
+    pub kind: LegacySystemMenuItemKindV1,
+    pub label: String,
+    pub enabled: bool,
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySystemMenuTransactionV1 {
+    pub sequence: u64,
+    pub menu_id: String,
+    pub pointer_x: Option<i32>,
+    pub pointer_y: Option<i32>,
+    pub items: Vec<LegacySystemMenuItemV1>,
+}
+
+impl LegacySystemMenuTransactionV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        const MAX_ITEMS: usize = 64;
+        const MAX_LABEL_BYTES: usize = 256;
+        if self.sequence == 0 || self.items.is_empty() || self.items.len() > MAX_ITEMS {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_BOUNDS",
+                "system menu must have a non-zero sequence and 1..=64 items",
+            ));
+        }
+        validate_symbol("system_menu_id", &self.menu_id)?;
+        if self.pointer_x.is_some() != self.pointer_y.is_some()
+            || self.pointer_x.is_some_and(|value| value < 0)
+            || self.pointer_y.is_some_and(|value| value < 0)
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_MENU_POINTER",
+                "system-menu anchor must contain two non-negative coordinates or neither",
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        for item in &self.items {
+            validate_symbol("system_menu_item_id", &item.item_id)?;
+            if !ids.insert(item.item_id.as_str()) {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_ITEM_DUPLICATE",
+                    "system-menu item id is duplicated",
+                ));
+            }
+            if item.label.len() > MAX_LABEL_BYTES
+                || item.label.chars().any(|character| character.is_control())
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_LABEL",
+                    "system-menu label is invalid or exceeds the byte bound",
+                ));
+            }
+            match item.kind {
+                LegacySystemMenuItemKindV1::Separator
+                    if item.label.is_empty() && !item.enabled && !item.checked => {}
+                LegacySystemMenuItemKindV1::Command | LegacySystemMenuItemKindV1::Submenu
+                    if !item.label.trim().is_empty() => {}
+                _ => {
+                    return Err(LegacyProviderError::invalid(
+                        "ASTRA_EMU_SYSTEM_MENU_ITEM_SHAPE",
+                        "system-menu item fields do not match its kind",
+                    ));
+                }
+            }
+        }
+        let by_id = self
+            .items
+            .iter()
+            .map(|item| (item.item_id.as_str(), item))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut sibling_orders = BTreeSet::new();
+        for item in &self.items {
+            if !sibling_orders.insert((item.parent_id.as_deref(), item.order)) {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_ORDER_DUPLICATE",
+                    "system-menu sibling order is duplicated",
+                ));
+            }
+            if let Some(parent_id) = item.parent_id.as_deref() {
+                let parent = by_id.get(parent_id).ok_or_else(|| {
+                    LegacyProviderError::invalid(
+                        "ASTRA_EMU_SYSTEM_MENU_PARENT_MISSING",
+                        "system-menu item references a missing parent",
+                    )
+                })?;
+                if parent.kind != LegacySystemMenuItemKindV1::Submenu {
+                    return Err(LegacyProviderError::invalid(
+                        "ASTRA_EMU_SYSTEM_MENU_PARENT_KIND",
+                        "system-menu children require a submenu parent",
+                    ));
+                }
+                let mut cursor = Some(parent_id);
+                let mut depth = 0usize;
+                while let Some(id) = cursor {
+                    depth += 1;
+                    if depth > 4 || id == item.item_id {
+                        return Err(LegacyProviderError::invalid(
+                            "ASTRA_EMU_SYSTEM_MENU_CYCLE",
+                            "system-menu hierarchy is cyclic or exceeds depth four",
+                        ));
+                    }
+                    cursor = by_id
+                        .get(id)
+                        .and_then(|ancestor| ancestor.parent_id.as_deref());
+                }
+            }
+        }
+        for submenu in self
+            .items
+            .iter()
+            .filter(|item| item.kind == LegacySystemMenuItemKindV1::Submenu)
+        {
+            if !self
+                .items
+                .iter()
+                .any(|item| item.parent_id.as_deref() == Some(submenu.item_id.as_str()))
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_MENU_SUBMENU_EMPTY",
+                    "system-menu submenu must contain at least one item",
                 ));
             }
         }
@@ -1835,6 +2023,8 @@ mod tests {
         let mut input = valid_step_input();
         input.system_menu = Some(LegacySystemMenuRequestV1 {
             action: LegacySystemMenuActionV1::Open,
+            menu_id: None,
+            item_id: None,
             pointer_x: Some(10),
             pointer_y: Some(20),
             sequence: 3,
@@ -1854,6 +2044,8 @@ mod tests {
         let mut input = valid_step_input();
         input.system_menu = Some(LegacySystemMenuRequestV1 {
             action: LegacySystemMenuActionV1::Open,
+            menu_id: None,
+            item_id: None,
             pointer_x: Some(-1),
             pointer_y: None,
             sequence: 0,
@@ -1863,12 +2055,61 @@ mod tests {
 
         input.system_menu = Some(LegacySystemMenuRequestV1 {
             action: LegacySystemMenuActionV1::Open,
+            menu_id: None,
+            item_id: None,
             pointer_x: Some(-1),
             pointer_y: None,
             sequence: 1,
         });
         let error = input.validate().unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_SYSTEM_MENU_POINTER");
+    }
+
+    #[test]
+    fn system_menu_model_validates_hierarchy_and_action_shapes() {
+        let menu = LegacySystemMenuTransactionV1 {
+            sequence: 4,
+            menu_id: "menu.4".into(),
+            pointer_x: Some(10),
+            pointer_y: Some(20),
+            items: vec![
+                LegacySystemMenuItemV1 {
+                    item_id: "game".into(),
+                    parent_id: None,
+                    order: 0,
+                    kind: LegacySystemMenuItemKindV1::Submenu,
+                    label: "Game".into(),
+                    enabled: true,
+                    checked: false,
+                },
+                LegacySystemMenuItemV1 {
+                    item_id: "exit".into(),
+                    parent_id: Some("game".into()),
+                    order: 0,
+                    kind: LegacySystemMenuItemKindV1::Command,
+                    label: "Exit".into(),
+                    enabled: true,
+                    checked: false,
+                },
+            ],
+        };
+        menu.validate().unwrap();
+
+        let select = LegacySystemMenuRequestV1 {
+            action: LegacySystemMenuActionV1::Select,
+            menu_id: Some("menu.4".into()),
+            item_id: Some("exit".into()),
+            pointer_x: None,
+            pointer_y: None,
+            sequence: 5,
+        };
+        select.validate().unwrap();
+        let mut invalid = select;
+        invalid.pointer_x = Some(0);
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            "ASTRA_EMU_SYSTEM_MENU_ACTION_FIELDS"
+        );
     }
 
     struct ChunkedVfsReader {

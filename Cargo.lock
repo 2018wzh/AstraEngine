@@ -1517,6 +1517,7 @@ dependencies = [
  "astra-ui-core",
  "cpal",
  "gilrs",
+ "muda-win",
  "pollster",
  "postcard",
  "rfd",
@@ -6695,6 +6696,18 @@ dependencies = [
  "png",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "muda-win"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "162b0f0b6e9bec18cccaf4383170ebe97da4d1571d333a5e94ea353b3fbc646c"
+dependencies = [
+ "crossbeam-channel",
+ "dpi",
+ "keyboard-types 0.7.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

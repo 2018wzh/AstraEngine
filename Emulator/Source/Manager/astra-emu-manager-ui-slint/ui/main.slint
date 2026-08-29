@@ -13,9 +13,9 @@ import { LibraryPage, PlaySession, ReleaseOption } from "./pages/library.slint";
 import { AboutPage } from "./pages/about.slint";
 import { SettingsPage } from "./pages/settings.slint";
 import { VfsBrowserPage } from "./pages/vfs-browser.slint";
-import { GameViewPage } from "./pages/game-view.slint";
+import { GameViewPage, SystemMenuItem } from "./pages/game-view.slint";
 
-export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession, ReleaseOption }
+export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession, ReleaseOption, SystemMenuItem }
 
 export component ManagerWindow inherits Window {
     title: "AstraEMU Manager";
@@ -76,6 +76,11 @@ export component ManagerWindow inherits Window {
     in-out property <float> stage-native-width: 1024;
     in-out property <float> stage-native-height: 768;
     in-out property <bool> game-active: false;
+    in property <[SystemMenuItem]> system-menu-items;
+    in-out property <bool> system-menu-active: false;
+    in-out property <string> system-menu-id;
+    in-out property <float> system-menu-x: 0;
+    in-out property <float> system-menu-y: 0;
 
     // ===== Overlay panels (game view) =====
     in-out property <bool> translation-overlay-active: false;
@@ -146,6 +151,8 @@ export component ManagerWindow inherits Window {
     callback configure-nls(string);
     callback game-input(string, bool, float);
     callback leave-game();
+    callback system-menu-select(string);
+    callback system-menu-dismiss();
     callback open-diagnostics();
     callback open-translation();
     callback open-filters();
@@ -197,6 +204,12 @@ export component ManagerWindow inherits Window {
         stage-native-height <=> root.stage-native-height;
         game-input(control, pressed, value) => { root.game-input(control, pressed, value); }
         leave-game => { root.leave-game(); }
+        system-menu-items: root.system-menu-items;
+        system-menu-active: root.system-menu-active;
+        system-menu-x: root.system-menu-x;
+        system-menu-y: root.system-menu-y;
+        system-menu-select(item-id) => { root.system-menu-select(item-id); }
+        system-menu-dismiss => { root.system-menu-dismiss(); }
 
         translation-overlay-active <=> root.translation-overlay-active;
         diagnostics-overlay-active <=> root.diagnostics-overlay-active;

@@ -29,6 +29,7 @@ postcard.workspace = true
 tokio.workspace = true
 wgpu.workspace = true
 winit = { workspace = true, features = ["rwh_06"] }
+muda-win.workspace = true
 accesskit.workspace = true
 accesskit_winit.workspace = true
 windows = { workspace = true, features = [

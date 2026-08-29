@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacySystemMenuTransactionV1",
+  "type": "object",
+  "required": [
+    "items",
+    "menu_id",
+    "sequence"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/LegacySystemMenuItemV1"
+      }
+    },
+    "menu_id": {
+      "type": "string"
+    },
+    "pointer_x": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int32"
+    },
+    "pointer_y": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int32"
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "LegacySystemMenuItemKindV1": {
+      "type": "string",
+      "enum": [
+        "command",
+        "separator",
+        "submenu"
+      ]
+    },
+    "LegacySystemMenuItemV1": {
+      "type": "object",
+      "required": [
+        "checked",
+        "enabled",
+        "item_id",
+        "kind",
+        "label",
+        "order"
+      ],
+      "properties": {
+        "checked": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/LegacySystemMenuItemKindV1"
+        },
+        "label": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

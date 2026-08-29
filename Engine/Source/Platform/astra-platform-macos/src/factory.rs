@@ -598,6 +598,13 @@ mod macos {
                     }
                 };
                 match command {
+                    HostCommand::ShowContextMenu { reply, .. } => {
+                        let _ = reply.send(Err(PlatformError::new(
+                            PlatformErrorCode::PlatformNotImplemented,
+                            "window.context_menu",
+                            "macOS native context menus are not implemented",
+                        )));
+                    }
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
                             .with_title(request.title)

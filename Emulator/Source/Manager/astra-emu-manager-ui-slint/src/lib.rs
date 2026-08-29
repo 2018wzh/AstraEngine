@@ -118,6 +118,17 @@ pub struct AppearanceViewModel {
     pub grid_columns: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemMenuItemViewModel {
+    pub item_id: String,
+    pub label: String,
+    pub depth: i32,
+    pub enabled: bool,
+    pub checked: bool,
+    pub separator: bool,
+    pub submenu: bool,
+}
+
 impl Default for AppearanceViewModel {
     fn default() -> Self {
         Self {
@@ -210,6 +221,7 @@ pub struct SlintManagerAdapter {
     play_history: Rc<VecModel<PlaySession>>,
     releases: Rc<VecModel<ReleaseOption>>,
     gamepad_bindings: Rc<VecModel<GamepadBinding>>,
+    system_menu_items: Rc<VecModel<SystemMenuItem>>,
 }
 
 impl SlintManagerAdapter {
@@ -221,12 +233,14 @@ impl SlintManagerAdapter {
         let play_history = Rc::new(VecModel::default());
         let releases = Rc::new(VecModel::default());
         let gamepad_bindings = Rc::new(VecModel::default());
+        let system_menu_items = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
         window.set_match_reviews(ModelRc::from(reviews.clone()));
         window.set_vfs_entries(ModelRc::from(vfs_entries.clone()));
         window.set_play_history(ModelRc::from(play_history.clone()));
         window.set_releases(ModelRc::from(releases.clone()));
         window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
+        window.set_system_menu_items(ModelRc::from(system_menu_items.clone()));
         Ok(Self {
             window,
             games,
@@ -235,7 +249,41 @@ impl SlintManagerAdapter {
             play_history,
             releases,
             gamepad_bindings,
+            system_menu_items,
         })
+    }
+
+    pub fn show_system_menu(
+        &self,
+        menu_id: &str,
+        items: &[SystemMenuItemViewModel],
+        pointer_x: i32,
+        pointer_y: i32,
+    ) {
+        self.system_menu_items.set_vec(
+            items
+                .iter()
+                .map(|item| SystemMenuItem {
+                    item_id: item.item_id.as_str().into(),
+                    label: item.label.as_str().into(),
+                    depth: item.depth,
+                    enabled: item.enabled,
+                    checked: item.checked,
+                    separator: item.separator,
+                    submenu: item.submenu,
+                })
+                .collect::<Vec<_>>(),
+        );
+        self.window.set_system_menu_x(pointer_x as f32);
+        self.window.set_system_menu_y(pointer_y as f32);
+        self.window.set_system_menu_id(menu_id.into());
+        self.window.set_system_menu_active(true);
+    }
+
+    pub fn hide_system_menu(&self) {
+        self.window.set_system_menu_active(false);
+        self.window.set_system_menu_id("".into());
+        self.system_menu_items.set_vec(Vec::new());
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
@@ -487,7 +535,8 @@ impl SlintManagerAdapter {
 mod tests {
     use super::{
         AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-        MatchReviewViewModel, PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
+        MatchReviewViewModel, PlaySessionViewModel, SystemMenuItemViewModel, VfsEntryViewModel,
+        VfsPreviewViewModel,
     };
 
     fn assert_contract_is_send_sync<T: Send + Sync>() {}
@@ -502,5 +551,6 @@ mod tests {
         assert_contract_is_send_sync::<InputConfigViewModel>();
         assert_contract_is_send_sync::<AppearanceViewModel>();
         assert_contract_is_send_sync::<PlaySessionViewModel>();
+        assert_contract_is_send_sync::<SystemMenuItemViewModel>();
     }
 }

@@ -155,7 +155,9 @@
       "description": "Typed semantic request emitted by a host when the physical secondary pointer button opens the family-owned system menu.",
       "type": "string",
       "enum": [
-        "open"
+        "open",
+        "select",
+        "dismiss"
       ]
     },
     "LegacySystemMenuRequestV1": {
@@ -167,6 +169,18 @@
       "properties": {
         "action": {
           "$ref": "#/definitions/LegacySystemMenuActionV1"
+        },
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "menu_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "pointer_x": {
           "type": [

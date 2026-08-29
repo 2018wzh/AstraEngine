@@ -31,8 +31,8 @@ use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
     LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
-    LegacyResourceRead, LegacyRuntimeHostCtx, LegacyTextureFilter, LegacyTextureFormat,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    LegacyResourceRead, LegacyRuntimeHostCtx, LegacySystemMenuItemKindV1, LegacyTextureFilter,
+    LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
@@ -40,8 +40,8 @@ use astra_emu_family_support::{
 };
 use astra_emu_manager_core::{
     evidence_vm_coverage_ids, AstraEmuRuntimeProvider, CancellationToken, CaseRecord,
-    DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner, ScanLimits,
-    SourceGrant,
+    DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner,
+    PendingFamilySystemMenu, ScanLimits, SourceGrant,
 };
 use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_headless_protocol::{
@@ -66,19 +66,21 @@ use astra_observability::{
     sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceSummary,
     PerfettoTraceWriter,
 };
+#[cfg(target_os = "windows")]
+use astra_platform::{
+    ContextMenuItem, ContextMenuItemKind, ContextMenuRequest,
+    GamepadControl as PlatformGamepadControl, InputState, PlatformEventKind,
+    PointerButton as PlatformPointerButton, TouchPhase as PlatformTouchPhase,
+};
 use astra_platform::{
     DecodeKind, DecodeOutput, GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy,
     HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy,
     HeadlessRenderPolicy, PlatformDecodeRequest, PlatformHostClient, PlatformHostFactory,
-    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowRequest,
+    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowHandle,
+    WindowRequest,
 };
 #[cfg(windows)]
 use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
-#[cfg(target_os = "windows")]
-use astra_platform::{
-    GamepadControl as PlatformGamepadControl, InputState, PlatformEventKind,
-    PointerButton as PlatformPointerButton, TouchPhase as PlatformTouchPhase, WindowHandle,
-};
 use astra_platform_headless::{
     HeadlessGpuFrameSample, HeadlessPerformanceObserver, HeadlessPlatformFactory,
 };
@@ -845,6 +847,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                 target_latency_ms: 180,
                 refill_low_water_ms: 120,
             },
+            window: Some(window),
         },
     )?;
     record_native_launch_phase("driver_ready", phase_started, launch_started);
@@ -4127,6 +4130,8 @@ struct RuntimeDriver<'a> {
     delta_ns: u64,
     platform: &'a PlatformHostClient,
     surface: SurfaceHandle,
+    window: Option<WindowHandle>,
+    virtual_system_menu: Option<VirtualSystemMenu>,
     fixed_step: u64,
     input_sequence: u64,
     await_sequence: u64,
@@ -4192,6 +4197,71 @@ enum PendingAudioCommand {
     },
 }
 
+struct VirtualSystemMenu {
+    pending: PendingFamilySystemMenu,
+    parent_id: Option<String>,
+    focus: usize,
+}
+
+#[derive(Debug)]
+enum VirtualSystemMenuDecision {
+    None,
+    Select(String),
+    Dismiss,
+}
+
+impl VirtualSystemMenu {
+    fn consume(&mut self, control: &str) -> Result<VirtualSystemMenuDecision, String> {
+        let mut children = self
+            .pending
+            .menu
+            .items
+            .iter()
+            .filter(|item| {
+                item.parent_id == self.parent_id
+                    && item.kind != LegacySystemMenuItemKindV1::Separator
+                    && item.enabled
+            })
+            .collect::<Vec<_>>();
+        children.sort_by_key(|item| item.order);
+        if children.is_empty() {
+            return Err("ASTRA_EMU_HEADLESS_SYSTEM_MENU_EMPTY".into());
+        }
+        self.focus %= children.len();
+        match control {
+            "arrow_up" => self.focus = (self.focus + children.len() - 1) % children.len(),
+            "arrow_down" => self.focus = (self.focus + 1) % children.len(),
+            "arrow_right" | "enter" | "space" => {
+                let selected = children[self.focus];
+                if selected.kind == LegacySystemMenuItemKindV1::Submenu {
+                    self.parent_id = Some(selected.item_id.clone());
+                    self.focus = 0;
+                } else {
+                    return Ok(VirtualSystemMenuDecision::Select(selected.item_id.clone()));
+                }
+            }
+            "arrow_left" | "escape" if self.parent_id.is_some() => {
+                let parent_id = self
+                    .parent_id
+                    .as_deref()
+                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_SYSTEM_MENU_PARENT_MISSING".to_owned())?;
+                self.parent_id = self
+                    .pending
+                    .menu
+                    .items
+                    .iter()
+                    .find(|item| item.item_id == parent_id)
+                    .and_then(|item| item.parent_id.clone());
+                self.focus = 0;
+            }
+            "escape" => return Ok(VirtualSystemMenuDecision::Dismiss),
+            "pointer.x" | "pointer.y" | "pointer.secondary" => {}
+            _ => return Err("ASTRA_EMU_HEADLESS_SYSTEM_MENU_INPUT_UNSUPPORTED".into()),
+        }
+        Ok(VirtualSystemMenuDecision::None)
+    }
+}
+
 struct PendingScenePresent {
     sequence: u64,
     submitted: Instant,
@@ -4210,6 +4280,7 @@ struct RuntimeDriverConfig {
     presentation: PresentationPath,
     presentation_substeps: u8,
     audio_pump: AudioPumpPolicy,
+    window: Option<WindowHandle>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4744,6 +4815,7 @@ async fn execute_sequence(
             presentation: config.presentation,
             presentation_substeps: config.presentation_substeps,
             audio_pump: AudioPumpPolicy::FixedTick,
+            window: None,
         },
     )?;
     let mut checkpoints = Vec::new();
@@ -5114,6 +5186,8 @@ impl<'a> RuntimeDriver<'a> {
             delta_ns: config.delta_ns,
             platform,
             surface,
+            window: config.window,
+            virtual_system_menu: None,
             fixed_step: 0,
             input_sequence: 0,
             await_sequence: 0,
@@ -5212,6 +5286,9 @@ impl<'a> RuntimeDriver<'a> {
             .input_sequence
             .checked_add(1)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        if self.virtual_system_menu.is_some() {
+            return self.consume_virtual_system_menu_input(control, pressed);
+        }
         self.pending_inputs.push(LegacyInputEdge {
             control: control.into(),
             pressed,
@@ -5219,6 +5296,44 @@ impl<'a> RuntimeDriver<'a> {
             sequence: self.input_sequence,
         });
         Ok(())
+    }
+
+    fn consume_virtual_system_menu_input(
+        &mut self,
+        control: &str,
+        pressed: bool,
+    ) -> Result<(), String> {
+        if !pressed {
+            return Ok(());
+        }
+        let decision = self
+            .virtual_system_menu
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_SYSTEM_MENU_STATE".to_owned())?
+            .consume(control)?;
+        match decision {
+            VirtualSystemMenuDecision::None => Ok(()),
+            VirtualSystemMenuDecision::Select(item_id) => {
+                self.resolve_virtual_system_menu(Some(&item_id))
+            }
+            VirtualSystemMenuDecision::Dismiss => self.resolve_virtual_system_menu(None),
+        }
+    }
+
+    fn resolve_virtual_system_menu(&mut self, item_id: Option<&str>) -> Result<(), String> {
+        let menu = self
+            .virtual_system_menu
+            .take()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_SYSTEM_MENU_STATE".to_owned())?;
+        self.runtime
+            .system_menu_host()
+            .resolve(
+                &menu.pending.session_id,
+                &menu.pending.menu.menu_id,
+                item_id,
+                self.input_sequence,
+            )
+            .map_err(|error| error.to_string())
     }
 
     fn consume_physical_input(&mut self, input: &PhysicalInput) -> Result<(), String> {
@@ -5463,36 +5578,50 @@ impl<'a> RuntimeDriver<'a> {
         {
             return Err("ASTRA_EMU_HEADLESS_WAIT_UNSUPPORTED".into());
         }
+        let system_menu_pending = self
+            .runtime
+            .system_menu_host()
+            .has_pending_interaction()
+            .map_err(|error| error.to_string())?;
+        if system_menu_pending {
+            self.pending_inputs
+                .retain(|edge| edge.control != "pointer.secondary");
+        }
         let pressed_keys = pressed_input_keys(&self.pending_inputs);
-        let ready = self
-            .pending_waits
-            .iter()
-            .filter_map(|(token, wait)| match wait {
-                PendingWait::DueStep(due) if *due <= next_step => {
-                    Some((token.clone(), BTreeSet::new()))
-                }
-                // Minori's Escape menu is allowed to interrupt a message
-                // timer. Keep this distinct from a generic frame/presentation
-                // wait: those waits still require their own completion and
-                // cannot be silently cancelled by system UI input.
-                PendingWait::Time(due) if *due <= next_step || pressed_keys.contains("escape") => {
-                    Some((token.clone(), BTreeSet::new()))
-                }
-                PendingWait::Input(keys) => {
-                    let consumed = keys
-                        .iter()
-                        .filter(|key| pressed_keys.contains(*key))
-                        .cloned()
-                        .collect::<BTreeSet<_>>();
-                    if consumed.is_empty() {
-                        None
-                    } else {
-                        Some((token.clone(), consumed))
+        let ready = if system_menu_pending {
+            Vec::new()
+        } else {
+            self.pending_waits
+                .iter()
+                .filter_map(|(token, wait)| match wait {
+                    PendingWait::DueStep(due) if *due <= next_step => {
+                        Some((token.clone(), BTreeSet::new()))
                     }
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+                    // Minori's Escape menu is allowed to interrupt a message
+                    // timer. Keep this distinct from a generic frame/presentation
+                    // wait: those waits still require their own completion and
+                    // cannot be silently cancelled by system UI input.
+                    PendingWait::Time(due)
+                        if *due <= next_step || pressed_keys.contains("escape") =>
+                    {
+                        Some((token.clone(), BTreeSet::new()))
+                    }
+                    PendingWait::Input(keys) => {
+                        let consumed = keys
+                            .iter()
+                            .filter(|key| pressed_keys.contains(*key))
+                            .cloned()
+                            .collect::<BTreeSet<_>>();
+                        if consumed.is_empty() {
+                            None
+                        } else {
+                            Some((token.clone(), consumed))
+                        }
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
         let consumed_input_keys = ready
             .iter()
             .fold(BTreeSet::new(), |mut acc, (_, consumed)| {
@@ -5806,9 +5935,88 @@ impl<'a> RuntimeDriver<'a> {
                 }
             }
         }
+        #[cfg(target_os = "windows")]
+        self.present_native_system_menu_if_pending().await?;
+        self.capture_virtual_system_menu_if_pending()?;
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
         Ok(())
+    }
+
+    fn capture_virtual_system_menu_if_pending(&mut self) -> Result<(), String> {
+        if self.window.is_some() || self.virtual_system_menu.is_some() {
+            return Ok(());
+        }
+        let Some(pending) = self
+            .runtime
+            .system_menu_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        self.virtual_system_menu = Some(VirtualSystemMenu {
+            pending,
+            parent_id: None,
+            focus: 0,
+        });
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    async fn present_native_system_menu_if_pending(&mut self) -> Result<(), String> {
+        let Some(window) = self.window else {
+            return Ok(());
+        };
+        let menu_host = self.runtime.system_menu_host();
+        let Some(pending) = menu_host
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        let items = pending
+            .menu
+            .items
+            .iter()
+            .map(|item| ContextMenuItem {
+                item_id: item.item_id.clone(),
+                parent_id: item.parent_id.clone(),
+                order: item.order,
+                kind: match item.kind {
+                    LegacySystemMenuItemKindV1::Command => ContextMenuItemKind::Command,
+                    LegacySystemMenuItemKindV1::Separator => ContextMenuItemKind::Separator,
+                    LegacySystemMenuItemKindV1::Submenu => ContextMenuItemKind::Submenu,
+                },
+                label: item.label.clone(),
+                enabled: item.enabled,
+                checked: item.checked,
+            })
+            .collect();
+        let result = self
+            .platform
+            .show_context_menu(ContextMenuRequest {
+                window,
+                // Native tracking uses the current OS cursor. Family anchor
+                // coordinates remain stage-relative evidence for Headless.
+                x: None,
+                y: None,
+                items,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        self.input_sequence = self
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_SYSTEM_MENU_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        menu_host
+            .resolve(
+                &pending.session_id,
+                &pending.menu.menu_id,
+                result.item_id.as_deref(),
+                self.input_sequence,
+            )
+            .map_err(|error| error.to_string())
     }
 
     async fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {
@@ -7098,7 +7306,81 @@ fn validate_image_decode_output(
 #[cfg(test)]
 mod native_tests {
     use super::*;
-    use astra_emu_family_api::FamilyId;
+    use astra_emu_family_api::{FamilyId, LegacySystemMenuItemV1, LegacySystemMenuTransactionV1};
+
+    fn virtual_menu() -> VirtualSystemMenu {
+        VirtualSystemMenu {
+            pending: PendingFamilySystemMenu {
+                session_id: "session".into(),
+                menu: LegacySystemMenuTransactionV1 {
+                    sequence: 1,
+                    menu_id: "menu".into(),
+                    pointer_x: None,
+                    pointer_y: None,
+                    items: vec![
+                        LegacySystemMenuItemV1 {
+                            item_id: "save".into(),
+                            parent_id: None,
+                            order: 0,
+                            kind: LegacySystemMenuItemKindV1::Command,
+                            label: "Save".into(),
+                            enabled: true,
+                            checked: false,
+                        },
+                        LegacySystemMenuItemV1 {
+                            item_id: "game".into(),
+                            parent_id: None,
+                            order: 1,
+                            kind: LegacySystemMenuItemKindV1::Submenu,
+                            label: "Game".into(),
+                            enabled: true,
+                            checked: false,
+                        },
+                        LegacySystemMenuItemV1 {
+                            item_id: "exit".into(),
+                            parent_id: Some("game".into()),
+                            order: 0,
+                            kind: LegacySystemMenuItemKindV1::Command,
+                            label: "Exit".into(),
+                            enabled: true,
+                            checked: false,
+                        },
+                    ],
+                },
+            },
+            parent_id: None,
+            focus: 0,
+        }
+    }
+
+    #[test]
+    fn virtual_system_menu_routes_physical_navigation_without_semantic_shortcuts() {
+        let mut menu = virtual_menu();
+        assert!(matches!(
+            menu.consume("arrow_down").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+        assert_eq!(menu.focus, 1);
+        assert!(matches!(
+            menu.consume("enter").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+        assert_eq!(menu.parent_id.as_deref(), Some("game"));
+        assert!(matches!(
+            menu.consume("enter").unwrap(),
+            VirtualSystemMenuDecision::Select(item) if item == "exit"
+        ));
+
+        let mut menu = virtual_menu();
+        assert!(matches!(
+            menu.consume("escape").unwrap(),
+            VirtualSystemMenuDecision::Dismiss
+        ));
+        assert_eq!(
+            virtual_menu().consume("save").unwrap_err(),
+            "ASTRA_EMU_HEADLESS_SYSTEM_MENU_INPUT_UNSUPPORTED"
+        );
+    }
 
     #[test]
     fn writable_game_component_is_a_portable_directory_name() {

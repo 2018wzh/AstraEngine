@@ -1,4 +1,5 @@
-use astra_emu_manager_core::{default_vn_preset, InputMapping};
+use astra_emu_family_api::LegacySystemMenuItemKindV1;
+use astra_emu_manager_core::{default_vn_preset, InputMapping, PendingFamilySystemMenu};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -7,7 +8,7 @@ use std::{
     time::Instant,
 };
 
-use astra_emu_manager_ui_slint::{ManagerViewModel, SlintManagerAdapter};
+use astra_emu_manager_ui_slint::{ManagerViewModel, SlintManagerAdapter, SystemMenuItemViewModel};
 use slint::ComponentHandle;
 use thiserror::Error;
 
@@ -20,6 +21,36 @@ type HostCallbackSlot = std::rc::Rc<std::cell::RefCell<Option<HostCallback>>>;
 /// The callback only schedules work back onto the UI thread; it never mutates
 /// controller or renderer state from a worker.
 pub type HostWake = Arc<dyn Fn() + Send + Sync + 'static>;
+
+fn manager_system_menu_items(pending: &PendingFamilySystemMenu) -> Vec<SystemMenuItemViewModel> {
+    pending
+        .menu
+        .items
+        .iter()
+        .map(|item| {
+            let mut depth = 0_i32;
+            let mut parent_id = item.parent_id.as_deref();
+            while let Some(parent) = parent_id {
+                depth += 1;
+                parent_id = pending
+                    .menu
+                    .items
+                    .iter()
+                    .find(|candidate| candidate.item_id == parent)
+                    .and_then(|candidate| candidate.parent_id.as_deref());
+            }
+            SystemMenuItemViewModel {
+                item_id: item.item_id.clone(),
+                label: item.label.clone(),
+                depth,
+                enabled: item.enabled,
+                checked: item.checked,
+                separator: item.kind == LegacySystemMenuItemKindV1::Separator,
+                submenu: item.kind == LegacySystemMenuItemKindV1::Submenu,
+            }
+        })
+        .collect()
+}
 
 type PanicHook = Box<dyn for<'a> Fn(&std::panic::PanicHookInfo<'a>) + Send + Sync + 'static>;
 
@@ -126,6 +157,16 @@ pub trait ManagerController: 'static {
     }
     fn advance_runtime(&mut self) -> Result<Option<ManagerViewModel>, String> {
         Ok(None)
+    }
+    fn take_pending_system_menu(&mut self) -> Result<Option<PendingFamilySystemMenu>, String> {
+        Ok(None)
+    }
+    fn resolve_system_menu(
+        &mut self,
+        _menu_id: &str,
+        _item_id: Option<&str>,
+    ) -> Result<(), String> {
+        Err("ASTRA_EMU_SYSTEM_MENU_NOT_CONFIGURED".into())
     }
     // ===== UI redesign callbacks (default implementations keep existing
     // controllers source-compatible until they opt in) =====
@@ -333,8 +374,26 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 // renderer/session error needs to be reported.
                 let advance_result = { controller.borrow_mut().advance_runtime() };
                 match advance_result {
-                    Ok(Some(model)) => adapter.apply(&model),
-                    Ok(None) => {}
+                    Ok(model) => {
+                        if let Some(model) = model {
+                            adapter.apply(&model);
+                        }
+                        match controller.borrow_mut().take_pending_system_menu() {
+                            Ok(Some(pending)) => {
+                                let items = manager_system_menu_items(&pending);
+                                adapter.show_system_menu(
+                                    &pending.menu.menu_id,
+                                    &items,
+                                    pending.menu.pointer_x.unwrap_or_default(),
+                                    pending.menu.pointer_y.unwrap_or_default(),
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                window.set_global_diagnostic(error.into());
+                            }
+                        }
+                    }
                     Err(error) => {
                         let termination = controller.borrow_mut().leave_game();
                         let message = match termination {
@@ -358,6 +417,46 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
         });
     }));
     fire_host_callback(&runtime_schedule);
+    let menu_select_weak = adapter.window().as_weak();
+    let menu_select_controller = controller.clone();
+    let menu_select_adapter = adapter.clone();
+    let menu_select_schedule = runtime_schedule.clone();
+    adapter.window().on_system_menu_select(move |item_id| {
+        let Some(window) = menu_select_weak.upgrade() else {
+            return;
+        };
+        let menu_id = window.get_system_menu_id();
+        match menu_select_controller
+            .borrow_mut()
+            .resolve_system_menu(menu_id.as_str(), Some(item_id.as_str()))
+        {
+            Ok(()) => {
+                menu_select_adapter.hide_system_menu();
+                fire_host_callback(&menu_select_schedule);
+            }
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let menu_dismiss_weak = adapter.window().as_weak();
+    let menu_dismiss_controller = controller.clone();
+    let menu_dismiss_adapter = adapter.clone();
+    let menu_dismiss_schedule = runtime_schedule.clone();
+    adapter.window().on_system_menu_dismiss(move || {
+        let Some(window) = menu_dismiss_weak.upgrade() else {
+            return;
+        };
+        let menu_id = window.get_system_menu_id();
+        match menu_dismiss_controller
+            .borrow_mut()
+            .resolve_system_menu(menu_id.as_str(), None)
+        {
+            Ok(()) => {
+                menu_dismiss_adapter.hide_system_menu();
+                fire_host_callback(&menu_dismiss_schedule);
+            }
+            Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
     let launch_weak = adapter.window().as_weak();
     let launch_controller = controller.clone();
     let launch_adapter = adapter.clone();

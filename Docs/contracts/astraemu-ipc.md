@@ -4,9 +4,9 @@ AstraEMU v1 采用 Manager + `AstraEmuRuntimeProvider` + AstraEngine `RuntimeWor
 
 `EMUCoreBridge` 只作为 extension point 保留，用于外部工具或研究环境。它不属于 v1 主路径，也不能替换 `RuntimeWorld`。
 
-## v10 迁移状态
+## v11 迁移状态
 
-当前 hard-cut identity 为 `astra.emu.family_abi.v10`。v7/v8/v9 module、fingerprint 与旧 runtime snapshot 必须在 provider 执行前拒绝；没有 compatibility shim。Product Runtime Provider ABI 同步 hard cut 到 v4，Extension ABI 首版 identity 为 `astra.emu.extension_abi.v1`。v10 在 `LegacyStepInput` 中增加 ABI-owned typed system-menu request，用于将物理右键语义交给 family-owned system UI；它不再作为键盘别名或隐式 fallback。
+当前 hard-cut identity 为 `astra.emu.family_abi.v11`。v7/v8/v9/v10 module、fingerprint 与旧 runtime snapshot 必须在 provider 执行前拒绝；没有 compatibility shim。Product Runtime Provider ABI 保持 v4，Extension ABI identity 为 `astra.emu.extension_abi.v1`。v11 在既有 typed system-menu request 上增加有界菜单 transaction 和非阻塞 Host publication port。Family 发布层级、启用状态和勾选状态；Host 只负责显示并把 `Select` 或 `Dismiss` 送回同一 session，不能按 item 名称解释 family 语义。
 
 本次 ABI 契约已经落地，FVP、Minori、Manager、CLI、Headless 与平台 renderer 的 consumer 迁移仍是 `IN_PROGRESS`。v7 的 scene transaction、snapshot/save/restore、text lease、session resource presentation 与 step budget 只属于历史实现，不是当前接口能力。
 
@@ -66,7 +66,9 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-Family ABI v10 对 descriptor、instance、probe、open、step、surface、Hook、writable-file、只读 VFS 与 shutdown 使用显式 `StableAbi` wire DTO，并把 typed system-menu request 纳入 step wire。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。
+Family ABI v11 对 descriptor、instance、probe、open、step、surface、Hook、writable-file、system-menu、只读 VFS 与 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。
+
+`LegacySystemMenuTransactionV1` 最多包含 64 项，菜单深度最多为 4。重复 id、重复 sibling order、无效 parent、空 submenu、不可选 item 或错配 menu id 都会阻断。Windows native host 通过平台 context-menu provider 显示菜单；Manager 使用同一 transaction 构建 Slint overlay；Headless 只接受序列化物理方向键、确认键和取消键，不提供语义化选项快捷命令。
 
 只读 VFS range 请求绑定 expected revision、offset、length 与 bounds，Host 不传文件句柄或本地路径，也不计算 per-read content hash。Family 只能 acquire Host-owned writable surface。lease 明确携带 RGBA8/BGRA8 sRGB premultiplied-alpha format、dimensions、stride 与 generation；core 写入后提交 `Unchanged`、`Full` 或 surface 像素坐标 `Rects` damage。step 成功且 Layer transaction 验证完成后才公开 staged generation；失败时整批回收。pool 暂时耗尽时重试同一 generation 并输出节流 WARN，不临时分配、不丢帧、不切换 presentation mode。设备丢失、整数溢出、尺寸或 stride 不匹配、所有权错误与实际分配失败继续 fail-fast。
 

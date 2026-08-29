@@ -424,6 +424,13 @@ mod linux {
                     }
                 };
                 match command {
+                    HostCommand::ShowContextMenu { reply, .. } => {
+                        let _ = reply.send(Err(PlatformError::new(
+                            PlatformErrorCode::PlatformNotImplemented,
+                            "window.context_menu",
+                            "Linux native context menus are not implemented",
+                        )));
+                    }
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
                             .with_title(request.title)

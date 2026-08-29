@@ -324,6 +324,7 @@ impl DynamicFamilyLoader {
             commit_surface: ffi_commit_surface,
             invoke_hook: ffi_invoke_hook,
             writable_file: ffi_writable_file,
+            publish_system_menu: ffi_publish_system_menu,
         };
         if let Err(error) = native_result::<_, ()>((module.create_instance())(services, request)) {
             remove_host_services(&host_token);
@@ -691,6 +692,16 @@ extern "C" fn ffi_writable_file(
         })
     })();
     ffi_result::<FfiWritableFileResultV1, FfiWritableFileResultV1>(result)
+}
+
+extern "C" fn ffi_publish_system_menu(call: FfiPublishSystemMenuCallV1) -> FfiLegacyResult<()> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        let menu: LegacySystemMenuTransactionV1 = call.menu.into();
+        menu.validate()?;
+        host.system_menus.publish(call.session_id.as_str(), menu)
+    })();
+    ffi_result(result)
 }
 
 fn registered_host(token: &str) -> Result<LegacyFamilyHostServicesV9, LegacyProviderError> {

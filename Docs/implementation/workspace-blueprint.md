@@ -4,7 +4,7 @@ AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目�
 
 ## Layout
 
-The current AstraEMU boundary is Family ABI v10. Existing v6/v7/v8/v9
+The current AstraEMU boundary is Family ABI v11. Existing v6/v7/v8/v9/v10
 references in historical status rows describe migrations that preceded the v10
 hard cut. The v10 step wire includes the typed `LegacySystemMenuRequestV1` used
 for family-owned right-click system menus; no compatibility shim is retained.
@@ -20,7 +20,7 @@ for family-owned right-click system menus; no compatibility shim is retained.
 | `Engine/Plugins/Fixtures/` | Stage 1/3 implemented | 测试插件 fixture，覆盖真实 load/unload；`headless-presentation-provider` 覆盖 Stage 1 presentation/action provider，`vn-extension-provider` 覆盖 Stage 3 VN extension provider slots |
 | `Engine/Plugins/Providers/` | Stage 2 implemented, Stage 4 reopened | 通用 provider 插件由 Stage 1/2 registry 和 gate 管理；VFS backend provider 统一走 `vfs_provider` slot，NativeVN runtime provider 位于 AstraVN module，第三方 gameplay runtime provider、OpenAI、Ollama、ComfyUI 和 ONNX 仍是后续 provider |
 | `Editor/Source/` | Stage 4 not implemented | Qt/QML editor bridge 和应用入口 |
-| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v10 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、FVP/Minori provider boundary、fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；AstraEMU Luau patch/decode 已删除，RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
+| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v11 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、family-owned system-menu、FVP/Minori provider boundary、fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；AstraEMU Luau patch/decode 已删除，RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
 | `Examples/` | Stage 3 in progress | 产品样例和发布样例；`Examples/NativeVN` 是可提交 commercial baseline sample，`Examples/TsuiNoSora/Docs/Title.png`、`Game.png` 作为 TsuiNoSora 视觉参考证据；`Examples/TsuiNoSora/Tools/original-patcher` 是不发布到 crates.io 的 1999 原版独立副本补丁器 |
 | `Tools/TsuiNoSora/` | Stage 3 in progress | 本地合法数据的 inventory、visual reference report 和 Asset analysis helper；输出脱敏 report，不提交商业 payload |
 

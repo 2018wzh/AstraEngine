@@ -1,5 +1,13 @@
 # Minori 移植日志
 
+## 2026-08-30：Family API v11 与原版右键菜单
+
+- 原版现场观察确认：右键打开的是系统菜单，不是 Save 页。标题与剧情阶段的根菜单不同；剧情菜单包含消息框显示、Auto、Skip、Quick Save、Save、Load 和 Config，窗口、Help、Game 子菜单位于其后。转场期间右键不生效。
+- Family API hard cut 到 `astra.emu.family_abi.v11`。Family 通过 `LegacySystemMenuTransactionV1` 非阻塞发布层级、启用状态和勾选状态，Host 只负责显示并回送 `Select` 或 `Dismiss`。错配 menu id、重复 item、无效 parent、不可选 item 和并发菜单都直接阻断。
+- Windows Release CLI 使用 AstraPlatform context-menu provider；Manager 使用同一 transaction 构建 Slint overlay；Headless 只接受物理方向键、确认键和取消键。三条路径不按 Minori item id 自行解释命令。
+- Minori 选中后可以切换消息框、Auto/Skip，或打开 Save、Load 和 gameplay Config。菜单活动期间保留底层 message wait，防止确认或取消动作误推进剧情。
+- 当前完成的是 ABI、平台和 consumer 的 E1 定向回归。尚未用 v11 build 完成真实 key-file mount、Headless GPU E2 或 Release Sandbox 视觉复测，不能沿用旧 ABI 的 Save 页现场结果。
+
 ## 2026-08-29：key file 与流式解密 hard cut
 
 - Minori launch profile 改用安全相对 `key_file`。mount 通过 `astra-emu-family-core` 的有界只读接口读取一次严格 `astra.emu.minori.keys.v1`，后续不监控、不重载，也不保存 key hash。
@@ -13,11 +21,11 @@
 - 该复核只证明无设备启动和 UI 生命周期不再因 WASAPI 失败而退出；null sink 不产生物理 audio meter，且本轮没有 artifact 输出，因此不能关闭正式音频听审或 Windows E3。
 - Diagnostics 摘要现显式显示 `audio_endpoint=none|native|null`；这是当前 session 的端点状态提示，不改变 blocking diagnostic，也不把 `null` 提升为物理音频 evidence。
 
-## 2026-08-28：Family API v10 与右键系统菜单
+## 2026-08-28：Family API v10 与右键系统菜单（历史）
 
 - Family API 的 ABI hard cut 进入 `astra.emu.family_abi.v10`。`LegacyStepInput` 增加 `LegacySystemMenuRequestV1`，通过 `FfiSystemMenuRequestV1` 进入 ABI wire。request 目前只允许 `Open`，可携带有界 pointer 坐标和独立 sequence，不把右键当作键盘 alias。
 - Manager 将 `pointer.secondary` 的 pressed edge 提升为 typed request，并从传给 family 的 input stream 中移除重复的 pressed edge；release edge 仍留在普通 input stream。重复 pressed secondary、pointer 数值异常和 sequence 冲突都返回 `ASTRA_EMU_SYSTEM_MENU_*` diagnostic。
-- Minori 只在没有 system page、wait 状态为稳定 gameplay `Input`/`Time` wait、没有 await/provider completion 且已绑定 writable-file Host 时打开 Save page，并通过已验证 system assets 刷新 slot。choice、media、ambiguous input 和缺 Host service 都直接阻断。
+- 当时的实现把右键直接映射到 Save page。2026 年 8 月 30 日的原版现场观察证明这项语义不正确，v11 已删除该路径；本节只保留迁移历史。
 - Family API wire round-trip、validation、Manager promotion/duplicate 和 Minori provider 测试已经加入定向测试；该变更没有改变 Layer2D、音频或媒体 provider contract。
 - 无物理音频设备时的 `NullAudioLane` 现在也严格绑定输出声道与 chunk 形状，并拒绝错误长度或非有限样本；它只消费经过同一 Kira/resampler 路径的 owned buffer，不把无设备数据当作物理音频 evidence。
 - 新增 service 生命周期回归：Host 的 `OpenAudioOutput` 返回明确的 `ProviderUnavailable` 时，`FamilyAudioService::start_with_client` 仍能完成 worker 初始化、处理挂起请求并正常 shutdown；测试同时确认该 session 的 `null_device` 标记保持为真。这样验证的是公开启动/关闭边界，不是物理音频或 Windows E3 证据。
@@ -738,7 +746,7 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 
 ### 2026-08-28 右键系统菜单与活动消息等待
 
-- Manager GameView 现在把舞台内的物理 secondary-pointer 按下/释放事件按原坐标提交为 `pointer.x`、`pointer.y` 和 `pointer.secondary`；它只在 stage bounds 内生成输入，不把 Slint 的 left-click 事件猜测成系统菜单请求。Family API 已有的 system-menu contract 因而可以从真实窗口打开 Save 页。
+- Manager GameView 当时已把舞台内的物理 secondary-pointer 按下/释放事件按原坐标提交为 `pointer.x`、`pointer.y` 和 `pointer.secondary`。该版本把右键直接映射到 Save 页，后来确认与原版菜单语义不符；v11 已删除这条映射。
 - 复测确认右键会显示真实 Minori `Savedata` 页面及 Auto/Quick Save 槽位。此前在该页按 Escape 会把底层 gameplay message await 一并完成，provider 随即以 `ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED` 终止；根因是 Manager 没有把系统页视为独占输入层。
 - 现行 host 在右键打开请求所在 tick 以及 `minori.system_page != none` 期间暂缓 gameplay await completion，同时保留 pending wait。关闭页面只更新系统页 observation；下一次普通确认才完成原有 message wait。未知页面值、同一批重复 page mutation 和非法等待类型仍 fail fast。
 - 新增 Manager 回归覆盖 secondary-pointer open、system-page activity observation 和 unknown page rejection。更新后的签名 Release 在 Windows Sandbox 中连续完成两次 Save→Escape→gameplay 循环：右键显示 Savedata 页面，Escape 返回 firefly gameplay 帧，Diagnostics 保持 `No blocking diagnostic`；Null audio endpoint 仍只提供无设备软件运行证据，不是物理音频 E3。完整路线、正式音频审查和 Windows E3 仍不提升证据等级。

@@ -565,6 +565,8 @@ pub struct MinoriSystemUiState {
     pub play_mode: MinoriPlayMode,
     pub config: MinoriConfigState,
     pub config_draft: Option<MinoriConfigState>,
+    pub config_return_page: Option<MinoriSystemPage>,
+    pub message_panel_hidden: bool,
     /// Script-owned permission corresponding to the original
     /// `skip_enable`/`skip_disable` pragma state. It defaults to enabled at
     /// scene construction and remains independent from Control input gating.
@@ -590,6 +592,8 @@ impl Default for MinoriSystemUiState {
             play_mode: MinoriPlayMode::Normal,
             config: MinoriConfigState::default(),
             config_draft: None,
+            config_return_page: None,
+            message_panel_hidden: false,
             skip_enabled: true,
             control_enabled: false,
             control_pressed: false,
@@ -1281,6 +1285,7 @@ impl MinoriVm {
         self.state.system_ui.page = MinoriSystemPage::Title;
         self.state.system_ui.focus_index = 0;
         self.state.system_ui.config_draft = None;
+        self.state.system_ui.config_return_page = None;
         Ok(())
     }
 
@@ -1476,6 +1481,23 @@ impl MinoriVm {
             return Err(MinoriRuntimeError::State);
         }
         self.state.system_ui.config_draft = Some(self.state.system_ui.config.clone());
+        self.state.system_ui.config_return_page = Some(MinoriSystemPage::Title);
+        self.state.system_ui.page = MinoriSystemPage::Config;
+        self.state.system_ui.focus_index = 0;
+        Ok(())
+    }
+
+    pub fn open_gameplay_config(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.launch_mode != MinoriLaunchMode::Title
+            || self.state.system_ui.page != MinoriSystemPage::None
+            || self.state.system_ui.config_draft.is_some()
+            || self.state.wait.is_none()
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.config_draft = Some(self.state.system_ui.config.clone());
+        self.state.system_ui.config_return_page = Some(MinoriSystemPage::None);
         self.state.system_ui.page = MinoriSystemPage::Config;
         self.state.system_ui.focus_index = 0;
         Ok(())
@@ -1517,13 +1539,23 @@ impl MinoriVm {
                 .take()
                 .ok_or(MinoriRuntimeError::State)?;
             self.state.system_ui.config = draft;
-            self.state.system_ui.page = MinoriSystemPage::Title;
+            self.state.system_ui.page = self
+                .state
+                .system_ui
+                .config_return_page
+                .take()
+                .ok_or(MinoriRuntimeError::State)?;
             self.state.system_ui.focus_index = 0;
             return Ok(MinoriConfigChange::Applied);
         }
         if control == MinoriConfigControl::Cancel {
             self.state.system_ui.config_draft = None;
-            self.state.system_ui.page = MinoriSystemPage::Title;
+            self.state.system_ui.page = self
+                .state
+                .system_ui
+                .config_return_page
+                .take()
+                .ok_or(MinoriRuntimeError::State)?;
             self.state.system_ui.focus_index = 0;
             return Ok(MinoriConfigChange::Cancelled);
         }
@@ -2083,6 +2115,29 @@ impl MinoriVm {
         self.state.system_ui.play_mode = next_mode;
 
         self.rebind_active_message_wait()
+    }
+
+    pub fn toggle_play_mode(&mut self, target: MinoriPlayMode) -> Result<bool, MinoriRuntimeError> {
+        if target == MinoriPlayMode::Normal || self.state.system_ui.page != MinoriSystemPage::None {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.play_mode = if self.state.system_ui.play_mode == target {
+            MinoriPlayMode::Normal
+        } else {
+            target
+        };
+        self.rebind_active_message_wait()
+    }
+
+    pub fn toggle_message_panel_hidden(&mut self) -> Result<bool, MinoriRuntimeError> {
+        if self.state.system_ui.page != MinoriSystemPage::None
+            || self.state.wait.is_none()
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.system_ui.message_panel_hidden = !self.state.system_ui.message_panel_hidden;
+        Ok(self.state.system_ui.message_panel_hidden)
     }
 
     pub fn rebind_active_message_wait(&mut self) -> Result<bool, MinoriRuntimeError> {
@@ -2753,6 +2808,7 @@ fn execute_control(
                 state.system_ui.focus_index = 0;
                 state.system_ui.backlog_cursor = None;
                 state.system_ui.config_draft = None;
+                state.system_ui.config_return_page = None;
             } else {
                 state.terminal = true;
             }
@@ -3657,6 +3713,11 @@ fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
         validate_config_state(draft)?;
     }
     if (state.system_ui.page == MinoriSystemPage::Config) != state.system_ui.config_draft.is_some()
+        || state.system_ui.config_draft.is_some() != state.system_ui.config_return_page.is_some()
+        || state
+            .system_ui
+            .config_return_page
+            .is_some_and(|page| !matches!(page, MinoriSystemPage::None | MinoriSystemPage::Title))
         || !(0..=1280).contains(&state.system_ui.pointer_x)
         || !(0..=720).contains(&state.system_ui.pointer_y)
     {
@@ -6076,6 +6137,43 @@ mod tests {
             MinoriPlayMode::Skip
         );
         assert!(vm.state().system_ui.config_draft.is_none());
+    }
+
+    #[test]
+    fn gameplay_menu_state_returns_from_config_and_rebinds_message_waits() {
+        let source = b".message 1  speaker body\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        vm.begin_title_launch().unwrap();
+        vm.set_system_page(MinoriSystemPage::None, 0).unwrap();
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Message { .. })
+        ));
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Input { .. })
+        ));
+
+        assert!(vm.toggle_message_panel_hidden().unwrap());
+        assert!(vm.state().system_ui.message_panel_hidden);
+        assert!(vm.toggle_play_mode(MinoriPlayMode::Auto).unwrap());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Time { .. })
+        ));
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Auto);
+        assert!(vm.toggle_play_mode(MinoriPlayMode::Skip).unwrap());
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
+
+        vm.open_gameplay_config().unwrap();
+        assert_eq!(vm.state().system_ui.page, MinoriSystemPage::Config);
+        assert_eq!(
+            vm.apply_config_control(MinoriConfigControl::Cancel),
+            Ok(MinoriConfigChange::Cancelled)
+        );
+        assert_eq!(vm.state().system_ui.page, MinoriSystemPage::None);
+        assert!(vm.state().wait.is_some());
+        vm.snapshot_bytes().unwrap();
     }
 
     #[test]

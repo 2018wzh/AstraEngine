@@ -467,12 +467,16 @@ impl From<FfiInputEdge> for LegacyInputEdge {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub enum FfiSystemMenuActionV1 {
     Open,
+    Select,
+    Dismiss,
 }
 
 impl From<LegacySystemMenuActionV1> for FfiSystemMenuActionV1 {
     fn from(value: LegacySystemMenuActionV1) -> Self {
         match value {
             LegacySystemMenuActionV1::Open => Self::Open,
+            LegacySystemMenuActionV1::Select => Self::Select,
+            LegacySystemMenuActionV1::Dismiss => Self::Dismiss,
         }
     }
 }
@@ -481,14 +485,18 @@ impl From<FfiSystemMenuActionV1> for LegacySystemMenuActionV1 {
     fn from(value: FfiSystemMenuActionV1) -> Self {
         match value {
             FfiSystemMenuActionV1::Open => Self::Open,
+            FfiSystemMenuActionV1::Select => Self::Select,
+            FfiSystemMenuActionV1::Dismiss => Self::Dismiss,
         }
     }
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
 pub struct FfiSystemMenuRequestV1 {
     pub action: FfiSystemMenuActionV1,
+    pub menu_id: ROption<RString>,
+    pub item_id: ROption<RString>,
     pub pointer_x: ROption<i32>,
     pub pointer_y: ROption<i32>,
     pub sequence: u64,
@@ -498,6 +506,8 @@ impl From<LegacySystemMenuRequestV1> for FfiSystemMenuRequestV1 {
     fn from(value: LegacySystemMenuRequestV1) -> Self {
         Self {
             action: value.action.into(),
+            menu_id: value.menu_id.map(Into::into).into(),
+            item_id: value.item_id.map(Into::into).into(),
             pointer_x: value.pointer_x.into(),
             pointer_y: value.pointer_y.into(),
             sequence: value.sequence,
@@ -509,6 +519,8 @@ impl From<FfiSystemMenuRequestV1> for LegacySystemMenuRequestV1 {
     fn from(value: FfiSystemMenuRequestV1) -> Self {
         Self {
             action: value.action.into(),
+            menu_id: value.menu_id.into_option().map(|value| value.to_string()),
+            item_id: value.item_id.into_option().map(|value| value.to_string()),
             pointer_x: value.pointer_x.into_option(),
             pointer_y: value.pointer_y.into_option(),
             sequence: value.sequence,
@@ -1633,6 +1645,8 @@ mod live_zero_copy_tests {
             input_edges: Vec::new(),
             system_menu: Some(LegacySystemMenuRequestV1 {
                 action: LegacySystemMenuActionV1::Open,
+                menu_id: None,
+                item_id: None,
                 pointer_x: Some(640),
                 pointer_y: Some(360),
                 sequence: 7,

@@ -1,10 +1,11 @@
 # Minori Implementation Checklist
 
-## Family API v10 right-click system menu (2026-08-28)
+## Family API v11 right-click system menu (2026-08-30)
 
-- [x] `LegacySystemMenuRequestV1` is part of the hard-cut Family API v10 step contract and has a stable `StableAbi` wire representation.
+- [x] `LegacySystemMenuRequestV1` and bounded `LegacySystemMenuTransactionV1` are part of the hard-cut Family API v11 contract and have explicit `StableAbi` wire representations.
 - [x] Manager promotes a pressed physical `pointer.secondary` edge to `Open`, carries the latest bounded pointer coordinates, and removes the duplicate pressed edge before invoking Minori.
-- [x] Minori opens the verified Save page only from a stable gameplay wait with the writable-file Host service; ambiguous input, active choice/media, completion sharing, duplicate requests and missing services fail closed.
+- [x] Minori publishes the observed title/gameplay hierarchy. Windows native uses the platform context-menu provider, Manager renders the same transaction as a Slint overlay, and Headless navigates it only through physical input records.
+- [x] Save, Load, Config, message-panel visibility and Auto/Skip are selected through the returned menu item. Ambiguous input, active choice/media, completion sharing, duplicate menus, stale results and missing services fail closed.
 - [ ] Windows E3 remains open: the Sandbox direct native run reached real scenes and completed its windowed route with audio explicitly disabled, but the WASAPI default output was unavailable and the read-only share prevented artifact recovery; no E3 artifact is claimed.
 
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）
