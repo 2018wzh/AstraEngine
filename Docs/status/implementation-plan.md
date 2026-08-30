@@ -1,5 +1,13 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日 Windows Manager confirmation service 接线：Manager 的
+audio/decode service host 现在直接消费 Family ABI v13 的 `ShowConfirmation`，在
+自己的 service thread 通过 `rfd` Task Dialog 回送 typed `Accepted`/`Cancelled`；它不
+创建第二个 Winit loop，也不接管菜单、全屏、帮助、About 或 surface。根 `rfd` 绑定
+`common-controls-v6` 后，Minori 的 `是(Y)`/`否(N)` 自定义按钮标签不会退化为默认
+OK/Cancel。平台定向测试与 Manager build 通过；该项只关闭无窗口 service host 的
+确认事务悬挂，不提升完整路线、Release Sandbox、正式音频或 Windows E3。
+
 2026 年 8 月 31 日 Family ABI 原生菜单 Host 分层：确认框和右键菜单仍由
 Family ABI v13 typed transaction 传递，Windows 使用原生 provider，macOS 使用
 AppKit `muda` 原生 context menu，并处理 winit flipped view 的显式锚点。窗口/帮助

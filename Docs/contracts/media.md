@@ -59,6 +59,13 @@ Player 的音频路径固定为 `OpenDecode -> Decode -> CloseDecode -> AudioSer
 
 `AudioOutputLane` 暴露只读原子 telemetry 和 wake registration，Kira worker按队列容量补充 chunk；refill 不进入 window/present command FIFO。稳定泵送后 underflow 增长必须终止受影响 session。open 后若设备格式漂移必须 blocking，退出时停止 mixer、关闭 endpoint 并等待 worker join。Web 仍须由真实 keyboard/pointer user activation 触发 `AudioContext.resume()`；设备热切换恢复与正式浏览器 E3 evidence 仍是独立门禁。
 
+Windows Manager 的 media-service host 不创建 Winit 窗口或第二条事件循环，但允许
+Family ABI 的有界 `ShowConfirmation` 请求直接在 service thread 调用 `rfd` 的原生
+Task Dialog。该命令不接受 parent window，也不处理菜单、全屏、帮助或 surface；这些
+仍必须由拥有游戏窗口的完整 platform host 处理。`rfd` 固定启用 `common-controls-v6`
+以保留 Family 传入的日文按钮标签，取消、未知结果和宿主错误都回送 typed diagnostic，
+不得让确认事务永久 pending。
+
 Kira main track 在最终输出硬裁前挂载只读 `MasterMixMeter` effect。它累计 pre-master peak、超过 1.0 的 frame 数和已观察 frame 数，不修改样本，也不参与 Runtime、save/replay 或 deterministic hash。`AudioOutputLane` 的 meter 继续描述裁后的设备流；两组数据必须分开解释。达到 0 dBFS 不能自动推导为 mixer 超限，只有 pre-master overload 才能证明叠加信号越界。该 telemetry 进入 Perfetto counter，不记录资源名、音频内容或本地路径。
 
 PlatformHost 通过 `AudioOutputLane::submit` 消费 Kira 填满的 owned chunk，并归还一个耗尽 allocation 供下一次 render 复用。native callback 使用 chunk+offset 批量消费，不能逐 sample push/pop，也不能分配或解码。AstraEMU Manager、CLI、Headless 与 Windowed E2 共用同一 Kira worker；Runtime tick、GPU present 与 Slint event loop 只提交 typed command 和读取 telemetry。

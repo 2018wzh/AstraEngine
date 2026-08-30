@@ -301,6 +301,19 @@ mod windows {
                     | HostCommand::CloseAudio { output, reply } => {
                         let _ = reply.send(audio_outputs.remove(output).map(|_| ()));
                     }
+                    HostCommand::ShowConfirmation { request, reply } => {
+                        // The Manager deliberately uses the service host for
+                        // audio/decode so it does not create a second Winit
+                        // event loop.  A confirmation is the one native UI
+                        // primitive that can be owned by this thread directly:
+                        // rfd maps it to the Windows Task Dialog/MessageBox
+                        // without requiring a Winit window handle.  Keep the
+                        // same typed request/result mapping as the window host
+                        // so Family ABI transactions do not get stranded in
+                        // Manager sessions.
+                        let result = show_confirmation(None, request);
+                        let _ = reply.send(result);
+                    }
                     #[cfg(feature = "platform-test-driver")]
                     HostCommand::InjectAudioDeviceLoss { output, reply } => {
                         let _ = reply.send(
@@ -343,7 +356,7 @@ mod windows {
                         let _ = unsupported.reply_error(PlatformError::new(
                             PlatformErrorCode::InvalidState,
                             operation,
-                            "Windows service host only supports audio and decode commands",
+                            "Windows service host supports audio, decode and native confirmations",
                         ));
                     }
                 }

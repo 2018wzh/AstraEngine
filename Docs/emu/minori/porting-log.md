@@ -1,5 +1,19 @@
 # Minori 移植日志
 
+## 2026-08-31：Windows Manager service host 原生确认框
+
+Manager 的 Windows 音频/解码 lane 使用不创建 Winit 窗口的 service host；此前该 host
+把 Family ABI confirmation 当成普通 window command 拒绝，导致 `game_exit` 和
+`game_return_title` 在 Manager 中无法结束 pending transaction。现在 service thread
+直接调用共享的 Windows `rfd` native confirmation helper（无 parent），结果仍按
+`Accepted`/`Cancelled` typed mapping 回送同一 Family session；菜单、全屏、帮助和
+About 不会借此路径偷偷转交。
+
+根目录 `rfd` 依赖固定启用 `common-controls-v6`，因此 Windows Task Dialog 会保留
+Minori 传入的 `是(Y)`/`否(N)` 标签，而不是退化成系统默认 OK/Cancel。该修复只关闭
+Manager service-host 的确认事务悬挂问题；没有增加 fallback，也不替代真实 Windows
+Release Sandbox/E3 视觉和键盘证据。
+
 ## 2026-08-31：Config 全屏设置改由 Host 原生应用
 
 Config 页面提交全屏选项后，Minori 不再把窗口状态当作自己的即时副作用。family

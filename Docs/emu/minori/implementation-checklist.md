@@ -17,6 +17,19 @@
   on each release platform, original same-point visual comparison and Windows
   E3 remain open.
 
+## Windows Manager confirmation Host path (2026-08-31)
+
+- [x] The Windows audio/decode service host now consumes Family ABI confirmation
+  transactions on its own thread with the native `rfd` Task Dialog, so Manager
+  `game_exit`/`game_return_title` requests cannot remain pending merely because
+  Manager has no game-owned Winit window.
+- [x] `rfd` is built with `common-controls-v6`; custom Minori button labels
+  (`是(Y)`/`否(N)`) remain visible. The service path accepts no parent window and
+  does not handle menus, fullscreen, help, About, or surfaces.
+- [ ] This closes the Windows Manager service-host wiring gap only. It is not
+  native Windows Release Sandbox/E3 evidence, and Linux/Android/Web keep their
+  explicit platform capability boundaries.
+
 ## Family ABI v13 native menu Host split (2026-08-31)
 
 - [x] Confirmation and system-menu transactions use Family ABI v13 typed ports; the

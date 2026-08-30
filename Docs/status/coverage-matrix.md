@@ -1,5 +1,13 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日 Windows Manager confirmation coverage：Manager 的无窗口
+audio/decode service host 已接入 Family ABI v13 `ShowConfirmation`，在同一 service
+thread 使用原生 `rfd` Task Dialog，并保留 `是(Y)`/`否(N)` typed label；不创建第二个
+Winit loop，也不把菜单、窗口命令、帮助、About 或 surface 偷渡到 service host。平台
+2/2 回归和 Manager build 通过，确认结果不会因 service host 缺少 game window 而
+永久 pending。该覆盖属于 E1/E2 接线证据，不是原生窗口视觉、Release Sandbox、
+正式音频或 Windows E3 证据。
+
 2026 年 8 月 31 日路线输入 smoke：现行 `runtime.input_or_terminal` 序列在开发签名
 Release CLI 上消费 195 条物理输入，完成 24048 fixed steps、48 个 checkpoint、109
 个提交/栅格帧，diagnostic 为空。该运行使用显式 WMF 与稀疏 frame sampling，尾部
