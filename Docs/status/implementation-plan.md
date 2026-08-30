@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026 年 8 月 30 日 Minori 自然解锁增量：使用独立 launch profile 与 writable identity 从零顺序执行四条真实路线，未改动用户存档。Sui 报告通过并严格观察累计解锁数 1；Ren 发布 `route_complete` 后因私有输入的过时累计值断言失败；随后 Ayame 的通过报告严格观察累计值 3，证明 Ren 已被持久化并由新 session 装载；Tohka 的通过报告严格观察 `route_complete` 与累计值 4。相同 identity 的新标题 session 自然出现并可进入 `Memories`，15 fixed steps、2 个 checkpoint、零 diagnostic，保留帧已完成模型检查。该链路关闭四个 clear flag 的自然写入和标题 gate，但四份独立路线报告尚未全部为绿色，CG/BGM/回想/Movie 子页、正式音频 review、Release Sandbox 与 Windows E3 继续开放。未跳过 WMV3 的 87.916667 秒与 185.583333 秒播放均到达 owner-side completion；FFmpeg 同时报告 damaged-frame concealment，因此只记 completion/fence，不记逐帧质量通过。
+
 2026 年 8 月 30 日 Minori 消息控制增量：IDA 已确认原程序 `CTextDrawer` 的 `\\a` 自动推进、`\\v` 语音结束等待，以及 `MsgSubCmd load` 的延时角色层替换语义。runtime state 已硬切到 v28。控制标记会在 backlog、translation Hook 和文字 surface 前移除。voice wait 改用 AstraMedia/Symphonia 的 seekable metadata reader，直接读取 revision-pinned VFS stream，不再把 Ogg 整体物化到内存。授权样本的定向探针在 12 ms 内取得时长。inline load 现在保留 current/next 两个角色节点，以互补 alpha 交叉淡化，结束后再原子提升 next。真实标题启动回归以 Release CLI 完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；`runtime_step` 最大值从旧整文件读取候选的约 4147 秒降到 0.553 秒。模型查看了保留帧，未见新增裁剪、拉伸或图层残影。该证据只关闭本次单路线回归；罕见行的精确交叉淡化 checkpoint、原版同点视觉对照、其余三路线 E2 与 Windows E3 尚未完成。
 
 2026 年 8 月 30 日 Minori 流式读取分配收紧：entry chunk transform 直接接管 source reader 返回的 owned buffer，Blowfish、RC4 与 movie transform 原地写入；输出只截断同一 allocation 后交给顺序 stream，不再为每个 64 KiB chunk复制两次。8 个 PAZ stream 定向回归通过，其中 pointer-identity 用例固定 owned buffer 复用。该优化不建立明文 cache，也不替代独立峰值内存规模门禁。

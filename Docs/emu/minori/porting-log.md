@@ -1,5 +1,12 @@
 # Minori 移植日志
 
+## 2026-08-30：隔离进度下的自然解锁链
+
+- 为避免改动用户存档，本轮使用独立 launch profile identity 和独立 writable root，从零开始顺序执行四条真实路线。Sui 报告通过并严格观察到累计解锁数 1；Ren 已发布 `route_complete` 并完成结局影片，但私有输入在返回标题后使用了过时的累计值断言，因此该报告按协议失败。随后 Ayame 的通过报告严格观察到累计解锁数 3，证明 Ren 的原子持久化已被下一 session 读取；Tohka 的通过报告再严格观察到 `route_complete` 和累计解锁数 4。
+- 使用同一隔离 identity 新建标题 session 后，标题自然出现 `Memories`，物理方向键和 Enter 可进入鉴赏根页。对应报告通过，15 fixed steps、2 个 checkpoint、零 diagnostic。模型实际查看标题与鉴赏根页，未见缺字、裁剪、拉伸或残留图层。
+- 这条链证明四个 clear flag 可由真实路线自然写入，并在新 session 中控制标题和鉴赏入口；它不等于四份路线报告全部为绿色，也不证明 CG、BGM、回想、Movie 子页内容与原版一致。正式门禁仍需在新的空白 identity 下重跑四份无过时断言的独立通过报告，并补齐各鉴赏子页 required checkpoint。
+- 未跳过影片的诊断运行确认 FFmpeg/AstraMedia 会保持 media wait，分别在 87.916667 秒与 185.583333 秒的声明时长后提交 owner-side completion。日志同时出现 WMV3 damaged-frame concealment；因此这里只确认 completion/fence，不确认逐帧质量或原版视觉一致性。
+
 ## 2026-08-30：原生消息控制标记与音频时长
 
 - IDA 对原程序 `CTextDrawer` 和 `MsgSubCmd` 的静态分析确认：`\\a` 请求自动推进，`\\v` 等待当前语音结束，组合 `\\v\\a` 先等待语音再自动继续；`\\x{...}` 进入内联子命令 parser，已确认的 `load` 形态按延时、角色 slot、PNG 资源、可选 transition 和 opacity 调度。未知控制、截断参数和越界值继续阻断，不从名字推测语义。

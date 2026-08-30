@@ -6,7 +6,7 @@
 - [x] 控制标记不进入文字 surface、translation Hook 或 backlog；voice wait 使用 AstraMedia/Symphonia metadata-only probe，不为时长计算解码整段 PCM。
 - [x] runtime state v28 保存 voice wait、auto-advance、pending inline load 和 current/next 角色替换；AstraMedia seekable metadata fixture、授权样本 Ogg 探针与定向 Minori 回归通过。
 - [x] Release CLI 的真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；最大 `runtime_step` 为 0.553 秒。该项只证明本次单路线没有回归。
-- [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。内联角色替换当前缺少原程序 current/next 双层交叉淡化，不能标视觉 parity。
+- [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。runtime 已提交 current/next 双层和互补 alpha 交叉淡化，但当前采样没有命中中间帧，不能标视觉 parity。
 
 ## Key-file Release 路线复核（2026-08-30）
 
@@ -15,7 +15,8 @@
 - [x] PAZ 查找使用 ASCII case-insensitive identity，并保留 manifest 的 canonical URI；大小写折叠冲突直接阻断。`.stage`/`.wait` 只接收样本已确认的单个尾随空字段，更多空字段仍阻断。
 - [x] 已确认的 `.effect fadeout` 只结束活动的 primary Firefly；没有活动 Firefly 时返回 blocking diagnostic。样本唯一的三参数 `.panel` 形态按原程序 parser 解释为 mode 1、默认过渡标记和 `sys` 自定义资源，显式未知过渡值仍阻断。
 - [x] 当前 Release 包已完成一次标题启动路线报告：5212 fixed steps、4382 个提交/栅格帧、17 条物理输入、4120576 个 48 kHz 双声道音频帧，`route_complete`、返回标题、解锁计数 4 和零 diagnostic 成立。模型检查标题、剧情与返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。
-- [ ] 这次通过运行开始时平台私有进度已含四个 clear flag；此前从三个 flag 自然写入第四个的运行在完成后被测试脚本多余的 terminal await 判失败。因此，仍需从受控的三 flag 状态重跑同一通过报告，不能把现有结果写成“四路线自然解锁已关闭”。
+- [x] 在独立 writable identity 中从零顺序执行四条真实路线：Sui 通过并观察累计解锁数 1；Ren 发布 `route_complete` 后仅因过时的累计值断言失败；Ayame 通过并严格观察累计值 3，证明 Ren 已持久化；Tohka 通过并严格观察 `route_complete` 与累计值 4。新标题 session 自然出现并可进入 `Memories`，两个 checkpoint 已检查。
+- [ ] 以上链路关闭自然写入和标题 gate，不等于四份路线报告全部绿色，也不关闭鉴赏子页。仍需用新的空白 identity 生成四份无过时断言的独立通过报告，并覆盖 CG、BGM、回想和 Movie 子页。
 - [ ] 全流 WMV3 诊断曾出现 FFmpeg concealment；必须用影片 checkpoint 与原版对照确认质量。正式音频听审、save/restore required checkpoint、完整 gallery、Release Sandbox 视觉验收和 Windows E3 继续保持 blocking。
 
 ## Family API v11 right-click system menu (2026-08-30)
