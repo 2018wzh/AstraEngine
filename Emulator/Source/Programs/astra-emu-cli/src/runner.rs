@@ -4733,6 +4733,15 @@ fn native_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&
     }
 }
 
+fn confirmation_key_control(logical_key: Option<&str>, physical_key: &str) -> Option<&'static str> {
+    let key = logical_key.unwrap_or(physical_key).to_ascii_lowercase();
+    match key.as_str() {
+        "y" | "keyy" => Some("confirmation_accept"),
+        "n" | "keyn" => Some("confirmation_cancel"),
+        _ => None,
+    }
+}
+
 #[cfg(target_os = "windows")]
 /// Applies the portion of a validated physical input sequence that becomes due
 /// at the driver's current fixed-step boundary. Native replay deliberately
@@ -5386,6 +5395,12 @@ impl<'a> RuntimeDriver<'a> {
             } else {
                 LegacyConfirmationChoiceV1::Cancelled
             }),
+            // The original Minori confirmation labels expose Y/N mnemonics
+            // ("是(Y)"/"否(N)"). Keep these bindings inside the active
+            // confirmation transaction; they must never become ordinary
+            // gameplay input when no native confirmation is pending.
+            "confirmation_accept" => Some(LegacyConfirmationChoiceV1::Accepted),
+            "confirmation_cancel" => Some(LegacyConfirmationChoiceV1::Cancelled),
             "escape" => Some(LegacyConfirmationChoiceV1::Cancelled),
             _ => {
                 return Err("ASTRA_EMU_HEADLESS_CONFIRMATION_INPUT_UNSUPPORTED".into());
@@ -5468,7 +5483,11 @@ impl<'a> RuntimeDriver<'a> {
                 if *repeat && *state == ButtonState::Released {
                     return Err("ASTRA_EMU_HEADLESS_KEY_REPEAT_INVALID".into());
                 }
-                let control = native_key_control(logical_key.as_deref(), physical_key)
+                let control = self
+                    .virtual_confirmation
+                    .as_ref()
+                    .and_then(|_| confirmation_key_control(logical_key.as_deref(), physical_key))
+                    .or_else(|| native_key_control(logical_key.as_deref(), physical_key))
                     .ok_or_else(|| "ASTRA_EMU_HEADLESS_KEY_UNSUPPORTED".to_owned())?;
                 if control == "control" {
                     self.physical_control_pressed = *state == ButtonState::Pressed;
@@ -8148,6 +8167,15 @@ mod native_tests {
         assert_eq!(native_key_control(Some("F5"), "F5"), Some("function:5"));
         assert_eq!(native_key_control(None, "F9"), Some("function:9"));
         assert_eq!(native_key_control(Some("F12"), "F12"), None);
+        assert_eq!(
+            confirmation_key_control(Some("Y"), "Unidentified"),
+            Some("confirmation_accept")
+        );
+        assert_eq!(
+            confirmation_key_control(None, "KeyN"),
+            Some("confirmation_cancel")
+        );
+        assert_eq!(native_key_control(Some("Y"), "KeyY"), None);
     }
 
     #[test]

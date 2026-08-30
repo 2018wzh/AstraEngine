@@ -1,5 +1,11 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日确认框键盘语义收紧：原版 `是(Y)`/`否(N)` 的快捷键现在只在
+Headless 的 Family ABI confirmation transaction 激活时映射为接受/取消。没有待处理
+确认时，Y/N 仍按未绑定物理键拒绝，不会混入剧情输入或改变 Runtime 状态。该改动已
+补充 CLI 映射回归；原生平台对话框继续由平台自身处理快捷键，Release Sandbox、
+完整路线和 Windows E3 证据边界不变。
+
 2026 年 8 月 31 日新输入契约下的完整路线 Release Headless smoke：开发签名
 Release CLI 在显式 WMF provider 下消费 195 条物理输入，完成 24048 fixed steps、
 109 个提交/栅格帧、48 个 checkpoint 且 diagnostic 为空。尾部是显式 shutdown，

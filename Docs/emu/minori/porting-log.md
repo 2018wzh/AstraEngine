@@ -885,3 +885,12 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - Headless 进入 Load 页后按 Enter 曾同时完成底层 message await，并把同一次输入交给 family 页面，触发 `ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED`。问题位于 Host 输入所有权，不是 Minori load transaction。Family API 现在定义公共 `astra.emu.system_ui_active` observation；Minori 只发布规范布尔值，CLI 和 Manager 在活动期间保留底层 wait。family 私有的 `minori.system_page` 只用于页面观察，不再承担 Host 控制语义。
 - 更新后的官方开发签名 Release 候选以序列化物理输入完成 Quick Save、推进到下一消息、打开 Load 页并恢复 slot。报告为 `passed`：2047 fixed steps、1685 个提交/栅格帧、6 个 checkpoint、零 diagnostic；WAV 为 48 kHz 双声道、1617920 frame，自动量测非静音且无 clipping。Load 页确实使用原版系统资源，恢复 checkpoint 与保存前 checkpoint 字节一致。这是当前身份的定向 Headless E2，不是 Release Sandbox 或正式 Windows E3。
 - 模型查看保存前、推进后、Load 页和恢复帧时发现一组只在单条真实 message 行末出现的控制标记被显示成普通字符。全包私有统计确认该组合唯一，不能据一次样本猜测为可直接删除的装饰符。原版在普通消息末尾使用独立推进指示，但这组标记的组合效果仍需原程序观察或反编译确认；在修复和 checkpoint 复验前，消息视觉完整性继续 blocking。
+# Minori 移植记录
+
+## 2026-08-31
+
+确认框的键盘语义已补齐：原版按钮显示 `是(Y)` 与 `否(N)`，Headless Host 仅在
+Family ABI confirmation transaction 激活期间接受 `Y`/`N`，分别回送 typed
+`Accepted`/`Cancelled`。事务结束后 Y/N 仍是未绑定键并被拒绝；这保证系统快捷键不会
+绕过剧情输入。Windows 原生对话框仍由平台 provider 负责键盘处理。该改动有 CLI
+映射回归，但不构成完整路线、Release Sandbox 或 Windows E3 证据。

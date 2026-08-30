@@ -1,5 +1,11 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日确认框输入对齐：Headless Host 在 confirmation transaction 存在时
+消费原版 `是(Y)`/`否(N)` 快捷键，并把它们转换为 Family ABI 的 typed choice；确认框
+关闭后同样的 Y/N 输入仍然被拒绝，避免把系统快捷键泄漏到剧情。Windows 原生对话框
+继续交给平台消息框处理。该项只有定向输入回归证据，不提升 Release Sandbox、完整
+路线、正式音频听审或 Windows E3 状态。
+
 2026 年 8 月 30 日原生菜单 Auto E2：受限 wait 重绑规则已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 和 `Time→Time`，其他重复 token 继续阻断。开发签名 Release v21 从空白进度通过 family v11 菜单选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后场景按预期推进，关闭后继续运行 2 秒画面不变。关键画面已人工检查，Manager Core 59 项 tests、CLI 定向回归和三个 consumer 的 clippy 通过。该项关闭原生菜单 Auto 定向 E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
 
 2026 年 8 月 30 日 Family ABI v12 确认事务：Minori 的 `game_exit`、`game_return_title` 和 Host `window.close` 都通过 Family ABI 发布有界 confirmation transaction；Host 读取 transaction 后调用平台 native confirmation provider，接受或取消结果在后续固定 step 回传，family 再决定 terminal 或返回标题。Manager 不再维护第二套对话框语义，Headless 只使用物理方向键、确认键和取消键。Family API、平台、Manager、CLI 与 Minori 的定向回归通过；这属于当前 ABI 的 E1/E2 集成证据，Release Sandbox、120 Hz 性能门禁和 Windows E3 仍开放。
