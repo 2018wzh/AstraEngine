@@ -1,18 +1,28 @@
 # Minori 移植日志
 
-## 2026-08-31：Windows Manager service host 原生确认框
+## 2026-08-31：Windows Manager service host 原生确认框（初始实现）
 
 Manager 的 Windows 音频/解码 lane 使用不创建 Winit 窗口的 service host；此前该 host
 把 Family ABI confirmation 当成普通 window command 拒绝，导致 `game_exit` 和
 `game_return_title` 在 Manager 中无法结束 pending transaction。现在 service thread
-直接调用共享的 Windows `rfd` native confirmation helper（无 parent），结果仍按
+直接调用共享的 Windows native confirmation helper（无 parent），结果仍按
 `Accepted`/`Cancelled` typed mapping 回送同一 Family session；菜单、全屏、帮助和
 About 不会借此路径偷偷转交。
 
-根目录 `rfd` 依赖固定启用 `common-controls-v6`，因此 Windows Task Dialog 会保留
-Minori 传入的 `是(Y)`/`否(N)` 标签，而不是退化成系统默认 OK/Cancel。该修复只关闭
-Manager service-host 的确认事务悬挂问题；没有增加 fallback，也不替代真实 Windows
-Release Sandbox/E3 视觉和键盘证据。
+该项只关闭 Manager service-host 的确认事务悬挂问题；没有增加 fallback，也不替代
+真实 Windows Release Sandbox/E3 视觉和键盘证据。
+
+## 2026-08-31：Windows confirmation loader 边界修正
+
+开发和 Release CLI 在加载 `rfd` 的 `common-controls-v6` Task Dialog 路径时会在进入
+`main` 前退出（Windows `STATUS_ENTRYPOINT_NOT_FOUND`），因此该静态依赖不能作为
+发布入口的一部分。现在根依赖移除该 feature，Windows Host 改用同一线程上的纯
+Win32 `user32` modal window：保留 live parent caption、消息文本和 Minori 的
+`是(Y)`/`否(N)`标签，关闭、键盘导航、owner 禁用/恢复与错误结果都在 Host 边界完成。
+Manager 无窗口 service host 继续复用这条路径；`rfd` 仅保留 About 的普通 OK 对话框。
+
+定向平台测试和 `astra-emu-cli --help` 启动检查通过。这只是加载器和确认框接线的
+E1/E2 证据，真实对话框视觉、Release Sandbox 路线和 Windows E3 仍未完成。
 
 ## 2026-08-31：Config 全屏设置改由 Host 原生应用
 

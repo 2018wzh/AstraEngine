@@ -171,7 +171,6 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 bangumi-api = "0.1.2"
 rcgen = "0.14"
 rfd = { version = "0.17.2", default-features = false, features = [
-    "common-controls-v6",
     "wayland",
     "xdg-portal",
 ] }

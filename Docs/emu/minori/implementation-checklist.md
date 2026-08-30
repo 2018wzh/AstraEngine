@@ -20,12 +20,17 @@
 ## Windows Manager confirmation Host path (2026-08-31)
 
 - [x] The Windows audio/decode service host now consumes Family ABI confirmation
-  transactions on its own thread with the native `rfd` Task Dialog, so Manager
+  transactions on its own thread with the native Win32 modal window, so Manager
   `game_exit`/`game_return_title` requests cannot remain pending merely because
   Manager has no game-owned Winit window.
-- [x] `rfd` is built with `common-controls-v6`; custom Minori button labels
-  (`是(Y)`/`否(N)`) remain visible. The service path accepts no parent window and
-  does not handle menus, fullscreen, help, About, or surfaces.
+- [x] The root `rfd` dependency no longer enables `common-controls-v6` (which made
+  the CLI fail before `main` on the target Windows loader). The Host-owned Win32
+  dialog keeps the live caption, custom Minori labels (`是(Y)`/`否(N)`), keyboard
+  navigation, owner disable/restore and explicit close/error handling. The service
+  path accepts no parent window and does not handle menus, fullscreen, help, About,
+  or surfaces.
+- [x] `astra-emu-cli --help` starts after the loader-boundary fix; focused
+  `astra-platform-windows` tests remain green.
 - [ ] This closes the Windows Manager service-host wiring gap only. It is not
   native Windows Release Sandbox/E3 evidence, and Linux/Android/Web keep their
   explicit platform capability boundaries.

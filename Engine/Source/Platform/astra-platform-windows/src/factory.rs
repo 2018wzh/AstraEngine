@@ -306,8 +306,8 @@ mod windows {
                         // audio/decode so it does not create a second Winit
                         // event loop.  A confirmation is the one native UI
                         // primitive that can be owned by this thread directly:
-                        // rfd maps it to the Windows Task Dialog/MessageBox
-                        // without requiring a Winit window handle.  Keep the
+                        // the Win32 modal helper does not require a Winit
+                        // window handle.  Keep the
                         // same typed request/result mapping as the window host
                         // so Family ABI transactions do not get stranded in
                         // Manager sessions.
@@ -2526,29 +2526,473 @@ mod windows {
         // Family title.
         let parent_title = window.map(Window::title);
         let title = confirmation_dialog_title(parent_title.as_deref(), request.title);
-        let mut dialog = AsyncMessageDialog::new()
-            .set_title(title)
-            .set_description(request.message)
-            .set_buttons(MessageButtons::OkCancelCustom(
-                request.accept_label.clone(),
-                request.cancel_label.clone(),
-            ));
-        if let Some(window) = window {
-            dialog = dialog.set_parent(window);
+        show_custom_confirmation(
+            window,
+            title,
+            request.message,
+            request.accept_label,
+            request.cancel_label,
+        )
+    }
+
+    struct ConfirmationDialogState {
+        result: Option<ConfirmationResult>,
+        closed: bool,
+    }
+
+    const CONFIRMATION_ACCEPT_ID: usize = 1001;
+    const CONFIRMATION_CANCEL_ID: usize = 1002;
+
+    fn show_custom_confirmation(
+        window: Option<&Window>,
+        title: String,
+        message: String,
+        accept_label: String,
+        cancel_label: String,
+    ) -> Result<ConfirmationResult, PlatformError> {
+        use std::ffi::c_void;
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::{HINSTANCE, HWND, LPARAM, WPARAM},
+                Graphics::Gdi::{GetStockObject, DEFAULT_GUI_FONT},
+                System::LibraryLoader::GetModuleHandleW,
+                UI::{
+                    Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled, SetFocus},
+                    WindowsAndMessaging::{
+                        CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW,
+                        IsDialogMessageW, SetForegroundWindow, ShowWindow, TranslateMessage,
+                        BS_DEFPUSHBUTTON, BS_PUSHBUTTON, SW_SHOW, WM_SETFONT, WS_CAPTION, WS_CHILD,
+                        WS_EX_CONTROLPARENT, WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP,
+                        WS_VISIBLE,
+                    },
+                },
+            },
+        };
+
+        ensure_confirmation_class()?;
+
+        let owner = window
+            .map(|window| {
+                let raw = window
+                    .window_handle()
+                    .map_err(|_| host_error("window.confirmation", "window handle is unavailable"))?
+                    .as_raw();
+                match raw {
+                    RawWindowHandle::Win32(handle) => Ok(HWND(handle.hwnd.get() as *mut c_void)),
+                    _ => Err(host_error(
+                        "window.confirmation",
+                        "Windows host returned a non-Win32 window handle",
+                    )),
+                }
+            })
+            .transpose()?;
+
+        let class_name = widestring("AstraEmuConfirmationDialog");
+        let title_wide = widestring(&title);
+        let message_wide = widestring(&message);
+        let accept_wide = widestring(&accept_label);
+        let cancel_wide = widestring(&cancel_label);
+        let module = unsafe {
+            GetModuleHandleW(None).map_err(|_| {
+                host_error(
+                    "window.confirmation",
+                    "Windows module handle is unavailable",
+                )
+            })?
+        };
+        let instance = HINSTANCE(module.0);
+        let mut state = ConfirmationDialogState {
+            result: None,
+            closed: false,
+        };
+
+        let (width, height) = (460_i32, 176_i32);
+        let (x, y) = dialog_position(owner, width, height)?;
+        let dialog = unsafe {
+            CreateWindowExW(
+                WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                PCWSTR(class_name.as_ptr()),
+                PCWSTR(title_wide.as_ptr()),
+                WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                x,
+                y,
+                width,
+                height,
+                owner,
+                None,
+                Some(instance),
+                Some((&mut state as *mut ConfirmationDialogState).cast::<c_void>()),
+            )
         }
-        match pollster::block_on(dialog.show()) {
-            MessageDialogResult::Ok => Ok(ConfirmationResult::Accepted),
-            MessageDialogResult::Cancel => Ok(ConfirmationResult::Cancelled),
-            MessageDialogResult::Custom(label) if label == request.accept_label => {
-                Ok(ConfirmationResult::Accepted)
-            }
-            MessageDialogResult::Custom(label) if label == request.cancel_label => {
-                Ok(ConfirmationResult::Cancelled)
-            }
-            _ => Err(host_error(
+        .map_err(|_| {
+            host_error(
                 "window.confirmation",
-                "native confirmation returned an unsupported result",
-            )),
+                "native confirmation window could not be created",
+            )
+        })?;
+
+        let message_control = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("STATIC").as_ptr()),
+                PCWSTR(message_wide.as_ptr()),
+                WS_CHILD | WS_VISIBLE,
+                18,
+                18,
+                424,
+                82,
+                Some(dialog),
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.confirmation",
+                "native confirmation message could not be created",
+            )
+        })?;
+
+        let accept_control = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("BUTTON").as_ptr()),
+                PCWSTR(accept_wide.as_ptr()),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_TABSTOP
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
+                        BS_DEFPUSHBUTTON as u32,
+                    ),
+                238,
+                116,
+                94,
+                28,
+                Some(dialog),
+                Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
+                    CONFIRMATION_ACCEPT_ID as *mut c_void,
+                )),
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.confirmation",
+                "native confirmation accept button could not be created",
+            )
+        })?;
+
+        let cancel_control = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("BUTTON").as_ptr()),
+                PCWSTR(cancel_wide.as_ptr()),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_TABSTOP
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_PUSHBUTTON as u32),
+                334,
+                116,
+                94,
+                28,
+                Some(dialog),
+                Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
+                    CONFIRMATION_CANCEL_ID as *mut c_void,
+                )),
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.confirmation",
+                "native confirmation cancel button could not be created",
+            )
+        })?;
+
+        let font = unsafe { GetStockObject(DEFAULT_GUI_FONT) };
+        if font.is_invalid() {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            return Err(host_error(
+                "window.confirmation",
+                "Windows default dialog font is unavailable",
+            ));
+        }
+        let font_param = Some(WPARAM(font.0 as usize));
+        let redraw = Some(LPARAM(1));
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::SendMessageW(
+                message_control,
+                WM_SETFONT,
+                font_param,
+                redraw,
+            );
+            let _ = windows::Win32::UI::WindowsAndMessaging::SendMessageW(
+                accept_control,
+                WM_SETFONT,
+                font_param,
+                redraw,
+            );
+            let _ = windows::Win32::UI::WindowsAndMessaging::SendMessageW(
+                cancel_control,
+                WM_SETFONT,
+                font_param,
+                redraw,
+            );
+            let _ = ShowWindow(dialog, SW_SHOW);
+            let _ = SetFocus(Some(accept_control));
+        }
+
+        let owner_was_enabled = owner.map(|owner| unsafe { IsWindowEnabled(owner).as_bool() });
+        if let Some(owner) = owner {
+            unsafe {
+                let _ = EnableWindow(owner, false);
+                let _ = SetForegroundWindow(dialog);
+            }
+            if unsafe { IsWindowEnabled(owner).as_bool() } {
+                unsafe {
+                    let _ = DestroyWindow(dialog);
+                }
+                return Err(host_error(
+                    "window.confirmation",
+                    "owner window could not be disabled for modal confirmation",
+                ));
+            }
+        }
+
+        let mut message_loop_error = false;
+        if !state.closed {
+            loop {
+                if state.closed {
+                    break;
+                }
+                let mut native_message = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+                let result = unsafe { GetMessageW(&mut native_message, None, 0, 0) };
+                if result.0 == -1 {
+                    message_loop_error = true;
+                    break;
+                }
+                if result.0 == 0 {
+                    break;
+                }
+                let handled = unsafe { IsDialogMessageW(dialog, &native_message).as_bool() };
+                if !handled {
+                    unsafe {
+                        let _ = TranslateMessage(&native_message);
+                        let _ = DispatchMessageW(&native_message);
+                    }
+                }
+            }
+        }
+
+        if !state.closed {
+            unsafe {
+                DestroyWindow(dialog).map_err(|_| {
+                    host_error(
+                        "window.confirmation",
+                        "native confirmation window could not be closed",
+                    )
+                })?;
+            }
+        }
+        if let (Some(owner), Some(true)) = (owner, owner_was_enabled) {
+            unsafe {
+                let _ = EnableWindow(owner, true);
+                let _ = SetForegroundWindow(owner);
+            }
+            if !unsafe { IsWindowEnabled(owner).as_bool() } {
+                return Err(host_error(
+                    "window.confirmation",
+                    "owner window could not be restored after modal confirmation",
+                ));
+            }
+        }
+        if message_loop_error {
+            return Err(host_error(
+                "window.confirmation",
+                "Windows confirmation message loop failed",
+            ));
+        }
+        state.result.ok_or_else(|| {
+            host_error(
+                "window.confirmation",
+                "native confirmation closed without a result",
+            )
+        })
+    }
+
+    fn ensure_confirmation_class() -> Result<(), PlatformError> {
+        use std::sync::OnceLock;
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::{GetLastError, HINSTANCE},
+                Graphics::Gdi::{GetSysColorBrush, COLOR_WINDOW},
+                System::LibraryLoader::GetModuleHandleW,
+                UI::WindowsAndMessaging::{
+                    LoadCursorW, RegisterClassExW, IDC_ARROW, WNDCLASSEXW, WNDCLASS_STYLES,
+                },
+            },
+        };
+
+        static REGISTERED: OnceLock<bool> = OnceLock::new();
+        if *REGISTERED.get_or_init(|| {
+            let class_name = widestring("AstraEmuConfirmationDialog");
+            let module = match unsafe { GetModuleHandleW(None) } {
+                Ok(module) => module,
+                Err(_) => return false,
+            };
+            let instance = HINSTANCE(module.0);
+            let cursor = match unsafe { LoadCursorW(None, IDC_ARROW) } {
+                Ok(cursor) => cursor,
+                Err(_) => return false,
+            };
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                style: WNDCLASS_STYLES(0),
+                lpfnWndProc: Some(confirmation_window_proc),
+                hInstance: instance,
+                hCursor: cursor,
+                hbrBackground: unsafe { GetSysColorBrush(COLOR_WINDOW) },
+                lpszClassName: PCWSTR(class_name.as_ptr()),
+                ..WNDCLASSEXW::default()
+            };
+            let atom = unsafe { RegisterClassExW(&class) };
+            atom != 0
+                || unsafe { GetLastError() }
+                    == windows::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS
+        }) {
+            Ok(())
+        } else {
+            Err(host_error(
+                "window.confirmation",
+                "native confirmation window class could not be registered",
+            ))
+        }
+    }
+
+    fn dialog_position(
+        owner: Option<windows::Win32::Foundation::HWND>,
+        width: i32,
+        height: i32,
+    ) -> Result<(i32, i32), PlatformError> {
+        use windows::Win32::{
+            Foundation::RECT,
+            UI::WindowsAndMessaging::{GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN},
+        };
+        let bounds = if let Some(owner) = owner {
+            let mut rect = RECT::default();
+            unsafe {
+                GetWindowRect(owner, &mut rect).map_err(|_| {
+                    host_error("window.confirmation", "owner window bounds are unavailable")
+                })?;
+            }
+            rect
+        } else {
+            let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+            let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+            if screen_width <= 0 || screen_height <= 0 {
+                return Err(host_error(
+                    "window.confirmation",
+                    "Windows desktop metrics are unavailable",
+                ));
+            }
+            RECT {
+                left: 0,
+                top: 0,
+                right: screen_width,
+                bottom: screen_height,
+            }
+        };
+        let owner_width = bounds.right.saturating_sub(bounds.left);
+        let owner_height = bounds.bottom.saturating_sub(bounds.top);
+        let x = bounds
+            .left
+            .saturating_add(owner_width.saturating_sub(width) / 2);
+        let y = bounds
+            .top
+            .saturating_add(owner_height.saturating_sub(height) / 2);
+        Ok((x, y))
+    }
+
+    unsafe extern "system" fn confirmation_window_proc(
+        hwnd: windows::Win32::Foundation::HWND,
+        message: u32,
+        wparam: windows::Win32::Foundation::WPARAM,
+        lparam: windows::Win32::Foundation::LPARAM,
+    ) -> windows::Win32::Foundation::LRESULT {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DefWindowProcW, DestroyWindow, GetWindowLongPtrW, SetWindowLongPtrW, BN_CLICKED,
+            CREATESTRUCTW, GWLP_USERDATA, WM_CLOSE, WM_COMMAND, WM_NCCREATE, WM_NCDESTROY,
+        };
+
+        let state = if message == WM_NCCREATE {
+            let create = lparam.0 as *const CREATESTRUCTW;
+            if create.is_null() {
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            let state = unsafe { (*create).lpCreateParams as *mut ConfirmationDialogState };
+            if state.is_null() {
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+            }
+            state
+        } else {
+            unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut ConfirmationDialogState }
+        };
+
+        if !state.is_null() {
+            match message {
+                WM_COMMAND if ((wparam.0 >> 16) as u32) == BN_CLICKED => {
+                    let command_id = wparam.0 & 0xffff;
+                    let result = confirmation_button_result(command_id);
+                    if let Some(result) = result {
+                        unsafe {
+                            (*state).result = Some(result);
+                            let _ = DestroyWindow(hwnd);
+                        }
+                        return windows::Win32::Foundation::LRESULT(0);
+                    }
+                }
+                WM_CLOSE => {
+                    unsafe {
+                        (*state).result = Some(ConfirmationResult::Cancelled);
+                        let _ = DestroyWindow(hwnd);
+                    }
+                    return windows::Win32::Foundation::LRESULT(0);
+                }
+                WM_NCDESTROY => unsafe {
+                    (*state).closed = true;
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                },
+                _ => {}
+            }
+        }
+
+        DefWindowProcW(hwnd, message, wparam, lparam)
+    }
+
+    fn confirmation_button_result(command_id: usize) -> Option<ConfirmationResult> {
+        match command_id {
+            CONFIRMATION_ACCEPT_ID => Some(ConfirmationResult::Accepted),
+            CONFIRMATION_CANCEL_ID => Some(ConfirmationResult::Cancelled),
+            _ => None,
         }
     }
 
@@ -2597,7 +3041,8 @@ mod windows {
 
     #[cfg(test)]
     mod tests {
-        use super::confirmation_dialog_title;
+        use super::{confirmation_button_result, confirmation_dialog_title};
+        use astra_platform::ConfirmationResult;
 
         #[test]
         fn confirmation_prefers_live_parent_caption() {
@@ -2614,6 +3059,19 @@ mod windows {
                 confirmation_dialog_title(Some("  \t"), "确认".into()),
                 "确认"
             );
+        }
+
+        #[test]
+        fn confirmation_button_ids_are_explicit() {
+            assert_eq!(
+                confirmation_button_result(super::CONFIRMATION_ACCEPT_ID),
+                Some(ConfirmationResult::Accepted)
+            );
+            assert_eq!(
+                confirmation_button_result(super::CONFIRMATION_CANCEL_ID),
+                Some(ConfirmationResult::Cancelled)
+            );
+            assert_eq!(confirmation_button_result(0), None);
         }
     }
 }

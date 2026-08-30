@@ -3,13 +3,13 @@
 2026-08-31 Windows Manager service confirmation seam: the focused
 `astra-platform-windows` library tests pass 2/2 and `cargo check -p
 astra-emu-manager` passes after the audio/decode service host gained a native
-`ShowConfirmation` arm. The service thread uses the shared `rfd` Task Dialog
-helper without creating a Winit window or event loop; `common-controls-v6`
-keeps the typed Minori `是(Y)`/`否(N)` labels visible. Menus,
+`ShowConfirmation` arm. The service thread uses the Host-owned Win32 modal
+window without creating a Winit window or event loop; custom Minori `是(Y)`/`否(N)`
+labels remain visible without the `rfd` `common-controls-v6` feature. Menus,
 fullscreen, help, About and surfaces remain outside this service host and still
 require their owning platform window. This closes the Manager confirmation
-pending seam only; Release Sandbox, full-route, formal audio review and
-Windows E3 remain open.
+pending seam and the CLI loader boundary only; Release Sandbox, full-route,
+formal audio review and Windows E3 remain open.
 
 2026-08-31 route-input smoke: the development-signed Release CLI consumed the
 current `runtime.input_or_terminal` sequence through 24048 fixed steps, 48

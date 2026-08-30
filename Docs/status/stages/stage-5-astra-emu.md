@@ -2,12 +2,13 @@
 
 2026 年 8 月 31 日 Windows Manager confirmation service 接线：无游戏窗口的
 audio/decode service host 现在直接在 service thread 处理 Family ABI v13
-`ShowConfirmation`，使用带 `common-controls-v6` 的原生 `rfd` Task Dialog，并把
-typed 结果送回同一 session。该路径不创建第二个 Winit loop，也不处理菜单、全屏、
-帮助、About 或 surface；这些仍要求拥有窗口的对应 platform Host。`astra-platform-
-windows` confirmation 回归 2/2、Manager build 和文档检查通过，但这只是 Host
-事务接线证据，Stage 5、Release Sandbox、正式音频 review 和 Windows E3 仍为
-`IN_PROGRESS`。
+`ShowConfirmation`，使用 Host-owned Win32 modal window，并把 typed 结果送回同一
+session。移除 `rfd` `common-controls-v6` 后，CLI 不再在进入 `main` 前触发
+`STATUS_ENTRYPOINT_NOT_FOUND`；Win32 对话框保留 Minori 自定义按钮标签。该路径不
+创建第二个 Winit loop，也不处理菜单、全屏、帮助、About 或 surface；这些仍要求
+拥有窗口的对应 platform Host。`astra-platform-windows` confirmation 回归 2/2、
+CLI 启动检查、Manager build 和文档检查通过，但这只是 Host 事务接线证据，Stage 5、
+Release Sandbox、正式音频 review 和 Windows E3 仍为 `IN_PROGRESS`。
 
 2026 年 8 月 31 日 Family ABI v13 原生菜单 Host 分层：Windows 原生 context menu 和
 confirmation 保持不变，macOS 通过 AppKit `muda` 接入同一 typed menu transaction，
