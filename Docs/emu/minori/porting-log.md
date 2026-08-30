@@ -1,5 +1,12 @@
 # Minori 移植日志
 
+## 2026-08-30：WMF Release E2 与原版现场复测
+
+- Windows 默认组合已通过 AstraMedia 的统一 `IncrementalMediaDecoder` 绑定 `astra.decode.wmf.incremental`。开发签名 Release CLI 的影片定向 Headless 运行完成 17371 fixed steps、32 个提交帧和零 diagnostic；影片在第 5251 tick 打开，于第 16387 tick 完成。完整音频非静音且未削波，早段和中段 checkpoint 未见上下颠倒、横向拉伸或边缘裁切。
+- 原版程序在新的 title session 中显示未解锁标题页；与当前四路线 clear identity 的 `topMenu2` checkpoint 不是同一状态，不能做像素对照。进入剧情后，右键在指针位置打开原生层级菜单。Auto 能持续推进消息；Skip 在空白进度的未读消息处停止，重新打开菜单也不会给 Auto/Skip 添加勾选。runtime 已据此把持久 Skip 限定到已有 read identity 的消息，Control 的 pragma 快进保持独立。该现场结果确认 v11 的菜单层级和 activity ownership，但不等于 Release Sandbox 验收。
+- 原版旧 session 的访问异常可通过结束该 session 后重新启动规避；新 session 尚未到达与 WMF checkpoint 相同的影片时间点。原版同点影片、完整 WMF 路线、正式音频听审、Release Sandbox 和 Windows E3 继续开放。
+- `astra-emu-minori-cli` 中已不再编译、但仍留在源码树的旧 GARbro NRBF reader 已删除。CLI 只保留 archive、script 和 media census；AstraEMU CLI 与 Manager 的依赖图均不含 `mlua`，也没有恢复 importer、Luau patch 或明文 cache 路径。
+
 ## 2026-08-30：原版影片后端与平台解码诊断
 
 - 原版主程序的 PE 导入和 COM 调用已确认影片链路使用 DirectShow Filter Graph，而不是 Media Foundation：创建 `CLSID_FilterGraph`，查询 `IGraphBuilder`/`IFilterGraph2`，并创建 `CLSID_VideoMixingRenderer`（VMR7）及 `IVMRFilterConfig`、`IVMRWindowlessControl`。`VMR7` 属性配置和关键 COM 调用均检查负 HRESULT 并进入清理/失败分支，没有观察到静默切换后端的路径。

@@ -2251,20 +2251,14 @@ impl MinoriVm {
     }
 
     pub fn fast_forward_active(&self) -> bool {
-        self.state.system_ui.skip_enabled
-            && (self.state.system_ui.play_mode == MinoriPlayMode::Skip
-                || (self.state.system_ui.control_enabled && self.state.system_ui.control_pressed))
+        fast_forward_active_for_state(&self.state)
     }
 
     pub fn active_message_is_read(&self) -> Result<bool, MinoriRuntimeError> {
         let Some(message) = self.state.message.as_ref() else {
             return Err(MinoriRuntimeError::State);
         };
-        Ok(self
-            .state
-            .read_message_identities
-            .binary_search(&message_read_identity(&self.state, message))
-            .is_ok())
+        Ok(message_is_read(&self.state, message))
     }
 
     /// Allocate an effect sequence for a host-side presentation update that
@@ -2903,10 +2897,7 @@ fn execute_control(
             // the script has enabled it explicitly. Keeping this at command
             // execution time avoids fabricating an await completion in the
             // host and preserves one deterministic fixed tick per call.
-            if state.system_ui.skip_enabled
-                && (state.system_ui.play_mode == MinoriPlayMode::Skip
-                    || (state.system_ui.control_enabled && state.system_ui.control_pressed))
-            {
+            if fast_forward_active_for_state(state) {
                 return Ok(None);
             }
             let milliseconds = timer_ticks
@@ -5844,10 +5835,7 @@ fn message_wait_for_current_mode(
     voice: Option<&MinoriMessageVoice>,
     message_voice_durations_ms: &BTreeMap<String, u32>,
 ) -> Result<MinoriWaitState, MinoriRuntimeError> {
-    if state.system_ui.skip_enabled
-        && (state.system_ui.play_mode == MinoriPlayMode::Skip
-            || (state.system_ui.control_enabled && state.system_ui.control_pressed))
-    {
+    if fast_forward_active_for_state(state) {
         return message_auto_wait(token_id, 0);
     }
     if wait_for_voice {
@@ -5884,6 +5872,26 @@ fn message_read_identity(state: &MinoriRuntimeState, message: &MinoriMessageStat
     material.extend_from_slice(&message.message_id.to_le_bytes());
     material.extend_from_slice(message.text_hash.as_bytes());
     Hash256::from_sha256(&material)
+}
+
+fn message_is_read(state: &MinoriRuntimeState, message: &MinoriMessageState) -> bool {
+    state
+        .read_message_identities
+        .binary_search(&message_read_identity(state, message))
+        .is_ok()
+}
+
+fn fast_forward_active_for_state(state: &MinoriRuntimeState) -> bool {
+    if !state.system_ui.skip_enabled {
+        return false;
+    }
+    let control_fast_forward = state.system_ui.control_enabled && state.system_ui.control_pressed;
+    let read_skip = state.system_ui.play_mode == MinoriPlayMode::Skip
+        && state
+            .message
+            .as_ref()
+            .is_some_and(|message| message_is_read(state, message));
+    control_fast_forward || read_skip
 }
 
 const VOICE_STREAM_ID: u32 = 4;
@@ -6741,8 +6749,54 @@ mod tests {
             Some(MinoriWaitState::Input { .. })
         ));
         vm.state.system_ui.config.preferred_play_mode = MinoriPlayMode::Skip;
-        assert!(vm.toggle_preferred_play_mode().unwrap());
+        assert!(!vm.toggle_preferred_play_mode().unwrap());
         assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
+        assert!(!vm.fast_forward_active());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Input { .. })
+        ));
+
+        vm.mark_active_message_read().unwrap();
+        assert!(vm.rebind_active_message_wait().unwrap());
+        assert!(vm.fast_forward_active());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Time {
+                timer_ticks: 1,
+                milliseconds: 10,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn persistent_skip_stops_on_unread_messages_but_control_does_not() {
+        let source = b".pragma enable_control\r\n.message 1 voice speaker unread\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+
+        let Some(MinoriVmEvent::Message { wait, .. }) = vm.step(1, 16).unwrap() else {
+            panic!("expected message")
+        };
+        assert!(matches!(wait, MinoriWaitState::Input { .. }));
+
+        assert!(!vm.toggle_play_mode(MinoriPlayMode::Skip).unwrap());
+        assert_eq!(vm.state().system_ui.play_mode, MinoriPlayMode::Skip);
+        assert!(!vm.fast_forward_active());
+        assert!(matches!(
+            vm.state().wait,
+            Some(MinoriWaitState::Input { .. })
+        ));
+
+        vm.set_control_pressed(true);
+        assert!(vm.rebind_active_message_wait().unwrap());
         assert!(vm.fast_forward_active());
         assert!(matches!(
             vm.state().wait,

@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 30 日 Minori Skip 行为覆盖：原版空白进度现场确认持久 Skip 不推进未读消息，Auto/Skip 原生菜单项也不显示勾选。runtime 现以已记录的 message read identity 约束持久 Skip；Control 快进继续使用独立 pragma gate。新增 unread/Control 回归，Minori 173 项 library tests 通过。该覆盖属于 runtime/menu E1，不提升完整路线、Sandbox 或 Windows E3。
+
 2026 年 8 月 30 日 WMF composition 增量：AstraEMU CLI 和 Manager 现可显式选择 `wmf` 或 `ffmpeg-vcpkg`，Minori 拒绝 `disabled`、未知值和运行时 provider 切换。Windows 桌面包默认 `wmf`；构建器仅在明确选择 FFmpeg 时启用其 feature，并把选定 provider 写入脱敏 package evidence。默认与 FFmpeg feature graph 的定向编译均通过。尚未运行签名 Release WMF movie checkpoint，因此画面方向、padding crop、音频时序、fence 和原版同点 parity 仍开放。
 
 2026 年 8 月 30 日原版影片后端复核：原版二进制明确创建 DirectShow `CLSID_FilterGraph`、`IGraphBuilder`/`IFilterGraph2` 与 windowless VMR7，关键 COM 调用失败会进入清理路径，未发现静默切换解码后端。AstraMedia 新增有界只读 COM `IStream` adapter 和显式 `astra.decode.wmf.incremental` registry provider；公开 MP4 已覆盖统一双轨 packet、seek generation 与 cancel。授权 AVI 通过统一 provider 到 EOS，共 2106 个单调 PTS 视频 packet 和 2110 个 PCM packet，未复制 encoded source 到 HGLOBAL 或 plaintext spool；固定 FFmpeg 路径仍对 7 个 concealment frame fail-fast。当前关闭公共 provider seam，不等于 Minori 生产接线、原版逐帧 parity 或 Windows E3。

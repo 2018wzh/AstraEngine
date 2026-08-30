@@ -8,7 +8,8 @@
 - [x] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including typed packets, media-type validation, seek generation and cancellation.
 - [x] CLI and Manager accept exactly one explicit Minori binding (`wmf` or `ffmpeg-vcpkg`); Windows packages default to WMF, the builder records the choice, and missing/ineligible providers block without switching.
 - [x] Release CLI 的开发签名候选已用 `wmf` 完成真实影片定向 Headless E2：17,371 fixed steps、32 个提交帧、零 diagnostic；影片在第 5,251 tick 打开，于第 16,387 tick 完成。保留的早段和中段画面未见上下颠倒、拉伸或边缘裁切，完整音频非静音且未削波。
-- [ ] Re-run required movie checkpoints and original-title parity before changing the shipping Minori provider binding.
+- [x] Re-run the required opening, middle and completion movie checkpoints through the Windows-default WMF binding; owner-side completion, distinct frames and bounded audio evidence all pass.
+- [ ] Capture the original at the same movie points before claiming parity. The available original title is an uncleared variant, while the current emulator checkpoint is the four-route `topMenu2` variant, so those images are intentionally not compared.
 
 ## FFmpeg dependency and WMV3 quality (2026-08-30)
 
@@ -44,6 +45,7 @@
 - [x] Manager promotes a pressed physical `pointer.secondary` edge to `Open`, carries the latest bounded pointer coordinates, and removes the duplicate pressed edge before invoking Minori.
 - [x] Minori publishes the observed title/gameplay hierarchy. Windows native uses the platform context-menu provider, Manager renders the same transaction as a Slint overlay, and Headless navigates it only through physical input records.
 - [x] Save, Load, Config, message-panel visibility and Auto/Skip are selected through the returned menu item. Ambiguous input, active choice/media, completion sharing, duplicate menus, stale results and missing services fail closed.
+- [x] 原版空白进度确认持久 Skip 在未读消息处停止；runtime 只对已有 read identity 的消息启用 Skip 快进，Control 的 pragma 路径保持独立。原生菜单中的 Auto/Skip 不显示勾选，Family transaction 也不再伪造该状态。
 - [ ] Windows E3 remains open: the Sandbox direct native run reached real scenes and completed its windowed route with audio explicitly disabled, but the WASAPI default output was unavailable and the read-only share prevented artifact recovery; no E3 artifact is claimed.
 
 ## 增量游标与 FFmpeg 复核（2026 年 8 月 27 日）

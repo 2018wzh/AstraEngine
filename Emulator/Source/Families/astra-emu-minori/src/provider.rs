@@ -6611,7 +6611,7 @@ fn minori_system_menu(
             LegacySystemMenuItemKindV1::Command,
             "オートプレイ (&A)",
             true,
-            vm.state().system_ui.play_mode == MinoriPlayMode::Auto,
+            false,
         );
         push(
             "skip",
@@ -6620,7 +6620,7 @@ fn minori_system_menu(
             LegacySystemMenuItemKindV1::Command,
             "スキップ (&K)",
             vm.state().system_ui.skip_enabled,
-            vm.state().system_ui.play_mode == MinoriPlayMode::Skip,
+            false,
         );
         push(
             "quick_save",
@@ -10721,6 +10721,11 @@ mod tests {
             .iter()
             .any(|item| item.item_id == "message_panel"));
         assert!(menu.items.iter().any(|item| item.item_id == "save"));
+        assert!(menu
+            .items
+            .iter()
+            .filter(|item| matches!(item.item_id.as_str(), "auto" | "skip"))
+            .all(|item| !item.checked));
         let menu_id = menu.menu_id.clone();
         drop(published);
 
