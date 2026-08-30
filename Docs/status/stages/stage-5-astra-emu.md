@@ -1,5 +1,10 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日剧情右键菜单的两个顶层分类已按 Sandbox 观察改为日文标题
+`ヘルプ (&H)`、`ゲーム (&G)`，移除英文值并加入 family menu regression。菜单
+语义仍由 Minori Family ABI 发布，Windows Host 只构建/呈现并回送选择；完整 Release
+Sandbox、Linux/macOS 原生菜单和 Windows E3 继续保持 blocking。
+
 2026 年 8 月 31 日 Windows native confirmation 标题已按 Sandbox 观察对齐：有 parent
 window 时沿用 live game caption，没有 parent 时保留 Family ABI 的 typed title。该
 行为由 platform provider 实现，不让 Manager 或 Minori 复制商业标题；Windows target

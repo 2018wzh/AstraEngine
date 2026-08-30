@@ -1,5 +1,11 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日原生菜单分类标题对齐：Sandbox 观察确认剧情右键菜单的两个顶层分类
+使用日文 `ヘルプ (&H)` 与 `ゲーム (&G)`，此前 family transaction 的英文标题已
+移除。菜单顺序、分隔线、启用/勾选状态和 Host 仅呈现不解释命令的边界不变；Minori
+菜单回归通过，仍不改变 Linux/macOS context-menu 未实现、Release Sandbox 或 Windows
+E3 的证据边界。
+
 2026 年 8 月 31 日 Windows 原生确认框标题对齐：Sandbox 观察确认原版 message box
 沿用 parent game window caption。Windows platform provider 现在在有 parent 时读取 live
 caption，缺 parent 的 service-only 调用仍使用 Family ABI title；不把商业标题写入
