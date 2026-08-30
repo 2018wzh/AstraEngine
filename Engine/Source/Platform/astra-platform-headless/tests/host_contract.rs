@@ -6,7 +6,6 @@ use astra_media_core::{
     BlendMode, MeshDraw2D, MeshMaterial2D, MeshVertex2D, RectI, SceneCommand, SceneCompositing2D,
     TextureFilter2D, TextureFrame,
 };
-#[cfg(feature = "ffmpeg-vcpkg")]
 use astra_platform::DecodeOutput;
 use astra_platform::{
     AudioOutputRequest, DecodeKind, HeadlessArtifactRetention, HeadlessHostProfile,
@@ -1049,6 +1048,16 @@ async fn ffmpeg_video_decode_requires_incremental_streaming() {
 #[cfg(feature = "ffmpeg-vcpkg")]
 #[tokio::test]
 async fn ffmpeg_video_stream_returns_one_frame_at_a_time() {
+    assert_video_stream_returns_one_frame_at_a_time("ffmpeg-vcpkg").await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn wmf_video_stream_returns_one_frame_at_a_time() {
+    assert_video_stream_returns_one_frame_at_a_time("wmf").await;
+}
+
+async fn assert_video_stream_returns_one_frame_at_a_time(provider_id: &str) {
     let temp = tempfile::tempdir().unwrap();
     let package = b"streaming video package identity";
     fs::write(temp.path().join("fixture.astrapkg"), package).unwrap();
@@ -1058,7 +1067,7 @@ async fn ffmpeg_video_stream_returns_one_frame_at_a_time() {
         hash(b"build"),
         hash(package),
     );
-    profile.providers.video_decode = "ffmpeg-vcpkg".into();
+    profile.providers.video_decode = provider_id.into();
     profile.max_video_frames = 1_000;
     profile.max_decode_output_bytes = 512 * 1024 * 1024;
     let factory = HeadlessPlatformFactory::new(temp.path().join("run"), temp.path());

@@ -49,7 +49,7 @@ FFmpeg 首帧/整段 provider 与增量 demux 都使用 `Packet::read` 的显式
 
 每个已解码视频帧在缩放和发布前必须检查 `AV_FRAME_FLAG_CORRUPT` 与 `AVFrame::decode_error_flags`。bitstream、missing-reference、concealment 或 slice decode error 任一标记都会返回 `ASTRA_FFMPEG_CORRUPT_FRAME`；stderr 日志不能代替 typed diagnostic，也不能把 concealment 后的帧计入零诊断 E2。
 
-Headless 与 Windows 共享 typed incremental stream contract。`DecodeStreamAction::Start` 建立有界 session，后续 `Next` 每次消费一个 owned frame，EOF 返回 typed end marker。Player 同时最多保留一帧；snapshot 只保存 asset identity、revision、cursor、loop index 和逻辑起始时间。restore 重新创建 decode session并按 cursor continuation；skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`。
+Headless 与 Windows 共享 typed incremental stream contract。Headless worker 只持有 `IncrementalMediaDecoder`，按 profile 中唯一的 `wmf` 或 `ffmpeg-vcpkg` binding 打开 provider；它不含 provider 顺序，也不会在错误后重试另一实现。`DecodeStreamAction::Start` 建立有界 session，后续 `Next` 每次消费一个 owned frame，EOF 返回 typed end marker。Player 同时最多保留一帧；snapshot 只保存 asset identity、revision、cursor、loop index 和逻辑起始时间。restore 重新创建 decode session并按 cursor continuation；skip、loop replacement、失败与 shutdown 必须显式 `CloseDecode`。
 
 Player 从 package 消费 encoded audio 时，必须先通过 `asset.catalog` 与 `asset.vfs_manifest` 得到唯一 package-backed entry，执行 bounded read 和 SHA-256 校验，再按文件签名识别 codec。不能用 asset id、文件名或 provider descriptor 猜测已解码成功。Windows Media Foundation 当前返回 `pcm_s16le:<sample_rate>:<channels>`；Player 必须检查格式字段、采样率、声道、sample budget、sample 截断和 frame alignment，再显式转换为 interleaved `f32`。未知格式、空/越界 stream shape 和不完整 frame 都是 blocking，不能转为空音频成功。
 

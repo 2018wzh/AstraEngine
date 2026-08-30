@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-2026 年 8 月 30 日 WMF composition：CLI 与 Manager 现按用户/构建 profile 显式绑定 `wmf` 或 `ffmpeg-vcpkg`；Minori 不接受缺失 binding，也不会在 decode error 后切换 provider。Windows 桌面包默认 WMF，构建 evidence 保存选择；默认与 FFmpeg feature graph 均通过定向编译。签名 Release WMF movie checkpoint、画面方向与 crop、音频时序、原版同点比较和 Windows E3 尚未执行，Stage 5 保持 `IN_PROGRESS`。
+2026 年 8 月 30 日 WMF composition：CLI 与 Manager 现按用户/构建 profile 显式绑定 `wmf` 或 `ffmpeg-vcpkg`；Minori 不接受缺失 binding，也不会在 decode error 后切换 provider。Windows 桌面包默认 WMF，构建 evidence 保存选择。Headless 已删除写死的 FFmpeg worker，改用 `IncrementalMediaDecoder`，公开 MP4 分别通过 WMF 默认图与 FFmpeg feature 图的逐帧、EOS 回归。当前 Release 候选已越过原先的 provider availability gate，授权影片 checkpoint、画面方向与 crop、音频时序、原版同点比较和 Windows E3 仍待执行，Stage 5 保持 `IN_PROGRESS`。
 
 2026 年 8 月 30 日原版影片契约复核：PE/COM 调用确认原版使用 DirectShow Filter Graph、`IGraphBuilder`/`IFilterGraph2` 和 windowless VMR7；关键 HRESULT 失败进入清理分支，没有观察到后端 fallback。AstraMedia 已加入有界只读 `IStream` adapter 和显式 `astra.decode.wmf.incremental` provider，公开 MP4 覆盖统一双轨 packet、seek/cancel，授权 AVI 通过同一 provider 完成 2106 个视频 packet 和 2110 个音频 packet。固定 FFmpeg 路径继续对 7 个 concealment frame 阻断。Minori composition 与 launch binding仍开放；当前结果不关闭 movie checkpoint、原版 parity、Sandbox 或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
 

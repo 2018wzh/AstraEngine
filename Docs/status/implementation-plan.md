@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026 年 8 月 30 日 Minori WMF composition：CLI、Manager 和桌面构建器已从 FFmpeg-only 硬编码改为单一显式 `wmf`/`ffmpeg-vcpkg` binding。Windows Minori package 默认 WMF；选择 FFmpeg 才编译对应 feature，evidence 固化所选 provider。两项 provider 不构成 fallback。下一项是用当前签名 Release CLI 运行 WMF required movie slice，检查 frame orientation/crop、音频、completion fence 和原版同点画面；通过前仍不提升 E2/E3 状态。
+2026 年 8 月 30 日 Minori WMF composition：CLI、Manager 和桌面构建器已从 FFmpeg-only 硬编码改为单一显式 `wmf`/`ffmpeg-vcpkg` binding。Windows Minori package 默认 WMF；选择 FFmpeg 才编译对应 feature，evidence 固化所选 provider。两项 provider 不构成 fallback。Headless 平台层也已删除写死的 FFmpeg worker，统一消费 `IncrementalMediaDecoder`；公开 MP4 的 WMF 默认图和 FFmpeg feature 图均完成逐帧、EOS 回归。下一项是用当前签名 Release CLI 运行 WMF required movie slice，检查 frame orientation/crop、音频、completion fence 和原版同点画面；通过前仍不提升 E2/E3 状态。
 
 2026 年 8 月 30 日 Minori 影片 provider 决策：原版行为证据确认其使用 DirectShow Filter Graph + windowless VMR7，并在 HRESULT 失败时退出当前初始化路径。公共 `astra.decode.wmf.incremental` 已从同一个有界 MF Source Reader 输出统一音视频 packet，并覆盖动态 media type 校验、seek generation、cancel 和 registry identity；授权 AVI 完成 2106 个视频 packet 与 2110 个音频 packet并到达 EOS，与 FFmpeg 的 7 个 concealment blocker 形成明确差异。下一实现项是 Minori CLI/Manager 的显式 WMF composition。Windows launch profile 只能选择 WMF 或 FFmpeg之一，任何失败都不得切换 provider。完成真实 movie checkpoint 和原版同点复核前，现有 Release binding 与 Stage 5 状态不提升。
 
