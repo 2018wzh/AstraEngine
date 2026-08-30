@@ -543,3 +543,5 @@ Windows E3 parity claim is made here.
 2026-08-28：修正 Minori Control/Auto 活动消息等待的受限 modality rebinding。Manager Core 复用已有 `AwaitTokenId`，host 同步替换 pending `Input`/`Time` condition；同类重复和未知 wait 仍 fail fast。代码与定向回归已通过，真实 Sandbox 复测和 Stage 5 的完整路线、正式媒体/音频审查、Linux FUSE、macOS extract、FVP v9、Windows E3 仍保持开放。
 
 2026-08-30：v11 修正了旧实现把右键直接映射到 Save 的语义错误。Minori 现在发布已观察到的 title/gameplay 菜单层级；Host 不解释 item id，只显示并回送结果。Manager 和 Headless 在交互期间暂缓底层 gameplay await。当前完成的是定向回归，不继承旧 ABI 的 Sandbox 现场证据；完整路线、自然 unlock、正式音频 review、Linux FUSE、macOS extract 与 Windows E3 仍保持 blocking。
+
+2026-08-30 后续：开发签名 Release v24 通过序列化 secondary-pointer、方向键、Enter 和 Escape 完成 Save、Load、gameplay Config 三页的打开与关闭。报告通过 138 fixed steps、82 条物理输入、9 个呈现帧、8 个 checkpoint 和零 diagnostic；全部 checkpoint 已查看，页面前后的 gameplay 帧字节一致。Load 返回与 Config 关闭的 ownership 根因已修复并有定向回归。通用退出确认、Release Sandbox、120 Hz 性能和 Windows E3 继续 blocking。

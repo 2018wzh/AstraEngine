@@ -755,4 +755,6 @@ Minori 的 Control/Auto 语义允许活动消息在 `Input` 与 `Time` 之间切
 
 2026-08-30：Minori 右键系统菜单已改为双向 typed transaction。GameView 仍只在舞台边界内提交 secondary pointer；Manager、Release CLI 和 Headless 分别显示或导航同一 family hierarchy，并在菜单结束前暂停底层 gameplay await。当前只有合成与局部 consumer 回归，尚未用 v11 build 重跑 Release Sandbox，因此不沿用旧 Save 页现场结果，也不扩大完整路线、媒体/音频 review、Linux FUSE、macOS extract 和 Windows E3。
 
+2026-08-30 后续：开发签名 Release v24 已用 82 条序列化物理输入完成右键菜单的 Save、Load、gameplay Config 打开与关闭。报告通过 138 fixed steps、9 个呈现帧、8 个 checkpoint，diagnostic 为空；全部 checkpoint 已查看，四张页面前后 gameplay 帧字节一致。Load 返回目标现由保留的 gameplay wait 决定，Config 关闭后改走 provider tick 并恢复原消息 wait。该结果只关闭定向 Headless E2；原版窗口关闭确认、`game_return_title`、Release Sandbox、120 Hz 性能和 Windows E3 仍开放。
+
 2026-08-28 音频启动顺序修复：`FamilyAudioService::start_with_client` 增加 worker endpoint-selection handshake，只有 native 或 bounded `NullAudioLane` 完成选择后才向 Minori/Manager 发布 service。无设备的 `ProviderUnavailable` 因而在首个音频命令前稳定进入 null sink；其他输出错误同步返回，并在 service 不可用时清理由该入口拥有的 Host。Support 37 项、Minori 159 项和 Manager 21 项定向测试通过；该修复消除启动竞态，不改变物理音频、正式听审或 Windows E3 的阻断边界。

@@ -1433,6 +1433,15 @@ impl MinoriRuntimeProvider {
                         &mut restore_audio,
                     )?;
                 }
+                if action == MinoriSystemUiAction::PresentAfterConfigClose
+                    && session.vm.state().system_ui.page == MinoriSystemPage::None
+                {
+                    session
+                        .vm
+                        .advance_provider_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                }
                 session
                     .vm
                     .advance_system_tick(input.tick_index)
@@ -6029,9 +6038,7 @@ fn apply_system_ui_input(
                 "arrow_left" => vm.move_save_page(-1).map_err(runtime_error)?,
                 "arrow_right" => vm.move_save_page(1).map_err(runtime_error)?,
                 "escape" => {
-                    if page == MinoriSystemPage::Load
-                        && vm.state().launch_mode == crate::MinoriLaunchMode::Title
-                    {
+                    if page == MinoriSystemPage::Load && vm.state().wait.is_none() {
                         vm.set_system_page(MinoriSystemPage::Title, 0)
                             .map_err(runtime_error)?;
                         return Ok(MinoriSystemUiAction::Present);
@@ -6071,9 +6078,7 @@ fn apply_system_ui_input(
                 vm.move_save_page(1).map_err(runtime_error)?;
                 return Ok(MinoriSystemUiAction::Present);
             }
-            if page == MinoriSystemPage::Load
-                && vm.state().launch_mode == crate::MinoriLaunchMode::Title
-            {
+            if page == MinoriSystemPage::Load && vm.state().wait.is_none() {
                 vm.set_system_page(MinoriSystemPage::Title, 0)
                     .map_err(runtime_error)?;
                 return Ok(MinoriSystemUiAction::Present);
@@ -10618,6 +10623,52 @@ mod tests {
         assert_eq!(session.vm.state().system_ui.page, MinoriSystemPage::None);
         assert_eq!(session.vm.state().fixed_tick, 2);
         assert!(session.vm.state().wait.is_some());
+    }
+
+    #[test]
+    fn load_page_escape_returns_to_its_actual_owner() {
+        let script =
+            parse_sc(b".wait 20\r\n.end\r\n", &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut gameplay = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(b"gameplay-load"),
+            script.clone(),
+            7,
+        )
+        .unwrap();
+        gameplay.step(1, 100).unwrap();
+        assert!(gameplay.state().wait.is_some());
+        gameplay.open_load_page().unwrap();
+
+        let escape = LegacyStepInput {
+            input_edges: vec![LegacyInputEdge {
+                control: "escape".into(),
+                pressed: true,
+                value: 1.0,
+                sequence: 1,
+            }],
+            ..step_input(2, Vec::new())
+        };
+        assert_eq!(
+            apply_system_ui_input(&mut gameplay, &escape).unwrap(),
+            MinoriSystemUiAction::CloseGameplaySystemPage
+        );
+        assert_eq!(gameplay.state().system_ui.page, MinoriSystemPage::Load);
+
+        let mut title = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(b"title-load"),
+            script,
+            7,
+        )
+        .unwrap();
+        title.begin_title_launch().unwrap();
+        title.set_system_page(MinoriSystemPage::Load, 0).unwrap();
+        assert_eq!(
+            apply_system_ui_input(&mut title, &escape).unwrap(),
+            MinoriSystemUiAction::Present
+        );
+        assert_eq!(title.state().system_ui.page, MinoriSystemPage::Title);
     }
 
     #[test]

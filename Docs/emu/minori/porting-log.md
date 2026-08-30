@@ -1,5 +1,12 @@
 # Minori 移植日志
 
+## 2026-08-30：原生菜单 Save、Load 与 Config 的 Release E2
+
+- 开发签名 Release v24 从空白进度启动，用 secondary-pointer、方向键、Enter 和 Escape 依次打开 Save、Load 与 gameplay Config。报告通过 138 fixed steps、82 条物理输入、9 个呈现帧和 8 个 checkpoint，diagnostic 为空。三个页面关闭后都返回同一条剧情消息，前后四张 gameplay PNG 字节一致。
+- 复验暴露了两处页面所有权错误。Load 页曾按 session 的 `Title` launch mode 判断返回目标，但剧情也是从标题启动，Escape 因而误回标题；现改由保留的 gameplay wait 区分标题 Load 与剧情 Load。Config Cancel 已先把页面改回 gameplay，provider 却仍按 system-page tick 推进，随后触发非法状态；现改由 provider tick 接管关闭后的提交，并恢复底层消息 wait。
+- 模型查看了全部 checkpoint。标题、Save、Load、Config 和恢复后的剧情画面都使用真实系统资源；日文字形、比例、层次、透明度和焦点没有发现裁剪、拉伸或残影。Save/Load 当前空槽、分页和返回行为得到定向覆盖，实际写入槽、跨 session Load 仍沿用既有独立 E2，本次不重复声明。
+- 该结果关闭当前身份下右键菜单进入 Save/Load/Config 并返回剧情的定向 Headless E2。原版窗口关闭确认、`game_return_title` 确认语义、Release Sandbox、120 Hz 性能门禁和 Windows E3 仍未完成。
+
 ## 2026-08-30：原生菜单 Auto 的 Release E2
 
 - Release CLI 的 Headless host 原先没有实现 Manager 已有的消息 wait 重绑规则：Auto 将活动消息从 `Input` 改为 `Time` 时，CLI 把同一 token 误判为重复 wait。规则现已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 CLI 共同只允许 `Input` 与 `Time` 互换以及 `Time` deadline 更新；同批重复、`Input` 重发和其他 wait 类型仍阻断。

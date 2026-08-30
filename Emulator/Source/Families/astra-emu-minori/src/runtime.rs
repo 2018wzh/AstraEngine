@@ -1728,9 +1728,10 @@ impl MinoriVm {
     pub fn config_audio_param_commands(
         &mut self,
     ) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
-        if self.state.system_ui.page != MinoriSystemPage::Config
-            && self.state.system_ui.page != MinoriSystemPage::Title
-        {
+        if !matches!(
+            self.state.system_ui.page,
+            MinoriSystemPage::None | MinoriSystemPage::Title | MinoriSystemPage::Config
+        ) {
             return Err(MinoriRuntimeError::State);
         }
         let active = self
@@ -1756,8 +1757,10 @@ impl MinoriVm {
     pub fn close_config_audio_commands(
         &mut self,
     ) -> Result<Vec<MinoriAudioCommand>, MinoriRuntimeError> {
-        if self.state.system_ui.page != MinoriSystemPage::Title
-            || self.state.system_ui.config_draft.is_some()
+        if !matches!(
+            self.state.system_ui.page,
+            MinoriSystemPage::None | MinoriSystemPage::Title
+        ) || self.state.system_ui.config_draft.is_some()
         {
             return Err(MinoriRuntimeError::State);
         }
@@ -6615,6 +6618,7 @@ mod tests {
         );
         assert_eq!(vm.state().system_ui.page, MinoriSystemPage::None);
         assert!(vm.state().wait.is_some());
+        assert!(vm.close_config_audio_commands().unwrap().is_empty());
         vm.snapshot_bytes().unwrap();
     }
 
