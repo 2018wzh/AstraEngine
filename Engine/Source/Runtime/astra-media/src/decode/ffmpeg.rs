@@ -4,8 +4,8 @@ use ffmpeg_next as ffmpeg;
 use tempfile::Builder;
 
 use super::{
-    decode_error, DecodeKind, DecodeOutput, DecodeRequest, DecodeResult, MediaError,
-    MAX_DECODED_AUDIO_BYTES, MAX_DECODED_VIDEO_FRAME_BYTES,
+    decode_error, validate_ffmpeg_decoded_frame, DecodeKind, DecodeOutput, DecodeRequest,
+    DecodeResult, MediaError, MAX_DECODED_AUDIO_BYTES, MAX_DECODED_VIDEO_FRAME_BYTES,
 };
 
 pub(super) fn probe() -> Result<(), MediaError> {
@@ -351,6 +351,7 @@ fn receive_video_frame(
     let mut decoded = ffmpeg::frame::Video::empty();
     match decoder.receive_frame(&mut decoded) {
         Ok(()) => {
+            validate_ffmpeg_decoded_frame(&decoded)?;
             let mut converted = ffmpeg::frame::Video::empty();
             scaler.run(&decoded, &mut converted).map_err(|error| {
                 ffmpeg_error("ASTRA_FFMPEG_SCALE", "convert video frame", error)

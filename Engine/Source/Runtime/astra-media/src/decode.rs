@@ -41,6 +41,33 @@ pub(crate) fn validate_ffmpeg_runtime_version() -> Result<(), MediaError> {
 }
 
 #[cfg(feature = "ffmpeg-vcpkg")]
+pub(crate) fn validate_ffmpeg_decoded_frame(
+    frame: &ffmpeg_next::frame::Video,
+) -> Result<(), MediaError> {
+    // SAFETY: `frame` owns a live AVFrame for the duration of this call. The
+    // FFmpeg ABI defines `decode_error_flags` as decoder-owned output for
+    // consumers to inspect after `avcodec_receive_frame` succeeds.
+    let decode_error_flags = unsafe { (*frame.as_ptr()).decode_error_flags };
+    validate_ffmpeg_decode_error_flags(frame.is_corrupt(), decode_error_flags)
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+fn validate_ffmpeg_decode_error_flags(
+    is_corrupt: bool,
+    decode_error_flags: i32,
+) -> Result<(), MediaError> {
+    if !is_corrupt && decode_error_flags == 0 {
+        return Ok(());
+    }
+    Err(decode_error(
+        "ASTRA_FFMPEG_CORRUPT_FRAME",
+        format!(
+            "FFmpeg marked a decoded frame as corrupt (decode_error_flags=0x{decode_error_flags:08x})"
+        ),
+    ))
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
 fn validate_ffmpeg_codec_version(version: u32) -> Result<(), MediaError> {
     if version == REQUIRED_FFMPEG_AVCODEC_VERSION {
         return Ok(());
@@ -2037,6 +2064,22 @@ mod ffmpeg_runtime_version_tests {
         assert!(validate_ffmpeg_codec_version((62 << 16) | (11 << 8) | 100).is_err());
         assert!(validate_ffmpeg_codec_version((62 << 16) | (28 << 8) | 101).is_err());
         assert!(validate_ffmpeg_codec_version((63 << 16) | (1 << 8) | 100).is_err());
+    }
+
+    #[test]
+    fn corrupt_decoded_frame_is_rejected() {
+        validate_ffmpeg_decode_error_flags(false, 0).unwrap();
+        let error = validate_ffmpeg_decode_error_flags(
+            false,
+            ffmpeg_next::ffi::FF_DECODE_ERROR_CONCEALMENT_ACTIVE,
+        )
+        .unwrap_err();
+        let MediaError::Diagnostics(diagnostics) = error else {
+            panic!("expected blocking diagnostic");
+        };
+        assert_eq!(diagnostics[0].code, "ASTRA_FFMPEG_CORRUPT_FRAME");
+
+        assert!(validate_ffmpeg_decode_error_flags(true, 0).is_err());
     }
 }
 

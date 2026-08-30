@@ -4,7 +4,7 @@
 
 - 根目录新增 vcpkg manifest，固定到提供 FFmpeg `8.1.2#3` 的 baseline，并只启用 `avcodec`、`avformat`、`swresample` 和 `swscale`。Windows CI 改为检出同一 baseline 后按 manifest 安装；AstraMedia 的完整与增量 provider 都会校验实际加载的 `libavcodec 62.28.102`，旧版或混装 DLL 直接返回 `ASTRA_FFMPEG_RUNTIME_VERSION`。
 - 当前 MSVC/vcpkg build 通过普通文件输入和 AstraMedia custom AVIO 输入解码同一授权 WMV3，均输出 2106 帧，也均复现 7 个 P-frame concealment。由此排除 custom AVIO 读取差异是唯一根因；升级与版本固定提升了可复现性，但没有消除质量警告。
-- 系统 FFmpeg 7.1 对五个授权 AVI 的逐个完整解码未报告 concealment，外部 FFmpeg 8.1.2 build 对同一抽样影片也未报告。差异目前收敛到 FFmpeg build/compiler/configuration，而不是 PAZ 流式 reader。该对照不提交影片、文件名或逐帧内容；在画面 checkpoint 与原版同点比较完成前，WMV3 质量继续 blocking。
+- 外部 FFmpeg 8.1.2 对同一抽样影片没有打印 concealment 数量，但明确报告 7 个 `corrupt decoded frame`，与库路径数量一致。AstraMedia 现在读取 `AVFrame::decode_error_flags`；出现 `FF_DECODE_ERROR_CONCEALMENT_ACTIVE` 或其他 decode error flag 时返回 `ASTRA_FFMPEG_CORRUPT_FRAME`，不再只向 stderr 打印后继续生成零诊断报告。该对照不提交影片、文件名或逐帧内容；在原版同点比较或明确的素材容错契约形成前，WMV3 质量继续 blocking。
 
 ## 2026-08-30：隔离进度下的自然解锁链
 

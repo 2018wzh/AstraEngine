@@ -21,7 +21,7 @@
 | [image](https://docs.rs/image/latest/image/) | workspace lockfile `0.25.10` | MIT OR Apache-2.0 | PNG/JPEG/BMP 和 RGBA buffer；ANI/SQZ 只负责专有 container 解包 |
 | [cosmic-text](https://docs.rs/crate/cosmic-text/latest) | workspace lockfile `0.18.2` | MIT OR Apache-2.0 | 日文 shaping、fallback、度量和换行；Minori 不实现私有字体排版器 |
 | [Symphonia](https://docs.rs/symphonia/latest/symphonia/) | workspace lockfile `0.6.0` | MPL-2.0 | 音频 demux/decode；解码后的 owned PCM 进入统一 Kira `AudioServiceSession`，不保留 Minori 私有 mixer |
-| [FFmpeg](https://ffmpeg.org/download.html) / [vcpkg port registry](https://github.com/microsoft/vcpkg/tree/master/ports/ffmpeg) | `8.1.2#3`，根 manifest 固定 baseline | LGPL-2.1-or-later / configured build | AVI/WMV3/PCM 增量 demux/decode；custom AVIO 直接读取有界 seekable VFS source，不建立明文 spool，也不作为其他 provider 失败后的 fallback。MSVC build 的 WMV3 concealment 仍需画面验证，版本固定只保证可复现，不代表质量门禁通过 |
+| [FFmpeg](https://ffmpeg.org/download.html) / [vcpkg port registry](https://github.com/microsoft/vcpkg/tree/master/ports/ffmpeg) | `8.1.2#3`，根 manifest 固定 baseline | LGPL-2.1-or-later / configured build | AVI/WMV3/PCM 增量 demux/decode；custom AVIO 直接读取有界 seekable VFS source，不建立明文 spool，也不作为其他 provider 失败后的 fallback。授权影片存在 FFmpeg decode-error flags；现行 provider fail-fast，版本固定不代表质量门禁通过 |
 | `flate2` | workspace lockfile `1.1.9` | MIT OR Apache-2.0 | PAZ/SQZ zlib；所有输出都受 descriptor 与 host budget 限制 |
 | `blowfish` / `rc4` | workspace lockfile `0.10.0` / `0.2.0` | MIT OR Apache-2.0 | 旧 PAZ 兼容；不作为新数据的安全加密方案 |
 

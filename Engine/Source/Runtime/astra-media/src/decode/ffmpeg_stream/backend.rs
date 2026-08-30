@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use ffmpeg_next as ffmpeg;
 
 use super::{FfmpegAudioOutputFormat, FfmpegDecodedPacket, FfmpegStreamLimits};
-use crate::decode::{decode_error, MediaError};
+use crate::decode::{decode_error, validate_ffmpeg_decoded_frame, MediaError};
 use crate::{AudioFramePacket, VideoFramePacket};
 
 pub(super) struct AudioDecoder {
@@ -564,6 +564,7 @@ pub(super) fn drain_video(
         let mut decoded = ffmpeg::frame::Video::empty();
         match video.decoder.receive_frame(&mut decoded) {
             Ok(()) => {
+                validate_ffmpeg_decoded_frame(&decoded)?;
                 let pts_us = timestamp_us(decoded.timestamp(), video.time_base)?;
                 pts_us.checked_add(video.frame_duration_us).ok_or_else(|| {
                     decode_error(

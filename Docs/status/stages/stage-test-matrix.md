@@ -1,6 +1,6 @@
 # Stage Test Matrix
 
-2026-08-30 FFmpeg dependency seam: the root vcpkg manifest pins FFmpeg `8.1.2#3`, both AstraMedia providers require `libavcodec 62.28.102`, and the focused version tests plus 10 incremental-stream tests pass. The same authorized WMV3 produces 2106 frames and the same 7 concealment warnings through ordinary file input and custom AVIO, so AVIO is not the sole cause. This is deterministic dependency and diagnosis evidence, not movie visual acceptance or E3.
+2026-08-30 FFmpeg dependency seam: the root vcpkg manifest pins FFmpeg `8.1.2#3`, both AstraMedia providers require `libavcodec 62.28.102`, and the focused version tests plus 10 incremental-stream tests pass. The same authorized WMV3 exposes 7 damaged frames through ordinary file input, external FFmpeg and custom AVIO, so AVIO is not the sole cause. AstraMedia now maps FFmpeg `decode_error_flags` to blocking `ASTRA_FFMPEG_CORRUPT_FRAME`; this is deterministic dependency and fail-fast diagnosis evidence, not movie visual acceptance or E3.
 
 2026-08-30 Minori streaming allocation seam: `entry_chunk_transform_reuses_the_owned_source_buffer` and the seven existing PAZ stream regressions pass. The source-owned chunk now survives decrypt and pending-stream handoff without an intermediate plaintext allocation. This remains an E1 allocation contract; the real-sample peak-memory gate is still open.
 

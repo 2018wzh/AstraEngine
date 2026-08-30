@@ -4,8 +4,9 @@
 
 - [x] Root vcpkg manifest pins the reviewed FFmpeg `8.1.2#3` baseline and minimal components; Windows CI installs that manifest instead of a floating port.
 - [x] Both AstraMedia FFmpeg providers reject a runtime other than `libavcodec 62.28.102`; focused version and incremental-stream tests pass against the pinned install.
-- [x] The same authorized AVI reproduces 7 concealed P frames through both ordinary FFmpeg file input and AstraMedia custom AVIO. This rules out custom AVIO as the sole cause and keeps the diagnostic observable.
-- [ ] Resolve or qualify the MSVC/vcpkg decoder-build difference, then inspect required movie checkpoints against the original. External builds decoding without warnings are diagnostic evidence only, not a production fallback or parity proof.
+- [x] The same authorized AVI reproduces 7 damaged frames through ordinary file input, external FFmpeg and AstraMedia custom AVIO. This rules out custom AVIO as the sole cause.
+- [x] AstraMedia inspects FFmpeg `decode_error_flags` and returns `ASTRA_FFMPEG_CORRUPT_FRAME` when concealment or another decode error is present; damaged frames can no longer pass E2 as zero diagnostics.
+- [ ] Inspect required movie checkpoints against the original and define an explicit title-owned acceptance policy if the authored source requires concealment. External builds remain diagnostic evidence, not a production fallback or parity proof.
 
 ## 消息控制标记（2026-08-30）
 
