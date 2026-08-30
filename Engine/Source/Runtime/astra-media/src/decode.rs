@@ -32,6 +32,35 @@ mod ffmpeg_stream;
 #[cfg(feature = "ffmpeg-vcpkg")]
 pub use ffmpeg_stream::*;
 
+#[cfg(feature = "ffmpeg-vcpkg")]
+const REQUIRED_FFMPEG_AVCODEC_VERSION: u32 = (62 << 16) | (28 << 8) | 102;
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+pub(crate) fn validate_ffmpeg_runtime_version() -> Result<(), MediaError> {
+    validate_ffmpeg_codec_version(ffmpeg_next::codec::version())
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+fn validate_ffmpeg_codec_version(version: u32) -> Result<(), MediaError> {
+    if version == REQUIRED_FFMPEG_AVCODEC_VERSION {
+        return Ok(());
+    }
+    let (major, minor, micro) = ffmpeg_version_components(version);
+    let (required_major, required_minor, required_micro) =
+        ffmpeg_version_components(REQUIRED_FFMPEG_AVCODEC_VERSION);
+    Err(decode_error(
+        "ASTRA_FFMPEG_RUNTIME_VERSION",
+        format!(
+            "FFmpeg libavcodec runtime {major}.{minor}.{micro} does not match required {required_major}.{required_minor}.{required_micro}"
+        ),
+    ))
+}
+
+#[cfg(feature = "ffmpeg-vcpkg")]
+fn ffmpeg_version_components(version: u32) -> (u32, u32, u32) {
+    (version >> 16, (version >> 8) & 0xff, version & 0xff)
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
@@ -1969,6 +1998,7 @@ impl FfmpegDecodeProvider {
 
     pub fn probe() -> Result<Self, MediaError> {
         ffmpeg::probe()?;
+        validate_ffmpeg_runtime_version()?;
         Ok(Self { probed: true })
     }
 
@@ -1990,6 +2020,23 @@ impl FfmpegDecodeProvider {
             packaged_eligible: true,
             reference_only: false,
         }
+    }
+}
+
+#[cfg(all(test, feature = "ffmpeg-vcpkg"))]
+mod ffmpeg_runtime_version_tests {
+    use super::*;
+
+    #[test]
+    fn exact_pinned_ffmpeg_runtime_is_accepted() {
+        validate_ffmpeg_codec_version(REQUIRED_FFMPEG_AVCODEC_VERSION).unwrap();
+    }
+
+    #[test]
+    fn unverified_ffmpeg_runtime_is_rejected() {
+        assert!(validate_ffmpeg_codec_version((62 << 16) | (11 << 8) | 100).is_err());
+        assert!(validate_ffmpeg_codec_version((62 << 16) | (28 << 8) | 101).is_err());
+        assert!(validate_ffmpeg_codec_version((63 << 16) | (1 << 8) | 100).is_err());
     }
 }
 

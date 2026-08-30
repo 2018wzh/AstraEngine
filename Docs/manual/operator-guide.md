@@ -18,7 +18,7 @@ cargo test --workspace --features ffmpeg-vcpkg
 
 任务结束后，应停止当前实例启动的进程，删除不再需要的临时报告、fixture 和构建缓存。只允许清理当前实例拥有的产物；移除 worktree 前必须确认没有未提交修改，也不能触碰其他实例仍在使用的目录。
 
-Windows 的 `ffmpeg-vcpkg` job 要求设置 `VCPKG_ROOT`，并把 `VCPKG_DEFAULT_TRIPLET` 对应的 release/debug runtime 目录显式加入 `PATH`。目录或 runtime 缺失时命令直接阻断，不复制 DLL，也不退回无视频模式。
+Windows 的 `ffmpeg-vcpkg` job 要求使用仓库根目录 `vcpkg.json` 的 manifest mode；不要另行安装浮动的 `ffmpeg:x64-windows`。先将 vcpkg checkout 固定到 manifest 的 `builtin-baseline`，再执行 `vcpkg install --x-manifest-root=. --triplet=x64-windows`。构建时设置 `VCPKG_ROOT`，并把 `VCPKG_DEFAULT_TRIPLET` 对应的 release/debug runtime 目录显式加入 `PATH`。目录、组件或实际加载的 `libavcodec` 版本不匹配时，provider probe 以 `ASTRA_FFMPEG_RUNTIME_VERSION` 阻断；不会复制其他 DLL，也不会退回无视频模式。
 
 CI 的默认 Headless job 执行 docs、fmt、clippy、Headless driver build、workspace test、test convergence 与 shipping graph 检查。独立 Windows job 从显式 vcpkg root 安装 FFmpeg，并以 `ffmpeg-vcpkg` 同时运行 workspace clippy/test；配置存在不等于 job 已通过，状态页只能引用实际 CI run evidence。
 

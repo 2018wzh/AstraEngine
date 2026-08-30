@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：固定 FFmpeg 依赖与 WMV3 对照
+
+- 根目录新增 vcpkg manifest，固定到提供 FFmpeg `8.1.2#3` 的 baseline，并只启用 `avcodec`、`avformat`、`swresample` 和 `swscale`。Windows CI 改为检出同一 baseline 后按 manifest 安装；AstraMedia 的完整与增量 provider 都会校验实际加载的 `libavcodec 62.28.102`，旧版或混装 DLL 直接返回 `ASTRA_FFMPEG_RUNTIME_VERSION`。
+- 当前 MSVC/vcpkg build 通过普通文件输入和 AstraMedia custom AVIO 输入解码同一授权 WMV3，均输出 2106 帧，也均复现 7 个 P-frame concealment。由此排除 custom AVIO 读取差异是唯一根因；升级与版本固定提升了可复现性，但没有消除质量警告。
+- 系统 FFmpeg 7.1 对五个授权 AVI 的逐个完整解码未报告 concealment，外部 FFmpeg 8.1.2 build 对同一抽样影片也未报告。差异目前收敛到 FFmpeg build/compiler/configuration，而不是 PAZ 流式 reader。该对照不提交影片、文件名或逐帧内容；在画面 checkpoint 与原版同点比较完成前，WMV3 质量继续 blocking。
+
 ## 2026-08-30：隔离进度下的自然解锁链
 
 - 为避免改动用户存档，本轮使用独立 launch profile identity 和独立 writable root，从零开始顺序执行四条真实路线。Sui 报告通过并严格观察到累计解锁数 1；Ren 已发布 `route_complete` 并完成结局影片，但私有输入在返回标题后使用了过时的累计值断言，因此该报告按协议失败。随后 Ayame 的通过报告严格观察到累计解锁数 3，证明 Ren 的原子持久化已被下一 session 读取；Tohka 的通过报告再严格观察到 `route_complete` 和累计解锁数 4。

@@ -1,5 +1,12 @@
 # Minori Implementation Checklist
 
+## FFmpeg dependency and WMV3 quality (2026-08-30)
+
+- [x] Root vcpkg manifest pins the reviewed FFmpeg `8.1.2#3` baseline and minimal components; Windows CI installs that manifest instead of a floating port.
+- [x] Both AstraMedia FFmpeg providers reject a runtime other than `libavcodec 62.28.102`; focused version and incremental-stream tests pass against the pinned install.
+- [x] The same authorized AVI reproduces 7 concealed P frames through both ordinary FFmpeg file input and AstraMedia custom AVIO. This rules out custom AVIO as the sole cause and keeps the diagnostic observable.
+- [ ] Resolve or qualify the MSVC/vcpkg decoder-build difference, then inspect required movie checkpoints against the original. External builds decoding without warnings are diagnostic evidence only, not a production fallback or parity proof.
+
 ## 消息控制标记（2026-08-30）
 
 - [x] 依据原程序 `CTextDrawer`/`MsgSubCmd` 静态分析实现 `\\a`、`\\v` 和 `\\x{load,...}` typed parser；未知、截断、越界和未验证子命令全部阻断。

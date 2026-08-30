@@ -50,11 +50,15 @@ jobs:
         with:
           python-version: "3.x"
       - name: Checkout vcpkg
-        run: git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
+        run: |
+          git init vcpkg
+          git -C vcpkg remote add origin https://github.com/microsoft/vcpkg.git
+          git -C vcpkg fetch --depth 1 origin 39ec37c17d122da0c98c3279e6a6b0f4efb75c4a
+          git -C vcpkg checkout --detach FETCH_HEAD
       - name: Bootstrap vcpkg
         run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
       - name: Install FFmpeg
-        run: .\vcpkg\vcpkg.exe install ffmpeg:x64-windows --clean-after-build
+        run: .\vcpkg\vcpkg.exe install --x-manifest-root=. --x-install-root=.\vcpkg\installed --triplet=x64-windows --clean-after-build
       - name: Configure FFmpeg runtime
         run: python -c "import os,pathlib; root=pathlib.Path(os.environ['VCPKG_ROOT'])/'installed'/os.environ['VCPKG_DEFAULT_TRIPLET']; pathlib.Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8').write(str(root/'debug'/'bin')+'\n'+str(root/'bin')+'\n')"
       - name: Clippy with FFmpeg

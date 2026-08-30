@@ -1,5 +1,7 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 30 日 FFmpeg 复核：Windows native dependency 现由根 vcpkg manifest 固定为 FFmpeg `8.1.2#3`，完整与增量 provider 都拒绝非 `libavcodec 62.28.102` runtime。定向测试通过，但授权 WMV3 在普通文件输入和 custom AVIO 中均复现相同 7 个 P-frame concealment；因此 custom AVIO 不是唯一根因，固定版本也不能被写成影片质量已关闭。外部 build 的无警告结果只用于缩小 build/compiler/configuration 差异，required movie checkpoint、原版同点比较与 Windows E3 仍开放。
+
 2026 年 8 月 30 日自然解锁复核：独立 launch profile 和 writable identity 从零顺序执行四条真实路线，不改动用户存档。Sui、Ayame、Tohka 报告通过，累计解锁分别严格观察为 1、3、4；Ren 已发布 `route_complete` 并完成结局影片，但私有输入的过时累计值断言使该报告按协议失败，Ayame 的累计值 3 证明 Ren 的原子写入已由下一 session 装载。相同 identity 的新标题 session 自然显示并可进入 `Memories`；两个 checkpoint 已完成模型检查。自然 clear 写入与标题 gate 已形成真实 E2 链路，但四份独立路线报告尚未全部绿色，鉴赏子页、正式音频 review、Release Sandbox 和 Windows E3 仍未关闭。未跳过的 WMV3 已到达 owner-side completion，但 FFmpeg concealment 仍是逐帧质量 blocker，Stage 5 保持 `IN_PROGRESS`。
 
 2026 年 8 月 30 日 key-file Release 复核：分支已 rebase 到当前 `origin/master`。官方桌面构建器会为 Minori Manager/CLI 强制编译唯一的 `ffmpeg-vcpkg` provider；缺依赖时构建失败。补齐样本确认的 PAZ 大小写、positional、Firefly fadeout 与三参数 panel 语义后，开发签名 Release 包完成一条 5212 fixed step、4382 presented frame、17 条物理输入、非静音音频和零 diagnostic 的标题启动路线，发布 `route_complete` 并返回标题。三个 checkpoint 已通过模型质量检查。该 passed report 载入时已有四个 clear flag，不能替代从三个 flag 自然写入第四个的同报告；WMV3 concealment、save/restore required checkpoint、正式音频 review、Release Sandbox 和 Windows E3 仍未关闭，Stage 5 保持 `IN_PROGRESS`。

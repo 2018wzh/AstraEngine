@@ -5,7 +5,7 @@ use ffmpeg_next as ffmpeg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{decode_error, MediaError};
+use super::{decode_error, validate_ffmpeg_runtime_version, MediaError};
 use crate::{
     DecodedMediaPacket, IncrementalDecodeBudget, IncrementalDecodeCapability,
     IncrementalDecodeProvider, IncrementalDecodeProviderRegistry, IncrementalDecodeRequest,
@@ -67,6 +67,7 @@ impl FfmpegIncrementalDecodeProvider {
                 format!("initialize FFmpeg provider: {error}"),
             )
         })?;
+        validate_ffmpeg_runtime_version()?;
         Ok(Self)
     }
 }

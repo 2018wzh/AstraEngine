@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 30 日 FFmpeg 依赖复核：根 vcpkg manifest 与 Windows CI 现固定 FFmpeg `8.1.2#3`，AstraMedia provider 严格校验 `libavcodec 62.28.102`。定向版本测试与 10 个增量流测试通过。授权 WMV3 在同一 MSVC/vcpkg build 的普通文件输入和 custom AVIO 输入下都输出 2106 帧并复现 7 个 concealment，说明 custom AVIO 不是唯一根因。其他 FFmpeg build 的无警告解码只用于定位差异；影片 checkpoint、原版同点视觉比较和正式 E3 仍保持 blocking。
+
 2026 年 8 月 30 日自然解锁链：在隔离 launch/writable identity 中从零顺序执行四条真实路线。Sui 通过并观察累计解锁 1；Ren 已完成 route 和结局影片，但报告因过时的累计值断言失败；Ayame 随后通过并观察累计值 3，证明 Ren 的持久化被下一 session 读取；Tohka 通过并观察 `route_complete` 与累计值 4。新标题 session 的 15 fixed step 报告通过，物理输入可进入自然出现的 `Memories`，标题和鉴赏根页两个 checkpoint 已检查且无明显视觉阻断。该证据把自然 clear 写入、跨 session 读取和标题 gate 提升到真实 Headless E2 链路，但四份独立 route report 尚未全部通过，鉴赏子页和原版视觉 parity 仍开放。未跳过的两段 WMV3 均提交 completion，FFmpeg concealment 使逐帧质量继续 blocking。
 
 2026 年 8 月 30 日消息控制回归：Minori runtime state 已硬切到 v28。IDA 确认的 `\\a`、`\\v` 与 `MsgSubCmd load` 已进入 typed parser；控制标记不会成为可见正文。voice wait 通过 AstraMedia/Symphonia 的 seekable metadata reader 读取 revision-pinned VFS stream，避免无缓存压缩包上的整文件物化。inline load 按 fixed clock 保存 pending state，并以 current/next retained texture 执行互补 alpha 交叉淡化。授权样本的定向 Ogg 探针耗时 12 ms。真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空，最大 `runtime_step` 为 0.553 秒；保留帧的模型检查未见新增裁剪、拉伸或图层残影。该结果属于单路线 Headless E2 回归，不关闭罕见行精确 checkpoint、原版视觉对照、其余三路线 E2 或 Windows E3。

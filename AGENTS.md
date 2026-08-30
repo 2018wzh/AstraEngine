@@ -50,7 +50,7 @@ AstraEngine 仓库是 AstraEngine 系列的产品总入口，负责维护跨仓�
 - Headless 视频必须输出有界、逐帧 hash/PTS 校验的完整 decoded stream，不能把 first-frame decode 当作产品播放。正式审查先由 `prepare-review` 固定 required checkpoint、首尾、最大差异、失败邻近帧和完整 WAV，再由 `validate-review` 阻断缺项或覆盖自动失败；正式平台 link 必须同时校验 `astra.platform_run_identity.v1` 和真实平台 report hash。
 - `astra-media-core` 只放轻量、可序列化的 Renderer2D/FilterGraph contract、headless CPU frame 和 deterministic executor；`astra-vn` dylib 可以依赖它，但不能为了演出执行把 decode/text/native media 依赖拖入 VN facade。
 - Stage 2 Media + Package 的完成边界是 Desktop Native + Headless：默认验证 headless、package、asset/cook、release report 和单一 decode provider binding；六平台 native provider 接入不作为 Stage 2 完成前置。
-- FFmpeg 是 optional `ffmpeg-vcpkg` feature，通过 `ffmpeg-next`/`ffmpeg-sys-next` 的 `vcpkg` crate provider 查找本机 FFmpeg。默认 workspace build 不要求本机 FFmpeg；选择 FFmpeg 的 profile 若缺少 provider 必须 blocking，不得切换到其他 decoder。
+- FFmpeg 是 optional `ffmpeg-vcpkg` feature，通过 `ffmpeg-next`/`ffmpeg-sys-next` 的 `vcpkg` crate provider 查找本机 FFmpeg。根 `vcpkg.json` 固定 FFmpeg `8.1.2#3` baseline 和最小组件，provider 必须验证实际加载的 `libavcodec 62.28.102`；默认 workspace build 不要求本机 FFmpeg，选择 FFmpeg 的 profile 若缺少或版本漂移必须 blocking，不得切换到其他 decoder。
 - Package/save 容器支持 `Postcard`、`Raw` 和 `Zstd` section codec。加密只通过 provider trait、`EncryptionDescriptor`、AAD/hash 和 release gate 表达；仓库不得内置发布密钥或 DRM/访问控制绕过实现。
 - Project-level `package_sections` 只能引用项目内相对路径，并用 `targets`/`profiles` 明确限定写入范围。它只适合脱敏 manifest/report section；不得把商业 payload、本地绝对路径、截图、文本、音频、影片或可复原源数据作为 section 写入。
 - Runtime AI 与 Editor AI 同等重要。联网 Runtime AI 可发布，但输出通过 IntentValidator 后必须固化进 save/replay，回放不重新请求 provider。
