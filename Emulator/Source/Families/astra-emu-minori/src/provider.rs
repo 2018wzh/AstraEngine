@@ -390,10 +390,12 @@ struct MinoriGlobalProgressSession {
     loaded: bool,
     persisted_unlocks: Vec<Hash256>,
 }
-fn message_input_keys() -> Vec<String> {
+fn message_input_keys(control_fast_forward_enabled: bool) -> Vec<String> {
     MINORI_MESSAGE_HOST_AWAIT_CONTROLS
         .iter()
-        .map(|key| key.to_string())
+        .copied()
+        .chain(control_fast_forward_enabled.then_some(MINORI_CONTROL_KEY))
+        .map(str::to_owned)
         .collect()
 }
 
@@ -1450,10 +1452,12 @@ impl MinoriRuntimeProvider {
             started_game = true;
             session.restore_presentation_pending = false;
         }
-        let mut play_mode_wait_rebound = session
-            .vm
-            .rebind_active_message_wait()
-            .map_err(runtime_error)?;
+        // Control is part of an eligible message's Host-owned input wait, so
+        // pressing it completes that wait instead of replacing an already
+        // published token. Rebinding here would publish the same token twice
+        // and violate RuntimeWorld AwaitQueue uniqueness. Play-mode changes
+        // still request an explicit rebind at their owning action below.
+        let mut play_mode_wait_rebound = false;
         let game_menu_mode_pressed = input.input_edges.iter().any(|edge| {
             edge.control == MINORI_POINTER_PRIMARY
                 && edge.pressed
@@ -2575,7 +2579,7 @@ impl MinoriRuntimeProvider {
         }
         let waits = match &event {
             Some(MinoriVmEvent::Wait(wait)) | Some(MinoriVmEvent::Message { wait, .. }) => {
-                vec![legacy_wait(wait)]
+                vec![legacy_wait(wait, session.vm.state())]
             }
             Some(MinoriVmEvent::Choice { .. }) => {
                 let wait = session
@@ -2584,7 +2588,7 @@ impl MinoriRuntimeProvider {
                     .wait
                     .as_ref()
                     .ok_or_else(|| runtime_error(MinoriRuntimeError::Choice))?;
-                vec![legacy_wait(wait)]
+                vec![legacy_wait(wait, session.vm.state())]
             }
             Some(MinoriVmEvent::Movie(movie)) => vec![LegacyWaitRequest::MediaFence {
                 token_id: movie.fence_id.clone(),
@@ -7112,7 +7116,10 @@ fn system_ui_output(
             .wait
             .as_ref()
             .ok_or_else(|| runtime_error(MinoriRuntimeError::Backlog))?;
-        output.control.waits.push(legacy_wait(wait));
+        output
+            .control
+            .waits
+            .push(legacy_wait(wait, session.vm.state()));
     }
     let reported_system_page = append_system_page_observation(session, &mut output.control)?;
     let reported_play_mode = append_play_mode_observation(session, &mut output.control)?;
@@ -8371,7 +8378,7 @@ fn waiting_output(
         control: LegacyControlTransaction {
             events: event.into_iter().collect(),
             waits: publish_rebound_wait
-                .then(|| legacy_wait(&wait))
+                .then(|| legacy_wait(&wait, session.vm.state()))
                 .into_iter()
                 .collect(),
             ..LegacyControlTransaction::default()
@@ -8787,7 +8794,7 @@ fn movie_presentation(
     })
 }
 
-fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
+fn legacy_wait(wait: &MinoriWaitState, state: &MinoriRuntimeState) -> LegacyWaitRequest {
     match wait {
         MinoriWaitState::Time {
             token_id,
@@ -8821,7 +8828,9 @@ fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
         },
         MinoriWaitState::Input { token_id } => LegacyWaitRequest::Input {
             token_id: token_id.clone(),
-            keys: message_input_keys(),
+            keys: message_input_keys(
+                state.system_ui.skip_enabled && state.system_ui.control_enabled,
+            ),
         },
         MinoriWaitState::Choice { token_id } => LegacyWaitRequest::Input {
             token_id: token_id.clone(),
@@ -12819,7 +12828,7 @@ mod tests {
             .is_none());
         assert!(matches!(
             output.control.waits.as_slice(),
-            [LegacyWaitRequest::Input { keys, .. }] if *keys == message_input_keys()
+            [LegacyWaitRequest::Input { keys, .. }] if *keys == message_input_keys(false)
         ));
         let wait_token = match &output.control.waits[0] {
             LegacyWaitRequest::Input { token_id, .. } => token_id.clone(),
@@ -12958,7 +12967,7 @@ mod tests {
     }
 
     #[test]
-    fn held_control_rebinds_the_active_provider_message_wait() {
+    fn eligible_control_is_owned_by_the_active_host_message_wait() {
         let script = b".pragma enable_control\r\n.message 1  speaker first\r\n.end\r\n".to_vec();
         let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
             scripts: BTreeMap::from([("minori:/scr/test.sc".into(), script)]),
@@ -12985,7 +12994,9 @@ mod tests {
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
         let token_id = match first.control.waits.as_slice() {
-            [LegacyWaitRequest::Input { token_id, .. }] => token_id.clone(),
+            [LegacyWaitRequest::Input { token_id, keys }] if *keys == message_input_keys(true) => {
+                token_id.clone()
+            }
             _ => panic!("expected message input wait"),
         };
 
@@ -13000,40 +13011,20 @@ mod tests {
                         value: 1.0,
                         sequence: 1,
                     }],
-                    ..step_input(2, Vec::new())
+                    ..step_input(
+                        2,
+                        vec![LegacyAwaitResult {
+                            token_id,
+                            status: "completed".into(),
+                            payload_len: 0,
+                            sequence: 1,
+                        }],
+                    )
                 },
             )
             .unwrap();
-        assert!(matches!(
-            pressed.control.waits.as_slice(),
-            [LegacyWaitRequest::Time {
-                token_id: rebound_token,
-                milliseconds: 10,
-            }] if rebound_token == &token_id
-        ));
-
-        let released = provider
-            .step(
-                &ctx,
-                &session,
-                LegacyStepInput {
-                    input_edges: vec![LegacyInputEdge {
-                        control: MINORI_CONTROL_KEY.into(),
-                        pressed: false,
-                        value: 0.0,
-                        sequence: 2,
-                    }],
-                    ..step_input(3, Vec::new())
-                },
-            )
-            .unwrap();
-        assert!(matches!(
-            released.control.waits.as_slice(),
-            [LegacyWaitRequest::Input {
-                token_id: rebound_token,
-                ..
-            }] if rebound_token == &token_id
-        ));
+        assert_eq!(pressed.status, LegacyRuntimeStatus::Terminal);
+        assert!(pressed.control.waits.is_empty());
     }
 
     #[test]

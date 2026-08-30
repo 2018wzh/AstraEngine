@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026 年 8 月 30 日 Minori 原生菜单 Skip E2：开发签名 Release CLI 通过序列化 secondary-pointer 打开 family v11 菜单，再用方向键选择 Skip。运行完成 674 fixed steps、41 条物理输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和继续运行 10 秒后的 PNG 完全一致。Control 也已纳入启用该 pragma 的 Host-owned message wait，不再靠同 token `Input`/`Time` 重绑定推进当前消息；Minori 173 项 library tests 通过。该结果关闭未读 Skip 的定向 Headless E2，不代表 Control 完整路线、Release Sandbox 或 Windows E3 已通过。
+
 2026 年 8 月 30 日 Minori Skip 语义复核：授权原版在空白进度中选择 Skip 后，当前未读消息保持不动；重新打开右键菜单时，Auto/Skip 也没有勾选。Minori runtime 现只让持久 Skip 快进已有 read identity 的消息，受 `.pragma enable_control` 约束的 Control 仍可快进未读消息。Auto/Skip transaction 的伪勾选已删除，173 个 Minori library tests 与受影响 clippy 通过。该项关闭 E1 行为差异，不替代完整路线、同点影片、Sandbox 或 Windows E3。
 
 2026 年 8 月 30 日 Minori WMF composition：CLI、Manager 和桌面构建器已从 FFmpeg-only 硬编码改为单一显式 `wmf`/`ffmpeg-vcpkg` binding。Windows Minori package 默认 WMF；选择 FFmpeg 才编译对应 feature，evidence 固化所选 provider。两项 provider 不构成 fallback。Headless 平台层也已删除写死的 FFmpeg worker，统一消费 `IncrementalMediaDecoder`；公开 MP4 的 WMF 默认图和 FFmpeg feature 图均完成逐帧、EOS 回归。开发签名 Release CLI 的真实影片 slice随后完成 17,371 fixed steps、32 个提交帧和零 diagnostic；影片从第 5,251 tick 播放到第 16,387 tick，完整音频非静音且未削波。人工检查早段和中段画面未见上下颠倒、拉伸或边缘裁切。该结果关闭当前 Release Headless movie 定向 E2，原版同时间点对照、完整路线复跑、Sandbox 与 Windows E3 仍保持开放。

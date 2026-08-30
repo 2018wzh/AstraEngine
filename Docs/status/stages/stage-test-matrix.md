@@ -1,5 +1,7 @@
 # Stage Test Matrix
 
+2026-08-30 native-menu Skip E2: the development-signed Release CLI opens the v11 family menu from a serialized secondary-pointer event and selects Skip with physical arrow/Enter input. The report passes 674 fixed steps, 41 physical inputs, four checkpoints and zero diagnostics. The unread-message PNG is byte-identical before selection, after selection and ten seconds later. Eligible Control is now declared by the Host-owned message wait instead of replacing the same token. The 173 Minori library tests pass; full-route Control, Release Sandbox and Windows E3 remain open.
+
 2026-08-30 Minori read-skip seam: a fresh original-game session keeps an unread message on screen after selecting Skip, and its native Auto/Skip commands are not check-marked. `persistent_skip_stops_on_unread_messages_but_control_does_not`, the system-menu regression and the full 173-test Minori library suite pass. Persistent Skip now requires the active read identity; pragma-gated Control remains independent. This is focused E1 behavior evidence, not route, Sandbox or E3 acceptance.
 
 2026-08-30 WMF composition seam: CLI and Manager accept one explicit Minori `wmf` or `ffmpeg-vcpkg` binding, reject disabled/unknown values, and never retry another provider. Windows desktop packaging defaults to WMF, compiles FFmpeg only when selected, and records the provider in redacted evidence. Focused default and FFmpeg feature checks plus builder tests pass; signed Release WMF movie checkpoints, orientation/crop, audio timing, original parity and E3 remain open.

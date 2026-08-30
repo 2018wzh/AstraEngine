@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：原生菜单 Skip 的 Headless 复验
+
+- 开发签名 Release CLI 用序列化 secondary-pointer 在剧情中打开 Family API v11 菜单，再以两次方向键和 Enter 选择 Skip。报告通过：674 fixed steps、41 条物理输入、4 个 checkpoint、零 diagnostic。选择前、选择后和继续运行 10 秒后的未读消息 PNG 字节完全一致，与原版空白进度现场观察相符。
+- 复验还暴露了 Control wait 的所有权问题。provider 原先在按键状态变化时把活动消息的同一 token 从 `Input` 改成 `Time`，Headless 会按 AwaitQueue 唯一性返回 `ASTRA_EMU_HEADLESS_WAIT_DUPLICATE`。现行实现让启用 `.pragma enable_control` 且允许快进的 message wait 直接声明 `control`；Host 完成原 wait 后，family 才推进消息，不再发布替换 token。未启用 pragma 的消息不会把 Control 当作确认输入。
+- Minori 173 项 library tests 全部通过。旧的 Control 路线输入在 15000 tick 的 choice 观察处超时，期间影片已打开并完成；该失败没有被计为路线通过。下一轮需要按当前 WMF 时长和 choice 位置重建输入时序，再做 Control 完整路线与 Release Sandbox 复验。
+
 ## 2026-08-30：WMF Release E2 与原版现场复测
 
 - Windows 默认组合已通过 AstraMedia 的统一 `IncrementalMediaDecoder` 绑定 `astra.decode.wmf.incremental`。开发签名 Release CLI 的影片定向 Headless 运行完成 17371 fixed steps、32 个提交帧和零 diagnostic；影片在第 5251 tick 打开，于第 16387 tick 完成。完整音频非静音且未削波，早段和中段 checkpoint 未见上下颠倒、横向拉伸或边缘裁切。

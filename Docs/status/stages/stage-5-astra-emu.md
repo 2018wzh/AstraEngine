@@ -1,5 +1,7 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 30 日原生菜单 Skip E2：开发签名 Release CLI 用序列化 secondary-pointer 打开 family v11 菜单，再以物理方向键选择 Skip。报告通过 674 fixed steps、41 条输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和 10 秒后的画面文件完全一致。Control 快进现在由启用 pragma 的 Host-owned message wait 接收，不再用同一 token 重绑 wait；Minori 173 项 library tests 通过。该项只关闭未读 Skip 的定向 E2，Control 全路线、Release Sandbox 和 Windows E3 仍未完成，Stage 5 保持 `IN_PROGRESS`。
+
 2026 年 8 月 30 日 Skip 现场纠偏：原版空白进度选择 Skip 后不会推进未读消息，重新打开原生菜单时 Auto/Skip 也没有勾选。Minori 现只让持久 Skip 快进已有 read identity 的消息；受 pragma 门控的 Control 仍是独立快进路径。transaction 不再伪造 Auto/Skip checked state。Minori 173 项 library tests、受影响 clippy 与文档检查通过；该项只关闭行为级 E1 差异，Stage 5 仍为 `IN_PROGRESS`。
 
 2026 年 8 月 30 日 WMF composition：CLI 与 Manager 现按用户/构建 profile 显式绑定 `wmf` 或 `ffmpeg-vcpkg`；Minori 不接受缺失 binding，也不会在 decode error 后切换 provider。Windows 桌面包默认 WMF，构建 evidence 保存选择。Headless 已删除写死的 FFmpeg worker，改用 `IncrementalMediaDecoder`，公开 MP4 分别通过 WMF 默认图与 FFmpeg feature 图的逐帧、EOS 回归。开发签名 Release CLI 的真实影片 slice完成 17,371 fixed steps、32 个提交帧和零 diagnostic；影片在第 5,251 tick 打开，于第 16,387 tick 完成，完整音频非静音且未削波。早段和中段 checkpoint 未见上下颠倒、拉伸或边缘裁切。该证据只关闭 WMF 定向 movie E2；原版同时间点比较、完整路线复跑、Release Sandbox 和 Windows E3 仍待执行，Stage 5 保持 `IN_PROGRESS`。

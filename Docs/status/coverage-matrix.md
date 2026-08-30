@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 30 日 Minori 原生菜单 Skip 覆盖：当前开发签名 Release CLI 用 secondary-pointer 打开 v11 family menu，并以物理方向键选择 Skip。报告通过 674 fixed steps、41 条物理输入和 4 个 checkpoint，零 diagnostic；未读消息在选择前、选择后及 10 秒后画面字节一致。受 pragma 门控的 Control 已加入对应 Host-owned message wait，避免发布同一 token 的替换 wait；173 项 Minori library tests 通过。该覆盖属于定向 Headless E2，不关闭 Control 全路线、Sandbox 或 Windows E3。
+
 2026 年 8 月 30 日 Minori Skip 行为覆盖：原版空白进度现场确认持久 Skip 不推进未读消息，Auto/Skip 原生菜单项也不显示勾选。runtime 现以已记录的 message read identity 约束持久 Skip；Control 快进继续使用独立 pragma gate。新增 unread/Control 回归，Minori 173 项 library tests 通过。该覆盖属于 runtime/menu E1，不提升完整路线、Sandbox 或 Windows E3。
 
 2026 年 8 月 30 日 WMF composition 增量：AstraEMU CLI 和 Manager 现可显式选择 `wmf` 或 `ffmpeg-vcpkg`，Minori 拒绝 `disabled`、未知值和运行时 provider 切换。Windows 桌面包默认 `wmf`；构建器仅在明确选择 FFmpeg 时启用其 feature，并把选定 provider 写入脱敏 package evidence。默认与 FFmpeg feature graph 的定向编译均通过。尚未运行签名 Release WMF movie checkpoint，因此画面方向、padding crop、音频时序、fence 和原版同点 parity 仍开放。
