@@ -5360,6 +5360,16 @@ impl<'a> RuntimeDriver<'a> {
         if self.virtual_system_menu.is_some() {
             return self.consume_virtual_system_menu_input(control, pressed);
         }
+        if matches!(control, "confirmation_accept" | "confirmation_cancel") {
+            // A Y/N release can arrive one physical edge after the modal
+            // transaction was resolved. Consume that release, but reject a
+            // fresh Y/N press outside a confirmation so it cannot become an
+            // implicit gameplay shortcut.
+            if !pressed {
+                return Ok(());
+            }
+            return Err("ASTRA_EMU_HEADLESS_CONFIRMATION_INPUT_UNEXPECTED".into());
+        }
         self.pending_inputs.push(LegacyInputEdge {
             control: control.into(),
             pressed,
@@ -5488,6 +5498,11 @@ impl<'a> RuntimeDriver<'a> {
                     .as_ref()
                     .and_then(|_| confirmation_key_control(logical_key.as_deref(), physical_key))
                     .or_else(|| native_key_control(logical_key.as_deref(), physical_key))
+                    .or_else(|| {
+                        (*state == ButtonState::Released)
+                            .then(|| confirmation_key_control(logical_key.as_deref(), physical_key))
+                            .flatten()
+                    })
                     .ok_or_else(|| "ASTRA_EMU_HEADLESS_KEY_UNSUPPORTED".to_owned())?;
                 if control == "control" {
                     self.physical_control_pressed = *state == ButtonState::Pressed;
