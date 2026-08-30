@@ -10,6 +10,8 @@ AstraEMU v1 采用 Manager + `AstraEmuRuntimeProvider` + AstraEngine `RuntimeWor
 
 Family 只发布菜单层级、启用状态、勾选状态和确认语义；Host 负责按当前平台能力呈现，并把 `Select`、`Dismiss`、`Accepted` 或 `Cancelled` 送回同一 session。Family action 只在已验证的结果进入固定 step 后执行，Host/Manager/CLI 不按 item 名称或确认文本解释 family 语义。Manager 的宿主界面使用 Slint，桌面 CLI 通过 `astra-platform` 的原生 context-menu/confirmation provider；Headless 使用序列化物理输入，不伪造桌面 native evidence。
 
+Windows Host 使用 Win32 `muda-win` 和原生 message dialog；macOS Host 使用 AppKit `muda`，在主线程按 live winit view 进行菜单追踪并转换 flipped-view 锚点。当前 Linux Wayland Host 没有 GTK window 绑定，原生 context-menu 请求必须返回 `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED`，不能保留 pending transaction 或隐式切换到 Manager/Headless UI。该差异是平台能力边界，不改变 Family ABI 的语义 ownership。
+
 本次 ABI 契约已经落地，FVP、Minori、Manager、CLI、Headless 与平台 renderer 的 consumer 迁移仍是 `IN_PROGRESS`。v7 的 scene transaction、snapshot/save/restore、text lease、session resource presentation 与 step budget 只属于历史实现，不是当前接口能力。
 
 ## Descriptor

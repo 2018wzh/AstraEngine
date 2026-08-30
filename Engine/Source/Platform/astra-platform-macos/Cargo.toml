@@ -44,6 +44,7 @@ objc2-core-video = { workspace = true, features = [
     "CVReturn",
 ] }
 objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSError", "NSString", "NSURL"] }
+muda.workspace = true
 pollster.workspace = true
 rfd.workspace = true
 tempfile.workspace = true

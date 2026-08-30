@@ -1,9 +1,16 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日 Family ABI 原生菜单 Host 分层：Windows 原生 context menu 和
+confirmation 保持不变，macOS 通过 AppKit `muda` 接入同一 typed menu transaction，
+并在主线程处理 flipped view 坐标；CLI 的 macOS native 路径已接通。Linux 当前
+Wayland Host 缺少 GTK window 绑定，CLI 会返回稳定 unsupported diagnostic，不保留
+悬挂菜单或隐式 fallback。该项是平台 Host 接线证据，完整路线、正式视觉/音频、
+Release Sandbox 和 Windows E3 仍为 blocking。
+
 2026 年 8 月 31 日剧情右键菜单的两个顶层分类已按 Sandbox 观察改为日文标题
 `ヘルプ (&H)`、`ゲーム (&G)`，移除英文值并加入 family menu regression。菜单
 语义仍由 Minori Family ABI 发布，Windows Host 只构建/呈现并回送选择；完整 Release
-Sandbox、Linux/macOS 原生菜单和 Windows E3 继续保持 blocking。
+Sandbox、Linux 原生菜单和 Windows E3 继续保持 blocking，macOS 原生菜单已接通。
 
 2026 年 8 月 31 日 Windows native confirmation 标题已按 Sandbox 观察对齐：有 parent
 window 时沿用 live game caption，没有 parent 时保留 Family ABI 的 typed title。该

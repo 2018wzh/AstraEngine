@@ -75,7 +75,7 @@ use astra_platform::{
     PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
     SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use astra_platform::{
     ContextMenuItem, ContextMenuItemKind, ContextMenuRequest,
     GamepadControl as PlatformGamepadControl, InputState, PlatformEventKind,
@@ -6106,8 +6106,10 @@ impl<'a> RuntimeDriver<'a> {
                 }
             }
         }
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
         self.present_native_system_menu_if_pending().await?;
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        self.reject_unsupported_native_system_menu_if_pending()?;
         self.present_native_confirmation_if_pending().await?;
         self.capture_virtual_confirmation_if_pending()?;
         self.capture_virtual_system_menu_if_pending()?;
@@ -6203,7 +6205,7 @@ impl<'a> RuntimeDriver<'a> {
         .map_err(|error| error.to_string())
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     async fn present_native_system_menu_if_pending(&mut self) -> Result<(), String> {
         let Some(window) = self.window else {
             return Ok(());
@@ -6257,6 +6259,20 @@ impl<'a> RuntimeDriver<'a> {
                 self.input_sequence,
             )
             .map_err(|error| error.to_string())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn reject_unsupported_native_system_menu_if_pending(&self) -> Result<(), String> {
+        if self.window.is_some()
+            && self
+                .runtime
+                .system_menu_host()
+                .has_pending_interaction()
+                .map_err(|error| error.to_string())?
+        {
+            return Err("ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED".to_owned());
+        }
+        Ok(())
     }
 
     async fn submit_scene(&mut self, mut scene: SceneFrame) -> Result<(), String> {

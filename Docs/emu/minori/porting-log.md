@@ -1,5 +1,17 @@
 # Minori 移植日志
 
+## 2026-08-31：Family ABI 原生菜单 Host 分层
+
+继续、退出确认框和剧情右键菜单继续只通过 Family ABI v12 的 typed transaction
+跨边界：Minori 负责语义、层级、勾选状态和结果校验，Host 负责呈现与物理输入，
+不在 Manager 或 CLI 复制一套菜单逻辑。Windows 继续使用 `muda-win`/`rfd` 的
+原生控件；macOS Host 新增 AppKit `muda` context menu，按 winit flipped view
+坐标转换显式锚点，并在主线程完成菜单追踪；Headless 保留物理方向键和确认键路径。
+当前 Linux Wayland Host 没有 GTK window 绑定，原生 context menu 仍明确返回
+`ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED`，不会留下悬挂 transaction 或静默切换
+到另一套 UI。该项仅证明 Host 分层和平台边界，完整路线、媒体、正式视觉对照和
+Windows E3 仍保持原有证据状态。
+
 ## 2026-08-31：原生菜单分类标题对齐
 
 在授权 Windows Sandbox 中重新打开剧情右键菜单，确认底部两个顶层分类带有日文标题和

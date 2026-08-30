@@ -1,5 +1,18 @@
 # Minori Implementation Checklist
 
+## Family ABI native menu Host split (2026-08-31)
+
+- [x] Confirmation and system-menu transactions remain Family ABI v12 typed ports; the
+  family owns semantics while the Host owns native presentation and result delivery.
+- [x] Windows keeps the native `muda-win`/`rfd` path, and macOS now uses AppKit `muda`
+  with flipped-view anchor conversion on the event-loop thread.
+- [x] Release CLI selects the macOS native presenter through the same platform Host client;
+  Headless continues to use only physical navigation/confirmation input.
+- [x] Linux native CLI no longer leaves a menu transaction pending when the Wayland Host
+  lacks a GTK surface; it returns `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED` explicitly.
+- [ ] Linux GTK-backed native context menus, full-route behavior and Windows E3 remain
+  open; no platform fallback is claimed.
+
 ## Original movie backend and platform decode (2026-08-30)
 
 - [x] PE/COM contract inspection confirms the original uses DirectShow Filter Graph plus windowless VMR7 and checks failing HRESULTs; it does not establish a silent decoder fallback.

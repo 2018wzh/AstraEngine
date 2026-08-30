@@ -1,10 +1,19 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日 Family ABI 原生菜单 Host 分层：确认框和右键菜单仍由
+Family ABI v12 typed transaction 传递，Windows 使用现有原生 provider，macOS
+新增 AppKit `muda` 原生 context menu，并处理 winit flipped view 的显式锚点。
+CLI 在 macOS 走同一 Host port；Linux 当前 Wayland Host 没有 GTK window 绑定，
+因此对桌面原生菜单明确返回 `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED`，不再
+让 pending transaction 悬挂。Family 仍不解释平台菜单实现，Headless 仍只消费物理
+输入。macOS 交叉编译检查受本机缺少 Apple C 编译器阻塞，Windows 目标的 CLI 与
+平台增量检查通过；该项不提升 Release Sandbox、完整路线或 Windows E3 状态。
+
 2026 年 8 月 31 日原生菜单分类标题对齐：Sandbox 观察确认剧情右键菜单的两个顶层分类
 使用日文 `ヘルプ (&H)` 与 `ゲーム (&G)`，此前 family transaction 的英文标题已
 移除。菜单顺序、分隔线、启用/勾选状态和 Host 仅呈现不解释命令的边界不变；Minori
-菜单回归通过，仍不改变 Linux/macOS context-menu 未实现、Release Sandbox 或 Windows
-E3 的证据边界。
+菜单回归通过，仍不改变 Linux context-menu 未实现、Release Sandbox 或 Windows
+E3 的证据边界；macOS 原生菜单已由同一 Host port 接通。
 
 2026 年 8 月 31 日 Windows 原生确认框标题对齐：Sandbox 观察确认原版 message box
 沿用 parent game window caption。Windows platform provider 现在在有 parent 时读取 live

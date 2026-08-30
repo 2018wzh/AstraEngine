@@ -91,9 +91,10 @@ mod macos {
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
         host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
-        AudioWakeRegistration, CapturedFrame, ConfirmationRequest, ConfirmationResult, DecodeKind,
-        DecodeOutput, DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState,
-        OpenedAudioOutput, PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
+        AudioWakeRegistration, CapturedFrame, ConfirmationRequest, ConfirmationResult,
+        ContextMenuItemKind, ContextMenuRequest, ContextMenuResult, DecodeKind, DecodeOutput,
+        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput,
+        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
         PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
         PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
         SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
@@ -103,6 +104,10 @@ mod macos {
         VerifiedPackageCache,
     };
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+    use muda::{
+        CheckMenuItem, ContextMenu, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem,
+        PredefinedMenuItem, Submenu,
+    };
     use tokio::sync::oneshot;
     use winit::{
         application::ApplicationHandler,
@@ -112,6 +117,7 @@ mod macos {
         },
         event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
         platform::pump_events::EventLoopExtPumpEvents,
+        raw_window_handle::{HasWindowHandle, RawWindowHandle},
         window::{Window, WindowAttributes, WindowId},
     };
 
@@ -598,12 +604,13 @@ mod macos {
                     }
                 };
                 match command {
-                    HostCommand::ShowContextMenu { reply, .. } => {
-                        let _ = reply.send(Err(PlatformError::new(
-                            PlatformErrorCode::PlatformNotImplemented,
-                            "window.context_menu",
-                            "macOS native context menus are not implemented",
-                        )));
+                    HostCommand::ShowContextMenu { request, reply } => {
+                        let result = self
+                            .windows
+                            .get(request.window)
+                            .cloned()
+                            .and_then(|window| show_context_menu(window.as_ref(), request));
+                        let _ = reply.send(result);
                     }
                     HostCommand::ShowConfirmation { request, reply } => {
                         let result = request
@@ -1843,6 +1850,125 @@ mod macos {
                 message,
             ),
         }
+    }
+
+    fn show_context_menu(
+        window: &Window,
+        request: ContextMenuRequest,
+    ) -> Result<ContextMenuResult, PlatformError> {
+        // MenuEvent is process-global in muda. Drain an event left by a
+        // previous native menu before constructing this transaction so a
+        // stale selection cannot resolve the Family ABI request.
+        while MenuEvent::receiver().try_recv().is_ok() {}
+
+        let menu = Menu::new();
+        let submenus = request
+            .items
+            .iter()
+            .filter(|item| item.kind == ContextMenuItemKind::Submenu)
+            .map(|item| {
+                (
+                    item.item_id.clone(),
+                    Submenu::with_id(MenuId::new(item.item_id.clone()), &item.label, item.enabled),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut items = request.items.iter().collect::<Vec<_>>();
+        items.sort_by_key(|item| (item.parent_id.as_deref(), item.order));
+        for item in items {
+            let append = |entry: &dyn IsMenuItem| -> Result<(), PlatformError> {
+                if let Some(parent_id) = item.parent_id.as_deref() {
+                    submenus
+                        .get(parent_id)
+                        .ok_or_else(|| {
+                            host_error(
+                                "window.context_menu",
+                                "context menu submenu parent is missing",
+                            )
+                        })?
+                        .append(entry)
+                        .map_err(|_| {
+                            host_error(
+                                "window.context_menu",
+                                "context menu child could not be appended",
+                            )
+                        })
+                } else {
+                    menu.append(entry).map_err(|_| {
+                        host_error(
+                            "window.context_menu",
+                            "context menu root item could not be appended",
+                        )
+                    })
+                }
+            };
+            match item.kind {
+                ContextMenuItemKind::Submenu => {
+                    append(submenus.get(&item.item_id).ok_or_else(|| {
+                        host_error(
+                            "window.context_menu",
+                            "context menu submenu was not constructed",
+                        )
+                    })?)?
+                }
+                ContextMenuItemKind::Separator => append(&PredefinedMenuItem::separator())?,
+                ContextMenuItemKind::Command if item.checked => append(&CheckMenuItem::with_id(
+                    MenuId::new(item.item_id.clone()),
+                    &item.label,
+                    item.enabled,
+                    item.checked,
+                    None,
+                ))?,
+                ContextMenuItemKind::Command => append(&MenuItem::with_id(
+                    MenuId::new(item.item_id.clone()),
+                    &item.label,
+                    item.enabled,
+                    None,
+                ))?,
+            }
+        }
+
+        let view = match window
+            .window_handle()
+            .map_err(|_| host_error("window.context_menu", "window handle is unavailable"))?
+            .as_raw()
+        {
+            RawWindowHandle::AppKit(handle) => handle.ns_view.as_ptr(),
+            _ => {
+                return Err(host_error(
+                    "window.context_menu",
+                    "macOS host returned a non-AppKit window handle",
+                ));
+            }
+        };
+        // Winit's AppKit view is flipped while muda positions relative to a
+        // conventional bottom-left view. Convert only explicit family
+        // anchors; None deliberately delegates to the native cursor.
+        let position = request.x.zip(request.y).map(|(x, y)| {
+            let height = window
+                .inner_size()
+                .to_logical::<f64>(window.scale_factor())
+                .height;
+            winit::dpi::Position::Logical(winit::dpi::LogicalPosition::new(
+                f64::from(x),
+                height - f64::from(y),
+            ))
+        });
+        // SAFETY: the view pointer comes from the live winit Window retained
+        // by the platform resource table while AppKit tracks this menu.
+        let selected = unsafe { menu.show_context_menu_for_nsview(view, position) };
+        if !selected {
+            return Ok(ContextMenuResult { item_id: None });
+        }
+        let event = MenuEvent::receiver().try_recv().map_err(|_| {
+            host_error(
+                "window.context_menu",
+                "native context menu selected without an item event",
+            )
+        })?;
+        Ok(ContextMenuResult {
+            item_id: Some(event.id.0),
+        })
     }
 
     fn host_error(operation: &'static str, message: &'static str) -> PlatformError {
