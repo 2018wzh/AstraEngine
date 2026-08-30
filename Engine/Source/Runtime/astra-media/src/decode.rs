@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{Cursor, ErrorKind},
+    io::{Cursor, ErrorKind, Read, Seek, SeekFrom},
 };
 
 use astra_core::{is_safe_symbol as safe_identity, Diagnostic};
@@ -10,7 +10,7 @@ use symphonia::core::{
     codecs::audio::{AudioDecoder, AudioDecoderOptions, CODEC_ID_NULL_AUDIO},
     errors::Error as SymphoniaError,
     formats::{probe::Hint, FormatOptions, FormatReader, TrackType},
-    io::MediaSourceStream,
+    io::{MediaSource, MediaSourceStream},
     meta::MetadataOptions,
 };
 
@@ -90,6 +90,18 @@ pub fn probe_symphonia_audio_metadata(
     codec: &str,
     bytes: astra_byte_source::OwnedByteBuffer,
 ) -> Result<AudioStreamMetadata, MediaError> {
+    let byte_len = bytes.len() as u64;
+    probe_symphonia_audio_metadata_reader(codec, Cursor::new(bytes), byte_len)
+}
+
+pub fn probe_symphonia_audio_metadata_reader<R>(
+    codec: &str,
+    reader: R,
+    byte_len: u64,
+) -> Result<AudioStreamMetadata, MediaError>
+where
+    R: Read + Seek + Send + Sync + 'static,
+{
     if !matches!(codec, "wav" | "ogg" | "flac" | "mp3") {
         return Err(MediaError::message(
             "audio metadata probe codec is not explicitly supported",
@@ -97,7 +109,13 @@ pub fn probe_symphonia_audio_metadata(
     }
     let mut hint = Hint::new();
     hint.with_extension(codec);
-    let media_stream = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+    if byte_len == 0 {
+        return Err(MediaError::message("audio metadata source is empty"));
+    }
+    let media_stream = MediaSourceStream::new(
+        Box::new(SeekableMediaSource { reader, byte_len }),
+        Default::default(),
+    );
     let format = symphonia::default::get_probe()
         .probe(
             &hint,
@@ -149,6 +167,36 @@ pub fn probe_symphonia_audio_metadata(
         frame_count,
         duration_us,
     })
+}
+
+struct SeekableMediaSource<R> {
+    reader: R,
+    byte_len: u64,
+}
+
+impl<R: Read> Read for SeekableMediaSource<R> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(output)
+    }
+}
+
+impl<R: Seek> Seek for SeekableMediaSource<R> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        self.reader.seek(position)
+    }
+}
+
+impl<R> MediaSource for SeekableMediaSource<R>
+where
+    R: Read + Seek + Send + Sync,
+{
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.byte_len)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

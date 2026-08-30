@@ -4,7 +4,8 @@
 
 - IDA 对原程序 `CTextDrawer` 和 `MsgSubCmd` 的静态分析确认：`\\a` 请求自动推进，`\\v` 等待当前语音结束，组合 `\\v\\a` 先等待语音再自动继续；`\\x{...}` 进入内联子命令 parser，已确认的 `load` 形态按延时、角色 slot、PNG 资源、可选 transition 和 opacity 调度。未知控制、截断参数和越界值继续阻断，不从名字推测语义。
 - 当前授权样本的脱敏 census 为 18319 条 message、26 条内联 `load`，`\\v` 和 `\\a` 只在同一处组合出现。报告不保存脚本名、正文、角色资源名或 source span；`pos/trans/vis` 仅由原程序 dispatcher 证明存在，没有因样本未使用而注入 runtime。
-- runtime state 已硬切到 `astra.emu.minori.runtime_state.v26`。控制序列在进入 backlog、翻译 Hook 和文字 surface 前剥离；`\\v` 使用 AstraMedia 的 Symphonia metadata probe 读取 Ogg 容器时长，不分配整段 PCM，缺少可靠 duration 时直接阻断。内联 `load` 使用固定时钟和可序列化 pending state，消息输入会按原程序清理路径强制完成；当前呈现仍是新资源淡入，不宣称已经复刻原程序 current/next 双层交叉淡化。
+- runtime state 已硬切到 `astra.emu.minori.runtime_state.v28`。控制序列在进入 backlog、翻译 Hook 和文字 surface 前剥离。`\\v` 通过 AstraMedia 的 seekable Symphonia metadata reader 读取 revision-pinned VFS stream，不分配整段 PCM；缺少可靠 duration 时直接阻断。授权样本定向探针耗时 12 ms，替代了此前会在无缓存压缩 entry 上反复解压的整文件读取。内联 `load` 使用固定时钟和可序列化 pending state；current 与 next 作为两个 retained texture 同时提交，以互补 alpha 交叉淡化，完成后再提升 next。消息输入会走同一清理路径强制完成。该实现已有定向测试，尚未取得 v28 的原版同点视觉证据。
+- 使用签名 v28 plugin 和 Release `astra-emu-cli headless` 重跑此前通过的标题启动物理输入。结果完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空，结局按脚本返回标题。`runtime_step` 最大值为 0.553 秒，旧候选因整文件读取出现的约 4147 秒尖峰没有复现；整次日志跨度约 345 秒。模型查看标题、路线和返回标题三个保留帧，未见新增裁剪、拉伸或图层残影。采样没有命中 inline load 的交叉淡化中间态，因此不能用这次回归代替精确 checkpoint 或原版同点视觉对照。
 - AstraMedia WAV fixture、仓库 Ogg 样本和 Minori 170 项 library 回归均通过。该结果是 parser/runtime E1；真实罕见行的 Headless checkpoint、原版同点视觉对照、四路线 E2 和 Windows E3 尚未重跑。
 
 ## 2026-08-30：控制标记观察边界与契约纠偏

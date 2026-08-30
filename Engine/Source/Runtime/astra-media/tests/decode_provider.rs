@@ -1,6 +1,7 @@
 use astra_media::{
-    open_symphonia_audio_stream, probe_symphonia_audio_metadata, DecodeBindingContext, DecodeKind,
-    DecodeOutput, DecodeProvider, DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
+    open_symphonia_audio_stream, probe_symphonia_audio_metadata,
+    probe_symphonia_audio_metadata_reader, DecodeBindingContext, DecodeKind, DecodeOutput,
+    DecodeProvider, DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
     SymphoniaAudioDecodeProvider, SyntheticPlatformDecodeProvider,
 };
 use serde_json::Value;
@@ -101,11 +102,19 @@ fn symphonia_stream_decoder_emits_bounded_chunks_without_whole_file_pcm() {
 
 #[astra_headless_test::test]
 fn symphonia_metadata_probe_reports_duration_without_pcm_output() {
-    let metadata = probe_symphonia_audio_metadata("wav", tiny_wav().into()).unwrap();
+    let wav = tiny_wav();
+    let metadata = probe_symphonia_audio_metadata("wav", wav.clone().into()).unwrap();
     assert_eq!(metadata.sample_rate, 8_000);
     assert_eq!(metadata.channels, 1);
     assert_eq!(metadata.frame_count, 4);
     assert_eq!(metadata.duration_us, 500);
+    let streamed = probe_symphonia_audio_metadata_reader(
+        "wav",
+        std::io::Cursor::new(wav.clone()),
+        wav.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(streamed, metadata);
 }
 
 #[astra_headless_test::test]

@@ -4,7 +4,8 @@
 
 - [x] 依据原程序 `CTextDrawer`/`MsgSubCmd` 静态分析实现 `\\a`、`\\v` 和 `\\x{load,...}` typed parser；未知、截断、越界和未验证子命令全部阻断。
 - [x] 控制标记不进入文字 surface、translation Hook 或 backlog；voice wait 使用 AstraMedia/Symphonia metadata-only probe，不为时长计算解码整段 PCM。
-- [x] runtime state v26 保存 voice wait、auto-advance 和 pending inline load；Minori library 170/170、AstraMedia metadata fixture 与仓库 Ogg probe 通过。
+- [x] runtime state v28 保存 voice wait、auto-advance、pending inline load 和 current/next 角色替换；AstraMedia seekable metadata fixture、授权样本 Ogg 探针与定向 Minori 回归通过。
+- [x] Release CLI 的真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；最大 `runtime_step` 为 0.553 秒。该项只证明本次单路线没有回归。
 - [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。内联角色替换当前缺少原程序 current/next 双层交叉淡化，不能标视觉 parity。
 
 ## Key-file Release 路线复核（2026-08-30）
@@ -48,7 +49,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 ## 当前状态（2026-08-25）
 
-- runtime snapshot schema 当前为 `astra.emu.minori.runtime_state.v26`；message completion 记录排序 bounded read identity，voice/auto wait 与 pending inline load 同步进入 restore 校验。此前 v23/v24 的条目仅用于回溯，不能作为当前 ABI/状态版本。
+- runtime snapshot schema 当前为 `astra.emu.minori.runtime_state.v28`；message completion 记录排序 bounded read identity，voice/auto wait、pending inline load 和 current/next 交叉淡化状态同步进入 restore 校验。此前 v23/v24/v26 的条目仅用于回溯，不能作为当前 ABI/状态版本。
 
 - Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori launch profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
 
@@ -142,6 +143,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - [x] 公共 Kira main track 使用显式 peak limiter，分别报告 pre-master 与 master-output；真实短程 output overload 和 underflow 均为 0。
 - [x] 真实 movie frame checkpoint 已确认 decoded frame、比例、剧情层文字合成和无旧帧残留；完整路线 WAV 非静音、低于 i16 full scale，master output overload/underflow 为 0。
 - [ ] 完成正式 Headless audio review；视觉 bundle 已逐项检查，WAV 的格式、时长、peak、RMS、静音区间、clipping 和声道平衡已量测，但涉及语音的整段试听尚未完成，`validate-review` 保持 blocking。
+- [ ] 为样本唯一的 `\\v\\a` 行和 26 条 inline load 增加精确 checkpoint，检查 current/next 中间帧，并与原版同点画面比较；当前单路线采样帧没有命中交叉淡化中间态。
 - [x] review protocol 强制 `full_audio` verdict 与 bundle 的完整 WAV selection；省略或失败必须在 validator 和 release preflight 阻断。私有 10 段连续听审清单覆盖全部 27260416 audio frame，但尚未据此宣称人工听审完成。
 
 ## 后台进度与窗口焦点（2026-08-25）

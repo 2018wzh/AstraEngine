@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use astra_byte_source::{ByteRange, OwnedByteBuffer};
+use astra_byte_source::{BoundedByteSourceReader, ByteRange, OwnedByteBuffer};
 use astra_core::Hash256;
 #[cfg(test)]
 use astra_core::SchemaVersion;
@@ -27,8 +27,9 @@ use astra_emu_family_api::{
     LEGACY_FAMILY_ABI_FINGERPRINT, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_core::LegacyCoreError;
+use astra_emu_family_support::LegacyRuntimeVfsByteSource;
 use astra_media::{
-    probe_symphonia_audio_metadata, DecodeBindingContext, DecodeKind, DecodeOutput,
+    probe_symphonia_audio_metadata_reader, DecodeBindingContext, DecodeKind, DecodeOutput,
     DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
 };
 use astra_media_core::{
@@ -46,6 +47,8 @@ use crate::save::{
 use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
 };
+#[cfg(test)]
+use crate::MinoriCharacterReplacementState;
 use crate::{
     collect_resource_references, message_voice_wait_resources, parse_sc, MinoriAudioCommand,
     MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame, MinoriCharacterState,
@@ -90,6 +93,7 @@ const MINORI_CHOICE_RESOURCE_URIS: [&str; 3] = [
 ];
 const MINORI_CHOICE_TEXTURE_BASE: u32 = 500;
 const MINORI_CHARACTER_TEXTURE_BASE: u32 = 10_000;
+const MINORI_CHARACTER_REPLACEMENT_TEXTURE_BASE: u32 = 15_000;
 const MINORI_SYSTEM_TEXTURE_ID: u32 = 20_000;
 const MINORI_BACKLOG_GAUGE_TEXTURE_ID: u32 = 20_001;
 const MINORI_BACKLOG_BALL_TEXTURE_ID: u32 = 20_002;
@@ -4427,65 +4431,105 @@ fn append_character_contents(
                 "character presentation requires a static PNG resource",
             ));
         }
-        let texture_id = MINORI_CHARACTER_TEXTURE_BASE
-            .checked_add(character.slot_id)
-            .ok_or_else(|| {
-                invalid(
-                    "ASTRA_EMU_MINORI_CHARACTER_TEXTURE_ID",
-                    "character texture id overflowed",
-                )
-            })?;
-        let resource = read_texture_resource(vfs, mount_set_id, resource_uri, texture_id)?;
-        let left = i64::from(character.anchor_position[0])
-            .checked_sub(i64::from(resource.decoded_width) / 2)
-            .ok_or_else(|| {
-                invalid(
-                    "ASTRA_EMU_MINORI_CHARACTER_POSITION",
-                    "character horizontal anchor overflowed",
-                )
-            })?;
-        let top = i64::from(stage_height)
-            .checked_sub(i64::from(resource.decoded_height))
-            .and_then(|value| value.checked_sub(i64::from(character.anchor_position[1])))
-            .ok_or_else(|| {
-                invalid(
-                    "ASTRA_EMU_MINORI_CHARACTER_POSITION",
-                    "character bottom-relative anchor overflowed",
-                )
-            })?;
-        let left = i32::try_from(left).map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MINORI_CHARACTER_POSITION",
-                "character horizontal anchor cannot be represented",
-            )
-        })?;
-        let top = i32::try_from(top).map_err(|_| {
-            invalid(
-                "ASTRA_EMU_MINORI_CHARACTER_POSITION",
-                "character vertical anchor cannot be represented",
-            )
-        })?;
-        append_texture_draw(
-            &resource,
-            left,
-            top,
-            f32::from(character.opacity_256) / 256.0,
+        append_character_sprite(
+            vfs,
+            mount_set_id,
+            character,
+            resource_uri,
+            MINORI_CHARACTER_TEXTURE_BASE,
+            character.opacity_256,
+            stage_height,
+            scissor,
+            texture_resources,
             draws,
         )?;
-        let draw = draws.last_mut().ok_or_else(|| {
+        if let Some(replacement) = character.replacement.as_ref() {
+            append_character_sprite(
+                vfs,
+                mount_set_id,
+                character,
+                &replacement.resource_uri,
+                MINORI_CHARACTER_REPLACEMENT_TEXTURE_BASE,
+                replacement.next_opacity_256,
+                stage_height,
+                scissor,
+                texture_resources,
+                draws,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_character_sprite(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    character: &MinoriCharacterState,
+    resource_uri: &str,
+    texture_base: u32,
+    opacity_256: u16,
+    stage_height: u32,
+    scissor: LegacyScissorV1,
+    texture_resources: &mut Vec<LegacyTextureResourceV1>,
+    draws: &mut Vec<LegacyDrawV1>,
+) -> Result<(), LegacyProviderError> {
+    if !resource_uri.to_ascii_lowercase().ends_with(".png") {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CHARACTER_CODEC",
+            "character presentation requires a static PNG resource",
+        ));
+    }
+    let texture_id = texture_base.checked_add(character.slot_id).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_CHARACTER_TEXTURE_ID",
+            "character texture id overflowed",
+        )
+    })?;
+    let resource = read_texture_resource(vfs, mount_set_id, resource_uri, texture_id)?;
+    let left = i64::from(character.anchor_position[0])
+        .checked_sub(i64::from(resource.decoded_width) / 2)
+        .ok_or_else(|| {
             invalid(
-                "ASTRA_EMU_MINORI_CHARACTER_RESOURCE",
-                "character draw was not appended",
+                "ASTRA_EMU_MINORI_CHARACTER_POSITION",
+                "character horizontal anchor overflowed",
             )
         })?;
-        draw.scissor = Some(scissor);
-        if !character.positive_orientation {
-            for vertex in &mut draw.vertices {
-                vertex.tex_coord[0] = 1.0 - vertex.tex_coord[0];
-            }
+    let top = i64::from(stage_height)
+        .checked_sub(i64::from(resource.decoded_height))
+        .and_then(|value| value.checked_sub(i64::from(character.anchor_position[1])))
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_CHARACTER_POSITION",
+                "character bottom-relative anchor overflowed",
+            )
+        })?;
+    let left = i32::try_from(left).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_CHARACTER_POSITION",
+            "character horizontal anchor cannot be represented",
+        )
+    })?;
+    let top = i32::try_from(top).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_CHARACTER_POSITION",
+            "character vertical anchor cannot be represented",
+        )
+    })?;
+    append_texture_draw(&resource, left, top, f32::from(opacity_256) / 256.0, draws)?;
+    let draw = draws.last_mut().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_CHARACTER_RESOURCE",
+            "character draw was not appended",
+        )
+    })?;
+    draw.scissor = Some(scissor);
+    if !character.positive_orientation {
+        for vertex in &mut draw.vertices {
+            vertex.tex_coord[0] = 1.0 - vertex.tex_coord[0];
         }
-        texture_resources.push(resource);
     }
+    texture_resources.push(resource);
     Ok(())
 }
 
@@ -4779,9 +4823,26 @@ fn decode_message_voice_durations(
     }
     let mut durations_ms = BTreeMap::new();
     for resource_uri in resources {
-        let encoded = vfs.read_file(mount_set_id, &resource_uri, MAX_RESOURCE_BYTES)?;
-        let metadata =
-            probe_symphonia_audio_metadata("ogg", encoded).map_err(minori_media_decode_error)?;
+        let source = Arc::new(LegacyRuntimeVfsByteSource::new(
+            Arc::clone(vfs),
+            mount_set_id,
+            resource_uri.clone(),
+        )?);
+        let reader = BoundedByteSourceReader::new(source, 4 * 1024 * 1024).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_MESSAGE_VOICE_READER",
+                "voice metadata reader could not bind the revision-pinned VFS source",
+            )
+        })?;
+        if reader.stat().len == 0 || reader.stat().len > MAX_RESOURCE_BYTES {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_MESSAGE_VOICE_BOUNDS",
+                "voice resource is empty or exceeds the runtime input bound",
+            ));
+        }
+        let byte_len = reader.stat().len;
+        let metadata = probe_symphonia_audio_metadata_reader("ogg", reader, byte_len)
+            .map_err(minori_media_decode_error)?;
         let milliseconds = metadata
             .duration_us
             .checked_add(999)
@@ -13993,7 +14054,70 @@ mod tests {
     }
 
     #[test]
-    fn provider_stage_frames_retire_unmarked_character_slots_after_one_keep() {
+    fn provider_crossfades_both_native_character_nodes_for_inline_load() {
+        let png = |rgba: [u8; 4]| {
+            let mut encoded = Vec::new();
+            PngEncoder::new(&mut encoded)
+                .write_image(&rgba.repeat(16), 4, 4, ExtendedColorType::Rgba8)
+                .unwrap();
+            encoded
+        };
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                ("minori:/st/Old.png".into(), png([255, 0, 0, 255])),
+                ("minori:/st/New.png".into(), png([0, 255, 0, 255])),
+            ]),
+        });
+        let characters = BTreeMap::from([(
+            11,
+            MinoriCharacterState {
+                slot_id: 11,
+                positive_orientation: true,
+                resource_uris: vec!["minori:/st/Old.png".into()],
+                anchor_position: [640, 0],
+                visible: true,
+                opacity_256: 128,
+                transition: None,
+                replacement: Some(MinoriCharacterReplacementState {
+                    resource_uri: "minori:/st/New.png".into(),
+                    start_opacity_256: 256,
+                    target_opacity_256: 256,
+                    next_opacity_256: 128,
+                    duration_ms: 40,
+                    elapsed_ns: 20_000_000,
+                    completed: false,
+                }),
+                pending_stage: false,
+                keep_once: false,
+            },
+        )]);
+        let mut resources = Vec::new();
+        let mut draws = Vec::new();
+        append_character_contents(
+            &vfs,
+            "mount.test",
+            &characters,
+            1280,
+            720,
+            &mut resources,
+            &mut draws,
+        )
+        .unwrap();
+        let current = draws
+            .iter()
+            .find(|draw| draw.texture_id == MINORI_CHARACTER_TEXTURE_BASE + 11)
+            .unwrap();
+        let replacement = draws
+            .iter()
+            .find(|draw| draw.texture_id == MINORI_CHARACTER_REPLACEMENT_TEXTURE_BASE + 11)
+            .unwrap();
+        assert_eq!(current.vertices[0].color[3], 0.5);
+        assert_eq!(replacement.vertices[0].color[3], 0.5);
+        assert_eq!(resources.len(), 2);
+    }
+
+    #[test]
+    fn provider_stage_frames_commit_new_slots_then_retire_unmarked_previous_slots() {
         let script = b".stage * BG.png 0 0\r\n.char load 11 CH1.png\r\n.char load 12 CH2.png\r\n.char keep 11\r\n.stage * BG2.png 0 0\r\n.stage * BG3.png 0 0\r\n.end\r\n"
             .to_vec();
         let png = |rgba: [u8; 4]| {
@@ -14043,12 +14167,12 @@ mod tests {
             .step(&ctx, &session, step_input(5, Vec::new()))
             .unwrap();
         let retained_frame = &retained.live.resource_scenes[0].value;
-        assert_eq!(retained_frame.texture_resources.len(), 2);
+        assert_eq!(retained_frame.texture_resources.len(), 3);
         assert!(retained_frame
             .texture_resources
             .iter()
             .any(|resource| resource.texture_id == MINORI_CHARACTER_TEXTURE_BASE + 11));
-        assert!(!retained_frame
+        assert!(retained_frame
             .texture_resources
             .iter()
             .any(|resource| resource.texture_id == MINORI_CHARACTER_TEXTURE_BASE + 12));

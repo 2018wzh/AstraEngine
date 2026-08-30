@@ -11,7 +11,7 @@ use crate::{
     SourceSpan,
 };
 
-pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v26";
+pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v28";
 
 /// Maximum number of script files accepted by the explicit resource-reference
 /// audit.  The audit is an opt-in mount/open policy; the normal runtime keeps
@@ -409,6 +409,13 @@ pub struct MinoriCharacterState {
     pub visible: bool,
     pub opacity_256: u16,
     pub transition: Option<MinoriCharacterTransitionState>,
+    /// Native inline `load` prepares a second sprite node and cross-fades it
+    /// against the current node before atomically promoting the replacement.
+    pub replacement: Option<MinoriCharacterReplacementState>,
+    /// A `.char load` prepares this slot for the next `.stage`. Native
+    /// `CCharLayerManager` keeps newly prepared layers while retiring older
+    /// unmarked layers at the stage boundary.
+    pub pending_stage: bool,
     /// Native `CCharLayer` one-shot retention flag. `.char keep` sets it;
     /// scene finalization consumes it when deciding which previous-scene
     /// characters survive into the next scene.
@@ -419,6 +426,17 @@ pub struct MinoriCharacterState {
 pub struct MinoriCharacterTransitionState {
     pub start_opacity_256: u16,
     pub target_opacity_256: u16,
+    pub duration_ms: u32,
+    pub elapsed_ns: u64,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriCharacterReplacementState {
+    pub resource_uri: String,
+    pub start_opacity_256: u16,
+    pub target_opacity_256: u16,
+    pub next_opacity_256: u16,
     pub duration_ms: u32,
     pub elapsed_ns: u64,
     pub completed: bool,
@@ -2082,6 +2100,7 @@ impl MinoriVm {
                 if let Some(transition) = character.transition.take() {
                     character.opacity_256 = transition.target_opacity_256;
                 }
+                complete_character_replacement(character)?;
             }
         }
         let completes_media = matches!(current, MinoriWaitState::Media { .. });
@@ -2437,31 +2456,50 @@ impl MinoriVm {
         &mut self,
         delta_ns: u64,
     ) -> Result<Option<MinoriCharacterFrame>, MinoriRuntimeError> {
-        let Some((_, character)) = self
-            .state
-            .characters
-            .iter_mut()
-            .find(|(_, character)| character.transition.is_some())
-        else {
+        let Some((_, character)) = self.state.characters.iter_mut().find(|(_, character)| {
+            character.transition.is_some() || character.replacement.is_some()
+        }) else {
             return Ok(None);
         };
-        let transition = character
-            .transition
-            .as_mut()
-            .ok_or(MinoriRuntimeError::Character)?;
-        if transition.completed {
-            return Ok(None);
+        if let Some(transition) = character.transition.as_mut() {
+            if transition.completed {
+                return Ok(None);
+            }
+            let duration_ns = u64::from(transition.duration_ms)
+                .checked_mul(1_000_000)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            transition.elapsed_ns = transition
+                .elapsed_ns
+                .checked_add(delta_ns)
+                .ok_or(MinoriRuntimeError::Overflow)?
+                .min(duration_ns);
+            character.opacity_256 = interpolate_character_opacity(transition, duration_ns)?;
+            transition.completed = transition.elapsed_ns == duration_ns;
+        } else {
+            let replacement = character
+                .replacement
+                .as_mut()
+                .ok_or(MinoriRuntimeError::Character)?;
+            if replacement.completed {
+                return Ok(None);
+            }
+            let duration_ns = u64::from(replacement.duration_ms)
+                .checked_mul(1_000_000)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            replacement.elapsed_ns = replacement
+                .elapsed_ns
+                .checked_add(delta_ns)
+                .ok_or(MinoriRuntimeError::Overflow)?
+                .min(duration_ns);
+            let (current_opacity, next_opacity) =
+                interpolate_character_replacement(replacement, duration_ns)?;
+            character.opacity_256 = current_opacity;
+            replacement.next_opacity_256 = next_opacity;
+            replacement.completed = replacement.elapsed_ns == duration_ns;
+            if replacement.completed {
+                complete_character_replacement(character)?;
+            }
         }
-        let duration_ns = u64::from(transition.duration_ms)
-            .checked_mul(1_000_000)
-            .ok_or(MinoriRuntimeError::Overflow)?;
-        transition.elapsed_ns = transition
-            .elapsed_ns
-            .checked_add(delta_ns)
-            .ok_or(MinoriRuntimeError::Overflow)?
-            .min(duration_ns);
-        character.opacity_256 = interpolate_character_opacity(transition, duration_ns)?;
-        transition.completed = transition.elapsed_ns == duration_ns;
         let sequence = next_effect_sequence(&mut self.state)?;
         Ok(Some(MinoriCharacterFrame { sequence }))
     }
@@ -3014,6 +3052,8 @@ fn execute_character(
                     visible: true,
                     opacity_256: 256,
                     transition: None,
+                    replacement: None,
+                    pending_stage: true,
                     keep_once: false,
                 },
             );
@@ -3042,7 +3082,7 @@ fn execute_character(
                 .characters
                 .get_mut(&slot_id)
                 .ok_or(MinoriRuntimeError::Character)?;
-            if character.transition.is_some() {
+            if character.transition.is_some() || character.replacement.is_some() {
                 return Err(MinoriRuntimeError::Character);
             }
             if duration_ms == 0 {
@@ -3897,10 +3937,9 @@ fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
             return Err(MinoriRuntimeError::Character);
         }
     }
-    let transition_slot = state
-        .characters
-        .iter()
-        .find_map(|(slot_id, character)| character.transition.as_ref().map(|_| *slot_id));
+    let transition_slot = state.characters.iter().find_map(|(slot_id, character)| {
+        (character.transition.is_some() || character.replacement.is_some()).then_some(*slot_id)
+    });
     match (&state.wait, transition_slot) {
         (Some(MinoriWaitState::CharacterTransition { slot_id, .. }), Some(transition_slot))
             if *slot_id == transition_slot => {}
@@ -4209,6 +4248,9 @@ fn validate_character_state(
         {
             return Err(MinoriRuntimeError::Character);
         }
+        if character.transition.is_some() && character.replacement.is_some() {
+            return Err(MinoriRuntimeError::Character);
+        }
         if let Some(transition) = character.transition.as_ref() {
             transition_count = transition_count
                 .checked_add(1)
@@ -4223,6 +4265,29 @@ fn validate_character_state(
                 || transition.elapsed_ns > duration_ns
                 || transition.completed != (transition.elapsed_ns == duration_ns)
                 || character.opacity_256 != interpolate_character_opacity(transition, duration_ns)?
+            {
+                return Err(MinoriRuntimeError::Character);
+            }
+        }
+        if let Some(replacement) = character.replacement.as_ref() {
+            transition_count = transition_count
+                .checked_add(1)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            let duration_ns = u64::from(replacement.duration_ms)
+                .checked_mul(1_000_000)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            let (current_opacity, next_opacity) =
+                interpolate_character_replacement(replacement, duration_ns)?;
+            if replacement.duration_ms == 0
+                || replacement.duration_ms > MINORI_CHARACTER_MAX_TRANSITION_MS
+                || replacement.start_opacity_256 > 256
+                || replacement.target_opacity_256 > 256
+                || replacement.next_opacity_256 > 256
+                || replacement.elapsed_ns >= duration_ns
+                || replacement.completed
+                || character.opacity_256 != current_opacity
+                || replacement.next_opacity_256 != next_opacity
+                || validate_scene_uri(&replacement.resource_uri, "minori:/st/").is_err()
             {
                 return Err(MinoriRuntimeError::Character);
             }
@@ -4260,6 +4325,44 @@ fn interpolate_character_opacity(
     u16::try_from(value).map_err(|_| MinoriRuntimeError::Character)
 }
 
+fn interpolate_character_replacement(
+    replacement: &MinoriCharacterReplacementState,
+    duration_ns: u64,
+) -> Result<(u16, u16), MinoriRuntimeError> {
+    if duration_ns == 0 || replacement.elapsed_ns > duration_ns {
+        return Err(MinoriRuntimeError::Character);
+    }
+    let elapsed = u128::from(replacement.elapsed_ns);
+    let duration = u128::from(duration_ns);
+    let remaining = duration
+        .checked_sub(elapsed)
+        .ok_or(MinoriRuntimeError::Overflow)?;
+    let current = u128::from(replacement.start_opacity_256)
+        .checked_mul(remaining)
+        .ok_or(MinoriRuntimeError::Overflow)?
+        / duration;
+    let next = u128::from(replacement.target_opacity_256)
+        .checked_mul(elapsed)
+        .ok_or(MinoriRuntimeError::Overflow)?
+        / duration;
+    Ok((
+        u16::try_from(current).map_err(|_| MinoriRuntimeError::Character)?,
+        u16::try_from(next).map_err(|_| MinoriRuntimeError::Character)?,
+    ))
+}
+
+fn complete_character_replacement(
+    character: &mut MinoriCharacterState,
+) -> Result<(), MinoriRuntimeError> {
+    let Some(replacement) = character.replacement.take() else {
+        return Ok(());
+    };
+    validate_scene_uri(&replacement.resource_uri, "minori:/st/")?;
+    character.resource_uris = vec![replacement.resource_uri];
+    character.opacity_256 = replacement.target_opacity_256;
+    Ok(())
+}
+
 fn complete_character_transition_state(
     state: &mut MinoriRuntimeState,
 ) -> Result<(), MinoriRuntimeError> {
@@ -4289,22 +4392,24 @@ fn apply_message_character_load(
         .characters
         .get_mut(&load.slot_id)
         .ok_or(MinoriRuntimeError::Character)?;
-    if character.transition.is_some() {
+    if character.transition.is_some() || character.replacement.is_some() {
         return Err(MinoriRuntimeError::Character);
     }
-    character.resource_uris = vec![load.resource_uri.clone()];
     if animate && load.transition_ms != 0 {
-        character.opacity_256 = 0;
-        character.transition = Some(MinoriCharacterTransitionState {
-            start_opacity_256: 0,
+        character.replacement = Some(MinoriCharacterReplacementState {
+            resource_uri: load.resource_uri.clone(),
+            start_opacity_256: character.opacity_256,
             target_opacity_256: load.opacity_256,
+            next_opacity_256: 0,
             duration_ms: load.transition_ms,
             elapsed_ns: 0,
             completed: false,
         });
     } else {
+        character.resource_uris = vec![load.resource_uri.clone()];
         character.opacity_256 = load.opacity_256;
         character.transition = None;
+        character.replacement = None;
     }
     Ok(())
 }
@@ -4848,8 +4953,9 @@ fn execute_stage(
     // boundary the runtime retains every character loaded by the route and the
     // shared renderer atlas eventually fills with historical stand textures.
     state.characters.retain(|_, character| {
-        let retained = character.keep_once;
+        let retained = character.keep_once || character.pending_stage;
         character.keep_once = false;
+        character.pending_stage = false;
         retained
     });
     state.scroll_xf = None;
@@ -6078,6 +6184,7 @@ mod tests {
         assert!(!loaded.positive_orientation);
         assert_eq!(loaded.resource_uris, ["minori:/st/WALK.png"]);
         assert_eq!(loaded.anchor_position, [0, 0]);
+        assert!(loaded.pending_stage);
         assert!(!loaded.keep_once);
 
         assert!(matches!(
@@ -6175,17 +6282,18 @@ mod tests {
     }
 
     #[test]
-    fn stage_consumes_character_keep_and_discards_unmarked_slots() {
+    fn stage_commits_new_character_slots_then_retires_unmarked_previous_slots() {
         let source = b".char load 11 KEEP.png\r\n.char load 12 DROP.png\r\n.char keep 11\r\n.stage * BG.png 0 0\r\n.stage * BG2.png 0 0\r\n.end\r\n";
         let mut vm = firefly_vm(source, 7);
 
         for tick in 1..=4 {
             vm.step(tick, 1).unwrap();
         }
-        assert_eq!(vm.state().characters.len(), 1);
+        assert_eq!(vm.state().characters.len(), 2);
         let retained = vm.state().characters.get(&11).unwrap();
         assert!(!retained.keep_once);
-        assert!(!vm.state().characters.contains_key(&12));
+        assert!(!retained.pending_stage);
+        assert!(!vm.state().characters[&12].pending_stage);
 
         vm.step(5, 1).unwrap();
         assert!(vm.state().characters.is_empty());
@@ -6193,6 +6301,42 @@ mod tests {
             vm.step(6, 1).unwrap(),
             Some(MinoriVmEvent::Terminal)
         ));
+    }
+
+    #[test]
+    fn inline_message_load_targets_a_character_committed_by_the_same_stage() {
+        let source = b".char load -11 Old.png\r\n.char pos -11 640 720\r\n.stage * BG.png 0 0\r\n.message 42  speaker a\\x{load,0,11,New.png,40,255}b\r\n.end\r\n";
+        let mut vm = firefly_vm(source, 7);
+        for tick in 1..=3 {
+            vm.step(tick, 1).unwrap();
+        }
+        let committed = vm.state().characters.get(&11).unwrap();
+        assert!(!committed.pending_stage);
+        assert_eq!(committed.anchor_position, [640, 720]);
+
+        assert!(matches!(
+            vm.step(4, 1).unwrap(),
+            Some(MinoriVmEvent::Message { .. })
+        ));
+        assert!(vm.advance_message_load_clock(0, true).unwrap().is_some());
+        let updated = vm.state().characters.get(&11).unwrap();
+        assert_eq!(updated.resource_uris, ["minori:/st/Old.png"]);
+        assert_eq!(updated.anchor_position, [640, 720]);
+        assert!(updated.transition.is_none());
+        let replacement = updated.replacement.as_ref().unwrap();
+        assert_eq!(replacement.resource_uri, "minori:/st/New.png");
+        assert_eq!(replacement.next_opacity_256, 0);
+
+        vm.advance_character_clock(20_000_000).unwrap();
+        let crossing = vm.state().characters.get(&11).unwrap();
+        assert_eq!(crossing.opacity_256, 128);
+        assert_eq!(crossing.replacement.as_ref().unwrap().next_opacity_256, 128);
+
+        vm.advance_character_clock(20_000_000).unwrap();
+        let promoted = vm.state().characters.get(&11).unwrap();
+        assert_eq!(promoted.resource_uris, ["minori:/st/New.png"]);
+        assert_eq!(promoted.opacity_256, 256);
+        assert!(promoted.replacement.is_none());
     }
 
     #[test]
@@ -7985,9 +8129,13 @@ mod tests {
             .unwrap()
             .is_some());
         let character = vm.state().characters.get(&21).unwrap();
-        assert_eq!(character.resource_uris, ["minori:/st/New.png"]);
-        assert_eq!(character.opacity_256, 0);
-        assert!(character.transition.is_some());
+        assert_eq!(character.resource_uris, ["minori:/st/Old.png"]);
+        assert_eq!(character.opacity_256, 256);
+        assert!(character.transition.is_none());
+        assert_eq!(
+            character.replacement.as_ref().unwrap().resource_uri,
+            "minori:/st/New.png"
+        );
 
         vm.resolve_wait(match &wait {
             MinoriWaitState::Input { token_id } => token_id,
@@ -7995,8 +8143,10 @@ mod tests {
         })
         .unwrap();
         let character = vm.state().characters.get(&21).unwrap();
+        assert_eq!(character.resource_uris, ["minori:/st/New.png"]);
         assert_eq!(character.opacity_256, 256);
         assert!(character.transition.is_none());
+        assert!(character.replacement.is_none());
         assert!(vm.state().message_loads.is_empty());
     }
 

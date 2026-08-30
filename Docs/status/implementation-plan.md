@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026 年 8 月 30 日 Minori 消息控制增量：IDA 已确认原程序 `CTextDrawer` 的 `\\a` 自动推进、`\\v` 语音结束等待，以及 `MsgSubCmd load` 的延时角色层替换语义。runtime state 硬切到 v26，控制标记在 backlog、translation Hook 和文字 surface 前移除；voice wait 通过 AstraMedia/Symphonia metadata probe 获取 Ogg 时长，不展开整段 PCM。脱敏样本统计为 18319 条 message、26 条 inline load，voice/auto 组合只出现一次。Minori 170 项 library test、AstraMedia WAV fixture 和仓库 Ogg probe 通过。真实罕见行 Headless checkpoint、inline load 的 current/next 双层交叉淡化、原版同点视觉对照、四路线 E2 与 Windows E3 仍开放。
+2026 年 8 月 30 日 Minori 消息控制增量：IDA 已确认原程序 `CTextDrawer` 的 `\\a` 自动推进、`\\v` 语音结束等待，以及 `MsgSubCmd load` 的延时角色层替换语义。runtime state 已硬切到 v28。控制标记会在 backlog、translation Hook 和文字 surface 前移除。voice wait 改用 AstraMedia/Symphonia 的 seekable metadata reader，直接读取 revision-pinned VFS stream，不再把 Ogg 整体物化到内存。授权样本的定向探针在 12 ms 内取得时长。inline load 现在保留 current/next 两个角色节点，以互补 alpha 交叉淡化，结束后再原子提升 next。真实标题启动回归以 Release CLI 完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；`runtime_step` 最大值从旧整文件读取候选的约 4147 秒降到 0.553 秒。模型查看了保留帧，未见新增裁剪、拉伸或图层残影。该证据只关闭本次单路线回归；罕见行的精确交叉淡化 checkpoint、原版同点视觉对照、其余三路线 E2 与 Windows E3 尚未完成。
 
 2026 年 8 月 30 日 Minori 流式读取分配收紧：entry chunk transform 直接接管 source reader 返回的 owned buffer，Blowfish、RC4 与 movie transform 原地写入；输出只截断同一 allocation 后交给顺序 stream，不再为每个 64 KiB chunk复制两次。8 个 PAZ stream 定向回归通过，其中 pointer-identity 用例固定 owned buffer 复用。该优化不建立明文 cache，也不替代独立峰值内存规模门禁。
 
