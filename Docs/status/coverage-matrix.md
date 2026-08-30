@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 30 日自然鉴赏子页：复用同一隔离 writable identity，不注入解锁状态，序列化物理输入进入 `Memories`、BGM、CG、回想和影片列表。报告通过 82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源且零 diagnostic；九张画面已检查，未见明显缺字、裁剪、拉伸、错层或残影。该证据关闭当前自然 progress 到鉴赏子页的 Headless E2 输入/呈现链路，不关闭影片实际播放、原版像素 parity、四份独立绿色路线报告或 Windows E3。原版 Sandbox session 因原程序重复异常对话框无法用于本轮同点对照。
+
 2026 年 8 月 30 日 FFmpeg 依赖复核：根 vcpkg manifest 与 Windows CI 现固定 FFmpeg `8.1.2#3`，AstraMedia provider 严格校验 `libavcodec 62.28.102`。定向版本测试与 10 个增量流测试通过。授权 WMV3 在普通文件输入、外部 FFmpeg 和 custom AVIO 下均暴露 7 个损坏帧，说明 custom AVIO 不是唯一根因。AstraMedia 现读取 `decode_error_flags` 并以 `ASTRA_FFMPEG_CORRUPT_FRAME` 阻断，不再让 concealment 只出现在 stderr。影片 checkpoint、原版同点视觉比较和正式 E3 仍保持 blocking。
 
 2026 年 8 月 30 日自然解锁链：在隔离 launch/writable identity 中从零顺序执行四条真实路线。Sui 通过并观察累计解锁 1；Ren 已完成 route 和结局影片，但报告因过时的累计值断言失败；Ayame 随后通过并观察累计值 3，证明 Ren 的持久化被下一 session 读取；Tohka 通过并观察 `route_complete` 与累计值 4。新标题 session 的 15 fixed step 报告通过，物理输入可进入自然出现的 `Memories`，标题和鉴赏根页两个 checkpoint 已检查且无明显视觉阻断。该证据把自然 clear 写入、跨 session 读取和标题 gate 提升到真实 Headless E2 链路，但四份独立 route report 尚未全部通过，鉴赏子页和原版视觉 parity 仍开放。未跳过的两段 WMV3 均提交 completion，FFmpeg concealment 使逐帧质量继续 blocking。

@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：自然解锁后的鉴赏子页
+
+- 复用从零完成四条路线后留下的同一隔离 writable identity，通过序列化物理输入依次进入 `Memories` 根页、BGM、CG、回想和影片列表。Headless 报告通过：82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源、零 diagnostic；没有注入解锁状态，也没有改动用户存档。
+- 模型已查看九个保留 checkpoint。标题、鉴赏根页、BGM 列表/选择/播放状态、CG 两页、回想和影片列表未见明显缺字、裁剪、拉伸、错层或残影。该报告证明自然 progress 能驱动当前子页数据和输入链路，不证明影片列表中的资源已逐个播放，也不证明与原版像素一致。
+- 原版 Sandbox 的既有 session 被原程序自身的重复异常对话框阻断，无法可靠返回标题或进入鉴赏。本轮没有从崩溃后的画面推断 UI 或媒体容错；原版同点比较、正式 Sandbox 行为验收和 Windows E3 继续开放。
+
 ## 2026-08-30：固定 FFmpeg 依赖与 WMV3 对照
 
 - 根目录新增 vcpkg manifest，固定到提供 FFmpeg `8.1.2#3` 的 baseline，并只启用 `avcodec`、`avformat`、`swresample` 和 `swscale`。Windows CI 改为检出同一 baseline 后按 manifest 安装；AstraMedia 的完整与增量 provider 都会校验实际加载的 `libavcodec 62.28.102`，旧版或混装 DLL 直接返回 `ASTRA_FFMPEG_RUNTIME_VERSION`。

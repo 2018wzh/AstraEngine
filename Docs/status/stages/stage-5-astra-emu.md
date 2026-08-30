@@ -1,5 +1,7 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 30 日自然鉴赏复核：同一隔离 writable identity 在四条路线自然写入后，通过物理输入进入 `Memories`、BGM、CG、回想和影片列表。Headless 报告通过 82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源且零 diagnostic；九张保留画面已检查，未见明显缺字、裁剪、拉伸、错层或残影。影片列表尚未实际播放，原版 Sandbox 又被原程序重复异常对话框阻断，因此原版同点比较、Movie playback、四份独立绿色路线报告和 Windows E3 仍开放。
+
 2026 年 8 月 30 日 FFmpeg 复核：Windows native dependency 现由根 vcpkg manifest 固定为 FFmpeg `8.1.2#3`，完整与增量 provider 都拒绝非 `libavcodec 62.28.102` runtime。授权 WMV3 在普通文件输入、外部 FFmpeg 和 custom AVIO 中均暴露相同 7 个损坏帧；因此 custom AVIO 不是唯一根因，固定版本也不能被写成影片质量已关闭。AstraMedia 现读取 `AVFrame::decode_error_flags` 并以 `ASTRA_FFMPEG_CORRUPT_FRAME` 阻断。required movie checkpoint、原版同点比较与 Windows E3 仍开放。
 
 2026 年 8 月 30 日自然解锁复核：独立 launch profile 和 writable identity 从零顺序执行四条真实路线，不改动用户存档。Sui、Ayame、Tohka 报告通过，累计解锁分别严格观察为 1、3、4；Ren 已发布 `route_complete` 并完成结局影片，但私有输入的过时累计值断言使该报告按协议失败，Ayame 的累计值 3 证明 Ren 的原子写入已由下一 session 装载。相同 identity 的新标题 session 自然显示并可进入 `Memories`；两个 checkpoint 已完成模型检查。自然 clear 写入与标题 gate 已形成真实 E2 链路，但四份独立路线报告尚未全部绿色，鉴赏子页、正式音频 review、Release Sandbox 和 Windows E3 仍未关闭。未跳过的 WMV3 已到达 owner-side completion，但 FFmpeg concealment 仍是逐帧质量 blocker，Stage 5 保持 `IN_PROGRESS`。

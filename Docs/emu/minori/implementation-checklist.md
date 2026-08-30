@@ -24,7 +24,8 @@
 - [x] 已确认的 `.effect fadeout` 只结束活动的 primary Firefly；没有活动 Firefly 时返回 blocking diagnostic。样本唯一的三参数 `.panel` 形态按原程序 parser 解释为 mode 1、默认过渡标记和 `sys` 自定义资源，显式未知过渡值仍阻断。
 - [x] 当前 Release 包已完成一次标题启动路线报告：5212 fixed steps、4382 个提交/栅格帧、17 条物理输入、4120576 个 48 kHz 双声道音频帧，`route_complete`、返回标题、解锁计数 4 和零 diagnostic 成立。模型检查标题、剧情与返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。
 - [x] 在独立 writable identity 中从零顺序执行四条真实路线：Sui 通过并观察累计解锁数 1；Ren 发布 `route_complete` 后仅因过时的累计值断言失败；Ayame 通过并严格观察累计值 3，证明 Ren 已持久化；Tohka 通过并严格观察 `route_complete` 与累计值 4。新标题 session 自然出现并可进入 `Memories`，两个 checkpoint 已检查。
-- [ ] 以上链路关闭自然写入和标题 gate，不等于四份路线报告全部绿色，也不关闭鉴赏子页。仍需用新的空白 identity 生成四份无过时断言的独立通过报告，并覆盖 CG、BGM、回想和 Movie 子页。
+- [x] 相同自然解锁 identity 的鉴赏子页报告通过：82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源、零 diagnostic；CG、BGM、回想和 Movie 列表页均已检查。
+- [ ] 以上链路不等于四份路线报告全部绿色，也不证明 Movie 列表中的资源已播放。仍需用新的空白 identity 生成四份无过时断言的独立通过报告，并完成影片 playback 与原版同点检查。
 - [ ] 全流 WMV3 诊断曾出现 FFmpeg concealment；必须用影片 checkpoint 与原版对照确认质量。正式音频听审、save/restore required checkpoint、完整 gallery、Release Sandbox 视觉验收和 Windows E3 继续保持 blocking。
 
 ## Family API v11 right-click system menu (2026-08-30)
