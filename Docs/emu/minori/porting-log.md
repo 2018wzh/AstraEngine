@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：原生菜单 Auto 的 Release E2
+
+- Release CLI 的 Headless host 原先没有实现 Manager 已有的消息 wait 重绑规则：Auto 将活动消息从 `Input` 改为 `Time` 时，CLI 把同一 token 误判为重复 wait。现行实现只允许 `Input` 与 `Time` 互换以及 `Time` deadline 更新；同批重复、`Input` 重发和其他 wait 类型仍阻断。
+- 开发签名 Release v21 从空白进度启动，通过 secondary-pointer 和方向键在 family v11 菜单中选择 Auto。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint，diagnostic 为空。Auto 开启后 2 秒内从第一条消息推进到下一场景；再次选择 Auto 恢复 Normal 后，继续运行 2 秒的画面与关闭时完全一致。
+- 三个关键画面已人工检查，未见缺字、裁剪、拉伸或明显图层错误。该结果关闭当前身份的原生菜单 Auto 定向 Headless E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
+
 ## 2026-08-30：原生菜单 Skip 的 Headless 复验
 
 - 开发签名 Release CLI 用序列化 secondary-pointer 在剧情中打开 Family API v11 菜单，再以两次方向键和 Enter 选择 Skip。报告通过：674 fixed steps、41 条物理输入、4 个 checkpoint、零 diagnostic。选择前、选择后和继续运行 10 秒后的未读消息 PNG 字节完全一致，与原版空白进度现场观察相符。

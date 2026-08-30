@@ -257,6 +257,15 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
     (token_id, condition)
 }
 
+fn pending_wait_can_rebind(existing: &PendingWait, next: &PendingWait) -> bool {
+    matches!(
+        (existing, next),
+        (PendingWait::Input(_), PendingWait::Time(_))
+            | (PendingWait::Time(_), PendingWait::Input(_))
+            | (PendingWait::Time(_), PendingWait::Time(_))
+    )
+}
+
 fn runtime_wait_kind_name(wait: &RuntimeLiveWait) -> &'static str {
     match wait.kind {
         RuntimeLiveWaitKind::Frame { .. } => "frame",
@@ -5862,10 +5871,19 @@ impl<'a> RuntimeDriver<'a> {
                 .await?;
             self.record_perfetto_phase("media.worker", 9, media_started)?;
         }
+        let mut emitted_wait_tokens = BTreeSet::new();
         for wait in live.waits {
             let (token, condition) = live_wait_condition(wait, next_step, self.delta_ns);
-            if self.pending_waits.insert(token, condition).is_some() {
+            if !emitted_wait_tokens.insert(token.clone()) {
                 return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
+            }
+            if let Some(existing) = self.pending_waits.get_mut(&token) {
+                if !pending_wait_can_rebind(existing, &condition) {
+                    return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
+                }
+                *existing = condition;
+            } else {
+                self.pending_waits.insert(token, condition);
             }
         }
         if let Some(system_ui_active) = system_ui_activity_from_blackboard(&live.blackboard)? {
@@ -8059,6 +8077,21 @@ mod native_tests {
             PendingWait::Time(due) if due <= 10 || pressed.contains("escape")
         );
         assert!(ready);
+    }
+
+    #[test]
+    fn message_wait_rebind_is_limited_to_input_and_time_conditions() {
+        let input = PendingWait::Input(vec!["enter".into()]);
+        let time = PendingWait::Time(12);
+        let later_time = PendingWait::Time(24);
+        let media = PendingWait::Media("movie".into());
+
+        assert!(pending_wait_can_rebind(&input, &time));
+        assert!(pending_wait_can_rebind(&time, &input));
+        assert!(pending_wait_can_rebind(&time, &later_time));
+        assert!(!pending_wait_can_rebind(&input, &input));
+        assert!(!pending_wait_can_rebind(&media, &time));
+        assert!(!pending_wait_can_rebind(&time, &media));
     }
 
     #[test]
