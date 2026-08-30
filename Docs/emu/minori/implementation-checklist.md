@@ -41,6 +41,8 @@
 
 ## Family API v12 native menu and confirmation (2026-08-30)
 
+- [x] Sandbox 观察确认右键菜单顶层 `ヘルプ (&H)`、`ゲーム (&G)` 的日文标题和助记符；
+  family transaction 已移除英文标题，Windows Host 仍只构建/呈现菜单。
 - [x] `LegacySystemMenuRequestV1`, bounded `LegacySystemMenuTransactionV1` and bounded `LegacyConfirmationTransactionV1` are part of the hard-cut Family API v12 contract and have explicit `StableAbi` wire representations.
 - [x] Manager promotes a pressed physical `pointer.secondary` edge to `Open`, carries the latest bounded pointer coordinates, and removes the duplicate pressed edge before invoking Minori.
 - [x] Minori publishes the observed title/gameplay hierarchy. Windows native uses the platform context-menu provider, Manager renders the same transaction as a Slint overlay, and Headless navigates it only through physical input records.
