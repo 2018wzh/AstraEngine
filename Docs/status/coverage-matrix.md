@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-2026 年 8 月 30 日 Minori 原生菜单 Skip 覆盖：当前开发签名 Release CLI 用 secondary-pointer 打开 v11 family menu，并以物理方向键选择 Skip。报告通过 674 fixed steps、41 条物理输入和 4 个 checkpoint，零 diagnostic；未读消息在选择前、选择后及 10 秒后画面字节一致。受 pragma 门控的 Control 已加入对应 Host-owned message wait，避免发布同一 token 的替换 wait；173 项 Minori library tests 通过。该覆盖属于定向 Headless E2，不关闭 Control 全路线、Sandbox 或 Windows E3。
+2026 年 8 月 30 日 Minori 原生菜单 Skip 与 Control 覆盖：当前开发签名 Release CLI 用 secondary-pointer 打开 v11 family menu，并以物理方向键选择 Skip。定向报告通过 674 fixed steps、41 条物理输入和 4 个 checkpoint，未读消息在选择前、选择后及 10 秒后画面字节一致。受 pragma 门控的 Control 已加入对应 Host-owned message wait，避免发布同一 token 的替换 wait；173 项 Minori library tests 通过。独立空白进度的 Control 首路线随后通过 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空。三张保留画面已人工检查。该覆盖关闭当前身份的未读 Skip 定向 E2 和 Control 首路线 E2，不替代 Release Sandbox、120 Hz 性能门禁或 Windows E3。
 
 2026 年 8 月 30 日 Minori Skip 行为覆盖：原版空白进度现场确认持久 Skip 不推进未读消息，Auto/Skip 原生菜单项也不显示勾选。runtime 现以已记录的 message read identity 约束持久 Skip；Control 快进继续使用独立 pragma gate。新增 unread/Control 回归，Minori 173 项 library tests 通过。该覆盖属于 runtime/menu E1，不提升完整路线、Sandbox 或 Windows E3。
 

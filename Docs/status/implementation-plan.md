@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026 年 8 月 30 日 Minori 原生菜单 Skip E2：开发签名 Release CLI 通过序列化 secondary-pointer 打开 family v11 菜单，再用方向键选择 Skip。运行完成 674 fixed steps、41 条物理输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和继续运行 10 秒后的 PNG 完全一致。Control 也已纳入启用该 pragma 的 Host-owned message wait，不再靠同 token `Input`/`Time` 重绑定推进当前消息；Minori 173 项 library tests 通过。该结果关闭未读 Skip 的定向 Headless E2，不代表 Control 完整路线、Release Sandbox 或 Windows E3 已通过。
+2026 年 8 月 30 日 Minori 原生菜单 Skip 与 Control E2：开发签名 Release CLI 通过序列化 secondary-pointer 打开 family v11 菜单，再用方向键选择 Skip。定向运行完成 674 fixed steps、41 条物理输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和继续运行 10 秒后的 PNG 完全一致。Control 也已纳入启用该 pragma 的 Host-owned message wait，不再靠同 token `Input`/`Time` 重绑定推进当前消息；Minori 173 项 library tests 通过。独立空白进度的 Control 首路线随后完成 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空。三个 checkpoint 的人工检查未见阻断。该结果关闭当前身份的未读 Skip 定向 E2 和 Control 首路线 E2，不代表 Release Sandbox、120 Hz 性能门禁或 Windows E3 已通过。
 
 2026 年 8 月 30 日 Minori Skip 语义复核：授权原版在空白进度中选择 Skip 后，当前未读消息保持不动；重新打开右键菜单时，Auto/Skip 也没有勾选。Minori runtime 现只让持久 Skip 快进已有 read identity 的消息，受 `.pragma enable_control` 约束的 Control 仍可快进未读消息。Auto/Skip transaction 的伪勾选已删除，173 个 Minori library tests 与受影响 clippy 通过。该项关闭 E1 行为差异，不替代完整路线、同点影片、Sandbox 或 Windows E3。
 

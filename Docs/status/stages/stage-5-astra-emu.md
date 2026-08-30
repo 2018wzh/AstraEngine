@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-2026 年 8 月 30 日原生菜单 Skip E2：开发签名 Release CLI 用序列化 secondary-pointer 打开 family v11 菜单，再以物理方向键选择 Skip。报告通过 674 fixed steps、41 条输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和 10 秒后的画面文件完全一致。Control 快进现在由启用 pragma 的 Host-owned message wait 接收，不再用同一 token 重绑 wait；Minori 173 项 library tests 通过。该项只关闭未读 Skip 的定向 E2，Control 全路线、Release Sandbox 和 Windows E3 仍未完成，Stage 5 保持 `IN_PROGRESS`。
+2026 年 8 月 30 日原生菜单 Skip 与 Control E2：开发签名 Release CLI 用序列化 secondary-pointer 打开 family v11 菜单，再以物理方向键选择 Skip。定向报告通过 674 fixed steps、41 条输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和 10 秒后的画面文件完全一致。Control 快进现在由启用 pragma 的 Host-owned message wait 接收，不再用同一 token 重绑 wait；Minori 173 项 library tests 通过。独立空白进度的 Control 首路线随后通过 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空；三个 checkpoint 的人工检查未见阻断。当前结果仍不是 Release Sandbox、120 Hz 性能门禁或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
 
 2026 年 8 月 30 日 Skip 现场纠偏：原版空白进度选择 Skip 后不会推进未读消息，重新打开原生菜单时 Auto/Skip 也没有勾选。Minori 现只让持久 Skip 快进已有 read identity 的消息；受 pragma 门控的 Control 仍是独立快进路径。transaction 不再伪造 Auto/Skip checked state。Minori 173 项 library tests、受影响 clippy 与文档检查通过；该项只关闭行为级 E1 差异，Stage 5 仍为 `IN_PROGRESS`。
 

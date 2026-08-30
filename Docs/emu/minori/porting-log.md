@@ -4,7 +4,7 @@
 
 - 开发签名 Release CLI 用序列化 secondary-pointer 在剧情中打开 Family API v11 菜单，再以两次方向键和 Enter 选择 Skip。报告通过：674 fixed steps、41 条物理输入、4 个 checkpoint、零 diagnostic。选择前、选择后和继续运行 10 秒后的未读消息 PNG 字节完全一致，与原版空白进度现场观察相符。
 - 复验还暴露了 Control wait 的所有权问题。provider 原先在按键状态变化时把活动消息的同一 token 从 `Input` 改成 `Time`，Headless 会按 AwaitQueue 唯一性返回 `ASTRA_EMU_HEADLESS_WAIT_DUPLICATE`。现行实现让启用 `.pragma enable_control` 且允许快进的 message wait 直接声明 `control`；Host 完成原 wait 后，family 才推进消息，不再发布替换 token。未启用 pragma 的消息不会把 Control 当作确认输入。
-- Minori 173 项 library tests 全部通过。旧的 Control 路线输入在 15000 tick 的 choice 观察处超时，期间影片已打开并完成；该失败没有被计为路线通过。下一轮需要按当前 WMF 时长和 choice 位置重建输入时序，再做 Control 完整路线与 Release Sandbox 复验。
+- Minori 173 项 library tests 全部通过。随后使用独立 launch profile 从空白进度重跑 Control 首路线：首个选择在第 84 tick 出现，结局影片从第 3368 tick 播放到第 15394 tick，路线在第 15635 tick 返回标题，并于第 15636 tick 退出。报告消费 28 条物理输入、呈现 251 帧，自然解锁数为 1，diagnostic 为空。标题、路线和返回标题三个 checkpoint 已人工检查，未见缺字、裁剪、拉伸或明显图层错误。该结果关闭当前身份的 Control 首路线 Headless E2；稀疏采样不构成 120 Hz 性能证据，也不替代 Release Sandbox 或 Windows E3。
 
 ## 2026-08-30：WMF Release E2 与原版现场复测
 
