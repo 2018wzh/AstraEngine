@@ -11,10 +11,11 @@ use std::{
 use astra_byte_source::OwnedByteBuffer;
 use astra_emu_family_api::{LegacyVideoCommandV1, LegacyVideoMode};
 #[cfg(feature = "ffmpeg-vcpkg")]
+use astra_media::open_ffmpeg_incremental_reader;
 use astra_media::{
-    open_ffmpeg_incremental_reader, IncrementalDecodeBudget, IncrementalPlaybackLimits,
+    open_wmf_incremental_reader, IncrementalDecodeBudget, IncrementalMediaPlayback,
+    IncrementalPlaybackLimits, IncrementalPlaybackOutput, PlayerDecodedAudio,
 };
-use astra_media::{IncrementalMediaPlayback, IncrementalPlaybackOutput, PlayerDecodedAudio};
 use astra_platform::{
     DecodeKind, DecodeOutput, DecodeStreamAction, PlatformDecodeRequest, PlatformHostClient,
 };
@@ -22,13 +23,16 @@ use rfvp_astra_provider::{
     fvp_movie_compatibility, open_fvp_movie_packet_stream, FvpMovieAudioChunk,
     FvpMovieCompatibility, FvpMovieFrame, FvpMoviePacket, FvpMoviePacketStream,
 };
-#[cfg(feature = "ffmpeg-vcpkg")]
 use std::io::Cursor;
 
 use crate::audio_executor::HostAudioExecutor;
 
 pub(crate) const MAX_ENCODED_BYTES: u64 = 512 * 1024 * 1024;
-pub(crate) const MINORI_VIDEO_PROVIDER_BINDING: &str = "ffmpeg-vcpkg";
+pub(crate) const MINORI_VIDEO_PROVIDER_BINDING: &str =
+    match option_env!("ASTRA_EMU_DEFAULT_VIDEO_PROVIDER") {
+        Some(provider) => provider,
+        None => "wmf",
+    };
 const MAX_DECODED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_AUDIO_SAMPLES: usize = 64 * 1024 * 1024;
 const MAX_FRAMES: usize = 60 * 60 * 4;
@@ -85,46 +89,50 @@ struct MinoriAviStreamDecoder {
 }
 
 impl MinoriAviStreamDecoder {
-    fn open(bytes: OwnedByteBuffer) -> Result<Self, String> {
+    fn open(bytes: OwnedByteBuffer, provider_id: &str) -> Result<Self, String> {
         if !is_avi_container_header(&bytes) {
             return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".to_owned());
         }
-        #[cfg(not(feature = "ffmpeg-vcpkg"))]
-        {
-            let _ = bytes;
-            Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
-        }
-        #[cfg(feature = "ffmpeg-vcpkg")]
-        {
-            let decoder = open_ffmpeg_incremental_reader(
-                "avi",
-                Cursor::new(bytes),
-                IncrementalDecodeBudget {
-                    max_encoded_bytes: usize::try_from(MAX_ENCODED_BYTES)
-                        .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_BUDGET".to_owned())?,
-                    max_video_frame_bytes: MAX_DECODED_BYTES,
-                    max_pending_packets: VIDEO_RING_FRAMES * 4,
-                    max_video_frames: MAX_FRAMES,
-                    max_audio_packets: MAX_FRAMES,
-                },
-            )
-            .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())?;
-            let playback = IncrementalMediaPlayback::open(
-                decoder,
-                IncrementalPlaybackLimits {
-                    max_video_frame_bytes: MAX_DECODED_BYTES,
-                    max_audio_samples: MAX_AUDIO_SAMPLES,
-                    max_pending_audio_samples: MAX_AUDIO_SAMPLES,
-                },
-            )
-            .map_err(|error| error.to_string())?;
-            Ok(Self {
-                playback,
-                ready_outputs: Vec::new(),
-                pending: VecDeque::new(),
-                ended: false,
-            })
-        }
+        let budget = IncrementalDecodeBudget {
+            max_encoded_bytes: usize::try_from(MAX_ENCODED_BYTES)
+                .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_BUDGET".to_owned())?,
+            max_video_frame_bytes: MAX_DECODED_BYTES,
+            max_pending_packets: VIDEO_RING_FRAMES * 4,
+            max_video_frames: MAX_FRAMES,
+            max_audio_packets: MAX_FRAMES,
+        };
+        let decoder = match provider_id {
+            "wmf" => open_wmf_incremental_reader("avi", Cursor::new(bytes), budget)
+                .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_WMF_OPEN".to_owned())?,
+            "ffmpeg-vcpkg" => {
+                #[cfg(feature = "ffmpeg-vcpkg")]
+                {
+                    open_ffmpeg_incremental_reader("avi", Cursor::new(bytes), budget)
+                        .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())?
+                }
+                #[cfg(not(feature = "ffmpeg-vcpkg"))]
+                {
+                    let _ = bytes;
+                    return Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned());
+                }
+            }
+            _ => return Err("ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN".to_owned()),
+        };
+        let playback = IncrementalMediaPlayback::open(
+            decoder,
+            IncrementalPlaybackLimits {
+                max_video_frame_bytes: MAX_DECODED_BYTES,
+                max_audio_samples: MAX_AUDIO_SAMPLES,
+                max_pending_audio_samples: MAX_AUDIO_SAMPLES,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(Self {
+            playback,
+            ready_outputs: Vec::new(),
+            pending: VecDeque::new(),
+            ended: false,
+        })
     }
 
     fn duration_ns(&self) -> Result<u64, String> {
@@ -822,7 +830,7 @@ pub(crate) fn validate_family_video_extension(
 }
 
 fn validate_family_video_provider(family_id: &str, provider_id: &str) -> Result<(), String> {
-    if family_id == "minori" && provider_id != MINORI_VIDEO_PROVIDER_BINDING {
+    if family_id == "minori" && !matches!(provider_id, "wmf" | "ffmpeg-vcpkg") {
         return Err("ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED".to_owned());
     }
     Ok(())
@@ -893,7 +901,7 @@ impl HostVideoExecutor {
         validate_family_video_extension(&self.family_id, extension)?;
         if self.family_id == "minori" && extension.eq_ignore_ascii_case("avi") {
             validate_family_video_provider(&self.family_id, &self.video_provider)?;
-            let decoder = MinoriAviStreamDecoder::open(bytes)?;
+            let decoder = MinoriAviStreamDecoder::open(bytes, &self.video_provider)?;
             let duration_ns = Some(decoder.duration_ns()?);
             let audio_stream_id = if matches!(mode, LegacyVideoMode::ModalWithAudio) {
                 let stream_id = MOVIE_AUDIO_STREAM_BASE
@@ -1255,12 +1263,13 @@ mod tests {
     }
 
     #[test]
-    fn minori_video_requires_the_shared_ffmpeg_binding() {
+    fn minori_video_requires_one_explicit_supported_binding() {
         assert_eq!(
             validate_family_video_provider("minori", "unbound").unwrap_err(),
             "ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED"
         );
         assert!(validate_family_video_provider("minori", MINORI_VIDEO_PROVIDER_BINDING).is_ok());
+        assert!(validate_family_video_provider("minori", "ffmpeg-vcpkg").is_ok());
         assert!(validate_family_video_provider("fvp", "platform").is_ok());
     }
 

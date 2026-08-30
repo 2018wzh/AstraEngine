@@ -42,6 +42,7 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--target")
     parser.add_argument("--family", choices=sorted(SUPPORTED_FAMILIES), default="fvp")
+    parser.add_argument("--video-provider", choices=("wmf", "ffmpeg-vcpkg"))
     parser.add_argument("--development-ephemeral-signer", action="store_true")
     parser.add_argument("--development-reuse-build", action="store_true")
     parser.add_argument("--signer-identity")
@@ -81,7 +82,15 @@ def main() -> int:
         environment["ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX"] = derive_public_key(root, environment)
     validate_hex(environment["ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX"], 64, "ASTRA_EMU_FAMILY_PUBLIC_KEY_ENCODING")
 
-    descriptor = cargo_build(root, target, target_root, environment, args.family)
+    video_provider = args.video_provider
+    if args.family == "minori" and video_provider is None:
+        video_provider = "wmf" if target == "x86_64-pc-windows-msvc" else "ffmpeg-vcpkg"
+    if args.family != "minori" and video_provider is not None:
+        fail("ASTRA_EMU_DESKTOP_VIDEO_PROVIDER_FAMILY_MISMATCH")
+    environment["ASTRA_EMU_DEFAULT_VIDEO_PROVIDER"] = video_provider or "disabled"
+    descriptor = cargo_build(
+        root, target, target_root, environment, args.family, video_provider
+    )
     profile = target_root / target / "release"
     manager_name, cli_name, _ = SUPPORTED_TARGETS[target]
     family_name = family_library_name(args.family, target)
@@ -120,6 +129,7 @@ def main() -> int:
             args.development_ephemeral_signer or args.development_reuse_build,
             environment["ASTRA_EMU_FAMILY_SIGNER_ID"],
             args.family,
+            video_provider,
         )
         write_json_new(temporary / "astraemu-desktop-package-evidence.json", report)
         temporary.replace(output)
@@ -190,12 +200,13 @@ def cargo_build(
     target_root: pathlib.Path,
     environment: dict[str, str],
     family_id: str,
+    video_provider: str | None,
 ) -> pathlib.Path:
     # Build the host and dynamic family in one Cargo invocation. Running these
     # separately toggles `dynamic-plugin-export` in the same target directory
     # and forces Cargo to relink the family graph twice on every iteration.
     family_package = SUPPORTED_FAMILIES[family_id][0]
-    features = desktop_features(family_id)
+    features = desktop_features(family_id, video_provider)
     command = [
         "cargo", "build", "--locked", "--release", "--target", target,
         "-p", "astra-emu-manager", "-p", "astra-emu-cli", "-p", family_package,
@@ -231,13 +242,12 @@ def cargo_build(
     return descriptor
 
 
-def desktop_features(family_id: str) -> tuple[str, ...]:
+def desktop_features(family_id: str, video_provider: str | None) -> tuple[str, ...]:
     family_package = SUPPORTED_FAMILIES[family_id][0]
     features = [f"{family_package}/dynamic-plugin-export"]
-    if family_id == "minori":
-        # Minori movie playback has one production binding: AstraMedia FFmpeg.
-        # Compile both product hosts with that binding so the packaged Manager
-        # and CLI cannot advertise a provider that is absent from the binary.
+    if family_id == "minori" and video_provider == "ffmpeg-vcpkg":
+        # FFmpeg is an optional explicit provider. WMF is part of the Windows
+        # platform build and therefore does not require a Cargo feature.
         features.extend(
             (
                 "astra-emu-manager/ffmpeg-vcpkg",
@@ -321,6 +331,7 @@ def distribution_report(
     ephemeral: bool,
     signer_identity: str,
     family_id: str,
+    video_provider: str | None,
 ) -> dict[str, Any]:
     manager = root / manager_name
     cli = root / cli_name
@@ -338,6 +349,7 @@ def distribution_report(
         "family_file": f"families/{family_id}/{family_name}",
         "family_sha256": "sha256." + sha256_file(family),
         "family_manifest_sha256": "sha256." + sha256_file(manifest),
+        "video_provider": video_provider,
         "signer_identity": signer_identity,
         "build_identity": identity,
         "commercial_payload": "omitted",

@@ -1,5 +1,7 @@
 # Stage Test Matrix
 
+2026-08-30 WMF composition seam: CLI and Manager accept one explicit Minori `wmf` or `ffmpeg-vcpkg` binding, reject disabled/unknown values, and never retry another provider. Windows desktop packaging defaults to WMF, compiles FFmpeg only when selected, and records the provider in redacted evidence. Focused default and FFmpeg feature checks plus builder tests pass; signed Release WMF movie checkpoints, orientation/crop, audio timing, original parity and E3 remain open.
+
 2026-08-30 original movie backend seam: PE/COM inspection confirms DirectShow Filter Graph with windowless VMR7 and HRESULT-checked failure paths. AstraMedia now owns a bounded read-only COM `IStream` adapter and explicit `astra.decode.wmf.incremental` registry provider. Public MP4 covers unified audio/video packets, seek generation and cancel; the authorized AVI reaches EOS through the same provider with 2106 monotonic video packets and 2110 PCM packets, while pinned FFmpeg blocks on 7 concealment frames. Minori composition, required movie checkpoints, original parity and E3 remain open.
 
 2026-08-30 natural gallery E2: the isolated writable identity produced by the four-route clear campaign opens Memories, BGM, CG, replay and movie-list pages through 64 serialized physical-input messages. The report passes 82 fixed steps, 20 presented frames, 9 checkpoints, 45 resources and zero diagnostics. All nine retained frames were reviewed; actual movie playback, original-title parity, four independently green route reports and Windows E3 remain open.

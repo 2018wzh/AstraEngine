@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_FFMPEG_VCPKG");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_FEATURE");
+    println!("cargo:rerun-if-env-changed=ASTRA_EMU_DEFAULT_VIDEO_PROVIDER");
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("ASTRA_EMU_CLI_MANIFEST_DIR_MISSING");
     let source_root = git_output(&manifest_dir, ["rev-parse", "--show-toplevel"]);
     let source_revision = git_output(&source_root, ["rev-parse", "HEAD"]);

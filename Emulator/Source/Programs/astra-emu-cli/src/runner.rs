@@ -51,11 +51,11 @@ use astra_headless_protocol::{
     TouchPhase, HEADLESS_RUN_REPORT_SCHEMA as STANDARD_HEADLESS_RUN_REPORT_SCHEMA,
 };
 #[cfg(feature = "ffmpeg-vcpkg")]
-use astra_media::{open_ffmpeg_incremental_reader, IncrementalDecodeBudget};
+use astra_media::open_ffmpeg_incremental_reader;
 use astra_media::{
-    DecodeBindingContext, DecodeOutput as MediaDecodeOutput, DecodeProviderRegistry, DecodeRequest,
-    DecodedVideoFrame, ImageDecodeProvider, IncrementalMediaDecoder, MediaError,
-    PlayerDecodedAudio,
+    open_wmf_incremental_reader, DecodeBindingContext, DecodeOutput as MediaDecodeOutput,
+    DecodeProviderRegistry, DecodeRequest, DecodedVideoFrame, ImageDecodeProvider,
+    IncrementalDecodeBudget, IncrementalMediaDecoder, MediaError, PlayerDecodedAudio,
 };
 use astra_media_core::{
     BlendMode, CpuFilterExecutor, CpuFrame, Layer2DContent, Layer2DState, Layer2DTransaction,
@@ -1639,7 +1639,10 @@ fn standard_headless_run_report(
 fn validate_launch(launch: &HeadlessLaunch) -> Result<(), String> {
     if !(320..=8192).contains(&launch.viewport_width)
         || !(240..=8192).contains(&launch.viewport_height)
-        || !matches!(launch.video_provider.as_str(), "disabled" | "ffmpeg-vcpkg")
+        || !matches!(
+            launch.video_provider.as_str(),
+            "disabled" | "wmf" | "ffmpeg-vcpkg"
+        )
         || parse_artifact_retention(&launch.artifact_retention).is_err()
         || !(1..=10_000).contains(&launch.frame_sample_interval)
         || !matches!(launch.presentation_rate_hz, 60 | 120)
@@ -1671,10 +1674,10 @@ fn validate_launch(launch: &HeadlessLaunch) -> Result<(), String> {
 }
 
 fn validate_video_provider_binding(family_id: &str, provider_id: &str) -> Result<(), String> {
-    if !matches!(provider_id, "disabled" | "ffmpeg-vcpkg") {
+    if !matches!(provider_id, "disabled" | "wmf" | "ffmpeg-vcpkg") {
         return Err("ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN".into());
     }
-    if family_id == "minori" && provider_id != "ffmpeg-vcpkg" {
+    if family_id == "minori" && !matches!(provider_id, "wmf" | "ffmpeg-vcpkg") {
         return Err("ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED".into());
     }
     Ok(())
@@ -6631,7 +6634,7 @@ impl<'a> RuntimeDriver<'a> {
             if !is_avi_container_header(&header) {
                 return Err("ASTRA_EMU_MINORI_VIDEO_CONTAINER".into());
             }
-            let decoder = open_minori_avi_incremental_decoder(reader)?;
+            let decoder = open_minori_avi_incremental_decoder(&self.video_provider, reader)?;
             let audio_stream_id =
                 if self.audio_enabled && matches!(mode, LegacyVideoMode::ModalWithAudio) {
                     let stream_id = MOVIE_AUDIO_STREAM_BASE
@@ -7043,30 +7046,35 @@ fn matches_blackboard_observation(
 }
 
 fn open_minori_avi_incremental_decoder<R>(
+    provider_id: &str,
     reader: R,
 ) -> Result<Box<dyn IncrementalMediaDecoder>, String>
 where
     R: Read + Seek + Send + 'static,
 {
-    #[cfg(not(feature = "ffmpeg-vcpkg"))]
-    {
-        let _ = reader;
-        Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
-    }
-    #[cfg(feature = "ffmpeg-vcpkg")]
-    {
-        open_ffmpeg_incremental_reader(
-            "avi",
-            reader,
-            IncrementalDecodeBudget {
-                max_encoded_bytes: MAX_MOVIE_DECODED_BYTES,
-                max_video_frame_bytes: 64 * 1024 * 1024,
-                max_pending_packets: 64,
-                max_video_frames: MAX_MOVIE_FRAMES,
-                max_audio_packets: MAX_MOVIE_FRAMES,
-            },
-        )
-        .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())
+    let budget = IncrementalDecodeBudget {
+        max_encoded_bytes: MAX_MOVIE_DECODED_BYTES,
+        max_video_frame_bytes: 64 * 1024 * 1024,
+        max_pending_packets: 64,
+        max_video_frames: MAX_MOVIE_FRAMES,
+        max_audio_packets: MAX_MOVIE_FRAMES,
+    };
+    match provider_id {
+        "wmf" => open_wmf_incremental_reader("avi", reader, budget)
+            .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_WMF_OPEN".to_owned()),
+        "ffmpeg-vcpkg" => {
+            #[cfg(feature = "ffmpeg-vcpkg")]
+            {
+                open_ffmpeg_incremental_reader("avi", reader, budget)
+                    .map_err(|_| "ASTRA_EMU_MINORI_VIDEO_FFMPEG_OPEN".to_owned())
+            }
+            #[cfg(not(feature = "ffmpeg-vcpkg"))]
+            {
+                let _ = reader;
+                Err("ASTRA_EMU_MINORI_VIDEO_FFMPEG_UNAVAILABLE".to_owned())
+            }
+        }
+        _ => Err("ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN".to_owned()),
     }
 }
 
@@ -7574,7 +7582,7 @@ mod native_tests {
     }
 
     #[test]
-    fn minori_requires_the_explicit_ffmpeg_provider_binding() {
+    fn minori_requires_one_explicit_supported_video_provider_binding() {
         assert_eq!(
             validate_video_provider_binding("minori", "disabled").unwrap_err(),
             "ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED"
@@ -7583,6 +7591,7 @@ mod native_tests {
             validate_video_provider_binding("minori", "platform").unwrap_err(),
             "ASTRA_EMU_VIDEO_PROVIDER_UNKNOWN"
         );
+        assert!(validate_video_provider_binding("minori", "wmf").is_ok());
         assert!(validate_video_provider_binding("minori", "ffmpeg-vcpkg").is_ok());
         assert!(validate_video_provider_binding("fvp", "disabled").is_ok());
     }

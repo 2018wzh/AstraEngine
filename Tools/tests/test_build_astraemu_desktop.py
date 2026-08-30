@@ -29,9 +29,9 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
                 pathlib.Path.cwd(), {}, False, False, None
             )
 
-    def test_minori_distribution_compiles_the_only_video_provider_binding(self):
+    def test_minori_distribution_compiles_only_the_explicit_video_provider(self):
         self.assertEqual(
-            build_astraemu_desktop.desktop_features("minori"),
+            build_astraemu_desktop.desktop_features("minori", "ffmpeg-vcpkg"),
             (
                 "astra-emu-minori/dynamic-plugin-export",
                 "astra-emu-manager/ffmpeg-vcpkg",
@@ -39,7 +39,11 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            build_astraemu_desktop.desktop_features("fvp"),
+            build_astraemu_desktop.desktop_features("minori", "wmf"),
+            ("astra-emu-minori/dynamic-plugin-export",),
+        )
+        self.assertEqual(
+            build_astraemu_desktop.desktop_features("fvp", None),
             ("astra-emu-fvp/dynamic-plugin-export",),
         )
 

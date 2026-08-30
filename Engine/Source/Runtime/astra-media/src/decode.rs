@@ -649,6 +649,23 @@ impl WmfIncrementalDecodeProvider {
     }
 }
 
+pub fn open_wmf_incremental_reader<R>(
+    codec: impl Into<String>,
+    reader: R,
+    budget: crate::IncrementalDecodeBudget,
+) -> Result<Box<dyn crate::IncrementalMediaDecoder>, MediaError>
+where
+    R: Read + Seek + Send + 'static,
+{
+    let provider = WmfIncrementalDecodeProvider::probe()?;
+    let mut registry = crate::IncrementalDecodeProviderRegistry::default();
+    registry.register(Box::new(provider))?;
+    registry.open(
+        WMF_INCREMENTAL_PROVIDER_ID,
+        crate::IncrementalDecodeRequest::new(codec, Box::new(reader)).with_budget(budget),
+    )
+}
+
 impl crate::IncrementalDecodeProvider for WmfIncrementalDecodeProvider {
     fn provider_id(&self) -> &'static str {
         WMF_INCREMENTAL_PROVIDER_ID

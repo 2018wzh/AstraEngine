@@ -7,6 +7,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=ASTRA_EMU_DEFAULT_VIDEO_PROVIDER");
     let rustc = env::var_os("RUSTC").expect("ASTRA_EMU_MANAGER_BUILD_RUSTC_MISSING");
     let output = Command::new(rustc)
         .arg("-Vv")

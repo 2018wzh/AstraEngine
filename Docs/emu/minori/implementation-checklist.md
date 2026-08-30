@@ -6,7 +6,8 @@
 - [x] AstraMedia WMF decodes the same authorized AVI to EOS with 2106 monotonic frames and no returned decode error, while the pinned FFmpeg path blocks on 7 concealment frames.
 - [x] Add the bounded read-only COM `IStream` seam plus video/audio reader entry points; public MP4 and the authorized AVI decode both tracks directly from owned seekable readers without HGLOBAL input copies or plaintext spools.
 - [x] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including typed packets, media-type validation, seek generation and cancellation.
-- [ ] Bind WMF only when explicitly selected by the Minori launch composition. Missing/ineligible WMF, codec mismatch, or decode failure must block rather than switch to FFmpeg.
+- [x] CLI and Manager accept exactly one explicit Minori binding (`wmf` or `ffmpeg-vcpkg`); Windows packages default to WMF, the builder records the choice, and missing/ineligible providers block without switching.
+- [ ] Run the signed Release Headless movie checkpoints with `wmf` and confirm video orientation, crop, audio timing, fence completion and zero diagnostics.
 - [ ] Re-run required movie checkpoints and original-title parity before changing the shipping Minori provider binding.
 
 ## FFmpeg dependency and WMV3 quality (2026-08-30)

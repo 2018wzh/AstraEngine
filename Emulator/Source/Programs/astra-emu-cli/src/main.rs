@@ -12,6 +12,11 @@ mod vfs;
 static ASTRA_EMU_ALLOCATOR: astra_observability::TrackingAllocator =
     astra_observability::TrackingAllocator::new();
 
+const DEFAULT_VIDEO_PROVIDER: &str = match option_env!("ASTRA_EMU_DEFAULT_VIDEO_PROVIDER") {
+    Some(provider) => provider,
+    None => "wmf",
+};
+
 fn parse_presentation_rate(value: &str) -> Result<u32, String> {
     match value {
         "60" => Ok(60),
@@ -66,8 +71,8 @@ enum CliCommand {
         /// Enable native audio. Overlay-free visual acceptance is muted by default.
         #[arg(long, default_value_t = false)]
         enable_audio: bool,
-        /// Explicit media decode provider. Minori requires the shared FFmpeg provider.
-        #[arg(long, default_value = "ffmpeg-vcpkg", value_parser = ["disabled", "ffmpeg-vcpkg"])]
+        /// Explicit media decode provider. Minori accepts one bound WMF or FFmpeg provider.
+        #[arg(long, default_value = DEFAULT_VIDEO_PROVIDER, value_parser = ["disabled", "wmf", "ffmpeg-vcpkg"])]
         video_provider: String,
         /// Write a local-private Perfetto Trace Event file for this native Windows run.
         #[arg(long)]
@@ -105,7 +110,7 @@ enum CliCommand {
         viewport_width: u32,
         #[arg(long, default_value_t = 720)]
         viewport_height: u32,
-        #[arg(long, default_value = "disabled", value_parser = ["disabled", "ffmpeg-vcpkg"])]
+        #[arg(long, default_value = "disabled", value_parser = ["disabled", "wmf", "ffmpeg-vcpkg"])]
         video_provider: String,
         #[arg(
             long,
