@@ -23,6 +23,28 @@ pub enum PendingLiveWait {
     ProviderCompletion,
 }
 
+/// Canonical modality class for a family-owned wait token that remains live
+/// across host steps. Only message Input/Time modality changes may reuse a
+/// token; every other duplicate remains a contract violation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveWaitBindingKind {
+    Input,
+    Time,
+    Other,
+}
+
+pub const fn live_wait_can_rebind(
+    existing: LiveWaitBindingKind,
+    next: LiveWaitBindingKind,
+) -> bool {
+    matches!(
+        (existing, next),
+        (LiveWaitBindingKind::Input, LiveWaitBindingKind::Time)
+            | (LiveWaitBindingKind::Time, LiveWaitBindingKind::Input)
+            | (LiveWaitBindingKind::Time, LiveWaitBindingKind::Time)
+    )
+}
+
 pub fn legacy_live_audio_packet(packet: RuntimeLiveAudioPacket) -> LegacyAudioPacketV7 {
     LegacyAudioPacketV7 {
         sequence: packet.sequence,
@@ -177,4 +199,33 @@ pub fn live_wait_condition(
         RuntimeLiveWaitKind::ProviderCompletion { .. } => PendingLiveWait::ProviderCompletion,
     };
     (token_id, condition)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{live_wait_can_rebind, LiveWaitBindingKind};
+
+    #[test]
+    fn wait_rebind_contract_is_limited_to_message_modalities() {
+        assert!(live_wait_can_rebind(
+            LiveWaitBindingKind::Input,
+            LiveWaitBindingKind::Time
+        ));
+        assert!(live_wait_can_rebind(
+            LiveWaitBindingKind::Time,
+            LiveWaitBindingKind::Input
+        ));
+        assert!(live_wait_can_rebind(
+            LiveWaitBindingKind::Time,
+            LiveWaitBindingKind::Time
+        ));
+        assert!(!live_wait_can_rebind(
+            LiveWaitBindingKind::Input,
+            LiveWaitBindingKind::Input
+        ));
+        assert!(!live_wait_can_rebind(
+            LiveWaitBindingKind::Other,
+            LiveWaitBindingKind::Time
+        ));
+    }
 }

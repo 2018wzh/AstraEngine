@@ -39,7 +39,8 @@ pub use library::{
 };
 pub use live_mapping::{
     legacy_live_audio_command, legacy_live_audio_packet, legacy_live_video_command,
-    legacy_texture_format, live_wait_condition, PendingLiveWait,
+    legacy_texture_format, live_wait_can_rebind, live_wait_condition, LiveWaitBindingKind,
+    PendingLiveWait,
 };
 pub use play_record::{PlaySessionRecord, PlayStats, RecentWorkRecord};
 pub use probe::{AutoProbe, ProbeBinding, ProbeError, DEFAULT_PROBE_ORDER};

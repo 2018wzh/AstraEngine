@@ -44,7 +44,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AstraEmuFamilyHost, FamilySurfaceHost, PublishedFamilySurface, SynchronousFamilyHookProvider,
+    live_wait_can_rebind, AstraEmuFamilyHost, FamilySurfaceHost, LiveWaitBindingKind,
+    PublishedFamilySurface, SynchronousFamilyHookProvider,
 };
 
 pub fn evidence_vm_coverage_ids(
@@ -640,17 +641,10 @@ struct ApplyLegacyControlAction {
 #[derive(Debug, Clone, Copy)]
 struct AwaitBinding {
     runtime_token: AwaitTokenId,
-    kind: AwaitBindingKind,
+    kind: LiveWaitBindingKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AwaitBindingKind {
-    Input,
-    Time,
-    Other,
-}
-
-impl AwaitBindingKind {
+impl LiveWaitBindingKind {
     fn from_wait(wait: &LegacyWaitRequest) -> Self {
         match wait {
             LegacyWaitRequest::Input { .. } => Self::Input,
@@ -660,16 +654,6 @@ impl AwaitBindingKind {
             | LegacyWaitRequest::PresentationFence { .. }
             | LegacyWaitRequest::ProviderCompletion { .. } => Self::Other,
         }
-    }
-
-    fn can_rebind(self, next: Self) -> bool {
-        matches!(
-            (self, next),
-            (Self::Input, Self::Input)
-                | (Self::Time, Self::Time)
-                | (Self::Input, Self::Time)
-                | (Self::Time, Self::Input)
-        )
     }
 }
 
@@ -734,9 +718,9 @@ impl RuntimeAction for ApplyLegacyControlAction {
                 .await_tokens
                 .lock()
                 .map_err(|_| RuntimeError::message("ASTRA_EMU_AWAIT_LOCK_POISONED"))?;
-            let next_kind = AwaitBindingKind::from_wait(wait);
+            let next_kind = LiveWaitBindingKind::from_wait(wait);
             if let Some(binding) = tokens.get_mut(&family_token_id) {
-                if binding.kind.can_rebind(next_kind) {
+                if live_wait_can_rebind(binding.kind, next_kind) {
                     binding.kind = next_kind;
                     continue;
                 }
@@ -1806,11 +1790,26 @@ mod tests {
 
     #[test]
     fn legacy_wait_binding_rebinds_persistent_input_and_time_waits() {
-        assert!(AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Time));
-        assert!(AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Input));
-        assert!(AwaitBindingKind::Input.can_rebind(AwaitBindingKind::Input));
-        assert!(AwaitBindingKind::Time.can_rebind(AwaitBindingKind::Time));
-        assert!(!AwaitBindingKind::Other.can_rebind(AwaitBindingKind::Input));
+        assert!(live_wait_can_rebind(
+            LiveWaitBindingKind::Input,
+            LiveWaitBindingKind::Time
+        ));
+        assert!(live_wait_can_rebind(
+            LiveWaitBindingKind::Time,
+            LiveWaitBindingKind::Input
+        ));
+        assert!(!live_wait_can_rebind(
+            LiveWaitBindingKind::Input,
+            LiveWaitBindingKind::Input
+        ));
+        assert!(live_wait_can_rebind(
+            LiveWaitBindingKind::Time,
+            LiveWaitBindingKind::Time
+        ));
+        assert!(!live_wait_can_rebind(
+            LiveWaitBindingKind::Other,
+            LiveWaitBindingKind::Input
+        ));
     }
 
     #[test]

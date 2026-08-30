@@ -40,9 +40,9 @@ use astra_emu_family_support::{
     LegacyVfsFamilyRegistry,
 };
 use astra_emu_manager_core::{
-    evidence_vm_coverage_ids, AstraEmuRuntimeProvider, CancellationToken, CaseRecord,
-    DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner,
-    PendingFamilySystemMenu, ScanLimits, SourceGrant,
+    evidence_vm_coverage_ids, live_wait_can_rebind, AstraEmuRuntimeProvider, CancellationToken,
+    CaseRecord, DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner,
+    LiveWaitBindingKind, PendingFamilySystemMenu, ScanLimits, SourceGrant,
 };
 use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_headless_protocol::{
@@ -257,13 +257,15 @@ fn live_wait_condition(wait: RuntimeLiveWait, step: u64, delta_ns: u64) -> (Stri
     (token_id, condition)
 }
 
-fn pending_wait_can_rebind(existing: &PendingWait, next: &PendingWait) -> bool {
-    matches!(
-        (existing, next),
-        (PendingWait::Input(_), PendingWait::Time(_))
-            | (PendingWait::Time(_), PendingWait::Input(_))
-            | (PendingWait::Time(_), PendingWait::Time(_))
-    )
+fn pending_wait_binding_kind(wait: &PendingWait) -> LiveWaitBindingKind {
+    match wait {
+        PendingWait::Input(_) => LiveWaitBindingKind::Input,
+        PendingWait::Time(_) => LiveWaitBindingKind::Time,
+        PendingWait::DueStep(_)
+        | PendingWait::Media(_)
+        | PendingWait::Presentation
+        | PendingWait::Unsupported => LiveWaitBindingKind::Other,
+    }
 }
 
 fn runtime_wait_kind_name(wait: &RuntimeLiveWait) -> &'static str {
@@ -5878,7 +5880,10 @@ impl<'a> RuntimeDriver<'a> {
                 return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
             }
             if let Some(existing) = self.pending_waits.get_mut(&token) {
-                if !pending_wait_can_rebind(existing, &condition) {
+                if !live_wait_can_rebind(
+                    pending_wait_binding_kind(existing),
+                    pending_wait_binding_kind(&condition),
+                ) {
                     return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
                 }
                 *existing = condition;
@@ -8086,12 +8091,30 @@ mod native_tests {
         let later_time = PendingWait::Time(24);
         let media = PendingWait::Media("movie".into());
 
-        assert!(pending_wait_can_rebind(&input, &time));
-        assert!(pending_wait_can_rebind(&time, &input));
-        assert!(pending_wait_can_rebind(&time, &later_time));
-        assert!(!pending_wait_can_rebind(&input, &input));
-        assert!(!pending_wait_can_rebind(&media, &time));
-        assert!(!pending_wait_can_rebind(&time, &media));
+        assert!(live_wait_can_rebind(
+            pending_wait_binding_kind(&input),
+            pending_wait_binding_kind(&time)
+        ));
+        assert!(live_wait_can_rebind(
+            pending_wait_binding_kind(&time),
+            pending_wait_binding_kind(&input)
+        ));
+        assert!(live_wait_can_rebind(
+            pending_wait_binding_kind(&time),
+            pending_wait_binding_kind(&later_time)
+        ));
+        assert!(!live_wait_can_rebind(
+            pending_wait_binding_kind(&input),
+            pending_wait_binding_kind(&input)
+        ));
+        assert!(!live_wait_can_rebind(
+            pending_wait_binding_kind(&media),
+            pending_wait_binding_kind(&time)
+        ));
+        assert!(!live_wait_can_rebind(
+            pending_wait_binding_kind(&time),
+            pending_wait_binding_kind(&media)
+        ));
     }
 
     #[test]

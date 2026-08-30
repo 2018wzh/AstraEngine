@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026 年 8 月 30 日 Minori 原生菜单 Auto E2：Release CLI Headless host 已补齐 Manager 既有的受限 wait 重绑语义，只允许 `Input↔Time` 和 `Time→Time`，同批重复及其他 wait 类型仍阻断。开发签名 Release v21 从空白进度通过 family v11 菜单选择 Auto，再次选择后恢复 Normal。报告完成 371 fixed steps、36 条物理输入、9 个呈现帧和 6 个 checkpoint，diagnostic 为空；Auto 开启后画面推进，关闭后继续运行 2 秒保持不变，关键画面已人工检查。CLI 37 项 library tests 与受影响 clippy 通过。该结果关闭原生菜单 Auto 定向 E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
+2026 年 8 月 30 日 Minori 原生菜单 Auto E2：受限 wait 重绑语义已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 和 `Time→Time`，同批重复及其他 wait 类型仍阻断。开发签名 Release v21 从空白进度通过 family v11 菜单选择 Auto，再次选择后恢复 Normal。报告完成 371 fixed steps、36 条物理输入、9 个呈现帧和 6 个 checkpoint，diagnostic 为空；Auto 开启后画面推进，关闭后继续运行 2 秒保持不变，关键画面已人工检查。Manager Core 59 项 tests、CLI 定向回归、三个 consumer 的 clippy 与 Manager build check 通过。该结果关闭原生菜单 Auto 定向 E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。原版窗口关闭确认已现场观察，但公共确认结果通道尚未实现。
 
 2026 年 8 月 30 日 Minori 原生菜单 Skip 与 Control E2：开发签名 Release CLI 通过序列化 secondary-pointer 打开 family v11 菜单，再用方向键选择 Skip。定向运行完成 674 fixed steps、41 条物理输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和继续运行 10 秒后的 PNG 完全一致。Control 也已纳入启用该 pragma 的 Host-owned message wait，不再靠同 token `Input`/`Time` 重绑定推进当前消息；Minori 173 项 library tests 通过。独立空白进度的 Control 首路线随后完成 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空。三个 checkpoint 的人工检查未见阻断。该结果关闭当前身份的未读 Skip 定向 E2 和 Control 首路线 E2，不代表 Release Sandbox、120 Hz 性能门禁或 Windows E3 已通过。
 

@@ -2,9 +2,10 @@
 
 ## 2026-08-30：原生菜单 Auto 的 Release E2
 
-- Release CLI 的 Headless host 原先没有实现 Manager 已有的消息 wait 重绑规则：Auto 将活动消息从 `Input` 改为 `Time` 时，CLI 把同一 token 误判为重复 wait。现行实现只允许 `Input` 与 `Time` 互换以及 `Time` deadline 更新；同批重复、`Input` 重发和其他 wait 类型仍阻断。
+- Release CLI 的 Headless host 原先没有实现 Manager 已有的消息 wait 重绑规则：Auto 将活动消息从 `Input` 改为 `Time` 时，CLI 把同一 token 误判为重复 wait。规则现已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 CLI 共同只允许 `Input` 与 `Time` 互换以及 `Time` deadline 更新；同批重复、`Input` 重发和其他 wait 类型仍阻断。
 - 开发签名 Release v21 从空白进度启动，通过 secondary-pointer 和方向键在 family v11 菜单中选择 Auto。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint，diagnostic 为空。Auto 开启后 2 秒内从第一条消息推进到下一场景；再次选择 Auto 恢复 Normal 后，继续运行 2 秒的画面与关闭时完全一致。
 - 三个关键画面已人工检查，未见缺字、裁剪、拉伸或明显图层错误。该结果关闭当前身份的原生菜单 Auto 定向 Headless E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
+- 原版 Sandbox 的窗口关闭按钮会弹出原生确认框，正文与舞台保持在其后方；取消后 session 继续。当前 family 菜单的 `game_exit`/`game_return_title` 仍只有 typed command event，尚无通用确认对话框结果通道，因此不能据此宣称退出行为已对齐。该观察只记录交互契约，不提交截图或商业内容。
 
 ## 2026-08-30：原生菜单 Skip 的 Headless 复验
 

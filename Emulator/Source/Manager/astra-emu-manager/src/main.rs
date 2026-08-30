@@ -46,11 +46,12 @@ use astra_emu_manager::family_host::FamilyHostConfig;
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
-    evidence_vm_coverage_ids, AstraEmuRuntimeProvider, BangumiPlayStateRecord, CancellationToken,
-    CaseRuntimeProfileRecord, CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile,
-    ExternalIdentityRecord, GrantedSourceReader, Library, LibraryScanner, MatchCandidateRecord,
-    MatchDecisionRecord, MetadataSnapshotRecord, PendingFamilySystemMenu, ProviderConsentRecord,
-    ScanLimits, SourceGrant, TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
+    evidence_vm_coverage_ids, live_wait_can_rebind, AstraEmuRuntimeProvider,
+    BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord, CompatibilityCacheEntry,
+    CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord, GrantedSourceReader, Library,
+    LibraryScanner, LiveWaitBindingKind, MatchCandidateRecord, MatchDecisionRecord,
+    MetadataSnapshotRecord, PendingFamilySystemMenu, ProviderConsentRecord, ScanLimits,
+    SourceGrant, TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -1626,17 +1627,15 @@ fn pending_wait_kind(wait: &PendingWait) -> &'static str {
 }
 
 fn pending_wait_can_rebind(existing: &PendingWait, next: &PendingWait) -> bool {
-    matches!(
-        (existing, next),
-        (PendingWait::Input(_), PendingWait::Time(_))
-            | (PendingWait::Time(_), PendingWait::Input(_))
-            // A single message token may move between two timed waits when
-            // the family changes its playback mode (for example Auto to the
-            // Control fast path).  The token identity remains authoritative;
-            // only its deadline changes, so replacing the condition is a
-            // valid rebind rather than a duplicate wait.
-            | (PendingWait::Time(_), PendingWait::Time(_))
-    )
+    let kind = |wait: &PendingWait| match wait {
+        PendingWait::Input(_) => LiveWaitBindingKind::Input,
+        PendingWait::Time(_) => LiveWaitBindingKind::Time,
+        PendingWait::DueStep(_)
+        | PendingWait::PresentationFence
+        | PendingWait::MediaFence(_)
+        | PendingWait::ProviderCompletion => LiveWaitBindingKind::Other,
+    };
+    live_wait_can_rebind(kind(existing), kind(next))
 }
 
 fn system_menu_open_requested(input_edges: &[LegacyInputEdge]) -> bool {
