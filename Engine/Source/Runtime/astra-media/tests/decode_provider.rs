@@ -364,6 +364,25 @@ fn windows_wmf_incremental_audio_releases_ordered_bounded_pcm_chunks() {
 
 #[cfg(windows)]
 #[astra_headless_test::test]
+fn windows_wmf_audio_reader_streams_pcm_from_owned_seekable_source() {
+    let bytes = fixture_bytes("flower.mp4");
+    let encoded_len = bytes.len();
+    let mut decoder = astra_media::open_windows_audio_reader(
+        Box::new(std::io::Cursor::new(bytes)),
+        encoded_len,
+        1_000_000,
+    )
+    .unwrap();
+    let first = decoder.next_chunk().unwrap().unwrap();
+    let second = decoder.next_chunk().unwrap().unwrap();
+    assert!(!first.samples.is_empty());
+    assert_eq!(first.sample_rate, second.sample_rate);
+    assert_eq!(first.channels, second.channels);
+    assert!(second.pts_us >= first.pts_us);
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
 fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnostic() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let err = provider

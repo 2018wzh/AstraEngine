@@ -1,6 +1,6 @@
 # Stage 5 AstraEMU Work
 
-2026 年 8 月 30 日原版影片契约复核：PE/COM 调用确认原版使用 DirectShow Filter Graph、`IGraphBuilder`/`IFilterGraph2` 和 windowless VMR7；关键 HRESULT 失败进入清理分支，没有观察到后端 fallback。AstraMedia 已加入有界只读 `IStream` adapter，公开 MP4 与授权 AVI 均从 owned seekable reader 直接解码，后者完成 2106 个单调 PTS 帧且未返回错误；固定 FFmpeg 路径继续对 7 个 concealment frame 阻断。统一 WMF 音视频 provider 和显式 launch binding仍开放；当前结果不关闭 movie checkpoint、原版 parity、Sandbox 或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
+2026 年 8 月 30 日原版影片契约复核：PE/COM 调用确认原版使用 DirectShow Filter Graph、`IGraphBuilder`/`IFilterGraph2` 和 windowless VMR7；关键 HRESULT 失败进入清理分支，没有观察到后端 fallback。AstraMedia 已加入有界只读 `IStream` adapter，公开 MP4 与授权 AVI 均从 owned seekable reader 直接解码视频和音频；后者完成 2106 个单调 PTS 视频帧、2110 个 PCM chunk 和 8439808 个交错 sample，均未返回错误。固定 FFmpeg 路径继续对 7 个 concealment frame 阻断。统一 WMF 音视频 provider 和显式 launch binding仍开放；当前结果不关闭 movie checkpoint、原版 parity、Sandbox 或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
 
 2026 年 8 月 30 日自然鉴赏复核：同一隔离 writable identity 在四条路线自然写入后，通过物理输入进入 `Memories`、BGM、CG、回想和影片列表。Headless 报告通过 82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源且零 diagnostic；九张保留画面已检查，未见明显缺字、裁剪、拉伸、错层或残影。影片列表尚未实际播放，原版 Sandbox 又被原程序重复异常对话框阻断，因此原版同点比较、Movie playback、四份独立绿色路线报告和 Windows E3 仍开放。
 

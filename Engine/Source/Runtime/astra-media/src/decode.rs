@@ -598,6 +598,34 @@ pub fn open_windows_audio_stream(
     }
 }
 
+/// Opens an incremental Media Foundation audio decoder over an owned,
+/// bounded seekable source without materializing the encoded stream.
+pub fn open_windows_audio_reader(
+    reader: Box<dyn crate::IncrementalReadSeek>,
+    max_encoded_bytes: usize,
+    max_samples: u64,
+) -> Result<WindowsAudioStreamDecoder, MediaError> {
+    #[cfg(windows)]
+    {
+        Ok(WindowsAudioStreamDecoder {
+            inner: wmf_decode::IncrementalAudioDecoder::open_reader(
+                reader,
+                max_encoded_bytes,
+                max_samples,
+            )
+            .map_err(wmf_decode::decode_error)?,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (reader, max_encoded_bytes, max_samples);
+        Err(decode_error(
+            "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+            "Media Foundation audio stream decode is only available on Windows",
+        ))
+    }
+}
+
 #[cfg(not(windows))]
 pub fn decode_windows_video_stream(
     _bytes: &[u8],
@@ -1428,12 +1456,24 @@ mod wmf_decode {
 
     impl IncrementalAudioDecoder {
         pub(super) fn open(bytes: &[u8], max_samples: u64) -> windows::core::Result<Self> {
+            Self::open_reader(
+                Box::new(std::io::Cursor::new(bytes.to_vec())),
+                bytes.len(),
+                max_samples,
+            )
+        }
+
+        pub(super) fn open_reader(
+            reader_source: Box<dyn crate::IncrementalReadSeek>,
+            max_encoded_bytes: usize,
+            max_samples: u64,
+        ) -> windows::core::Result<Self> {
             unsafe {
-                if max_samples == 0 {
+                if max_encoded_bytes == 0 || max_samples == 0 {
                     return Err(wmf_error("audio stream decode budget is empty"));
                 }
                 let session = WmfSession::new()?;
-                let setup = audio_stream_setup(bytes)?;
+                let setup = audio_stream_setup_reader(reader_source, max_encoded_bytes)?;
                 let (sample_rate, channels) = audio_format_from_media_type(&setup.media_type)?;
                 Ok(Self {
                     reader: setup.reader,
@@ -1912,6 +1952,20 @@ mod wmf_decode {
     /// first audio stream and negotiates PCM output.
     unsafe fn audio_stream_setup(bytes: &[u8]) -> windows::core::Result<AudioStreamSetup> {
         let reader = source_reader_from_bytes(bytes)?;
+        audio_stream_setup_with_reader(reader)
+    }
+
+    unsafe fn audio_stream_setup_reader(
+        reader: Box<dyn crate::IncrementalReadSeek>,
+        max_encoded_bytes: usize,
+    ) -> windows::core::Result<AudioStreamSetup> {
+        let reader = source_reader_from_reader(reader, max_encoded_bytes)?;
+        audio_stream_setup_with_reader(reader)
+    }
+
+    unsafe fn audio_stream_setup_with_reader(
+        reader: IMFSourceReader,
+    ) -> windows::core::Result<AudioStreamSetup> {
         let stream_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
         let requested = media_type(&MFMediaType_Audio, &MFAudioFormat_PCM)?;
         reader.SetCurrentMediaType(stream_index, None, &requested)?;
