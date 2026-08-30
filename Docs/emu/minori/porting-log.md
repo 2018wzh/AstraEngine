@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：控制标记观察边界与契约纠偏
+
+- 授权原版在既有 Sandbox session 中恢复到普通剧情画面，但先后在消息阶段和选择 Load 菜单时触发访问异常。目标罕见行没有被可靠复现，因此本轮不据崩溃后的画面解释控制标记，也不在 runtime 中增加静默删除或推测语义。
+- 全量脚本的私有统计继续只确认该行末组合出现一次；公开记录不保存脚本名、正文或截图。下一步需要可复现的原版断点/反编译证据，或在干净 session 中到达同一 source span 后再修改 message parser。
+- 同步清理现行契约中的两处迁移残留：AstraEMU Manager 不再声明通用 Trusted Luau script profile，Minori media 也不再声明 64 MiB 进程内明文 entry cache。现行路径是严格 launch profile、相对 private file、family-owned 流式解密和 AstraMedia custom AVIO。
+
 ## 2026-08-30：FFmpeg custom AVIO 与当前 E2 边界
 
 - AstraMedia 的 FFmpeg 增量入口已从明文临时 spool 改为 custom AVIO。Host 把有界 `Read + Seek + Send` reader 的所有权交给 decoder；FFmpeg 通过 64 KiB callback buffer 直接读取和定位 VFS 明文流，不再生成第二份完整明文文件。reader、AVIO context 和 demux context 按显式所有权顺序释放，回调 panic、I/O 错误、越界 seek 和输入预算异常都会阻断。

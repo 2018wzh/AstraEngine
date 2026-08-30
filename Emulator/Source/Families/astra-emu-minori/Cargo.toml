@@ -30,7 +30,6 @@ encoding_rs.workspace = true
 flate2.workspace = true
 hex.workspace = true
 image.workspace = true
-lru.workspace = true
 postcard.workspace = true
 rc4.workspace = true
 schemars.workspace = true

@@ -126,13 +126,6 @@ pub struct FamilyAutoProbePolicy {
     pub diagnostics: Vec<LegacyProbeDiagnostic>,
 }
 
-pub struct TrustedEmuScriptProfile {
-    pub script_bundle: PackageSectionRef,
-    pub trusted_profile: bool,
-    pub host_capabilities: Vec<PermissionId>,
-    pub violation_policy: ScriptViolationPolicy,
-}
-
 pub struct TextCapturePipeline {
     pub local_dump: TextDumpPolicy,
     pub translation_provider: Option<ProviderId>,
@@ -146,7 +139,7 @@ pub struct EmuFilterPresetBinding {
 }
 ```
 
-默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。Luau 是唯一用户脚本语言；旧 Lua/TJS 只描述 family 内部 legacy 事实。Trusted script 只能提交 typed blackboard、input、tag 或 media intent，这些 intent 必须在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理或访问控制规避时，Manager 隔离禁用该脚本；只有 case profile 已显式允许无补丁启动时才能继续，否则启动被阻断。
+默认 auto probe 顺序是 KrKr、Artemis、BGI、Siglus、SoftPAL、FVP、Minori。用户 profile 可以覆盖最终 family。AstraEMU 不执行通用 Luau patch 或 decoder callback；family 的私有配置由严格 launch profile 与安全相对 private file 交给对应 factory。旧 Lua/TJS 只描述 family 内部 legacy 事实，不构成 Host 脚本接口。缺少配置、schema 不匹配或 private file 越界时直接阻断启动，不允许无补丁回退。
 
 Text dump 默认只写 hash、长度、source ref 和 speaker metadata；用户本地 opt-in 后才能保存全文 dump。翻译 overlay 是非权威 UI 状态，不进入 replay hash。Filter preset 复用 `FilterGraph`；family 缺少 layer metadata 时，只启用 final-frame preset 并输出 diagnostic。
 

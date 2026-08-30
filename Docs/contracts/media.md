@@ -68,7 +68,7 @@ allocation。相同格式的 PCM 不允许重建；worker 只在实际 mix/resam
 
 Native callback 的消费、设备错误和低水位边沿通过 `AudioWakeRegistration` 唤醒 drain/refill waiter；waiter 使用绝对 deadline，不能以 4/5 ms `sleep` 或 fixed-tick timeout 反复查询。队列满时 producer 必须背压或返回稳定 overflow，设备丢失、worker panic 和 shutdown drain/abort/join 必须成为可诊断的终态。
 
-Minori PAZ 的完整明文 entry 读取在完成 source mutation、encrypted hash、解密和尺寸校验后，可以保留一个最多 64 MiB 的进程内 entry。后续同一 identity 的 bounded range read 直接复用已验证的 `Arc<[u8]>`，避免从磁盘明文 cache 重复读取完整 entry；identity 变化或 entry 超过上限时立即失效。该优化不扩大 cache 配额、不改变 raw movie 的 source-backed range transform，也不把明文写入 manifest、save、report 或日志。
+Minori PAZ 不保留完整明文 entry。未压缩 entry 只读取覆盖请求范围的对齐密文块；packed entry 的随机范围读取从 entry 起点重新建立 decrypt + zlib 流，顺序 `open_stream` 则保留单一增量状态。影片通过 custom AVIO 把有界 `Read + Seek + Send` reader 直接交给 AstraMedia FFmpeg provider，不建立明文 spool、seek index、进程内明文 entry 或磁盘 cache。
 
 ## FilterGraph
 
