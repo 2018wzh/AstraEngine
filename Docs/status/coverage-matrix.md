@@ -1,6 +1,6 @@
 # Implementation Coverage Matrix
 
-2026 年 8 月 30 日原版影片后端复核：原版二进制明确创建 DirectShow `CLSID_FilterGraph`、`IGraphBuilder`/`IFilterGraph2` 与 windowless VMR7，关键 COM 调用失败会进入清理路径，未发现静默切换解码后端。AstraMedia 新增有界只读 COM `IStream` adapter；公开 MP4 与相同授权 AVI 均可直接从 owned seekable reader 解码视频和音频，不复制 encoded source 到 HGLOBAL 或 plaintext spool。授权 AVI 到 EOS 共 2106 个单调 PTS 视频帧、2110 个 PCM chunk 和 8439808 个交错 sample，均未返回错误；固定 FFmpeg 路径仍对 7 个 concealment frame fail-fast。当前只关闭 reader-backed 分轨 seam，不等于统一音视频 provider、生产接线、原版逐帧 parity 或 Windows E3。
+2026 年 8 月 30 日原版影片后端复核：原版二进制明确创建 DirectShow `CLSID_FilterGraph`、`IGraphBuilder`/`IFilterGraph2` 与 windowless VMR7，关键 COM 调用失败会进入清理路径，未发现静默切换解码后端。AstraMedia 新增有界只读 COM `IStream` adapter 和显式 `astra.decode.wmf.incremental` registry provider；公开 MP4 已覆盖统一双轨 packet、seek generation 与 cancel。授权 AVI 通过统一 provider 到 EOS，共 2106 个单调 PTS 视频 packet 和 2110 个 PCM packet，未复制 encoded source 到 HGLOBAL 或 plaintext spool；固定 FFmpeg 路径仍对 7 个 concealment frame fail-fast。当前关闭公共 provider seam，不等于 Minori 生产接线、原版逐帧 parity 或 Windows E3。
 
 2026 年 8 月 30 日自然鉴赏子页：复用同一隔离 writable identity，不注入解锁状态，序列化物理输入进入 `Memories`、BGM、CG、回想和影片列表。报告通过 82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源且零 diagnostic；九张画面已检查，未见明显缺字、裁剪、拉伸、错层或残影。该证据关闭当前自然 progress 到鉴赏子页的 Headless E2 输入/呈现链路，不关闭影片实际播放、原版像素 parity、四份独立绿色路线报告或 Windows E3。原版 Sandbox session 因原程序重复异常对话框无法用于本轮同点对照。
 

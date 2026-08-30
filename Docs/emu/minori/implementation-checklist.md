@@ -5,8 +5,8 @@
 - [x] PE/COM contract inspection confirms the original uses DirectShow Filter Graph plus windowless VMR7 and checks failing HRESULTs; it does not establish a silent decoder fallback.
 - [x] AstraMedia WMF decodes the same authorized AVI to EOS with 2106 monotonic frames and no returned decode error, while the pinned FFmpeg path blocks on 7 concealment frames.
 - [x] Add the bounded read-only COM `IStream` seam plus video/audio reader entry points; public MP4 and the authorized AVI decode both tracks directly from owned seekable readers without HGLOBAL input copies or plaintext spools.
-- [ ] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including packet ordering, seek generation and cancellation.
-- [ ] Bind WMF only when explicitly selected by the launch composition. Missing/ineligible WMF, codec mismatch, or decode failure must block rather than switch to FFmpeg.
+- [x] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including typed packets, media-type validation, seek generation and cancellation.
+- [ ] Bind WMF only when explicitly selected by the Minori launch composition. Missing/ineligible WMF, codec mismatch, or decode failure must block rather than switch to FFmpeg.
 - [ ] Re-run required movie checkpoints and original-title parity before changing the shipping Minori provider binding.
 
 ## FFmpeg dependency and WMV3 quality (2026-08-30)

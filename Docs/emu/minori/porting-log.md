@@ -5,7 +5,8 @@
 - 原版主程序的 PE 导入和 COM 调用已确认影片链路使用 DirectShow Filter Graph，而不是 Media Foundation：创建 `CLSID_FilterGraph`，查询 `IGraphBuilder`/`IFilterGraph2`，并创建 `CLSID_VideoMixingRenderer`（VMR7）及 `IVMRFilterConfig`、`IVMRWindowlessControl`。`VMR7` 属性配置和关键 COM 调用均检查负 HRESULT 并进入清理/失败分支，没有观察到静默切换后端的路径。
 - 同一授权 AVI 经 AstraMedia 的 Windows Media Foundation 全流诊断完成 2106 帧、87.916666 秒，PTS 单调且未返回解码错误；固定 FFmpeg 路径则在同一源中报告 7 个 concealment frame。这个结果说明平台解码器能处理该 authored source，但还不是原版逐帧 parity，也不授权把 FFmpeg 的错误静默吞掉。
 - AstraMedia 已增加只读 `IStream` adapter、`open_windows_video_reader` 和 `open_windows_audio_reader`：它们直接持有有界 `Read + Seek + Send` source，并交给 MF byte stream，不复制到 HGLOBAL，也不建立临时文件。公开 MP4 fixture 的视频与音频 reader 回归均通过。授权 AVI 的独立 reader 诊断得到 2106 个单调视频帧，以及 2110 个 PCM chunk、8439808 个交错 sample；两条轨道均到达 EOS。当前完成的是公共分轨 reader seam，统一音视频 packet provider、seek generation 与 launch registry binding 仍未完成。
-- 后续生产实现采用显式 provider binding：Windows 可选择 AstraMedia 的 reader-backed WMF 增量 provider，FFmpeg 继续保留为另一项显式选择；二者不构成 fallback chain。WMF provider 还需输出统一 timestamped audio/video packet，并完成公开 fixture、授权样本、Headless movie checkpoint 与原版同点复核后才能替换当前 Minori Release binding。
+- AstraMedia 公共 registry 现提供显式 `astra.decode.wmf.incremental`。它从同一个 MF Source Reader 输出统一 timestamped audio/video packet，校验动态 media type、轨道、PTS、generation 和预算，并实现 seek/cancel；未注册、codec 不匹配和平台不可用均由 registry 阻断。公开 MP4 覆盖双轨、seek 和 cancel，授权 AVI 的统一 provider 全流得到与分轨诊断一致的 2106 个视频 packet 和 2110 个音频 packet。
+- 后续生产接线仍采用显式 provider binding：Windows 可选择 WMF，FFmpeg 保留为另一项显式选择；二者不构成 fallback chain。完成 Minori composition、Headless movie checkpoint 与原版同点复核后才能替换当前 Release binding。
 
 ## 2026-08-30：自然解锁后的鉴赏子页
 

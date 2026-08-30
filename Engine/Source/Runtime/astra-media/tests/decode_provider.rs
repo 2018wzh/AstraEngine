@@ -383,6 +383,66 @@ fn windows_wmf_audio_reader_streams_pcm_from_owned_seekable_source() {
 
 #[cfg(windows)]
 #[astra_headless_test::test]
+fn windows_wmf_incremental_registry_emits_both_tracks_and_owns_seek_cancel() {
+    use astra_media::{
+        DecodedMediaPacket, IncrementalDecodeBudget, IncrementalDecodeProviderRegistry,
+        IncrementalDecodeRequest, WmfIncrementalDecodeProvider, WMF_INCREMENTAL_PROVIDER_ID,
+    };
+
+    let bytes = fixture_bytes("flower.mp4");
+    let mut registry = IncrementalDecodeProviderRegistry::default();
+    registry
+        .register(Box::new(WmfIncrementalDecodeProvider::probe().unwrap()))
+        .unwrap();
+    let mut decoder = registry
+        .open(
+            WMF_INCREMENTAL_PROVIDER_ID,
+            IncrementalDecodeRequest::new("mp4", Box::new(std::io::Cursor::new(bytes)))
+                .with_budget(IncrementalDecodeBudget {
+                    max_encoded_bytes: 16 * 1024 * 1024,
+                    max_video_frame_bytes: 64 * 1024 * 1024,
+                    max_pending_packets: 64,
+                    max_video_frames: 256,
+                    max_audio_packets: 256,
+                }),
+        )
+        .unwrap();
+    let config = decoder.playback_config();
+    assert!(config.has_video);
+    assert!(config.has_audio);
+    let mut saw_video = false;
+    let mut saw_audio = false;
+    for _ in 0..64 {
+        match decoder.read_next().unwrap().unwrap() {
+            DecodedMediaPacket::Video { packet, bgra8 } => {
+                assert_eq!(packet.generation, 1);
+                assert!(!bgra8.is_empty());
+                saw_video = true;
+            }
+            DecodedMediaPacket::Audio { packet, samples } => {
+                assert_eq!(packet.generation, 1);
+                assert!(!samples.is_empty());
+                saw_audio = true;
+            }
+        }
+        if saw_video && saw_audio {
+            break;
+        }
+    }
+    assert!(saw_video && saw_audio);
+
+    assert_eq!(decoder.seek(config.duration_us / 2).unwrap(), 2);
+    let packet = decoder.read_next().unwrap().unwrap();
+    match packet {
+        DecodedMediaPacket::Video { packet, .. } => assert_eq!(packet.generation, 2),
+        DecodedMediaPacket::Audio { packet, .. } => assert_eq!(packet.generation, 2),
+    }
+    decoder.cancel().unwrap();
+    assert!(decoder.read_next().is_err());
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
 fn windows_wmf_decode_provider_video_without_transform_reports_blocking_diagnostic() {
     let provider = astra_media::WindowsMediaFoundationDecodeProvider::probe().unwrap();
     let err = provider

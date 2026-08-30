@@ -626,6 +626,76 @@ pub fn open_windows_audio_reader(
     }
 }
 
+pub const WMF_INCREMENTAL_PROVIDER_ID: &str = "astra.decode.wmf.incremental";
+
+/// Explicit Windows Media Foundation binding for the shared incremental
+/// playback registry. It is never registered or selected implicitly.
+pub struct WmfIncrementalDecodeProvider;
+
+impl WmfIncrementalDecodeProvider {
+    pub fn probe() -> Result<Self, MediaError> {
+        #[cfg(windows)]
+        {
+            let _session = wmf_decode::startup()?;
+            Ok(Self)
+        }
+        #[cfg(not(windows))]
+        {
+            Err(decode_error(
+                "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+                "Media Foundation incremental decode is only available on Windows",
+            ))
+        }
+    }
+}
+
+impl crate::IncrementalDecodeProvider for WmfIncrementalDecodeProvider {
+    fn provider_id(&self) -> &'static str {
+        WMF_INCREMENTAL_PROVIDER_ID
+    }
+
+    fn capability(&self) -> crate::IncrementalDecodeCapability {
+        crate::IncrementalDecodeCapability {
+            provider_id: WMF_INCREMENTAL_PROVIDER_ID.to_owned(),
+            codecs: vec![
+                "avi".to_owned(),
+                "asf".to_owned(),
+                "mp4".to_owned(),
+                "m4v".to_owned(),
+                "wmv".to_owned(),
+                "mpg".to_owned(),
+                "mpeg".to_owned(),
+            ],
+            feature_gated: false,
+        }
+    }
+
+    fn open_reader(
+        &self,
+        request: crate::IncrementalDecodeRequest,
+    ) -> Result<Box<dyn crate::IncrementalMediaDecoder>, MediaError> {
+        #[cfg(windows)]
+        {
+            let crate::IncrementalDecodeRequest {
+                codec: _,
+                reader,
+                budget,
+            } = request;
+            let decoder = wmf_decode::WmfPlaybackDecoder::open(reader, budget)
+                .map_err(wmf_decode::decode_error)?;
+            Ok(Box::new(decoder))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = request;
+            Err(decode_error(
+                "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+                "Media Foundation incremental decode is only available on Windows",
+            ))
+        }
+    }
+}
+
 #[cfg(not(windows))]
 pub fn decode_windows_video_stream(
     _bytes: &[u8],
@@ -1305,7 +1375,7 @@ fn webcodecs_available() -> bool {
 
 #[cfg(windows)]
 mod wmf_decode {
-    use std::{ptr, slice};
+    use std::{mem::ManuallyDrop, ptr, slice};
 
     use astra_core::Diagnostic;
     use windows::{
@@ -1317,18 +1387,26 @@ mod wmf_decode {
                 MFCreateAttributes, MFCreateMFByteStreamOnStreamEx, MFCreateMediaType,
                 MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video,
                 MFShutdown, MFStartup, MFVideoFormat_RGB32, MFSTARTUP_FULL,
-                MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE,
-                MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
-                MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READERF_ENDOFSTREAM,
+                MF_E_INVALIDSTREAMNUMBER, MF_E_NO_MORE_TYPES, MF_MT_AUDIO_NUM_CHANNELS,
+                MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
+                MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
+                MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED,
+                MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED,
+                MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_ANY_STREAM,
                 MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
                 MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE, MF_VERSION,
             },
             System::{
                 Com::{
-                    CoInitializeEx, CoUninitialize, StructuredStorage::CreateStreamOnHGlobal,
+                    CoInitializeEx, CoUninitialize,
+                    StructuredStorage::{
+                        CreateStreamOnHGlobal, PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0,
+                        PROPVARIANT_0_0_0,
+                    },
                     COINIT_MULTITHREADED,
                 },
                 Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+                Variant::VT_I8,
             },
         },
     };
@@ -1338,6 +1416,10 @@ mod wmf_decode {
         WindowsDecodedAudioChunk, MAX_DECODED_AUDIO_BYTES, MAX_DECODED_VIDEO_FRAME_BYTES,
     };
     use crate::pcm_contract::{is_supported_pcm_channel_count, is_supported_pcm_rate};
+    use crate::{
+        AudioFramePacket, DecodedMediaPacket, IncrementalDecodeBudget, IncrementalMediaDecoder,
+        LateVideoPolicy, MediaPlaybackConfig, VideoFramePacket,
+    };
 
     pub(super) fn startup() -> Result<WmfSession, MediaError> {
         WmfSession::new().map_err(|err| {
@@ -1452,6 +1534,480 @@ mod wmf_decode {
         eof: bool,
         // Must be dropped after every Media Foundation interface above.
         _session: WmfSession,
+    }
+
+    pub(super) struct WmfPlaybackDecoder {
+        reader: IMFSourceReader,
+        config: MediaPlaybackConfig,
+        width: u32,
+        height: u32,
+        expected_frame_bytes: usize,
+        frame_duration_us: u64,
+        sample_rate: u32,
+        channels: u16,
+        budget: IncrementalDecodeBudget,
+        generation: u64,
+        video_sequence: u64,
+        audio_sequence: u64,
+        video_frames: usize,
+        audio_packets: usize,
+        previous_video_pts_us: Option<u64>,
+        previous_audio_pts_us: Option<u64>,
+        video_eos: bool,
+        audio_eos: bool,
+        cancelled: bool,
+        _session: WmfSession,
+    }
+
+    impl WmfPlaybackDecoder {
+        pub(super) fn open(
+            source: Box<dyn crate::IncrementalReadSeek>,
+            budget: IncrementalDecodeBudget,
+        ) -> windows::core::Result<Self> {
+            unsafe {
+                let session = WmfSession::new()?;
+                let reader = source_reader_from_reader(source, budget.max_encoded_bytes)?;
+                reader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)?;
+
+                let video_type = configure_optional_track(
+                    &reader,
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                    &MFMediaType_Video,
+                    &MFVideoFormat_RGB32,
+                )?;
+                let audio_type = configure_optional_track(
+                    &reader,
+                    MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32,
+                    &MFMediaType_Audio,
+                    &MFAudioFormat_PCM,
+                )?;
+                if video_type.is_none() && audio_type.is_none() {
+                    return Err(wmf_error(
+                        "media source has no supported audio or video track",
+                    ));
+                }
+
+                let duration = reader.GetPresentationAttribute(
+                    MF_SOURCE_READER_MEDIASOURCE.0 as u32,
+                    &MF_PD_DURATION,
+                )?;
+                let duration_us = u64::try_from(&duration)? / 10;
+                if duration_us == 0 {
+                    return Err(wmf_error("media source reported an empty duration"));
+                }
+
+                let (width, height, expected_frame_bytes, frame_duration_us) =
+                    if let Some(media_type) = video_type.as_ref() {
+                        let (width, height) = attribute_frame_size(media_type)
+                            .ok_or_else(|| wmf_error("video track has no frame size"))?;
+                        let expected = usize::try_from(width)
+                            .ok()
+                            .and_then(|width| {
+                                usize::try_from(height)
+                                    .ok()
+                                    .and_then(|height| width.checked_mul(height))
+                            })
+                            .and_then(|pixels| pixels.checked_mul(4))
+                            .filter(|bytes| *bytes > 0 && *bytes <= budget.max_video_frame_bytes)
+                            .ok_or_else(|| wmf_error("video frame exceeds its decode budget"))?;
+                        (
+                            width,
+                            height,
+                            expected,
+                            attribute_frame_duration_us(media_type),
+                        )
+                    } else {
+                        (0, 0, 0, 0)
+                    };
+                let (sample_rate, channels) = if let Some(media_type) = audio_type.as_ref() {
+                    audio_format_from_media_type(media_type)?
+                } else {
+                    (0, 0)
+                };
+
+                Ok(Self {
+                    reader,
+                    config: MediaPlaybackConfig {
+                        has_audio: audio_type.is_some(),
+                        has_video: video_type.is_some(),
+                        duration_us,
+                        max_video_frames: budget.max_video_frames,
+                        max_audio_packets: budget.max_audio_packets,
+                        max_tick_us: 100_000,
+                        max_audio_clock_jump_us: 250_000,
+                        max_video_lead_us: 20_000,
+                        max_video_lag_us: 100_000,
+                        late_video_policy: LateVideoPolicy::Block,
+                    },
+                    width,
+                    height,
+                    expected_frame_bytes,
+                    frame_duration_us,
+                    sample_rate,
+                    channels,
+                    budget,
+                    generation: 1,
+                    video_sequence: 0,
+                    audio_sequence: 0,
+                    video_frames: 0,
+                    audio_packets: 0,
+                    previous_video_pts_us: None,
+                    previous_audio_pts_us: None,
+                    video_eos: video_type.is_none(),
+                    audio_eos: audio_type.is_none(),
+                    cancelled: false,
+                    _session: session,
+                })
+            }
+        }
+
+        fn reset_after_seek(&mut self) {
+            self.video_sequence = 0;
+            self.audio_sequence = 0;
+            self.video_frames = 0;
+            self.audio_packets = 0;
+            self.previous_video_pts_us = None;
+            self.previous_audio_pts_us = None;
+            self.video_eos = !self.config.has_video;
+            self.audio_eos = !self.config.has_audio;
+        }
+    }
+
+    impl IncrementalMediaDecoder for WmfPlaybackDecoder {
+        fn provider_id(&self) -> &'static str {
+            super::WMF_INCREMENTAL_PROVIDER_ID
+        }
+
+        fn playback_config(&self) -> MediaPlaybackConfig {
+            self.config.clone()
+        }
+
+        fn read_next(&mut self) -> Result<Option<DecodedMediaPacket>, MediaError> {
+            if self.cancelled {
+                return Err(blocking(
+                    "ASTRA_WMF_INCREMENTAL_CANCELLED",
+                    "Media Foundation decoder is cancelled",
+                ));
+            }
+            unsafe {
+                loop {
+                    if self.video_eos && self.audio_eos {
+                        return Ok(None);
+                    }
+                    let mut actual_stream = 0_u32;
+                    let mut flags = 0_u32;
+                    let mut timestamp_100ns = 0_i64;
+                    let mut sample = None;
+                    self.reader
+                        .ReadSample(
+                            MF_SOURCE_READER_ANY_STREAM.0 as u32,
+                            0,
+                            Some(&mut actual_stream),
+                            Some(&mut flags),
+                            Some(&mut timestamp_100ns),
+                            Some(&mut sample),
+                        )
+                        .map_err(decode_error)?;
+                    if flags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED.0 as u32 != 0 {
+                        return Err(blocking(
+                            "ASTRA_WMF_INCREMENTAL_MEDIA_TYPE_CHANGED",
+                            "Media Foundation changed the native media type during playback",
+                        ));
+                    }
+                    let track = stream_track(&self.reader, actual_stream).map_err(decode_error)?;
+                    if flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0 {
+                        validate_current_track(
+                            &self.reader,
+                            actual_stream,
+                            track,
+                            self.width,
+                            self.height,
+                            self.sample_rate,
+                            self.channels,
+                        )
+                        .map_err(decode_error)?;
+                    }
+                    if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                        match track {
+                            StreamTrack::Video => self.video_eos = true,
+                            StreamTrack::Audio => self.audio_eos = true,
+                        }
+                        continue;
+                    }
+                    let Some(sample) = sample else {
+                        continue;
+                    };
+                    if timestamp_100ns < 0 {
+                        return Err(blocking(
+                            "ASTRA_WMF_INCREMENTAL_TIMESTAMP",
+                            "Media Foundation returned a negative timestamp",
+                        ));
+                    }
+                    let pts_us = timestamp_100ns as u64 / 10;
+                    if pts_us >= self.config.duration_us {
+                        return Err(blocking(
+                            "ASTRA_WMF_INCREMENTAL_TIMESTAMP",
+                            "Media Foundation timestamp exceeds playback duration",
+                        ));
+                    }
+                    match track {
+                        StreamTrack::Video => {
+                            if !self.config.has_video
+                                || self
+                                    .previous_video_pts_us
+                                    .is_some_and(|previous| pts_us < previous)
+                            {
+                                return Err(blocking(
+                                    "ASTRA_WMF_INCREMENTAL_VIDEO",
+                                    "Media Foundation video track or timestamp is invalid",
+                                ));
+                            }
+                            self.video_frames = self
+                                .video_frames
+                                .checked_add(1)
+                                .filter(|count| *count <= self.budget.max_video_frames)
+                                .ok_or_else(|| {
+                                    blocking(
+                                        "ASTRA_WMF_INCREMENTAL_VIDEO_BUDGET",
+                                        "Media Foundation video frame budget is exhausted",
+                                    )
+                                })?;
+                            self.video_sequence =
+                                self.video_sequence.checked_add(1).ok_or_else(|| {
+                                    blocking(
+                                        "ASTRA_WMF_INCREMENTAL_SEQUENCE",
+                                        "Media Foundation video sequence overflowed",
+                                    )
+                                })?;
+                            let mut bgra8 = sample_bytes(&sample).map_err(decode_error)?;
+                            if bgra8.len() < self.expected_frame_bytes {
+                                return Err(blocking(
+                                    "ASTRA_WMF_INCREMENTAL_VIDEO",
+                                    "Media Foundation returned a partial video frame",
+                                ));
+                            }
+                            bgra8.truncate(self.expected_frame_bytes);
+                            self.previous_video_pts_us = Some(pts_us);
+                            return Ok(Some(DecodedMediaPacket::Video {
+                                packet: VideoFramePacket {
+                                    generation: self.generation,
+                                    sequence: self.video_sequence,
+                                    resource_id: "wmf.video".to_owned(),
+                                    pts_us,
+                                    duration_us: self
+                                        .frame_duration_us
+                                        .min(self.config.duration_us - pts_us),
+                                    width: self.width,
+                                    height: self.height,
+                                },
+                                bgra8: bgra8.into(),
+                            }));
+                        }
+                        StreamTrack::Audio => {
+                            if !self.config.has_audio
+                                || self
+                                    .previous_audio_pts_us
+                                    .is_some_and(|previous| pts_us < previous)
+                            {
+                                return Err(blocking(
+                                    "ASTRA_WMF_INCREMENTAL_AUDIO",
+                                    "Media Foundation audio track or timestamp is invalid",
+                                ));
+                            }
+                            self.audio_packets = self
+                                .audio_packets
+                                .checked_add(1)
+                                .filter(|count| *count <= self.budget.max_audio_packets)
+                                .ok_or_else(|| {
+                                    blocking(
+                                        "ASTRA_WMF_INCREMENTAL_AUDIO_BUDGET",
+                                        "Media Foundation audio packet budget is exhausted",
+                                    )
+                                })?;
+                            self.audio_sequence =
+                                self.audio_sequence.checked_add(1).ok_or_else(|| {
+                                    blocking(
+                                        "ASTRA_WMF_INCREMENTAL_SEQUENCE",
+                                        "Media Foundation audio sequence overflowed",
+                                    )
+                                })?;
+                            let samples = sample_i16(&sample).map_err(decode_error)?;
+                            let frame_count = samples.len() / usize::from(self.channels);
+                            let frame_count = u32::try_from(frame_count).map_err(|_| {
+                                blocking(
+                                    "ASTRA_WMF_INCREMENTAL_AUDIO",
+                                    "Media Foundation audio frame count overflowed",
+                                )
+                            })?;
+                            let duration_us = u64::from(frame_count)
+                                .checked_mul(1_000_000)
+                                .map(|value| value / u64::from(self.sample_rate))
+                                .filter(|value| *value > 0)
+                                .ok_or_else(|| {
+                                    blocking(
+                                        "ASTRA_WMF_INCREMENTAL_AUDIO",
+                                        "Media Foundation audio packet duration is invalid",
+                                    )
+                                })?
+                                .min(self.config.duration_us - pts_us);
+                            self.previous_audio_pts_us = Some(pts_us);
+                            return Ok(Some(DecodedMediaPacket::Audio {
+                                packet: AudioFramePacket {
+                                    generation: self.generation,
+                                    sequence: self.audio_sequence,
+                                    resource_id: "wmf.audio".to_owned(),
+                                    pts_us,
+                                    duration_us,
+                                    sample_rate: self.sample_rate,
+                                    channels: self.channels,
+                                    frame_count,
+                                },
+                                samples,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        fn seek(&mut self, position_us: u64) -> Result<u64, MediaError> {
+            if self.cancelled || position_us >= self.config.duration_us {
+                return Err(blocking(
+                    "ASTRA_WMF_INCREMENTAL_SEEK",
+                    "Media Foundation seek target or decoder state is invalid",
+                ));
+            }
+            let position_100ns = position_us.checked_mul(10).ok_or_else(|| {
+                blocking(
+                    "ASTRA_WMF_INCREMENTAL_SEEK",
+                    "Media Foundation seek timestamp overflowed",
+                )
+            })?;
+            let variant = propvariant_i64(position_100ns as i64);
+            unsafe {
+                let time_format = windows::core::GUID::zeroed();
+                self.reader
+                    .SetCurrentPosition(&time_format, &variant)
+                    .map_err(decode_error)?;
+            }
+            self.generation = self.generation.checked_add(1).ok_or_else(|| {
+                blocking(
+                    "ASTRA_WMF_INCREMENTAL_GENERATION",
+                    "Media Foundation decoder generation overflowed",
+                )
+            })?;
+            self.reset_after_seek();
+            Ok(self.generation)
+        }
+
+        fn cancel(&mut self) -> Result<(), MediaError> {
+            if !self.cancelled {
+                unsafe {
+                    self.reader
+                        .Flush(MF_SOURCE_READER_ALL_STREAMS.0 as u32)
+                        .map_err(decode_error)?;
+                }
+                self.cancelled = true;
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum StreamTrack {
+        Video,
+        Audio,
+    }
+
+    unsafe fn configure_optional_track(
+        reader: &IMFSourceReader,
+        stream_index: u32,
+        major_type: &windows::core::GUID,
+        subtype: &windows::core::GUID,
+    ) -> windows::core::Result<Option<IMFMediaType>> {
+        match reader.GetNativeMediaType(stream_index, 0) {
+            Ok(_) => {}
+            Err(error)
+                if error.code() == MF_E_INVALIDSTREAMNUMBER
+                    || error.code() == MF_E_NO_MORE_TYPES =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        }
+        reader.SetStreamSelection(stream_index, true)?;
+        let requested = media_type(major_type, subtype)?;
+        reader.SetCurrentMediaType(stream_index, None, &requested)?;
+        Ok(Some(reader.GetCurrentMediaType(stream_index)?))
+    }
+
+    unsafe fn stream_track(
+        reader: &IMFSourceReader,
+        stream_index: u32,
+    ) -> windows::core::Result<StreamTrack> {
+        let media_type = reader.GetCurrentMediaType(stream_index)?;
+        let attributes: IMFAttributes = media_type.cast()?;
+        let major = attributes.GetGUID(&MF_MT_MAJOR_TYPE)?;
+        if major == MFMediaType_Video {
+            Ok(StreamTrack::Video)
+        } else if major == MFMediaType_Audio {
+            Ok(StreamTrack::Audio)
+        } else {
+            Err(wmf_error("Media Foundation emitted an unselected track"))
+        }
+    }
+
+    unsafe fn validate_current_track(
+        reader: &IMFSourceReader,
+        stream_index: u32,
+        track: StreamTrack,
+        width: u32,
+        height: u32,
+        sample_rate: u32,
+        channels: u16,
+    ) -> windows::core::Result<()> {
+        let media_type = reader.GetCurrentMediaType(stream_index)?;
+        match track {
+            StreamTrack::Video => {
+                let observed = attribute_frame_size(&media_type);
+                if observed.is_some_and(|(observed_width, observed_height)| {
+                    observed_width == width
+                        && observed_height >= height
+                        && observed_height - height < 16
+                }) {
+                    Ok(())
+                } else {
+                    Err(wmf_error(format!(
+                        "Media Foundation changed video dimensions from {width}x{height} to {observed:?}"
+                    )))
+                }
+            }
+            StreamTrack::Audio => {
+                let observed = audio_format_from_media_type(&media_type)?;
+                if observed == (sample_rate, channels) {
+                    Ok(())
+                } else {
+                    Err(wmf_error(format!(
+                        "Media Foundation changed audio format from {sample_rate}/{channels} to {}/{}",
+                        observed.0, observed.1
+                    )))
+                }
+            }
+        }
+    }
+
+    fn propvariant_i64(value: i64) -> PROPVARIANT {
+        PROPVARIANT {
+            Anonymous: PROPVARIANT_0 {
+                Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
+                    vt: VT_I8,
+                    wReserved1: 0,
+                    wReserved2: 0,
+                    wReserved3: 0,
+                    Anonymous: PROPVARIANT_0_0_0 { hVal: value },
+                }),
+            },
+        }
     }
 
     impl IncrementalAudioDecoder {
@@ -2088,8 +2644,8 @@ mod wmf_decode {
             .max(1)
     }
 
-    fn wmf_error(message: &'static str) -> WindowsError {
-        WindowsError::new(HRESULT(0x80004005_u32 as i32), message)
+    fn wmf_error(message: impl AsRef<str>) -> WindowsError {
+        WindowsError::new(HRESULT(0x80004005_u32 as i32), message.as_ref())
     }
 
     unsafe fn sample_bytes(sample: &IMFSample) -> windows::core::Result<Vec<u8>> {
