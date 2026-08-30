@@ -1,6 +1,8 @@
 # Implementation Coverage Matrix
 
-2026 年 8 月 30 日 Minori 原生菜单 Auto 覆盖：Manager Core 现持有唯一的受限 wait 重绑规则，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 与 `Time→Time`；同批重复和其他类型继续阻断。开发签名 Release v21 通过 secondary-pointer 与方向键选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后的画面发生预期推进，关闭后继续运行 2 秒保持不变。保留画面已人工检查。该覆盖属于原生菜单 Auto 定向 E2，不关闭完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。原版窗口关闭会弹出确认框；通用确认结果通道尚未实现，退出行为继续开放。
+2026 年 8 月 30 日 Family ABI v12 确认覆盖：Minori 的 `game_exit`、`game_return_title` 与 Host `window.close` 由 Family 发布有界 confirmation transaction，平台 Host 以 native confirmation provider 呈现，后续固定 step 回送 `Accepted` 或 `Cancelled`。取消保持底层 wait，接受才执行 terminal 或返回标题；重复、过期、错配和确认期间的 gameplay input 继续阻断。Manager、Release CLI、Headless 和 Minori 的定向回归通过；当前只属于 E1/E2 接线证据，Release Sandbox、120 Hz 和 Windows E3 仍开放。
+
+2026 年 8 月 30 日 Minori 原生菜单 Auto 覆盖：Manager Core 现持有唯一的受限 wait 重绑规则，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 与 `Time→Time`；同批重复和其他类型继续阻断。开发签名 Release v21 通过 secondary-pointer 与方向键选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后的画面发生预期推进，关闭后继续运行 2 秒保持不变。保留画面已人工检查。该覆盖属于原生菜单 Auto 定向 E2，不关闭完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
 
 2026 年 8 月 30 日 Minori 原生菜单 Skip 与 Control 覆盖：当前开发签名 Release CLI 用 secondary-pointer 打开 v11 family menu，并以物理方向键选择 Skip。定向报告通过 674 fixed steps、41 条物理输入和 4 个 checkpoint，未读消息在选择前、选择后及 10 秒后画面字节一致。受 pragma 门控的 Control 已加入对应 Host-owned message wait，避免发布同一 token 的替换 wait；173 项 Minori library tests 通过。独立空白进度的 Control 首路线随后通过 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空。三张保留画面已人工检查。该覆盖关闭当前身份的未读 Skip 定向 E2 和 Control 首路线 E2，不替代 Release Sandbox、120 Hz 性能门禁或 Windows E3。
 
@@ -26,7 +28,7 @@
 
 The signed Manager also reached its runtime-active window in the authorized Windows Sandbox with no default audio device; Diagnostics showed no blocking diagnostic after `NullAudioLane` selection and exposes `audio_endpoint=null` for the session. This is startup/UI evidence only. The null endpoint is excluded from physical-audio evidence and the Sandbox did not yield a writable artifact, so Windows E3 and formal audio review remain open.
 
-Current AstraEMU contract identity is Family ABI v11 (`astra.emu.family_abi.v11`), a hard cut from v10. The ABI carries typed `Open`/`Select`/`Dismiss` requests plus a bounded menu transaction Host port. Minori publishes the observed title/gameplay hierarchy; Windows native, Manager and Headless consume that same hierarchy without interpreting family item ids. Duplicate, stale, ambiguous, active-choice and active-media cases remain blocking diagnostics.
+Current AstraEMU contract identity is Family ABI v12 (`astra.emu.family_abi.v12`), a hard cut from v11. The ABI carries typed `Open`/`Select`/`Dismiss` requests, a bounded menu transaction Host port and a one-shot confirmation transaction Host port. Minori publishes the observed title/gameplay hierarchy and confirmation semantics; platform Hosts present them and return typed results without interpreting family item ids or confirmation text. Duplicate, stale, ambiguous, active-choice, active-media and confirmation-input conflicts remain blocking diagnostics.
 
 2026-08-28 runtime follow-up: missing native audio output (`ProviderUnavailable`) now uses the shared bounded `NullAudioLane` inside `FamilyAudioService`, preserving the Kira/resampling/telemetry path without claiming physical audio. Manager emits an explicit `audio_null_device` marker and keeps that sink out of the physical `audio_non_silent` evidence bit. Minori message waits now expose every directly consumed activation edge, including `pointer.primary`; the targeted provider/Manager regressions and a Sandbox click-then-confirm run pass without duplicate-ready waits. This is startup and wait-contract evidence only; full route, formal audio review and Windows E3 remain open.
 The null sink now validates the exact stereo chunk shape and finite samples at both capacity and submit boundaries; malformed chunks fail before telemetry advances. This is a local contract regression and does not upgrade null-device runs to physical-audio coverage.
@@ -53,14 +55,14 @@ Manager startup uses a pure-Rust Minori idle provider and loads FVP only from an
 
 Minori `progress_in_background` is now exposed as a bounded provider observation and consumed by the Windows native host for Minori-only focus suspend/resume. Focused provider/CLI evidence passes; real focus/audio and Windows E3 evidence remain open.
 
-Current AstraEMU identity note: the active contract is Family ABI v11 at
-`635527831e89e5ff9b87ac165b5b5532e28356c6` with Product Runtime Provider ABI
-v4. Minori uses `Native + MultiLayer`, Host-owned surfaces, synchronous Hook,
-typed `LegacyFilterGraphV9`, typed `LegacySystemMenuRequestV1` and writable-file ports. CLI、Manager 和 Minori 的
-增量 consumer 已恢复编译，Manager typed filter graph 已走 WGPU，旧 Scene2D
-transaction consumer 已删除。Minori 签名真实样本已通过一轮 v9 Headless lifecycle，
-但 checkpoint 阶段标签与完整路线视觉门禁尚未闭合。ABI v8 E2 只作历史回归基线；
-本行保持 `IN_PROGRESS`。
+Current AstraEMU identity note: the active contract is Family ABI v12
+(`astra.emu.family_abi.v12`) with Product Runtime Provider ABI v4. Minori uses
+`Native + MultiLayer`, Host-owned surfaces, synchronous Hook, typed
+`LegacyFilterGraphV9`, typed system-menu/confirmation transactions and
+writable-file ports. CLI、Manager 和 Minori 的增量 consumer 已恢复编译，Manager
+typed filter graph 已走 WGPU，旧 Scene2D transaction consumer 已删除。Minori
+签名真实样本已通过一轮 Headless lifecycle，但 checkpoint 阶段标签与完整路线
+视觉门禁尚未闭合。ABI v8/v9/v11 E2 只作历史回归基线；本行保持 `IN_PROGRESS`。
 
 1999 原版补丁器已接入 workspace。公开测试覆盖 edition fingerprint、RIFX 资源图边界、唯一 CASt binding、script ID 大端读写、ProjectorRays hash/timeout、完整目录复制、原子清理、manifest 和发布包 hash。私有 `inspect → apply → verify` 已证明原安装目录保持只读，成品保留 `DATA/MENU.dxr` 原名，其余原文件逐项保持 hash。受控 launcher 已用 Locale Emulator Core 的 CP932/LCID `0x0411` 环境成功创建 32 位 projector，并把 Director 7 残留的 1 像素 outer frame 删除；实测 outer/client 同为 800×600，window style 为 borderless popup。标题第三按钮的完整视觉状态与路线跳转仍需形成同一轮 E3 报告，当前不计入 AstraVN Player 的 Windows E3 coverage。
 
@@ -68,7 +70,7 @@ TsuiNoSora 当前覆盖边界：严格 ProjectorRays codec、2527/2527 binary re
 
 RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁；`006` 仍是唯一允许绑定具名 `astra.headless_tolerance_approval.v2` 的色彩容差项。UI010 至 UI014 的系统窗几何偏差为 0 px，UI009 的选择菱形列偏差为 1 px。模型已查看全部五联图；30 张输入和 12 组稳定捕获契约均已闭合，权威 manifest 与 node map 已同步。Director movie 入口现按 Score snapshot 恢复初始可见 layer；source-bound package crypto、不透明授权目录、CLI build/bundle 与 Player bootstrap 已形成 contract/E2。商业明文、媒体签名和私有路径扫描均通过预检；最终同身份重跑和 formal signoff 尚未闭合。Windows E3 显式延期，不作为本轮 RC 门禁，状态保持 `IN_PROGRESS`。旧 synthetic story 与旧 worktree 证据不计入当前 coverage。
 
-AstraEMU 当前实现边界以 Family ABI v11 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file、typed filter graph 与双向 typed system-menu 已进入公共契约。Minori resource/text surface、CLI layer consumer、Manager Hook/Layer2D consumer 和物理右键到 family system UI 的映射已进入 v11 主路径；旧 v10 及更早 ABI 只保留为历史记录，不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
+AstraEMU 当前实现边界以 Family ABI v12 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file、typed filter graph、双向 typed system-menu 与 one-shot confirmation transaction 已进入公共契约。Minori resource/text surface、CLI layer consumer、Manager Hook/Layer2D consumer、物理右键到 family system UI 的映射以及退出/返回标题确认已进入 v12 主路径；旧 v11 及更早 ABI 只保留为历史记录，不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
 
 2026 年 8 月 30 日系统页输入所有权增量：Family API 用规范布尔 observation 表达 family UI 是否独占物理输入，CLI 与 Manager 不再解析 Minori 页面名称。官方开发签名 Release 候选通过 Quick Save、推进、Load 页和 restore 的 2047-step Headless E2，6 个 checkpoint、非静音音频和零 diagnostic；恢复帧与保存前一致。视觉复核同时发现一组罕见 message 行末控制标记仍被当作正文，故消息视觉完整性、四路线、影片复核、Sandbox 与 E3 继续开放。
 

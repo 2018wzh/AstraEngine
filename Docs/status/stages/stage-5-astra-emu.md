@@ -1,6 +1,8 @@
 # Stage 5 AstraEMU Work
 
-2026 年 8 月 30 日原生菜单 Auto E2：受限 wait 重绑规则已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 和 `Time→Time`，其他重复 token 继续阻断。开发签名 Release v21 从空白进度通过 family v11 菜单选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后场景按预期推进，关闭后继续运行 2 秒画面不变。关键画面已人工检查，Manager Core 59 项 tests、CLI 定向回归和三个 consumer 的 clippy 通过。原版窗口关闭确认已现场观察，但公共确认结果通道尚未实现。该项关闭原生菜单 Auto 定向 E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
+2026 年 8 月 30 日原生菜单 Auto E2：受限 wait 重绑规则已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 和 `Time→Time`，其他重复 token 继续阻断。开发签名 Release v21 从空白进度通过 family v11 菜单选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后场景按预期推进，关闭后继续运行 2 秒画面不变。关键画面已人工检查，Manager Core 59 项 tests、CLI 定向回归和三个 consumer 的 clippy 通过。该项关闭原生菜单 Auto 定向 E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
+
+2026 年 8 月 30 日 Family ABI v12 确认事务：Minori 的 `game_exit`、`game_return_title` 和 Host `window.close` 都通过 Family ABI 发布有界 confirmation transaction；Host 读取 transaction 后调用平台 native confirmation provider，接受或取消结果在后续固定 step 回传，family 再决定 terminal 或返回标题。Manager 不再维护第二套对话框语义，Headless 只使用物理方向键、确认键和取消键。Family API、平台、Manager、CLI 与 Minori 的定向回归通过；这属于当前 ABI 的 E1/E2 集成证据，Release Sandbox、120 Hz 性能门禁和 Windows E3 仍开放。
 
 2026 年 8 月 30 日原生菜单 Skip 与 Control E2：开发签名 Release CLI 用序列化 secondary-pointer 打开 family v11 菜单，再以物理方向键选择 Skip。定向报告通过 674 fixed steps、41 条输入和 4 个 checkpoint，diagnostic 为空；未读消息在选择前、选择后和 10 秒后的画面文件完全一致。Control 快进现在由启用 pragma 的 Host-owned message wait 接收，不再用同一 token 重绑 wait；Minori 173 项 library tests 通过。独立空白进度的 Control 首路线随后通过 15636 fixed steps、28 条物理输入、251 个呈现帧和 3 个 checkpoint，结局影片自然完成，路线返回标题并退出，自然解锁数为 1，diagnostic 为空；三个 checkpoint 的人工检查未见阻断。当前结果仍不是 Release Sandbox、120 Hz 性能门禁或 Windows E3，Stage 5 保持 `IN_PROGRESS`。
 
@@ -33,7 +35,7 @@ Support 还把 `has_physical_audible_output()` 作为 evidence 专用判定，�
 
 同日的 global-progress 回归用两个独立 provider/session 覆盖 writable-file 的真实装载顺序：第一 session 执行 `REN_CLEAR` 后原子持久化，第二 session 在 `.if REN_CLEAR ...` 之前完成读取，并保持 `SUI_CLEAR` 未设置。该项只增加 provider/VFS E1 证据，不把局部状态持久化提升为四路线自然解锁或完整鉴赏通过。
 
-2026 年 8 月 30 日：Family API 已进入 v11 hard cut（`astra.emu.family_abi.v11`）。右键只提交 `Open`；Minori 在稳定 title 或 gameplay 状态发布有界菜单 transaction，Host 回送 `Select`/`Dismiss` 后才执行 family 命令。Windows native、Manager Slint overlay 与 Headless 物理输入导航共用同一层级。Family API、平台、CLI、Manager 与 Minori 的定向回归已通过；当前身份尚未完成 Headless GPU E2 或 Release Sandbox 视觉复测，更不能计为 Windows E3。
+2026 年 8 月 30 日（v11 历史记录）：Family API 曾进入 v11 hard cut（`astra.emu.family_abi.v11`）。右键只提交 `Open`；Minori 在稳定 title 或 gameplay 状态发布有界菜单 transaction，Host 回送 `Select`/`Dismiss` 后才执行 family 命令。该记录保留当时的菜单 E1 证据；当前身份已升级到 v12，并在同一 Family ABI 增加 confirmation transaction。Headless GPU E2、Release Sandbox 视觉复测和 Windows E3 仍未关闭。
 
 2026 年 8 月 27 日媒体复核：`astra-media::IncrementalMediaPlayback` 已统一校验播放配置、单调 tick、轨道/packet 形状、音频/视频 packet 预算、视频 lead/lag 与迟到策略；Minori 继续只绑定显式 `ffmpeg-vcpkg`，不保留手写 AVI/WMV decoder 或平台 fallback。当前签名 release plugin 的标题→配置→影片→Control 跳过→标题 Headless slice 报告 `passed`，完成 3102 fixed steps、9 个 retained frame sample，诊断为空。按当前 v9 typed observation 重新生成的首路线也已报告 `passed`：3,034,309 fixed steps、16,150 条物理输入、53 个 retained frame sample、31 个 checkpoint、route terminal、自然 unlock count=1 和最终 Exit 均成立。该输入未把已删除的首 choice 等待点计入本次 checkpoint，choice 仍由独立真实 slice 覆盖。正式音频听审、四条路线后的完整 Memories/CG/BGM/回想、cache second-run、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍为 blocking。
 

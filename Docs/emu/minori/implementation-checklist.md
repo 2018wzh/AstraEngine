@@ -39,11 +39,13 @@
 - [ ] 以上链路不等于四份路线报告全部绿色，也不证明 Movie 列表中的资源已播放。仍需用新的空白 identity 生成四份无过时断言的独立通过报告，并完成影片 playback 与原版同点检查。
 - [ ] 全流 WMV3 诊断曾出现 FFmpeg concealment；必须用影片 checkpoint 与原版对照确认质量。正式音频听审、save/restore required checkpoint、完整 gallery、Release Sandbox 视觉验收和 Windows E3 继续保持 blocking。
 
-## Family API v11 right-click system menu (2026-08-30)
+## Family API v12 native menu and confirmation (2026-08-30)
 
-- [x] `LegacySystemMenuRequestV1` and bounded `LegacySystemMenuTransactionV1` are part of the hard-cut Family API v11 contract and have explicit `StableAbi` wire representations.
+- [x] `LegacySystemMenuRequestV1`, bounded `LegacySystemMenuTransactionV1` and bounded `LegacyConfirmationTransactionV1` are part of the hard-cut Family API v12 contract and have explicit `StableAbi` wire representations.
 - [x] Manager promotes a pressed physical `pointer.secondary` edge to `Open`, carries the latest bounded pointer coordinates, and removes the duplicate pressed edge before invoking Minori.
 - [x] Minori publishes the observed title/gameplay hierarchy. Windows native uses the platform context-menu provider, Manager renders the same transaction as a Slint overlay, and Headless navigates it only through physical input records.
+- [x] `game_exit`, `game_return_title` and Host `window.close` publish one confirmation transaction; platform Host presents it through the native confirmation provider and returns a typed result on a later fixed step.
+- [x] Cancellation resumes the retained gameplay wait; acceptance enters terminal or returns title; duplicate, stale, mixed-input and missing-platform-service cases fail closed.
 - [x] Save, Load, Config, message-panel visibility and Auto/Skip are selected through the returned menu item. Ambiguous input, active choice/media, completion sharing, duplicate menus, stale results and missing services fail closed.
 - [x] 原版空白进度确认持久 Skip 在未读消息处停止；runtime 只对已有 read identity 的消息启用 Skip 快进，Control 的 pragma 路径保持独立。原生菜单中的 Auto/Skip 不显示勾选，Family transaction 也不再伪造该状态。
 - [ ] Windows E3 remains open: the Sandbox direct native run reached real scenes and completed its windowed route with audio explicitly disabled, but the WASAPI default output was unavailable and the read-only share prevented artifact recovery; no E3 artifact is claimed.

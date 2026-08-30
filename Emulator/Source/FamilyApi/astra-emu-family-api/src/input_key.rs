@@ -19,6 +19,11 @@ pub const POINTER_CONTROLS: [&str; 5] = [
     "wheel",
 ];
 
+/// Host lifecycle controls which are delivered as physical edges rather than
+/// keyboard aliases.  They let a platform close request reach the selected
+/// family so the family can publish its own confirmation transaction.
+pub const HOST_CONTROLS: [&str; 1] = ["window.close"];
+
 /// A canonical input key recognized by the legacy family ABI.
 ///
 /// Named keys serialize to their lowercase snake_case name; `Character` and
@@ -140,7 +145,7 @@ pub fn is_pointer_control(name: &str) -> bool {
 /// Whether `name` is a valid `LegacyInputEdge.control` value: either a canonical
 /// key name or a preserved pointer/wheel control.
 pub fn is_valid_input_control(name: &str) -> bool {
-    parse_input_key(name).is_some() || is_pointer_control(name)
+    parse_input_key(name).is_some() || is_pointer_control(name) || HOST_CONTROLS.contains(&name)
 }
 
 #[cfg(test)]
@@ -234,6 +239,13 @@ mod tests {
             assert_eq!(parse_input_key(control), None);
             assert!(is_valid_input_control(control));
         }
+    }
+
+    #[test]
+    fn host_lifecycle_controls_are_recognized_but_not_keys() {
+        assert!(HOST_CONTROLS.iter().all(|control| {
+            is_valid_input_control(control) && parse_input_key(control).is_none()
+        }));
     }
 
     #[test]

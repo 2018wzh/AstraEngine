@@ -348,6 +348,13 @@ impl AndroidHostApp {
                     "Android does not expose a native context-menu host command",
                 )));
             }
+            HostCommand::ShowConfirmation { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.confirmation",
+                    "Android confirmation is owned by the Activity UI",
+                )));
+            }
             HostCommand::CreateWindow { request, reply } => {
                 let result = if !self.resumed {
                     Err(host_error(

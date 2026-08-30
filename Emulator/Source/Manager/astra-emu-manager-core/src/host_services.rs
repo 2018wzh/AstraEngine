@@ -8,13 +8,14 @@ use std::{
 
 use astra_byte_source::{OwnedByteBuffer, OwnedWritableByteBuffer};
 use astra_emu_family_api::{
-    validate_relative_writable_path, LegacyFamilyHostServicesV9, LegacyHookHostV1,
-    LegacyHookInvocationV1, LegacyHookResultV1, LegacyHookStatusV1, LegacyProviderError,
-    LegacySurfaceCommitV9, LegacySurfaceFormatV9, LegacySurfaceHostV9, LegacySurfaceLeaseV9,
-    LegacySystemMenuActionV1, LegacySystemMenuHostV1, LegacySystemMenuItemKindV1,
-    LegacySystemMenuRequestV1, LegacySystemMenuTransactionV1, LegacyVfsReader,
-    LegacyWritableFileEntryV1, LegacyWritableFileHostV1, LegacyWritableFileRequestV1,
-    LegacyWritableFileResultV1,
+    validate_relative_writable_path, LegacyConfirmationChoiceV1, LegacyConfirmationHostV1,
+    LegacyConfirmationResultV1, LegacyConfirmationTransactionV1, LegacyFamilyHostServicesV9,
+    LegacyHookHostV1, LegacyHookInvocationV1, LegacyHookResultV1, LegacyHookStatusV1,
+    LegacyProviderError, LegacySurfaceCommitV9, LegacySurfaceFormatV9, LegacySurfaceHostV9,
+    LegacySurfaceLeaseV9, LegacySystemMenuActionV1, LegacySystemMenuHostV1,
+    LegacySystemMenuItemKindV1, LegacySystemMenuRequestV1, LegacySystemMenuTransactionV1,
+    LegacyVfsReader, LegacyWritableFileEntryV1, LegacyWritableFileHostV1,
+    LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -939,12 +940,147 @@ impl LegacySystemMenuHostV1 for FamilySystemMenuHost {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFamilyConfirmation {
+    pub session_id: String,
+    pub confirmation: LegacyConfirmationTransactionV1,
+}
+
+#[derive(Default)]
+struct FamilyConfirmationState {
+    active: BTreeMap<String, LegacyConfirmationTransactionV1>,
+    delivered: BTreeMap<String, bool>,
+    resolutions: BTreeMap<String, LegacyConfirmationResultV1>,
+}
+
+#[derive(Default)]
+pub struct FamilyConfirmationHost {
+    state: Mutex<FamilyConfirmationState>,
+}
+
+impl FamilyConfirmationHost {
+    pub fn has_pending_interaction(&self) -> Result<bool, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| confirmation_lock_error())
+            .map(|state| !state.active.is_empty() || !state.resolutions.is_empty())
+    }
+
+    pub fn take_next_pending(
+        &self,
+    ) -> Result<Option<PendingFamilyConfirmation>, LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| confirmation_lock_error())?;
+        let session_id = state
+            .active
+            .keys()
+            .find(|session_id| !state.delivered.contains_key(*session_id))
+            .cloned();
+        let Some(session_id) = session_id else {
+            return Ok(None);
+        };
+        let confirmation = state.active.get(&session_id).cloned().ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_STATE",
+                "pending confirmation state changed unexpectedly",
+            )
+        })?;
+        state.delivered.insert(session_id.clone(), true);
+        Ok(Some(PendingFamilyConfirmation {
+            session_id,
+            confirmation,
+        }))
+    }
+
+    pub fn resolve(
+        &self,
+        session_id: &str,
+        confirmation_id: &str,
+        choice: LegacyConfirmationChoiceV1,
+        sequence: u64,
+    ) -> Result<(), LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| confirmation_lock_error())?;
+        if state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_RESULT_DUPLICATE",
+                "confirmation host already queued a result for the session",
+            ));
+        }
+        let confirmation = state.active.get(session_id).ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_NOT_ACTIVE",
+                "confirmation result has no active transaction",
+            )
+        })?;
+        if confirmation.confirmation_id != confirmation_id {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_ID_MISMATCH",
+                "confirmation result does not match the active transaction",
+            ));
+        }
+        let result = LegacyConfirmationResultV1 {
+            confirmation_id: confirmation_id.into(),
+            choice,
+            sequence,
+        };
+        result.validate()?;
+        state.active.remove(session_id);
+        state.delivered.remove(session_id);
+        state.resolutions.insert(session_id.into(), result);
+        Ok(())
+    }
+
+    pub fn take_resolution(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LegacyConfirmationResultV1>, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| confirmation_lock_error())
+            .map(|mut state| state.resolutions.remove(session_id))
+    }
+
+    pub fn release_session(&self, session_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active.remove(session_id);
+            state.delivered.remove(session_id);
+            state.resolutions.remove(session_id);
+        }
+    }
+}
+
+impl LegacyConfirmationHostV1 for FamilyConfirmationHost {
+    fn publish(
+        &self,
+        session_id: &str,
+        confirmation: LegacyConfirmationTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        confirmation.validate()?;
+        let mut state = self.state.lock().map_err(|_| confirmation_lock_error())?;
+        if state.active.contains_key(session_id) || state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_ALREADY_ACTIVE",
+                "confirmation host accepts only one active transaction per session",
+            ));
+        }
+        state.active.insert(session_id.into(), confirmation);
+        Ok(())
+    }
+}
+
+fn confirmation_lock_error() -> LegacyProviderError {
+    LegacyProviderError::invalid(
+        "ASTRA_EMU_CONFIRMATION_LOCK_POISONED",
+        "confirmation host lock is poisoned",
+    )
+}
+
 #[derive(Clone)]
 pub struct AstraEmuFamilyHost {
     pub surfaces: Arc<FamilySurfaceHost>,
     pub hooks: Arc<FamilyHookHost>,
     pub writable_files: Arc<FamilyWritableFileHost>,
     pub system_menus: Arc<FamilySystemMenuHost>,
+    pub confirmations: Arc<FamilyConfirmationHost>,
     vfs: Arc<dyn LegacyVfsReader>,
     services: LegacyFamilyHostServicesV9,
 }
@@ -955,18 +1091,21 @@ impl AstraEmuFamilyHost {
         let hooks = Arc::new(FamilyHookHost::default());
         let writable_files = Arc::new(FamilyWritableFileHost::default());
         let system_menus = Arc::new(FamilySystemMenuHost::default());
+        let confirmations = Arc::new(FamilyConfirmationHost::default());
         let services = LegacyFamilyHostServicesV9 {
             vfs: vfs.clone(),
             surfaces: surfaces.clone(),
             hooks: hooks.clone(),
             writable_files: writable_files.clone(),
             system_menus: system_menus.clone(),
+            confirmations: confirmations.clone(),
         };
         Self {
             surfaces,
             hooks,
             writable_files,
             system_menus,
+            confirmations,
             vfs,
             services,
         }
@@ -984,6 +1123,7 @@ impl AstraEmuFamilyHost {
         self.surfaces.release_session(session_id);
         self.writable_files.release_session(session_id);
         self.system_menus.release_session(session_id);
+        self.confirmations.release_session(session_id);
     }
 }
 
@@ -1305,6 +1445,39 @@ mod tests {
         let result = host.take_resolution("session").unwrap().unwrap();
         assert_eq!(result.action, LegacySystemMenuActionV1::Select);
         assert_eq!(result.item_id.as_deref(), Some("save"));
+        assert!(host.take_resolution("session").unwrap().is_none());
+    }
+
+    #[test]
+    fn confirmation_host_enforces_one_transaction_and_typed_resolution() {
+        let host = FamilyConfirmationHost::default();
+        let confirmation = LegacyConfirmationTransactionV1 {
+            sequence: 7,
+            confirmation_id: "exit_game".into(),
+            title: "Confirm".into(),
+            message: "Exit the game?".into(),
+            accept_label: "Yes".into(),
+            cancel_label: "No".into(),
+        };
+        host.publish("session", confirmation.clone()).unwrap();
+        assert_eq!(
+            host.publish("session", confirmation).unwrap_err().code(),
+            "ASTRA_EMU_CONFIRMATION_ALREADY_ACTIVE"
+        );
+        let pending = host.take_next_pending().unwrap().unwrap();
+        assert_eq!(pending.session_id, "session");
+        assert_eq!(pending.confirmation.confirmation_id, "exit_game");
+        assert!(host.take_next_pending().unwrap().is_none());
+        host.resolve(
+            "session",
+            "exit_game",
+            LegacyConfirmationChoiceV1::Cancelled,
+            9,
+        )
+        .unwrap();
+        let result = host.take_resolution("session").unwrap().unwrap();
+        assert_eq!(result.choice, LegacyConfirmationChoiceV1::Cancelled);
+        assert_eq!(result.confirmation_id, "exit_game");
         assert!(host.take_resolution("session").unwrap().is_none());
     }
 }

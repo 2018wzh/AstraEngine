@@ -50,8 +50,9 @@ use astra_emu_manager_core::{
     BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord, CompatibilityCacheEntry,
     CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord, GrantedSourceReader, Library,
     LibraryScanner, LiveWaitBindingKind, MatchCandidateRecord, MatchDecisionRecord,
-    MetadataSnapshotRecord, PendingFamilySystemMenu, ProviderConsentRecord, ScanLimits,
-    SourceGrant, TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
+    MetadataSnapshotRecord, PendingFamilyConfirmation, PendingFamilySystemMenu,
+    ProviderConsentRecord, ScanLimits, SourceGrant, TranslationConsent, TranslationProfileRecord,
+    VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -76,6 +77,7 @@ use astra_media::{
     ImageDecodeProvider, SymphoniaAudioDecodeProvider,
 };
 use astra_media_core::Layer2DTransaction;
+use astra_platform::{ConfirmationRequest, ConfirmationResult};
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
@@ -320,6 +322,51 @@ impl RuntimeBridge {
                 &active.session_id.0,
                 menu_id,
                 item_id,
+                active.input_sequence,
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    /// Present a Family ABI confirmation through the platform host that owns
+    /// the Manager's native service session.  The Manager UI only forwards the
+    /// semantic transaction; it never draws a second dialog or interprets the
+    /// family action itself.
+    fn present_confirmation(&mut self, pending: PendingFamilyConfirmation) -> Result<(), String> {
+        let client = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_CONFIRMATION_PLATFORM_NOT_READY".to_owned())?
+            .platform_client();
+        let result = pollster::block_on(client.show_confirmation(ConfirmationRequest {
+            window: None,
+            title: pending.confirmation.title.clone(),
+            message: pending.confirmation.message.clone(),
+            accept_label: pending.confirmation.accept_label.clone(),
+            cancel_label: pending.confirmation.cancel_label.clone(),
+        }))
+        .map_err(|error| error.to_string())?;
+        let choice = match result {
+            ConfirmationResult::Accepted => {
+                astra_emu_family_api::LegacyConfirmationChoiceV1::Accepted
+            }
+            ConfirmationResult::Cancelled => {
+                astra_emu_family_api::LegacyConfirmationChoiceV1::Cancelled
+            }
+        };
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        active.input_sequence = active
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        self.provider
+            .confirmation_host()
+            .resolve(
+                &pending.session_id,
+                &pending.confirmation.confirmation_id,
+                choice,
                 active.input_sequence,
             )
             .map_err(|error| error.to_string())
@@ -3213,6 +3260,23 @@ impl ManagerController for AstraEmuManagerController {
             .try_borrow_mut()
             .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
             .resolve_system_menu(menu_id, item_id)
+    }
+
+    fn take_pending_confirmation(&mut self) -> Result<Option<PendingFamilyConfirmation>, String> {
+        self.runtime
+            .try_borrow()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .provider
+            .confirmation_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())
+    }
+
+    fn present_confirmation(&mut self, pending: PendingFamilyConfirmation) -> Result<(), String> {
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .present_confirmation(pending)
     }
 
     fn model(&self) -> Result<ManagerViewModel, String> {

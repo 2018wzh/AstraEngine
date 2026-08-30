@@ -2004,6 +2004,30 @@ impl MinoriVm {
         Ok(())
     }
 
+    pub fn terminate_from_confirmation(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.terminal
+            || !matches!(
+                self.state.system_ui.page,
+                MinoriSystemPage::None | MinoriSystemPage::Title
+            )
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        self.state.terminal = true;
+        Ok(())
+    }
+
+    pub fn return_to_title_from_gameplay(&mut self) -> Result<(), MinoriRuntimeError> {
+        if self.state.launch_mode != MinoriLaunchMode::Title
+            || self.state.system_ui.page != MinoriSystemPage::None
+            || self.state.terminal
+        {
+            return Err(MinoriRuntimeError::State);
+        }
+        clear_gameplay_for_title(&mut self.state);
+        Ok(())
+    }
+
     pub fn take_executed_commands(&mut self) -> Vec<MinoriExecutedCommand> {
         std::mem::take(&mut self.executed_commands)
     }
@@ -2949,15 +2973,7 @@ fn execute_control(
             // SceneMainMenu. Direct-entry sessions remain bounded command-line
             // executions and therefore terminate at the same script boundary.
             if state.launch_mode == MinoriLaunchMode::Title {
-                state.wait = None;
-                state.message = None;
-                state.choice = None;
-                state.movie = None;
-                state.system_ui.page = MinoriSystemPage::Title;
-                state.system_ui.focus_index = 0;
-                state.system_ui.backlog_cursor = None;
-                state.system_ui.config_draft = None;
-                state.system_ui.config_return_page = None;
+                clear_gameplay_for_title(state);
             } else {
                 state.terminal = true;
             }
@@ -2968,6 +2984,24 @@ fn execute_control(
             ordinal: command.ordinal,
         }),
     }
+}
+
+fn clear_gameplay_for_title(state: &mut MinoriRuntimeState) {
+    state.wait = None;
+    state.message = None;
+    state.message_loads.clear();
+    state.choice = None;
+    state.movie = None;
+    state.system_ui.page = MinoriSystemPage::Title;
+    state.system_ui.focus_index = 0;
+    state.system_ui.play_mode = MinoriPlayMode::Normal;
+    state.system_ui.control_pressed = false;
+    state.system_ui.pointer_primary_pressed = false;
+    state.system_ui.backlog_cursor = None;
+    state.system_ui.pending_save_slot = None;
+    state.system_ui.pending_load_slot = None;
+    state.system_ui.config_draft = None;
+    state.system_ui.config_return_page = None;
 }
 
 fn record_verified_route_clear(state: &mut MinoriRuntimeState, key: &str, value: i64) {

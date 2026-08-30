@@ -60,9 +60,11 @@ FVP 是 v1 首发 family；自动探测顺序仍按 KrKr、Artemis、BGI、Siglu
 
 每个 family 的实现级调研、格式说明、脚本演出拆解和工具命令放在 [../emu/README.md](../emu/README.md)。研究页可以保留旧引擎原始术语；产品 contract 以本页和 [AstraEMU Legacy Runtime Provider Contract](../contracts/astraemu-ipc.md) 为准。
 
-## Luau Patch / Decode
+## Minori key file / streaming decode
 
-EMU 用户脚本统一使用 Luau。Trusted Project Profile 可以开启 read-only VFS mount、patch overlay、decode transform、text/media hook、VM trace、diagnostic 和 deterministic effect intent。状态注入只能变成 `LegacyEffect`、Blackboard、input 或 tag intent，在 fixed tick 边界进入 Runtime。脚本请求未授权 key 提取、商业保护处理、访问控制规避、raw filesystem/network/system call 或 native handle 时，Manager 隔离禁用该脚本并生成稳定诊断。只有 case profile 明确允许无补丁模式时才能继续，否则阻断启动。
+Minori 的生产路径不再使用 AstraEMU Luau patch、decoder callback 或明文 cache。Launch Profile 只接受游戏根目录下安全相对的 `key.toml`，mount 时严格解析 `astra.emu.minori.keys.v1`，随后由 family-owned Rust reader 进行 index、entry、RC4/Blowfish、zlib 和 multipart 的有界流式解密。密钥只在 mount session 内存中存在，不进入 VFS namespace、日志、报告、save/replay 或 cache；文件缺失、schema/role/key 不匹配和源读取错误直接阻断。
+
+Luau policy 仍是 AstraVN/AstraRPG 的产品边界，不属于 Minori 解密主路径。AstraEMU Manager 只保留平台 Host 的输入、窗口、媒体 provider、翻译 Hook 和 Family ABI 组合；不得把 Luau patch 或任意脚本解释器作为 Minori fallback。
 
 ## Text / Translation / Filter
 

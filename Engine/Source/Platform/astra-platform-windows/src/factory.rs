@@ -98,13 +98,13 @@ mod windows {
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
         host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
-        AudioWakeRegistration, CapturedFrame, ContextMenuItemKind, ContextMenuRequest,
-        ContextMenuResult, DecodeKind, DecodeOutput, DecodeSessionHandle, HostCommand,
-        HostLaunchProfile, InputState, OpenedAudioOutput, PackageSourceHandle,
-        PackageSourceRequest, PlatformBackendChannels, PlatformCommandWakeRegistration,
-        PlatformDecodeRequest, PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind,
-        PlatformHostProfile, PlatformHostSession, PointerButton, SaveTransactionHandle,
-        SurfaceHandle, TouchPhase, WindowHandle,
+        AudioWakeRegistration, CapturedFrame, ConfirmationRequest, ConfirmationResult,
+        ContextMenuItemKind, ContextMenuRequest, ContextMenuResult, DecodeKind, DecodeOutput,
+        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput,
+        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
+        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
+        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
+        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, NullAudioProducer, ResourceTable,
@@ -115,6 +115,7 @@ mod windows {
         CheckMenuItem, ContextMenu, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem,
         PredefinedMenuItem, Submenu,
     };
+    use rfd::{AsyncMessageDialog, MessageButtons, MessageDialogResult};
     use tokio::sync::oneshot;
     use winit::{
         application::ApplicationHandler,
@@ -634,6 +635,14 @@ mod windows {
                             .windows
                             .get(request.window)
                             .and_then(|window| show_context_menu(window, request));
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::ShowConfirmation { request, reply } => {
+                        let result = request
+                            .window
+                            .map(|handle| self.windows.get(handle))
+                            .transpose()
+                            .and_then(|window| show_confirmation(window.map(Arc::as_ref), request));
                         let _ = reply.send(result);
                     }
                     HostCommand::CreateWindow { request, reply } => {
@@ -2301,6 +2310,36 @@ mod windows {
         Ok(ContextMenuResult {
             item_id: Some(event.id.0),
         })
+    }
+
+    fn show_confirmation(
+        window: Option<&Window>,
+        request: ConfirmationRequest,
+    ) -> Result<ConfirmationResult, PlatformError> {
+        let mut dialog = AsyncMessageDialog::new()
+            .set_title(request.title)
+            .set_description(request.message)
+            .set_buttons(MessageButtons::OkCancelCustom(
+                request.accept_label.clone(),
+                request.cancel_label.clone(),
+            ));
+        if let Some(window) = window {
+            dialog = dialog.set_parent(window);
+        }
+        match pollster::block_on(dialog.show()) {
+            MessageDialogResult::Ok => Ok(ConfirmationResult::Accepted),
+            MessageDialogResult::Cancel => Ok(ConfirmationResult::Cancelled),
+            MessageDialogResult::Custom(label) if label == request.accept_label => {
+                Ok(ConfirmationResult::Accepted)
+            }
+            MessageDialogResult::Custom(label) if label == request.cancel_label => {
+                Ok(ConfirmationResult::Cancelled)
+            }
+            _ => Err(host_error(
+                "window.confirmation",
+                "native confirmation returned an unsupported result",
+            )),
+        }
     }
 
     fn host_error(operation: &'static str, message: &'static str) -> PlatformError {

@@ -28,6 +28,7 @@ gstreamer.workspace = true
 gstreamer-app.workspace = true
 libc.workspace = true
 pollster.workspace = true
+rfd.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tracing.workspace = true

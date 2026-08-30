@@ -124,6 +124,13 @@ mod browser {
                         "Web does not expose a native context-menu host command",
                     )));
                 }
+                HostCommand::ShowConfirmation { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "window.confirmation",
+                        "Web confirmation is owned by the browser host",
+                    )));
+                }
                 HostCommand::CreateWindow { request, reply } => {
                     let result = CanvasResource::new(
                         request.title,

@@ -278,6 +278,13 @@ pub struct LegacyStepInput {
     /// alias.  The request remains optional so families that do not expose a
     /// system menu can reject it explicitly instead of guessing from a key.
     pub system_menu: Option<LegacySystemMenuRequestV1>,
+    /// Result of one family-owned confirmation published through the Host.
+    ///
+    /// The Host presents the transaction asynchronously and returns exactly
+    /// one accepted or cancelled result on a later fixed step. Confirmation
+    /// text is ephemeral presentation data and must not enter reports, logs,
+    /// replay or save state.
+    pub confirmation: Option<LegacyConfirmationResultV1>,
     pub await_results: Vec<LegacyAwaitResult>,
     pub provider_results: Vec<LegacyProviderResult>,
 }
@@ -320,6 +327,23 @@ impl LegacyStepInput {
                 ));
             }
         }
+        if let Some(result) = self.confirmation.as_ref() {
+            result.validate()?;
+            if self
+                .input_edges
+                .iter()
+                .any(|edge| edge.sequence == result.sequence)
+                || self
+                    .system_menu
+                    .as_ref()
+                    .is_some_and(|request| request.sequence == result.sequence)
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_CONFIRMATION_SEQUENCE_DUPLICATE",
+                    "confirmation result sequence duplicates another input item",
+                ));
+            }
+        }
         for edge in &self.input_edges {
             if !is_valid_input_control(&edge.control) {
                 return Err(LegacyProviderError::invalid(
@@ -342,6 +366,72 @@ impl LegacyStepInput {
             validate_symbol("provider_request_id", &result.request_id)?;
             validate_symbol("provider_id", &result.provider_id)?;
             validate_symbol("provider_status", &result.status)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyConfirmationChoiceV1 {
+    Accepted,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyConfirmationResultV1 {
+    pub confirmation_id: String,
+    pub choice: LegacyConfirmationChoiceV1,
+    pub sequence: u64,
+}
+
+impl LegacyConfirmationResultV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_SEQUENCE",
+                "confirmation result sequence must be non-zero",
+            ));
+        }
+        validate_symbol("confirmation_id", &self.confirmation_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyConfirmationTransactionV1 {
+    pub sequence: u64,
+    pub confirmation_id: String,
+    pub title: String,
+    pub message: String,
+    pub accept_label: String,
+    pub cancel_label: String,
+}
+
+impl LegacyConfirmationTransactionV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        const MAX_TITLE_BYTES: usize = 256;
+        const MAX_MESSAGE_BYTES: usize = 1024;
+        const MAX_LABEL_BYTES: usize = 64;
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_CONFIRMATION_SEQUENCE",
+                "confirmation transaction sequence must be non-zero",
+            ));
+        }
+        validate_symbol("confirmation_id", &self.confirmation_id)?;
+        for (field, value, bound) in [
+            ("title", self.title.as_str(), MAX_TITLE_BYTES),
+            ("message", self.message.as_str(), MAX_MESSAGE_BYTES),
+            ("accept_label", self.accept_label.as_str(), MAX_LABEL_BYTES),
+            ("cancel_label", self.cancel_label.as_str(), MAX_LABEL_BYTES),
+        ] {
+            if value.trim().is_empty() || value.len() > bound || value.chars().any(char::is_control)
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_CONFIRMATION_TEXT",
+                    format!("confirmation {field} is empty, invalid, or exceeds its byte bound"),
+                ));
+            }
         }
         Ok(())
     }
@@ -2013,6 +2103,7 @@ mod tests {
             mode: LegacyReplayMode::Live,
             input_edges: Vec::new(),
             system_menu: None,
+            confirmation: None,
             await_results: Vec::new(),
             provider_results: Vec::new(),
         }
@@ -2037,6 +2128,37 @@ mod tests {
         });
         let error = input.validate().unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_SYSTEM_MENU_SEQUENCE_DUPLICATE");
+    }
+
+    #[test]
+    fn confirmation_contract_is_bounded_and_sequence_unique() {
+        let transaction = LegacyConfirmationTransactionV1 {
+            sequence: 7,
+            confirmation_id: "exit_game".into(),
+            title: "Confirm".into(),
+            message: "Exit the game?".into(),
+            accept_label: "Yes".into(),
+            cancel_label: "No".into(),
+        };
+        transaction.validate().unwrap();
+
+        let mut input = valid_step_input();
+        input.confirmation = Some(LegacyConfirmationResultV1 {
+            confirmation_id: transaction.confirmation_id,
+            choice: LegacyConfirmationChoiceV1::Cancelled,
+            sequence: 8,
+        });
+        input.validate().unwrap();
+        input.input_edges.push(LegacyInputEdge {
+            control: "escape".into(),
+            pressed: true,
+            value: 1.0,
+            sequence: 8,
+        });
+        assert_eq!(
+            input.validate().unwrap_err().code(),
+            "ASTRA_EMU_CONFIRMATION_SEQUENCE_DUPLICATE"
+        );
     }
 
     #[test]

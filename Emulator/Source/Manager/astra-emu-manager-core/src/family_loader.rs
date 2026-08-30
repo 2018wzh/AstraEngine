@@ -325,6 +325,7 @@ impl DynamicFamilyLoader {
             invoke_hook: ffi_invoke_hook,
             writable_file: ffi_writable_file,
             publish_system_menu: ffi_publish_system_menu,
+            publish_confirmation: ffi_publish_confirmation,
         };
         if let Err(error) = native_result::<_, ()>((module.create_instance())(services, request)) {
             remove_host_services(&host_token);
@@ -700,6 +701,17 @@ extern "C" fn ffi_publish_system_menu(call: FfiPublishSystemMenuCallV1) -> FfiLe
         let menu: LegacySystemMenuTransactionV1 = call.menu.into();
         menu.validate()?;
         host.system_menus.publish(call.session_id.as_str(), menu)
+    })();
+    ffi_result(result)
+}
+
+extern "C" fn ffi_publish_confirmation(call: FfiPublishConfirmationCallV1) -> FfiLegacyResult<()> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        let confirmation: LegacyConfirmationTransactionV1 = call.confirmation.into();
+        confirmation.validate()?;
+        host.confirmations
+            .publish(call.session_id.as_str(), confirmation)
     })();
     ffi_result(result)
 }
@@ -1152,6 +1164,7 @@ mod tests {
                         mode: LegacyReplayMode::Live,
                         input_edges: Vec::new(),
                         system_menu: None,
+                        confirmation: None,
                         await_results: Vec::new(),
                         provider_results: Vec::new(),
                     },

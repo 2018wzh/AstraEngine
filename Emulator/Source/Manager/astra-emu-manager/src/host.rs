@@ -1,5 +1,7 @@
 use astra_emu_family_api::LegacySystemMenuItemKindV1;
-use astra_emu_manager_core::{default_vn_preset, InputMapping, PendingFamilySystemMenu};
+use astra_emu_manager_core::{
+    default_vn_preset, InputMapping, PendingFamilyConfirmation, PendingFamilySystemMenu,
+};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -167,6 +169,15 @@ pub trait ManagerController: 'static {
         _item_id: Option<&str>,
     ) -> Result<(), String> {
         Err("ASTRA_EMU_SYSTEM_MENU_NOT_CONFIGURED".into())
+    }
+    /// Takes the next semantic Family ABI confirmation transaction.  The
+    /// platform host presents it and returns the typed result through the
+    /// controller; Manager does not implement family confirmation UI.
+    fn take_pending_confirmation(&mut self) -> Result<Option<PendingFamilyConfirmation>, String> {
+        Ok(None)
+    }
+    fn present_confirmation(&mut self, _pending: PendingFamilyConfirmation) -> Result<(), String> {
+        Err("ASTRA_EMU_CONFIRMATION_NOT_CONFIGURED".into())
     }
     // ===== UI redesign callbacks (default implementations keep existing
     // controllers source-compatible until they opt in) =====
@@ -387,6 +398,19 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                                     pending.menu.pointer_x.unwrap_or_default(),
                                     pending.menu.pointer_y.unwrap_or_default(),
                                 );
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                window.set_global_diagnostic(error.into());
+                            }
+                        }
+                        match controller.borrow_mut().take_pending_confirmation() {
+                            Ok(Some(pending)) => {
+                                if let Err(error) =
+                                    controller.borrow_mut().present_confirmation(pending)
+                                {
+                                    window.set_global_diagnostic(error.into());
+                                }
                             }
                             Ok(None) => {}
                             Err(error) => {

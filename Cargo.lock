@@ -1446,6 +1446,7 @@ dependencies = [
  "gstreamer-app",
  "libc",
  "pollster",
+ "rfd",
  "serde_json",
  "tempfile",
  "tokio",

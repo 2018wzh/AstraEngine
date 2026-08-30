@@ -11,14 +11,15 @@ use astra_core::SchemaVersion;
 use astra_emu_extension_api::{translation_response, TRANSLATION_TEXT_HOOK_ID};
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyBlackboardMutation, LegacyBlendMode, LegacyControlTransaction, LegacyCoverageDelta,
-    LegacyDrawV1, LegacyEvent, LegacyFamilyHostServicesV9, LegacyFamilyPluginDescriptor,
-    LegacyHookInvocationV1, LegacyHookStatusV1, LegacyLayerBlendV9, LegacyLayerFilterV9,
-    LegacyLayerOperationV9, LegacyLayerStateV9, LegacyLayerTransactionV9, LegacyLayerTransformV9,
-    LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest, LegacyProbeReport,
-    LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1, LegacyResourceRead,
-    LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId, LegacyRuntimeStatus,
-    LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacyStepInput,
+    LegacyBlackboardMutation, LegacyBlendMode, LegacyConfirmationChoiceV1,
+    LegacyConfirmationResultV1, LegacyConfirmationTransactionV1, LegacyControlTransaction,
+    LegacyCoverageDelta, LegacyDrawV1, LegacyEvent, LegacyFamilyHostServicesV9,
+    LegacyFamilyPluginDescriptor, LegacyHookInvocationV1, LegacyHookStatusV1, LegacyLayerBlendV9,
+    LegacyLayerFilterV9, LegacyLayerOperationV9, LegacyLayerStateV9, LegacyLayerTransactionV9,
+    LegacyLayerTransformV9, LegacyLiveOutput as LegacyLiveOutputV9, LegacyOpenRequest,
+    LegacyProbeReport, LegacyProbeRequest, LegacyProviderError, LegacyRenderResourceFrameV1,
+    LegacyResourceRead, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
+    LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacyStepInput,
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
     LegacySurfaceFormatV9, LegacySystemMenuActionV1, LegacySystemMenuItemKindV1,
     LegacySystemMenuItemV1, LegacySystemMenuTransactionV1, LegacyTextureFilter,
@@ -407,6 +408,7 @@ fn choice_input_keys() -> Vec<String> {
 }
 
 const MINORI_MESSAGE_INPUT_CONTROLS: [&str; 3] = ["enter", "space", "pointer.primary"];
+const MINORI_WINDOW_CLOSE_CONTROL: &str = "window.close";
 // The host wait contract must cover every canonical message activation edge
 // that the family accepts directly.  Escape is also a host-owned system-menu
 // shortcut, but it remains in the contract so the host removes the active
@@ -542,7 +544,20 @@ struct MinoriSession {
     presentation_layers: BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
     last_layer_sequence: u64,
     active_system_menu: Option<String>,
+    active_confirmation: Option<ActiveMinoriConfirmation>,
     poisoned: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MinoriConfirmationAction {
+    Exit,
+    ReturnTitle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveMinoriConfirmation {
+    confirmation_id: String,
+    action: MinoriConfirmationAction,
 }
 
 #[derive(Default)]
@@ -876,6 +891,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 presentation_layers: BTreeMap::new(),
                 last_layer_sequence: 0,
                 active_system_menu: None,
+                active_confirmation: None,
                 poisoned: false,
             },
         );
@@ -984,6 +1000,10 @@ impl MinoriRuntimeProvider {
             session.poisoned = true;
             return Err(runtime_error(MinoriRuntimeError::State));
         }
+        if session.active_confirmation.is_some() || input.confirmation.is_some() {
+            let audio_commands = take_restore_audio_commands(session, &vfs)?;
+            return handle_confirmation_step(session, &vfs, &input, audio_commands);
+        }
         for edge in &input.input_edges {
             if edge.control == MINORI_CONTROL_KEY {
                 session.vm.set_control_pressed(edge.pressed);
@@ -1045,6 +1065,58 @@ impl MinoriRuntimeProvider {
                 return Err(error);
             }
         };
+        let window_close_requested = input
+            .input_edges
+            .iter()
+            .any(|edge| edge.pressed && edge.control == MINORI_WINDOW_CLOSE_CONTROL);
+        if window_close_requested {
+            if input.input_edges.len() != 1
+                || input.system_menu.is_some()
+                || !input.await_results.is_empty()
+                || !input.provider_results.is_empty()
+            {
+                session.poisoned = true;
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_WINDOW_CLOSE_INPUT_AMBIGUOUS",
+                    "window close must be the only input and completion in its tick",
+                ));
+            }
+            let services = host_services.as_ref().ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                    "window close requires current Family ABI Host services",
+                )
+            })?;
+            let sequence = session
+                .vm
+                .allocate_effect_sequence()
+                .map_err(runtime_error)?;
+            let confirmation_id = format!("minori.confirmation.window_close.{sequence}");
+            services.confirmations.publish(
+                &session_id.0,
+                LegacyConfirmationTransactionV1 {
+                    sequence,
+                    confirmation_id: confirmation_id.clone(),
+                    title: "Confirmation".into(),
+                    message: "Exit the game?".into(),
+                    accept_label: "Yes".into(),
+                    cancel_label: "No".into(),
+                },
+            )?;
+            session.active_confirmation = Some(ActiveMinoriConfirmation {
+                confirmation_id,
+                action: MinoriConfirmationAction::Exit,
+            });
+            session
+                .vm
+                .advance_provider_tick(input.tick_index)
+                .map_err(runtime_error)?;
+            return if session.vm.state().system_ui.page == MinoriSystemPage::None {
+                idle_system_menu_output(session, &vfs, &input, restore_audio, None)
+            } else {
+                system_ui_output(session, &vfs, &input, restore_audio)
+            };
+        }
         if let Some(request) = system_menu_request.as_ref() {
             return handle_system_menu_request(
                 host_services.as_ref().ok_or_else(|| {
@@ -6490,15 +6562,57 @@ fn handle_system_menu_request(
                         .map_err(runtime_error)?;
                     system_ui_output(session, vfs, input, audio_commands)
                 }
+                "game_return_title" | "game_exit" => {
+                    let action = if item_id == "game_exit" {
+                        MinoriConfirmationAction::Exit
+                    } else {
+                        MinoriConfirmationAction::ReturnTitle
+                    };
+                    if action == MinoriConfirmationAction::ReturnTitle
+                        && session.vm.state().system_ui.page != MinoriSystemPage::None
+                    {
+                        return Err(invalid(
+                            "ASTRA_EMU_MINORI_CONFIRMATION_CONTEXT",
+                            "return-to-title confirmation requires active gameplay",
+                        ));
+                    }
+                    let sequence = session
+                        .vm
+                        .allocate_effect_sequence()
+                        .map_err(runtime_error)?;
+                    let confirmation_id = format!("minori.confirmation.{item_id}.{sequence}");
+                    let confirmation = LegacyConfirmationTransactionV1 {
+                        sequence,
+                        confirmation_id: confirmation_id.clone(),
+                        title: "Confirmation".into(),
+                        message: if action == MinoriConfirmationAction::Exit {
+                            "Exit the game?".into()
+                        } else {
+                            "Return to the title screen?".into()
+                        },
+                        accept_label: "Yes".into(),
+                        cancel_label: "No".into(),
+                    };
+                    services
+                        .confirmations
+                        .publish(&session_id.0, confirmation)?;
+                    session.active_confirmation = Some(ActiveMinoriConfirmation {
+                        confirmation_id,
+                        action,
+                    });
+                    session
+                        .vm
+                        .advance_provider_tick(input.tick_index)
+                        .map_err(runtime_error)?;
+                    idle_system_menu_output(session, vfs, input, audio_commands, None)
+                }
                 "window_fullscreen"
                 | "window_original_size"
                 | "window_precision"
                 | "window_antialias"
                 | "help_manual"
                 | "help_about"
-                | "help_homepage"
-                | "game_return_title"
-                | "game_exit" => {
+                | "help_homepage" => {
                     let sequence = session
                         .vm
                         .allocate_effect_sequence()
@@ -6526,6 +6640,79 @@ fn handle_system_menu_request(
             }
         }
     }
+}
+
+fn handle_confirmation_step(
+    session: &mut MinoriSession,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    input: &LegacyStepInput,
+    audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
+) -> Result<LegacyStepOutput, LegacyProviderError> {
+    if input.system_menu.is_some()
+        || !input.input_edges.is_empty()
+        || !input.await_results.is_empty()
+        || !input.provider_results.is_empty()
+    {
+        session.poisoned = true;
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIRMATION_INPUT_WHILE_ACTIVE",
+            "active native confirmation must suspend gameplay input and completions",
+        ));
+    }
+    let active = session.active_confirmation.clone().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_CONFIRMATION_NOT_ACTIVE",
+            "confirmation result has no active Minori transaction",
+        )
+    })?;
+    let Some(result) = input.confirmation.as_ref() else {
+        session
+            .vm
+            .advance_provider_tick(input.tick_index)
+            .map_err(runtime_error)?;
+        return idle_system_menu_output(session, vfs, input, audio_commands, None);
+    };
+    validate_confirmation_result(&active, result)?;
+    session.active_confirmation = None;
+    session
+        .vm
+        .advance_provider_tick(input.tick_index)
+        .map_err(runtime_error)?;
+    match result.choice {
+        LegacyConfirmationChoiceV1::Cancelled => {
+            idle_system_menu_output(session, vfs, input, audio_commands, None)
+        }
+        LegacyConfirmationChoiceV1::Accepted => match active.action {
+            MinoriConfirmationAction::Exit => {
+                session
+                    .vm
+                    .terminate_from_confirmation()
+                    .map_err(runtime_error)?;
+                system_ui_output(session, vfs, input, audio_commands)
+            }
+            MinoriConfirmationAction::ReturnTitle => {
+                session
+                    .vm
+                    .return_to_title_from_gameplay()
+                    .map_err(runtime_error)?;
+                system_ui_output(session, vfs, input, audio_commands)
+            }
+        },
+    }
+}
+
+fn validate_confirmation_result(
+    active: &ActiveMinoriConfirmation,
+    result: &LegacyConfirmationResultV1,
+) -> Result<(), LegacyProviderError> {
+    result.validate()?;
+    if result.confirmation_id != active.confirmation_id {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIRMATION_ID_MISMATCH",
+            "confirmation result does not match the active Minori transaction",
+        ));
+    }
+    Ok(())
 }
 
 fn idle_system_menu_output(
@@ -10235,6 +10422,26 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingConfirmationHost {
+        published: std::sync::Mutex<Vec<(String, LegacyConfirmationTransactionV1)>>,
+    }
+
+    impl astra_emu_family_api::LegacyConfirmationHostV1 for RecordingConfirmationHost {
+        fn publish(
+            &self,
+            session_id: &str,
+            confirmation: LegacyConfirmationTransactionV1,
+        ) -> Result<(), LegacyProviderError> {
+            confirmation.validate()?;
+            self.published
+                .lock()
+                .unwrap()
+                .push((session_id.into(), confirmation));
+            Ok(())
+        }
+    }
+
     struct ReplacingHookHost {
         count: Arc<std::sync::atomic::AtomicUsize>,
     }
@@ -10724,6 +10931,7 @@ mod tests {
             hooks: Arc::new(UnboundHookHost),
             writable_files: writable,
             system_menus: system_menus.clone(),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -10817,6 +11025,234 @@ mod tests {
                 .iter()
                 .any(|resource| resource.resource_uri == "minori:/sys/saveloadBase.png")
         }));
+    }
+
+    #[test]
+    fn exit_confirmation_cancels_without_consuming_gameplay_then_accepts_once() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/test.sc".into(),
+                b".wait 20\r\n.end\r\n".to_vec(),
+            )]),
+        });
+        let system_menus = Arc::new(RecordingSystemMenuHost::default());
+        let confirmations = Arc::new(RecordingConfirmationHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs,
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::new(RejectWritableFiles),
+            system_menus: system_menus.clone(),
+            confirmations: confirmations.clone(),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.confirmation".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            provider
+                .step(&ctx, &session, step_input(1, Vec::new()))
+                .unwrap()
+                .status,
+            LegacyRuntimeStatus::Awaiting
+        );
+
+        let select_exit = |provider: &mut MinoriRuntimeProvider, tick: u64, menu_id: String| {
+            provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        system_menu: Some(LegacySystemMenuRequestV1 {
+                            action: LegacySystemMenuActionV1::Select,
+                            menu_id: Some(menu_id),
+                            item_id: Some("game_exit".into()),
+                            pointer_x: None,
+                            pointer_y: None,
+                            sequence: tick,
+                        }),
+                        ..step_input(tick, Vec::new())
+                    },
+                )
+                .unwrap()
+        };
+        let open_menu = |provider: &mut MinoriRuntimeProvider, tick: u64| {
+            provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        system_menu: Some(LegacySystemMenuRequestV1 {
+                            action: LegacySystemMenuActionV1::Open,
+                            menu_id: None,
+                            item_id: None,
+                            pointer_x: Some(640),
+                            pointer_y: Some(360),
+                            sequence: tick,
+                        }),
+                        ..step_input(tick, Vec::new())
+                    },
+                )
+                .unwrap();
+            system_menus
+                .published
+                .lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .1
+                .menu_id
+                .clone()
+        };
+
+        let first_menu = open_menu(&mut provider, 2);
+        assert_eq!(
+            select_exit(&mut provider, 3, first_menu).status,
+            LegacyRuntimeStatus::Awaiting
+        );
+        let first_confirmation = confirmations
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .confirmation_id
+            .clone();
+        let cancelled = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    confirmation: Some(LegacyConfirmationResultV1 {
+                        confirmation_id: first_confirmation,
+                        choice: LegacyConfirmationChoiceV1::Cancelled,
+                        sequence: 4,
+                    }),
+                    ..step_input(4, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(cancelled.status, LegacyRuntimeStatus::Awaiting);
+        assert!(provider.sessions[&session.0].vm.state().wait.is_some());
+
+        let second_menu = open_menu(&mut provider, 5);
+        select_exit(&mut provider, 6, second_menu);
+        let second_confirmation = confirmations
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .confirmation_id
+            .clone();
+        let accepted = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    confirmation: Some(LegacyConfirmationResultV1 {
+                        confirmation_id: second_confirmation,
+                        choice: LegacyConfirmationChoiceV1::Accepted,
+                        sequence: 7,
+                    }),
+                    ..step_input(7, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(accepted.status, LegacyRuntimeStatus::Terminal);
+    }
+
+    #[test]
+    fn host_window_close_publishes_family_confirmation_before_exit() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/test.sc".into(),
+                b".wait 20\r\n.end\r\n".to_vec(),
+            )]),
+        });
+        let confirmations = Arc::new(RecordingConfirmationHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs,
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::new(RejectWritableFiles),
+            system_menus: Arc::new(RecordingSystemMenuHost::default()),
+            confirmations: confirmations.clone(),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.window-close".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        let pending = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "window.close".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(pending.status, LegacyRuntimeStatus::Awaiting);
+        let confirmation_id = confirmations
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .expect("window close must publish a typed confirmation")
+            .1
+            .confirmation_id
+            .clone();
+        assert!(confirmation_id.starts_with("minori.confirmation.window_close."));
+        let accepted = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    confirmation: Some(LegacyConfirmationResultV1 {
+                        confirmation_id,
+                        choice: LegacyConfirmationChoiceV1::Accepted,
+                        sequence: 2,
+                    }),
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(accepted.status, LegacyRuntimeStatus::Terminal);
     }
 
     #[test]
@@ -10928,6 +11364,7 @@ mod tests {
             hooks: Arc::new(UnboundHookHost),
             writable_files: Arc::new(RejectWritableFiles),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
         };
         let mut published_layers = BTreeSet::new();
         let mut presentation_layers = BTreeMap::new();
@@ -11013,6 +11450,7 @@ mod tests {
             }),
             writable_files: Arc::new(RejectWritableFiles),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11347,6 +11785,7 @@ mod tests {
             hooks: Arc::new(UnboundHookHost),
             writable_files: Arc::clone(&writable_host),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
         };
         let storage_options = BTreeMap::from([(
             MINORI_GLOBAL_PROGRESS_OPTION.into(),
@@ -14852,6 +15291,7 @@ mod tests {
             mode: LegacyReplayMode::Live,
             input_edges: Vec::new(),
             system_menu: None,
+            confirmation: None,
             await_results,
             provider_results: Vec::new(),
         }

@@ -16,7 +16,7 @@ pub use provider::*;
 pub use scheduler::*;
 pub use v9::*;
 
-pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v10";
+pub const LEGACY_FAMILY_API_SCHEMA: &str = "astra.emu.family_api.v12";
 pub const LEGACY_EFFECT_SCHEMA: &str = "astra.emu.legacy_effect.v2";
 /// Host-facing blackboard observation that transfers gameplay-input ownership
 /// to family-owned system UI while its value is `"true"`.

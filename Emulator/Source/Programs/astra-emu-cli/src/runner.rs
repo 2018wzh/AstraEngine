@@ -30,10 +30,10 @@ use astra_core::{
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
     parse_legacy_system_ui_activity, LegacyAudioCommandV1, LegacyAudioEncoding,
-    LegacyAudioPacketV7, LegacyAudioSampleFormat, LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge,
-    LegacyPcmBufferV7, LegacyProbeRequest, LegacyResourceRead, LegacyRuntimeHostCtx,
-    LegacySystemMenuItemKindV1, LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader,
-    LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
+    LegacyAudioPacketV7, LegacyAudioSampleFormat, LegacyAwaitResult, LegacyConfirmationChoiceV1,
+    LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest, LegacyResourceRead,
+    LegacyRuntimeHostCtx, LegacySystemMenuItemKindV1, LegacyTextureFilter, LegacyTextureFormat,
+    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
@@ -42,7 +42,8 @@ use astra_emu_family_support::{
 use astra_emu_manager_core::{
     evidence_vm_coverage_ids, live_wait_can_rebind, AstraEmuRuntimeProvider, CancellationToken,
     CaseRecord, DesktopGrantedSource, DesktopVfsRegistry, EmuCaseProfile, Library, LibraryScanner,
-    LiveWaitBindingKind, PendingFamilySystemMenu, ScanLimits, SourceGrant,
+    LiveWaitBindingKind, PendingFamilyConfirmation, PendingFamilySystemMenu, ScanLimits,
+    SourceGrant,
 };
 use astra_emu_minori::{MinoriImageDecodeProvider, MinoriVfsFamilyFactory};
 use astra_headless_protocol::{
@@ -67,18 +68,18 @@ use astra_observability::{
     sample_process_memory, PerfettoFlowPhase, PerfettoTraceConfig, PerfettoTraceSummary,
     PerfettoTraceWriter,
 };
+use astra_platform::{
+    ConfirmationRequest, ConfirmationResult, DecodeKind, DecodeOutput, GpuAdapterPolicy,
+    GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
+    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
+    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
+    SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
+};
 #[cfg(target_os = "windows")]
 use astra_platform::{
     ContextMenuItem, ContextMenuItemKind, ContextMenuRequest,
     GamepadControl as PlatformGamepadControl, InputState, PlatformEventKind,
     PointerButton as PlatformPointerButton, TouchPhase as PlatformTouchPhase,
-};
-use astra_platform::{
-    DecodeKind, DecodeOutput, GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy,
-    HeadlessArtifactPolicy, HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy,
-    HeadlessRenderPolicy, PlatformDecodeRequest, PlatformHostClient, PlatformHostFactory,
-    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowHandle,
-    WindowRequest,
 };
 #[cfg(windows)]
 use astra_platform::{FixedDeadlineScheduler, HostLaunchProfile};
@@ -981,7 +982,9 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                         driver.audio.set_suspended(value)?;
                         suspended = value;
                     }
-                    Ok(NativeEventAction::Close) => break Ok(()),
+                    Ok(NativeEventAction::RequestFamilyClose) => {
+                        driver.queue_input("window.close", true, 1.0)?;
+                    }
                     Err(error) => break Err(error),
                 }
                 continue;
@@ -1011,7 +1014,9 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                                 driver.audio.set_suspended(value)?;
                                 suspended = value;
                             }
-                            Ok(NativeEventAction::Close) => break Ok(()),
+                            Ok(NativeEventAction::RequestFamilyClose) => {
+                                driver.queue_input("window.close", true, 1.0)?;
+                            }
                             Err(error) => break Err(error),
                         }
                     }
@@ -1075,7 +1080,9 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                             driver.audio.set_suspended(value)?;
                             suspended = value;
                         }
-                        Ok(NativeEventAction::Close) => break Ok(()),
+                        Ok(NativeEventAction::RequestFamilyClose) => {
+                            driver.queue_input("window.close", true, 1.0)?;
+                        }
                         Err(error) => break Err(error),
                     }
                 }
@@ -4158,6 +4165,7 @@ struct RuntimeDriver<'a> {
     surface: SurfaceHandle,
     window: Option<WindowHandle>,
     virtual_system_menu: Option<VirtualSystemMenu>,
+    virtual_confirmation: Option<VirtualConfirmation>,
     fixed_step: u64,
     input_sequence: u64,
     await_sequence: u64,
@@ -4228,6 +4236,11 @@ struct VirtualSystemMenu {
     pending: PendingFamilySystemMenu,
     parent_id: Option<String>,
     focus: usize,
+}
+
+struct VirtualConfirmation {
+    pending: PendingFamilyConfirmation,
+    accept_focused: bool,
 }
 
 #[derive(Debug)]
@@ -4499,7 +4512,7 @@ struct ExecutionConfig {
 enum NativeEventAction {
     Continue,
     Suspend(bool),
-    Close,
+    RequestFamilyClose,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4523,7 +4536,7 @@ fn route_native_event(
         PlatformEventKind::Suspended => Ok(NativeEventAction::Suspend(true)),
         PlatformEventKind::WindowClosed {
             window: event_window,
-        } if event_window == window => Ok(NativeEventAction::Close),
+        } if event_window == window => Ok(NativeEventAction::RequestFamilyClose),
         PlatformEventKind::WindowResized {
             window: event_window,
             width,
@@ -5232,6 +5245,7 @@ impl<'a> RuntimeDriver<'a> {
             surface,
             window: config.window,
             virtual_system_menu: None,
+            virtual_confirmation: None,
             fixed_step: 0,
             input_sequence: 0,
             await_sequence: 0,
@@ -5331,6 +5345,9 @@ impl<'a> RuntimeDriver<'a> {
             .input_sequence
             .checked_add(1)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        if self.virtual_confirmation.is_some() {
+            return self.consume_virtual_confirmation_input(control, pressed);
+        }
         if self.virtual_system_menu.is_some() {
             return self.consume_virtual_system_menu_input(control, pressed);
         }
@@ -5341,6 +5358,62 @@ impl<'a> RuntimeDriver<'a> {
             sequence: self.input_sequence,
         });
         Ok(())
+    }
+
+    fn consume_virtual_confirmation_input(
+        &mut self,
+        control: &str,
+        pressed: bool,
+    ) -> Result<(), String> {
+        if !pressed {
+            return Ok(());
+        }
+        let confirmation = self
+            .virtual_confirmation
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_CONFIRMATION_STATE".to_owned())?;
+        let decision = match control {
+            "arrow_left" | "arrow_up" => {
+                confirmation.accept_focused = false;
+                None
+            }
+            "arrow_right" | "arrow_down" => {
+                confirmation.accept_focused = true;
+                None
+            }
+            "enter" | "space" => Some(if confirmation.accept_focused {
+                LegacyConfirmationChoiceV1::Accepted
+            } else {
+                LegacyConfirmationChoiceV1::Cancelled
+            }),
+            "escape" => Some(LegacyConfirmationChoiceV1::Cancelled),
+            _ => {
+                return Err("ASTRA_EMU_HEADLESS_CONFIRMATION_INPUT_UNSUPPORTED".into());
+            }
+        };
+        if let Some(choice) = decision {
+            self.resolve_virtual_confirmation(choice)?;
+        }
+        Ok(())
+    }
+
+    fn resolve_virtual_confirmation(
+        &mut self,
+        choice: LegacyConfirmationChoiceV1,
+    ) -> Result<(), String> {
+        let confirmation = self
+            .virtual_confirmation
+            .take()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_CONFIRMATION_STATE".to_owned())?;
+        self.runtime
+            .confirmation_host()
+            .resolve(
+                &confirmation.pending.session_id,
+                &confirmation.pending.confirmation.confirmation_id,
+                choice,
+                self.input_sequence,
+            )
+            .map_err(|error| error.to_string())
     }
 
     fn consume_virtual_system_menu_input(
@@ -5628,9 +5701,13 @@ impl<'a> RuntimeDriver<'a> {
             .system_menu_host()
             .has_pending_interaction()
             .map_err(|error| error.to_string())?;
-        if system_menu_pending {
-            self.pending_inputs
-                .retain(|edge| edge.control != "pointer.secondary");
+        let confirmation_pending = self
+            .runtime
+            .confirmation_host()
+            .has_pending_interaction()
+            .map_err(|error| error.to_string())?;
+        if system_menu_pending || confirmation_pending {
+            self.pending_inputs.clear();
         }
         let pressed_keys = pressed_input_keys(&self.pending_inputs);
         let ready = if system_menu_pending || self.system_ui_active {
@@ -5997,6 +6074,8 @@ impl<'a> RuntimeDriver<'a> {
         }
         #[cfg(target_os = "windows")]
         self.present_native_system_menu_if_pending().await?;
+        self.present_native_confirmation_if_pending().await?;
+        self.capture_virtual_confirmation_if_pending()?;
         self.capture_virtual_system_menu_if_pending()?;
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
@@ -6004,7 +6083,10 @@ impl<'a> RuntimeDriver<'a> {
     }
 
     fn capture_virtual_system_menu_if_pending(&mut self) -> Result<(), String> {
-        if self.window.is_some() || self.virtual_system_menu.is_some() {
+        if self.window.is_some()
+            || self.virtual_system_menu.is_some()
+            || self.virtual_confirmation.is_some()
+        {
             return Ok(());
         }
         let Some(pending) = self
@@ -6021,6 +6103,70 @@ impl<'a> RuntimeDriver<'a> {
             focus: 0,
         });
         Ok(())
+    }
+
+    fn capture_virtual_confirmation_if_pending(&mut self) -> Result<(), String> {
+        if self.window.is_some()
+            || self.virtual_confirmation.is_some()
+            || self.virtual_system_menu.is_some()
+        {
+            return Ok(());
+        }
+        let Some(pending) = self
+            .runtime
+            .confirmation_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        self.virtual_confirmation = Some(VirtualConfirmation {
+            pending,
+            accept_focused: false,
+        });
+        Ok(())
+    }
+
+    async fn present_native_confirmation_if_pending(&mut self) -> Result<(), String> {
+        if self.window.is_none()
+            || self.virtual_confirmation.is_some()
+            || self.virtual_system_menu.is_some()
+        {
+            return Ok(());
+        }
+        let host = self.runtime.confirmation_host();
+        let Some(pending) = host
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        let result = self
+            .platform
+            .show_confirmation(ConfirmationRequest {
+                window: self.window,
+                title: pending.confirmation.title.clone(),
+                message: pending.confirmation.message.clone(),
+                accept_label: pending.confirmation.accept_label.clone(),
+                cancel_label: pending.confirmation.cancel_label.clone(),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        let choice = match result {
+            ConfirmationResult::Accepted => LegacyConfirmationChoiceV1::Accepted,
+            ConfirmationResult::Cancelled => LegacyConfirmationChoiceV1::Cancelled,
+        };
+        self.input_sequence = self
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_CONFIRMATION_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        host.resolve(
+            &pending.session_id,
+            &pending.confirmation.confirmation_id,
+            choice,
+            self.input_sequence,
+        )
+        .map_err(|error| error.to_string())
     }
 
     #[cfg(target_os = "windows")]

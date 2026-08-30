@@ -58,6 +58,19 @@ pub trait LegacySystemMenuHostV1: Send + Sync {
     ) -> Result<(), LegacyProviderError>;
 }
 
+/// Non-blocking platform confirmation publication port.
+///
+/// The family owns the ephemeral text and semantic decision. The Host owns
+/// native presentation and returns exactly one result through a later
+/// `LegacyStepInput`; provider execution never blocks the UI thread.
+pub trait LegacyConfirmationHostV1: Send + Sync {
+    fn publish(
+        &self,
+        session_id: &str,
+        confirmation: crate::LegacyConfirmationTransactionV1,
+    ) -> Result<(), LegacyProviderError>;
+}
+
 #[derive(Clone)]
 pub struct LegacyFamilyHostServicesV9 {
     pub vfs: Arc<dyn crate::LegacyVfsReader>,
@@ -65,6 +78,7 @@ pub struct LegacyFamilyHostServicesV9 {
     pub hooks: Arc<dyn LegacyHookHostV1>,
     pub writable_files: Arc<dyn LegacyWritableFileHostV1>,
     pub system_menus: Arc<dyn LegacySystemMenuHostV1>,
+    pub confirmations: Arc<dyn LegacyConfirmationHostV1>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -738,6 +752,25 @@ pub struct FfiPublishSystemMenuCallV1 {
     pub menu: FfiSystemMenuTransactionV1,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiConfirmationTransactionV1 {
+    pub sequence: u64,
+    pub confirmation_id: RString,
+    pub title: RString,
+    pub message: RString,
+    pub accept_label: RString,
+    pub cancel_label: RString,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiPublishConfirmationCallV1 {
+    pub host_token: RString,
+    pub session_id: RString,
+    pub confirmation: FfiConfirmationTransactionV1,
+}
+
 pub type FfiAcquireSurfaceV9 =
     extern "C" fn(FfiAcquireSurfaceCallV9) -> FfiLegacyResult<FfiSurfaceLeaseV9>;
 pub type FfiCommitSurfaceV9 = extern "C" fn(FfiCommitSurfaceCallV9) -> FfiLegacyResult<()>;
@@ -745,6 +778,34 @@ pub type FfiInvokeHookV1 = extern "C" fn(FfiHookInvocationV1) -> FfiLegacyResult
 pub type FfiWritableFileV1 =
     extern "C" fn(FfiWritableFileCallV1) -> FfiLegacyResult<FfiWritableFileResultV1>;
 pub type FfiPublishSystemMenuV1 = extern "C" fn(FfiPublishSystemMenuCallV1) -> FfiLegacyResult<()>;
+pub type FfiPublishConfirmationV1 =
+    extern "C" fn(FfiPublishConfirmationCallV1) -> FfiLegacyResult<()>;
+
+impl From<crate::LegacyConfirmationTransactionV1> for FfiConfirmationTransactionV1 {
+    fn from(value: crate::LegacyConfirmationTransactionV1) -> Self {
+        Self {
+            sequence: value.sequence,
+            confirmation_id: value.confirmation_id.into(),
+            title: value.title.into(),
+            message: value.message.into(),
+            accept_label: value.accept_label.into(),
+            cancel_label: value.cancel_label.into(),
+        }
+    }
+}
+
+impl From<FfiConfirmationTransactionV1> for crate::LegacyConfirmationTransactionV1 {
+    fn from(value: FfiConfirmationTransactionV1) -> Self {
+        Self {
+            sequence: value.sequence,
+            confirmation_id: value.confirmation_id.to_string(),
+            title: value.title.to_string(),
+            message: value.message.to_string(),
+            accept_label: value.accept_label.to_string(),
+            cancel_label: value.cancel_label.to_string(),
+        }
+    }
+}
 
 impl From<crate::LegacySystemMenuTransactionV1> for FfiSystemMenuTransactionV1 {
     fn from(value: crate::LegacySystemMenuTransactionV1) -> Self {

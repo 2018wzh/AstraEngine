@@ -9,7 +9,8 @@ use astra_core::{Hash256, SchemaVersion};
 
 use crate::{
     FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation, LegacyControlTransaction,
+    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyBlackboardMutation,
+    LegacyConfirmationChoiceV1, LegacyConfirmationResultV1, LegacyControlTransaction,
     LegacyCoverageDelta, LegacyDiagnostic, LegacyEvent, LegacyFamilyCoreKind,
     LegacyFamilyPluginDescriptor, LegacyFamilyPresentationMode, LegacyInputEdge, LegacyLiveOutput,
     LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
@@ -528,6 +529,59 @@ impl From<FfiSystemMenuRequestV1> for LegacySystemMenuRequestV1 {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiConfirmationChoiceV1 {
+    Accepted,
+    Cancelled,
+}
+
+impl From<LegacyConfirmationChoiceV1> for FfiConfirmationChoiceV1 {
+    fn from(value: LegacyConfirmationChoiceV1) -> Self {
+        match value {
+            LegacyConfirmationChoiceV1::Accepted => Self::Accepted,
+            LegacyConfirmationChoiceV1::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+impl From<FfiConfirmationChoiceV1> for LegacyConfirmationChoiceV1 {
+    fn from(value: FfiConfirmationChoiceV1) -> Self {
+        match value {
+            FfiConfirmationChoiceV1::Accepted => Self::Accepted,
+            FfiConfirmationChoiceV1::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiConfirmationResultV1 {
+    pub confirmation_id: RString,
+    pub choice: FfiConfirmationChoiceV1,
+    pub sequence: u64,
+}
+
+impl From<LegacyConfirmationResultV1> for FfiConfirmationResultV1 {
+    fn from(value: LegacyConfirmationResultV1) -> Self {
+        Self {
+            confirmation_id: value.confirmation_id.into(),
+            choice: value.choice.into(),
+            sequence: value.sequence,
+        }
+    }
+}
+
+impl From<FfiConfirmationResultV1> for LegacyConfirmationResultV1 {
+    fn from(value: FfiConfirmationResultV1) -> Self {
+        Self {
+            confirmation_id: value.confirmation_id.to_string(),
+            choice: value.choice.into(),
+            sequence: value.sequence,
+        }
+    }
+}
+
 macro_rules! ffi_result_item {
     ($ffi:ident, $native:ident, $($field:ident),+) => {
         #[repr(C)]
@@ -597,6 +651,7 @@ pub struct FfiStepInput {
     pub mode: FfiReplayMode,
     pub input_edges: RVec<FfiInputEdge>,
     pub system_menu: ROption<FfiSystemMenuRequestV1>,
+    pub confirmation: ROption<FfiConfirmationResultV1>,
     pub await_results: RVec<FfiAwaitResult>,
     pub provider_results: RVec<FfiProviderResult>,
 }
@@ -615,6 +670,7 @@ impl From<LegacyStepInput> for FfiStepInput {
                 .collect::<Vec<_>>()
                 .into(),
             system_menu: value.system_menu.map(Into::into).into(),
+            confirmation: value.confirmation.map(Into::into).into(),
             await_results: value
                 .await_results
                 .into_iter()
@@ -640,6 +696,7 @@ impl From<FfiStepInput> for LegacyStepInput {
             mode: value.mode.into(),
             input_edges: value.input_edges.iter().cloned().map(Into::into).collect(),
             system_menu: value.system_menu.into_option().map(Into::into),
+            confirmation: value.confirmation.into_option().map(Into::into),
             await_results: value
                 .await_results
                 .iter()
@@ -1650,6 +1707,28 @@ mod live_zero_copy_tests {
                 pointer_x: Some(640),
                 pointer_y: Some(360),
                 sequence: 7,
+            }),
+            confirmation: None,
+            await_results: Vec::new(),
+            provider_results: Vec::new(),
+        };
+        let decoded: LegacyStepInput = FfiStepInput::from(legacy.clone()).into();
+        assert_eq!(decoded, legacy);
+    }
+
+    #[test]
+    fn confirmation_result_round_trips_through_family_ffi_wire() {
+        let legacy = LegacyStepInput {
+            tick_index: 8,
+            delta_ns: 16_666_667,
+            session_seed: 19,
+            mode: LegacyReplayMode::Live,
+            input_edges: Vec::new(),
+            system_menu: None,
+            confirmation: Some(LegacyConfirmationResultV1 {
+                confirmation_id: "minori.confirmation.game_exit.12".into(),
+                choice: LegacyConfirmationChoiceV1::Cancelled,
+                sequence: 15,
             }),
             await_results: Vec::new(),
             provider_results: Vec::new(),

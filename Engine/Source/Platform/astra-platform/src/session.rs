@@ -99,6 +99,59 @@ pub struct ContextMenuResult {
     pub item_id: Option<String>,
 }
 
+/// A host-owned, two-choice confirmation request.
+///
+/// Family providers publish the semantic transaction through Family ABI.  The
+/// platform host owns the actual presentation so each target can use its
+/// native modal primitive (and its accessibility/focus rules) without making
+/// a Manager or CLI carry a second dialog implementation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmationRequest {
+    /// Optional parent window.  Native hosts use it when supplied; a missing
+    /// parent is valid for service-only hosts such as the Manager's audio
+    /// service and lets the platform choose the normal application owner.
+    pub window: Option<WindowHandle>,
+    pub title: String,
+    pub message: String,
+    pub accept_label: String,
+    pub cancel_label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationResult {
+    Accepted,
+    Cancelled,
+}
+
+impl ConfirmationRequest {
+    fn validate(&self) -> Result<(), PlatformError> {
+        const MAX_TITLE_BYTES: usize = 256;
+        const MAX_MESSAGE_BYTES: usize = 4096;
+        const MAX_LABEL_BYTES: usize = 128;
+        if self.title.trim().is_empty()
+            || self.message.trim().is_empty()
+            || self.accept_label.trim().is_empty()
+            || self.cancel_label.trim().is_empty()
+            || self.title.len() > MAX_TITLE_BYTES
+            || self.message.len() > MAX_MESSAGE_BYTES
+            || self.accept_label.len() > MAX_LABEL_BYTES
+            || self.cancel_label.len() > MAX_LABEL_BYTES
+            || self.title.chars().any(char::is_control)
+            || self.message.chars().any(char::is_control)
+            || self.accept_label.chars().any(char::is_control)
+            || self.cancel_label.chars().any(char::is_control)
+            || self.accept_label == self.cancel_label
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.confirmation",
+                "confirmation title, message, and labels are invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl ContextMenuRequest {
     fn validate(&self) -> Result<(), PlatformError> {
         if self.items.is_empty() || self.items.len() > 64 || self.x.is_some() != self.y.is_some() {
@@ -485,6 +538,10 @@ pub enum HostCommand {
         request: ContextMenuRequest,
         reply: oneshot::Sender<Result<ContextMenuResult, PlatformError>>,
     },
+    ShowConfirmation {
+        request: ConfirmationRequest,
+        reply: oneshot::Sender<Result<ConfirmationResult, PlatformError>>,
+    },
     CaptureSurface {
         surface: SurfaceHandle,
         reply: oneshot::Sender<Result<CapturedFrame, PlatformError>>,
@@ -603,6 +660,7 @@ impl HostCommand {
             Self::CreateWindow { .. } => "window.create",
             Self::CreateSurface { .. } => "surface.create",
             Self::ShowContextMenu { .. } => "window.context_menu",
+            Self::ShowConfirmation { .. } => "window.confirmation",
             Self::CaptureSurface { .. } => "surface.capture",
             Self::PresentRgba { .. } => "surface.present_rgba",
             Self::PresentScene { .. } => "surface.present_scene",
@@ -676,6 +734,7 @@ impl HostCommand {
             Self::CreateWindow { reply, .. } => send_error!(reply),
             Self::CreateSurface { reply, .. } => send_error!(reply),
             Self::ShowContextMenu { reply, .. } => send_error!(reply),
+            Self::ShowConfirmation { reply, .. } => send_error!(reply),
             Self::CaptureSurface { reply, .. } => send_error!(reply),
             Self::PresentRgba { reply, .. } => send_error!(reply),
             Self::PresentScene { reply, .. } => send_error!(reply),
@@ -958,6 +1017,19 @@ impl PlatformHostClient {
         response
             .await
             .map_err(|_| queue_closed("window.context_menu"))?
+    }
+
+    pub async fn show_confirmation(
+        &self,
+        request: ConfirmationRequest,
+    ) -> Result<ConfirmationResult, PlatformError> {
+        request.validate()?;
+        self.ensure_running("window.confirmation")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ShowConfirmation { request, reply })?;
+        response
+            .await
+            .map_err(|_| queue_closed("window.confirmation"))?
     }
 
     pub async fn capture_surface(
@@ -2230,7 +2302,10 @@ fn https_origin(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioWakeRegistration, ContextMenuItem, ContextMenuItemKind, ContextMenuRequest};
+    use super::{
+        AudioWakeRegistration, ConfirmationRequest, ContextMenuItem, ContextMenuItemKind,
+        ContextMenuRequest,
+    };
     use crate::WindowHandle;
     use std::{sync::Arc, thread, time::Duration};
 
@@ -2321,6 +2396,32 @@ mod tests {
         assert_eq!(
             invalid.validate().unwrap_err().operation,
             "window.context_menu"
+        );
+    }
+
+    #[test]
+    fn confirmation_validates_bounded_native_text() {
+        let request = ConfirmationRequest {
+            window: None,
+            title: "Confirm".into(),
+            message: "Continue?".into(),
+            accept_label: "Yes".into(),
+            cancel_label: "No".into(),
+        };
+        request.validate().unwrap();
+
+        let mut invalid = request.clone();
+        invalid.accept_label = invalid.cancel_label.clone();
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.confirmation"
+        );
+
+        let mut invalid = request;
+        invalid.message = "\u{0000}".into();
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.confirmation"
         );
     }
 }

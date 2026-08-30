@@ -987,6 +987,10 @@ impl AstraEmuRuntimeProvider {
         Arc::clone(&self.host.system_menus)
     }
 
+    pub fn confirmation_host(&self) -> Arc<crate::FamilyConfirmationHost> {
+        Arc::clone(&self.host.confirmations)
+    }
+
     /// Shuts down one concrete AstraEMU session and returns the family-owned
     /// cold-path evidence alongside the generic provider lifecycle report.
     pub fn shutdown_with_family_report(
@@ -1456,11 +1460,20 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             .system_menus
             .take_resolution(&session.family_session_id.0)
             .map_err(|error| error.to_string())?;
+        let confirmation = self
+            .host
+            .confirmations
+            .take_resolution(&session.family_session_id.0)
+            .map_err(|error| error.to_string())?;
         if physical_system_menu.is_some() && resolved_system_menu.is_some() {
             session.poisoned = true;
             return Err("ASTRA_EMU_SYSTEM_MENU_RESULT_AND_OPEN_CONFLICT".into());
         }
         let system_menu = resolved_system_menu.or(physical_system_menu);
+        if confirmation.is_some() && system_menu.is_some() {
+            session.poisoned = true;
+            return Err("ASTRA_EMU_CONFIRMATION_AND_SYSTEM_MENU_CONFLICT".into());
+        }
         let await_results = await_results.clone();
         let mut surface_guard = SurfaceStepGuard::new(
             surface_host,
@@ -1477,6 +1490,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 mode: LegacyReplayMode::Live,
                 input_edges,
                 system_menu,
+                confirmation,
                 await_results: await_results.clone(),
                 provider_results,
             },

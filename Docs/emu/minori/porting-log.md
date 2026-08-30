@@ -1,5 +1,11 @@
 # Minori 移植日志
 
+## 2026-08-30：Family ABI v12 确认事务与平台 Host
+
+- `game_exit`、`game_return_title` 和 Host 的 `window.close` 现在都由 Minori 通过 Family ABI 发布有界 `LegacyConfirmationTransactionV1`。Host 保存一次性 pending transaction，按 session 严格匹配结果；取消只恢复原有 wait，接受才进入 terminal 或返回标题。确认期间的 gameplay input、system-menu result、重复结果和错配 id 直接阻断。
+- `astra-platform` 新增 `PlatformHostClient::show_confirmation` 与 `HostCommand::ShowConfirmation`。Windows、Linux 和 macOS 走各自的 `rfd` native message dialog，使用可选 parent window 与有界标题/正文/按钮；Headless、Android、Web 明确返回 `PLATFORM_NOT_IMPLEMENTED`，由 Headless CLI 的物理方向键、Enter/Space/Escape 路径完成确定性验证。Manager 只组合 Host service，不再绘制第二套 confirmation 语义。
+- Family API v12 wire、Manager Core confirmation host、动态 loader、CLI close event、Minori provider 和平台 Host 的定向测试通过。该结果是当前 ABI 的 E1/E2 接线证据；尚未形成 Release Sandbox 行为验收、120 Hz 性能证据或 Windows E3。
+
 ## 2026-08-30：原生菜单 Save、Load 与 Config 的 Release E2
 
 - 开发签名 Release v24 从空白进度启动，用 secondary-pointer、方向键、Enter 和 Escape 依次打开 Save、Load 与 gameplay Config。报告通过 138 fixed steps、82 条物理输入、9 个呈现帧和 8 个 checkpoint，diagnostic 为空。三个页面关闭后都返回同一条剧情消息，前后四张 gameplay PNG 字节一致。
@@ -12,7 +18,7 @@
 - Release CLI 的 Headless host 原先没有实现 Manager 已有的消息 wait 重绑规则：Auto 将活动消息从 `Input` 改为 `Time` 时，CLI 把同一 token 误判为重复 wait。规则现已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 CLI 共同只允许 `Input` 与 `Time` 互换以及 `Time` deadline 更新；同批重复、`Input` 重发和其他 wait 类型仍阻断。
 - 开发签名 Release v21 从空白进度启动，通过 secondary-pointer 和方向键在 family v11 菜单中选择 Auto。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint，diagnostic 为空。Auto 开启后 2 秒内从第一条消息推进到下一场景；再次选择 Auto 恢复 Normal 后，继续运行 2 秒的画面与关闭时完全一致。
 - 三个关键画面已人工检查，未见缺字、裁剪、拉伸或明显图层错误。该结果关闭当前身份的原生菜单 Auto 定向 Headless E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。
-- 原版 Sandbox 的窗口关闭按钮会弹出原生确认框，正文与舞台保持在其后方；取消后 session 继续。当前 family 菜单的 `game_exit`/`game_return_title` 仍只有 typed command event，尚无通用确认对话框结果通道，因此不能据此宣称退出行为已对齐。该观察只记录交互契约，不提交截图或商业内容。
+- 原版 Sandbox 的窗口关闭按钮会弹出原生确认框，正文与舞台保持在其后方；取消后 session 继续。该观察与当前 Family ABI v12 的一次性确认事务契约一致，但仍只记录交互结构，不提交截图或商业内容，也不替代 Release Sandbox/Windows E3。
 
 ## 2026-08-30：原生菜单 Skip 的 Headless 复验
 
@@ -83,10 +89,10 @@
 - Release reader 随后在当前 key-file/streaming identity 下完成真实八包校验：8 个 source、14502 个 entry、43818 个逻辑读取范围、6624958365 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。该结果关闭本轮 full verify，不代表峰值内存、四路线 GPU E2、Sandbox 视觉验收或正式 Windows E3 已完成。
 - 同一 identity 的脱敏研究工具随后完成 89 个脚本 census：33728 行、33695 条命令、29 个 opcode，unknown opcode 为 0。媒体 census 覆盖 `bg`、`bgm` 和 `mov`：4665 个图像/音频条目、1951 ANI（6723 frames）、9 SQZ（224 frames）、2655 PNG、49 Ogg，以及 5 个 AVI container。它证明生产 reader/adapter 能完整遍历当前素材，不等于影片逐帧播放、音频听审或视觉 parity。
 
-## 2026-08-30：Family API v11 与原版右键菜单
+## 2026-08-30：Family API v11 与原版右键菜单（历史）
 
 - 原版现场观察确认：右键打开的是系统菜单，不是 Save 页。标题与剧情阶段的根菜单不同；剧情菜单包含消息框显示、Auto、Skip、Quick Save、Save、Load 和 Config，窗口、Help、Game 子菜单位于其后。转场期间右键不生效。
-- Family API hard cut 到 `astra.emu.family_abi.v11`。Family 通过 `LegacySystemMenuTransactionV1` 非阻塞发布层级、启用状态和勾选状态，Host 只负责显示并回送 `Select` 或 `Dismiss`。错配 menu id、重复 item、无效 parent、不可选 item 和并发菜单都直接阻断。
+- 当时 Family API hard cut 到 `astra.emu.family_abi.v11`。Family 通过 `LegacySystemMenuTransactionV1` 非阻塞发布层级、启用状态和勾选状态，Host 只负责显示并回送 `Select` 或 `Dismiss`。错配 menu id、重复 item、无效 parent、不可选 item 和并发菜单都直接阻断；现行 identity 已升级到 v12，并在同一通道增加 confirmation transaction。
 - Windows Release CLI 使用 AstraPlatform context-menu provider；Manager 使用同一 transaction 构建 Slint overlay；Headless 只接受物理方向键、确认键和取消键。三条路径不按 Minori item id 自行解释命令。
 - Minori 选中后可以切换消息框、Auto/Skip，或打开 Save、Load 和 gameplay Config。菜单活动期间保留底层 message wait，防止确认或取消动作误推进剧情。
 - 当前完成的是 ABI、平台和 consumer 的 E1 定向回归。尚未用 v11 build 完成真实 key-file mount、Headless GPU E2 或 Release Sandbox 视觉复测，不能沿用旧 ABI 的 Save 页现场结果。
@@ -836,7 +842,7 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 
 ### 2026-08-30 key-file Release 路线复核
 
-- 当前分支已 rebase 到 `origin/master` 的 `a2bb57d9c43084ec8e519b8c38d5aded14f51cb3`。冲突按现行 Family API v11 解决，没有恢复旧 surface、snapshot、Luau callback、明文 cache 或兼容入口。
+- 当前分支已 rebase 到 `origin/master` 的 `a2bb57d9c43084ec8e519b8c38d5aded14f51cb3`。冲突按现行 Family API v12 解决，没有恢复旧 surface、snapshot、Luau callback、明文 cache 或兼容入口；v11 只作为历史菜单迁移记录。
 - 官方桌面构建器此前只给 Minori library 启用 dynamic export，Manager 与 CLI 没有编译 `ffmpeg-vcpkg`，生成的包无法播放 Minori 影片。构建器现按 family 绑定 feature：Minori package 同时编译两个产品 host 的唯一 FFmpeg provider；依赖缺失会让 Release 构建直接失败。工具单元测试覆盖 Minori/FVP 的 feature 集合。
 - PAZ lookup 现按原引擎文件系统语义执行 ASCII case-insensitive 匹配，同时继续向 manifest 和调用方返回 canonical URI；大小写折叠冲突阻断，不覆盖 entry。positional parser 只接受真实样本观察到的单个尾随空字段。primary `.effect fadeout` 只结束活动 Firefly，缺少目标时阻断。
 - 全包 census 中只有一条三 operand `.panel`。原程序 parser 已确认字段为 mode、可选过渡和文件名；真实命令使用 `*` 作为缺省过渡并引用一个存在的 `sys` 资源。runtime 与资源预审现在共同接受这一种已验证形态；显式数值过渡、其他 mode 和非法文件名仍返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
