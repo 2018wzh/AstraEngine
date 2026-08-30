@@ -28,6 +28,8 @@ const MAX_DECODED_VIDEO_FRAME_BYTES: usize = 64 * 1024 * 1024;
 mod ffmpeg;
 #[cfg(feature = "ffmpeg-vcpkg")]
 mod ffmpeg_stream;
+#[cfg(windows)]
+mod wmf_reader;
 
 #[cfg(feature = "ffmpeg-vcpkg")]
 pub use ffmpeg_stream::*;
@@ -349,6 +351,38 @@ pub fn open_windows_video_stream(
     #[cfg(not(windows))]
     {
         let _ = (bytes, max_frames, max_bytes);
+        Err(decode_error(
+            "ASTRA_WMF_PLATFORM_UNAVAILABLE",
+            "Media Foundation video stream decode is only available on Windows",
+        ))
+    }
+}
+
+/// Opens a Windows Media Foundation video decoder directly over an owned,
+/// bounded seekable source. The source remains inside the COM byte-stream for
+/// the decoder lifetime; encoded bytes are neither copied into an HGLOBAL nor
+/// written to a temporary file.
+pub fn open_windows_video_reader(
+    reader: Box<dyn crate::IncrementalReadSeek>,
+    max_encoded_bytes: usize,
+    max_frames: u64,
+    max_bytes: u64,
+) -> Result<WindowsVideoStreamDecoder, MediaError> {
+    #[cfg(windows)]
+    {
+        Ok(WindowsVideoStreamDecoder {
+            inner: wmf_decode::IncrementalVideoDecoder::open_reader(
+                reader,
+                max_encoded_bytes,
+                max_frames,
+                max_bytes,
+            )
+            .map_err(wmf_decode::decode_error)?,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (reader, max_encoded_bytes, max_frames, max_bytes);
         Err(decode_error(
             "ASTRA_WMF_PLATFORM_UNAVAILABLE",
             "Media Foundation video stream decode is only available on Windows",
@@ -1485,12 +1519,26 @@ mod wmf_decode {
             max_frames: u64,
             max_bytes: u64,
         ) -> windows::core::Result<Self> {
+            Self::open_reader(
+                Box::new(std::io::Cursor::new(bytes.to_vec())),
+                bytes.len(),
+                max_frames,
+                max_bytes,
+            )
+        }
+
+        pub(super) fn open_reader(
+            reader_source: Box<dyn crate::IncrementalReadSeek>,
+            max_encoded_bytes: usize,
+            max_frames: u64,
+            max_bytes: u64,
+        ) -> windows::core::Result<Self> {
             unsafe {
-                if max_frames == 0 || max_bytes == 0 {
+                if max_encoded_bytes == 0 || max_frames == 0 || max_bytes == 0 {
                     return Err(wmf_error("video stream decode budget is empty"));
                 }
                 let session = WmfSession::new()?;
-                let reader = source_reader_from_bytes(bytes)?;
+                let reader = source_reader_from_reader(reader_source, max_encoded_bytes)?;
                 let duration = reader.GetPresentationAttribute(
                     MF_SOURCE_READER_MEDIASOURCE.0 as u32,
                     &MF_PD_DURATION,
@@ -1916,6 +1964,27 @@ mod wmf_decode {
             hardware_transforms = true,
             output_boundary = "cpu_bgra8_or_pcm_s16le",
             "Media Foundation source reader requested hardware transforms"
+        );
+        MFCreateSourceReaderFromByteStream(&byte_stream, Some(&attributes))
+    }
+
+    unsafe fn source_reader_from_reader(
+        reader: Box<dyn crate::IncrementalReadSeek>,
+        max_encoded_bytes: usize,
+    ) -> windows::core::Result<windows::Win32::Media::MediaFoundation::IMFSourceReader> {
+        let stream = super::wmf_reader::stream_from_reader(reader, max_encoded_bytes)?;
+        let byte_stream = MFCreateMFByteStreamOnStreamEx(&stream)?;
+        let mut attributes = None;
+        MFCreateAttributes(&mut attributes, 2)?;
+        let attributes =
+            attributes.ok_or_else(|| wmf_error("source reader attributes unavailable"))?;
+        attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1)?;
+        attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)?;
+        tracing::debug!(
+            event = "media.decode.wmf.reader.hardware_transform.requested",
+            hardware_transforms = true,
+            output_boundary = "cpu_bgra8",
+            "Media Foundation reader-backed source requested hardware transforms"
         );
         MFCreateSourceReaderFromByteStream(&byte_stream, Some(&attributes))
     }

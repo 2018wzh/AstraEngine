@@ -1,5 +1,14 @@
 # Minori Implementation Checklist
 
+## Original movie backend and platform decode (2026-08-30)
+
+- [x] PE/COM contract inspection confirms the original uses DirectShow Filter Graph plus windowless VMR7 and checks failing HRESULTs; it does not establish a silent decoder fallback.
+- [x] AstraMedia WMF decodes the same authorized AVI to EOS with 2106 monotonic frames and no returned decode error, while the pinned FFmpeg path blocks on 7 concealment frames.
+- [x] Add the bounded read-only COM `IStream` seam and `open_windows_video_reader`; public MP4 and the authorized AVI decode directly from owned seekable readers without HGLOBAL input copies or plaintext spools.
+- [ ] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including packet ordering, seek generation and cancellation.
+- [ ] Bind WMF only when explicitly selected by the launch composition. Missing/ineligible WMF, codec mismatch, or decode failure must block rather than switch to FFmpeg.
+- [ ] Re-run required movie checkpoints and original-title parity before changing the shipping Minori provider binding.
+
 ## FFmpeg dependency and WMV3 quality (2026-08-30)
 
 - [x] Root vcpkg manifest pins the reviewed FFmpeg `8.1.2#3` baseline and minimal components; Windows CI installs that manifest instead of a floating port.

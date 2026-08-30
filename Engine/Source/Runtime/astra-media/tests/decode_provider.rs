@@ -311,6 +311,36 @@ fn windows_wmf_incremental_stream_releases_frames_and_enforces_running_budget() 
 
 #[cfg(windows)]
 #[astra_headless_test::test]
+fn windows_wmf_reader_stream_owns_seekable_source_without_encoded_copy_contract() {
+    let bytes = fixture_bytes("flower.mp4");
+    let encoded_len = bytes.len();
+    let mut decoder = astra_media::open_windows_video_reader(
+        Box::new(std::io::Cursor::new(bytes)),
+        encoded_len,
+        3,
+        3 * 64 * 1024 * 1024,
+    )
+    .unwrap();
+    let first = decoder.next_frame().unwrap().unwrap();
+    let second = decoder.next_frame().unwrap().unwrap();
+    assert_eq!(first.sequence, 1);
+    assert_eq!(second.sequence, 2);
+    assert!(second.pts_us >= first.pts_us);
+
+    let bytes = fixture_bytes("flower.mp4");
+    let error = astra_media::open_windows_video_reader(
+        Box::new(std::io::Cursor::new(bytes.clone())),
+        bytes.len() - 1,
+        3,
+        3 * 64 * 1024 * 1024,
+    )
+    .err()
+    .expect("encoded source above its bound must block");
+    assert_wmf_diagnostic(error);
+}
+
+#[cfg(windows)]
+#[astra_headless_test::test]
 fn windows_wmf_incremental_audio_releases_ordered_bounded_pcm_chunks() {
     let bytes = fixture_bytes("flower.mp4");
     let mut decoder = astra_media::open_windows_audio_stream(&bytes, 1_000_000).unwrap();

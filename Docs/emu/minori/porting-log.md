@@ -1,5 +1,12 @@
 # Minori 移植日志
 
+## 2026-08-30：原版影片后端与平台解码诊断
+
+- 原版主程序的 PE 导入和 COM 调用已确认影片链路使用 DirectShow Filter Graph，而不是 Media Foundation：创建 `CLSID_FilterGraph`，查询 `IGraphBuilder`/`IFilterGraph2`，并创建 `CLSID_VideoMixingRenderer`（VMR7）及 `IVMRFilterConfig`、`IVMRWindowlessControl`。`VMR7` 属性配置和关键 COM 调用均检查负 HRESULT 并进入清理/失败分支，没有观察到静默切换后端的路径。
+- 同一授权 AVI 经 AstraMedia 的 Windows Media Foundation 全流诊断完成 2106 帧、87.916666 秒，PTS 单调且未返回解码错误；固定 FFmpeg 路径则在同一源中报告 7 个 concealment frame。这个结果说明平台解码器能处理该 authored source，但还不是原版逐帧 parity，也不授权把 FFmpeg 的错误静默吞掉。
+- AstraMedia 已增加只读 `IStream` adapter 和 `open_windows_video_reader`：它直接持有有界 `Read + Seek + Send` source，并交给 MF byte stream，不复制到 HGLOBAL，也不建立临时文件。公开 MP4 fixture 与授权 AVI 均通过 reader-backed 路径；后者仍为 2106 帧且 PTS 单调。当前只完成公共视频 reader seam，统一音视频 packet provider、seek generation 与 launch registry binding 仍未完成。
+- 后续生产实现采用显式 provider binding：Windows 可选择 AstraMedia 的 reader-backed WMF 增量 provider，FFmpeg 继续保留为另一项显式选择；二者不构成 fallback chain。WMF provider 还需输出统一 timestamped audio/video packet，并完成公开 fixture、授权样本、Headless movie checkpoint 与原版同点复核后才能替换当前 Minori Release binding。
+
 ## 2026-08-30：自然解锁后的鉴赏子页
 
 - 复用从零完成四条路线后留下的同一隔离 writable identity，通过序列化物理输入依次进入 `Memories` 根页、BGM、CG、回想和影片列表。Headless 报告通过：82 fixed steps、20 个呈现帧、9 个 checkpoint、45 个资源、零 diagnostic；没有注入解锁状态，也没有改动用户存档。

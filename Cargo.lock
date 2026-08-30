@@ -1262,6 +1262,7 @@ dependencies = [
  "unicode-segmentation",
  "wasm-bindgen",
  "windows",
+ "windows-core",
 ]
 
 [[package]]
