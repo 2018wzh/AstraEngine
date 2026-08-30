@@ -11,6 +11,10 @@ use astra_media_core::{
 
 const FONT_FAMILY: &str = "Noto Sans JP";
 const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
+/// The original Minori message panel draws a small, independent downward
+/// triangle after the completed message.  It is a presentation marker, not
+/// part of the message source, translation input, or backlog text.
+const ADVANCE_INDICATOR: &str = "▼";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum TextAlignment {
@@ -40,6 +44,7 @@ pub(super) struct TextSurfaceRequest {
     pub key: String,
     pub text: String,
     pub speaker: Option<String>,
+    pub show_advance_indicator: bool,
     pub body: TextRegion,
     pub speaker_region: Option<TextRegion>,
     pub rgba: [u8; 4],
@@ -80,6 +85,10 @@ impl MinoriTextSurfaceRenderer {
                     UnicodeRange {
                         start: 0x2010,
                         end: 0x2027,
+                    },
+                    UnicodeRange {
+                        start: 0x25bc,
+                        end: 0x25bc,
                     },
                     UnicodeRange {
                         start: 0x266a,
@@ -153,6 +162,7 @@ impl MinoriTextSurfaceRenderer {
                 request.body,
                 request.rgba,
                 request.outline,
+                request.show_advance_indicator,
             )?;
             if let (Some(speaker), Some(region)) =
                 (request.speaker.as_deref(), request.speaker_region)
@@ -166,6 +176,7 @@ impl MinoriTextSurfaceRenderer {
                     region,
                     request.rgba,
                     request.outline,
+                    false,
                 )?;
             }
         }
@@ -203,18 +214,30 @@ fn append_text(
     region: TextRegion,
     rgba: [u8; 4],
     outline: Option<TextOutline>,
+    show_advance_indicator: bool,
 ) -> Result<(), &'static str> {
+    let mut runs = vec![TextRun {
+        text: text.into(),
+        language: "ja-JP".into(),
+        script: Some("Jpan".into()),
+        direction: TextDirection::LeftToRight,
+        ruby: Vec::new(),
+        voice: None,
+    }];
+    if show_advance_indicator {
+        runs.push(TextRun {
+            text: ADVANCE_INDICATOR.into(),
+            language: "ja-JP".into(),
+            script: Some("Jpan".into()),
+            direction: TextDirection::LeftToRight,
+            ruby: Vec::new(),
+            voice: None,
+        });
+    }
     let layout = provider
         .layout(&TextLayoutRequest {
             key: layout_id.into(),
-            runs: vec![TextRun {
-                text: text.into(),
-                language: "ja-JP".into(),
-                script: Some("Jpan".into()),
-                direction: TextDirection::LeftToRight,
-                ruby: Vec::new(),
-                voice: None,
-            }],
+            runs,
             constraint: LayoutConstraint {
                 max_width: region.width as f32,
                 max_height: Some(region.height as f32),
@@ -318,6 +341,7 @@ mod tests {
             key: "minori.test.message".into(),
             text: "日本語テキスト".into(),
             speaker: Some("話者".into()),
+            show_advance_indicator: true,
             body: TextRegion {
                 x: 160,
                 y: 568,
@@ -349,5 +373,36 @@ mod tests {
         let second = renderer.render(&[request]).unwrap();
         assert_eq!(first.len(), 1280 * 720 * 4);
         assert_eq!(second.len(), first.len());
+    }
+
+    #[test]
+    fn advance_indicator_is_rendered_without_mutating_message_text() {
+        let mut renderer = MinoriTextSurfaceRenderer::new(1280, 720).unwrap();
+        let mut request = TextSurfaceRequest {
+            key: "minori.test.indicator".into(),
+            text: "本文".into(),
+            speaker: None,
+            show_advance_indicator: false,
+            body: TextRegion {
+                x: 160,
+                y: 568,
+                width: 960,
+                height: 112,
+                font_size: 26.0,
+                line_height: 32.0,
+                max_lines: 3,
+                alignment: TextAlignment::Start,
+            },
+            speaker_region: None,
+            rgba: [255, 255, 255, 255],
+            outline: Some(TextOutline {
+                radius: 2,
+                rgba: [0, 0, 0, 192],
+            }),
+        };
+        let without = renderer.render(std::slice::from_ref(&request)).unwrap();
+        request.show_advance_indicator = true;
+        let with = renderer.render(&[request]).unwrap();
+        assert_ne!(with, without);
     }
 }

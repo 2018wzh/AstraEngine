@@ -45,6 +45,13 @@
 - [x] Release CLI 的真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；最大 `runtime_step` 为 0.553 秒。该项只证明本次单路线没有回归。
 - [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。runtime 已提交 current/next 双层和互补 alpha 交叉淡化，但当前采样没有命中中间帧，不能标视觉 parity。
 
+## 消息推进指示器（2026-08-31）
+
+- [x] Windows Sandbox 原版画面确认：消息框末尾的白色下三角是独立的推进指示器，不属于正文字符；打开右键菜单或确认框时该指示器仍由底层消息层保留。
+- [x] Minori text surface 通过现有 CosmicText/Renderer2D 路径追加独立的 `U+25BC` glyph run。正文仍单独进入 translation Hook、backlog 和一次性 text lease，指示器只存在于本次 Host-owned raster surface。
+- [x] Noto Sans JP 的显式 coverage 增加 `U+25BC`，并以真实 glyph raster 回归验证有/无指示器的 surface 输出不同；未新增手写像素绘制或字体 fallback。
+- [ ] 仍需在干净原版与同一条 Headless checkpoint 对齐指示器的出现时机、位置和动画节奏；当前实现只依据已观察到的静态消息等待画面，不宣称像素 parity。
+
 ## Key-file Release 路线复核（2026-08-30）
 
 - [x] 分支已 rebase 到当前 `origin/master`。现行 Family API 是 v13；旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。

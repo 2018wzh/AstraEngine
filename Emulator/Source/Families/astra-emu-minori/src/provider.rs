@@ -302,6 +302,10 @@ struct StagedEphemeralText {
     lease_id: String,
     text: String,
     speaker: Option<String>,
+    /// The original message panel owns a separate progress marker.  Keep the
+    /// flag beside the ephemeral lease so it cannot leak into translation,
+    /// backlog or runtime state.
+    show_advance_indicator: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2389,6 +2393,7 @@ impl MinoriRuntimeProvider {
                         lease_id: lease_id.clone(),
                         text: text.clone(),
                         speaker: speaker.clone(),
+                        show_advance_indicator: true,
                     },
                 )
                 .is_some()
@@ -7667,6 +7672,7 @@ fn append_resumed_message_text(
                 lease_id: lease_id.clone(),
                 text: text.clone(),
                 speaker,
+                show_advance_indicator: true,
             },
         )
         .is_some()
@@ -7751,6 +7757,7 @@ fn append_gallery_movie_text(
                 lease_id: lease_id.clone(),
                 text: text.clone(),
                 speaker: None,
+                show_advance_indicator: false,
             },
         )
         .is_some()
@@ -7845,6 +7852,7 @@ fn append_backlog_text(
                 lease_id: lease_id.clone(),
                 text: entry.text.clone(),
                 speaker: entry.speaker,
+                show_advance_indicator: false,
             },
         )
         .is_some()
@@ -8856,6 +8864,7 @@ fn append_choice_live_output(
                     lease_id: lease_id.clone(),
                     text: option.clone(),
                     speaker: None,
+                    show_advance_indicator: false,
                 },
             )
             .is_some()
@@ -9442,6 +9451,7 @@ fn prepare_text_surface(
             speaker,
             body: text_region(presentation.body),
             speaker_region: presentation.speaker.map(text_region),
+            show_advance_indicator: captured.show_advance_indicator,
             rgba: presentation.rgba,
             outline: presentation.outline.map(|outline| TextOutline {
                 radius: outline.radius,
@@ -13752,6 +13762,7 @@ mod tests {
             .unwrap();
         assert_eq!(text.text, "hello world");
         assert_eq!(text.speaker.as_deref(), Some("speaker"));
+        assert!(text.show_advance_indicator);
         assert!(provider
             .take_staged_text(&ctx, &session, &lease.lease_id)
             .unwrap()
@@ -13783,6 +13794,7 @@ mod tests {
             .unwrap();
         assert_eq!(restored_text.text, "hello world");
         assert_eq!(restored_text.speaker.as_deref(), Some("speaker"));
+        assert!(restored_text.show_advance_indicator);
 
         provider
             .restore_test_checkpoint(&ctx, &session, &snapshot)

@@ -1,5 +1,19 @@
 # Minori 移植日志
 
+## 2026-08-31：原版消息推进指示器对齐
+
+在授权 Windows Sandbox 的普通剧情画面中，正文末尾稳定出现一个白色下三角；
+打开右键菜单或确认框时，底层消息层仍保留该标记。它不是脚本文字，也不是
+`\\v`/`\\a` 的可见字符。该观察只记录画面结构，截图和原始脚本继续留在 ignored
+私有研究目录。
+
+Minori text surface 现通过现有 CosmicText/Renderer2D 路径追加独立的 `U+25BC`
+glyph run。正文仍单独进入翻译 Hook、backlog 和一次性 text lease，指示器只保留
+在本次 Host-owned raster surface；Noto Sans JP 的显式 coverage 同步声明该 glyph。
+这修复了此前把控制序列末尾错误呈现为普通字符的路径，并新增有/无指示器的 raster
+回归。出现时机、精确位置和动画节奏还需在干净原版与同一 Headless checkpoint
+逐点对齐，因此当前不宣称像素 parity。
+
 ## 2026-08-31：Family ABI 原生菜单 Host 分层
 
 继续、退出确认框和剧情右键菜单继续只通过 Family ABI v13 的 typed transaction
