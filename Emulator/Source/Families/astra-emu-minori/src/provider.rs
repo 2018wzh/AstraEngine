@@ -1097,10 +1097,14 @@ impl MinoriRuntimeProvider {
                 LegacyConfirmationTransactionV1 {
                     sequence,
                     confirmation_id: confirmation_id.clone(),
-                    title: "Confirmation".into(),
-                    message: "Exit the game?".into(),
-                    accept_label: "Yes".into(),
-                    cancel_label: "No".into(),
+                    // These strings are the native Minori close-dialog
+                    // contract observed in the original Windows build.  The
+                    // host owns the modal presentation, but the family owns
+                    // the Japanese wording and button order.
+                    title: "確認".into(),
+                    message: "終了してもよろしいですか？".into(),
+                    accept_label: "是(Y)".into(),
+                    cancel_label: "否(N)".into(),
                 },
             )?;
             session.active_confirmation = Some(ActiveMinoriConfirmation {
@@ -6584,14 +6588,14 @@ fn handle_system_menu_request(
                     let confirmation = LegacyConfirmationTransactionV1 {
                         sequence,
                         confirmation_id: confirmation_id.clone(),
-                        title: "Confirmation".into(),
+                        title: "確認".into(),
                         message: if action == MinoriConfirmationAction::Exit {
-                            "Exit the game?".into()
+                            "終了してもよろしいですか？".into()
                         } else {
-                            "Return to the title screen?".into()
+                            "ゲームを中断してメニューに戻ります。よろしいですか？".into()
                         },
-                        accept_label: "Yes".into(),
-                        cancel_label: "No".into(),
+                        accept_label: "是(Y)".into(),
+                        cancel_label: "否(N)".into(),
                     };
                     services
                         .confirmations
@@ -11131,6 +11135,14 @@ mod tests {
             .1
             .confirmation_id
             .clone();
+        {
+            let published = confirmations.published.lock().unwrap();
+            let confirmation = &published.last().unwrap().1;
+            assert_eq!(confirmation.title, "確認");
+            assert_eq!(confirmation.message, "終了してもよろしいですか？");
+            assert_eq!(confirmation.accept_label, "是(Y)");
+            assert_eq!(confirmation.cancel_label, "否(N)");
+        }
         let cancelled = provider
             .step(
                 &ctx,
