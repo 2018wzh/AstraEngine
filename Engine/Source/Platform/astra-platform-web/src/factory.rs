@@ -138,6 +138,15 @@ mod browser {
                         "Web does not apply native window commands",
                     )));
                 }
+                HostCommand::OpenManual { reply, .. }
+                | HostCommand::ShowAbout { reply, .. }
+                | HostCommand::OpenHomepage { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "window.system",
+                        "Web host does not launch native help or about windows",
+                    )));
+                }
                 HostCommand::CreateWindow { request, reply } => {
                     let result = CanvasResource::new(
                         request.title,

@@ -15,9 +15,11 @@ cut 拒绝，当前尚未以新序列完成完整 Release Sandbox 或 Windows E3
 仍为 E1/E2 行为对齐，不能标成正式通过。
 
 同轮的菜单窗口动作也通过 v13 typed system-command channel 传递。Windows/macOS
-Host 只在显式窗口绑定存在时执行原生全屏或原始尺寸恢复；Manager、Headless 和
-无窗口 CLI 对未绑定能力回送 `Unsupported`，不解释 item id、不伪造成功，也不留下
-pending command。帮助、关于和未确认缩放动作仍是未完成的 family 行为。
+Host 只在显式窗口绑定存在时执行原生全屏、原始尺寸恢复、缩放采样和帮助动作；
+Manager、Headless 和无窗口 CLI 对未绑定能力回送 `Unsupported`，不解释 item id、
+不伪造成功，也不留下 pending command。Minori 对 Host `Applied` 的 host-owned 操作
+只释放挂起事务，不把窗口或外部进程状态写入 VM。About 图像、Linux GTK 原生菜单、
+帮助/浏览器实际启动和完整路线仍是未完成的正式验收项。
 
 2026 年 8 月 30 日 Family ABI v12 确认覆盖（历史记录）：Minori 的 `game_exit`、`game_return_title` 与 Host `window.close` 由 Family 发布有界 confirmation transaction，平台 Host 以 native confirmation provider 呈现，后续固定 step 回送 `Accepted` 或 `Cancelled`。取消保持底层 wait，接受才执行 terminal 或返回标题；重复、过期、错配和确认期间的 gameplay input 继续阻断。Manager、Release CLI、Headless 和 Minori 的定向回归通过；该结果属于当时身份的 E1/E2 接线证据，当前 v13、Release Sandbox、120 Hz 和 Windows E3 仍开放。
 

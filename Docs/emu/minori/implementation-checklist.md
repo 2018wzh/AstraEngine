@@ -5,16 +5,18 @@
 - [x] Confirmation and system-menu transactions use Family ABI v13 typed ports; the
   family owns semantics while the Host owns native presentation and result delivery.
 - [x] Menu-selected window/help actions use the v13 typed system-command port. Windows and
-  macOS apply bound fullscreen/original-size operations through the platform Host; Manager,
-  Headless and windowless CLI return `Unsupported` explicitly.
+  macOS apply bound fullscreen/original-size, resize sampling, manual, About and homepage
+  operations through the platform Host; Manager, Headless and windowless CLI return
+  `Unsupported` explicitly.
 - [x] Windows keeps the native `muda-win`/`rfd` path, and macOS now uses AppKit `muda`
   with flipped-view anchor conversion on the event-loop thread.
 - [x] Release CLI selects the macOS native presenter through the same platform Host client;
   Headless continues to use only physical navigation/confirmation input.
 - [x] Linux native CLI no longer leaves a menu transaction pending when the Wayland Host
   lacks a GTK surface; it returns `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED` explicitly.
-- [ ] Linux GTK-backed native context menus, full-route behavior and Windows E3 remain
-  open; no platform fallback is claimed.
+- [ ] About artwork parity, Linux GTK-backed native context menus, external help/browser
+  launch evidence, full-route behavior and Windows E3 remain open; no platform fallback is
+  claimed.
 
 ## Original movie backend and platform decode (2026-08-30)
 

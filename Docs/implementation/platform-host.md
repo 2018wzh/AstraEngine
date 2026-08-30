@@ -47,6 +47,15 @@ pub struct PlatformHostSession {
 
 `PlatformHostClient` 通过 Future 提交 window/surface/present/capture、audio、decode、save transaction、package range 和 shutdown 命令。OS/browser event loop 在本地主线程 executor 持有 `!Send` 资源，Tokio 只负责编排。
 
+AstraEMU 的 Family system-command 只把有界的 typed intent 交给 Host。`SetFullscreen`、
+`RestoreOriginalSize`、`SetResizePrecision` 和 `SetResizeAntialias` 通过
+`PlatformHostClient::apply_window_command` 处理；后者由 Windows/macOS 的
+`WgpuPresentationCore` 在已绑定 surface 上切换线性或最近邻 sampler。`OpenManual`、
+`ShowAbout` 和 `OpenHomepage` 分别由平台的 HTML Help/系统打开器、原生对话框和默认
+浏览器处理。路径、URL 与 About 文本在 `astra-platform` 边界先做有界校验；Family 不
+接收窗口句柄、本地路径或进程结果。未实现平台返回 `PlatformNotImplemented`，不转交
+Manager/Headless，也不留下挂起 transaction。
+
 Windows/Linux/macOS host 的命令队列是事件驱动的：命令成功进入有界队列后必须通过 `EventLoopProxy` 唤醒 Winit，并在 `user_event` 中立即排空；队列满、关闭或未成功提交时不得产生伪唤醒。macOS Player 的异步编排运行在独立 Tokio worker，主线程只阻塞在 `pump_app_events(None)`，由 host command/future completion user event 唤醒。HTTPS package completion 同样显式唤醒 event loop。`about_to_wait` 不能作为 render/audio/decode/input command 的生产或补水时钟。Manager 以及 Windows/Linux/macOS host 的 gamepad、metadata 和 translation worker 使用同一类 edge-triggered host wake；Web gamepad source 和媒体完成使用 `requestAnimationFrame`，不再使用固定 interval/timeout。只有底层 native backend 不提供 hotplug handle 时，worker 内部才允许 250 ms 的设备发现等待。唤醒注册重复绑定、event loop 关闭和 queue overflow 都必须输出稳定 diagnostic，不能静默退回 UI fixed polling。
 
 Native fixed-tick loops use the shared absolute-deadline scheduler. Their event

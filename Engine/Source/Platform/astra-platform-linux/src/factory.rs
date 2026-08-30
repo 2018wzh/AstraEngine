@@ -438,6 +438,15 @@ mod linux {
                             "Linux native window commands are not implemented",
                         )));
                     }
+                    HostCommand::OpenManual { reply, .. }
+                    | HostCommand::ShowAbout { reply, .. }
+                    | HostCommand::OpenHomepage { reply, .. } => {
+                        let _ = reply.send(Err(PlatformError::new(
+                            PlatformErrorCode::PlatformNotImplemented,
+                            "window.system",
+                            "Linux host does not expose native help or about commands",
+                        )));
+                    }
                     HostCommand::ShowConfirmation { request, reply } => {
                         let result = request
                             .window

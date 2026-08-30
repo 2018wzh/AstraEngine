@@ -70,11 +70,12 @@ use astra_observability::{
     PerfettoTraceWriter,
 };
 use astra_platform::{
-    ConfirmationRequest, ConfirmationResult, DecodeKind, DecodeOutput, GpuAdapterPolicy,
-    GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
-    HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
-    PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
-    SurfaceHandle, SurfaceRequest, WindowCommand, WindowHandle, WindowRequest,
+    AboutRequest, ConfirmationRequest, ConfirmationResult, DecodeKind, DecodeOutput,
+    GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy,
+    HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy,
+    HomepageRequest, ManualRequest, PlatformDecodeRequest, PlatformHostClient, PlatformHostFactory,
+    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowCommand,
+    WindowHandle, WindowRequest,
 };
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use astra_platform::{
@@ -812,10 +813,16 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         .start(HostLaunchProfile::platform(host_profile))
         .await
         .map_err(|error| error.to_string())?;
+    let system_resources = NativeSystemResources::for_family(&launch.family_id, &game_root);
+    let window_title = system_resources
+        .about
+        .as_ref()
+        .map(|about| about.product.clone())
+        .unwrap_or_else(|| format!("AstraEMU {}", launch.family_id));
     let window = host
         .client
         .create_window(WindowRequest {
-            title: format!("AstraEMU {}", launch.family_id),
+            title: window_title,
             width: stage_width,
             height: stage_height,
             visible: true,
@@ -862,6 +869,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
                 refill_low_water_ms: 120,
             },
             window: Some(window),
+            system_resources,
         },
     )?;
     record_native_launch_phase("driver_ready", phase_started, launch_started);
@@ -4198,6 +4206,7 @@ struct RuntimeDriver<'a> {
     frame_samples: Vec<HeadlessFrameSampleV1>,
     diagnostics: BTreeSet<String>,
     active_touch: Option<u64>,
+    system_resources: NativeSystemResources,
     /// The native Control key is an explicit Minori fast-forward gesture.
     /// While it is held, the host still executes every fixed tick in order,
     /// but does not sleep between ticks.  This is distinct from skipping
@@ -4322,6 +4331,58 @@ struct RuntimeDriverConfig {
     presentation_substeps: u8,
     audio_pump: AudioPumpPolicy,
     window: Option<WindowHandle>,
+    system_resources: NativeSystemResources,
+}
+
+fn system_command_status(
+    result: Result<(), astra_platform::PlatformError>,
+) -> LegacySystemCommandStatusV1 {
+    match result {
+        Ok(()) => LegacySystemCommandStatusV1::Applied,
+        Err(error) => {
+            tracing::error!(
+                target: "astra_emu_cli::system_command",
+                event = "astra_emu_native_system_command_failed",
+                diagnostic_code = ?error.code,
+                operation = %error.operation,
+                "native system command was not applied"
+            );
+            if error.code == astra_platform::PlatformErrorCode::PlatformNotImplemented {
+                LegacySystemCommandStatusV1::Unsupported
+            } else {
+                LegacySystemCommandStatusV1::Rejected
+            }
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct NativeSystemResources {
+    manual_path: Option<PathBuf>,
+    homepage_url: Option<String>,
+    about: Option<AboutRequest>,
+}
+
+impl NativeSystemResources {
+    fn for_family(family_id: &str, game_root: &Path) -> Self {
+        if family_id != "minori" {
+            return Self::default();
+        }
+        let manual_path = game_root
+            .join("perseus.chm")
+            .is_file()
+            .then(|| game_root.join("perseus.chm"));
+        Self {
+            manual_path,
+            homepage_url: Some("http://www.minori.ph/".into()),
+            about: Some(AboutRequest {
+                product: "夏空のペルセウス - The brave under the summer sky.".into(),
+                tagline: "The brave under the summer sky.".into(),
+                version: "Ver.1.0".into(),
+                copyright: "Copyright (C) 2012 minori; All rights Reserved.".into(),
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -4866,6 +4927,7 @@ async fn execute_sequence(
             presentation_substeps: config.presentation_substeps,
             audio_pump: AudioPumpPolicy::FixedTick,
             window: None,
+            system_resources: NativeSystemResources::default(),
         },
     )?;
     let mut checkpoints = Vec::new();
@@ -5291,6 +5353,7 @@ impl<'a> RuntimeDriver<'a> {
             physical_control_pressed: false,
             audio_enabled: config.audio_enabled,
             audio_pump: config.audio_pump,
+            system_resources: config.system_resources,
             frame_sample_interval: config.frame_sample_interval,
             presentation_substeps: config.presentation_substeps,
             step_timings_ns: Vec::new(),
@@ -6304,23 +6367,59 @@ impl<'a> RuntimeDriver<'a> {
             return Ok(());
         };
         let status = match pending.command.command {
-            LegacySystemCommandKindV1::SetFullscreen { enabled } => self
-                .platform
-                .apply_window_command(window, WindowCommand::SetFullscreen { enabled })
-                .await
-                .map(|_| LegacySystemCommandStatusV1::Applied)
-                .unwrap_or(LegacySystemCommandStatusV1::Rejected),
-            LegacySystemCommandKindV1::RestoreOriginalSize => self
-                .platform
-                .apply_window_command(window, WindowCommand::RestoreOriginalSize)
-                .await
-                .map(|_| LegacySystemCommandStatusV1::Applied)
-                .unwrap_or(LegacySystemCommandStatusV1::Rejected),
+            LegacySystemCommandKindV1::SetFullscreen { enabled } => system_command_status(
+                self.platform
+                    .apply_window_command(window, WindowCommand::SetFullscreen { enabled })
+                    .await,
+            ),
+            LegacySystemCommandKindV1::RestoreOriginalSize => system_command_status(
+                self.platform
+                    .apply_window_command(window, WindowCommand::RestoreOriginalSize)
+                    .await,
+            ),
             LegacySystemCommandKindV1::SetResizePrecision { .. }
-            | LegacySystemCommandKindV1::SetResizeAntialias { .. }
-            | LegacySystemCommandKindV1::OpenManual
-            | LegacySystemCommandKindV1::ShowAbout
-            | LegacySystemCommandKindV1::OpenHomepage => LegacySystemCommandStatusV1::Unsupported,
+            | LegacySystemCommandKindV1::SetResizeAntialias { .. } => system_command_status(
+                self.platform
+                    .apply_window_command(
+                        window,
+                        match pending.command.command {
+                            LegacySystemCommandKindV1::SetResizePrecision { enabled } => {
+                                WindowCommand::SetResizePrecision { enabled }
+                            }
+                            LegacySystemCommandKindV1::SetResizeAntialias { enabled } => {
+                                WindowCommand::SetResizeAntialias { enabled }
+                            }
+                            _ => unreachable!("resize command arm is exhaustive"),
+                        },
+                    )
+                    .await,
+            ),
+            LegacySystemCommandKindV1::OpenManual => {
+                match self.system_resources.manual_path.clone() {
+                    Some(path) => system_command_status(
+                        self.platform
+                            .open_manual(window, ManualRequest { path })
+                            .await,
+                    ),
+                    None => LegacySystemCommandStatusV1::Unsupported,
+                }
+            }
+            LegacySystemCommandKindV1::ShowAbout => match self.system_resources.about.clone() {
+                Some(request) => {
+                    system_command_status(self.platform.show_about(window, request).await)
+                }
+                None => LegacySystemCommandStatusV1::Unsupported,
+            },
+            LegacySystemCommandKindV1::OpenHomepage => {
+                match self.system_resources.homepage_url.clone() {
+                    Some(url) => system_command_status(
+                        self.platform
+                            .open_homepage(window, HomepageRequest { url })
+                            .await,
+                    ),
+                    None => LegacySystemCommandStatusV1::Unsupported,
+                }
+            }
         };
         self.input_sequence = self
             .input_sequence

@@ -20,7 +20,9 @@ pub struct WgpuPresentationCore {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
+    resize_antialias: bool,
     pipeline: wgpu::RenderPipeline,
     glyph_renderer: WgpuGlyphAtlasRenderer,
     last_upload: Option<UploadFrame>,
@@ -94,7 +96,7 @@ impl WgpuPresentationCore {
         }
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
-        let (layout, sampler, pipeline) = pipeline(&device, config.format);
+        let (layout, linear_sampler, nearest_sampler, pipeline) = pipeline(&device, config.format);
         let glyph_renderer = WgpuGlyphAtlasRenderer::new(&device);
         Ok(Self {
             _instance: instance,
@@ -104,7 +106,9 @@ impl WgpuPresentationCore {
             queue,
             config,
             layout,
-            sampler,
+            linear_sampler,
+            nearest_sampler,
+            resize_antialias: true,
             pipeline,
             glyph_renderer,
             last_upload: None,
@@ -177,7 +181,7 @@ impl WgpuPresentationCore {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    resource: wgpu::BindingResource::Sampler(self.active_sampler()),
                 },
             ],
         });
@@ -427,7 +431,8 @@ impl WgpuPresentationCore {
             })?;
         let device_lost = Arc::new(AtomicBool::new(false));
         install_device_lost_callback(&device, Arc::clone(&device_lost));
-        let (layout, sampler, pipeline) = pipeline(&device, self.config.format);
+        let (layout, linear_sampler, nearest_sampler, pipeline) =
+            pipeline(&device, self.config.format);
         self.surface.configure(&device, &self.config);
         self.glyph_renderer.recover(&device, &queue);
         let last_upload = if let Some(frame) = self.last_frame.as_ref() {
@@ -450,7 +455,8 @@ impl WgpuPresentationCore {
         self.device = device;
         self.queue = queue;
         self.layout = layout;
-        self.sampler = sampler;
+        self.linear_sampler = linear_sampler;
+        self.nearest_sampler = nearest_sampler;
         self.pipeline = pipeline;
         self.last_upload = last_upload;
         self.device_lost = device_lost;
@@ -464,6 +470,24 @@ impl WgpuPresentationCore {
 
     pub fn is_device_lost(&self) -> bool {
         self.device_lost.load(Ordering::Acquire)
+    }
+
+    /// Select the sampler used while the retained frame is scaled into the
+    /// native window. Families expose this as a host-owned resize option so
+    /// the platform can switch GPU sampling without rebuilding the family
+    /// scene or copying a full frame through the runtime.
+    pub fn set_resize_antialias(&mut self, enabled: bool) -> Result<(), PlatformError> {
+        self.ensure_device_available("window.command")?;
+        self.resize_antialias = enabled;
+        Ok(())
+    }
+
+    fn active_sampler(&self) -> &wgpu::Sampler {
+        if self.resize_antialias {
+            &self.linear_sampler
+        } else {
+            &self.nearest_sampler
+        }
     }
 
     #[cfg(feature = "platform-test-driver")]
@@ -507,7 +531,7 @@ impl WgpuPresentationCore {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    resource: wgpu::BindingResource::Sampler(self.active_sampler()),
                 },
             ],
         });
@@ -671,7 +695,12 @@ fn upload_frame(device: &wgpu::Device, queue: &wgpu::Queue, frame: &RgbaFrame) -
 fn pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
-) -> (wgpu::BindGroupLayout, wgpu::Sampler, wgpu::RenderPipeline) {
+) -> (
+    wgpu::BindGroupLayout,
+    wgpu::Sampler,
+    wgpu::Sampler,
+    wgpu::RenderPipeline,
+) {
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("astra-platform-frame-layout"),
         entries: &[
@@ -693,10 +722,16 @@ fn pipeline(
             },
         ],
     });
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("astra-platform-frame-sampler"),
+    let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("astra-platform-frame-linear-sampler"),
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("astra-platform-frame-nearest-sampler"),
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -733,7 +768,7 @@ fn pipeline(
         multiview_mask: None,
         cache: None,
     });
-    (layout, sampler, pipeline)
+    (layout, linear_sampler, nearest_sampler, pipeline)
 }
 fn unavailable(operation: &'static str, message: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::ProviderUnavailable, operation, message)

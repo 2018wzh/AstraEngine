@@ -2,10 +2,13 @@
 
 2026 年 8 月 31 日 Family ABI v13 原生菜单 Host 分层：Windows 原生 context menu 和
 confirmation 保持不变，macOS 通过 AppKit `muda` 接入同一 typed menu transaction，
-并在主线程处理 flipped view 坐标；CLI 的 macOS native 路径已接通。Linux 当前
-Wayland Host 缺少 GTK window 绑定，CLI 会返回稳定 unsupported diagnostic，不保留
-悬挂菜单或隐式 fallback。该项是平台 Host 接线证据，完整路线、正式视觉/音频、
-Release Sandbox 和 Windows E3 仍为 blocking。
+并在主线程处理 flipped view 坐标；CLI 的 macOS native 路径已接通。窗口/帮助动作
+也通过 Host port 处理：Windows 使用 `hh.exe`、ShellExecute 和 `rfd`，macOS 使用
+系统 `open` 与原生 About 对话框。窗口抗锯齿切换由 WGPU presentation core 选择
+linear/nearest sampler，不重建 family scene。Linux、Web、Android、Headless 对没有
+原生窗口能力的动作返回稳定 unsupported diagnostic，不保留悬挂菜单或隐式 fallback。
+该项是平台 Host 接线证据，About 图像、完整路线、正式视觉/音频、Release Sandbox
+和 Windows E3 仍为 blocking。
 
 2026 年 8 月 31 日剧情右键菜单的两个顶层分类已按 Sandbox 观察改为日文标题
 `ヘルプ (&H)`、`ゲーム (&G)`，移除英文值并加入 family menu regression。菜单
@@ -13,10 +16,11 @@ Release Sandbox 和 Windows E3 仍为 blocking。
 Sandbox、Linux 原生菜单和 Windows E3 继续保持 blocking，macOS 原生菜单已接通。
 
 同轮把菜单选择的窗口/帮助动作改为 `LegacySystemCommandTransactionV1`。Family 只
-发布 typed kind，Host 按当前平台窗口绑定执行原生全屏或原始尺寸恢复，再以
-`LegacySystemCommandResultV1` 回送结果；Manager、Headless 和无窗口 CLI 对未绑定
-能力显式回送 `Unsupported`。帮助、关于和未确认的缩放动作不伪造成功，仍保持
-blocking。
+发布 typed kind，Host 按当前平台窗口绑定执行全屏、原始尺寸恢复、缩放采样和外部
+帮助动作，再以 `LegacySystemCommandResultV1` 回送结果。Minori 对 Host 已 `Applied`
+的 host-owned 操作只解除挂起事务，不把窗口、浏览器或帮助进程写入 VM 状态；Host
+拒绝或不支持仍由 Family 阻断。Manager、Headless 和无窗口 CLI 对未绑定能力显式
+回送 `Unsupported`。
 
 2026 年 8 月 31 日 Windows native confirmation 标题已按 Sandbox 观察对齐：有 parent
 window 时沿用 live game caption，没有 parent 时保留 Family ABI 的 typed title。该

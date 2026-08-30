@@ -1,20 +1,23 @@
 # Implementation Plan Status
 
 2026 年 8 月 31 日 Family ABI 原生菜单 Host 分层：确认框和右键菜单仍由
-Family ABI v13 typed transaction 传递，Windows 使用现有原生 provider，macOS
-新增 AppKit `muda` 原生 context menu，并处理 winit flipped view 的显式锚点。
-CLI 在 macOS 走同一 Host port；Linux 当前 Wayland Host 没有 GTK window 绑定，
-因此对桌面原生菜单明确返回 `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED`，不再
-让 pending transaction 悬挂。Family 仍不解释平台菜单实现，Headless 仍只消费物理
-输入。macOS 交叉编译检查受本机缺少 Apple C 编译器阻塞，Windows 目标的 CLI 与
-平台增量检查通过；该项不提升 Release Sandbox、完整路线或 Windows E3 状态。
+Family ABI v13 typed transaction 传递，Windows 使用原生 provider，macOS 使用
+AppKit `muda` 原生 context menu，并处理 winit flipped view 的显式锚点。窗口/帮助
+动作也已由同一 Host port 接通：Windows 通过 `hh.exe`、Win32 ShellExecute 和
+`rfd` 呈现手册、主页与 About，macOS 使用系统 `open` 和原生 About 对话框。
+CLI 在 macOS 走同一 Host port；Linux、Web、Android、Headless 对没有原生窗口能力
+的动作明确回送 unsupported，不让 pending transaction 悬挂。macOS 交叉编译检查受
+本机缺少 Apple C 编译器阻塞，Windows 目标的 CLI、平台和公共 presentation core
+增量检查通过；该项不提升 Release Sandbox、完整路线或 Windows E3 状态。
 
 同轮新增 typed system-command channel：Minori 在菜单选择窗口/帮助动作后只发布
-`LegacySystemCommandTransactionV1`，Windows/macOS Host 按显式窗口绑定执行原生
-全屏或原始尺寸恢复，并通过下一固定 step 回送 `Applied`、`Rejected` 或
-`Unsupported`。Manager、Headless 和无窗口 CLI 不解释命令；它们显式回送
-`Unsupported`，避免 pending session 悬挂。帮助、关于和未确认的缩放选项保持
-blocking/未实现，不以通用事件字符串或隐式平台 fallback 代替。
+`LegacySystemCommandTransactionV1`，Host 按显式窗口绑定执行全屏、原始尺寸恢复、
+缩放采样策略和原生帮助动作，再通过下一固定 step 回送 `Applied`、`Rejected` 或
+`Unsupported`。Windows/macOS 的抗锯齿选项切换 WGPU presentation core 的线性/最近邻
+sampler，不重建 family scene；Minori 对这些 host-owned 操作的 `Applied` 只释放
+挂起事务，不把窗口或外部进程状态写入确定性 VM。Manager、Headless 和无窗口 CLI
+继续显式回送 `Unsupported`，不以通用事件字符串或隐式平台 fallback 代替。About
+图像复刻、Linux GTK 原生菜单和外部帮助/浏览器的正式验收仍未完成。
 
 2026 年 8 月 31 日原生菜单分类标题对齐：Sandbox 观察确认剧情右键菜单的两个顶层分类
 使用日文 `ヘルプ (&H)` 与 `ゲーム (&G)`，此前 family transaction 的英文标题已

@@ -941,3 +941,25 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - 新增 Family API FFI wire round-trip、Manager completion matching、Minori applied
   result 和 Windows/macOS platform command checks。当前定向 checks 通过；Linux GTK
   原生菜单、Help/About 行为、完整路线、Release Sandbox 和 Windows E3 仍未关闭。
+
+### 2026-08-31 Host-native system dialogs and resize policy
+
+- 原版 Sandbox 观察确认：Game→Exit 与 Game→Return title 使用带 `是(Y)`/`否(N)` 的
+  原生确认框；Help→Help 启动 HTML Help，Help→About 显示版本和版权信息，Help→
+  minori homepage 请求系统浏览器。Family 只报告有界的 typed command，正文和外部
+  进程状态不写入 VM、save、replay 或 evidence。
+- `astra-platform` 现提供 `OpenManual`、`ShowAbout`、`OpenHomepage` 的 Host 命令和
+  bounded request DTO。Windows Host 绑定 `hh.exe`、Win32 ShellExecute 与 `rfd`，
+  macOS 绑定系统 `open` 与原生 About 对话框；Linux、Web、Android、Headless 没有
+  原生窗口能力时返回稳定 unsupported diagnostic。手册路径只在 Host 边界作为已验证
+  的本地文件使用，不进入 Family ABI。
+- `SetResizeAntialias` 现在由 Windows/macOS Host 转换为对应 presentation surface
+  的 GPU sampler 切换。`astra-platform-common` 保留线性和最近邻 sampler，在命令边界
+  切换，不复制或重建 Minori scene；`SetResizePrecision` 仍是 Host-owned typed
+  operation，原版菜单当前为禁用且勾选状态，未凭名称扩展未知语义。
+- Minori 收到 Host `Applied` 后只释放挂起的 system-command transaction。窗口尺寸、
+  sampler、帮助对话框和浏览器属于 Host 外部状态，不伪造为确定性 VM state；`Rejected`
+  与 `Unsupported` 仍阻断 session。六种 host-owned command 已有 provider 回归，
+  platform DTO validation、公共 presentation core 与 Windows target check 通过。
+- About 对话框的原版图像/排版、Linux GTK 原生菜单、帮助和浏览器实际启动结果尚未
+  形成正式 Windows E3 或 Release Sandbox evidence；这些差距保留为下一轮验收项。

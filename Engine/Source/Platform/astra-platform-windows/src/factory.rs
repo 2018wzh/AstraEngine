@@ -97,14 +97,15 @@ mod windows {
     use crate::accessibility::WindowsAccessibilityBridge;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
-        AudioWakeRegistration, CapturedFrame, ConfirmationRequest, ConfirmationResult,
-        ContextMenuItemKind, ContextMenuRequest, ContextMenuResult, DecodeKind, DecodeOutput,
-        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput,
-        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
-        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
-        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
-        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowCommand, WindowHandle,
+        host_channel_with_command_wake, AboutRequest, AudioDeviceFormat, AudioOutputHandle,
+        AudioOutputRequest, AudioWakeRegistration, CapturedFrame, ConfirmationRequest,
+        ConfirmationResult, ContextMenuItemKind, ContextMenuRequest, ContextMenuResult, DecodeKind,
+        DecodeOutput, DecodeSessionHandle, HomepageRequest, HostCommand, HostLaunchProfile,
+        InputState, ManualRequest, OpenedAudioOutput, PackageSourceHandle, PackageSourceRequest,
+        PlatformBackendChannels, PlatformCommandWakeRegistration, PlatformDecodeRequest,
+        PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
+        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
+        WindowCommand, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, NullAudioProducer, ResourceTable,
@@ -617,6 +618,39 @@ mod windows {
             }
         }
 
+        fn apply_window_command(
+            &mut self,
+            window: WindowHandle,
+            command: WindowCommand,
+        ) -> Result<(), PlatformError> {
+            let native = self
+                .windows
+                .get(window)
+                .map_err(|_| host_error("window.command", "window handle is invalid"))?
+                .clone();
+            if let WindowCommand::SetResizeAntialias { enabled } = command {
+                let window_id = native.id();
+                let surface = self
+                    .surface_windows
+                    .iter()
+                    .find_map(|(surface, owner)| (*owner == window_id).then_some(*surface))
+                    .ok_or_else(|| {
+                        host_error(
+                            "window.command",
+                            "window has no presentation surface for resize sampling",
+                        )
+                    })?;
+                self.surfaces
+                    .get_mut(surface)
+                    .and_then(|surface| surface.set_resize_antialias(enabled))?;
+            }
+            apply_window_command(
+                native.as_ref(),
+                command,
+                self.window_original_sizes.get(&window).copied(),
+            )
+        }
+
         fn process_commands(&mut self, event_loop: &ActiveEventLoop) {
             const MAX_COMMANDS_PER_TURN: usize = 64;
             let mut processed = 0usize;
@@ -652,17 +686,43 @@ mod windows {
                         command,
                         reply,
                     } => {
+                        let result = self.apply_window_command(window, command);
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::OpenManual {
+                        window,
+                        request,
+                        reply,
+                    } => {
                         let result = self
                             .windows
                             .get(window)
-                            .map_err(|_| host_error("window.command", "window handle is invalid"))
-                            .and_then(|native| {
-                                apply_window_command(
-                                    native,
-                                    command,
-                                    self.window_original_sizes.get(&window).copied(),
-                                )
-                            });
+                            .map_err(|_| host_error("window.manual", "window handle is invalid"))
+                            .and_then(|_| open_manual(request));
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::ShowAbout {
+                        window,
+                        request,
+                        reply,
+                    } => {
+                        let result = self
+                            .windows
+                            .get(window)
+                            .map_err(|_| host_error("window.about", "window handle is invalid"))
+                            .and_then(|native| show_about(native, request));
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::OpenHomepage {
+                        window,
+                        request,
+                        reply,
+                    } => {
+                        let result = self
+                            .windows
+                            .get(window)
+                            .map_err(|_| host_error("window.homepage", "window handle is invalid"))
+                            .and_then(|_| open_homepage(request));
                         let _ = reply.send(result);
                     }
                     HostCommand::CreateWindow { request, reply } => {
@@ -2360,7 +2420,85 @@ mod windows {
                     })?;
                 Ok(())
             }
+            WindowCommand::SetResizePrecision { .. } => Err(unsupported(
+                "window.command",
+                "high-precision resize is not implemented by this host",
+            )),
+            WindowCommand::SetResizeAntialias { .. } => {
+                // The renderer sampler was selected by the app-level helper;
+                // this arm keeps the geometry helper exhaustive.
+                Ok(())
+            }
         }
+    }
+
+    fn open_manual(request: ManualRequest) -> Result<(), PlatformError> {
+        std::process::Command::new("hh.exe")
+            .arg(&request.path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| host_error("window.manual", "Windows HTML Help could not be started"))
+    }
+
+    fn show_about(window: &Window, request: AboutRequest) -> Result<(), PlatformError> {
+        let parent_title = window.title();
+        let title = if parent_title.trim().is_empty() {
+            request.product.clone()
+        } else {
+            parent_title
+        };
+        let description = format!(
+            "{}\n\n{}\n{}",
+            request.tagline, request.copyright, request.version
+        );
+        match pollster::block_on(
+            AsyncMessageDialog::new()
+                .set_title(title)
+                .set_description(description)
+                .set_buttons(MessageButtons::Ok)
+                .set_parent(window)
+                .show(),
+        ) {
+            MessageDialogResult::Ok
+            | MessageDialogResult::Yes
+            | MessageDialogResult::No
+            | MessageDialogResult::Custom(_)
+            | MessageDialogResult::Cancel => Ok(()),
+        }
+    }
+
+    fn open_homepage(request: HomepageRequest) -> Result<(), PlatformError> {
+        use windows::{
+            core::PCWSTR, Win32::UI::Shell::ShellExecuteW,
+            Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+        };
+
+        let operation = widestring("open");
+        let url = widestring(&request.url);
+        // SAFETY: both UTF-16 buffers are NUL-terminated and remain alive for
+        // the synchronous ShellExecuteW call.  The URL was validated by the
+        // public host client before it reached this platform thread.
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR(operation.as_ptr()),
+                PCWSTR(url.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as usize <= 32 {
+            return Err(host_error(
+                "window.homepage",
+                "Windows default browser could not be opened",
+            ));
+        }
+        Ok(())
+    }
+
+    fn widestring(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
     fn show_confirmation(
@@ -2410,6 +2548,14 @@ mod windows {
 
     fn host_error(operation: &'static str, message: &'static str) -> PlatformError {
         PlatformError::new(PlatformErrorCode::ProviderUnavailable, operation, message)
+    }
+
+    fn unsupported(operation: &'static str, message: &'static str) -> PlatformError {
+        PlatformError::new(
+            PlatformErrorCode::PlatformNotImplemented,
+            operation,
+            message,
+        )
     }
 
     fn default_roots() -> Option<super::HostRoots> {

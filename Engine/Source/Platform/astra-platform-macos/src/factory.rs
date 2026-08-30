@@ -90,14 +90,15 @@ mod macos {
     use crate::accessibility::MacosAccessibilityBridge;
     use astra_media::{DecodeOutput as MediaDecodeOutput, DecodeProvider};
     use astra_platform::{
-        host_channel_with_command_wake, AudioDeviceFormat, AudioOutputHandle, AudioOutputRequest,
-        AudioWakeRegistration, CapturedFrame, ConfirmationRequest, ConfirmationResult,
-        ContextMenuItemKind, ContextMenuRequest, ContextMenuResult, DecodeKind, DecodeOutput,
-        DecodeSessionHandle, HostCommand, HostLaunchProfile, InputState, OpenedAudioOutput,
-        PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
-        PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
-        PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
-        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowCommand, WindowHandle,
+        host_channel_with_command_wake, AboutRequest, AudioDeviceFormat, AudioOutputHandle,
+        AudioOutputRequest, AudioWakeRegistration, CapturedFrame, ConfirmationRequest,
+        ConfirmationResult, ContextMenuItemKind, ContextMenuRequest, ContextMenuResult, DecodeKind,
+        DecodeOutput, DecodeSessionHandle, HomepageRequest, HostCommand, HostLaunchProfile,
+        InputState, ManualRequest, OpenedAudioOutput, PackageSourceHandle, PackageSourceRequest,
+        PlatformBackendChannels, PlatformCommandWakeRegistration, PlatformDecodeRequest,
+        PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
+        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
+        WindowCommand, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, ResourceTable, SaveTransaction,
@@ -595,6 +596,39 @@ mod macos {
             }
         }
 
+        fn apply_window_command(
+            &mut self,
+            window: WindowHandle,
+            command: WindowCommand,
+        ) -> Result<(), PlatformError> {
+            let native = self
+                .windows
+                .get(window)
+                .map_err(|_| host_error("window.command", "window handle is invalid"))?
+                .clone();
+            if let WindowCommand::SetResizeAntialias { enabled } = command {
+                let window_id = native.id();
+                let surface = self
+                    .surface_windows
+                    .iter()
+                    .find_map(|(surface, owner)| (*owner == window_id).then_some(*surface))
+                    .ok_or_else(|| {
+                        host_error(
+                            "window.command",
+                            "window has no presentation surface for resize sampling",
+                        )
+                    })?;
+                self.surfaces
+                    .get_mut(surface)
+                    .and_then(|surface| surface.set_resize_antialias(enabled))?;
+            }
+            apply_window_command(
+                native.as_ref(),
+                command,
+                self.window_original_sizes.get(&window).copied(),
+            )
+        }
+
         fn process_commands(&mut self, event_loop: &ActiveEventLoop) {
             loop {
                 let command = match self.backend.try_next_command() {
@@ -634,17 +668,43 @@ mod macos {
                         command,
                         reply,
                     } => {
+                        let result = self.apply_window_command(window, command);
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::OpenManual {
+                        window,
+                        request,
+                        reply,
+                    } => {
                         let result = self
                             .windows
                             .get(window)
-                            .map_err(|_| host_error("window.command", "window handle is invalid"))
-                            .and_then(|native| {
-                                apply_window_command(
-                                    native,
-                                    command,
-                                    self.window_original_sizes.get(&window).copied(),
-                                )
-                            });
+                            .map_err(|_| host_error("window.manual", "window handle is invalid"))
+                            .and_then(|_| open_manual(request));
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::ShowAbout {
+                        window,
+                        request,
+                        reply,
+                    } => {
+                        let result = self
+                            .windows
+                            .get(window)
+                            .map_err(|_| host_error("window.about", "window handle is invalid"))
+                            .and_then(|native| show_about(native, request));
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::OpenHomepage {
+                        window,
+                        request,
+                        reply,
+                    } => {
+                        let result = self
+                            .windows
+                            .get(window)
+                            .map_err(|_| host_error("window.homepage", "window handle is invalid"))
+                            .and_then(|_| open_homepage(request));
                         let _ = reply.send(result);
                     }
                     HostCommand::CreateWindow { request, reply } => {
@@ -2019,11 +2079,75 @@ mod macos {
                     })?;
                 Ok(())
             }
+            WindowCommand::SetResizePrecision { .. } => Err(unsupported(
+                "window.command",
+                "high-precision resize is not implemented by this host",
+            )),
+            WindowCommand::SetResizeAntialias { .. } => {
+                // Keep the geometry helper exhaustive after the sampler has
+                // been selected by the app-level helper.
+                Ok(())
+            }
         }
+    }
+
+    fn open_manual(request: ManualRequest) -> Result<(), PlatformError> {
+        std::process::Command::new("open")
+            .arg(&request.path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| host_error("window.manual", "macOS manual viewer could not be started"))
+    }
+
+    fn show_about(window: &Window, request: AboutRequest) -> Result<(), PlatformError> {
+        let title = if window.title().trim().is_empty() {
+            request.product.clone()
+        } else {
+            window.title()
+        };
+        let description = format!(
+            "{}\n\n{}\n{}",
+            request.tagline, request.copyright, request.version
+        );
+        match pollster::block_on(
+            rfd::AsyncMessageDialog::new()
+                .set_title(title)
+                .set_description(description)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .set_parent(window)
+                .show(),
+        ) {
+            rfd::MessageDialogResult::Ok
+            | rfd::MessageDialogResult::Yes
+            | rfd::MessageDialogResult::No
+            | rfd::MessageDialogResult::Custom(_)
+            | rfd::MessageDialogResult::Cancel => Ok(()),
+        }
+    }
+
+    fn open_homepage(request: HomepageRequest) -> Result<(), PlatformError> {
+        std::process::Command::new("open")
+            .arg(&request.url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| {
+                host_error(
+                    "window.homepage",
+                    "macOS default browser could not be opened",
+                )
+            })
     }
 
     fn host_error(operation: &'static str, message: &'static str) -> PlatformError {
         PlatformError::new(PlatformErrorCode::ProviderUnavailable, operation, message)
+    }
+
+    fn unsupported(operation: &'static str, message: &'static str) -> PlatformError {
+        PlatformError::new(
+            PlatformErrorCode::PlatformNotImplemented,
+            operation,
+            message,
+        )
     }
 
     fn show_confirmation(

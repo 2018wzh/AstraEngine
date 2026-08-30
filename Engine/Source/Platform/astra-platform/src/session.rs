@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeSet,
     future::Future,
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -75,6 +76,122 @@ pub struct WindowRequest {
 pub enum WindowCommand {
     SetFullscreen { enabled: bool },
     RestoreOriginalSize,
+    SetResizePrecision { enabled: bool },
+    SetResizeAntialias { enabled: bool },
+}
+
+/// Host-owned metadata for a native About dialog.  The family owns the
+/// bounded strings; the platform host owns the native dialog, focus and
+/// accessibility behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AboutRequest {
+    pub product: String,
+    pub tagline: String,
+    pub version: String,
+    pub copyright: String,
+}
+
+impl AboutRequest {
+    fn validate(&self) -> Result<(), PlatformError> {
+        const MAX_PRODUCT_BYTES: usize = 128;
+        const MAX_TAGLINE_BYTES: usize = 256;
+        const MAX_VERSION_BYTES: usize = 64;
+        const MAX_COPYRIGHT_BYTES: usize = 512;
+        if self.product.trim().is_empty()
+            || self.product.len() > MAX_PRODUCT_BYTES
+            || self.tagline.len() > MAX_TAGLINE_BYTES
+            || self.version.trim().is_empty()
+            || self.version.len() > MAX_VERSION_BYTES
+            || self.copyright.len() > MAX_COPYRIGHT_BYTES
+            || self
+                .product
+                .chars()
+                .chain(self.tagline.chars())
+                .chain(self.version.chars())
+                .chain(self.copyright.chars())
+                .any(char::is_control)
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.about",
+                "about metadata is invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A local manual resource selected by the launch composition root.  It is
+/// deliberately not a Family ABI path: only the native host receives the
+/// resolved path, and it must point at an existing regular file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualRequest {
+    pub path: PathBuf,
+}
+
+impl ManualRequest {
+    fn validate(&self) -> Result<(), PlatformError> {
+        if !self.path.is_absolute() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.manual",
+                "manual path must be absolute",
+            ));
+        }
+        let metadata = std::fs::metadata(&self.path).map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::Io,
+                "window.manual",
+                "manual resource is unavailable",
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.manual",
+                "manual resource is not a regular file",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A validated HTTP(S) URL opened by the platform's default browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomepageRequest {
+    pub url: String,
+}
+
+impl HomepageRequest {
+    fn validate(&self) -> Result<(), PlatformError> {
+        const MAX_URL_BYTES: usize = 2048;
+        if self.url.len() > MAX_URL_BYTES || self.url.chars().any(char::is_control) {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.homepage",
+                "homepage URL is invalid",
+            ));
+        }
+        let parsed = url::Url::parse(&self.url).map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.homepage",
+                "homepage URL is invalid",
+            )
+        })?;
+        if !matches!(parsed.scheme(), "http" | "https")
+            || parsed.host_str().is_none()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.homepage",
+                "homepage URL must be an HTTP(S) origin without credentials",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,6 +673,21 @@ pub enum HostCommand {
         command: WindowCommand,
         reply: oneshot::Sender<Result<(), PlatformError>>,
     },
+    OpenManual {
+        window: WindowHandle,
+        request: ManualRequest,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    ShowAbout {
+        window: WindowHandle,
+        request: AboutRequest,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
+    OpenHomepage {
+        window: WindowHandle,
+        request: HomepageRequest,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
     CaptureSurface {
         surface: SurfaceHandle,
         reply: oneshot::Sender<Result<CapturedFrame, PlatformError>>,
@@ -676,6 +808,9 @@ impl HostCommand {
             Self::ShowContextMenu { .. } => "window.context_menu",
             Self::ShowConfirmation { .. } => "window.confirmation",
             Self::ApplyWindowCommand { .. } => "window.command",
+            Self::OpenManual { .. } => "window.manual",
+            Self::ShowAbout { .. } => "window.about",
+            Self::OpenHomepage { .. } => "window.homepage",
             Self::CaptureSurface { .. } => "surface.capture",
             Self::PresentRgba { .. } => "surface.present_rgba",
             Self::PresentScene { .. } => "surface.present_scene",
@@ -714,6 +849,9 @@ impl HostCommand {
             | Self::DestroySurface { reply, .. }
             | Self::DestroyWindow { reply, .. }
             | Self::ApplyWindowCommand { reply, .. }
+            | Self::OpenManual { reply, .. }
+            | Self::ShowAbout { reply, .. }
+            | Self::OpenHomepage { reply, .. }
             | Self::PauseAudio { reply, .. }
             | Self::ResumeAudio { reply, .. }
             | Self::AbortAudio { reply, .. }
@@ -752,6 +890,9 @@ impl HostCommand {
             Self::ShowContextMenu { reply, .. } => send_error!(reply),
             Self::ShowConfirmation { reply, .. } => send_error!(reply),
             Self::ApplyWindowCommand { reply, .. } => send_error!(reply),
+            Self::OpenManual { reply, .. } => send_error!(reply),
+            Self::ShowAbout { reply, .. } => send_error!(reply),
+            Self::OpenHomepage { reply, .. } => send_error!(reply),
             Self::CaptureSurface { reply, .. } => send_error!(reply),
             Self::PresentRgba { reply, .. } => send_error!(reply),
             Self::PresentScene { reply, .. } => send_error!(reply),
@@ -1062,6 +1203,56 @@ impl PlatformHostClient {
             reply,
         })?;
         response.await.map_err(|_| queue_closed("window.command"))?
+    }
+
+    pub async fn open_manual(
+        &self,
+        window: WindowHandle,
+        request: ManualRequest,
+    ) -> Result<(), PlatformError> {
+        request.validate()?;
+        self.ensure_running("window.manual")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::OpenManual {
+            window,
+            request,
+            reply,
+        })?;
+        response.await.map_err(|_| queue_closed("window.manual"))?
+    }
+
+    pub async fn show_about(
+        &self,
+        window: WindowHandle,
+        request: AboutRequest,
+    ) -> Result<(), PlatformError> {
+        request.validate()?;
+        self.ensure_running("window.about")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ShowAbout {
+            window,
+            request,
+            reply,
+        })?;
+        response.await.map_err(|_| queue_closed("window.about"))?
+    }
+
+    pub async fn open_homepage(
+        &self,
+        window: WindowHandle,
+        request: HomepageRequest,
+    ) -> Result<(), PlatformError> {
+        request.validate()?;
+        self.ensure_running("window.homepage")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::OpenHomepage {
+            window,
+            request,
+            reply,
+        })?;
+        response
+            .await
+            .map_err(|_| queue_closed("window.homepage"))?
     }
 
     pub async fn capture_surface(
@@ -2335,8 +2526,9 @@ fn https_origin(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioWakeRegistration, ConfirmationRequest, ContextMenuItem, ContextMenuItemKind,
-        ContextMenuRequest, HostCommand, WindowCommand,
+        AboutRequest, AudioWakeRegistration, ConfirmationRequest, ContextMenuItem,
+        ContextMenuItemKind, ContextMenuRequest, HomepageRequest, HostCommand, ManualRequest,
+        WindowCommand,
     };
     use crate::WindowHandle;
     use std::{sync::Arc, thread, time::Duration};
@@ -2466,5 +2658,105 @@ mod tests {
             reply,
         };
         assert_eq!(command.operation(), "window.command");
+    }
+
+    #[test]
+    fn native_system_requests_validate_before_reaching_the_host() {
+        let about = AboutRequest {
+            product: "Minori".into(),
+            tagline: "The brave under the summer sky.".into(),
+            version: "Ver.1.0".into(),
+            copyright: "Copyright (C) 2012 minori".into(),
+        };
+        about.validate().unwrap();
+        let mut invalid_about = about;
+        invalid_about.product.push('\n');
+        assert_eq!(
+            invalid_about.validate().unwrap_err().operation,
+            "window.about"
+        );
+
+        let executable = std::env::current_exe().expect("test executable path is available");
+        ManualRequest {
+            path: executable.clone(),
+        }
+        .validate()
+        .unwrap();
+        let invalid_manual = ManualRequest {
+            path: std::path::PathBuf::from("manual.chm"),
+        };
+        assert_eq!(
+            invalid_manual.validate().unwrap_err().operation,
+            "window.manual"
+        );
+        let invalid_directory = ManualRequest {
+            path: executable.parent().expect("executable has a parent").into(),
+        };
+        assert_eq!(
+            invalid_directory.validate().unwrap_err().operation,
+            "window.manual"
+        );
+
+        HomepageRequest {
+            url: "http://www.minori.ph/".into(),
+        }
+        .validate()
+        .unwrap();
+        for url in [
+            "ftp://www.minori.ph/",
+            "https://user:password@example.com/",
+            "https://example.com/\n",
+        ] {
+            assert_eq!(
+                HomepageRequest { url: url.into() }
+                    .validate()
+                    .unwrap_err()
+                    .operation,
+                "window.homepage"
+            );
+        }
+    }
+
+    #[test]
+    fn native_system_host_commands_have_stable_operations() {
+        let (manual_reply, _) = tokio::sync::oneshot::channel();
+        assert_eq!(
+            HostCommand::OpenManual {
+                window: WindowHandle::from_parts(1, 1).unwrap(),
+                request: ManualRequest {
+                    path: std::env::current_exe().unwrap(),
+                },
+                reply: manual_reply,
+            }
+            .operation(),
+            "window.manual"
+        );
+        let (about_reply, _) = tokio::sync::oneshot::channel();
+        assert_eq!(
+            HostCommand::ShowAbout {
+                window: WindowHandle::from_parts(1, 1).unwrap(),
+                request: AboutRequest {
+                    product: "Minori".into(),
+                    tagline: "Summer".into(),
+                    version: "1.0".into(),
+                    copyright: "Copyright".into(),
+                },
+                reply: about_reply,
+            }
+            .operation(),
+            "window.about"
+        );
+        let (homepage_reply, _) = tokio::sync::oneshot::channel();
+        assert_eq!(
+            HostCommand::OpenHomepage {
+                window: WindowHandle::from_parts(1, 1).unwrap(),
+                request: HomepageRequest {
+                    url: "https://example.com/".into(),
+                },
+                reply: homepage_reply,
+            }
+            .operation(),
+            "window.homepage"
+        );
     }
 }

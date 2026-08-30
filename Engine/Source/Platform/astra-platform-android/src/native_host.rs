@@ -362,6 +362,15 @@ impl AndroidHostApp {
                     "Android does not apply native window commands",
                 )));
             }
+            HostCommand::OpenManual { reply, .. }
+            | HostCommand::ShowAbout { reply, .. }
+            | HostCommand::OpenHomepage { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.system",
+                    "Android host delegates help and about UI to the Activity",
+                )));
+            }
             HostCommand::CreateWindow { request, reply } => {
                 let result = if !self.resumed {
                     Err(host_error(

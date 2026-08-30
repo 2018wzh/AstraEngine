@@ -528,6 +528,10 @@ struct MinoriSession {
     global_progress: MinoriGlobalProgressSession,
     config_storage_enabled: bool,
     config_persisted: MinoriConfigState,
+    /// Host-owned window sampling preference mirrored only for rebuilding the
+    /// next native menu transaction. It is not part of the game save/config
+    /// payload; the platform host remains the source of the actual sampler.
+    resize_antialias: bool,
     save_slots: BTreeSet<u32>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
@@ -888,6 +892,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 },
                 config_storage_enabled,
                 config_persisted: persisted_config,
+                resize_antialias: true,
                 save_slots: BTreeSet::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
@@ -6476,7 +6481,8 @@ fn handle_system_menu_request(
                 .vm
                 .allocate_effect_sequence()
                 .map_err(runtime_error)?;
-            let menu = minori_system_menu(&session.vm, request, sequence)?;
+            let menu =
+                minori_system_menu(&session.vm, session.resize_antialias, request, sequence)?;
             services.system_menus.publish(&session_id.0, menu.clone())?;
             session.active_system_menu = Some(menu.menu_id);
             session
@@ -6625,9 +6631,12 @@ fn handle_system_menu_request(
                         .map_err(runtime_error)?;
                     idle_system_menu_output(session, vfs, input, audio_commands, None)
                 }
+                "window_precision" => Err(invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM_DISABLED",
+                    "the observed Minori precision resize item is disabled",
+                )),
                 "window_fullscreen"
                 | "window_original_size"
-                | "window_precision"
                 | "window_antialias"
                 | "help_manual"
                 | "help_about"
@@ -6637,12 +6646,9 @@ fn handle_system_menu_request(
                             enabled: !session.vm.state().system_ui.config.fullscreen,
                         },
                         "window_original_size" => LegacySystemCommandKindV1::RestoreOriginalSize,
-                        "window_precision" => {
-                            LegacySystemCommandKindV1::SetResizePrecision { enabled: true }
-                        }
-                        "window_antialias" => {
-                            LegacySystemCommandKindV1::SetResizeAntialias { enabled: true }
-                        }
+                        "window_antialias" => LegacySystemCommandKindV1::SetResizeAntialias {
+                            enabled: !session.resize_antialias,
+                        },
                         "help_manual" => LegacySystemCommandKindV1::OpenManual,
                         "help_about" => LegacySystemCommandKindV1::ShowAbout,
                         "help_homepage" => LegacySystemCommandKindV1::OpenHomepage,
@@ -6792,15 +6798,19 @@ fn handle_system_command_step(
                     .map_err(runtime_error)?,
                 LegacySystemCommandKindV1::RestoreOriginalSize
                 | LegacySystemCommandKindV1::SetResizePrecision { .. }
-                | LegacySystemCommandKindV1::SetResizeAntialias { .. }
                 | LegacySystemCommandKindV1::OpenManual
                 | LegacySystemCommandKindV1::ShowAbout
                 | LegacySystemCommandKindV1::OpenHomepage => {
-                    session.poisoned = true;
-                    return Err(invalid(
-                        "ASTRA_EMU_MINORI_SYSTEM_COMMAND_UNSUPPORTED",
-                        "Minori has no verified family state for this applied host command",
-                    ));
+                    // These operations are deliberately host-owned.  Their
+                    // native side effects (window geometry, sampling policy,
+                    // help viewer, About dialog and browser) do not belong in
+                    // the deterministic Minori VM state.  An Applied result
+                    // therefore only releases the suspended menu transaction;
+                    // Rejected/Unsupported below remain blocking so a missing
+                    // host capability can never be mistaken for success.
+                }
+                LegacySystemCommandKindV1::SetResizeAntialias { enabled } => {
+                    session.resize_antialias = enabled;
                 }
             }
             idle_system_menu_output(session, vfs, input, audio_commands, None)
@@ -6885,6 +6895,7 @@ fn validate_active_system_menu(
 
 fn minori_system_menu(
     vm: &MinoriVm,
+    resize_antialias: bool,
     request: &astra_emu_family_api::LegacySystemMenuRequestV1,
     sequence: u64,
 ) -> Result<LegacySystemMenuTransactionV1, LegacyProviderError> {
@@ -7024,7 +7035,7 @@ fn minori_system_menu(
         LegacySystemMenuItemKindV1::Command,
         "サイズ変更時にアンチエイリアス (&A)",
         true,
-        true,
+        resize_antialias,
     );
     push(
         "sep_window",
@@ -11131,6 +11142,13 @@ mod tests {
             .iter()
             .any(|item| item.item_id == "message_panel"));
         assert!(menu.items.iter().any(|item| item.item_id == "save"));
+        let precision = menu
+            .items
+            .iter()
+            .find(|item| item.item_id == "window_precision")
+            .expect("the precision resize item is part of the native menu");
+        assert!(!precision.enabled);
+        assert!(precision.checked);
         assert!(menu
             .items
             .iter()
@@ -11291,6 +11309,149 @@ mod tests {
                 .config
                 .fullscreen
         );
+    }
+
+    #[test]
+    fn host_owned_system_commands_release_the_suspended_session_after_apply() {
+        let commands = [
+            (
+                "window_original_size",
+                LegacySystemCommandKindV1::RestoreOriginalSize,
+            ),
+            (
+                "window_antialias",
+                LegacySystemCommandKindV1::SetResizeAntialias { enabled: false },
+            ),
+            ("help_manual", LegacySystemCommandKindV1::OpenManual),
+            ("help_about", LegacySystemCommandKindV1::ShowAbout),
+            ("help_homepage", LegacySystemCommandKindV1::OpenHomepage),
+        ];
+        for (index, (item_id, expected)) in commands.into_iter().enumerate() {
+            let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+                scripts: BTreeMap::from([(
+                    "minori:/scr/test.sc".into(),
+                    b".wait 20\r\n.end\r\n".to_vec(),
+                )]),
+            });
+            let system_menus = Arc::new(RecordingSystemMenuHost::default());
+            let system_commands = Arc::new(RecordingSystemCommandHost::default());
+            let services = LegacyFamilyHostServicesV9 {
+                vfs,
+                surfaces: Arc::new(RecordingSurfaceHost::default()),
+                hooks: Arc::new(UnboundHookHost),
+                writable_files: Arc::new(RejectWritableFiles),
+                system_menus: system_menus.clone(),
+                confirmations: Arc::new(RecordingConfirmationHost::default()),
+                system_commands: system_commands.clone(),
+            };
+            let mut provider = MinoriRuntimeProvider::with_host_services(services);
+            let ctx = context();
+            let session = provider
+                .open(
+                    &ctx,
+                    LegacyOpenRequest {
+                        requested_session_id: LegacyRuntimeSessionId(format!(
+                            "session.command.host_owned.{index}"
+                        )),
+                        case_fingerprint: Hash256::from_sha256(b"case"),
+                        script_uri: "minori:/scr/test.sc".into(),
+                        fixed_delta_ns: 16_666_667,
+                        session_seed: 7,
+                        compatibility_profile: "minori.reference".into(),
+                        family_options: BTreeMap::new(),
+                    },
+                )
+                .unwrap();
+            provider
+                .step(&ctx, &session, step_input(1, Vec::new()))
+                .unwrap();
+            provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        system_menu: Some(LegacySystemMenuRequestV1 {
+                            action: LegacySystemMenuActionV1::Open,
+                            menu_id: None,
+                            item_id: None,
+                            pointer_x: Some(640),
+                            pointer_y: Some(360),
+                            sequence: 1,
+                        }),
+                        ..step_input(2, Vec::new())
+                    },
+                )
+                .unwrap();
+            let menu_id = system_menus.published.lock().unwrap()[0].1.menu_id.clone();
+            provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        system_menu: Some(LegacySystemMenuRequestV1 {
+                            action: LegacySystemMenuActionV1::Select,
+                            menu_id: Some(menu_id),
+                            item_id: Some(item_id.into()),
+                            pointer_x: None,
+                            pointer_y: None,
+                            sequence: 2,
+                        }),
+                        ..step_input(3, Vec::new())
+                    },
+                )
+                .unwrap();
+            let command = system_commands.published.lock().unwrap()[0].1.clone();
+            assert_eq!(command.command, expected);
+            provider
+                .step(
+                    &ctx,
+                    &session,
+                    LegacyStepInput {
+                        system_command: Some(LegacySystemCommandResultV1 {
+                            command_id: command.command_id,
+                            status: LegacySystemCommandStatusV1::Applied,
+                            sequence: 3,
+                        }),
+                        ..step_input(4, Vec::new())
+                    },
+                )
+                .unwrap();
+            assert!(!provider.sessions[&session.0].poisoned);
+            assert!(provider.sessions[&session.0]
+                .active_system_command
+                .is_none());
+            if item_id == "window_antialias" {
+                provider
+                    .step(
+                        &ctx,
+                        &session,
+                        LegacyStepInput {
+                            system_menu: Some(LegacySystemMenuRequestV1 {
+                                action: LegacySystemMenuActionV1::Open,
+                                menu_id: None,
+                                item_id: None,
+                                pointer_x: Some(640),
+                                pointer_y: Some(360),
+                                sequence: 4,
+                            }),
+                            ..step_input(5, Vec::new())
+                        },
+                    )
+                    .unwrap();
+                let menus = system_menus.published.lock().unwrap();
+                let reopened = menus
+                    .last()
+                    .expect("the menu must be republished")
+                    .1
+                    .clone();
+                let antialias = reopened
+                    .items
+                    .iter()
+                    .find(|item| item.item_id == "window_antialias")
+                    .expect("the antialiasing item must remain visible");
+                assert!(!antialias.checked);
+            }
+        }
     }
 
     #[test]
