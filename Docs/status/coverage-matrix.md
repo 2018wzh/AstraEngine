@@ -1,5 +1,12 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日确认框覆盖：原版 Windows Sandbox 的退出与返回标题确认框
+文案、按钮顺序和取消后的 wait 保持已记录，Minori 通过 Family ABI v12 发布，
+平台 Host 负责 native 呈现；Headless 不伪造 native dialog，只消费物理方向键、
+Enter/Space/Escape。旧路线输入中的 `runtime.awaiting_input` 观察键已经被 hard
+cut 拒绝，当前尚未以新序列完成完整 Release Sandbox 或 Windows E3，因此本项
+仍为 E1/E2 行为对齐，不能标成正式通过。
+
 2026 年 8 月 30 日 Family ABI v12 确认覆盖：Minori 的 `game_exit`、`game_return_title` 与 Host `window.close` 由 Family 发布有界 confirmation transaction，平台 Host 以 native confirmation provider 呈现，后续固定 step 回送 `Accepted` 或 `Cancelled`。取消保持底层 wait，接受才执行 terminal 或返回标题；重复、过期、错配和确认期间的 gameplay input 继续阻断。Manager、Release CLI、Headless 和 Minori 的定向回归通过；当前只属于 E1/E2 接线证据，Release Sandbox、120 Hz 和 Windows E3 仍开放。
 
 2026 年 8 月 30 日 Minori 原生菜单 Auto 覆盖：Manager Core 现持有唯一的受限 wait 重绑规则，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 与 `Time→Time`；同批重复和其他类型继续阻断。开发签名 Release v21 通过 secondary-pointer 与方向键选择 Auto，再次选择后恢复 Normal。报告通过 371 fixed steps、36 条物理输入、9 个呈现帧、6 个 checkpoint且零 diagnostic；Auto 开启后的画面发生预期推进，关闭后继续运行 2 秒保持不变。保留画面已人工检查。该覆盖属于原生菜单 Auto 定向 E2，不关闭完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。

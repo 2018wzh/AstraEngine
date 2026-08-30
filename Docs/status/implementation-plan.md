@@ -1,5 +1,13 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日原版确认框对齐：Windows Sandbox 的 Game→Exit 与
+Game→Return title 均使用原生两按钮对话框，按钮为 `是(Y)`/`否(N)`；Minori
+provider 已把观察到的日文正文通过 Family ABI v12 交给 Host，取消保持原有
+剧情 wait，接受才退出或回到标题。Headless 仍只使用物理输入路径。旧私有
+路线序列引用了已删除的 `runtime.awaiting_input` 观察键，按 hard-cut 规则拒绝；
+新序列尚未形成完整 Release Sandbox 或 Windows E3 证据，因此整体状态保持
+`IN_PROGRESS`。
+
 2026 年 8 月 30 日 Family ABI v12 确认事务：Minori 的退出、返回标题和 Host window-close 请求已改为 Family-owned confirmation transaction。Host 通过 `astra-platform` 的显式 native confirmation command 按平台呈现，Manager/CLI 只负责组合和把 `Accepted`/`Cancelled` 结果送回同一 session；Headless 通过物理输入完成等价交互。取消保持原有 message wait，接受才终止或返回标题。Family API、平台、Manager、CLI 与 Minori 的定向回归通过；该结果只关闭 confirmation 的 E1/E2 接线，不代表 Release Sandbox、120 Hz 或 Windows E3。
 
 2026 年 8 月 30 日 Minori 原生菜单 Auto E2：受限 wait 重绑语义已收敛到 Manager Core，RuntimeWorld adapter、Manager 和 Release CLI Headless 共同只允许 `Input↔Time` 和 `Time→Time`，同批重复及其他 wait 类型仍阻断。开发签名 Release v21 从空白进度通过 family v11 菜单选择 Auto，再次选择后恢复 Normal。报告完成 371 fixed steps、36 条物理输入、9 个呈现帧和 6 个 checkpoint，diagnostic 为空；Auto 开启后画面推进，关闭后继续运行 2 秒保持不变，关键画面已人工检查。Manager Core 59 项 tests、CLI 定向回归、三个 consumer 的 clippy 与 Manager build check 通过。该结果关闭原生菜单 Auto 定向 E2，不替代完整路线、Release Sandbox、120 Hz 性能门禁或 Windows E3。

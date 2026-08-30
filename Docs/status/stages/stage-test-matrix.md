@@ -1,5 +1,12 @@
 # Stage Test Matrix
 
+2026-08-31 confirmation wording alignment: the original Windows Sandbox was
+observed using the native Exit and Return-title confirmation dialogs with the
+same two-button order and cancel semantics now sent through Family ABI v12.
+The observation is private visual evidence only. A legacy private input sequence
+that referenced the removed `runtime.awaiting_input` key is rejected; no alias is
+retained. Full Release Sandbox and Windows E3 remain open.
+
 2026-08-30 native-menu page E2: development-signed Release v24 opens Save, Load and gameplay Config through the v11 family menu using 82 serialized physical-input messages. The report passes 138 fixed steps, 9 presented frames, 8 checkpoints and zero diagnostics. All checkpoints were reviewed, and the four gameplay frames before and after each page are byte-identical. Focused regressions bind Load return behavior to the retained gameplay wait and route gameplay Config close through the provider tick before restoring the message wait. This closes the current-identity menu-page Headless E2 only; generic exit/return-title confirmation, Release Sandbox, 120 Hz performance and Windows E3 remain open.
 
 2026-08-30 native-menu Auto E2 (recorded on the v11 build): Manager Core now owns the single bounded wait-rebind rule used by the RuntimeWorld adapter, Manager and Release CLI Headless. It permits only `Input↔Time` and `Time→Time` while rejecting same-batch duplicates and all other type changes. Development-signed Release v21 selects Auto and restores Normal through the family menu. The report passes 371 fixed steps, 36 physical inputs, 9 presented frames, 6 checkpoints and zero diagnostics. The frame advances while Auto is active and remains byte-identical for two seconds after returning to Normal. Reviewed checkpoints, 59 Manager Core tests, the focused CLI regression and affected consumer clippy pass. The report predates the v12 confirmation port; current-identity confirmation, Release Sandbox, 120 Hz performance and Windows E3 remain open.

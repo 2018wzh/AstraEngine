@@ -1,5 +1,22 @@
 # Minori 移植日志
 
+## 2026-08-31：原版确认框文案与输入观察边界
+
+- 在干净的原版 Windows Sandbox 会话中分别打开 Game→Exit 和
+  Game→Return title。两者都使用原生两按钮确认框，按钮顺序为
+  `是(Y)`、`否(N)`；退出正文为 `終了してもよろしいですか？`，返回标题正文为
+  `ゲームを中断してメニューに戻ります。よろしいですか？`。取消后舞台和当前消息
+  保持不变，接受才结束当前 session 或回到标题。截图只留在 ignored 私有研究目录，
+  本页不保存图片或路径。
+- Minori provider 的 Family ABI v12 confirmation transaction 已采用上述原版
+  日文文案和按钮顺序；Host 继续负责 native dialog 的 parent、焦点和结果回传，
+  family 只处理 `Accepted`/`Cancelled` 语义。该项覆盖退出、返回标题和
+  `window.close` 三个入口，未把确认框改成 Manager 自绘控件。
+- 当前 Headless 输入契约用 `runtime.input_or_terminal` 表示可消费的输入边界；
+  旧私有序列中的 `runtime.awaiting_input` 不是现行观察键，已按 hard-cut 规则
+  拒绝，不增加兼容别名。用新观察键重排后的路线输入仍需完成完整 Release
+  Sandbox 与正式 Windows E3 验收，当前不扩大证据等级。
+
 ## 2026-08-30：Family ABI v12 确认事务与平台 Host
 
 - `game_exit`、`game_return_title` 和 Host 的 `window.close` 现在都由 Minori 通过 Family ABI 发布有界 `LegacyConfirmationTransactionV1`。Host 保存一次性 pending transaction，按 session 严格匹配结果；取消只恢复原有 wait，接受才进入 terminal 或返回标题。确认期间的 gameplay input、system-menu result、重复结果和错配 id 直接阻断。
