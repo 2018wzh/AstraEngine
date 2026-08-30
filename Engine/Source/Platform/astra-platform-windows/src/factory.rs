@@ -2789,6 +2789,22 @@ mod windows {
                 if result.0 == 0 {
                     break;
                 }
+                // The original dialog exposes explicit `Y`/`N` mnemonics in
+                // the button captions (`是(Y)`/`否(N)`).  This dialog is built
+                // from ordinary Win32 controls instead of the common-controls
+                // accelerator table, so consume those virtual keys at the
+                // modal boundary.  Handling them before `IsDialogMessageW`
+                // keeps the result tied to this transaction regardless of
+                // which child currently owns focus.
+                if native_message.message == windows::Win32::UI::WindowsAndMessaging::WM_KEYDOWN {
+                    if let Some(result) = confirmation_key_result(native_message.wParam.0) {
+                        state.result = Some(result);
+                        unsafe {
+                            let _ = DestroyWindow(dialog);
+                        }
+                        continue;
+                    }
+                }
                 let handled = unsafe { IsDialogMessageW(dialog, &native_message).as_bool() };
                 if !handled {
                     unsafe {
@@ -2996,6 +3012,17 @@ mod windows {
         }
     }
 
+    fn confirmation_key_result(key: usize) -> Option<ConfirmationResult> {
+        match key {
+            // VK_RETURN and VK_Y accept; VK_ESCAPE and VK_N cancel.  The
+            // explicit Y/N mapping matches the labels shown by the original
+            // Minori dialog and is independent of the focused child control.
+            0x0d | 0x59 => Some(ConfirmationResult::Accepted),
+            0x1b | 0x4e => Some(ConfirmationResult::Cancelled),
+            _ => None,
+        }
+    }
+
     fn confirmation_dialog_title(parent_title: Option<&str>, request_title: String) -> String {
         parent_title
             .filter(|title| !title.trim().is_empty())
@@ -3041,7 +3068,9 @@ mod windows {
 
     #[cfg(test)]
     mod tests {
-        use super::{confirmation_button_result, confirmation_dialog_title};
+        use super::{
+            confirmation_button_result, confirmation_dialog_title, confirmation_key_result,
+        };
         use astra_platform::ConfirmationResult;
 
         #[test]
@@ -3072,6 +3101,27 @@ mod windows {
                 Some(ConfirmationResult::Cancelled)
             );
             assert_eq!(confirmation_button_result(0), None);
+        }
+
+        #[test]
+        fn confirmation_keyboard_mnemonics_are_explicit() {
+            assert_eq!(
+                confirmation_key_result(0x0d),
+                Some(ConfirmationResult::Accepted)
+            );
+            assert_eq!(
+                confirmation_key_result(0x59),
+                Some(ConfirmationResult::Accepted)
+            );
+            assert_eq!(
+                confirmation_key_result(0x1b),
+                Some(ConfirmationResult::Cancelled)
+            );
+            assert_eq!(
+                confirmation_key_result(0x4e),
+                Some(ConfirmationResult::Cancelled)
+            );
+            assert_eq!(confirmation_key_result(0x51), None);
         }
     }
 }

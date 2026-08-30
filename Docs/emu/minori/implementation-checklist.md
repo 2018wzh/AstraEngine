@@ -25,8 +25,9 @@
   Manager has no game-owned Winit window.
 - [x] The root `rfd` dependency no longer enables `common-controls-v6` (which made
   the CLI fail before `main` on the target Windows loader). The Host-owned Win32
-  dialog keeps the live caption, custom Minori labels (`是(Y)`/`否(N)`), keyboard
-  navigation, owner disable/restore and explicit close/error handling. The service
+  dialog keeps the live caption, custom Minori labels (`是(Y)`/`否(N)`), explicit
+  `Y`/`N`/Enter/Escape keyboard results, owner disable/restore and explicit close/error
+  handling. The service
   path accepts no parent window and does not handle menus, fullscreen, help, About,
   or surfaces.
 - [x] `astra-emu-cli --help` starts after the loader-boundary fix; focused

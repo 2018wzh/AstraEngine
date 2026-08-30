@@ -24,6 +24,14 @@ Manager 无窗口 service host 继续复用这条路径；`rfd` 仅保留 About 
 定向平台测试和 `astra-emu-cli --help` 启动检查通过。这只是加载器和确认框接线的
 E1/E2 证据，真实对话框视觉、Release Sandbox 路线和 Windows E3 仍未完成。
 
+## 2026-08-31：Windows 原生确认框快捷键边界
+
+自定义 Win32 modal 现在在对话框消息循环入口消费 `VK_RETURN`/`VK_ESCAPE`，并把
+原版按钮标题中的 `Y`/`N` 助记键分别映射为 `Accepted`/`Cancelled`。映射发生在
+Host 的当前 confirmation transaction 内，不会把 `Y`/`N` 注入 Minori gameplay
+输入；按钮控件仍保留 Tab/Enter 导航和关闭即取消的标准行为。新增的 key mapping
+回归通过，真实 Sandbox 键盘证据和完整路线门禁仍未形成。
+
 ## 2026-08-31：Config 全屏设置改由 Host 原生应用
 
 Config 页面提交全屏选项后，Minori 不再把窗口状态当作自己的即时副作用。family
