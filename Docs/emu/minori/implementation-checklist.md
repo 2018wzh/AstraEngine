@@ -1,5 +1,15 @@
 # Minori Implementation Checklist
 
+## Key-file Release 路线复核（2026-08-30）
+
+- [x] 分支已 rebase 到当前 `origin/master`。现行 Family API 是 v11；旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。
+- [x] 官方桌面构建器在选择 Minori 时会同时给 Manager 与 CLI 编译唯一的 `ffmpeg-vcpkg` 绑定。FFmpeg 不可用时构建直接失败，不再生成缺少影片能力的 Release 包。
+- [x] PAZ 查找使用 ASCII case-insensitive identity，并保留 manifest 的 canonical URI；大小写折叠冲突直接阻断。`.stage`/`.wait` 只接收样本已确认的单个尾随空字段，更多空字段仍阻断。
+- [x] 已确认的 `.effect fadeout` 只结束活动的 primary Firefly；没有活动 Firefly 时返回 blocking diagnostic。样本唯一的三参数 `.panel` 形态按原程序 parser 解释为 mode 1、默认过渡标记和 `sys` 自定义资源，显式未知过渡值仍阻断。
+- [x] 当前 Release 包已完成一次标题启动路线报告：5212 fixed steps、4382 个提交/栅格帧、17 条物理输入、4120576 个 48 kHz 双声道音频帧，`route_complete`、返回标题、解锁计数 4 和零 diagnostic 成立。模型检查标题、剧情与返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。
+- [ ] 这次通过运行开始时平台私有进度已含四个 clear flag；此前从三个 flag 自然写入第四个的运行在完成后被测试脚本多余的 terminal await 判失败。因此，仍需从受控的三 flag 状态重跑同一通过报告，不能把现有结果写成“四路线自然解锁已关闭”。
+- [ ] 全流 WMV3 诊断曾出现 FFmpeg concealment；必须用影片 checkpoint 与原版对照确认质量。正式音频听审、save/restore required checkpoint、完整 gallery、Release Sandbox 视觉验收和 Windows E3 继续保持 blocking。
+
 ## Family API v11 right-click system menu (2026-08-30)
 
 - [x] `LegacySystemMenuRequestV1` and bounded `LegacySystemMenuTransactionV1` are part of the hard-cut Family API v11 contract and have explicit `StableAbi` wire representations.

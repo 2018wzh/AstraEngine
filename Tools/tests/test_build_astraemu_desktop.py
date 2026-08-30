@@ -16,14 +16,32 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
     def test_ephemeral_signer_never_reuses_environment_secret(self):
         environment = {}
         with mock.patch("build_astraemu_desktop.secrets.token_hex", return_value="ab" * 32):
-            build_astraemu_desktop.configure_signer(environment, True, None)
+            build_astraemu_desktop.configure_signer(
+                pathlib.Path.cwd(), environment, True, False, None
+            )
         self.assertEqual(environment["ASTRA_EMU_FAMILY_SIGNING_KEY_HEX"], "ab" * 32)
         self.assertEqual(environment["ASTRA_EMU_FAMILY_SIGNER_ID"], "astra.development.local")
         self.assertNotIn("ASTRA_EMU_FAMILY_PUBLIC_KEY_HEX", environment)
 
     def test_release_signer_requires_process_environment(self):
         with self.assertRaisesRegex(SystemExit, "ASTRA_EMU_DESKTOP_SIGNER_ENV_MISSING"):
-            build_astraemu_desktop.configure_signer({}, False, None)
+            build_astraemu_desktop.configure_signer(
+                pathlib.Path.cwd(), {}, False, False, None
+            )
+
+    def test_minori_distribution_compiles_the_only_video_provider_binding(self):
+        self.assertEqual(
+            build_astraemu_desktop.desktop_features("minori"),
+            (
+                "astra-emu-minori/dynamic-plugin-export",
+                "astra-emu-manager/ffmpeg-vcpkg",
+                "astra-emu-cli/ffmpeg-vcpkg",
+            ),
+        )
+        self.assertEqual(
+            build_astraemu_desktop.desktop_features("fvp"),
+            ("astra-emu-fvp/dynamic-plugin-export",),
+        )
 
     def test_evidence_redaction_rejects_absolute_paths_recursively(self):
         self.assertTrue(build_astraemu_desktop.has_absolute_path({"nested": ["C:\\private\\game"]}))

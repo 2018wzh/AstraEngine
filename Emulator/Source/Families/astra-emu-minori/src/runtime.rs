@@ -833,24 +833,11 @@ pub(crate) fn collect_resource_references(
                 [_] => {}
                 _ => return Err(MinoriRuntimeError::SecondaryEffect),
             },
-            "panel" => match tokens.as_slice() {
-                [mode] if mode == "0" => {}
-                [mode] if mode == "1" => {
-                    resources.insert("minori:/sys/msgPanel.png".into());
+            "panel" => {
+                if let Some(panel) = parse_panel_state(&tokens)? {
+                    resources.insert(panel.resource_uri);
                 }
-                [_] => {
-                    return Err(MinoriRuntimeError::Panel {
-                        operand_count: u8::try_from(tokens.len()).unwrap_or(u8::MAX),
-                        mode: tokens.first().and_then(|value| value.parse().ok()),
-                    })
-                }
-                _ => {
-                    return Err(MinoriRuntimeError::Panel {
-                        operand_count: u8::try_from(tokens.len()).unwrap_or(u8::MAX),
-                        mode: None,
-                    })
-                }
-            },
+            }
             "movie" => {
                 let [_id, resource, _width, _height, _skippable] = tokens.as_slice() else {
                     return Err(MinoriRuntimeError::Operand);
@@ -3396,38 +3383,35 @@ fn execute_panel(
                 mode: None,
             }
         })?;
-    let mode = tokens.first().and_then(|value| value.parse::<u32>().ok());
-    let operand_count = u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?;
-    let [mode] = tokens.as_slice() else {
-        return Err(MinoriRuntimeError::Panel {
-            operand_count,
-            mode,
-        });
-    };
-    let mode = mode.parse::<u32>().map_err(|_| MinoriRuntimeError::Panel {
-        operand_count,
-        mode: None,
-    })?;
-    // The original CMessagePanel switch has an asset-free case 0 and loads
-    // `msgPanel.png` only in case 1. Case 0 therefore clears the currently
-    // visible panel; it is not a request to draw a default panel.
-    state.panel = match mode {
-        0 => None,
-        1 => Some(MinoriPanelState {
-            mode,
-            resource_uri: "minori:/sys/msgPanel.png".into(),
-        }),
-        _ => {
-            return Err(MinoriRuntimeError::Panel {
-                operand_count,
-                mode: Some(mode),
-            });
-        }
-    };
+    state.panel = parse_panel_state(&tokens)?;
     next_effect_sequence(state)?;
     Ok(Some(MinoriVmEvent::Panel {
         sequence: state.effect_sequence,
     }))
+}
+
+fn parse_panel_state(tokens: &[String]) -> Result<Option<MinoriPanelState>, MinoriRuntimeError> {
+    let operand_count = u8::try_from(tokens.len()).map_err(|_| MinoriRuntimeError::Overflow)?;
+    let mode = tokens.first().and_then(|value| value.parse::<u32>().ok());
+    let invalid = || MinoriRuntimeError::Panel {
+        operand_count,
+        mode,
+    };
+    match tokens {
+        [mode] if mode == "0" => Ok(None),
+        [mode] if mode == "1" => Ok(Some(MinoriPanelState {
+            mode: 1,
+            resource_uri: "minori:/sys/msgPanel.png".into(),
+        })),
+        [mode, transition, filename] if mode == "1" && transition == "*" => {
+            validate_scene_filename(filename).map_err(|_| invalid())?;
+            Ok(Some(MinoriPanelState {
+                mode: 1,
+                resource_uri: format!("minori:/sys/{filename}"),
+            }))
+        }
+        _ => Err(invalid()),
+    }
 }
 
 fn next_effect_index(current: u32, len: usize) -> Result<u32, MinoriRuntimeError> {
@@ -6544,6 +6528,27 @@ mod tests {
         ));
         assert_eq!(clear_vm.state().panel, None);
 
+        let custom_source = b".panel 1 * customPanel.png\r\n.end\r\n";
+        let custom_script = parse_sc(custom_source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut custom_vm = MinoriVm::new(
+            "minori:/scr/fixture.sc".into(),
+            Hash256::from_sha256(custom_source),
+            custom_script,
+            1,
+        )
+        .unwrap();
+        assert!(matches!(
+            custom_vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Panel { .. })
+        ));
+        assert_eq!(
+            custom_vm.state().panel,
+            Some(MinoriPanelState {
+                mode: 1,
+                resource_uri: "minori:/sys/customPanel.png".into(),
+            })
+        );
+
         let (source, operand_count, mode) = (b".panel 1 -1\r\n".as_slice(), 2, Some(1));
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let mut vm = MinoriVm::new(
@@ -7783,7 +7788,7 @@ mod tests {
 
     #[test]
     fn resource_reference_audit_reuses_verified_command_grammars() {
-        let source = b".stage * bg.png 0 0 Stand.png 640,0\r\n.char load 1 Aya.png\r\n.effect CrossFade2 A.png:*:B.png 16 10\r\n.effect Firefly Firefly_c 1 1000\r\n.effect2 SnowH\r\n.panel 1\r\n.playbgm theme.ogg\r\n.playse click.ogg\r\n.message 1 ren-0001.ogg speaker text\r\n.movie 1 op.avi 640 480 t\r\n.chain tail.sc\r\n";
+        let source = b".stage * bg.png 0 0 Stand.png 640,0\r\n.char load 1 Aya.png\r\n.effect CrossFade2 A.png:*:B.png 16 10\r\n.effect Firefly Firefly_c 1 1000\r\n.effect2 SnowH\r\n.panel 1 * customPanel.png\r\n.playbgm theme.ogg\r\n.playse click.ogg\r\n.message 1 ren-0001.ogg speaker text\r\n.movie 1 op.avi 640 480 t\r\n.chain tail.sc\r\n";
         let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
         let resources = collect_resource_references(&script).unwrap();
         assert!(resources.contains("minori:/bg/bg.png"));
@@ -7793,7 +7798,7 @@ mod tests {
         assert!(resources.contains("minori:/bg/B.png"));
         assert!(resources.contains("minori:/sys/Firefly_cS.png"));
         assert!(resources.contains("minori:/sys/snowM.png"));
-        assert!(resources.contains("minori:/sys/msgPanel.png"));
+        assert!(resources.contains("minori:/sys/customPanel.png"));
         assert!(resources.contains("minori:/bgm/theme.ogg"));
         assert!(resources.contains("minori:/se/click.ogg"));
         assert!(resources.contains("minori:/voice/ren-0001.ogg"));

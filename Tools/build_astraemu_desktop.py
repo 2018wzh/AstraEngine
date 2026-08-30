@@ -195,10 +195,11 @@ def cargo_build(
     # separately toggles `dynamic-plugin-export` in the same target directory
     # and forces Cargo to relink the family graph twice on every iteration.
     family_package = SUPPORTED_FAMILIES[family_id][0]
+    features = desktop_features(family_id)
     command = [
         "cargo", "build", "--locked", "--release", "--target", target,
         "-p", "astra-emu-manager", "-p", "astra-emu-cli", "-p", family_package,
-        "--features", f"{family_package}/dynamic-plugin-export",
+        "--features", ",".join(features),
         "--message-format=json-render-diagnostics",
     ]
     process = subprocess.Popen(
@@ -228,6 +229,22 @@ def cargo_build(
         descriptor = candidates[0]
     require_file(descriptor, "ASTRA_EMU_DESKTOP_FAMILY_DESCRIPTOR_MISSING")
     return descriptor
+
+
+def desktop_features(family_id: str) -> tuple[str, ...]:
+    family_package = SUPPORTED_FAMILIES[family_id][0]
+    features = [f"{family_package}/dynamic-plugin-export"]
+    if family_id == "minori":
+        # Minori movie playback has one production binding: AstraMedia FFmpeg.
+        # Compile both product hosts with that binding so the packaged Manager
+        # and CLI cannot advertise a provider that is absent from the binary.
+        features.extend(
+            (
+                "astra-emu-manager/ffmpeg-vcpkg",
+                "astra-emu-cli/ffmpeg-vcpkg",
+            )
+        )
+    return tuple(features)
 
 
 def family_library_name(family_id: str, target: str) -> str:

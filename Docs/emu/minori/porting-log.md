@@ -764,3 +764,13 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - 复测确认右键会显示真实 Minori `Savedata` 页面及 Auto/Quick Save 槽位。此前在该页按 Escape 会把底层 gameplay message await 一并完成，provider 随即以 `ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED` 终止；根因是 Manager 没有把系统页视为独占输入层。
 - 现行 host 在右键打开请求所在 tick 以及 `minori.system_page != none` 期间暂缓 gameplay await completion，同时保留 pending wait。关闭页面只更新系统页 observation；下一次普通确认才完成原有 message wait。未知页面值、同一批重复 page mutation 和非法等待类型仍 fail fast。
 - 新增 Manager 回归覆盖 secondary-pointer open、system-page activity observation 和 unknown page rejection。更新后的签名 Release 在 Windows Sandbox 中连续完成两次 Save→Escape→gameplay 循环：右键显示 Savedata 页面，Escape 返回 firefly gameplay 帧，Diagnostics 保持 `No blocking diagnostic`；Null audio endpoint 仍只提供无设备软件运行证据，不是物理音频 E3。完整路线、正式音频审查和 Windows E3 仍不提升证据等级。
+
+### 2026-08-30 key-file Release 路线复核
+
+- 当前分支已 rebase 到 `origin/master` 的 `a2bb57d9c43084ec8e519b8c38d5aded14f51cb3`。冲突按现行 Family API v11 解决，没有恢复旧 surface、snapshot、Luau callback、明文 cache 或兼容入口。
+- 官方桌面构建器此前只给 Minori library 启用 dynamic export，Manager 与 CLI 没有编译 `ffmpeg-vcpkg`，生成的包无法播放 Minori 影片。构建器现按 family 绑定 feature：Minori package 同时编译两个产品 host 的唯一 FFmpeg provider；依赖缺失会让 Release 构建直接失败。工具单元测试覆盖 Minori/FVP 的 feature 集合。
+- PAZ lookup 现按原引擎文件系统语义执行 ASCII case-insensitive 匹配，同时继续向 manifest 和调用方返回 canonical URI；大小写折叠冲突阻断，不覆盖 entry。positional parser 只接受真实样本观察到的单个尾随空字段。primary `.effect fadeout` 只结束活动 Firefly，缺少目标时阻断。
+- 全包 census 中只有一条三 operand `.panel`。原程序 parser 已确认字段为 mode、可选过渡和文件名；真实命令使用 `*` 作为缺省过渡并引用一个存在的 `sys` 资源。runtime 与资源预审现在共同接受这一种已验证形态；显式数值过渡、其他 mode 和非法文件名仍返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
+- 更新后的开发签名 Release package 以序列化物理输入完成标题启动路线：`astra.emu.headless_run_report.v3` 为 `passed`，5212 fixed steps、4382 个提交/栅格帧、17 条输入、5993 次 VFS read、5113463957 bytes，diagnostic 为空。路线发布 `route_complete`，返回标题并观察到解锁计数 4。WAV 是 48 kHz 双声道、4120576 frame，peak 32412、RMS 4281.56，非静音；这不是具名人工听审。
+- 模型实际检查 `title_initial`、剧情和 `ending_return_title` 三个 checkpoint。首尾标题帧一致；剧情帧的背景、面板和日文正文非空，未见缺字、横向裁剪、拉伸、错层或残影。该检查只给出当前 checkpoint 的质量结论，不声明原版逐像素一致。
+- 证据边界仍有两项必须保留。第一，形成通过报告时平台私有进度已经包含四个 clear flag；此前从三个 flag 自然写入第四个的运行确实命中 `route_complete` 和解锁计数 4，但因为测试脚本在标题后错误等待 runtime terminal 而没有形成 passed report。第二，一次未跳过的 WMV3 全流解码出现 FFmpeg concealment 输出，尚未用影片 checkpoint 与原版画面对照。四路线自然解锁、save/restore required checkpoint、正式音频听审、完整 gallery、Release Sandbox 和 Windows E3 因此继续开放。
