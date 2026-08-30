@@ -113,11 +113,43 @@ fn v1_and_v2_rc4_chunks_resume_at_absolute_offsets() {
         let encrypted = blowfish_encrypt(DATA_KEY, &transformed);
         for (start, end) in [(0usize, 32usize), (16, 72), (64, 96)] {
             let decoded = decryptor
-                .decrypt_entry_chunk(version, &entry, start as u64, &encrypted[start..end])
+                .decrypt_entry_chunk(
+                    version,
+                    &entry,
+                    start as u64,
+                    encrypted[start..end].to_vec(),
+                )
                 .unwrap();
             assert_eq!(decoded, plain[start..end]);
         }
     }
+}
+
+#[test]
+fn entry_chunk_transform_reuses_the_owned_source_buffer() {
+    let decryptor = decryptor(BTreeMap::new());
+    let plain = (0u8..64).collect::<Vec<_>>();
+    let entry = PazEntryDescriptor {
+        archive_role: "scr".into(),
+        entry_id: "scr:0".into(),
+        name: "payload.sc".into(),
+        crypto_name: b"payload.sc".to_vec(),
+        offset: 0,
+        unpacked_size: plain.len() as u64,
+        stored_size: plain.len() as u64,
+        aligned_size: plain.len() as u64,
+        packed: false,
+        video_key: None,
+    };
+    let encrypted = blowfish_encrypt(DATA_KEY, &plain);
+    let source_allocation = encrypted.as_ptr();
+
+    let decoded = decryptor
+        .decrypt_entry_chunk(0, &entry, 0, encrypted)
+        .unwrap();
+
+    assert_eq!(decoded, plain);
+    assert_eq!(decoded.as_ptr(), source_allocation);
 }
 
 #[test]
@@ -143,7 +175,7 @@ fn movie_v0_substitution_and_v1_periodic_rc4_are_range_stable() {
         .collect::<Vec<_>>();
     assert_eq!(
         decryptor
-            .decrypt_entry_chunk(0, &entry, 47, &encrypted_v0[47..233])
+            .decrypt_entry_chunk(0, &entry, 47, encrypted_v0[47..233].to_vec())
             .unwrap(),
         plain[47..233]
     );
@@ -163,7 +195,7 @@ fn movie_v0_substitution_and_v1_periodic_rc4_are_range_stable() {
         .collect::<Vec<_>>();
     assert_eq!(
         decryptor
-            .decrypt_entry_chunk(1, &entry, 73, &encrypted_v1[73..291])
+            .decrypt_entry_chunk(1, &entry, 73, encrypted_v1[73..291].to_vec())
             .unwrap(),
         plain[73..291]
     );
@@ -252,7 +284,7 @@ fn v2_zlib_stream_preserves_checksum_across_decrypt_chunks() {
     for (index, chunk) in encrypted.chunks(STREAM_CHUNK_BYTES as usize).enumerate() {
         let offset = index as u64 * STREAM_CHUNK_BYTES;
         let decoded = decryptor(BTreeMap::from([("sc".into(), "pw".into())]))
-            .decrypt_entry_chunk(2, &entry, offset, chunk)
+            .decrypt_entry_chunk(2, &entry, offset, chunk.to_vec())
             .unwrap();
         assert!(
             decoded == expected_padded[offset as usize..offset as usize + chunk.len()],

@@ -1,5 +1,7 @@
 # Stage Test Matrix
 
+2026-08-30 Minori streaming allocation seam: `entry_chunk_transform_reuses_the_owned_source_buffer` and the seven existing PAZ stream regressions pass. The source-owned chunk now survives decrypt and pending-stream handoff without an intermediate plaintext allocation. This remains an E1 allocation contract; the real-sample peak-memory gate is still open.
+
 2026-08-30 focused Minori evidence: the rebased official desktop builder now compiles the explicit `ffmpeg-vcpkg` binding into both Minori hosts. Focused panel/resource-audit tests pass, and the development-signed Release package completed a 5212-step title route with 4382 presented frames, 17 physical inputs, non-silent audio, `route_complete`, return-to-title, unlock count 4 and no diagnostics. The passed run loaded four existing clear flags; the three-to-four natural write and an unskipped WMV3 concealment warning still require a clean report and movie checkpoint review. This is current E2 progress, not Release Sandbox or Windows E3 acceptance.
 
 The same current-identity Release path now also passes a focused 2047-step physical-input Quick Save, Load-page and slot-restore run. Six checkpoints were captured, restore reproduced the saved frame, audio was non-silent and diagnostics were empty. The host preserves the underlying gameplay wait through the generic family system-UI activity observation. Visual review found one rare authored message-control suffix still rendered as text, so this does not close message fidelity, full-route, Sandbox or E3 gates.

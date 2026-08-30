@@ -114,7 +114,9 @@ impl MinoriPazDecryptor {
     }
 
     fn decrypt_index(&self, role: &str, encrypted: &[u8]) -> Result<Vec<u8>, PazError> {
-        blowfish_decrypt(&self.scheme(role)?.index_key, encrypted)
+        let mut bytes = encrypted.to_vec();
+        blowfish_decrypt_in_place(&self.scheme(role)?.index_key, &mut bytes)?;
+        Ok(bytes)
     }
 
     fn decrypt_entry_chunk(
@@ -122,10 +124,10 @@ impl MinoriPazDecryptor {
         version: u8,
         entry: &PazEntryDescriptor,
         absolute_offset: u64,
-        encrypted: &[u8],
+        encrypted: Vec<u8>,
     ) -> Result<Vec<u8>, PazError> {
         let scheme = self.scheme(&entry.archive_role)?;
-        let mut bytes = encrypted.to_vec();
+        let mut bytes = encrypted;
         if entry.archive_role == "mov" {
             let video_key = entry.video_key.as_ref().ok_or_else(|| {
                 error(
@@ -182,7 +184,7 @@ impl MinoriPazDecryptor {
             return Ok(bytes);
         }
 
-        bytes = blowfish_decrypt(&scheme.data_key, &bytes)?;
+        blowfish_decrypt_in_place(&scheme.data_key, &mut bytes)?;
         if version > 0 {
             if let Some(password) = password_for_entry(entry, scheme) {
                 let key = entry_key_material(entry, Some(password))?;
@@ -467,7 +469,7 @@ impl MinoriMountedVfs {
             archive.version,
             &entry.descriptor,
             encrypted_start,
-            &encrypted,
+            encrypted,
         )?;
         let stored_end = entry.descriptor.stored_size.min(decoded.len() as u64);
         let local_start = offset.saturating_sub(encrypted_start);
@@ -806,18 +808,19 @@ impl MinoriEntryStream {
             })?;
         let mut encrypted = read_source_range(&self.archive, offset, count)?;
         xor_byte(&mut encrypted, self.archive.xor_key);
-        let decoded = self.decryptor.decrypt_entry_chunk(
+        let mut decoded = self.decryptor.decrypt_entry_chunk(
             self.archive.version,
             &self.entry,
             self.encrypted_position,
-            &encrypted,
+            encrypted,
         )?;
         let output_end = self
             .entry
             .stored_size
             .min(self.encrypted_position + decoded.len() as u64);
         let output_len = output_end.saturating_sub(self.encrypted_position) as usize;
-        self.pending = decoded.into_iter().take(output_len).collect();
+        decoded.truncate(output_len);
+        self.pending = decoded;
         self.pending_position = 0;
         self.encrypted_position += count;
         Ok(())
@@ -1352,9 +1355,9 @@ fn validate_blowfish_key(key: &[u8]) -> Result<(), PazError> {
     Ok(())
 }
 
-fn blowfish_decrypt(key: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, PazError> {
+fn blowfish_decrypt_in_place(key: &[u8], bytes: &mut [u8]) -> Result<(), PazError> {
     validate_blowfish_key(key)?;
-    if !encrypted.len().is_multiple_of(8) {
+    if !bytes.len().is_multiple_of(8) {
         return Err(error(
             "ASTRA_EMU_MINORI_BLOWFISH_ALIGNMENT",
             "Blowfish input is not block aligned",
@@ -1362,7 +1365,6 @@ fn blowfish_decrypt(key: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, PazError> {
     }
     let cipher: Blowfish = Blowfish::new_from_slice(key)
         .map_err(|_| error("ASTRA_EMU_MINORI_BLOWFISH_KEY", "Blowfish key is invalid"))?;
-    let mut bytes = encrypted.to_vec();
     for chunk in bytes.as_chunks_mut::<8>().0.iter_mut() {
         chunk[..4].reverse();
         chunk[4..].reverse();
@@ -1370,7 +1372,7 @@ fn blowfish_decrypt(key: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, PazError> {
         chunk[..4].reverse();
         chunk[4..].reverse();
     }
-    Ok(bytes)
+    Ok(())
 }
 
 fn xor_byte(bytes: &mut [u8], key: u8) {

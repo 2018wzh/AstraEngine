@@ -5,6 +5,7 @@
 - 授权原版在既有 Sandbox session 中恢复到普通剧情画面，但先后在消息阶段和选择 Load 菜单时触发访问异常。目标罕见行没有被可靠复现，因此本轮不据崩溃后的画面解释控制标记，也不在 runtime 中增加静默删除或推测语义。
 - 全量脚本的私有统计继续只确认该行末组合出现一次；公开记录不保存脚本名、正文或截图。下一步需要可复现的原版断点/反编译证据，或在干净 session 中到达同一 source span 后再修改 message parser。
 - 同步清理现行契约中的两处迁移残留：AstraEMU Manager 不再声明通用 Trusted Luau script profile，Minori media 也不再声明 64 MiB 进程内明文 entry cache。现行路径是严格 launch profile、相对 private file、family-owned 流式解密和 AstraMedia custom AVIO。
+- PAZ chunk transform 进一步接管 source reader 返回的 owned buffer。Blowfish、RC4 和 movie transform 在该 allocation 原地执行；顺序 stream 只截断有效 stored range 后直接保留，不再先复制 decrypt 输入、再 collect 一份 pending buffer。新增 pointer-identity 回归和原有 7 个流式用例均通过；真实峰值内存规模证据仍未完成。
 
 ## 2026-08-30：FFmpeg custom AVIO 与当前 E2 边界
 
