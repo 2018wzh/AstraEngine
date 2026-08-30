@@ -1,5 +1,22 @@
 # Minori 移植日志
 
+## 2026-08-31：Config 全屏设置改由 Host 原生应用
+
+Config 页面提交全屏选项后，Minori 不再把窗口状态当作自己的即时副作用。family
+先完成 draft apply，再通过 Family ABI v13 发布有界的
+`LegacySystemCommandTransactionV1::SetFullscreen`；Host 在自己的平台事件循环中执行
+窗口切换，并在后续 fixed tick 回送 typed result。命令等待期间禁止 gameplay 输入和其他
+completion，避免同一 session 同时推进 VM 与 native window。
+
+为避免 Config 关闭后留下旧的页面，family 会在命令发布轮重建一次 retained gameplay
+presentation；Host 返回 `Applied` 后再更新运行时的 fullscreen 状态并写入
+installation-scoped config。取消或没有实际改变 fullscreen 时不会发布命令；Rejected、
+Unsupported、持久化失败仍直接返回 blocking diagnostic。新增 provider 回归覆盖 draft、
+命令、挂起、完成和恢复链路，既有右键菜单窗口命令回归保持通过。
+
+这仍是 provider/ABI 的局部 E1/E2 证据，不代表各桌面平台的原版窗口行为、同点视觉
+对照或 Windows E3 已完成。
+
 ## 2026-08-31：原版消息推进指示器对齐
 
 在授权 Windows Sandbox 的普通剧情画面中，正文末尾稳定出现一个白色下三角；

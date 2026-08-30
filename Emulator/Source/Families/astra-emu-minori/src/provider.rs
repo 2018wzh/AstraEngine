@@ -576,6 +576,10 @@ struct ActiveMinoriConfirmation {
 struct ActiveMinoriSystemCommand {
     command_id: String,
     command: LegacySystemCommandKindV1,
+    /// Config closes directly back to gameplay, so the family must rebuild
+    /// the retained gameplay presentation while the Host applies fullscreen.
+    /// Native-menu window commands keep the existing retained scene.
+    resume_gameplay: bool,
 }
 
 #[derive(Default)]
@@ -1022,7 +1026,20 @@ impl MinoriRuntimeProvider {
         }
         if session.active_system_command.is_some() || input.system_command.is_some() {
             let audio_commands = take_restore_audio_commands(session, &vfs)?;
-            return handle_system_command_step(session, &vfs, &input, audio_commands);
+            let services = host_services.as_ref().ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                    "system command requires current Family ABI Host services",
+                )
+            })?;
+            return handle_system_command_step(
+                services,
+                session_id,
+                session,
+                &vfs,
+                &input,
+                audio_commands,
+            );
         }
         if session.active_confirmation.is_some() || input.confirmation.is_some() {
             let audio_commands = take_restore_audio_commands(session, &vfs)?;
@@ -1502,7 +1519,7 @@ impl MinoriRuntimeProvider {
                         .vm
                         .config_audio_param_commands()
                         .map_err(runtime_error)?,
-                    MinoriSystemUiAction::PresentAfterConfigClose => session
+                    MinoriSystemUiAction::PresentAfterConfigClose { .. } => session
                         .vm
                         .close_config_audio_commands()
                         .map_err(runtime_error)?,
@@ -1533,14 +1550,65 @@ impl MinoriRuntimeProvider {
                         &mut restore_audio,
                     )?;
                 }
-                if action == MinoriSystemUiAction::PresentAfterConfigClose
-                    && session.vm.state().system_ui.page == MinoriSystemPage::None
-                {
-                    session
-                        .vm
-                        .advance_provider_tick(input.tick_index)
-                        .map_err(runtime_error)?;
-                    return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                if let MinoriSystemUiAction::PresentAfterConfigClose { fullscreen } = action {
+                    if let Some(enabled) = fullscreen {
+                        let sequence = session
+                            .vm
+                            .allocate_effect_sequence()
+                            .map_err(runtime_error)?;
+                        let command_id =
+                            format!("minori.system_command.config_fullscreen.{sequence}");
+                        let command = LegacySystemCommandKindV1::SetFullscreen { enabled };
+                        let services = host_services.as_ref().ok_or_else(|| {
+                            invalid(
+                                "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                                "config fullscreen requires current Family ABI Host services",
+                            )
+                        })?;
+                        services.system_commands.publish(
+                            &session_id.0,
+                            LegacySystemCommandTransactionV1 {
+                                sequence,
+                                command_id: command_id.clone(),
+                                command,
+                            },
+                        )?;
+                        session.active_system_command = Some(ActiveMinoriSystemCommand {
+                            command_id,
+                            command,
+                            resume_gameplay: session.vm.state().system_ui.page
+                                == MinoriSystemPage::None,
+                        });
+                        session
+                            .vm
+                            .advance_provider_tick(input.tick_index)
+                            .map_err(runtime_error)?;
+                        return if session.vm.state().system_ui.page == MinoriSystemPage::None {
+                            gameplay_resume_output(session, &vfs, &input, restore_audio)
+                        } else {
+                            system_ui_output(session, &vfs, &input, restore_audio)
+                        };
+                    }
+                    if session.config_storage_enabled {
+                        let services = host_services.as_ref().ok_or_else(|| {
+                            invalid(
+                                "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                                "config persistence requires current Family ABI Host services",
+                            )
+                        })?;
+                        store_persistent_config_if_changed(
+                            services.writable_files.as_ref(),
+                            session_id,
+                            session,
+                        )?;
+                    }
+                    if session.vm.state().system_ui.page == MinoriSystemPage::None {
+                        session
+                            .vm
+                            .advance_provider_tick(input.tick_index)
+                            .map_err(runtime_error)?;
+                        return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                    }
                 }
                 session
                     .vm
@@ -5223,7 +5291,7 @@ fn validate_script_uri(script_uri: &str) -> Result<(), LegacyProviderError> {
 enum MinoriSystemUiAction {
     Present,
     PresentWithAudioRefresh,
-    PresentAfterConfigClose,
+    PresentAfterConfigClose { fullscreen: Option<bool> },
     PresentWithAudioTest(MinoriConfigAudioBus),
     StartGame,
     CloseBacklog,
@@ -5242,7 +5310,7 @@ fn system_ui_action_name(action: MinoriSystemUiAction) -> &'static str {
     match action {
         MinoriSystemUiAction::Present => "present",
         MinoriSystemUiAction::PresentWithAudioRefresh => "present_with_audio_refresh",
-        MinoriSystemUiAction::PresentAfterConfigClose => "present_after_config_close",
+        MinoriSystemUiAction::PresentAfterConfigClose { .. } => "present_after_config_close",
         MinoriSystemUiAction::PresentWithAudioTest(_) => "present_with_audio_test",
         MinoriSystemUiAction::StartGame => "start_game",
         MinoriSystemUiAction::CloseBacklog => "close_backlog",
@@ -6675,6 +6743,7 @@ fn handle_system_menu_request(
                     session.active_system_command = Some(ActiveMinoriSystemCommand {
                         command_id,
                         command,
+                        resume_gameplay: false,
                     });
                     session
                         .vm
@@ -6751,6 +6820,8 @@ fn handle_confirmation_step(
 }
 
 fn handle_system_command_step(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &LegacyRuntimeSessionId,
     session: &mut MinoriSession,
     vfs: &Arc<dyn LegacyVfsReader>,
     input: &LegacyStepInput,
@@ -6794,13 +6865,17 @@ fn handle_system_command_step(
         .vm
         .advance_provider_tick(input.tick_index)
         .map_err(runtime_error)?;
+    let mut persist_config = false;
     match result.status {
         LegacySystemCommandStatusV1::Applied => {
             match active.command {
-                LegacySystemCommandKindV1::SetFullscreen { enabled } => session
-                    .vm
-                    .set_runtime_fullscreen(enabled)
-                    .map_err(runtime_error)?,
+                LegacySystemCommandKindV1::SetFullscreen { enabled } => {
+                    session
+                        .vm
+                        .set_runtime_fullscreen(enabled)
+                        .map_err(runtime_error)?;
+                    persist_config = true;
+                }
                 LegacySystemCommandKindV1::RestoreOriginalSize
                 | LegacySystemCommandKindV1::SetResizePrecision { .. }
                 | LegacySystemCommandKindV1::OpenManual
@@ -6818,7 +6893,18 @@ fn handle_system_command_step(
                     session.resize_antialias = enabled;
                 }
             }
-            idle_system_menu_output(session, vfs, input, audio_commands, None)
+            if persist_config {
+                store_persistent_config_if_changed(
+                    services.writable_files.as_ref(),
+                    session_id,
+                    session,
+                )?;
+            }
+            if active.resume_gameplay {
+                gameplay_resume_output(session, vfs, input, audio_commands)
+            } else {
+                idle_system_menu_output(session, vfs, input, audio_commands, None)
+            }
         }
         LegacySystemCommandStatusV1::Rejected => {
             session.poisoned = true;
@@ -7230,11 +7316,16 @@ fn apply_config_input(
     let Some(control) = control else {
         return Ok(MinoriSystemUiAction::Present);
     };
+    let fullscreen_before = vm.state().system_ui.config.fullscreen;
     match vm.apply_config_control(control).map_err(runtime_error)? {
         MinoriConfigChange::Present => Ok(MinoriSystemUiAction::Present),
         MinoriConfigChange::AudioParamsChanged => Ok(MinoriSystemUiAction::PresentWithAudioRefresh),
-        MinoriConfigChange::Applied | MinoriConfigChange::Cancelled => {
-            Ok(MinoriSystemUiAction::PresentAfterConfigClose)
+        MinoriConfigChange::Applied => Ok(MinoriSystemUiAction::PresentAfterConfigClose {
+            fullscreen: (vm.state().system_ui.config.fullscreen != fullscreen_before)
+                .then_some(vm.state().system_ui.config.fullscreen),
+        }),
+        MinoriConfigChange::Cancelled => {
+            Ok(MinoriSystemUiAction::PresentAfterConfigClose { fullscreen: None })
         }
         MinoriConfigChange::TestAudio(bus) => Ok(MinoriSystemUiAction::PresentWithAudioTest(bus)),
     }
@@ -11318,6 +11409,121 @@ mod tests {
                 .system_ui
                 .config
                 .fullscreen
+        );
+    }
+
+    #[test]
+    fn config_fullscreen_uses_host_command_before_resuming_gameplay() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/test.sc".into(),
+                b".wait 20\r\n.end\r\n".to_vec(),
+            )]),
+        });
+        let system_commands = Arc::new(RecordingSystemCommandHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs,
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::new(RejectWritableFiles),
+            system_menus: Arc::new(RecordingSystemMenuHost::default()),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: system_commands.clone(),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId(
+                        "session.config.fullscreen".into(),
+                    ),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        // Establish a title-launched gameplay wait without going through the
+        // title resource presentation.  The provider path under test starts
+        // from the same stable wait that the native menu uses.
+        {
+            let session_state = provider.sessions.get_mut(&session.0).unwrap();
+            session_state.vm.begin_title_launch().unwrap();
+            session_state
+                .vm
+                .set_system_page(MinoriSystemPage::None, 0)
+                .unwrap();
+            session_state.vm.step(1, 100).unwrap();
+            session_state.vm.open_gameplay_config().unwrap();
+            assert_eq!(
+                session_state
+                    .vm
+                    .apply_config_control(MinoriConfigControl::Fullscreen(true))
+                    .unwrap(),
+                MinoriConfigChange::Present
+            );
+        }
+
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "enter".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+        let command = system_commands
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .expect("config apply must publish a native fullscreen command")
+            .1
+            .clone();
+        assert_eq!(
+            command.command,
+            LegacySystemCommandKindV1::SetFullscreen { enabled: true }
+        );
+        assert!(provider.sessions[&session.0]
+            .active_system_command
+            .is_some());
+
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_command: Some(LegacySystemCommandResultV1 {
+                        command_id: command.command_id,
+                        status: LegacySystemCommandStatusV1::Applied,
+                        sequence: 2,
+                    }),
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .unwrap();
+        let session_state = &provider.sessions[&session.0];
+        assert!(session_state.active_system_command.is_none());
+        assert!(session_state.vm.state().system_ui.config.fullscreen);
+        assert_eq!(
+            session_state.vm.state().system_ui.page,
+            MinoriSystemPage::None
         );
     }
 

@@ -1,5 +1,22 @@
 # Minori Implementation Checklist
 
+## Config fullscreen Host command (2026-08-31)
+
+- [x] Applying the Config fullscreen choice now emits a typed Family ABI
+  `LegacySystemCommandTransactionV1::SetFullscreen` instead of changing a
+  window locally inside Minori. The Host remains the only owner of the native
+  window operation and returns an explicit result on the next fixed tick.
+- [x] The family rebuilds the retained gameplay presentation while the native
+  Host applies the command, then persists the installation-scoped config only
+  after an `Applied` result. Cancel and unchanged fullscreen values do not
+  publish a command; rejected or unsupported Host results remain blocking.
+- [x] Added a provider regression covering Config draft apply, command
+  publication, suspended input, Host completion and gameplay resume. Existing
+  native-menu fullscreen and host-owned command tests still pass.
+- [ ] This is focused provider/ABI evidence only. Native fullscreen behavior
+  on each release platform, original same-point visual comparison and Windows
+  E3 remain open.
+
 ## Family ABI v13 native menu Host split (2026-08-31)
 
 - [x] Confirmation and system-menu transactions use Family ABI v13 typed ports; the
