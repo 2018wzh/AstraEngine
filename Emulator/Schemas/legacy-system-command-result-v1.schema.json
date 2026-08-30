@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacySystemCommandResultV1",
+  "type": "object",
+  "required": [
+    "command_id",
+    "sequence",
+    "status"
+  ],
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "status": {
+      "$ref": "#/definitions/LegacySystemCommandStatusV1"
+    }
+  },
+  "definitions": {
+    "LegacySystemCommandStatusV1": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "rejected",
+        "unsupported"
+      ]
+    }
+  }
+}

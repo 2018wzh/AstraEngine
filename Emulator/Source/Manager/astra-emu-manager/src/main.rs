@@ -50,9 +50,9 @@ use astra_emu_manager_core::{
     BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord, CompatibilityCacheEntry,
     CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord, GrantedSourceReader, Library,
     LibraryScanner, LiveWaitBindingKind, MatchCandidateRecord, MatchDecisionRecord,
-    MetadataSnapshotRecord, PendingFamilyConfirmation, PendingFamilySystemMenu,
-    ProviderConsentRecord, ScanLimits, SourceGrant, TranslationConsent, TranslationProfileRecord,
-    VfsResourceInfo,
+    MetadataSnapshotRecord, PendingFamilyConfirmation, PendingFamilySystemCommand,
+    PendingFamilySystemMenu, ProviderConsentRecord, ScanLimits, SourceGrant, TranslationConsent,
+    TranslationProfileRecord, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -307,6 +307,13 @@ impl RuntimeBridge {
             .map_err(|error| error.to_string())
     }
 
+    fn take_pending_system_command(&self) -> Result<Option<PendingFamilySystemCommand>, String> {
+        self.provider
+            .system_command_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())
+    }
+
     fn resolve_system_menu(&mut self, menu_id: &str, item_id: Option<&str>) -> Result<(), String> {
         let active = self
             .active
@@ -367,6 +374,33 @@ impl RuntimeBridge {
                 &pending.session_id,
                 &pending.confirmation.confirmation_id,
                 choice,
+                active.input_sequence,
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    /// Manager has no game-owned native window handle.  Resolve the typed
+    /// command as unsupported instead of interpreting it in Slint or leaving
+    /// the family session suspended indefinitely; desktop game hosts execute
+    /// supported window operations through their platform window binding.
+    fn present_system_command(
+        &mut self,
+        pending: PendingFamilySystemCommand,
+    ) -> Result<(), String> {
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        active.input_sequence = active
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        self.provider
+            .system_command_host()
+            .resolve(
+                &pending.session_id,
+                &pending.command.command_id,
+                astra_emu_family_api::LegacySystemCommandStatusV1::Unsupported,
                 active.input_sequence,
             )
             .map_err(|error| error.to_string())
@@ -3270,6 +3304,23 @@ impl ManagerController for AstraEmuManagerController {
             .confirmation_host()
             .take_next_pending()
             .map_err(|error| error.to_string())
+    }
+    fn take_pending_system_command(
+        &mut self,
+    ) -> Result<Option<PendingFamilySystemCommand>, String> {
+        self.runtime
+            .try_borrow()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .take_pending_system_command()
+    }
+    fn present_system_command(
+        &mut self,
+        pending: PendingFamilySystemCommand,
+    ) -> Result<(), String> {
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .present_system_command(pending)
     }
 
     fn present_confirmation(&mut self, pending: PendingFamilyConfirmation) -> Result<(), String> {

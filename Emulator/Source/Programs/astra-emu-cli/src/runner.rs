@@ -32,8 +32,9 @@ use astra_emu_family_api::{
     parse_legacy_system_ui_activity, LegacyAudioCommandV1, LegacyAudioEncoding,
     LegacyAudioPacketV7, LegacyAudioSampleFormat, LegacyAwaitResult, LegacyConfirmationChoiceV1,
     LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest, LegacyResourceRead,
-    LegacyRuntimeHostCtx, LegacySystemMenuItemKindV1, LegacyTextureFilter, LegacyTextureFormat,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
+    LegacyRuntimeHostCtx, LegacySystemCommandKindV1, LegacySystemCommandStatusV1,
+    LegacySystemMenuItemKindV1, LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
@@ -73,7 +74,7 @@ use astra_platform::{
     GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy, HeadlessArtifactRetention,
     HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy, PlatformDecodeRequest,
     PlatformHostClient, PlatformHostFactory, RgbaFrame, SceneFrame, ScenePresentReceipt,
-    SurfaceHandle, SurfaceRequest, WindowHandle, WindowRequest,
+    SurfaceHandle, SurfaceRequest, WindowCommand, WindowHandle, WindowRequest,
 };
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use astra_platform::{
@@ -6110,6 +6111,11 @@ impl<'a> RuntimeDriver<'a> {
         self.present_native_system_menu_if_pending().await?;
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         self.reject_unsupported_native_system_menu_if_pending()?;
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        self.present_native_system_command_if_pending().await?;
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        self.reject_unsupported_native_system_command_if_pending()?;
+        self.resolve_virtual_system_command_if_pending()?;
         self.present_native_confirmation_if_pending().await?;
         self.capture_virtual_confirmation_if_pending()?;
         self.capture_virtual_system_menu_if_pending()?;
@@ -6161,6 +6167,30 @@ impl<'a> RuntimeDriver<'a> {
             accept_focused: false,
         });
         Ok(())
+    }
+
+    fn resolve_virtual_system_command_if_pending(&mut self) -> Result<(), String> {
+        if self.window.is_some() {
+            return Ok(());
+        }
+        let host = self.runtime.system_command_host();
+        let Some(pending) = host
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        self.input_sequence = self
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_SYSTEM_COMMAND_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        host.resolve(
+            &pending.session_id,
+            &pending.command.command_id,
+            LegacySystemCommandStatusV1::Unsupported,
+            self.input_sequence,
+        )
+        .map_err(|error| error.to_string())
     }
 
     async fn present_native_confirmation_if_pending(&mut self) -> Result<(), String> {
@@ -6261,6 +6291,50 @@ impl<'a> RuntimeDriver<'a> {
             .map_err(|error| error.to_string())
     }
 
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    async fn present_native_system_command_if_pending(&mut self) -> Result<(), String> {
+        let Some(window) = self.window else {
+            return Ok(());
+        };
+        let host = self.runtime.system_command_host();
+        let Some(pending) = host
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        let status = match pending.command.command {
+            LegacySystemCommandKindV1::SetFullscreen { enabled } => self
+                .platform
+                .apply_window_command(window, WindowCommand::SetFullscreen { enabled })
+                .await
+                .map(|_| LegacySystemCommandStatusV1::Applied)
+                .unwrap_or(LegacySystemCommandStatusV1::Rejected),
+            LegacySystemCommandKindV1::RestoreOriginalSize => self
+                .platform
+                .apply_window_command(window, WindowCommand::RestoreOriginalSize)
+                .await
+                .map(|_| LegacySystemCommandStatusV1::Applied)
+                .unwrap_or(LegacySystemCommandStatusV1::Rejected),
+            LegacySystemCommandKindV1::SetResizePrecision { .. }
+            | LegacySystemCommandKindV1::SetResizeAntialias { .. }
+            | LegacySystemCommandKindV1::OpenManual
+            | LegacySystemCommandKindV1::ShowAbout
+            | LegacySystemCommandKindV1::OpenHomepage => LegacySystemCommandStatusV1::Unsupported,
+        };
+        self.input_sequence = self
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_SYSTEM_COMMAND_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        host.resolve(
+            &pending.session_id,
+            &pending.command.command_id,
+            status,
+            self.input_sequence,
+        )
+        .map_err(|error| error.to_string())
+    }
+
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     fn reject_unsupported_native_system_menu_if_pending(&self) -> Result<(), String> {
         if self.window.is_some()
@@ -6271,6 +6345,20 @@ impl<'a> RuntimeDriver<'a> {
                 .map_err(|error| error.to_string())?
         {
             return Err("ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED".to_owned());
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn reject_unsupported_native_system_command_if_pending(&self) -> Result<(), String> {
+        if self.window.is_some()
+            && self
+                .runtime
+                .system_command_host()
+                .has_pending_interaction()
+                .map_err(|error| error.to_string())?
+        {
+            return Err("ASTRA_EMU_PLATFORM_SYSTEM_COMMAND_UNSUPPORTED".to_owned());
         }
         Ok(())
     }

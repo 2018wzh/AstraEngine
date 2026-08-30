@@ -68,6 +68,15 @@ pub struct WindowRequest {
     pub visible: bool,
 }
 
+/// A bounded command applied to an existing native window by the platform
+/// host.  Family providers describe semantic intent through their own ABI;
+/// the host maps only operations with a real platform implementation here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowCommand {
+    SetFullscreen { enabled: bool },
+    RestoreOriginalSize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuItemKind {
     Command,
@@ -542,6 +551,11 @@ pub enum HostCommand {
         request: ConfirmationRequest,
         reply: oneshot::Sender<Result<ConfirmationResult, PlatformError>>,
     },
+    ApplyWindowCommand {
+        window: WindowHandle,
+        command: WindowCommand,
+        reply: oneshot::Sender<Result<(), PlatformError>>,
+    },
     CaptureSurface {
         surface: SurfaceHandle,
         reply: oneshot::Sender<Result<CapturedFrame, PlatformError>>,
@@ -661,6 +675,7 @@ impl HostCommand {
             Self::CreateSurface { .. } => "surface.create",
             Self::ShowContextMenu { .. } => "window.context_menu",
             Self::ShowConfirmation { .. } => "window.confirmation",
+            Self::ApplyWindowCommand { .. } => "window.command",
             Self::CaptureSurface { .. } => "surface.capture",
             Self::PresentRgba { .. } => "surface.present_rgba",
             Self::PresentScene { .. } => "surface.present_scene",
@@ -698,6 +713,7 @@ impl HostCommand {
             | Self::PresentScene { reply, .. }
             | Self::DestroySurface { reply, .. }
             | Self::DestroyWindow { reply, .. }
+            | Self::ApplyWindowCommand { reply, .. }
             | Self::PauseAudio { reply, .. }
             | Self::ResumeAudio { reply, .. }
             | Self::AbortAudio { reply, .. }
@@ -735,6 +751,7 @@ impl HostCommand {
             Self::CreateSurface { reply, .. } => send_error!(reply),
             Self::ShowContextMenu { reply, .. } => send_error!(reply),
             Self::ShowConfirmation { reply, .. } => send_error!(reply),
+            Self::ApplyWindowCommand { reply, .. } => send_error!(reply),
             Self::CaptureSurface { reply, .. } => send_error!(reply),
             Self::PresentRgba { reply, .. } => send_error!(reply),
             Self::PresentScene { reply, .. } => send_error!(reply),
@@ -1030,6 +1047,21 @@ impl PlatformHostClient {
         response
             .await
             .map_err(|_| queue_closed("window.confirmation"))?
+    }
+
+    pub async fn apply_window_command(
+        &self,
+        window: WindowHandle,
+        command: WindowCommand,
+    ) -> Result<(), PlatformError> {
+        self.ensure_running("window.command")?;
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ApplyWindowCommand {
+            window,
+            command,
+            reply,
+        })?;
+        response.await.map_err(|_| queue_closed("window.command"))?
     }
 
     pub async fn capture_surface(
@@ -2304,7 +2336,7 @@ fn https_origin(value: &str) -> Option<String> {
 mod tests {
     use super::{
         AudioWakeRegistration, ConfirmationRequest, ContextMenuItem, ContextMenuItemKind,
-        ContextMenuRequest,
+        ContextMenuRequest, HostCommand, WindowCommand,
     };
     use crate::WindowHandle;
     use std::{sync::Arc, thread, time::Duration};
@@ -2423,5 +2455,16 @@ mod tests {
             invalid.validate().unwrap_err().operation,
             "window.confirmation"
         );
+    }
+
+    #[test]
+    fn window_command_is_a_typed_host_operation() {
+        let (reply, _response) = tokio::sync::oneshot::channel();
+        let command = HostCommand::ApplyWindowCommand {
+            window: WindowHandle::from_parts(3, 7).unwrap(),
+            command: WindowCommand::RestoreOriginalSize,
+            reply,
+        };
+        assert_eq!(command.operation(), "window.command");
     }
 }

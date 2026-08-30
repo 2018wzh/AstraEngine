@@ -71,6 +71,18 @@ pub trait LegacyConfirmationHostV1: Send + Sync {
     ) -> Result<(), LegacyProviderError>;
 }
 
+/// Non-blocking host port for family-owned system commands selected from a
+/// published menu.  The family describes the semantic operation and the Host
+/// applies it using the platform-native window/help facilities; completion is
+/// returned through the next `LegacyStepInput`.
+pub trait LegacySystemCommandHostV1: Send + Sync {
+    fn publish(
+        &self,
+        session_id: &str,
+        command: crate::LegacySystemCommandTransactionV1,
+    ) -> Result<(), LegacyProviderError>;
+}
+
 #[derive(Clone)]
 pub struct LegacyFamilyHostServicesV9 {
     pub vfs: Arc<dyn crate::LegacyVfsReader>,
@@ -79,6 +91,7 @@ pub struct LegacyFamilyHostServicesV9 {
     pub writable_files: Arc<dyn LegacyWritableFileHostV1>,
     pub system_menus: Arc<dyn LegacySystemMenuHostV1>,
     pub confirmations: Arc<dyn LegacyConfirmationHostV1>,
+    pub system_commands: Arc<dyn LegacySystemCommandHostV1>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -771,6 +784,14 @@ pub struct FfiPublishConfirmationCallV1 {
     pub confirmation: FfiConfirmationTransactionV1,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiPublishSystemCommandCallV1 {
+    pub host_token: RString,
+    pub session_id: RString,
+    pub command: crate::FfiSystemCommandTransactionV1,
+}
+
 pub type FfiAcquireSurfaceV9 =
     extern "C" fn(FfiAcquireSurfaceCallV9) -> FfiLegacyResult<FfiSurfaceLeaseV9>;
 pub type FfiCommitSurfaceV9 = extern "C" fn(FfiCommitSurfaceCallV9) -> FfiLegacyResult<()>;
@@ -780,6 +801,8 @@ pub type FfiWritableFileV1 =
 pub type FfiPublishSystemMenuV1 = extern "C" fn(FfiPublishSystemMenuCallV1) -> FfiLegacyResult<()>;
 pub type FfiPublishConfirmationV1 =
     extern "C" fn(FfiPublishConfirmationCallV1) -> FfiLegacyResult<()>;
+pub type FfiPublishSystemCommandV1 =
+    extern "C" fn(FfiPublishSystemCommandCallV1) -> FfiLegacyResult<()>;
 
 impl From<crate::LegacyConfirmationTransactionV1> for FfiConfirmationTransactionV1 {
     fn from(value: crate::LegacyConfirmationTransactionV1) -> Self {

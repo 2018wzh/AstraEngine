@@ -9,6 +9,8 @@ use astra_core::Hash256;
 #[cfg(test)]
 use astra_core::SchemaVersion;
 use astra_emu_extension_api::{translation_response, TRANSLATION_TEXT_HOOK_ID};
+#[cfg(test)]
+use astra_emu_family_api::LegacySystemCommandResultV1;
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
     LegacyBlackboardMutation, LegacyBlendMode, LegacyConfirmationChoiceV1,
@@ -21,7 +23,8 @@ use astra_emu_family_api::{
     LegacyResourceRead, LegacyRuntimeHostCtx, LegacyRuntimeProvider, LegacyRuntimeSessionId,
     LegacyRuntimeStatus, LegacyScissorV1, LegacySequenced, LegacyShutdownReport, LegacyStepInput,
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
-    LegacySurfaceFormatV9, LegacySystemMenuActionV1, LegacySystemMenuItemKindV1,
+    LegacySurfaceFormatV9, LegacySystemCommandKindV1, LegacySystemCommandStatusV1,
+    LegacySystemCommandTransactionV1, LegacySystemMenuActionV1, LegacySystemMenuItemKindV1,
     LegacySystemMenuItemV1, LegacySystemMenuTransactionV1, LegacyTextureFilter,
     LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
     LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
@@ -545,6 +548,7 @@ struct MinoriSession {
     last_layer_sequence: u64,
     active_system_menu: Option<String>,
     active_confirmation: Option<ActiveMinoriConfirmation>,
+    active_system_command: Option<ActiveMinoriSystemCommand>,
     poisoned: bool,
 }
 
@@ -558,6 +562,12 @@ enum MinoriConfirmationAction {
 struct ActiveMinoriConfirmation {
     confirmation_id: String,
     action: MinoriConfirmationAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveMinoriSystemCommand {
+    command_id: String,
+    command: LegacySystemCommandKindV1,
 }
 
 #[derive(Default)]
@@ -892,6 +902,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 last_layer_sequence: 0,
                 active_system_menu: None,
                 active_confirmation: None,
+                active_system_command: None,
                 poisoned: false,
             },
         );
@@ -999,6 +1010,10 @@ impl MinoriRuntimeProvider {
         {
             session.poisoned = true;
             return Err(runtime_error(MinoriRuntimeError::State));
+        }
+        if session.active_system_command.is_some() || input.system_command.is_some() {
+            let audio_commands = take_restore_audio_commands(session, &vfs)?;
+            return handle_system_command_step(session, &vfs, &input, audio_commands);
         }
         if session.active_confirmation.is_some() || input.confirmation.is_some() {
             let audio_commands = take_restore_audio_commands(session, &vfs)?;
@@ -6617,25 +6632,44 @@ fn handle_system_menu_request(
                 | "help_manual"
                 | "help_about"
                 | "help_homepage" => {
+                    let command = match item_id {
+                        "window_fullscreen" => LegacySystemCommandKindV1::SetFullscreen {
+                            enabled: !session.vm.state().system_ui.config.fullscreen,
+                        },
+                        "window_original_size" => LegacySystemCommandKindV1::RestoreOriginalSize,
+                        "window_precision" => {
+                            LegacySystemCommandKindV1::SetResizePrecision { enabled: true }
+                        }
+                        "window_antialias" => {
+                            LegacySystemCommandKindV1::SetResizeAntialias { enabled: true }
+                        }
+                        "help_manual" => LegacySystemCommandKindV1::OpenManual,
+                        "help_about" => LegacySystemCommandKindV1::ShowAbout,
+                        "help_homepage" => LegacySystemCommandKindV1::OpenHomepage,
+                        _ => unreachable!("system menu command arm is exhaustive"),
+                    };
                     let sequence = session
                         .vm
                         .allocate_effect_sequence()
                         .map_err(runtime_error)?;
+                    let command_id = format!("minori.system_command.{item_id}.{sequence}");
+                    services.system_commands.publish(
+                        &session_id.0,
+                        LegacySystemCommandTransactionV1 {
+                            sequence,
+                            command_id: command_id.clone(),
+                            command,
+                        },
+                    )?;
+                    session.active_system_command = Some(ActiveMinoriSystemCommand {
+                        command_id,
+                        command,
+                    });
                     session
                         .vm
                         .advance_provider_tick(input.tick_index)
                         .map_err(runtime_error)?;
-                    idle_system_menu_output(
-                        session,
-                        vfs,
-                        input,
-                        audio_commands,
-                        Some(LegacyEvent {
-                            sequence,
-                            event: "minori.system_menu.command".into(),
-                            value: item_id.into(),
-                        }),
-                    )
+                    idle_system_menu_output(session, vfs, input, audio_commands, None)
                 }
                 _ => Err(invalid(
                     "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM_UNKNOWN",
@@ -6702,6 +6736,89 @@ fn handle_confirmation_step(
                 system_ui_output(session, vfs, input, audio_commands)
             }
         },
+    }
+}
+
+fn handle_system_command_step(
+    session: &mut MinoriSession,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    input: &LegacyStepInput,
+    audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
+) -> Result<LegacyStepOutput, LegacyProviderError> {
+    if input.system_menu.is_some()
+        || input.confirmation.is_some()
+        || !input.input_edges.is_empty()
+        || !input.await_results.is_empty()
+        || !input.provider_results.is_empty()
+    {
+        session.poisoned = true;
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_COMMAND_INPUT_WHILE_ACTIVE",
+            "active native system command must suspend gameplay input and completions",
+        ));
+    }
+    let active = session.active_system_command.clone().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_COMMAND_NOT_ACTIVE",
+            "system command result has no active Minori transaction",
+        )
+    })?;
+    let Some(result) = input.system_command.as_ref() else {
+        session
+            .vm
+            .advance_provider_tick(input.tick_index)
+            .map_err(runtime_error)?;
+        return idle_system_menu_output(session, vfs, input, audio_commands, None);
+    };
+    result.validate()?;
+    if result.command_id != active.command_id {
+        session.poisoned = true;
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_COMMAND_ID_MISMATCH",
+            "system command result does not match the active Minori transaction",
+        ));
+    }
+    session.active_system_command = None;
+    session
+        .vm
+        .advance_provider_tick(input.tick_index)
+        .map_err(runtime_error)?;
+    match result.status {
+        LegacySystemCommandStatusV1::Applied => {
+            match active.command {
+                LegacySystemCommandKindV1::SetFullscreen { enabled } => session
+                    .vm
+                    .set_runtime_fullscreen(enabled)
+                    .map_err(runtime_error)?,
+                LegacySystemCommandKindV1::RestoreOriginalSize
+                | LegacySystemCommandKindV1::SetResizePrecision { .. }
+                | LegacySystemCommandKindV1::SetResizeAntialias { .. }
+                | LegacySystemCommandKindV1::OpenManual
+                | LegacySystemCommandKindV1::ShowAbout
+                | LegacySystemCommandKindV1::OpenHomepage => {
+                    session.poisoned = true;
+                    return Err(invalid(
+                        "ASTRA_EMU_MINORI_SYSTEM_COMMAND_UNSUPPORTED",
+                        "Minori has no verified family state for this applied host command",
+                    ));
+                }
+            }
+            idle_system_menu_output(session, vfs, input, audio_commands, None)
+        }
+        LegacySystemCommandStatusV1::Rejected => {
+            session.poisoned = true;
+            Err(invalid(
+                "ASTRA_EMU_MINORI_SYSTEM_COMMAND_REJECTED",
+                "native host rejected the Minori system command",
+            ))
+        }
+        LegacySystemCommandStatusV1::Unsupported => {
+            session.poisoned = true;
+            Err(invalid(
+                "ASTRA_EMU_MINORI_SYSTEM_COMMAND_UNSUPPORTED",
+                "native host does not support the Minori system command",
+            ))
+        }
     }
 }
 
@@ -10427,6 +10544,26 @@ mod tests {
     }
 
     #[derive(Default)]
+    struct RecordingSystemCommandHost {
+        published: std::sync::Mutex<Vec<(String, LegacySystemCommandTransactionV1)>>,
+    }
+
+    impl astra_emu_family_api::LegacySystemCommandHostV1 for RecordingSystemCommandHost {
+        fn publish(
+            &self,
+            session_id: &str,
+            command: LegacySystemCommandTransactionV1,
+        ) -> Result<(), LegacyProviderError> {
+            command.validate()?;
+            self.published
+                .lock()
+                .unwrap()
+                .push((session_id.into(), command));
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
     struct RecordingConfirmationHost {
         published: std::sync::Mutex<Vec<(String, LegacyConfirmationTransactionV1)>>,
     }
@@ -10936,6 +11073,7 @@ mod tests {
             writable_files: writable,
             system_menus: system_menus.clone(),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11046,6 +11184,116 @@ mod tests {
     }
 
     #[test]
+    fn native_system_command_is_typed_and_applied_only_after_host_completion() {
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/test.sc".into(),
+                b".wait 20\r\n.end\r\n".to_vec(),
+            )]),
+        });
+        let system_menus = Arc::new(RecordingSystemMenuHost::default());
+        let system_commands = Arc::new(RecordingSystemCommandHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs,
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::new(RejectWritableFiles),
+            system_menus: system_menus.clone(),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: system_commands.clone(),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.command".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::new(),
+                },
+            )
+            .unwrap();
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Open,
+                        menu_id: None,
+                        item_id: None,
+                        pointer_x: Some(640),
+                        pointer_y: Some(360),
+                        sequence: 1,
+                    }),
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+        let menu_id = system_menus.published.lock().unwrap()[0].1.menu_id.clone();
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Select,
+                        menu_id: Some(menu_id),
+                        item_id: Some("window_fullscreen".into()),
+                        pointer_x: None,
+                        pointer_y: None,
+                        sequence: 2,
+                    }),
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .unwrap();
+        let command = system_commands.published.lock().unwrap()[0].1.clone();
+        assert!(matches!(
+            command.command,
+            LegacySystemCommandKindV1::SetFullscreen { enabled: true }
+        ));
+        assert!(
+            !provider.sessions[&session.0]
+                .vm
+                .state()
+                .system_ui
+                .config
+                .fullscreen
+        );
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_command: Some(LegacySystemCommandResultV1 {
+                        command_id: command.command_id,
+                        status: LegacySystemCommandStatusV1::Applied,
+                        sequence: 3,
+                    }),
+                    ..step_input(4, Vec::new())
+                },
+            )
+            .unwrap();
+        assert!(
+            provider.sessions[&session.0]
+                .vm
+                .state()
+                .system_ui
+                .config
+                .fullscreen
+        );
+    }
+
+    #[test]
     fn exit_confirmation_cancels_without_consuming_gameplay_then_accepts_once() {
         let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
             scripts: BTreeMap::from([(
@@ -11062,6 +11310,7 @@ mod tests {
             writable_files: Arc::new(RejectWritableFiles),
             system_menus: system_menus.clone(),
             confirmations: confirmations.clone(),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11218,6 +11467,7 @@ mod tests {
             writable_files: Arc::new(RejectWritableFiles),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: confirmations.clone(),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11391,6 +11641,7 @@ mod tests {
             writable_files: Arc::new(RejectWritableFiles),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
         };
         let mut published_layers = BTreeSet::new();
         let mut presentation_layers = BTreeMap::new();
@@ -11477,6 +11728,7 @@ mod tests {
             writable_files: Arc::new(RejectWritableFiles),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11812,6 +12064,7 @@ mod tests {
             writable_files: Arc::clone(&writable_host),
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
         };
         let storage_options = BTreeMap::from([(
             MINORI_GLOBAL_PROGRESS_OPTION.into(),
@@ -15318,6 +15571,7 @@ mod tests {
             input_edges: Vec::new(),
             system_menu: None,
             confirmation: None,
+            system_command: None,
             await_results,
             provider_results: Vec::new(),
         }

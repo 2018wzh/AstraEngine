@@ -285,6 +285,10 @@ pub struct LegacyStepInput {
     /// text is ephemeral presentation data and must not enter reports, logs,
     /// replay or save state.
     pub confirmation: Option<LegacyConfirmationResultV1>,
+    /// Completion of one family-owned system command applied by the Host.
+    /// The command itself is published through `LegacySystemCommandHostV1`;
+    /// only the bounded status crosses back into the fixed-step input.
+    pub system_command: Option<LegacySystemCommandResultV1>,
     pub await_results: Vec<LegacyAwaitResult>,
     pub provider_results: Vec<LegacyProviderResult>,
 }
@@ -344,6 +348,27 @@ impl LegacyStepInput {
                 ));
             }
         }
+        if let Some(result) = self.system_command.as_ref() {
+            result.validate()?;
+            if self
+                .input_edges
+                .iter()
+                .any(|edge| edge.sequence == result.sequence)
+                || self
+                    .system_menu
+                    .as_ref()
+                    .is_some_and(|request| request.sequence == result.sequence)
+                || self
+                    .confirmation
+                    .as_ref()
+                    .is_some_and(|confirmation| confirmation.sequence == result.sequence)
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_SYSTEM_COMMAND_SEQUENCE_DUPLICATE",
+                    "system-command result sequence duplicates another input item",
+                ));
+            }
+        }
         for edge in &self.input_edges {
             if !is_valid_input_control(&edge.control) {
                 return Err(LegacyProviderError::invalid(
@@ -383,6 +408,67 @@ pub struct LegacyConfirmationResultV1 {
     pub confirmation_id: String,
     pub choice: LegacyConfirmationChoiceV1,
     pub sequence: u64,
+}
+
+/// Semantic operations exposed by a family-owned system menu.  The Host is
+/// responsible for applying the operation with its native window or help
+/// provider; family code never manipulates a platform window directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacySystemCommandKindV1 {
+    SetFullscreen { enabled: bool },
+    RestoreOriginalSize,
+    SetResizePrecision { enabled: bool },
+    SetResizeAntialias { enabled: bool },
+    OpenManual,
+    ShowAbout,
+    OpenHomepage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySystemCommandTransactionV1 {
+    pub sequence: u64,
+    pub command_id: String,
+    pub command: LegacySystemCommandKindV1,
+}
+
+impl LegacySystemCommandTransactionV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_SEQUENCE",
+                "system-command sequence must be non-zero",
+            ));
+        }
+        validate_symbol("system_command_id", &self.command_id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacySystemCommandStatusV1 {
+    Applied,
+    Rejected,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacySystemCommandResultV1 {
+    pub command_id: String,
+    pub status: LegacySystemCommandStatusV1,
+    pub sequence: u64,
+}
+
+impl LegacySystemCommandResultV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_RESULT_SEQUENCE",
+                "system-command result sequence must be non-zero",
+            ));
+        }
+        validate_symbol("system_command_id", &self.command_id)
+    }
 }
 
 impl LegacyConfirmationResultV1 {
@@ -2104,6 +2190,7 @@ mod tests {
             input_edges: Vec::new(),
             system_menu: None,
             confirmation: None,
+            system_command: None,
             await_results: Vec::new(),
             provider_results: Vec::new(),
         }
@@ -2231,6 +2318,26 @@ mod tests {
         assert_eq!(
             invalid.validate().unwrap_err().code(),
             "ASTRA_EMU_SYSTEM_MENU_ACTION_FIELDS"
+        );
+    }
+
+    #[test]
+    fn system_command_contract_rejects_zero_sequence_and_invalid_identity() {
+        let mut command = LegacySystemCommandTransactionV1 {
+            sequence: 0,
+            command_id: "window.fullscreen".into(),
+            command: LegacySystemCommandKindV1::SetFullscreen { enabled: true },
+        };
+        assert_eq!(
+            command.validate().unwrap_err().code(),
+            "ASTRA_EMU_SYSTEM_COMMAND_SEQUENCE"
+        );
+
+        command.sequence = 1;
+        command.command_id = "window?".into();
+        assert_eq!(
+            command.validate().unwrap_err().code(),
+            "ASTRA_EMU_INVALID_SYMBOL"
         );
     }
 

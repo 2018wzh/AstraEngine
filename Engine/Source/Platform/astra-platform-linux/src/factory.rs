@@ -431,6 +431,13 @@ mod linux {
                             "Linux native context menus are not implemented",
                         )));
                     }
+                    HostCommand::ApplyWindowCommand { reply, .. } => {
+                        let _ = reply.send(Err(PlatformError::new(
+                            PlatformErrorCode::PlatformNotImplemented,
+                            "window.command",
+                            "Linux native window commands are not implemented",
+                        )));
+                    }
                     HostCommand::ShowConfirmation { request, reply } => {
                         let result = request
                             .window

@@ -16,9 +16,10 @@ use crate::{
     LegacyOpenRequest, LegacyPcmBufferV7, LegacyProbeReport, LegacyProbeRequest,
     LegacyProviderError, LegacyProviderResult, LegacyReplayMode, LegacyRuntimeHostCtx,
     LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport,
-    LegacyStepInput, LegacyStepOutput, LegacySystemMenuActionV1, LegacySystemMenuRequestV1,
-    LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1, LegacyVideoMode,
-    LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacyStepInput, LegacyStepOutput, LegacySystemCommandKindV1, LegacySystemCommandResultV1,
+    LegacySystemCommandStatusV1, LegacySystemCommandTransactionV1, LegacySystemMenuActionV1,
+    LegacySystemMenuRequestV1, LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1,
+    LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
 };
 
 #[repr(C)]
@@ -529,6 +530,138 @@ impl From<FfiSystemMenuRequestV1> for LegacySystemMenuRequestV1 {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiSystemCommandKindV1 {
+    SetFullscreen { enabled: bool },
+    RestoreOriginalSize,
+    SetResizePrecision { enabled: bool },
+    SetResizeAntialias { enabled: bool },
+    OpenManual,
+    ShowAbout,
+    OpenHomepage,
+}
+
+impl From<LegacySystemCommandKindV1> for FfiSystemCommandKindV1 {
+    fn from(value: LegacySystemCommandKindV1) -> Self {
+        match value {
+            LegacySystemCommandKindV1::SetFullscreen { enabled } => Self::SetFullscreen { enabled },
+            LegacySystemCommandKindV1::RestoreOriginalSize => Self::RestoreOriginalSize,
+            LegacySystemCommandKindV1::SetResizePrecision { enabled } => {
+                Self::SetResizePrecision { enabled }
+            }
+            LegacySystemCommandKindV1::SetResizeAntialias { enabled } => {
+                Self::SetResizeAntialias { enabled }
+            }
+            LegacySystemCommandKindV1::OpenManual => Self::OpenManual,
+            LegacySystemCommandKindV1::ShowAbout => Self::ShowAbout,
+            LegacySystemCommandKindV1::OpenHomepage => Self::OpenHomepage,
+        }
+    }
+}
+
+impl From<FfiSystemCommandKindV1> for LegacySystemCommandKindV1 {
+    fn from(value: FfiSystemCommandKindV1) -> Self {
+        match value {
+            FfiSystemCommandKindV1::SetFullscreen { enabled } => Self::SetFullscreen { enabled },
+            FfiSystemCommandKindV1::RestoreOriginalSize => Self::RestoreOriginalSize,
+            FfiSystemCommandKindV1::SetResizePrecision { enabled } => {
+                Self::SetResizePrecision { enabled }
+            }
+            FfiSystemCommandKindV1::SetResizeAntialias { enabled } => {
+                Self::SetResizeAntialias { enabled }
+            }
+            FfiSystemCommandKindV1::OpenManual => Self::OpenManual,
+            FfiSystemCommandKindV1::ShowAbout => Self::ShowAbout,
+            FfiSystemCommandKindV1::OpenHomepage => Self::OpenHomepage,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiSystemCommandTransactionV1 {
+    pub sequence: u64,
+    pub command_id: RString,
+    pub command: FfiSystemCommandKindV1,
+}
+
+impl From<LegacySystemCommandTransactionV1> for FfiSystemCommandTransactionV1 {
+    fn from(value: LegacySystemCommandTransactionV1) -> Self {
+        Self {
+            sequence: value.sequence,
+            command_id: value.command_id.into(),
+            command: value.command.into(),
+        }
+    }
+}
+
+impl From<FfiSystemCommandTransactionV1> for LegacySystemCommandTransactionV1 {
+    fn from(value: FfiSystemCommandTransactionV1) -> Self {
+        Self {
+            sequence: value.sequence,
+            command_id: value.command_id.to_string(),
+            command: value.command.into(),
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiSystemCommandStatusV1 {
+    Applied,
+    Rejected,
+    Unsupported,
+}
+
+impl From<LegacySystemCommandStatusV1> for FfiSystemCommandStatusV1 {
+    fn from(value: LegacySystemCommandStatusV1) -> Self {
+        match value {
+            LegacySystemCommandStatusV1::Applied => Self::Applied,
+            LegacySystemCommandStatusV1::Rejected => Self::Rejected,
+            LegacySystemCommandStatusV1::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
+impl From<FfiSystemCommandStatusV1> for LegacySystemCommandStatusV1 {
+    fn from(value: FfiSystemCommandStatusV1) -> Self {
+        match value {
+            FfiSystemCommandStatusV1::Applied => Self::Applied,
+            FfiSystemCommandStatusV1::Rejected => Self::Rejected,
+            FfiSystemCommandStatusV1::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiSystemCommandResultV1 {
+    pub command_id: RString,
+    pub status: FfiSystemCommandStatusV1,
+    pub sequence: u64,
+}
+
+impl From<LegacySystemCommandResultV1> for FfiSystemCommandResultV1 {
+    fn from(value: LegacySystemCommandResultV1) -> Self {
+        Self {
+            command_id: value.command_id.into(),
+            status: value.status.into(),
+            sequence: value.sequence,
+        }
+    }
+}
+
+impl From<FfiSystemCommandResultV1> for LegacySystemCommandResultV1 {
+    fn from(value: FfiSystemCommandResultV1) -> Self {
+        Self {
+            command_id: value.command_id.to_string(),
+            status: value.status.into(),
+            sequence: value.sequence,
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
 pub enum FfiConfirmationChoiceV1 {
@@ -652,6 +785,7 @@ pub struct FfiStepInput {
     pub input_edges: RVec<FfiInputEdge>,
     pub system_menu: ROption<FfiSystemMenuRequestV1>,
     pub confirmation: ROption<FfiConfirmationResultV1>,
+    pub system_command: ROption<FfiSystemCommandResultV1>,
     pub await_results: RVec<FfiAwaitResult>,
     pub provider_results: RVec<FfiProviderResult>,
 }
@@ -671,6 +805,7 @@ impl From<LegacyStepInput> for FfiStepInput {
                 .into(),
             system_menu: value.system_menu.map(Into::into).into(),
             confirmation: value.confirmation.map(Into::into).into(),
+            system_command: value.system_command.map(Into::into).into(),
             await_results: value
                 .await_results
                 .into_iter()
@@ -697,6 +832,7 @@ impl From<FfiStepInput> for LegacyStepInput {
             input_edges: value.input_edges.iter().cloned().map(Into::into).collect(),
             system_menu: value.system_menu.into_option().map(Into::into),
             confirmation: value.confirmation.into_option().map(Into::into),
+            system_command: value.system_command.into_option().map(Into::into),
             await_results: value
                 .await_results
                 .iter()
@@ -1709,6 +1845,7 @@ mod live_zero_copy_tests {
                 sequence: 7,
             }),
             confirmation: None,
+            system_command: None,
             await_results: Vec::new(),
             provider_results: Vec::new(),
         };
@@ -1729,6 +1866,29 @@ mod live_zero_copy_tests {
                 confirmation_id: "minori.confirmation.game_exit.12".into(),
                 choice: LegacyConfirmationChoiceV1::Cancelled,
                 sequence: 15,
+            }),
+            system_command: None,
+            await_results: Vec::new(),
+            provider_results: Vec::new(),
+        };
+        let decoded: LegacyStepInput = FfiStepInput::from(legacy.clone()).into();
+        assert_eq!(decoded, legacy);
+    }
+
+    #[test]
+    fn system_command_result_round_trips_through_family_ffi_wire() {
+        let legacy = LegacyStepInput {
+            tick_index: 12,
+            delta_ns: 16_666_667,
+            session_seed: 19,
+            mode: LegacyReplayMode::Live,
+            input_edges: Vec::new(),
+            system_menu: None,
+            confirmation: None,
+            system_command: Some(LegacySystemCommandResultV1 {
+                command_id: "minori.system_command.window_fullscreen.12".into(),
+                status: LegacySystemCommandStatusV1::Applied,
+                sequence: 21,
             }),
             await_results: Vec::new(),
             provider_results: Vec::new(),

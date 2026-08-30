@@ -326,6 +326,7 @@ impl DynamicFamilyLoader {
             writable_file: ffi_writable_file,
             publish_system_menu: ffi_publish_system_menu,
             publish_confirmation: ffi_publish_confirmation,
+            publish_system_command: ffi_publish_system_command,
         };
         if let Err(error) = native_result::<_, ()>((module.create_instance())(services, request)) {
             remove_host_services(&host_token);
@@ -712,6 +713,19 @@ extern "C" fn ffi_publish_confirmation(call: FfiPublishConfirmationCallV1) -> Ff
         confirmation.validate()?;
         host.confirmations
             .publish(call.session_id.as_str(), confirmation)
+    })();
+    ffi_result(result)
+}
+
+extern "C" fn ffi_publish_system_command(
+    call: FfiPublishSystemCommandCallV1,
+) -> FfiLegacyResult<()> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        let command: LegacySystemCommandTransactionV1 = call.command.into();
+        command.validate()?;
+        host.system_commands
+            .publish(call.session_id.as_str(), command)
     })();
     ffi_result(result)
 }
@@ -1165,6 +1179,7 @@ mod tests {
                         input_edges: Vec::new(),
                         system_menu: None,
                         confirmation: None,
+                        system_command: None,
                         await_results: Vec::new(),
                         provider_results: Vec::new(),
                     },

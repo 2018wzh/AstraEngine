@@ -842,6 +842,13 @@ impl HostState {
                     "Headless confirmation is driven by the Family host test input",
                 )));
             }
+            HostCommand::ApplyWindowCommand { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.command",
+                    "Headless does not apply native window commands",
+                )));
+            }
             HostCommand::CreateSurface { request, reply } => {
                 let gpu_renderer = if self.profile.providers.renderer == "wgpu_offscreen" {
                     let renderer = if self.performance_observer.is_some() {

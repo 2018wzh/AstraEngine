@@ -10,10 +10,11 @@ use abi_stable::{
     StableAbi,
 };
 
-/// The v12 wire contract makes surface, Hook, writable-file, bulk ownership and
-/// the non-blocking typed system-menu host port explicit. Older modules are intentionally rejected
+/// The v13 wire contract makes surface, Hook, writable-file, bulk ownership,
+/// system-menu, confirmation and typed system-command ports explicit. Older
+/// modules are intentionally rejected
 /// by the loader; there is no shim.
-pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v12";
+pub const LEGACY_FAMILY_ABI_FINGERPRINT: &str = "astra.emu.family_abi.v13";
 
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
@@ -164,6 +165,8 @@ pub struct FfiLegacyHostServices {
     pub publish_system_menu: crate::FfiPublishSystemMenuV1,
     #[sabi(unsafe_opaque_field)]
     pub publish_confirmation: crate::FfiPublishConfirmationV1,
+    #[sabi(unsafe_opaque_field)]
+    pub publish_system_command: crate::FfiPublishSystemCommandV1,
 }
 
 impl core::fmt::Debug for FfiLegacyHostServices {
@@ -215,7 +218,7 @@ mod tests {
     use crate::{FamilyId, FfiOwnedBytes, LegacyFamilyPluginDescriptor};
 
     #[test]
-    fn v12_descriptor_round_trips_through_typed_wire() {
+    fn v13_descriptor_round_trips_through_typed_wire() {
         let descriptor = LegacyFamilyPluginDescriptor {
             family_id: FamilyId("fvp".into()),
             plugin_id: "astra.emu.fvp".into(),
@@ -237,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn v12_error_preserves_code_without_serialization() {
+    fn v13_error_preserves_code_without_serialization() {
         let ffi = FfiLegacyError::from(LegacyProviderError::invalid("TEST_CODE", "message"));
         let error = LegacyProviderError::from(ffi);
         assert_eq!(error.code(), "TEST_CODE");
@@ -245,11 +248,14 @@ mod tests {
     }
 
     #[test]
-    fn pre_v12_descriptors_are_rejected_without_a_shim() {
+    fn pre_v13_descriptors_are_rejected_without_a_shim() {
         for fingerprint in [
             "astra.emu.family_abi.v7",
             "astra.emu.family_abi.v8",
             "astra.emu.family_abi.v9",
+            "astra.emu.family_abi.v10",
+            "astra.emu.family_abi.v11",
+            "astra.emu.family_abi.v12",
         ] {
             let descriptor = LegacyFamilyPluginDescriptor {
                 family_id: FamilyId("fvp".into()),

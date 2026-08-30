@@ -1288,6 +1288,19 @@ impl MinoriVm {
         Ok(())
     }
 
+    /// Applies a host-confirmed window mode command without opening the
+    /// configuration draft.  Native menu commands are immediate in the
+    /// original title and therefore must not be staged as an unrelated UI
+    /// draft transaction.
+    pub(crate) fn set_runtime_fullscreen(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), MinoriRuntimeError> {
+        let mut config = self.state.system_ui.config.clone();
+        config.fullscreen = enabled;
+        self.set_persistent_config(config)
+    }
+
     pub fn merge_verified_gallery_unlocks(
         &mut self,
         unlocks: &[Hash256],

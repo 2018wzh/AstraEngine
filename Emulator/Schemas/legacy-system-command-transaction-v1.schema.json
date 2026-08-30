@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacySystemCommandTransactionV1",
+  "type": "object",
+  "required": [
+    "command",
+    "command_id",
+    "sequence"
+  ],
+  "properties": {
+    "command": {
+      "$ref": "#/definitions/LegacySystemCommandKindV1"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "LegacySystemCommandKindV1": {
+      "description": "Semantic operations exposed by a family-owned system menu.  The Host is responsible for applying the operation with its native window or help provider; family code never manipulates a platform window directly.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "restore_original_size",
+            "open_manual",
+            "show_about",
+            "open_homepage"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "set_fullscreen"
+          ],
+          "properties": {
+            "set_fullscreen": {
+              "type": "object",
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "set_resize_precision"
+          ],
+          "properties": {
+            "set_resize_precision": {
+              "type": "object",
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "set_resize_antialias"
+          ],
+          "properties": {
+            "set_resize_antialias": {
+              "type": "object",
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

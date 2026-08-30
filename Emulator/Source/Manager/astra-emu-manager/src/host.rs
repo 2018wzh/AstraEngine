@@ -1,6 +1,7 @@
 use astra_emu_family_api::LegacySystemMenuItemKindV1;
 use astra_emu_manager_core::{
-    default_vn_preset, InputMapping, PendingFamilyConfirmation, PendingFamilySystemMenu,
+    default_vn_preset, InputMapping, PendingFamilyConfirmation, PendingFamilySystemCommand,
+    PendingFamilySystemMenu,
 };
 use std::{
     sync::{
@@ -169,6 +170,17 @@ pub trait ManagerController: 'static {
         _item_id: Option<&str>,
     ) -> Result<(), String> {
         Err("ASTRA_EMU_SYSTEM_MENU_NOT_CONFIGURED".into())
+    }
+    fn take_pending_system_command(
+        &mut self,
+    ) -> Result<Option<PendingFamilySystemCommand>, String> {
+        Ok(None)
+    }
+    fn present_system_command(
+        &mut self,
+        _pending: PendingFamilySystemCommand,
+    ) -> Result<(), String> {
+        Err("ASTRA_EMU_SYSTEM_COMMAND_NOT_CONFIGURED".into())
     }
     /// Takes the next semantic Family ABI confirmation transaction.  The
     /// platform host presents it and returns the typed result through the
@@ -408,6 +420,19 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                             Ok(Some(pending)) => {
                                 if let Err(error) =
                                     controller.borrow_mut().present_confirmation(pending)
+                                {
+                                    window.set_global_diagnostic(error.into());
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                window.set_global_diagnostic(error.into());
+                            }
+                        }
+                        match controller.borrow_mut().take_pending_system_command() {
+                            Ok(Some(pending)) => {
+                                if let Err(error) =
+                                    controller.borrow_mut().present_system_command(pending)
                                 {
                                     window.set_global_diagnostic(error.into());
                                 }

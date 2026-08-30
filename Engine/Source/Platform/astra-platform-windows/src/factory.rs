@@ -104,7 +104,7 @@ mod windows {
         PackageSourceHandle, PackageSourceRequest, PlatformBackendChannels,
         PlatformCommandWakeRegistration, PlatformDecodeRequest, PlatformError, PlatformErrorCode,
         PlatformEvent, PlatformEventKind, PlatformHostProfile, PlatformHostSession, PointerButton,
-        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowHandle,
+        SaveTransactionHandle, SurfaceHandle, TouchPhase, WindowCommand, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, NullAudioProducer, ResourceTable,
@@ -126,7 +126,7 @@ mod windows {
         event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
         platform::windows::EventLoopBuilderExtWindows,
         raw_window_handle::{HasWindowHandle, RawWindowHandle},
-        window::{Window, WindowAttributes, WindowId},
+        window::{Fullscreen, Window, WindowAttributes, WindowId},
     };
 
     pub async fn start(
@@ -491,6 +491,7 @@ mod windows {
         backend: PlatformBackendChannels,
         ready: Option<std_mpsc::SyncSender<Result<(), PlatformError>>>,
         windows: ResourceTable<Arc<Window>, WindowHandle>,
+        window_original_sizes: BTreeMap<WindowHandle, (u32, u32)>,
         window_ids: BTreeMap<WindowId, WindowHandle>,
         accessibility: BTreeMap<WindowId, WindowsAccessibilityBridge>,
         surfaces: ResourceTable<SurfaceResource, SurfaceHandle>,
@@ -570,6 +571,7 @@ mod windows {
                 backend,
                 ready: Some(ready),
                 windows: ResourceTable::new("window"),
+                window_original_sizes: BTreeMap::new(),
                 window_ids: BTreeMap::new(),
                 accessibility: BTreeMap::new(),
                 surfaces: ResourceTable::new("surface"),
@@ -645,6 +647,24 @@ mod windows {
                             .and_then(|window| show_confirmation(window.map(Arc::as_ref), request));
                         let _ = reply.send(result);
                     }
+                    HostCommand::ApplyWindowCommand {
+                        window,
+                        command,
+                        reply,
+                    } => {
+                        let result = self
+                            .windows
+                            .get(window)
+                            .map_err(|_| host_error("window.command", "window handle is invalid"))
+                            .and_then(|native| {
+                                apply_window_command(
+                                    native,
+                                    command,
+                                    self.window_original_sizes.get(&window).copied(),
+                                )
+                            });
+                        let _ = reply.send(result);
+                    }
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
                             .with_title(request.title)
@@ -661,6 +681,8 @@ mod windows {
                                 window.set_ime_allowed(true);
                                 let id = window.id();
                                 let handle = self.windows.insert(window)?;
+                                self.window_original_sizes
+                                    .insert(handle, (request.width, request.height));
                                 self.window_ids.insert(id, handle);
                                 let native = self.windows.get(handle)?.clone();
                                 self.accessibility.insert(
@@ -818,6 +840,7 @@ mod windows {
                         let _ = reply.send(result);
                     }
                     HostCommand::DestroyWindow { window, reply } => {
+                        self.window_original_sizes.remove(&window);
                         let result = self.windows.remove(window).map(|window| {
                             self.accessibility.remove(&window.id());
                             self.window_ids.remove(&window.id());
@@ -2310,6 +2333,34 @@ mod windows {
         Ok(ContextMenuResult {
             item_id: Some(event.id.0),
         })
+    }
+
+    fn apply_window_command(
+        window: &Window,
+        command: WindowCommand,
+        original_size: Option<(u32, u32)>,
+    ) -> Result<(), PlatformError> {
+        match command {
+            WindowCommand::SetFullscreen { enabled } => {
+                window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(None)));
+                Ok(())
+            }
+            WindowCommand::RestoreOriginalSize => {
+                let (width, height) = original_size.ok_or_else(|| {
+                    host_error("window.command", "original window geometry is unavailable")
+                })?;
+                window.set_fullscreen(None);
+                window
+                    .request_inner_size(winit::dpi::PhysicalSize::new(width, height))
+                    .ok_or_else(|| {
+                        host_error(
+                            "window.command",
+                            "native window rejected the original size request",
+                        )
+                    })?;
+                Ok(())
+            }
+        }
     }
 
     fn show_confirmation(

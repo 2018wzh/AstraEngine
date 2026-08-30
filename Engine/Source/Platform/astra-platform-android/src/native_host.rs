@@ -355,6 +355,13 @@ impl AndroidHostApp {
                     "Android confirmation is owned by the Activity UI",
                 )));
             }
+            HostCommand::ApplyWindowCommand { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.command",
+                    "Android does not apply native window commands",
+                )));
+            }
             HostCommand::CreateWindow { request, reply } => {
                 let result = if !self.resumed {
                     Err(host_error(

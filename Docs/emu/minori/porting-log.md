@@ -2,7 +2,7 @@
 
 ## 2026-08-31：Family ABI 原生菜单 Host 分层
 
-继续、退出确认框和剧情右键菜单继续只通过 Family ABI v12 的 typed transaction
+继续、退出确认框和剧情右键菜单继续只通过 Family ABI v13 的 typed transaction
 跨边界：Minori 负责语义、层级、勾选状态和结果校验，Host 负责呈现与物理输入，
 不在 Manager 或 CLI 复制一套菜单逻辑。Windows 继续使用 `muda-win`/`rfd` 的
 原生控件；macOS Host 新增 AppKit `muda` context menu，按 winit flipped view
@@ -46,7 +46,7 @@ Family ABI confirmation transaction 激活期间接受 `Y`/`N`，分别回送 ty
   普通消息确认。此次使用稀疏 frame sampling，且尾部是显式 shutdown，不把会话状态
   误报为 terminal；没有把它当作 120 Hz GPU E2、Release Sandbox 或 Windows E3。
 - 这次 smoke 只证明现行 `runtime.input_or_terminal` 观察键、完整输入排序和当前
-  WMF/Family ABI v12 接线可以跑完既定路线脚本。四路线自然解锁、原版同点视觉、
+  WMF/Family ABI v13 接线可以跑完既定路线脚本。四路线自然解锁、原版同点视觉、
   音频人工听审、save/restore required checkpoint 和正式平台验收仍保持开放。
 
 ## 2026-08-31：原版确认框文案与输入观察边界
@@ -57,7 +57,7 @@ Family ABI confirmation transaction 激活期间接受 `Y`/`N`，分别回送 ty
   `ゲームを中断してメニューに戻ります。よろしいですか？`。取消后舞台和当前消息
   保持不变，接受才结束当前 session 或回到标题。截图只留在 ignored 私有研究目录，
   本页不保存图片或路径。
-- Minori provider 的 Family ABI v12 confirmation transaction 已采用上述原版
+- Minori provider 的 Family ABI v13 confirmation transaction 已采用上述原版
   日文文案和按钮顺序；Host 继续负责 native dialog 的 parent、焦点和结果回传，
   family 只处理 `Accepted`/`Cancelled` 语义。该项覆盖退出、返回标题和
   `window.close` 三个入口，未把确认框改成 Manager 自绘控件。
@@ -908,7 +908,7 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 
 ### 2026-08-30 key-file Release 路线复核
 
-- 当前分支已 rebase 到 `origin/master` 的 `a2bb57d9c43084ec8e519b8c38d5aded14f51cb3`。冲突按现行 Family API v12 解决，没有恢复旧 surface、snapshot、Luau callback、明文 cache 或兼容入口；v11 只作为历史菜单迁移记录。
+- 当时分支已 rebase 到 `origin/master` 的 `a2bb57d9c43084ec8e519b8c38d5aded14f51cb3`。冲突按当时 Family API v12 解决，没有恢复旧 surface、snapshot、Luau callback、明文 cache 或兼容入口；v11 只作为历史菜单迁移记录。随后 v13 typed system-command hard cut 已记录在本文末尾。
 - 官方桌面构建器此前只给 Minori library 启用 dynamic export，Manager 与 CLI 没有编译 `ffmpeg-vcpkg`，生成的包无法播放 Minori 影片。构建器现按 family 绑定 feature：Minori package 同时编译两个产品 host 的唯一 FFmpeg provider；依赖缺失会让 Release 构建直接失败。工具单元测试覆盖 Minori/FVP 的 feature 集合。
 - PAZ lookup 现按原引擎文件系统语义执行 ASCII case-insensitive 匹配，同时继续向 manifest 和调用方返回 canonical URI；大小写折叠冲突阻断，不覆盖 entry。positional parser 只接受真实样本观察到的单个尾随空字段。primary `.effect fadeout` 只结束活动 Firefly，缺少目标时阻断。
 - 全包 census 中只有一条三 operand `.panel`。原程序 parser 已确认字段为 mode、可选过渡和文件名；真实命令使用 `*` 作为缺省过渡并引用一个存在的 `sys` 资源。runtime 与资源预审现在共同接受这一种已验证形态；显式数值过渡、其他 mode 和非法文件名仍返回 `ASTRA_EMU_MINORI_RUNTIME_PANEL`。
@@ -921,3 +921,23 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - Headless 进入 Load 页后按 Enter 曾同时完成底层 message await，并把同一次输入交给 family 页面，触发 `ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED`。问题位于 Host 输入所有权，不是 Minori load transaction。Family API 现在定义公共 `astra.emu.system_ui_active` observation；Minori 只发布规范布尔值，CLI 和 Manager 在活动期间保留底层 wait。family 私有的 `minori.system_page` 只用于页面观察，不再承担 Host 控制语义。
 - 更新后的官方开发签名 Release 候选以序列化物理输入完成 Quick Save、推进到下一消息、打开 Load 页并恢复 slot。报告为 `passed`：2047 fixed steps、1685 个提交/栅格帧、6 个 checkpoint、零 diagnostic；WAV 为 48 kHz 双声道、1617920 frame，自动量测非静音且无 clipping。Load 页确实使用原版系统资源，恢复 checkpoint 与保存前 checkpoint 字节一致。这是当前身份的定向 Headless E2，不是 Release Sandbox 或正式 Windows E3。
 - 模型查看保存前、推进后、Load 页和恢复帧时发现一组只在单条真实 message 行末出现的控制标记被显示成普通字符。全包私有统计确认该组合唯一，不能据一次样本猜测为可直接删除的装饰符。原版在普通消息末尾使用独立推进指示，但这组标记的组合效果仍需原程序观察或反编译确认；在修复和 checkpoint 复验前，消息视觉完整性继续 blocking。
+
+### 2026-08-31 Family ABI v13 系统命令与平台 Host
+
+- Family ABI 从 v12 硬切到 `astra.emu.family_abi.v13`。确认框和菜单层级仍由
+  family 发布；菜单选择的窗口、帮助和关于动作不再生成通用 `LegacyEvent`，而是
+  发送有界 `LegacySystemCommandTransactionV1`，结果在下一固定 step 以
+  `LegacySystemCommandResultV1` 回传。旧 v7–v12 fingerprint 在加载前拒绝，未保留
+  compatibility shim。
+- Minori 当前已验证 `window_fullscreen` 选择会发布 `SetFullscreen`，只有收到 Host
+  的 `Applied` 才更新 runtime config。`RestoreOriginalSize`、缩放精度/抗锯齿以及
+  Help/About/Homepage 均保留 typed kind；尚未确认或未绑定的能力返回 `Unsupported`
+  并阻断当前命令，不猜测 URL、窗口句柄或系统 UI 语义。
+- Windows Host 通过 live window 的原生 fullscreen 与记录的初始 client size 完成
+  两项窗口动作；macOS 在 event-loop 主线程使用同一平台 port，并把 winit flipped
+  view 的坐标转换留在 Host。Manager、Headless 和无窗口 CLI 不解释命令，只回送
+  `Unsupported`，避免把 Slint overlay 或虚拟输入当成平台证据。Linux 当前缺 GTK
+  window binding，保持显式 unsupported diagnostic。
+- 新增 Family API FFI wire round-trip、Manager completion matching、Minori applied
+  result 和 Windows/macOS platform command checks。当前定向 checks 通过；Linux GTK
+  原生菜单、Help/About 行为、完整路线、Release Sandbox 和 Windows E3 仍未关闭。

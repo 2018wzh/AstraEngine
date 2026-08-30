@@ -12,10 +12,11 @@ use astra_emu_family_api::{
     LegacyConfirmationResultV1, LegacyConfirmationTransactionV1, LegacyFamilyHostServicesV9,
     LegacyHookHostV1, LegacyHookInvocationV1, LegacyHookResultV1, LegacyHookStatusV1,
     LegacyProviderError, LegacySurfaceCommitV9, LegacySurfaceFormatV9, LegacySurfaceHostV9,
-    LegacySurfaceLeaseV9, LegacySystemMenuActionV1, LegacySystemMenuHostV1,
-    LegacySystemMenuItemKindV1, LegacySystemMenuRequestV1, LegacySystemMenuTransactionV1,
-    LegacyVfsReader, LegacyWritableFileEntryV1, LegacyWritableFileHostV1,
-    LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
+    LegacySurfaceLeaseV9, LegacySystemCommandHostV1, LegacySystemCommandResultV1,
+    LegacySystemCommandStatusV1, LegacySystemCommandTransactionV1, LegacySystemMenuActionV1,
+    LegacySystemMenuHostV1, LegacySystemMenuItemKindV1, LegacySystemMenuRequestV1,
+    LegacySystemMenuTransactionV1, LegacyVfsReader, LegacyWritableFileEntryV1,
+    LegacyWritableFileHostV1, LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1074,6 +1075,145 @@ fn confirmation_lock_error() -> LegacyProviderError {
     )
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFamilySystemCommand {
+    pub session_id: String,
+    pub command: LegacySystemCommandTransactionV1,
+}
+
+#[derive(Default)]
+struct FamilySystemCommandState {
+    active: BTreeMap<String, LegacySystemCommandTransactionV1>,
+    delivered: BTreeMap<String, bool>,
+    resolutions: BTreeMap<String, LegacySystemCommandResultV1>,
+}
+
+/// Host-side completion queue for family-owned system commands.
+///
+/// Publishing is non-blocking: the family records a typed command and the
+/// platform/UI host applies it asynchronously. Exactly one result is then
+/// consumed by the next family step.
+#[derive(Default)]
+pub struct FamilySystemCommandHost {
+    state: Mutex<FamilySystemCommandState>,
+}
+
+impl FamilySystemCommandHost {
+    pub fn has_pending_interaction(&self) -> Result<bool, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| system_command_lock_error())
+            .map(|state| !state.active.is_empty() || !state.resolutions.is_empty())
+    }
+
+    pub fn take_next_pending(
+        &self,
+    ) -> Result<Option<PendingFamilySystemCommand>, LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| system_command_lock_error())?;
+        let session_id = state
+            .active
+            .keys()
+            .find(|session_id| !state.delivered.contains_key(*session_id))
+            .cloned();
+        let Some(session_id) = session_id else {
+            return Ok(None);
+        };
+        let command = state.active.get(&session_id).cloned().ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_STATE",
+                "pending system command state changed unexpectedly",
+            )
+        })?;
+        state.delivered.insert(session_id.clone(), true);
+        Ok(Some(PendingFamilySystemCommand {
+            session_id,
+            command,
+        }))
+    }
+
+    pub fn resolve(
+        &self,
+        session_id: &str,
+        command_id: &str,
+        status: LegacySystemCommandStatusV1,
+        sequence: u64,
+    ) -> Result<(), LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| system_command_lock_error())?;
+        if state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_RESULT_DUPLICATE",
+                "system command host already queued a result for the session",
+            ));
+        }
+        let command = state.active.get(session_id).ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_NOT_ACTIVE",
+                "system command result has no active transaction",
+            )
+        })?;
+        if command.command_id != command_id {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_ID_MISMATCH",
+                "system command result does not match the active transaction",
+            ));
+        }
+        let result = LegacySystemCommandResultV1 {
+            command_id: command_id.into(),
+            status,
+            sequence,
+        };
+        result.validate()?;
+        state.active.remove(session_id);
+        state.delivered.remove(session_id);
+        state.resolutions.insert(session_id.into(), result);
+        Ok(())
+    }
+
+    pub fn take_resolution(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LegacySystemCommandResultV1>, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| system_command_lock_error())
+            .map(|mut state| state.resolutions.remove(session_id))
+    }
+
+    pub fn release_session(&self, session_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active.remove(session_id);
+            state.delivered.remove(session_id);
+            state.resolutions.remove(session_id);
+        }
+    }
+}
+
+impl LegacySystemCommandHostV1 for FamilySystemCommandHost {
+    fn publish(
+        &self,
+        session_id: &str,
+        command: LegacySystemCommandTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        command.validate()?;
+        let mut state = self.state.lock().map_err(|_| system_command_lock_error())?;
+        if state.active.contains_key(session_id) || state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_SYSTEM_COMMAND_ALREADY_ACTIVE",
+                "system command host accepts only one active transaction per session",
+            ));
+        }
+        state.active.insert(session_id.into(), command);
+        Ok(())
+    }
+}
+
+fn system_command_lock_error() -> LegacyProviderError {
+    LegacyProviderError::invalid(
+        "ASTRA_EMU_SYSTEM_COMMAND_LOCK_POISONED",
+        "system command host lock is poisoned",
+    )
+}
+
 #[derive(Clone)]
 pub struct AstraEmuFamilyHost {
     pub surfaces: Arc<FamilySurfaceHost>,
@@ -1081,6 +1221,7 @@ pub struct AstraEmuFamilyHost {
     pub writable_files: Arc<FamilyWritableFileHost>,
     pub system_menus: Arc<FamilySystemMenuHost>,
     pub confirmations: Arc<FamilyConfirmationHost>,
+    pub system_commands: Arc<FamilySystemCommandHost>,
     vfs: Arc<dyn LegacyVfsReader>,
     services: LegacyFamilyHostServicesV9,
 }
@@ -1092,6 +1233,7 @@ impl AstraEmuFamilyHost {
         let writable_files = Arc::new(FamilyWritableFileHost::default());
         let system_menus = Arc::new(FamilySystemMenuHost::default());
         let confirmations = Arc::new(FamilyConfirmationHost::default());
+        let system_commands = Arc::new(FamilySystemCommandHost::default());
         let services = LegacyFamilyHostServicesV9 {
             vfs: vfs.clone(),
             surfaces: surfaces.clone(),
@@ -1099,6 +1241,7 @@ impl AstraEmuFamilyHost {
             writable_files: writable_files.clone(),
             system_menus: system_menus.clone(),
             confirmations: confirmations.clone(),
+            system_commands: system_commands.clone(),
         };
         Self {
             surfaces,
@@ -1106,6 +1249,7 @@ impl AstraEmuFamilyHost {
             writable_files,
             system_menus,
             confirmations,
+            system_commands,
             vfs,
             services,
         }
@@ -1124,6 +1268,7 @@ impl AstraEmuFamilyHost {
         self.writable_files.release_session(session_id);
         self.system_menus.release_session(session_id);
         self.confirmations.release_session(session_id);
+        self.system_commands.release_session(session_id);
     }
 }
 
@@ -1479,5 +1624,41 @@ mod tests {
         assert_eq!(result.choice, LegacyConfirmationChoiceV1::Cancelled);
         assert_eq!(result.confirmation_id, "exit_game");
         assert!(host.take_resolution("session").unwrap().is_none());
+    }
+
+    #[test]
+    fn system_command_host_requires_matching_completion() {
+        let host = FamilySystemCommandHost::default();
+        let command = LegacySystemCommandTransactionV1 {
+            sequence: 7,
+            command_id: "fullscreen.7".into(),
+            command: astra_emu_family_api::LegacySystemCommandKindV1::SetFullscreen {
+                enabled: true,
+            },
+        };
+        host.publish("session", command.clone()).unwrap();
+        assert_eq!(
+            host.publish("session", command).unwrap_err().code(),
+            "ASTRA_EMU_SYSTEM_COMMAND_ALREADY_ACTIVE"
+        );
+        let pending = host.take_next_pending().unwrap().unwrap();
+        assert_eq!(pending.command.command_id, "fullscreen.7");
+        assert!(host.take_next_pending().unwrap().is_none());
+        assert_eq!(
+            host.resolve("session", "wrong", LegacySystemCommandStatusV1::Applied, 9,)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_SYSTEM_COMMAND_ID_MISMATCH"
+        );
+        host.resolve(
+            "session",
+            "fullscreen.7",
+            LegacySystemCommandStatusV1::Applied,
+            9,
+        )
+        .unwrap();
+        let result = host.take_resolution("session").unwrap().unwrap();
+        assert_eq!(result.command_id, "fullscreen.7");
+        assert_eq!(result.status, LegacySystemCommandStatusV1::Applied);
     }
 }

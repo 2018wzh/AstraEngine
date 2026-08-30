@@ -10,7 +10,7 @@ save/restore checkpoints, Release Sandbox, and Windows E3 remain open.
 
 2026-08-31 confirmation wording alignment: the original Windows Sandbox was
 observed using the native Exit and Return-title confirmation dialogs with the
-same two-button order and cancel semantics now sent through Family ABI v12.
+same two-button order and cancel semantics now sent through Family ABI v13.
 The observation is private visual evidence only. A legacy private input sequence
 that referenced the removed `runtime.awaiting_input` key is rejected; no alias is
 retained. Full Release Sandbox and Windows E3 remain open.
@@ -43,6 +43,13 @@ Provider ABI v4. Minori is reopening its current E2 while migrating to
 ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
+
+The current identity is `astra.emu.family_abi.v13`; the v12 value above is
+historical migration evidence. The v13 step wire adds a typed system-command
+transaction/result pair for window and help actions. Windows/macOS hosts apply
+the two bound window operations natively; Manager, Headless, and windowless CLI
+return `Unsupported` explicitly. No generic event-string interpretation or
+platform fallback is accepted.
 
 The v11 contract carries `LegacySystemMenuRequestV1` plus a bounded
 `LegacySystemMenuTransactionV1` Host publication port. A physical secondary click

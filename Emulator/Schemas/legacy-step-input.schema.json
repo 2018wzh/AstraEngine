@@ -18,6 +18,17 @@
         "$ref": "#/definitions/LegacyAwaitResult"
       }
     },
+    "confirmation": {
+      "description": "Result of one family-owned confirmation published through the Host.\n\nThe Host presents the transaction asynchronously and returns exactly one accepted or cancelled result on a later fixed step. Confirmation text is ephemeral presentation data and must not enter reports, logs, replay or save state.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LegacyConfirmationResultV1"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "delta_ns": {
       "type": "integer",
       "format": "uint64",
@@ -42,6 +53,17 @@
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
+    },
+    "system_command": {
+      "description": "Completion of one family-owned system command applied by the Host. The command itself is published through `LegacySystemCommandHostV1`; only the bounded status crosses back into the fixed-step input.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LegacySystemCommandResultV1"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "system_menu": {
       "description": "A host-originated request to open the family-owned system menu.\n\nThis is intentionally separate from the generic input-edge stream: opening a system menu is a semantic family operation, not a keyboard alias.  The request remains optional so families that do not expose a system menu can reject it explicitly instead of guessing from a key.",
@@ -85,6 +107,34 @@
         },
         "token_id": {
           "type": "string"
+        }
+      }
+    },
+    "LegacyConfirmationChoiceV1": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "cancelled"
+      ]
+    },
+    "LegacyConfirmationResultV1": {
+      "type": "object",
+      "required": [
+        "choice",
+        "confirmation_id",
+        "sequence"
+      ],
+      "properties": {
+        "choice": {
+          "$ref": "#/definitions/LegacyConfirmationChoiceV1"
+        },
+        "confirmation_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         }
       }
     },
@@ -149,6 +199,35 @@
       "type": "string",
       "enum": [
         "live"
+      ]
+    },
+    "LegacySystemCommandResultV1": {
+      "type": "object",
+      "required": [
+        "command_id",
+        "sequence",
+        "status"
+      ],
+      "properties": {
+        "command_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "status": {
+          "$ref": "#/definitions/LegacySystemCommandStatusV1"
+        }
+      }
+    },
+    "LegacySystemCommandStatusV1": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "rejected",
+        "unsupported"
       ]
     },
     "LegacySystemMenuActionV1": {

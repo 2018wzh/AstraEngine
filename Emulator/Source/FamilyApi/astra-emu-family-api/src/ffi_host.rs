@@ -23,7 +23,8 @@ impl FfiLegacyFamilyHostAdapter {
             hooks: shared.clone(),
             writable_files: shared.clone(),
             system_menus: shared.clone(),
-            confirmations: shared,
+            confirmations: shared.clone(),
+            system_commands: shared,
         }
     }
 }
@@ -290,6 +291,23 @@ impl LegacyConfirmationHostV1 for FfiLegacyFamilyHostAdapter {
                 host_token: self.services.host_token.clone(),
                 session_id: session_id.into(),
                 confirmation: confirmation.into(),
+            },
+        ))
+    }
+}
+
+impl LegacySystemCommandHostV1 for FfiLegacyFamilyHostAdapter {
+    fn publish(
+        &self,
+        session_id: &str,
+        command: LegacySystemCommandTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        command.validate()?;
+        native_result((self.services.publish_system_command)(
+            FfiPublishSystemCommandCallV1 {
+                host_token: self.services.host_token.clone(),
+                session_id: session_id.into(),
+                command: command.into(),
             },
         ))
     }

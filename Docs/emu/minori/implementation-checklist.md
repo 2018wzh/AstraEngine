@@ -1,9 +1,12 @@
 # Minori Implementation Checklist
 
-## Family ABI native menu Host split (2026-08-31)
+## Family ABI v13 native menu Host split (2026-08-31)
 
-- [x] Confirmation and system-menu transactions remain Family ABI v12 typed ports; the
+- [x] Confirmation and system-menu transactions use Family ABI v13 typed ports; the
   family owns semantics while the Host owns native presentation and result delivery.
+- [x] Menu-selected window/help actions use the v13 typed system-command port. Windows and
+  macOS apply bound fullscreen/original-size operations through the platform Host; Manager,
+  Headless and windowless CLI return `Unsupported` explicitly.
 - [x] Windows keeps the native `muda-win`/`rfd` path, and macOS now uses AppKit `muda`
   with flipped-view anchor conversion on the event-loop thread.
 - [x] Release CLI selects the macOS native presenter through the same platform Host client;
@@ -42,7 +45,7 @@
 
 ## Key-file Release 路线复核（2026-08-30）
 
-- [x] 分支已 rebase 到当前 `origin/master`。现行 Family API 是 v11；旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。
+- [x] 分支已 rebase 到当前 `origin/master`。现行 Family API 是 v13；旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。
 - [x] 官方桌面构建器为 Minori Manager 与 CLI 固化唯一影片 binding。Windows 默认 `wmf`；只有显式选择 `ffmpeg-vcpkg` 才编译 FFmpeg feature。所选 provider 不可用时构建或启动直接失败。
 - [x] PAZ 查找使用 ASCII case-insensitive identity，并保留 manifest 的 canonical URI；大小写折叠冲突直接阻断。`.stage`/`.wait` 只接收样本已确认的单个尾随空字段，更多空字段仍阻断。
 - [x] 已确认的 `.effect fadeout` 只结束活动的 primary Firefly；没有活动 Firefly 时返回 blocking diagnostic。样本唯一的三参数 `.panel` 形态按原程序 parser 解释为 mode 1、默认过渡标记和 `sys` 自定义资源，显式未知过渡值仍阻断。
@@ -132,7 +135,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`census-scripts` v5 另输出不含 URI/正文/operand 的逐文件序号、源 hash、大小和 opcode 计数；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
 | Minori deterministic VM state 与 control-flow | E2 route + message E1 | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie/end，以及已确认的 `\\a`、`\\v`、内联 `load`；未确认 operand 继续阻断，内联 load 双层视觉 parity 待补 |
-| Minori runtime provider / `cdylib` ABI | E2 增量 | Family ABI v9 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺完整四路线与正式 Windows host evidence |
+| Minori runtime provider / `cdylib` ABI | E2 增量 | Family ABI v13 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook、system-menu/confirmation/system-command 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺完整四路线与正式 Windows host evidence |
 | Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
 | Config writable-file persistence | 已实现 | `astra.emu.minori.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |
 

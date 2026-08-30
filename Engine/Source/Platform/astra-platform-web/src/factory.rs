@@ -131,6 +131,13 @@ mod browser {
                         "Web confirmation is owned by the browser host",
                     )));
                 }
+                HostCommand::ApplyWindowCommand { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "window.command",
+                        "Web does not apply native window commands",
+                    )));
+                }
                 HostCommand::CreateWindow { request, reply } => {
                     let result = CanvasResource::new(
                         request.title,

@@ -1,13 +1,20 @@
 # Implementation Plan Status
 
 2026 年 8 月 31 日 Family ABI 原生菜单 Host 分层：确认框和右键菜单仍由
-Family ABI v12 typed transaction 传递，Windows 使用现有原生 provider，macOS
+Family ABI v13 typed transaction 传递，Windows 使用现有原生 provider，macOS
 新增 AppKit `muda` 原生 context menu，并处理 winit flipped view 的显式锚点。
 CLI 在 macOS 走同一 Host port；Linux 当前 Wayland Host 没有 GTK window 绑定，
 因此对桌面原生菜单明确返回 `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED`，不再
 让 pending transaction 悬挂。Family 仍不解释平台菜单实现，Headless 仍只消费物理
 输入。macOS 交叉编译检查受本机缺少 Apple C 编译器阻塞，Windows 目标的 CLI 与
 平台增量检查通过；该项不提升 Release Sandbox、完整路线或 Windows E3 状态。
+
+同轮新增 typed system-command channel：Minori 在菜单选择窗口/帮助动作后只发布
+`LegacySystemCommandTransactionV1`，Windows/macOS Host 按显式窗口绑定执行原生
+全屏或原始尺寸恢复，并通过下一固定 step 回送 `Applied`、`Rejected` 或
+`Unsupported`。Manager、Headless 和无窗口 CLI 不解释命令；它们显式回送
+`Unsupported`，避免 pending session 悬挂。帮助、关于和未确认的缩放选项保持
+blocking/未实现，不以通用事件字符串或隐式平台 fallback 代替。
 
 2026 年 8 月 31 日原生菜单分类标题对齐：Sandbox 观察确认剧情右键菜单的两个顶层分类
 使用日文 `ヘルプ (&H)` 与 `ゲーム (&G)`，此前 family transaction 的英文标题已
@@ -37,7 +44,7 @@ save/restore required checkpoint 继续保持 `IN_PROGRESS`。
 
 2026 年 8 月 31 日原版确认框对齐：Windows Sandbox 的 Game→Exit 与
 Game→Return title 均使用原生两按钮对话框，按钮为 `是(Y)`/`否(N)`；Minori
-provider 已把观察到的日文正文通过 Family ABI v12 交给 Host，取消保持原有
+ provider 已把观察到的日文正文通过 Family ABI v13 交给 Host，取消保持原有
 剧情 wait，接受才退出或回到标题。Headless 仍只使用物理输入路径。旧私有
 路线序列引用了已删除的 `runtime.awaiting_input` 观察键，按 hard-cut 规则拒绝；
 新序列尚未形成完整 Release Sandbox 或 Windows E3 证据，因此整体状态保持
