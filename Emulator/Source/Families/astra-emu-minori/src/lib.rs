@@ -5,6 +5,7 @@ mod factory;
 #[cfg(feature = "dynamic-plugin-export")]
 mod ffi;
 mod image_container;
+mod message;
 mod paz;
 mod provider;
 mod runtime;
@@ -17,6 +18,7 @@ pub use factory::*;
 #[cfg(feature = "dynamic-plugin-export")]
 pub use ffi::*;
 pub use image_container::*;
+pub use message::*;
 pub use paz::*;
 pub use provider::*;
 pub use runtime::*;

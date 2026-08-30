@@ -28,8 +28,8 @@ use astra_emu_family_api::{
 };
 use astra_emu_family_core::LegacyCoreError;
 use astra_media::{
-    DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProviderRegistry, DecodeRequest,
-    ImageDecodeProvider,
+    probe_symphonia_audio_metadata, DecodeBindingContext, DecodeKind, DecodeOutput,
+    DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
 };
 use astra_media_core::{
     BlendMode, CpuRendererProvider, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
@@ -47,15 +47,16 @@ use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
 };
 use crate::{
-    collect_resource_references, parse_sc, MinoriAudioCommand, MinoriAudioEncoding,
-    MinoriAxisScrollFrame, MinoriCharacterFrame, MinoriCharacterState, MinoriChoicePresentation,
-    MinoriConfigAudioBus, MinoriConfigChange, MinoriConfigControl, MinoriConfigState,
-    MinoriEffectFrame, MinoriExecutedCommand, MinoriImageDecodeProvider, MinoriLinearScrollFrame,
-    MinoriMovieState, MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState,
-    MinoriScreenShakeFrame, MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand,
-    MinoriStageLayer, MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent,
-    MinoriWScroll2Frame, MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
-    MINORI_IMAGE_DECODE_PROVIDER_ID, MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
+    collect_resource_references, message_voice_wait_resources, parse_sc, MinoriAudioCommand,
+    MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame, MinoriCharacterState,
+    MinoriChoicePresentation, MinoriConfigAudioBus, MinoriConfigChange, MinoriConfigControl,
+    MinoriConfigState, MinoriEffectFrame, MinoriExecutedCommand, MinoriImageDecodeProvider,
+    MinoriLinearScrollFrame, MinoriMessageMarkupError, MinoriMovieState, MinoriPlayMode,
+    MinoriRuntimeError, MinoriRuntimeState, MinoriScreenShakeFrame, MinoriScrollXfFrame,
+    MinoriSecondaryEffectFrame, MinoriStageCommand, MinoriStageLayer, MinoriStandLayer,
+    MinoriSystemPage, MinoriVm, MinoriVmEvent, MinoriWScroll2Frame, MinoriWaitState,
+    ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA, MINORI_IMAGE_DECODE_PROVIDER_ID,
+    MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
 };
 use crate::{MinoriAniArchive, MinoriSqzArchive};
 
@@ -735,7 +736,11 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             title_launch,
             "received the explicit Minori launch profile"
         );
+        let message_voice_durations =
+            decode_message_voice_durations(self.vfs()?, &ctx.mount_set_id, &script)?;
         let mut vm = MinoriVm::new(script_uri, script_hash, script, request.session_seed)
+            .map_err(runtime_error)?;
+        vm.set_message_voice_durations(message_voice_durations)
             .map_err(runtime_error)?;
         if title_launch {
             vm.begin_title_launch().map_err(runtime_error)?;
@@ -1118,7 +1123,11 @@ impl MinoriRuntimeProvider {
                 input.await_results.clear();
             }
             match session.vm.state().wait.as_ref() {
-                Some(MinoriWaitState::Input { .. } | MinoriWaitState::Time { .. }) => {}
+                Some(
+                    MinoriWaitState::Input { .. }
+                    | MinoriWaitState::Time { .. }
+                    | MinoriWaitState::Voice { .. },
+                ) => {}
                 Some(MinoriWaitState::Choice { .. }) => {
                     session.poisoned = true;
                     return Err(invalid(
@@ -1285,10 +1294,14 @@ impl MinoriRuntimeProvider {
                     .vm
                     .set_system_page(MinoriSystemPage::None, 0)
                     .map_err(runtime_error)?;
-                session
-                    .vm
-                    .replace_script(script_uri, script_hash, script)
-                    .map_err(runtime_error)?;
+                replace_vm_script(
+                    &vfs,
+                    &session.mount_set_id,
+                    &mut session.vm,
+                    script_uri,
+                    script_hash,
+                    script,
+                )?;
                 tracing::info!(
                     target: "astra_emu_minori::system_ui",
                     event = "astra_emu_minori_gallery_script_started",
@@ -1301,10 +1314,14 @@ impl MinoriRuntimeProvider {
             if action == MinoriSystemUiAction::StartGame && title_start {
                 let (script_uri, script_hash, script) =
                     load_script_uri(&vfs, &session.mount_set_id, &session.entry_script_uri)?;
-                session
-                    .vm
-                    .replace_script(script_uri, script_hash, script)
-                    .map_err(runtime_error)?;
+                replace_vm_script(
+                    &vfs,
+                    &session.mount_set_id,
+                    &mut session.vm,
+                    script_uri,
+                    script_hash,
+                    script,
+                )?;
                 tracing::debug!(
                     target: "astra_emu_minori::runtime",
                     event = "astra_emu_minori_title_entry_reloaded",
@@ -1523,12 +1540,13 @@ impl MinoriRuntimeProvider {
         // not satisfy a current input wait are still consumed as physical
         // state notifications; they must never be silently interpreted as a
         // semantic action or make an otherwise valid tick fail.
-        if let Some(MinoriWaitState::Input { token_id }) = session
-            .vm
-            .state()
-            .wait
-            .clone()
-            .filter(|_| !game_menu_mode_pressed)
+        if let Some(MinoriWaitState::Input { token_id } | MinoriWaitState::Voice { token_id, .. }) =
+            session
+                .vm
+                .state()
+                .wait
+                .clone()
+                .filter(|_| !game_menu_mode_pressed)
         {
             if !input.await_results.is_empty()
                 && input.input_edges.iter().any(|edge| {
@@ -1662,6 +1680,11 @@ impl MinoriRuntimeProvider {
         } else {
             None
         };
+        let message_character_load = session
+            .vm
+            .advance_message_load_clock(input.delta_ns, animation_enabled)
+            .map_err(runtime_error)?;
+        let animated_character = message_character_load.or(animated_character);
         let animated_linear_scroll = if animation_enabled {
             session
                 .vm
@@ -1936,10 +1959,14 @@ impl MinoriRuntimeProvider {
         if let Some(target) = chain_target.as_deref() {
             let switch_result = load_script(&vfs, &session.mount_set_id, target).and_then(
                 |(script_uri, script_hash, script)| {
-                    session
-                        .vm
-                        .replace_script(script_uri, script_hash, script)
-                        .map_err(runtime_error)
+                    replace_vm_script(
+                        &vfs,
+                        &session.mount_set_id,
+                        &mut session.vm,
+                        script_uri,
+                        script_hash,
+                        script,
+                    )
                 },
             );
             if let Err(error) = switch_result {
@@ -2208,8 +2235,7 @@ impl MinoriRuntimeProvider {
             capture_sequence,
             text,
             speaker,
-            audio_commands: _,
-            wait: _,
+            ..
         }) = event
             .as_ref()
             .filter(|_| !session.vm.state().system_ui.message_panel_hidden)
@@ -2784,10 +2810,17 @@ impl MinoriRuntimeProvider {
             .get_mut(&session_id.0)
             .ok_or_else(session_missing)?;
         validate_session_binding(ctx, session)?;
+        replace_vm_script(
+            &vfs,
+            &ctx.mount_set_id,
+            &mut session.vm,
+            restored.script_uri,
+            script_hash,
+            script,
+        )?;
         session
             .vm
-            .replace_script(restored.script_uri, script_hash, script)
-            .and_then(|_| session.vm.restore_state(&section.bytes))
+            .restore_state(&section.bytes)
             .map_err(runtime_error)?;
         session.global_progress.loaded = checkpoint.global_progress.loaded;
         session.global_progress.persisted_unlocks =
@@ -2926,6 +2959,7 @@ fn non_message_time_wait(event: &MinoriVmEvent) -> Option<(u32, u32)> {
 fn minori_wait_kind(wait: &MinoriWaitState) -> &'static str {
     match wait {
         MinoriWaitState::Time { .. } => "time",
+        MinoriWaitState::Voice { .. } => "voice",
         MinoriWaitState::AxisScroll { .. } => "axis_scroll",
         MinoriWaitState::LinearScroll { .. } => "linear_scroll",
         MinoriWaitState::CharacterTransition { .. } => "character_transition",
@@ -4734,6 +4768,52 @@ fn load_script_uri(
     Ok((script_uri.to_owned(), script_hash, script))
 }
 
+fn decode_message_voice_durations(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    script: &crate::ScScript,
+) -> Result<BTreeMap<String, u32>, LegacyProviderError> {
+    let resources = message_voice_wait_resources(script).map_err(runtime_error)?;
+    if resources.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let mut durations_ms = BTreeMap::new();
+    for resource_uri in resources {
+        let encoded = vfs.read_file(mount_set_id, &resource_uri, MAX_RESOURCE_BYTES)?;
+        let metadata =
+            probe_symphonia_audio_metadata("ogg", encoded).map_err(minori_media_decode_error)?;
+        let milliseconds = metadata
+            .duration_us
+            .checked_add(999)
+            .map(|value| value / 1000)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value != 0)
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_MESSAGE_VOICE_DURATION",
+                    "decoded voice duration is empty or exceeds the runtime clock",
+                )
+            })?;
+        durations_ms.insert(resource_uri, milliseconds);
+    }
+    Ok(durations_ms)
+}
+
+fn replace_vm_script(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    vm: &mut MinoriVm,
+    script_uri: String,
+    script_hash: Hash256,
+    script: crate::ScScript,
+) -> Result<(), LegacyProviderError> {
+    let durations_ms = decode_message_voice_durations(vfs, mount_set_id, &script)?;
+    vm.replace_script(script_uri, script_hash, script)
+        .map_err(runtime_error)?;
+    vm.set_message_voice_durations(durations_ms)
+        .map_err(runtime_error)
+}
+
 /// Validates the resource references of every `.sc` entry without loading an
 /// archive directory or retaining commercial payload. The host VFS owns the
 /// bounded enumeration and all reads; this function keeps only URI identities,
@@ -5816,10 +5896,14 @@ fn load_slot(
             "load continuation state could not be encoded",
         )
     })?;
-    session
-        .vm
-        .replace_script(script_uri, script_hash, script)
-        .map_err(runtime_error)?;
+    replace_vm_script(
+        vfs,
+        &session.mount_set_id,
+        &mut session.vm,
+        script_uri,
+        script_hash,
+        script,
+    )?;
     session
         .vm
         .restore_state(&adjusted_snapshot)
@@ -6681,7 +6765,11 @@ fn validate_system_menu_open(
         ));
     }
     match vm.state().wait.as_ref() {
-        Some(MinoriWaitState::Input { .. } | MinoriWaitState::Time { .. }) => Ok(()),
+        Some(
+            MinoriWaitState::Input { .. }
+            | MinoriWaitState::Time { .. }
+            | MinoriWaitState::Voice { .. },
+        ) => Ok(()),
         Some(MinoriWaitState::Choice { .. }) => Err(invalid(
             "ASTRA_EMU_MINORI_SYSTEM_MENU_CHOICE_ACTIVE",
             "right-click system-menu open is not valid while a choice is active",
@@ -8644,6 +8732,12 @@ fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
             token_id,
             timer_ticks: _,
             milliseconds,
+        }
+        | MinoriWaitState::Voice {
+            token_id,
+            timer_ticks: _,
+            milliseconds,
+            ..
         } => LegacyWaitRequest::Time {
             token_id: token_id.clone(),
             milliseconds: *milliseconds,
@@ -8695,6 +8789,7 @@ fn legacy_wait(wait: &MinoriWaitState) -> LegacyWaitRequest {
 fn wait_token(wait: &MinoriWaitState) -> &str {
     match wait {
         MinoriWaitState::Time { token_id, .. }
+        | MinoriWaitState::Voice { token_id, .. }
         | MinoriWaitState::AxisScroll { token_id, .. }
         | MinoriWaitState::LinearScroll { token_id, .. }
         | MinoriWaitState::CharacterTransition { token_id, .. }
@@ -9770,6 +9865,13 @@ fn runtime_error_code(error: &MinoriRuntimeError) -> &'static str {
         MinoriRuntimeError::AxisScroll => "ASTRA_EMU_MINORI_RUNTIME_AXIS_SCROLL",
         MinoriRuntimeError::LinearScroll => "ASTRA_EMU_MINORI_RUNTIME_LINEAR_SCROLL",
         MinoriRuntimeError::Backlog => "ASTRA_EMU_MINORI_RUNTIME_BACKLOG",
+        MinoriRuntimeError::MessageVoiceDuration => "ASTRA_EMU_MINORI_MESSAGE_VOICE_DURATION",
+        MinoriRuntimeError::MessageControl(error) => match error {
+            MinoriMessageMarkupError::Truncated => "ASTRA_EMU_MINORI_MESSAGE_CONTROL_TRUNCATED",
+            MinoriMessageMarkupError::Unsupported => "ASTRA_EMU_MINORI_MESSAGE_CONTROL_UNSUPPORTED",
+            MinoriMessageMarkupError::Bounds => "ASTRA_EMU_MINORI_MESSAGE_CONTROL_BOUNDS",
+            MinoriMessageMarkupError::LoadSchema => "ASTRA_EMU_MINORI_MESSAGE_LOAD_SCHEMA",
+        },
     }
 }
 

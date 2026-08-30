@@ -25,6 +25,8 @@ Message command 至少要恢复：
 - wait-for-input 标记。
 - backlog 是否记录。
 
+原程序的文字 parser 还识别正文内控制标记。当前已由 IDA 确认并进入 typed IR 的集合是 `\\a`（自动推进）、`\\v`（等待语音结束）和 `\\x{load,...}`（按延时更新角色层）。控制标记不会进入可见正文或 backlog。`load` 只接受已验证的 4 至 6 个参数、受限 PNG 名称、角色 slot、非负延时、transition 和 opacity；未知命令、截断花括号、额外参数或数值越界直接返回稳定 diagnostic。`MsgSubCmd` dispatcher 中存在但样本没有使用的 `pos/trans/vis` 仍只记作原程序事实，不在 runtime 中猜测 operand。
+
 ## Choice
 
 Choice command 的 parser 输出一个保真的候选组，并将已经验证的目标 label 单独保存在 CFG 中：

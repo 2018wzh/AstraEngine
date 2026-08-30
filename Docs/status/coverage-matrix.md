@@ -1,5 +1,7 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 30 日消息控制回归：Minori runtime state 已硬切到 v26。IDA 确认的 `\\a`、`\\v` 与 `MsgSubCmd load` 已进入 typed parser；控制标记不会成为可见正文。voice wait 使用 AstraMedia/Symphonia metadata-only probe，inline load 按 fixed clock 保存 pending state。AstraMedia probe 和 Minori 170 项 library test 通过。该证据为 E1；真实罕见行 Headless checkpoint、原程序双层交叉淡化、四路线 E2 和 Windows E3 仍未关闭。
+
 2026 年 8 月 30 日流式分配回归：Minori decrypt chunk 改为消费 source-owned `Vec<u8>`，通用 Blowfish 与后续 RC4 在同一 allocation 原地执行；`MinoriEntryStream` 截断后直接保留该 buffer。定向测试覆盖 buffer identity、跨 chunk zlib checksum、multipart、movie transform、随机 range 重开与无明文 cache。它只关闭 chunk 内重复 allocation，不把合成回归升级为真实峰值内存规模证据。
 
 2026 年 8 月 30 日 Release 路线复核：分支已 rebase 到当前 `origin/master`，官方 Minori 桌面包现在强制同时编译 Manager/CLI 的 `ffmpeg-vcpkg` binding。严格补齐 ASCII casefold VFS lookup、已观察的尾随空字段、primary Firefly fadeout，以及全包唯一的 `.panel 1 * <resource>` 形态后，当前开发签名 Release 包完成 5212 fixed steps、4382 个呈现帧、17 条物理输入和 4120576 个非静音音频帧，`route_complete`、返回标题、解锁计数 4 与零 diagnostic 成立。三个 checkpoint 已实际查看。该通过报告开始时平台进度已含四个 clear flag；三到四的自然写入另一次运行因测试尾段错误没有形成 passed report。未跳过的 WMV3 全流还出现 FFmpeg concealment 输出，故四路线自然解锁、影片质量、正式音频 review、save/restore checkpoint、Release Sandbox 和 Windows E3 仍为 blocking。

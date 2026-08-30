@@ -1,5 +1,12 @@
 # Minori Implementation Checklist
 
+## 消息控制标记（2026-08-30）
+
+- [x] 依据原程序 `CTextDrawer`/`MsgSubCmd` 静态分析实现 `\\a`、`\\v` 和 `\\x{load,...}` typed parser；未知、截断、越界和未验证子命令全部阻断。
+- [x] 控制标记不进入文字 surface、translation Hook 或 backlog；voice wait 使用 AstraMedia/Symphonia metadata-only probe，不为时长计算解码整段 PCM。
+- [x] runtime state v26 保存 voice wait、auto-advance 和 pending inline load；Minori library 170/170、AstraMedia metadata fixture 与仓库 Ogg probe 通过。
+- [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。内联角色替换当前缺少原程序 current/next 双层交叉淡化，不能标视觉 parity。
+
 ## Key-file Release 路线复核（2026-08-30）
 
 - [x] 分支已 rebase 到当前 `origin/master`。现行 Family API 是 v11；旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。
@@ -41,7 +48,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 ## 当前状态（2026-08-25）
 
-- 本轮已将 runtime snapshot schema 硬切到 `astra.emu.minori.runtime_state.v24`；message completion 会记录排序 bounded read identity，且 restore 会拒绝重复、无序或超限记录。此前 v23 的历史描述仅用于回溯，不能作为当前 ABI/状态版本。
+- runtime snapshot schema 当前为 `astra.emu.minori.runtime_state.v26`；message completion 记录排序 bounded read identity，voice/auto wait 与 pending inline load 同步进入 restore 校验。此前 v23/v24 的条目仅用于回溯，不能作为当前 ABI/状态版本。
 
 - Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori launch profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
 
@@ -84,7 +91,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |
 | `.sc` CP932 lossless IR、CFG、unknown command、census | 已实现 | 89 文件/33728 行/33695 command/29 token，unknown opcode 0；`census-scripts` v5 另输出不含 URI/正文/operand 的逐文件序号、源 hash、大小和 opcode 计数；`select` 的 display/label pair、选择移动和跳转已进入严格 runtime |
 | ANI/SQZ container 与 `bg`/`bgm` census | adapter 已实现 | 2655 PNG、1951 ANI/6723 frames、9 SQZ/224 frames、49 Ogg 真实读取通过；渲染/播放尚未验收 |
-| Minori deterministic VM state 与 control-flow | E2 route | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie 和 end；未确认 operand 继续阻断 |
+| Minori deterministic VM state 与 control-flow | E2 route + message E1 | 已覆盖 chain/call、label/goto/if、变量、message/select/wait、stage/character/panel、CrossFade2、Firefly、axis scroll/ScrollXF/WScroll2、BGM/SE/voice/movie/end，以及已确认的 `\\a`、`\\v`、内联 `load`；未确认 operand 继续阻断，内联 load 双层视觉 parity 待补 |
 | Minori runtime provider / `cdylib` ABI | E2 增量 | Family ABI v9 已 hard cut；共享 Host adapter、writable-file、资源/文字 surface、同步 Hook 与四层 `Native + MultiLayer` 已接通，受影响 library/CLI/Manager tests 通过。仍缺完整四路线与正式 Windows host evidence |
 | Minori 演出、系统 UI、完整模拟 | E2 增量 | 首路线、Config、backlog、save/load、choice、post-choice、影片和 local-private gallery checkpoint 已有增量 evidence；movie gallery 背景是严格有界近似，完整自然 unlock、正式 audio review、原版 gallery parity 与 Windows E3 仍开放 |
 | Config writable-file persistence | 已实现 | `astra.emu.minori.config.v1` identity-bound envelope、原子替换、默认值与损坏/漂移阻断有定向测试；完整跨进程桌面复验仍待补 |

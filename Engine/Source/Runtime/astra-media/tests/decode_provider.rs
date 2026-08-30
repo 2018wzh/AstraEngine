@@ -1,7 +1,7 @@
 use astra_media::{
-    open_symphonia_audio_stream, DecodeBindingContext, DecodeKind, DecodeOutput, DecodeProvider,
-    DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider, SymphoniaAudioDecodeProvider,
-    SyntheticPlatformDecodeProvider,
+    open_symphonia_audio_stream, probe_symphonia_audio_metadata, DecodeBindingContext, DecodeKind,
+    DecodeOutput, DecodeProvider, DecodeProviderRegistry, DecodeRequest, ImageDecodeProvider,
+    SymphoniaAudioDecodeProvider, SyntheticPlatformDecodeProvider,
 };
 use serde_json::Value;
 
@@ -97,6 +97,15 @@ fn symphonia_stream_decoder_emits_bounded_chunks_without_whole_file_pcm() {
     let source = tiny_wav().into();
     let mut decoder = open_symphonia_audio_stream("wav", source, 7).unwrap();
     assert!(decoder.next_chunk().is_err());
+}
+
+#[astra_headless_test::test]
+fn symphonia_metadata_probe_reports_duration_without_pcm_output() {
+    let metadata = probe_symphonia_audio_metadata("wav", tiny_wav().into()).unwrap();
+    assert_eq!(metadata.sample_rate, 8_000);
+    assert_eq!(metadata.channels, 1);
+    assert_eq!(metadata.frame_count, 4);
+    assert_eq!(metadata.duration_us, 500);
 }
 
 #[astra_headless_test::test]

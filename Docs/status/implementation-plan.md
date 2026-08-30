@@ -1,5 +1,7 @@
 # Implementation Plan Status
 
+2026 年 8 月 30 日 Minori 消息控制增量：IDA 已确认原程序 `CTextDrawer` 的 `\\a` 自动推进、`\\v` 语音结束等待，以及 `MsgSubCmd load` 的延时角色层替换语义。runtime state 硬切到 v26，控制标记在 backlog、translation Hook 和文字 surface 前移除；voice wait 通过 AstraMedia/Symphonia metadata probe 获取 Ogg 时长，不展开整段 PCM。脱敏样本统计为 18319 条 message、26 条 inline load，voice/auto 组合只出现一次。Minori 170 项 library test、AstraMedia WAV fixture 和仓库 Ogg probe 通过。真实罕见行 Headless checkpoint、inline load 的 current/next 双层交叉淡化、原版同点视觉对照、四路线 E2 与 Windows E3 仍开放。
+
 2026 年 8 月 30 日 Minori 流式读取分配收紧：entry chunk transform 直接接管 source reader 返回的 owned buffer，Blowfish、RC4 与 movie transform 原地写入；输出只截断同一 allocation 后交给顺序 stream，不再为每个 64 KiB chunk复制两次。8 个 PAZ stream 定向回归通过，其中 pointer-identity 用例固定 owned buffer 复用。该优化不建立明文 cache，也不替代独立峰值内存规模门禁。
 
 2026 年 8 月 30 日 Minori key-file Release 增量：当前分支已 rebase 到 `origin/master`。官方桌面构建器会把唯一的 `ffmpeg-vcpkg` provider 编译进 Minori Manager 和 CLI；不再生成缺影片能力的 Release 包。PAZ ASCII casefold lookup、样本尾随空字段、primary Firefly fadeout 和唯一三参数 panel 形态已按现有 contract 补齐。开发签名 Release 包完成 5212 fixed steps、4382 个呈现帧、17 条物理输入、非静音音频、`route_complete`、返回标题、解锁计数 4 与零 diagnostic；三个 checkpoint 已检查。该 passed report 载入时平台进度已有四个 clear flag，且未跳过的 WMV3 全流出现过 concealment 输出，所以四路线自然解锁、save/restore required checkpoint、正式影片/音频 review、Release Sandbox 与 Windows E3 继续保持 blocking。

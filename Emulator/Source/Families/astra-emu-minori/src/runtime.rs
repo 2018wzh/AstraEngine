@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    script::tokenize_operands, ScCommand, ScControlFlow, ScLineKind, ScOperand, ScScript,
+    parse_minori_message_markup, script::tokenize_operands, MinoriMessageControl,
+    MinoriMessageMarkupError, ScCommand, ScControlFlow, ScLineKind, ScOperand, ScScript,
     SourceSpan,
 };
 
-pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v24";
+pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v26";
 
 /// Maximum number of script files accepted by the explicit resource-reference
 /// audit.  The audit is an opt-in mount/open policy; the normal runtime keeps
@@ -68,6 +69,7 @@ pub struct MinoriRuntimeState {
     pub global_variables: BTreeMap<String, i64>,
     pub wait: Option<MinoriWaitState>,
     pub message: Option<MinoriMessageState>,
+    pub message_loads: Vec<MinoriMessageLoadState>,
     /// Message identities confirmed by the player.  The identity includes the
     /// script revision, source span, message id and text hash, so repeated text
     /// at different source locations is not accidentally treated as read.
@@ -134,6 +136,7 @@ impl MinoriRuntimeState {
                     .as_ref()
                     .is_some_and(|transition| !transition.completed)
             })
+            || !self.message_loads.is_empty()
     }
 }
 
@@ -142,6 +145,12 @@ impl MinoriRuntimeState {
 pub enum MinoriWaitState {
     Time {
         token_id: String,
+        timer_ticks: u32,
+        milliseconds: u32,
+    },
+    Voice {
+        token_id: String,
+        stream_id: u32,
         timer_ticks: u32,
         milliseconds: u32,
     },
@@ -186,6 +195,8 @@ pub struct MinoriMessageState {
     pub speaker_hash: Option<Hash256>,
     pub voice_hash: Option<Hash256>,
     pub voice: Option<MinoriMessageVoice>,
+    pub auto_advance: bool,
+    pub wait_for_voice: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -193,6 +204,16 @@ pub struct MinoriMessageVoice {
     pub resource_uri: String,
     pub volume_milli: u16,
     pub pan_milli: i16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MinoriMessageLoadState {
+    pub delay_ms: u32,
+    pub elapsed_ns: u64,
+    pub slot_id: u32,
+    pub resource_uri: String,
+    pub transition_ms: u32,
+    pub opacity_256: u16,
 }
 
 /// Local-private dialogue history retained by the runtime snapshot. Plaintext is
@@ -715,6 +736,7 @@ pub enum MinoriVmEvent {
         capture_sequence: u64,
         text: String,
         speaker: Option<String>,
+        controls: Vec<MinoriMessageControl>,
         audio_commands: Vec<MinoriAudioCommand>,
         wait: MinoriWaitState,
     },
@@ -1070,6 +1092,12 @@ pub enum MinoriRuntimeError {
     LinearScroll,
     #[error("ASTRA_EMU_MINORI_RUNTIME_BACKLOG: backlog state exceeds its verified bounds")]
     Backlog,
+    #[error(
+        "ASTRA_EMU_MINORI_MESSAGE_VOICE_DURATION: voice wait has no verified decoded duration"
+    )]
+    MessageVoiceDuration,
+    #[error(transparent)]
+    MessageControl(#[from] MinoriMessageMarkupError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1140,6 +1168,7 @@ fn parse_c_decimal_prefix(value: &str) -> Option<i32> {
 pub struct MinoriVm {
     script: ScScript,
     labels: BTreeMap<String, u32>,
+    message_voice_durations_ms: BTreeMap<String, u32>,
     state: MinoriRuntimeState,
     executed_commands: Vec<MinoriExecutedCommand>,
 }
@@ -1168,6 +1197,7 @@ impl MinoriVm {
             global_variables: BTreeMap::new(),
             wait: None,
             message: None,
+            message_loads: Vec::new(),
             read_message_identities: Vec::new(),
             backlog: Vec::new(),
             backlog_bytes: 0,
@@ -1199,6 +1229,7 @@ impl MinoriVm {
         Ok(Self {
             script,
             labels,
+            message_voice_durations_ms: BTreeMap::new(),
             state,
             executed_commands: Vec::new(),
         })
@@ -1206,6 +1237,21 @@ impl MinoriVm {
 
     pub fn state(&self) -> &MinoriRuntimeState {
         &self.state
+    }
+
+    pub(crate) fn set_message_voice_durations(
+        &mut self,
+        durations_ms: BTreeMap<String, u32>,
+    ) -> Result<(), MinoriRuntimeError> {
+        if durations_ms.iter().any(|(resource_uri, duration_ms)| {
+            !resource_uri.starts_with("minori:/voice/")
+                || *duration_ms == 0
+                || *duration_ms > 60 * 60 * 1000
+        }) {
+            return Err(MinoriRuntimeError::MessageVoiceDuration);
+        }
+        self.message_voice_durations_ms = durations_ms;
+        Ok(())
     }
 
     pub(crate) fn persistent_config(&self) -> &MinoriConfigState {
@@ -1975,6 +2021,7 @@ impl MinoriVm {
         self.state.variables.clear();
         self.state.wait = None;
         self.state.message = None;
+        self.state.message_loads.clear();
         self.state.choice = None;
         self.state.effect = None;
         self.state.firefly = None;
@@ -2012,6 +2059,7 @@ impl MinoriVm {
             .clone();
         let expected = match &current {
             MinoriWaitState::Time { token_id, .. }
+            | MinoriWaitState::Voice { token_id, .. }
             | MinoriWaitState::AxisScroll { token_id, .. }
             | MinoriWaitState::LinearScroll { token_id, .. }
             | MinoriWaitState::CharacterTransition { token_id, .. }
@@ -2026,6 +2074,15 @@ impl MinoriVm {
         }
         if token_id.starts_with("minori.message.") {
             self.mark_active_message_read()?;
+            let pending = std::mem::take(&mut self.state.message_loads);
+            for load in pending {
+                apply_message_character_load(&mut self.state, &load, false)?;
+            }
+            for character in self.state.characters.values_mut() {
+                if let Some(transition) = character.transition.take() {
+                    character.opacity_256 = transition.target_opacity_256;
+                }
+            }
         }
         let completes_media = matches!(current, MinoriWaitState::Media { .. });
         let completes_axis_scroll = matches!(current, MinoriWaitState::AxisScroll { .. });
@@ -2154,7 +2211,19 @@ impl MinoriVm {
             }
             _ => return Ok(false),
         };
-        let rebound = message_wait_for_current_mode(&self.state, token_id)?;
+        let message = self
+            .state
+            .message
+            .as_ref()
+            .ok_or(MinoriRuntimeError::State)?;
+        let rebound = message_wait_for_current_mode(
+            &self.state,
+            token_id,
+            message.auto_advance,
+            message.wait_for_voice,
+            message.voice.as_ref(),
+            &self.message_voice_durations_ms,
+        )?;
         if rebound == wait {
             return Ok(false);
         }
@@ -2393,6 +2462,41 @@ impl MinoriVm {
             .min(duration_ns);
         character.opacity_256 = interpolate_character_opacity(transition, duration_ns)?;
         transition.completed = transition.elapsed_ns == duration_ns;
+        let sequence = next_effect_sequence(&mut self.state)?;
+        Ok(Some(MinoriCharacterFrame { sequence }))
+    }
+
+    pub fn advance_message_load_clock(
+        &mut self,
+        delta_ns: u64,
+        animations_enabled: bool,
+    ) -> Result<Option<MinoriCharacterFrame>, MinoriRuntimeError> {
+        if self.state.message_loads.is_empty() {
+            return Ok(None);
+        }
+        let mut due = Vec::new();
+        for load in &mut self.state.message_loads {
+            load.elapsed_ns = load
+                .elapsed_ns
+                .checked_add(delta_ns)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            let delay_ns = u64::from(load.delay_ms)
+                .checked_mul(1_000_000)
+                .ok_or(MinoriRuntimeError::Overflow)?;
+            if load.elapsed_ns >= delay_ns {
+                due.push(load.clone());
+            }
+        }
+        if due.is_empty() {
+            return Ok(None);
+        }
+        self.state.message_loads.retain(|load| {
+            let delay_ns = u64::from(load.delay_ms).saturating_mul(1_000_000);
+            load.elapsed_ns < delay_ns
+        });
+        for load in due {
+            apply_message_character_load(&mut self.state, &load, animations_enabled)?;
+        }
         let sequence = next_effect_sequence(&mut self.state)?;
         Ok(Some(MinoriCharacterFrame { sequence }))
     }
@@ -2692,7 +2796,12 @@ impl MinoriVm {
                 .instruction_count
                 .checked_add(1)
                 .ok_or(MinoriRuntimeError::Overflow)?;
-            if let Some(event) = execute_control(command, &self.labels, &mut self.state)? {
+            if let Some(event) = execute_control(
+                command,
+                &self.labels,
+                &self.message_voice_durations_ms,
+                &mut self.state,
+            )? {
                 return Ok(Some(event));
             }
         }
@@ -2703,6 +2812,7 @@ impl MinoriVm {
 fn execute_control(
     command: &ScCommand,
     labels: &BTreeMap<String, u32>,
+    message_voice_durations_ms: &BTreeMap<String, u32>,
     state: &mut MinoriRuntimeState,
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
     match command.opcode.as_str() {
@@ -2773,7 +2883,7 @@ fn execute_control(
             state.wait = Some(wait.clone());
             Ok(Some(MinoriVmEvent::Wait(wait)))
         }
-        "message" => execute_message(command, state),
+        "message" => execute_message(command, message_voice_durations_ms, state),
         "select" => execute_select(command, labels, state),
         "playbgm" => execute_play_bgm(command, state),
         "playse" => execute_play_se(command, state, 1, "se"),
@@ -3758,6 +3868,35 @@ fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
         validate_stage_state(stage)?;
     }
     validate_character_state(&state.characters)?;
+    if state.message_loads.len() > 128
+        || (!state.message_loads.is_empty()
+            && (state.message.is_none()
+                || !state.wait.as_ref().is_some_and(|wait| {
+                    matches!(
+                        wait,
+                        MinoriWaitState::Input { token_id }
+                            | MinoriWaitState::Time { token_id, .. }
+                            | MinoriWaitState::Voice { token_id, .. }
+                            if token_id.starts_with("minori.message.")
+                    )
+                })))
+    {
+        return Err(MinoriRuntimeError::Character);
+    }
+    for load in &state.message_loads {
+        validate_scene_uri(&load.resource_uri, "minori:/st/")?;
+        let delay_ns = u64::from(load.delay_ms)
+            .checked_mul(1_000_000)
+            .ok_or(MinoriRuntimeError::Overflow)?;
+        if load.slot_id == 0
+            || load.slot_id > MINORI_CHARACTER_MAX_SLOT_ID
+            || load.transition_ms > MINORI_CHARACTER_MAX_TRANSITION_MS
+            || load.opacity_256 > 256
+            || (load.delay_ms != 0 && load.elapsed_ns >= delay_ns)
+        {
+            return Err(MinoriRuntimeError::Character);
+        }
+    }
     let transition_slot = state
         .characters
         .iter()
@@ -3765,6 +3904,14 @@ fn validate_runtime_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
     match (&state.wait, transition_slot) {
         (Some(MinoriWaitState::CharacterTransition { slot_id, .. }), Some(transition_slot))
             if *slot_id == transition_slot => {}
+        (
+            Some(
+                MinoriWaitState::Input { token_id }
+                | MinoriWaitState::Time { token_id, .. }
+                | MinoriWaitState::Voice { token_id, .. },
+            ),
+            Some(_),
+        ) if token_id.starts_with("minori.message.") => {}
         (Some(MinoriWaitState::CharacterTransition { .. }), _) | (_, Some(_)) => {
             return Err(MinoriRuntimeError::Character)
         }
@@ -4129,6 +4276,36 @@ fn complete_character_transition_state(
         .take()
         .ok_or(MinoriRuntimeError::Character)?;
     character.opacity_256 = transition.target_opacity_256;
+    Ok(())
+}
+
+fn apply_message_character_load(
+    state: &mut MinoriRuntimeState,
+    load: &MinoriMessageLoadState,
+    animate: bool,
+) -> Result<(), MinoriRuntimeError> {
+    validate_scene_uri(&load.resource_uri, "minori:/st/")?;
+    let character = state
+        .characters
+        .get_mut(&load.slot_id)
+        .ok_or(MinoriRuntimeError::Character)?;
+    if character.transition.is_some() {
+        return Err(MinoriRuntimeError::Character);
+    }
+    character.resource_uris = vec![load.resource_uri.clone()];
+    if animate && load.transition_ms != 0 {
+        character.opacity_256 = 0;
+        character.transition = Some(MinoriCharacterTransitionState {
+            start_opacity_256: 0,
+            target_opacity_256: load.opacity_256,
+            duration_ms: load.transition_ms,
+            elapsed_ns: 0,
+            completed: false,
+        });
+    } else {
+        character.opacity_256 = load.opacity_256;
+        character.transition = None;
+    }
     Ok(())
 }
 
@@ -5355,11 +5532,12 @@ fn next_effect_sequence(state: &mut MinoriRuntimeState) -> Result<u64, MinoriRun
 
 fn execute_message(
     command: &ScCommand,
+    message_voice_durations_ms: &BTreeMap<String, u32>,
     state: &mut MinoriRuntimeState,
 ) -> Result<Option<MinoriVmEvent>, MinoriRuntimeError> {
     let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
         .map_err(|_| MinoriRuntimeError::Operand)?;
-    let (message_id, voice, speaker, text) = if tokens.len() >= 4 {
+    let (message_id, voice, speaker, authored_text) = if tokens.len() >= 4 {
         let message_id = tokens[0]
             .parse::<i64>()
             .map_err(|_| MinoriRuntimeError::Operand)?;
@@ -5374,6 +5552,40 @@ fn execute_message(
         // than four operands are present, then still executes the empty message update.
         (-1, None, None, String::new())
     };
+    let markup = parse_minori_message_markup(&authored_text)?;
+    let auto_advance = markup.auto_advance();
+    let wait_for_voice = markup.waits_for_voice();
+    let controls = markup.controls;
+    let text = markup.visible_text;
+    if !state.message_loads.is_empty() {
+        return Err(MinoriRuntimeError::Character);
+    }
+    state.message_loads = controls
+        .iter()
+        .filter_map(|control| match control {
+            MinoriMessageControl::LoadCharacter {
+                delay_ms,
+                slot_id,
+                resource,
+                transition_ms,
+                opacity_255,
+                ..
+            } => Some(MinoriMessageLoadState {
+                delay_ms: *delay_ms,
+                elapsed_ns: 0,
+                slot_id: *slot_id,
+                resource_uri: format!("minori:/st/{resource}"),
+                transition_ms: *transition_ms,
+                opacity_256: if *opacity_255 == 255 {
+                    256
+                } else {
+                    u16::from(*opacity_255)
+                },
+            }),
+            MinoriMessageControl::WaitForVoice { .. }
+            | MinoriMessageControl::AutoAdvance { .. } => None,
+        })
+        .collect();
     let text_hash = Hash256::from_sha256(text.as_bytes());
     let speaker_hash = speaker
         .as_ref()
@@ -5448,21 +5660,60 @@ fn execute_message(
         text_hash,
         speaker_hash,
         voice_hash,
-        voice,
+        voice: voice.clone(),
+        auto_advance,
+        wait_for_voice,
     });
     let presentation_sequence = next_effect_sequence(state)?;
     let capture_sequence = next_effect_sequence(state)?;
     let token_id = format!("minori.message.{}", state.instruction_count);
-    let wait = message_wait_for_current_mode(state, token_id)?;
+    let wait = message_wait_for_current_mode(
+        state,
+        token_id,
+        auto_advance,
+        wait_for_voice,
+        voice.as_ref(),
+        message_voice_durations_ms,
+    )?;
     state.wait = Some(wait.clone());
     Ok(Some(MinoriVmEvent::Message {
         presentation_sequence,
         capture_sequence,
         text,
         speaker,
+        controls,
         audio_commands,
         wait,
     }))
+}
+
+pub(crate) fn message_voice_wait_resources(
+    script: &ScScript,
+) -> Result<BTreeSet<String>, MinoriRuntimeError> {
+    let mut resources = BTreeSet::new();
+    for line in &script.lines {
+        let ScLineKind::Command { command } = &line.kind else {
+            continue;
+        };
+        if command.opcode != "message" {
+            continue;
+        }
+        let tokens = tokenize_operands(&command.raw_operands, command.span.offset as usize)
+            .map_err(|_| MinoriRuntimeError::Operand)?;
+        if tokens.len() < 4 {
+            continue;
+        }
+        let authored_text = tokens[3..].join(" ");
+        if !parse_minori_message_markup(&authored_text)?.waits_for_voice() {
+            continue;
+        }
+        let voice = (!tokens[1].is_empty())
+            .then(|| parse_message_voice(&tokens[1]))
+            .transpose()?
+            .ok_or(MinoriRuntimeError::MessageVoiceDuration)?;
+        resources.insert(voice.resource_uri);
+    }
+    Ok(resources)
 }
 
 fn message_auto_wait(
@@ -5482,11 +5733,34 @@ fn message_auto_wait(
 fn message_wait_for_current_mode(
     state: &MinoriRuntimeState,
     token_id: String,
+    auto_advance: bool,
+    wait_for_voice: bool,
+    voice: Option<&MinoriMessageVoice>,
+    message_voice_durations_ms: &BTreeMap<String, u32>,
 ) -> Result<MinoriWaitState, MinoriRuntimeError> {
     if state.system_ui.skip_enabled
         && (state.system_ui.play_mode == MinoriPlayMode::Skip
             || (state.system_ui.control_enabled && state.system_ui.control_pressed))
     {
+        return message_auto_wait(token_id, 0);
+    }
+    if wait_for_voice {
+        let voice = voice.ok_or(MinoriRuntimeError::MessageVoiceDuration)?;
+        let milliseconds = *message_voice_durations_ms
+            .get(&voice.resource_uri)
+            .ok_or(MinoriRuntimeError::MessageVoiceDuration)?;
+        let timer_ticks = milliseconds
+            .checked_add(9)
+            .ok_or(MinoriRuntimeError::Overflow)?
+            / 10;
+        return Ok(MinoriWaitState::Voice {
+            token_id,
+            stream_id: VOICE_STREAM_ID,
+            timer_ticks,
+            milliseconds,
+        });
+    }
+    if auto_advance {
         return message_auto_wait(token_id, 0);
     }
     if state.system_ui.play_mode == MinoriPlayMode::Auto {
@@ -7624,6 +7898,106 @@ mod tests {
         vm.close_backlog().unwrap();
         assert_eq!(vm.state().system_ui.page, MinoriSystemPage::None);
         assert!(vm.state().wait.is_some());
+    }
+
+    #[test]
+    fn message_voice_auto_control_uses_decoded_voice_duration_and_hides_markup() {
+        let source = b".message 42 voice speaker body\\v\\a\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/main.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            9,
+        )
+        .unwrap();
+        vm.set_message_voice_durations(BTreeMap::from([("minori:/voice/voice".into(), 1_234)]))
+            .unwrap();
+
+        let Some(MinoriVmEvent::Message {
+            text,
+            controls,
+            wait,
+            ..
+        }) = vm.step(1, 4).unwrap()
+        else {
+            panic!("expected voice-synchronized message")
+        };
+        assert_eq!(text, "body");
+        assert_eq!(controls.len(), 2);
+        assert!(matches!(
+            wait,
+            MinoriWaitState::Voice {
+                stream_id: VOICE_STREAM_ID,
+                timer_ticks: 124,
+                milliseconds: 1_234,
+                ..
+            }
+        ));
+        let message = vm.state().message.as_ref().unwrap();
+        assert!(message.auto_advance);
+        assert!(message.wait_for_voice);
+    }
+
+    #[test]
+    fn voice_control_without_a_bound_duration_fails_closed() {
+        let source = b".message 42 voice speaker body\\v\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/main.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            9,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.step(1, 4).unwrap_err(),
+            MinoriRuntimeError::MessageVoiceDuration
+        );
+    }
+
+    #[test]
+    fn inline_message_load_runs_on_its_verified_clock_and_finishes_on_input() {
+        let source = b".char load 21 Old.png\r\n.message 42  speaker a\\x{load,120,21,New.png,40,255}b\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/main.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            9,
+        )
+        .unwrap();
+        assert!(matches!(
+            vm.step(1, 4).unwrap(),
+            Some(MinoriVmEvent::Character(_))
+        ));
+        let Some(MinoriVmEvent::Message { text, wait, .. }) = vm.step(2, 4).unwrap() else {
+            panic!("expected inline-load message")
+        };
+        assert_eq!(text, "ab");
+        assert_eq!(vm.state().message_loads.len(), 1);
+        assert!(vm
+            .advance_message_load_clock(100_000_000, true)
+            .unwrap()
+            .is_none());
+        assert!(vm
+            .advance_message_load_clock(20_000_000, true)
+            .unwrap()
+            .is_some());
+        let character = vm.state().characters.get(&21).unwrap();
+        assert_eq!(character.resource_uris, ["minori:/st/New.png"]);
+        assert_eq!(character.opacity_256, 0);
+        assert!(character.transition.is_some());
+
+        vm.resolve_wait(match &wait {
+            MinoriWaitState::Input { token_id } => token_id,
+            _ => panic!("expected input wait"),
+        })
+        .unwrap();
+        let character = vm.state().characters.get(&21).unwrap();
+        assert_eq!(character.opacity_256, 256);
+        assert!(character.transition.is_none());
+        assert!(vm.state().message_loads.is_empty());
     }
 
     #[test]

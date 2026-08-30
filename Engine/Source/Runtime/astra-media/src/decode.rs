@@ -78,6 +78,79 @@ pub enum DecodeOutput {
     MediaSurfaceToken(MediaSurfaceToken),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudioStreamMetadata {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub frame_count: u64,
+    pub duration_us: u64,
+}
+
+pub fn probe_symphonia_audio_metadata(
+    codec: &str,
+    bytes: astra_byte_source::OwnedByteBuffer,
+) -> Result<AudioStreamMetadata, MediaError> {
+    if !matches!(codec, "wav" | "ogg" | "flac" | "mp3") {
+        return Err(MediaError::message(
+            "audio metadata probe codec is not explicitly supported",
+        ));
+    }
+    let mut hint = Hint::new();
+    hint.with_extension(codec);
+    let media_stream = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+    let format = symphonia::default::get_probe()
+        .probe(
+            &hint,
+            media_stream,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|err| MediaError::message(format!("probe audio metadata: {err}")))?;
+    let track = format
+        .default_track(TrackType::Audio)
+        .ok_or_else(|| MediaError::message("audio container has no supported track"))?;
+    let codec_parameters = track
+        .codec_params
+        .as_ref()
+        .ok_or_else(|| MediaError::message("audio track is missing codec parameters"))?;
+    let parameters = codec_parameters
+        .audio()
+        .ok_or_else(|| MediaError::message("audio track is missing codec parameters"))?;
+    let sample_rate = parameters.sample_rate.unwrap_or_default();
+    let channels = parameters
+        .channels
+        .as_ref()
+        .map(|channels| channels.count())
+        .unwrap_or_default();
+    let frame_count = track.num_frames.unwrap_or_default();
+    if sample_rate == 0 || channels == 0 || frame_count == 0 {
+        return Err(MediaError::message(
+            "audio container does not declare bounded duration metadata",
+        ));
+    }
+    let (numerator, denominator) = match (track.time_base, track.duration) {
+        (Some(time_base), Some(duration)) => (
+            u128::from(duration.get()) * u128::from(time_base.numer.get()),
+            u128::from(time_base.denom.get()),
+        ),
+        _ => (u128::from(frame_count), u128::from(sample_rate)),
+    };
+    let duration_us = numerator
+        .checked_mul(1_000_000)
+        .and_then(|value| value.checked_add(denominator.saturating_sub(1)))
+        .map(|value| value / denominator)
+        .and_then(|value| u64::try_from(value).ok())
+        .filter(|value| *value != 0)
+        .ok_or_else(|| MediaError::message("audio duration metadata exceeds the clock"))?;
+    Ok(AudioStreamMetadata {
+        sample_rate,
+        channels: u16::try_from(channels)
+            .map_err(|_| MediaError::message("audio channel count exceeds u16"))?,
+        frame_count,
+        duration_us,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MediaSurfaceToken {
     pub provider_id: String,
