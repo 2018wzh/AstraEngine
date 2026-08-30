@@ -7,7 +7,7 @@
 - [x] Add the bounded read-only COM `IStream` seam plus video/audio reader entry points; public MP4 and the authorized AVI decode both tracks directly from owned seekable readers without HGLOBAL input copies or plaintext spools.
 - [x] Add the complete `astra.decode.wmf.incremental` audio/video provider to the shared AstraMedia registry, including typed packets, media-type validation, seek generation and cancellation.
 - [x] CLI and Manager accept exactly one explicit Minori binding (`wmf` or `ffmpeg-vcpkg`); Windows packages default to WMF, the builder records the choice, and missing/ineligible providers block without switching.
-- [ ] Run the signed Release Headless movie checkpoints with `wmf` and confirm video orientation, crop, audio timing, fence completion and zero diagnostics.
+- [x] Release CLI 的开发签名候选已用 `wmf` 完成真实影片定向 Headless E2：17,371 fixed steps、32 个提交帧、零 diagnostic；影片在第 5,251 tick 打开，于第 16,387 tick 完成。保留的早段和中段画面未见上下颠倒、拉伸或边缘裁切，完整音频非静音且未削波。
 - [ ] Re-run required movie checkpoints and original-title parity before changing the shipping Minori provider binding.
 
 ## FFmpeg dependency and WMV3 quality (2026-08-30)
@@ -29,7 +29,7 @@
 ## Key-file Release 路线复核（2026-08-30）
 
 - [x] 分支已 rebase 到当前 `origin/master`。现行 Family API 是 v11；旧 ABI、Luau private profile、明文 cache 和自动 key importer 没有恢复。
-- [x] 官方桌面构建器在选择 Minori 时会同时给 Manager 与 CLI 编译唯一的 `ffmpeg-vcpkg` 绑定。FFmpeg 不可用时构建直接失败，不再生成缺少影片能力的 Release 包。
+- [x] 官方桌面构建器为 Minori Manager 与 CLI 固化唯一影片 binding。Windows 默认 `wmf`；只有显式选择 `ffmpeg-vcpkg` 才编译 FFmpeg feature。所选 provider 不可用时构建或启动直接失败。
 - [x] PAZ 查找使用 ASCII case-insensitive identity，并保留 manifest 的 canonical URI；大小写折叠冲突直接阻断。`.stage`/`.wait` 只接收样本已确认的单个尾随空字段，更多空字段仍阻断。
 - [x] 已确认的 `.effect fadeout` 只结束活动的 primary Firefly；没有活动 Firefly 时返回 blocking diagnostic。样本唯一的三参数 `.panel` 形态按原程序 parser 解释为 mode 1、默认过渡标记和 `sys` 自定义资源，显式未知过渡值仍阻断。
 - [x] 当前 Release 包已完成一次标题启动路线报告：5212 fixed steps、4382 个提交/栅格帧、17 条物理输入、4120576 个 48 kHz 双声道音频帧，`route_complete`、返回标题、解锁计数 4 和零 diagnostic 成立。模型检查标题、剧情与返回标题三个 checkpoint，未见缺字、裁剪、拉伸、错层或残影。
@@ -51,7 +51,7 @@
 旧 private-profile/cache identity 下的八包 full verify 仅保留为迁移历史。当前 key-file/streaming identity 已重新完成无明文缓存的八包 full verify，并通过合成 source 计数回归确认重复 range read 会重新访问密文 source；峰值内存的独立规模门禁仍未关闭。
 
 - [x] `IncrementalMediaPlayback` 校验完整播放配置、单调 tick、轨道声明、资源标识、PTS/duration、尺寸、PCM 格式和 bounded queue；显式执行视频 lead/lag 与 `Block`/`Drop` 策略，并记录迟到帧计数。
-- [x] 共享 AstraMedia FFmpeg provider 完成真实影片的 demux、逐 packet decode、PCM resample、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
+- [x] AstraMedia 的 WMF 与 FFmpeg provider 共用 `IncrementalMediaDecoder`/`IncrementalMediaPlayback`，完成逐 packet 解码、PCM、seek/cancel、Control 跳过和 media fence；Minori 没有保留手写 AVI/WMV decoder 或平台 fallback。
 - [x] 当前签名 release plugin 的 title→config→movie→skip→title slice 报告 `passed`：3102 fixed steps、9 个 retained frame sample、零 diagnostic；该结果只覆盖 media/provider 与标题恢复接线，不覆盖完整剧情 terminal。
 - [ ] 正式音频人工听审、完整路线与自然 unlock、gallery、Linux FUSE、macOS extract、Manager 实机预览和 Windows E3 仍未闭合；旧 cache second-run 不属于当前 key-file/streaming identity，不能替代这些门禁。
 
@@ -59,7 +59,7 @@
 
 - rebase 到最新 ABI v9 `master` 后，签名动态 plugin 重新绑定 AstraMedia `ffmpeg-vcpkg`，真实授权样本 Headless slice 通过 139 fixed ticks、5 个 retained checkpoint samples、638 次有界 VFS read 和零 diagnostic；`title_initial`、`config`、`movie_60` 三张图已人工查看。该证据只关闭当前 media/provider 接线回归，不关闭完整路线、正式性能或 Windows E3。
 - 同一 FFmpeg release slice 在 CLI retained `Layer2D` composite cache 变更后重新执行：139 fixed steps、5 个 retained samples、638 次 bounded VFS read、zero diagnostic；`step_total` 从约 81.9 s 降到约 35.9 s，`effect_dispatch` 从约 48.7 s 降到约 22.4 s。缓存只在 viewport、完整 layer state 和已验证 base frame 全部相同时生效；该结果是性能诊断，不替代正式 120 Hz 或完整路线门禁。
-- FFmpeg feature 未编译、profile 没有 `ffmpeg-vcpkg` binding、AVI identity 不符或 codec/container 不受支持时，Minori 直接返回 blocking diagnostic；不存在 WMF、RFVP、手写 AVI/WMV 或按注册顺序选择的 fallback。
+- profile 未绑定 `wmf`/`ffmpeg-vcpkg` 中的唯一一项、所选 feature/provider 不可用、AVI identity 不符或 codec/container 不受支持时，Minori 直接返回 blocking diagnostic；不存在 RFVP、手写 AVI/WMV、按注册顺序选择或跨 provider 重试。
 
 Minori family-mounted image previews now use explicit `astra-media` `DecodeProviderRegistry` bindings: standard PNG/JPEG/BMP/WebP use `astra.decode.image`, and ANI/SQZ use the family-owned `astra.decode.minori.image` provider for a bounded first frame. UI receives RGBA8 pixels, not paths or native handles. Family audio previews use an explicit Symphonia binding and expose metadata only. Minori AVI playback and preview bind AstraMedia's incremental `ffmpeg-vcpkg` provider; an absent or mismatched binding remains blocking.
 
