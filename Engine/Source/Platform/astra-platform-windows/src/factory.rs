@@ -2322,10 +2322,8 @@ mod windows {
         // composition without copying a commercial title into Family ABI or
         // CLI code.  Service-only callers without a parent retain the typed
         // Family title.
-        let title = window
-            .map(Window::title)
-            .filter(|title| !title.trim().is_empty())
-            .unwrap_or(request.title);
+        let parent_title = window.map(Window::title);
+        let title = confirmation_dialog_title(parent_title.as_deref(), request.title);
         let mut dialog = AsyncMessageDialog::new()
             .set_title(title)
             .set_description(request.message)
@@ -2350,6 +2348,13 @@ mod windows {
                 "native confirmation returned an unsupported result",
             )),
         }
+    }
+
+    fn confirmation_dialog_title(parent_title: Option<&str>, request_title: String) -> String {
+        parent_title
+            .filter(|title| !title.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or(request_title)
     }
 
     fn host_error(operation: &'static str, message: &'static str) -> PlatformError {
@@ -2377,6 +2382,28 @@ mod windows {
                 .map_err(|_| host_error("save.store.open", "Saved Games path is invalid"))?;
             CoTaskMemFree(Some(path.as_ptr() as *const c_void));
             Ok(std::path::PathBuf::from(root))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::confirmation_dialog_title;
+
+        #[test]
+        fn confirmation_prefers_live_parent_caption() {
+            assert_eq!(
+                confirmation_dialog_title(Some("Game caption"), "确认".into()),
+                "Game caption"
+            );
+        }
+
+        #[test]
+        fn confirmation_uses_family_title_without_caption() {
+            assert_eq!(confirmation_dialog_title(None, "确认".into()), "确认");
+            assert_eq!(
+                confirmation_dialog_title(Some("  \t"), "确认".into()),
+                "确认"
+            );
         }
     }
 }
