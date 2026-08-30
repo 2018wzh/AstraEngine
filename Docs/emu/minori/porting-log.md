@@ -1026,3 +1026,12 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
   platform DTO validation、公共 presentation core 与 Windows target check 通过。
 - About 对话框的原版图像/排版、Linux GTK 原生菜单、帮助和浏览器实际启动结果尚未
   形成正式 Windows E3 或 Release Sandbox evidence；这些差距保留为下一轮验收项。
+
+### 2026-08-31 macOS 原生确认框标题绑定
+
+- macOS 的确认框现在优先读取当前宿主窗口标题，并继续使用 `rfd` 的原生 Cocoa
+  对话框；只有宿主没有标题时才使用 Family ABI 携带的请求标题。这样退出和返回标题
+  的确认框与 Windows 的 owner-caption 语义保持一致，Family 不需要知道平台窗口句柄。
+- 该改动只改变 Host presentation，不改变确认 transaction、输入消费或 VM 状态。当前
+  Windows 定向测试通过；macOS 交叉检查受限于本机没有 Apple C/链接工具链，尚未形成
+  macOS 运行时 evidence。

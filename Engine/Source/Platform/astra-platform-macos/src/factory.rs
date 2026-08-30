@@ -2154,8 +2154,18 @@ mod macos {
         window: Option<&Window>,
         request: ConfirmationRequest,
     ) -> Result<ConfirmationResult, PlatformError> {
+        // Keep the native dialog attached to the live game window's title.
+        // Minori's original confirmation surfaces use the owner caption for
+        // both return-to-title and exit prompts; using the request title as
+        // the primary caption makes macOS diverge when a host changes the
+        // window title during a session.  A blank owner title is the only
+        // case where the typed request title remains authoritative.
+        let title = window
+            .map(Window::title)
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or_else(|| request.title.clone());
         let mut dialog = rfd::AsyncMessageDialog::new()
-            .set_title(request.title)
+            .set_title(title)
             .set_description(request.message)
             .set_buttons(rfd::MessageButtons::OkCancelCustom(
                 request.accept_label.clone(),
