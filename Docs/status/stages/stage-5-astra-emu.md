@@ -1,5 +1,11 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日 Windows native confirmation 标题已按 Sandbox 观察对齐：有 parent
+window 时沿用 live game caption，没有 parent 时保留 Family ABI 的 typed title。该
+行为由 platform provider 实现，不让 Manager 或 Minori 复制商业标题；Windows target
+check 与平台确认回归通过。仍只有局部行为证据，完整 Release Sandbox、音频 review 和
+Windows E3 未关闭。
+
 2026 年 8 月 31 日确认框输入对齐：Headless Host 在 confirmation transaction 存在时
 消费原版 `是(Y)`/`否(N)` 快捷键，并把它们转换为 Family ABI 的 typed choice；确认框
 关闭后同样的 Y/N 输入仍然被拒绝，避免把系统快捷键泄漏到剧情。Windows 原生对话框

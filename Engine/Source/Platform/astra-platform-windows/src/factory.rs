@@ -2316,8 +2316,18 @@ mod windows {
         window: Option<&Window>,
         request: ConfirmationRequest,
     ) -> Result<ConfirmationResult, PlatformError> {
+        // Win32's original Minori dialog uses the owning game window caption
+        // as its message-box caption.  Read the live parent caption at the
+        // presentation boundary so the native title follows profile/window
+        // composition without copying a commercial title into Family ABI or
+        // CLI code.  Service-only callers without a parent retain the typed
+        // Family title.
+        let title = window
+            .map(Window::title)
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or(request.title);
         let mut dialog = AsyncMessageDialog::new()
-            .set_title(request.title)
+            .set_title(title)
             .set_description(request.message)
             .set_buttons(MessageButtons::OkCancelCustom(
                 request.accept_label.clone(),

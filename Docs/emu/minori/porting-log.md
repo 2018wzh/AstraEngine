@@ -1,5 +1,13 @@
 # Minori 移植日志
 
+## 2026-08-31：Windows 原生确认框标题对齐
+
+在授权 Windows Sandbox 中重新观察窗口关闭确认框：原版确认框的标题栏沿用游戏
+窗口标题，而不是使用消息正文的短标题。Windows platform provider 现在在有 parent
+window 时读取该窗口的 live caption，并把它交给 native message dialog；没有 parent
+的 service-only 调用仍使用 Family ABI 传入的 title。该调整不把商业标题写入 Family
+ABI、CLI、report 或日志，截图继续留在 ignored 私有目录。
+
 ## 2026-08-31：确认框键盘语义
 
 确认框的键盘语义已补齐：原版按钮显示 `是(Y)` 与 `否(N)`，Headless Host 仅在

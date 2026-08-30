@@ -1,5 +1,11 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日 Windows 原生确认框标题对齐：Sandbox 观察确认原版 message box
+沿用 parent game window caption。Windows platform provider 现在在有 parent 时读取 live
+caption，缺 parent 的 service-only 调用仍使用 Family ABI title；不把商业标题写入
+代码、profile、report 或日志。该项已通过 `astra-platform-windows` target check 和
+平台确认文本回归，尚不改变 Release Sandbox/Windows E3 的证据边界。
+
 2026 年 8 月 31 日确认框键盘语义收紧：原版 `是(Y)`/`否(N)` 的快捷键现在只在
 Headless 的 Family ABI confirmation transaction 激活时映射为接受/取消。没有待处理
 确认时，Y/N 仍按未绑定物理键拒绝，不会混入剧情输入或改变 Runtime 状态。该改动已
