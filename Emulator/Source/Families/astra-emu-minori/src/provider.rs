@@ -6923,7 +6923,7 @@ fn minori_system_menu(
         None,
         base + 5,
         LegacySystemMenuItemKindV1::Submenu,
-        "Help",
+        "ヘルプ (&H)",
         true,
         false,
     );
@@ -6959,7 +6959,7 @@ fn minori_system_menu(
         None,
         base + 6,
         LegacySystemMenuItemKindV1::Submenu,
-        "Game",
+        "ゲーム (&G)",
         true,
         false,
     );
@@ -10998,6 +10998,20 @@ mod tests {
             .iter()
             .filter(|item| matches!(item.item_id.as_str(), "auto" | "skip"))
             .all(|item| !item.checked));
+        assert_eq!(
+            menu.items
+                .iter()
+                .find(|item| item.item_id == "help")
+                .map(|item| item.label.as_str()),
+            Some("ヘルプ (&H)")
+        );
+        assert_eq!(
+            menu.items
+                .iter()
+                .find(|item| item.item_id == "game")
+                .map(|item| item.label.as_str()),
+            Some("ゲーム (&G)")
+        );
         let menu_id = menu.menu_id.clone();
         drop(published);
 
