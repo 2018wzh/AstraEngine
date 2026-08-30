@@ -24,7 +24,7 @@ use astra_emu_family_api::{
     LegacySystemMenuItemV1, LegacySystemMenuTransactionV1, LegacyTextureFilter,
     LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
     LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
-    LEGACY_FAMILY_ABI_FINGERPRINT,
+    LEGACY_FAMILY_ABI_FINGERPRINT, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_core::LegacyCoreError;
 use astra_media::{
@@ -5035,6 +5035,15 @@ fn append_system_page_observation(
         sequence,
         key: "minori.system_page".into(),
         value: system_page_name(page).into(),
+    });
+    let activity_sequence = session
+        .vm
+        .allocate_effect_sequence()
+        .map_err(runtime_error)?;
+    control.blackboard.push(LegacyBlackboardMutation {
+        sequence: activity_sequence,
+        key: LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY.into(),
+        value: (page != MinoriSystemPage::None).to_string(),
     });
     Ok(Some(page))
 }
@@ -11410,12 +11419,15 @@ mod tests {
             .unwrap();
         assert_eq!(title.status, LegacyRuntimeStatus::Active);
         assert_eq!(title.live.resource_scenes.len(), 1);
-        assert_eq!(title.control.blackboard.len(), 4);
+        assert_eq!(title.control.blackboard.len(), 5);
         assert!(title
             .control
             .blackboard
             .iter()
             .any(|mutation| { mutation.key == "minori.system_page" && mutation.value == "title" }));
+        assert!(title.control.blackboard.iter().any(|mutation| {
+            mutation.key == LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY && mutation.value == "true"
+        }));
         assert!(title.control.blackboard.iter().any(|mutation| {
             mutation.key == "minori.gallery_unlock_count" && mutation.value == "0"
         }));
@@ -11481,8 +11493,13 @@ mod tests {
             4
         );
         assert_eq!(config.live.resource_scenes[0].value.draws.len(), 18);
-        assert_eq!(config.control.blackboard.len(), 1);
+        assert_eq!(config.control.blackboard.len(), 2);
         assert_eq!(config.control.blackboard[0].value, "config");
+        assert_eq!(
+            config.control.blackboard[1].key,
+            LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY
+        );
+        assert_eq!(config.control.blackboard[1].value, "true");
         assert_ne!(
             config.live.resource_scenes[0].value.texture_resources[0].revision,
             title_revision
@@ -11564,8 +11581,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title_after_config.status, LegacyRuntimeStatus::Active);
-        assert_eq!(title_after_config.control.blackboard.len(), 1);
+        assert_eq!(title_after_config.control.blackboard.len(), 2);
         assert_eq!(title_after_config.control.blackboard[0].value, "title");
+        assert_eq!(
+            title_after_config.control.blackboard[1].key,
+            LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY
+        );
+        assert_eq!(title_after_config.control.blackboard[1].value, "true");
         assert_eq!(
             title_after_config.live.resource_scenes[0]
                 .value
@@ -11593,12 +11615,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(returned_to_title.status, LegacyRuntimeStatus::Active);
-        assert_eq!(returned_to_title.control.blackboard.len(), 5);
+        assert_eq!(returned_to_title.control.blackboard.len(), 6);
         assert!(returned_to_title
             .control
             .blackboard
             .iter()
             .any(|mutation| { mutation.key == "minori.system_page" && mutation.value == "title" }));
+        assert!(returned_to_title.control.blackboard.iter().any(|mutation| {
+            mutation.key == LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY && mutation.value == "true"
+        }));
         assert!(returned_to_title.control.blackboard.iter().any(|mutation| {
             mutation.key == "minori.gallery_unlock_count" && mutation.value == "0"
         }));

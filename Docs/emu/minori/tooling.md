@@ -69,4 +69,4 @@ Windows 无音频设备时，`FamilyAudioService` 仅在 `ProviderUnavailable` �
 
 Control/Auto 改变当前消息的推进方式时，family 保持同一个 wait token，只在 `Input` 与 `Time` 两种 modality 之间重绑定。Manager Core 的 `AwaitBinding` 和 Manager host 的 pending condition 必须同时执行这项受限替换；相同 modality、其它 wait 类型或同一个输出批次内重复 token 都继续返回 `ASTRA_EMU_AWAIT_TOKEN_DUPLICATE`。这不是通用重复 token 宽免，也不允许通过丢弃旧等待或额外推进 tick 来规避错误。
 
-系统页输入隔离：GameView 只把舞台内的真实右键按下/释放映射为 `pointer.secondary`，并同时提交有界 stage-space 坐标。Manager 在该打开请求的 fixed tick 不完成 gameplay await；当 blackboard 的 `minori.system_page` 为除 `none` 以外的已知页面时，所有底层消息/计时等待继续保留。关闭页面不伪造新的 await completion，直到下一次合法 gameplay 输入到达。未知 page、重复 page observation 或系统页期间收到不应有的 provider/await result 都必须返回稳定 blocking diagnostic。
+系统页输入隔离：GameView 只把舞台内的真实右键按下/释放映射为 `pointer.secondary`，并同时提交有界 stage-space 坐标。Manager 在该打开请求的 fixed tick 不完成 gameplay await；family 以公共 `astra.emu.system_ui_active=true` observation 声明独占输入，此时 Manager、Release CLI 和 Headless 都保留底层消息/计时等待。关闭页面发布 `false`，只恢复输入所有权，不伪造 await completion。`minori.system_page` 继续用于页面级测试观察，但 Host 不再解析 Minori 页面枚举。非法布尔值、重复 activity observation 或系统页期间收到不应有的 provider/await result 都返回稳定 blocking diagnostic。

@@ -33,10 +33,10 @@ use std::{
 use astra_byte_source::{ByteRange, OwnedByteBuffer};
 use astra_core::{Hash256, SchemaVersion};
 use astra_emu_family_api::{
-    is_valid_input_control, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
-    LegacyAudioSampleFormat, LegacyAwaitResult, LegacyInputEdge, LegacyPcmBufferV7,
-    LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader, LegacyVideoCommandV1,
-    LegacyVideoMode,
+    is_valid_input_control, parse_legacy_system_ui_activity, LegacyAudioCommandV1,
+    LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat, LegacyAwaitResult,
+    LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest, LegacyRuntimeHostCtx, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_support::{
     enforce_private_directory_permissions, extract_vfs_entry, LegacyMountedVfsReaderAdapter,
@@ -1650,17 +1650,13 @@ fn system_ui_activity_from_blackboard(
 ) -> Result<Option<bool>, String> {
     let mut activity = None;
     for mutation in blackboard {
-        if mutation.key != "minori.system_page" {
+        if mutation.key != LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY {
             continue;
         }
-        let next = match mutation.value.as_str() {
-            "none" => false,
-            "title" | "load" | "save" | "config" | "backlog" | "memories" | "gallery_cg"
-            | "gallery_bgm" | "gallery_replay" | "gallery_movie" => true,
-            _ => return Err("ASTRA_EMU_MINORI_SYSTEM_PAGE_OBSERVATION".into()),
-        };
+        let next = parse_legacy_system_ui_activity(&mutation.value)
+            .ok_or_else(|| "ASTRA_EMU_SYSTEM_UI_ACTIVITY_OBSERVATION".to_owned())?;
         if activity.replace(next).is_some() {
-            return Err("ASTRA_EMU_MINORI_SYSTEM_PAGE_DUPLICATE".into());
+            return Err("ASTRA_EMU_SYSTEM_UI_ACTIVITY_DUPLICATE".into());
         }
     }
     Ok(activity)
@@ -4885,7 +4881,7 @@ mod manager_tests {
 
     use crate::{normalize_legacy_input_value, resolve_platform_data_dir_override};
 
-    use astra_emu_family_api::LegacyInputEdge;
+    use astra_emu_family_api::{LegacyInputEdge, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY};
     use astra_emu_manager_core::{
         CancellationToken, DesktopVfsRegistry, GrantedSourceEntry, GrantedSourceReader, Library,
         LibraryScanner, ScanLimits, SourceGrant, SourceScanError,
@@ -5078,8 +5074,8 @@ mod manager_tests {
         }]));
         let active = astra_plugin_abi::RuntimeLiveBlackboardMutation {
             sequence: 1,
-            key: "minori.system_page".into(),
-            value: "save".into(),
+            key: LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY.into(),
+            value: "true".into(),
         };
         assert_eq!(
             system_ui_activity_from_blackboard(&[active]).unwrap(),
@@ -5087,8 +5083,8 @@ mod manager_tests {
         );
         let closed = astra_plugin_abi::RuntimeLiveBlackboardMutation {
             sequence: 2,
-            key: "minori.system_page".into(),
-            value: "none".into(),
+            key: LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY.into(),
+            value: "false".into(),
         };
         assert_eq!(
             system_ui_activity_from_blackboard(&[closed]).unwrap(),
@@ -5096,12 +5092,12 @@ mod manager_tests {
         );
         let invalid = astra_plugin_abi::RuntimeLiveBlackboardMutation {
             sequence: 3,
-            key: "minori.system_page".into(),
+            key: LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY.into(),
             value: "unknown".into(),
         };
         assert_eq!(
             system_ui_activity_from_blackboard(&[invalid]).unwrap_err(),
-            "ASTRA_EMU_MINORI_SYSTEM_PAGE_OBSERVATION"
+            "ASTRA_EMU_SYSTEM_UI_ACTIVITY_OBSERVATION"
         );
     }
 

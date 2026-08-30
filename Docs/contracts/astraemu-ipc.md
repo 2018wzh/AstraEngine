@@ -97,6 +97,8 @@ Hook 必须发生在 framebuffer acquire 之前。未绑定时交给 core 处理
 
 Family ABI 不提供 save/restore/snapshot。每个 game 获得独立 writable root，只能通过安全相对路径调用 stat/list/create-dir/read-range/write-range/set-length/remove/atomic-replace；本地路径和文件句柄不跨 ABI。同一 `(family_id, family_game_id)` 只允许一个 writable session。`atomic-replace` 必须同步临时文件、原子替换并同步父目录。Host/Manager 不定义 save slot，文件组织与格式归游戏/core 所有；AstraEMU Runtime Provider 对共享 save/restore lifecycle 返回 unsupported。
 
+Family-owned system UI 通过 `astra.emu.system_ui_active` blackboard observation 转移物理输入所有权。值只能是规范的 `true` 或 `false`，同一输出批次不得重复。值为 `true` 时，Host 必须保留底层 gameplay wait，只把物理输入交给 family；页面关闭只恢复输入所有权，不能伪造 await completion。页面 identity 仍归 family 私有 observation，CLI 和 Manager 不按 family 页面名称推断输入所有权。
+
 ## Host Context
 
 ```rust

@@ -119,6 +119,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 - [x] provider snapshot restore 会重新绑定当前 system page、message 或 choice presentation，并清除恢复前未消费的一次性文字 lease；首个 restore output 会在需要时把 retained scene 与新文字放入同一 typed transaction，完整路线 user save/restore 已验证该 continuation。
 - [x] 显式 checkpoint 在捕获前提交待处理 Scene2D；Config 与 backlog 打开/关闭已由真实短程画面变化验证。
 - [x] 用户 save/load 后 continuation 成立；两次完整路线的 visual/runtime/terminal/coverage/audio hash 一致。
+- [x] Family system UI 通过公共 activity observation 独占物理输入；Headless Release 候选已用右键菜单完成 Quick Save、剧情推进、Load 页和 slot restore，恢复 checkpoint 与保存前画面一致，底层 message wait 在页面期间保持未完成。
 - [x] runtime 只接受原程序已确认的四个 global clear flag，并把脱敏 unlock identity 纳入 snapshot；provider 会报告 session 内 unlock count，未知 `CLEAR` 名称不参与解锁。
 - [x] global clear flag 经 ordered platform storage 原子提交并在 provider session 恢复；真实路线严格断言自然解锁数为 1，title variant 只接受四个已确认 flag。
 - [x] family snapshot 固定携带独立的 `astra.emu.minori.global_progress_snapshot.v1` section；合法的 unloaded 静止态可供 restore rollback 保存，实际 pending storage I/O 仍严格阻断。
@@ -146,7 +147,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - [x] 重新安装 stable Rust 1.98 后，以当前 signer/trust-root 重新编译、签名并运行 Minori v9 短程；431 fixed step、27 条物理输入、13 个 submitted/rasterized frame、344576 个 audio frame、无 diagnostic，标题与场景 frame hash 不同。
 - [ ] 旧 gallery 输入在当前 mount/profile/global-progress identity 下触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，不能沿用历史 gallery report；需要重新生成匹配当前状态的物理输入并完成 required checkpoint 复核。
-- [ ] 四条自然路线、自然 gallery unlock、正式 audio review、movie gallery 原版视觉 parity、cache second-run、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。
+- [ ] 四条自然路线、自然 gallery unlock、正式 audio review、movie gallery 原版视觉 parity、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。最新 save/restore checkpoint 另发现一组罕见行末 message 控制标记仍被当作可见正文，必须先按原程序语义确认并修复，不能用静默删除代替解析。
 
 ## 2026-08-26 稀疏采样回归
 

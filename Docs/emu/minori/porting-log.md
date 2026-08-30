@@ -774,3 +774,9 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - 更新后的开发签名 Release package 以序列化物理输入完成标题启动路线：`astra.emu.headless_run_report.v3` 为 `passed`，5212 fixed steps、4382 个提交/栅格帧、17 条输入、5993 次 VFS read、5113463957 bytes，diagnostic 为空。路线发布 `route_complete`，返回标题并观察到解锁计数 4。WAV 是 48 kHz 双声道、4120576 frame，peak 32412、RMS 4281.56，非静音；这不是具名人工听审。
 - 模型实际检查 `title_initial`、剧情和 `ending_return_title` 三个 checkpoint。首尾标题帧一致；剧情帧的背景、面板和日文正文非空，未见缺字、横向裁剪、拉伸、错层或残影。该检查只给出当前 checkpoint 的质量结论，不声明原版逐像素一致。
 - 证据边界仍有两项必须保留。第一，形成通过报告时平台私有进度已经包含四个 clear flag；此前从三个 flag 自然写入第四个的运行确实命中 `route_complete` 和解锁计数 4，但因为测试脚本在标题后错误等待 runtime terminal 而没有形成 passed report。第二，一次未跳过的 WMV3 全流解码出现 FFmpeg concealment 输出，尚未用影片 checkpoint 与原版画面对照。四路线自然解锁、save/restore required checkpoint、正式音频听审、完整 gallery、Release Sandbox 和 Windows E3 因此继续开放。
+
+### 2026-08-30 Family 系统页输入所有权与存读档复验
+
+- Headless 进入 Load 页后按 Enter 曾同时完成底层 message await，并把同一次输入交给 family 页面，触发 `ASTRA_EMU_MINORI_SYSTEM_RESULT_UNEXPECTED`。问题位于 Host 输入所有权，不是 Minori load transaction。Family API 现在定义公共 `astra.emu.system_ui_active` observation；Minori 只发布规范布尔值，CLI 和 Manager 在活动期间保留底层 wait。family 私有的 `minori.system_page` 只用于页面观察，不再承担 Host 控制语义。
+- 更新后的官方开发签名 Release 候选以序列化物理输入完成 Quick Save、推进到下一消息、打开 Load 页并恢复 slot。报告为 `passed`：2047 fixed steps、1685 个提交/栅格帧、6 个 checkpoint、零 diagnostic；WAV 为 48 kHz 双声道、1617920 frame，自动量测非静音且无 clipping。Load 页确实使用原版系统资源，恢复 checkpoint 与保存前 checkpoint 字节一致。这是当前身份的定向 Headless E2，不是 Release Sandbox 或正式 Windows E3。
+- 模型查看保存前、推进后、Load 页和恢复帧时发现一组只在单条真实 message 行末出现的控制标记被显示成普通字符。全包私有统计确认该组合唯一，不能据一次样本猜测为可直接删除的装饰符。原版在普通消息末尾使用独立推进指示，但这组标记的组合效果仍需原程序观察或反编译确认；在修复和 checkpoint 复验前，消息视觉完整性继续 blocking。

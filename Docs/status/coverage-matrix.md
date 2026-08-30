@@ -50,6 +50,8 @@ RC 的 13 项 reference 已完成像素预检，全部满足各自固定门禁�
 
 AstraEMU 当前实现边界以 Family ABI v11 为准：Host-owned surface、retained `Layer2D`、同步 opaque Hook、UTF-8 translation companion、安全相对路径 writable-file、typed filter graph 与双向 typed system-menu 已进入公共契约。Minori resource/text surface、CLI layer consumer、Manager Hook/Layer2D consumer 和物理右键到 family system UI 的映射已进入 v11 主路径；旧 v10 及更早 ABI 只保留为历史记录，不能继续加载。新的真实样本 slice 已能输出不同画面与非静音音频，但尚未到 terminal，checkpoint 标签也未完全对应目标页面，下表旧 ABI 完整路线只保留为历史记录。
 
+2026 年 8 月 30 日系统页输入所有权增量：Family API 用规范布尔 observation 表达 family UI 是否独占物理输入，CLI 与 Manager 不再解析 Minori 页面名称。官方开发签名 Release 候选通过 Quick Save、推进、Load 页和 restore 的 2047-step Headless E2，6 个 checkpoint、非静音音频和零 diagnostic；恢复帧与保存前一致。视觉复核同时发现一组罕见 message 行末控制标记仍被当作正文，故消息视觉完整性、四路线、影片复核、Sandbox 与 E3 继续开放。
+
 2026 年 8 月 23 日的 consumer 增量已完成动态 loader、CLI 与 Manager 四个 Host port 组合；Minori 先执行同步 translation Hook，再以 CosmicText/Astra Renderer2D 写入文字 surface。Manager per-layer typed graph 通过公共 validator 后由 WGPU 执行，不存在 CPU fallback；旧 Scene2D transaction consumer 已删除。当前签名样本 slice 消费 42 条物理输入，提交 154 帧并输出 134144 个音频 frame，diagnostic 为 0。模型检查确认画面有标题、系统背景、正文与场景变化，也确认首个 checkpoint 是黑色过渡帧、页面标签存在错位，因此仍是受限 E2 诊断，不是完整视觉通过。
 
 2026 年 8 月 25 日脚本引用审计增量：Minori open 可显式接收 `astra.resource_audit=full`，由 Host bounded enumeration 扫描全部 `.sc`，复用 VM grammar 对 stage、character、effect、audio、movie、panel 和 chain 引用做非空/大小/revision 校验。审计只形成脱敏计数与 identity digest；普通 lazy 运行、未知 opcode、VFS enum 缺失和完整路线/人工 review 的证据边界不变。

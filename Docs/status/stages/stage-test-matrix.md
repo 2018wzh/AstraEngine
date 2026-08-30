@@ -2,6 +2,8 @@
 
 2026-08-30 focused Minori evidence: the rebased official desktop builder now compiles the explicit `ffmpeg-vcpkg` binding into both Minori hosts. Focused panel/resource-audit tests pass, and the development-signed Release package completed a 5212-step title route with 4382 presented frames, 17 physical inputs, non-silent audio, `route_complete`, return-to-title, unlock count 4 and no diagnostics. The passed run loaded four existing clear flags; the three-to-four natural write and an unskipped WMV3 concealment warning still require a clean report and movie checkpoint review. This is current E2 progress, not Release Sandbox or Windows E3 acceptance.
 
+The same current-identity Release path now also passes a focused 2047-step physical-input Quick Save, Load-page and slot-restore run. Six checkpoints were captured, restore reproduced the saved frame, audio was non-silent and diagnostics were empty. The host preserves the underlying gameplay wait through the generic family system-UI activity observation. Visual review found one rare authored message-control suffix still rendered as text, so this does not close message fidelity, full-route, Sandbox or E3 gates.
+
 `T-S5-FVP-01` current identity is `astra.emu.family_abi.v11` and Product Runtime
 Provider ABI v4. Minori is reopening its current E2 while migrating to
 `Native + MultiLayer`, Host-owned surfaces, synchronous Hook and writable-file

@@ -29,10 +29,11 @@ use astra_core::{
 #[cfg(test)]
 use astra_emu_family_api::LegacyProbeReport;
 use astra_emu_family_api::{
-    LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7, LegacyAudioSampleFormat,
-    LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest,
-    LegacyResourceRead, LegacyRuntimeHostCtx, LegacySystemMenuItemKindV1, LegacyTextureFilter,
-    LegacyTextureFormat, LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode,
+    parse_legacy_system_ui_activity, LegacyAudioCommandV1, LegacyAudioEncoding,
+    LegacyAudioPacketV7, LegacyAudioSampleFormat, LegacyAwaitResult, LegacyDrawV1, LegacyInputEdge,
+    LegacyPcmBufferV7, LegacyProbeRequest, LegacyResourceRead, LegacyRuntimeHostCtx,
+    LegacySystemMenuItemKindV1, LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
@@ -4149,6 +4150,7 @@ struct RuntimeDriver<'a> {
     pending_inputs: Vec<LegacyInputEdge>,
     pending_waits: BTreeMap<String, PendingWait>,
     observed_blackboard: BTreeMap<String, String>,
+    system_ui_active: bool,
     rasterizer: CpuStageRasterizer,
     layer_state: RetainedLayer2DState,
     last_layer_composite: Option<(u32, u32, Vec<Layer2DState>)>,
@@ -5222,6 +5224,7 @@ impl<'a> RuntimeDriver<'a> {
             pending_inputs: Vec::new(),
             pending_waits: BTreeMap::new(),
             observed_blackboard: BTreeMap::new(),
+            system_ui_active: false,
             rasterizer: CpuStageRasterizer::default(),
             layer_state: RetainedLayer2DState::default(),
             last_layer_composite: None,
@@ -5616,7 +5619,7 @@ impl<'a> RuntimeDriver<'a> {
                 .retain(|edge| edge.control != "pointer.secondary");
         }
         let pressed_keys = pressed_input_keys(&self.pending_inputs);
-        let ready = if system_menu_pending {
+        let ready = if system_menu_pending || self.system_ui_active {
             Vec::new()
         } else {
             self.pending_waits
@@ -5861,6 +5864,9 @@ impl<'a> RuntimeDriver<'a> {
             if self.pending_waits.insert(token, condition).is_some() {
                 return Err("ASTRA_EMU_HEADLESS_WAIT_DUPLICATE".into());
             }
+        }
+        if let Some(system_ui_active) = system_ui_activity_from_blackboard(&live.blackboard)? {
+            self.system_ui_active = system_ui_active;
         }
         for mutation in live.blackboard {
             if self.observed_blackboard.len() >= 4096
@@ -6969,6 +6975,23 @@ impl<'a> RuntimeDriver<'a> {
     }
 }
 
+fn system_ui_activity_from_blackboard(
+    blackboard: &[astra_plugin_abi::RuntimeLiveBlackboardMutation],
+) -> Result<Option<bool>, String> {
+    let mut activity = None;
+    for mutation in blackboard {
+        if mutation.key != LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY {
+            continue;
+        }
+        let next = parse_legacy_system_ui_activity(&mutation.value)
+            .ok_or_else(|| "ASTRA_EMU_SYSTEM_UI_ACTIVITY_OBSERVATION".to_owned())?;
+        if activity.replace(next).is_some() {
+            return Err("ASTRA_EMU_SYSTEM_UI_ACTIVITY_DUPLICATE".into());
+        }
+    }
+    Ok(activity)
+}
+
 fn input_or_terminal_observation(
     family_id: &str,
     terminal: bool,
@@ -7456,6 +7479,33 @@ mod native_tests {
             &observed,
             "blackboard.minori.choice_active.false"
         ));
+    }
+
+    #[test]
+    fn family_system_ui_activity_has_strict_generic_ownership_observation() {
+        let mutation = |sequence, value: &str| astra_plugin_abi::RuntimeLiveBlackboardMutation {
+            sequence,
+            key: LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY.into(),
+            value: value.into(),
+        };
+
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[mutation(1, "true")]).unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[mutation(2, "false")]).unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[mutation(3, "invalid")]).unwrap_err(),
+            "ASTRA_EMU_SYSTEM_UI_ACTIVITY_OBSERVATION"
+        );
+        assert_eq!(
+            system_ui_activity_from_blackboard(&[mutation(4, "true"), mutation(5, "false")])
+                .unwrap_err(),
+            "ASTRA_EMU_SYSTEM_UI_ACTIVITY_DUPLICATE"
+        );
     }
 
     #[test]

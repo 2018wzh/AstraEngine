@@ -518,9 +518,6 @@ fn is_hash(value: &str) -> bool {
         .strip_prefix("sha256:")
         .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
-fn empty_hash() -> String {
-    astra_core::Hash256::from_sha256(&[]).to_string()
-}
 fn io_error(operation: &'static str) -> PlatformError {
     PlatformError::new(PlatformErrorCode::Io, operation, "artifact I/O failed")
 }
