@@ -1,5 +1,13 @@
 # Stage Test Matrix
 
+2026-08-31 route-input smoke: the development-signed Release CLI consumed the
+current `runtime.input_or_terminal` sequence through 24048 fixed steps, 48
+checkpoints, 109 submitted/rasterized frames, and 195 physical input messages
+with zero diagnostics. The scenario explicitly shuts down after the last
+checkpoint, so it is not terminal evidence; sparse sampling is not the 120 Hz
+GPU E2 gate. Full-route natural unlock, same-point visual review, audio review,
+save/restore checkpoints, Release Sandbox, and Windows E3 remain open.
+
 2026-08-31 confirmation wording alignment: the original Windows Sandbox was
 observed using the native Exit and Return-title confirmation dialogs with the
 same two-button order and cancel semantics now sent through Family ABI v12.

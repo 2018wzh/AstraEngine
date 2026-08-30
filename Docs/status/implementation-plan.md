@@ -1,5 +1,13 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日新输入契约下的完整路线 Release Headless smoke：开发签名
+Release CLI 在显式 WMF provider 下消费 195 条物理输入，完成 24048 fixed steps、
+109 个提交/栅格帧、48 个 checkpoint 且 diagnostic 为空。尾部是显式 shutdown，
+因此不把该运行写成 terminal 或四路线完成；稀疏采样也不构成 120 Hz GPU E2、
+Release Sandbox 或 Windows E3。该结果只关闭现行 `runtime.input_or_terminal`
+观察键与输入排序的 smoke 回归，完整路线、自然解锁、同点视觉、音频听审和
+save/restore required checkpoint 继续保持 `IN_PROGRESS`。
+
 2026 年 8 月 31 日原版确认框对齐：Windows Sandbox 的 Game→Exit 与
 Game→Return title 均使用原生两按钮对话框，按钮为 `是(Y)`/`否(N)`；Minori
 provider 已把观察到的日文正文通过 Family ABI v12 交给 Host，取消保持原有

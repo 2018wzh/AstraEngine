@@ -1,5 +1,12 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日路线输入 smoke：现行 `runtime.input_or_terminal` 序列在开发签名
+Release CLI 上消费 195 条物理输入，完成 24048 fixed steps、48 个 checkpoint、109
+个提交/栅格帧，diagnostic 为空。该运行使用显式 WMF 与稀疏 frame sampling，尾部
+主动 shutdown，不声明 terminal、自然解锁、120 Hz GPU E2、Release Sandbox 或
+Windows E3；四路线、同点视觉、正式音频和 save/restore required checkpoint 仍为
+blocking。
+
 2026 年 8 月 31 日确认框覆盖：原版 Windows Sandbox 的退出与返回标题确认框
 文案、按钮顺序和取消后的 wait 保持已记录，Minori 通过 Family ABI v12 发布，
 平台 Host 负责 native 呈现；Headless 不伪造 native dialog，只消费物理方向键、

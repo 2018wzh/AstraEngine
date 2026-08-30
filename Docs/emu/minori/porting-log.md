@@ -1,5 +1,18 @@
 # Minori 移植日志
 
+## 2026-08-31：新输入契约下的完整路线 Release Headless smoke
+
+- 使用当前开发签名 Release CLI、显式 WMF provider 和重新生成的物理输入序列，
+  从标题连续消费 195 条输入消息。输入覆盖 48 个消息边界、48 个 checkpoint，
+  并在路线尾部显式结束会话；报告完成 24048 fixed steps、109 个提交/栅格帧，
+  diagnostic 为空，全部输入序列已消费。
+- 该序列包含一次短暂的 Control 快进按键，用于复核影片阶段不会把同一输入重复解释为
+  普通消息确认。此次使用稀疏 frame sampling，且尾部是显式 shutdown，不把会话状态
+  误报为 terminal；没有把它当作 120 Hz GPU E2、Release Sandbox 或 Windows E3。
+- 这次 smoke 只证明现行 `runtime.input_or_terminal` 观察键、完整输入排序和当前
+  WMF/Family ABI v12 接线可以跑完既定路线脚本。四路线自然解锁、原版同点视觉、
+  音频人工听审、save/restore required checkpoint 和正式平台验收仍保持开放。
+
 ## 2026-08-31：原版确认框文案与输入观察边界
 
 - 在干净的原版 Windows Sandbox 会话中分别打开 Game→Exit 和
