@@ -1,5 +1,12 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日 Windows confirmation geometry coverage：Host 原生 presenter 以
+96 DPI 下观察到的紧凑 350×164 为基准，按 owner window 有效 DPI 缩放窗口、消息、
+按钮；无 owner 的 service 调用使用系统 DPI，并放置标准 Win32 question icon；checked
+arithmetic 的正常与饱和边界测试通过。
+Family ABI transaction、`是(Y)`/`否(N)` 助记键和 owner-modal 生命周期没有变化。
+该项是平台呈现 E1/E2 覆盖，不是原版同点截图、Release Sandbox 或 Windows E3 证据。
+
 2026 年 8 月 31 日 Release Sandbox 启动复核：Windows desktop builder 强制
 `+crt-static`，新的开发签名包已在同一 Sandbox 启动 AstraEMU Manager，VC runtime
 依赖阻断已关闭。该证据只覆盖包启动，不代表 Minori 路线、Headless E2、视觉/音频

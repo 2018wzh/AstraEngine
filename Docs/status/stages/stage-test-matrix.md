@@ -1,5 +1,13 @@
 # Stage Test Matrix
 
+2026-08-31 Windows native confirmation geometry seam: the Host presenter now uses the
+observed compact 350×164 base at 96 DPI, scales the owner-modal dialog from the live
+owner DPI (or the system DPI for windowless service calls), and places the standard Win32
+question icon beside the message. Focused
+platform tests cover normal and saturation arithmetic; Family transaction semantics,
+keyboard mnemonics and explicit unsupported platform results are unchanged. This is
+Host presentation coverage only, not Release Sandbox or Windows E3 visual evidence.
+
 2026-08-31 Linux confirmation presenter seam: the Linux Host now chooses the live
 owner caption when presenting a Family confirmation and keeps the typed Family title
 for windowless service calls. The source-level host check and affected desktop tests

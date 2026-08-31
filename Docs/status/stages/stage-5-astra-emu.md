@@ -1,5 +1,12 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日 Windows confirmation geometry 对齐：Host 原生 presenter 采用
+原版观察到的 350×164（96 DPI）紧凑基准，按 live owner window 的有效 DPI 缩放控件（无
+owner 的 service 调用使用系统 DPI），
+并在消息左侧放置标准 Win32 question icon。checked arithmetic、`是(Y)`/`否(N)`
+助记键、owner-modal 生命周期和 Family ABI v13 transaction 不变；该项只增加平台
+呈现回归，不构成原版同点视觉、Release Sandbox 或 Windows E3 证据。
+
 2026 年 8 月 31 日 Release Sandbox 启动复核：首个开发包因机器 VC runtime
 依赖无法启动；官方 desktop builder 已改为 Windows MSVC 强制 `+crt-static`，
 并在环境显式要求动态 CRT 时阻断。新的开发签名 Release 包在同一 Sandbox

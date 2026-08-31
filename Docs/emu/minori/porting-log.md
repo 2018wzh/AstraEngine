@@ -1,5 +1,18 @@
 # Minori 移植日志
 
+## 2026-08-31：Windows 原生确认框尺寸与系统图标对齐
+
+补充复核原版退出/返回标题确认框后，Windows Host 的 Family ABI presenter 采用
+原版接近的 350×164（96 DPI）紧凑基准尺寸，并按 owner window 的有效 DPI 等比缩放
+所有控件；无 owner 的 Manager service 调用使用系统 DPI。消息左侧使用 Win32 系统
+question icon，按钮仍保留 `是(Y)`/`否(N)`
+助记键、owner-modal 禁用/恢复和关闭即取消语义。缩放计算使用 checked arithmetic，
+超大 DPI 不会溢出；新增的平台单元回归覆盖 96/144/192 DPI 和饱和边界。
+
+这项改动只调整 Host 原生呈现，不把图标、商业标题或截图写入 Family ABI、profile、
+report 或日志。原版 About artwork、Linux 原生菜单和正式 Release Sandbox/E3 视觉
+验收仍是独立开放项。
+
 ## 2026-08-31：原版 native 菜单与 Release 包启动复核
 
 授权原版在 Windows Sandbox 中进入标题后，右键会在指针位置打开包含窗口项、

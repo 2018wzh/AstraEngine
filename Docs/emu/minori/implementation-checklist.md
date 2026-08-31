@@ -1,5 +1,16 @@
 # Minori Implementation Checklist
 
+## Windows native confirmation geometry (2026-08-31)
+
+- [x] Host-owned confirmation uses the observed compact 350×164 base at 96 DPI,
+  scales all controls from the live owner DPI (or system DPI for the windowless service
+  host), and places the standard Win32 question icon beside the Japanese message.
+- [x] Checked geometry arithmetic has focused normal-DPI and saturation regressions;
+  Family transaction, owner-modal cleanup and `是(Y)`/`否(N)` keyboard semantics remain
+  unchanged.
+- [ ] Same-point original screenshot parity, Linux native menu evidence, Release Sandbox
+  visual review and Windows E3 remain open.
+
 ## Original Window menu state (2026-08-31)
 
 - [x] Windowed sessions expose fullscreen, original-size, disabled high-precision resize,

@@ -1,5 +1,13 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日 Windows 原生确认框几何复核：Family ABI v13 的 Host presenter
+现在以原版接近的 350×164（96 DPI）为紧凑基准，依据 owner window 的有效 DPI 缩放
+窗口、消息和按钮；无 owner 的 Manager service 调用使用系统 DPI，并使用标准 Win32
+question icon。`是(Y)`/`否(N)` 助记键、owner modal 生命周期和关闭即取消保持不变；
+缩放边界测试通过。该项改善高 DPI 下的原生
+系统 UI 对齐，不改变 Family transaction，也不提升 About artwork、Linux 原生菜单、
+完整路线、Release Sandbox 或 Windows E3 的证据等级。
+
 2026 年 8 月 31 日 Release Sandbox 启动复核：Windows desktop builder 现强制
 `+crt-static` 并拒绝动态 CRT flag；新的开发签名包已在同一 Sandbox 打开
 AstraEMU Manager，首个候选的 VC runtime 启动阻断已关闭。该项只覆盖分发启动

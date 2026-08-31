@@ -2559,6 +2559,28 @@ mod windows {
     const CONFIRMATION_ACCEPT_ID: usize = 1001;
     const CONFIRMATION_CANCEL_ID: usize = 1002;
 
+    fn scale_dialog_dimension(value: i32, dpi: u32) -> i32 {
+        let scaled = i64::from(value)
+            .saturating_mul(i64::from(dpi))
+            .saturating_add(48)
+            / 96;
+        i32::try_from(scaled).unwrap_or(i32::MAX)
+    }
+
+    fn select_confirmation_dpi(owner_dpi: Option<u32>, system_dpi: u32) -> u32 {
+        owner_dpi
+            .filter(|dpi| *dpi != 0)
+            .or_else(|| (system_dpi != 0).then_some(system_dpi))
+            .unwrap_or(96)
+    }
+
+    fn confirmation_dpi(owner: Option<windows::Win32::Foundation::HWND>) -> u32 {
+        let owner_dpi =
+            owner.map(|owner| unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(owner) });
+        let system_dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForSystem() };
+        select_confirmation_dpi(owner_dpi, system_dpi)
+    }
+
     fn show_custom_confirmation(
         window: Option<&Window>,
         title: String,
@@ -2573,12 +2595,14 @@ mod windows {
                 Foundation::{HINSTANCE, HWND, LPARAM, WPARAM},
                 Graphics::Gdi::{GetStockObject, DEFAULT_GUI_FONT},
                 System::LibraryLoader::GetModuleHandleW,
+                System::SystemServices::SS_ICON,
                 UI::{
                     Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled, SetFocus},
                     WindowsAndMessaging::{
                         CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW,
-                        IsDialogMessageW, SetForegroundWindow, ShowWindow, TranslateMessage,
-                        BS_DEFPUSHBUTTON, BS_PUSHBUTTON, SW_SHOW, WM_SETFONT, WS_CAPTION, WS_CHILD,
+                        IsDialogMessageW, LoadIconW, SetForegroundWindow, ShowWindow,
+                        TranslateMessage, BS_DEFPUSHBUTTON, BS_PUSHBUTTON, IDI_QUESTION,
+                        IMAGE_ICON, STM_SETIMAGE, SW_SHOW, WM_SETFONT, WS_CAPTION, WS_CHILD,
                         WS_EX_CONTROLPARENT, WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP,
                         WS_VISIBLE,
                     },
@@ -2623,7 +2647,14 @@ mod windows {
             closed: false,
         };
 
-        let (width, height) = (460_i32, 176_i32);
+        // The original Minori prompt is a compact owner-modal dialog.  Keep
+        // the same base geometry at 96 DPI and scale every child from the
+        // owner window's effective DPI so a high-DPI desktop does not clip
+        // the Japanese labels or move the default button out of the client
+        // area.
+        let dpi = confirmation_dpi(owner);
+        let scale = |value: i32| scale_dialog_dimension(value, dpi);
+        let (width, height) = (scale(350), scale(164));
         let (x, y) = dialog_position(owner, width, height)?;
         let dialog = unsafe {
             CreateWindowExW(
@@ -2648,16 +2679,61 @@ mod windows {
             )
         })?;
 
+        let icon = unsafe { LoadIconW(None, IDI_QUESTION) }.map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.confirmation",
+                "Windows question icon is unavailable",
+            )
+        })?;
+        let icon_control = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("STATIC").as_ptr()),
+                PCWSTR::null(),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_ICON.0),
+                scale(18),
+                scale(38),
+                scale(32),
+                scale(32),
+                Some(dialog),
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.confirmation",
+                "native confirmation question icon could not be created",
+            )
+        })?;
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::SendMessageW(
+                icon_control,
+                STM_SETIMAGE,
+                Some(WPARAM(IMAGE_ICON.0 as usize)),
+                Some(LPARAM(icon.0 as isize)),
+            );
+        }
+
         let message_control = unsafe {
             CreateWindowExW(
                 Default::default(),
                 PCWSTR(widestring("STATIC").as_ptr()),
                 PCWSTR(message_wide.as_ptr()),
                 WS_CHILD | WS_VISIBLE,
-                18,
-                18,
-                424,
-                82,
+                scale(64),
+                scale(38),
+                scale(264),
+                scale(44),
                 Some(dialog),
                 None,
                 Some(instance),
@@ -2685,10 +2761,10 @@ mod windows {
                     | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
                         BS_DEFPUSHBUTTON as u32,
                     ),
-                238,
-                116,
-                94,
-                28,
+                scale(145),
+                scale(110),
+                scale(88),
+                scale(28),
                 Some(dialog),
                 Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
                     CONFIRMATION_ACCEPT_ID as *mut c_void,
@@ -2716,10 +2792,10 @@ mod windows {
                     | WS_VISIBLE
                     | WS_TABSTOP
                     | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_PUSHBUTTON as u32),
-                334,
-                116,
-                94,
-                28,
+                scale(242),
+                scale(110),
+                scale(88),
+                scale(28),
                 Some(dialog),
                 Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
                     CONFIRMATION_CANCEL_ID as *mut c_void,
@@ -3138,6 +3214,25 @@ mod windows {
                 Some(ConfirmationResult::Cancelled)
             );
             assert_eq!(confirmation_key_result(0x51), None);
+        }
+
+        #[test]
+        fn confirmation_geometry_scales_at_owner_dpi() {
+            assert_eq!(super::scale_dialog_dimension(350, 96), 350);
+            assert_eq!(super::scale_dialog_dimension(350, 192), 700);
+            assert_eq!(super::scale_dialog_dimension(164, 144), 246);
+        }
+
+        #[test]
+        fn confirmation_geometry_saturates_on_large_dpi() {
+            assert_eq!(super::scale_dialog_dimension(i32::MAX, u32::MAX), i32::MAX);
+        }
+
+        #[test]
+        fn confirmation_dpi_prefers_owner_and_uses_system_for_service_host() {
+            assert_eq!(super::select_confirmation_dpi(Some(192), 144), 192);
+            assert_eq!(super::select_confirmation_dpi(Some(0), 144), 144);
+            assert_eq!(super::select_confirmation_dpi(None, 0), 96);
         }
     }
 }
