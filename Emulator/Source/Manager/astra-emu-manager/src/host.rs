@@ -64,6 +64,7 @@ fn manager_system_menu_items(
                 item_id: item.item_id.clone(),
                 parent_id: item.parent_id.clone().unwrap_or_default(),
                 label: item.label.clone(),
+                order: i32::from(item.order),
                 depth,
                 enabled: item.enabled,
                 checked: item.checked,

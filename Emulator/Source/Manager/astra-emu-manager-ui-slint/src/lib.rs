@@ -123,6 +123,7 @@ pub struct SystemMenuItemViewModel {
     pub item_id: String,
     pub parent_id: String,
     pub label: String,
+    pub order: i32,
     pub depth: i32,
     pub enabled: bool,
     pub checked: bool,
@@ -180,15 +181,31 @@ fn reduce_system_menu_navigation(
         }
         "arrow_right" => {
             let item = &items[focus];
-            if item.submenu {
+            if item.enabled && item.submenu {
                 SystemMenuNavigation::OpenSubmenu(item.item_id.to_string())
             } else {
                 SystemMenuNavigation::None
             }
         }
-        "enter" | "space" => {
+        "enter" => {
             let item = &items[focus];
-            if item.submenu {
+            if !item.enabled {
+                // Win32 closes the popup when Enter is pressed on a
+                // disabled row, without dispatching that row's command.
+                SystemMenuNavigation::Dismiss
+            } else if item.submenu {
+                SystemMenuNavigation::OpenSubmenu(item.item_id.to_string())
+            } else {
+                SystemMenuNavigation::Select(item.item_id.to_string())
+            }
+        }
+        "space" => {
+            let item = &items[focus];
+            if !item.enabled {
+                // Space does not activate a disabled row and leaves the
+                // transaction open for subsequent navigation.
+                SystemMenuNavigation::None
+            } else if item.submenu {
                 SystemMenuNavigation::OpenSubmenu(item.item_id.to_string())
             } else {
                 SystemMenuNavigation::Select(item.item_id.to_string())
@@ -339,6 +356,7 @@ impl SlintManagerAdapter {
                     item_id: item.item_id.as_str().into(),
                     parent_id: item.parent_id.as_str().into(),
                     label: item.label.as_str().into(),
+                    order: item.order,
                     depth: item.depth,
                     enabled: item.enabled,
                     checked: item.checked,
@@ -430,12 +448,12 @@ impl SlintManagerAdapter {
 
     fn current_system_menu_items(&self) -> Vec<SystemMenuItem> {
         let current_parent = self.window.get_system_menu_parent_id().to_string();
-        (0..self.system_menu_items.row_count())
+        let mut items = (0..self.system_menu_items.row_count())
             .filter_map(|row| self.system_menu_items.row_data(row))
-            .filter(|item| {
-                item.parent_id.as_str() == current_parent && item.enabled && !item.separator
-            })
-            .collect()
+            .filter(|item| item.parent_id.as_str() == current_parent && !item.separator)
+            .collect::<Vec<_>>();
+        items.sort_by_key(|item| item.order);
+        items
     }
 
     fn set_system_menu_focus_for_current_parent(&self) {
@@ -727,6 +745,7 @@ mod tests {
             item_id: "game".into(),
             parent_id: "".into(),
             label: "Game".into(),
+            order: 0,
             depth: 0,
             enabled: true,
             checked: false,
@@ -743,6 +762,7 @@ mod tests {
             item_id: "exit".into(),
             parent_id: "game".into(),
             label: "Exit".into(),
+            order: 0,
             depth: 1,
             enabled: true,
             checked: false,
@@ -774,6 +794,67 @@ mod tests {
                 .unwrap()
                 .1,
             SystemMenuNavigation::None
+        );
+    }
+
+    #[test]
+    fn system_menu_navigation_focuses_disabled_rows_without_selecting_them() {
+        let items = vec![
+            SystemMenuItem {
+                item_id: "fullscreen".into(),
+                parent_id: "".into(),
+                label: "Fullscreen".into(),
+                order: 0,
+                depth: 0,
+                enabled: true,
+                checked: false,
+                separator: false,
+                submenu: false,
+            },
+            SystemMenuItem {
+                item_id: "precision".into(),
+                parent_id: "".into(),
+                label: "Precision".into(),
+                order: 1,
+                depth: 0,
+                enabled: false,
+                checked: true,
+                separator: false,
+                submenu: false,
+            },
+            SystemMenuItem {
+                item_id: "help".into(),
+                parent_id: "".into(),
+                label: "Help".into(),
+                order: 2,
+                depth: 0,
+                enabled: true,
+                checked: false,
+                separator: false,
+                submenu: true,
+            },
+        ];
+
+        let (focus, action) = reduce_system_menu_navigation("", &items, 0, "arrow_down").unwrap();
+        assert_eq!(focus, 1);
+        assert_eq!(action, SystemMenuNavigation::None);
+        assert_eq!(
+            reduce_system_menu_navigation("", &items, focus, "enter")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::Dismiss
+        );
+        assert_eq!(
+            reduce_system_menu_navigation("", &items, focus, "space")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::None
+        );
+        assert_eq!(
+            reduce_system_menu_navigation("", &items, 2, "enter")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::OpenSubmenu("help".into())
         );
     }
 }

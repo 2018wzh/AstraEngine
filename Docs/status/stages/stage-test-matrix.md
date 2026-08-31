@@ -1,5 +1,13 @@
 # Stage Test Matrix
 
+2026-08-31 disabled-menu navigation seam: the authorized Windows Sandbox run showed
+that arrow-key focus includes disabled rows, skips separators, and a pointer click on a
+disabled row does not publish a command. Enter closes the popup without a selection,
+while Space/Right leave it active. CLI Headless and Manager Host now preserve
+non-separator rows in ABI `order` and keep these outcomes distinct. Focused CLI/Manager
+tests pass. This is menu E1/E2 behavior coverage, not Release Sandbox or Windows E3
+evidence.
+
 2026-08-31 original-size command state seam: after the native Host applies
 `RestoreOriginalSize`, Minori now clears its Family-owned fullscreen setting and
 persists that result before publishing the next menu. The focused provider regression

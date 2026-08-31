@@ -4282,7 +4282,6 @@ impl VirtualSystemMenu {
             .filter(|item| {
                 item.parent_id == self.parent_id
                     && item.kind != LegacySystemMenuItemKindV1::Separator
-                    && item.enabled
             })
             .collect::<Vec<_>>();
         children.sort_by_key(|item| item.order);
@@ -4293,12 +4292,33 @@ impl VirtualSystemMenu {
         match control {
             "arrow_up" => self.focus = (self.focus + children.len() - 1) % children.len(),
             "arrow_down" => self.focus = (self.focus + 1) % children.len(),
-            "arrow_right" | "enter" | "space" => {
+            "arrow_right" => {
                 let selected = children[self.focus];
+                if selected.enabled && selected.kind == LegacySystemMenuItemKindV1::Submenu {
+                    self.parent_id = Some(selected.item_id.clone());
+                    self.focus = 0;
+                }
+            }
+            "enter" => {
+                let selected = children[self.focus];
+                if !selected.enabled {
+                    // Win32 closes the popup when Enter is pressed on a
+                    // disabled row, without dispatching that row's command.
+                    return Ok(VirtualSystemMenuDecision::Dismiss);
+                }
                 if selected.kind == LegacySystemMenuItemKindV1::Submenu {
                     self.parent_id = Some(selected.item_id.clone());
                     self.focus = 0;
                 } else {
+                    return Ok(VirtualSystemMenuDecision::Select(selected.item_id.clone()));
+                }
+            }
+            "space" => {
+                let selected = children[self.focus];
+                if selected.enabled && selected.kind == LegacySystemMenuItemKindV1::Submenu {
+                    self.parent_id = Some(selected.item_id.clone());
+                    self.focus = 0;
+                } else if selected.enabled {
                     return Ok(VirtualSystemMenuDecision::Select(selected.item_id.clone()));
                 }
             }
@@ -8026,6 +8046,58 @@ mod native_tests {
             virtual_menu().consume("save").unwrap_err(),
             "ASTRA_EMU_HEADLESS_SYSTEM_MENU_INPUT_UNSUPPORTED"
         );
+    }
+
+    #[test]
+    fn virtual_system_menu_focuses_disabled_rows_without_dispatching_them() {
+        let disabled_menu = || {
+            let mut menu = virtual_menu();
+            menu.pending.menu.items.insert(
+                1,
+                LegacySystemMenuItemV1 {
+                    item_id: "precision".into(),
+                    parent_id: None,
+                    order: 1,
+                    kind: LegacySystemMenuItemKindV1::Command,
+                    label: "Precision".into(),
+                    enabled: false,
+                    checked: true,
+                },
+            );
+            menu.pending.menu.items[2].order = 2;
+            menu
+        };
+
+        let mut menu = disabled_menu();
+
+        assert!(matches!(
+            menu.consume("arrow_down").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+        assert_eq!(menu.focus, 1);
+        assert!(matches!(
+            menu.consume("enter").unwrap(),
+            VirtualSystemMenuDecision::Dismiss
+        ));
+        assert!(menu.parent_id.is_none());
+
+        let mut menu = disabled_menu();
+        menu.consume("arrow_down").unwrap();
+        assert!(matches!(
+            menu.consume("space").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+
+        assert!(matches!(
+            menu.consume("arrow_down").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+        assert_eq!(menu.focus, 2);
+        assert!(matches!(
+            menu.consume("enter").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+        assert_eq!(menu.parent_id.as_deref(), Some("game"));
     }
 
     #[test]

@@ -1,5 +1,18 @@
 # Minori 移植日志
 
+## 2026-08-31：原版菜单禁用项的键盘焦点语义
+
+授权 Windows Sandbox 的标题右键菜单复核确认：方向键会把焦点移动到灰色的禁用项，
+也会跳过分隔线；禁用项保持灰显，鼠标点击不会发布命令。这个行为与“只在
+enabled 集合中循环”的旧 Headless/Manager 实现不同。现在 CLI 的物理菜单和 Manager
+Host 都把非分隔线项按 ABI `order` 纳入焦点序列；Right/Space 对禁用项保持无操作，
+Enter 关闭弹出菜单但不向 Family 发布该项选择；可用 submenu 和 command 仍按原有
+事务路径处理。
+
+该修复只调整 Host 导航状态机，不改变 Family transaction、命令校验或平台能力边界。
+本次现场观察和 CLI/Manager 定向回归属于菜单 E1/E2 证据，真实 Manager 窗口、完整路线、
+Release Sandbox 视觉验收和 Windows E3 仍未关闭。
+
 ## 2026-08-31：原始尺寸命令同步全屏状态
 
 原版在全屏状态下选择“ウインドウをオリジナルサイズに”会先退出全屏，再恢复
