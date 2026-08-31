@@ -1136,3 +1136,9 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 新增的 runner 回归覆盖 16:9 留边、舞台边界和负坐标。该项只证明 Family ABI
 语义到 Host 的坐标传递，尚未形成 Linux 原生菜单、Release Sandbox 或 Windows
 E3 证据。
+
+同日补充 Host 侧层级校验：Windows/macOS 在构造 OS 菜单前重新检查 parent
+存在性、parent kind、sibling order、循环和四层深度上限。这样即使未来出现不合格
+的 Family transaction，也会在 `window.context_menu` 边界返回稳定 diagnostic，
+不会让平台菜单 API 接收断裂树或由 Host 静默丢弃分支。该校验是契约防线，不改变
+Minori 菜单的 item id、顺序或平台呈现。

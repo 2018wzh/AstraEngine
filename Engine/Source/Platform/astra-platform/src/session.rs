@@ -418,6 +418,30 @@ impl ContextMenuRequest {
                         "context menu parent is not a submenu",
                     ));
                 }
+
+                // A platform menu backend walks the parent chain while it
+                // builds native submenus.  Validate that chain here rather
+                // than allowing a malformed Family transaction to make the
+                // host loop recurse forever or silently drop a branch.  Keep
+                // the same four-level bound as the Family ABI contract so
+                // every host sees the same hierarchy shape.
+                let mut ancestor = Some(parent_id);
+                let mut depth = 0usize;
+                while let Some(id) = ancestor {
+                    depth = depth.saturating_add(1);
+                    if depth > 4 || id == item.item_id {
+                        return Err(PlatformError::new(
+                            PlatformErrorCode::InvalidState,
+                            "window.context_menu",
+                            "context menu hierarchy is cyclic or exceeds depth four",
+                        ));
+                    }
+                    ancestor = self
+                        .items
+                        .iter()
+                        .find(|candidate| candidate.item_id == id)
+                        .and_then(|candidate| candidate.parent_id.as_deref());
+                }
             }
         }
         Ok(())
@@ -2703,6 +2727,20 @@ mod tests {
 
         let mut invalid = request.clone();
         invalid.items[2].parent_id = Some("save".into());
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.context_menu"
+        );
+
+        let mut invalid = request.clone();
+        invalid.items[1].parent_id = Some("game".into());
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.context_menu"
+        );
+
+        let mut invalid = request.clone();
+        invalid.items[1].parent_id = Some("exit".into());
         assert_eq!(
             invalid.validate().unwrap_err().operation,
             "window.context_menu"

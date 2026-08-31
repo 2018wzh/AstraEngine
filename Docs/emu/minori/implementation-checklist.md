@@ -10,6 +10,10 @@
   physical point to a logical AppKit view point before applying the flipped-Y
   transform. An invalid or out-of-stage anchor is a blocking diagnostic and
   never falls back to the process cursor.
+- [x] The platform Host re-validates the native menu hierarchy before handing
+  it to the OS API: missing parents, non-submenu parents, duplicate sibling
+  order, cycles and chains deeper than four levels use one stable invalid-state
+  diagnostic.
 - [ ] Native Linux menu support, same-point original screenshots, Release
   Sandbox visual review and Windows E3 remain open.
 

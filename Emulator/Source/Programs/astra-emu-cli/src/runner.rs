@@ -4896,6 +4896,13 @@ impl NativeViewport {
     /// its own logical-point conversion.  Out-of-stage anchors are rejected;
     /// they must never fall back to the process cursor.
     fn map_stage_anchor(&self, x: i32, y: i32) -> Result<(i32, i32), String> {
+        if self.window_width == 0
+            || self.window_height == 0
+            || self.stage_width == 0
+            || self.stage_height == 0
+        {
+            return Err("ASTRA_EMU_NATIVE_MENU_VIEWPORT_INVALID".into());
+        }
         if x < 0 || y < 0 {
             return Err("ASTRA_EMU_NATIVE_MENU_ANCHOR_NEGATIVE".into());
         }
@@ -4903,13 +4910,6 @@ impl NativeViewport {
         let stage_y = u32::try_from(y).map_err(|_| "ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS")?;
         if stage_x >= self.stage_width || stage_y >= self.stage_height {
             return Err("ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS".into());
-        }
-        if self.window_width == 0
-            || self.window_height == 0
-            || self.stage_width == 0
-            || self.stage_height == 0
-        {
-            return Err("ASTRA_EMU_NATIVE_MENU_VIEWPORT_INVALID".into());
         }
         let scale = (f64::from(self.window_width) / f64::from(self.stage_width))
             .min(f64::from(self.window_height) / f64::from(self.stage_height));
@@ -8724,6 +8724,17 @@ mod native_tests {
         assert_eq!(
             viewport.map_stage_anchor(-1, 0).unwrap_err(),
             "ASTRA_EMU_NATIVE_MENU_ANCHOR_NEGATIVE"
+        );
+
+        let invalid_viewport = NativeViewport {
+            window_width: 0,
+            window_height: 1_200,
+            stage_width: 1_280,
+            stage_height: 720,
+        };
+        assert_eq!(
+            invalid_viewport.map_stage_anchor(0, 0).unwrap_err(),
+            "ASTRA_EMU_NATIVE_MENU_VIEWPORT_INVALID"
         );
     }
 
