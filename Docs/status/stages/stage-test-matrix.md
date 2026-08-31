@@ -5,6 +5,14 @@ owner caption when presenting a Family confirmation and keeps the typed Family t
 for windowless service calls. The source-level host check and affected desktop tests
 pass; native Linux context-menu/window-command evidence remains explicitly pending.
 
+2026-08-31 fullscreen menu state seam: the original Windows title hides the fullscreen
+toggle while the window is already fullscreen, leaving original-size, disabled high-
+precision resize, and antialiasing entries. Minori now constructs the corresponding
+three-item/four-item Window group and retains the active Family transaction so unknown,
+disabled, submenu, or separator selections are rejected at the family boundary. The
+focused Minori menu/command tests pass; this remains behavior evidence, not Linux native
+menu, Headless GPU E2, Release Sandbox, or Windows E3 acceptance.
+
 2026-08-31 native menu result validation: Windows and macOS `muda` presenters now
 re-check the returned event against the active Family menu transaction and accept only
 enabled command items. Stale/unknown ids and non-selectable entries are blocking Host

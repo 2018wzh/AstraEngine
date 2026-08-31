@@ -5,6 +5,12 @@
 依赖阻断已关闭。该证据只覆盖包启动，不代表 Minori 路线、Headless E2、视觉/音频
 审查或 Windows E3 通过。
 
+2026 年 8 月 31 日 Window 菜单状态覆盖：原版窗口化时显示全屏切换、原始尺寸、
+禁用的高精度尺寸変更和抗锯齿四项；全屏时隐藏全屏切换，恢复原始尺寸后再显示。
+Minori family 按该状态发布三项/四项 transaction，并在执行前校验活动 transaction
+中的 item、启用状态和命令类型。定向菜单与命令测试通过；Linux 原生菜单、Headless
+GPU E2、Release Sandbox 视觉验收和 Windows E3 仍保持开放。
+
 2026 年 8 月 31 日 native confirmation caption coverage：Linux Host 在存在 live
 owner window 时读取 owner caption，没有 owner 时保留 Family transaction title；该规则
 与 Windows/macOS presenter 保持一致。此项只属于 Host 接线覆盖，Linux context menu、窗口

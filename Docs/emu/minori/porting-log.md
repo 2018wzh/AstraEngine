@@ -12,6 +12,13 @@ Host 原生处理路径一致，只记录交互结构，不把截图或商业资
 confirmation。取消会保留当前消息等待，接受后回到标题页，标题画面和菜单状态
 重新出现。该行为已在 Sandbox 现场复核，仍不等价于完整路线或正式 E3 证据。
 
+随后切换到全屏再打开右键菜单，原版会隐藏全屏切换项，只显示“原始尺寸”、禁用且
+保持勾选的“高精度尺寸変更”和已勾选的抗锯齿项；选择“原始尺寸”回到窗口模式后，
+全屏项重新出现。Minori provider 现在按实际窗口状态构造这组三项/四项菜单，并保留
+完整活动 transaction 来校验 Host 返回的 item id、可选状态和命令类型；未发布、禁用
+或 submenu/separator 项不会进入 VM。该结论来自现场菜单结构观察和定向 provider 回归，
+不替代各平台原生窗口的正式验收。
+
 首个 Release 候选在 Sandbox 启动时暴露了机器 VC runtime 依赖，随后 desktop
 builder 强制 Windows MSVC 使用 `+crt-static`，并拒绝外部动态 CRT flag。新的
 开发签名 Release 候选已能在同一 Sandbox 打开 AstraEMU Manager，PE import

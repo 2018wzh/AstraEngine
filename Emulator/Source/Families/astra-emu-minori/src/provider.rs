@@ -554,7 +554,11 @@ struct MinoriSession {
     /// invalidated on restore or when the role's bounded descriptors change.
     presentation_layers: BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
     last_layer_sequence: u64,
-    active_system_menu: Option<String>,
+    /// The complete transaction is retained until the Host returns a typed
+    /// selection.  Keeping the transaction (instead of only its id) lets the
+    /// family enforce the same item/parent/enabled boundary as the native
+    /// Host, even when a caller bypasses a particular Host adapter.
+    active_system_menu: Option<LegacySystemMenuTransactionV1>,
     active_confirmation: Option<ActiveMinoriConfirmation>,
     active_system_command: Option<ActiveMinoriSystemCommand>,
     poisoned: bool,
@@ -6557,7 +6561,7 @@ fn handle_system_menu_request(
             let menu =
                 minori_system_menu(&session.vm, session.resize_antialias, request, sequence)?;
             services.system_menus.publish(&session_id.0, menu.clone())?;
-            session.active_system_menu = Some(menu.menu_id);
+            session.active_system_menu = Some(menu);
             session
                 .vm
                 .advance_provider_tick(input.tick_index)
@@ -6975,11 +6979,41 @@ fn validate_active_system_menu(
     session: &MinoriSession,
     request: &astra_emu_family_api::LegacySystemMenuRequestV1,
 ) -> Result<(), LegacyProviderError> {
-    if session.active_system_menu.as_deref() != request.menu_id.as_deref() {
+    let menu = session.active_system_menu.as_ref().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_ID_MISMATCH",
+            "system-menu result has no active Minori menu",
+        )
+    })?;
+    if Some(menu.menu_id.as_str()) != request.menu_id.as_deref() {
         return Err(invalid(
             "ASTRA_EMU_MINORI_SYSTEM_MENU_ID_MISMATCH",
             "system-menu result does not match the active Minori menu",
         ));
+    }
+    if request.action == LegacySystemMenuActionV1::Select {
+        let item_id = request.item_id.as_deref().ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM",
+                "system-menu selection is missing its item id",
+            )
+        })?;
+        let item = menu
+            .items
+            .iter()
+            .find(|item| item.item_id == item_id)
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM_UNKNOWN",
+                    "system-menu selection references an item outside the active transaction",
+                )
+            })?;
+        if item.kind != LegacySystemMenuItemKindV1::Command || !item.enabled {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM_DISABLED",
+                "system-menu selection references a disabled or non-command item",
+            ));
+        }
     }
     Ok(())
 }
@@ -7088,59 +7122,68 @@ fn minori_system_menu(
         );
     }
     let base = if title { 0 } else { 8 };
-    push(
-        "window_fullscreen",
-        None,
-        base,
-        LegacySystemMenuItemKindV1::Command,
-        if vm.state().system_ui.config.fullscreen {
-            "フルスクリーン解除 (&O)"
-        } else {
-            "フルスクリーン (&O)"
-        },
-        true,
-        vm.state().system_ui.config.fullscreen,
-    );
+    let fullscreen = vm.state().system_ui.config.fullscreen;
+    let mut window_order = base;
+    // The original title window hides the fullscreen toggle while it is
+    // already fullscreen.  The remaining Window entries keep their native
+    // order, so the Host menu has three rows in fullscreen and four rows in a
+    // normal window.
+    if !fullscreen {
+        push(
+            "window_fullscreen",
+            None,
+            window_order,
+            LegacySystemMenuItemKindV1::Command,
+            "フルスクリーン (&O)",
+            true,
+            false,
+        );
+        window_order += 1;
+    }
     push(
         "window_original_size",
         None,
-        base + 1,
+        window_order,
         LegacySystemMenuItemKindV1::Command,
         "ウインドウをオリジナルサイズに (&W)",
         true,
         false,
     );
+    window_order += 1;
     push(
         "window_precision",
         None,
-        base + 2,
+        window_order,
         LegacySystemMenuItemKindV1::Command,
         "高精度サイズ変更 (&Y)",
         false,
         true,
     );
+    window_order += 1;
     push(
         "window_antialias",
         None,
-        base + 3,
+        window_order,
         LegacySystemMenuItemKindV1::Command,
         "サイズ変更時にアンチエイリアス (&A)",
         true,
         resize_antialias,
     );
+    window_order += 1;
     push(
         "sep_window",
         None,
-        base + 4,
+        window_order,
         LegacySystemMenuItemKindV1::Separator,
         "",
         false,
         false,
     );
+    window_order += 1;
     push(
         "help",
         None,
-        base + 5,
+        window_order,
         LegacySystemMenuItemKindV1::Submenu,
         "ヘルプ (&H)",
         true,
@@ -7176,7 +7219,7 @@ fn minori_system_menu(
     push(
         "game",
         None,
-        base + 6,
+        window_order + 1,
         LegacySystemMenuItemKindV1::Submenu,
         "ゲーム (&G)",
         true,
@@ -11250,6 +11293,12 @@ mod tests {
             .expect("the precision resize item is part of the native menu");
         assert!(!precision.enabled);
         assert!(precision.checked);
+        let fullscreen = menu
+            .items
+            .iter()
+            .find(|item| item.item_id == "window_fullscreen")
+            .expect("the fullscreen item is visible in a normal window");
+        assert!(!fullscreen.checked);
         assert!(menu
             .items
             .iter()
@@ -11271,6 +11320,28 @@ mod tests {
         );
         let menu_id = menu.menu_id.clone();
         drop(published);
+
+        let invalid_selection = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Select,
+                        menu_id: Some(menu_id.clone()),
+                        item_id: Some("not-in-active-menu".into()),
+                        pointer_x: None,
+                        pointer_y: None,
+                        sequence: 2,
+                    }),
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .expect_err("a selection outside the published transaction must block");
+        assert_eq!(
+            invalid_selection.code(),
+            "ASTRA_EMU_MINORI_SYSTEM_MENU_ITEM_UNKNOWN"
+        );
 
         let output = provider
             .step(
@@ -11409,6 +11480,44 @@ mod tests {
                 .system_ui
                 .config
                 .fullscreen
+        );
+
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Open,
+                        menu_id: None,
+                        item_id: None,
+                        pointer_x: Some(640),
+                        pointer_y: Some(360),
+                        sequence: 4,
+                    }),
+                    ..step_input(5, Vec::new())
+                },
+            )
+            .unwrap();
+        let reopened = system_menus
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .expect("fullscreen menu must be published")
+            .1
+            .clone();
+        assert!(!reopened
+            .items
+            .iter()
+            .any(|item| item.item_id == "window_fullscreen"));
+        assert_eq!(
+            reopened
+                .items
+                .iter()
+                .find(|item| item.item_id == "window_original_size")
+                .map(|item| item.order),
+            Some(8)
         );
     }
 

@@ -1,5 +1,16 @@
 # Minori Implementation Checklist
 
+## Original Window menu state (2026-08-31)
+
+- [x] Windowed sessions expose fullscreen, original-size, disabled high-precision resize,
+  and antialiasing entries in the observed order; fullscreen sessions hide only the
+  fullscreen toggle and keep the remaining three entries.
+- [x] The family retains the published `LegacySystemMenuTransactionV1` until resolution,
+  then rejects an item id that was not published or is disabled/non-command before any
+  Minori command is executed.
+- [ ] Native menu evidence for Linux, complete route behavior, Headless GPU E2, Release
+  Sandbox visual review, and Windows E3 remain open.
+
 ## Config fullscreen Host command (2026-08-31)
 
 - [x] Applying the Config fullscreen choice now emits a typed Family ABI

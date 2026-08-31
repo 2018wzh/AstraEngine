@@ -5,6 +5,13 @@
 AstraEMU Manager，首个候选的 VC runtime 启动阻断已关闭。该项只覆盖分发启动
 边界，不提升 Minori 完整路线、Headless E2、视觉/音频审查或 Windows E3。
 
+2026 年 8 月 31 日原版全屏菜单状态复核：授权 Windows Sandbox 显示，窗口化时右键
+菜单包含全屏切换、原始尺寸、禁用的高精度尺寸変更和抗锯齿四项；进入全屏后，全屏
+切换项消失，选择原始尺寸才恢复窗口化。Minori family 按该状态动态生成三项/四项
+Window 菜单，并把完整活动 transaction 留在 session 内，对 Host 返回的 item id、启用
+状态和命令类型做二次校验。现场证据和定向测试通过；Linux 原生菜单、完整路线、
+Headless GPU E2、Release Sandbox 视觉验收及 Windows E3 仍保持开放。
+
 2026 年 8 月 31 日 Linux native confirmation caption 对齐：Linux Host 在有 live
 owner window 时沿用 owner caption，没有 owner 时保留 Family transaction title；该规则与
 Windows/macOS 的 native presenter 一致。Linux context menu、窗口命令和帮助动作仍按显式
