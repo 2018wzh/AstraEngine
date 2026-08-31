@@ -2567,6 +2567,51 @@ mod windows {
         i32::try_from(scaled).unwrap_or(i32::MAX)
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ConfirmationGeometry {
+        width: i32,
+        height: i32,
+        icon_x: i32,
+        icon_y: i32,
+        icon_size: i32,
+        message_x: i32,
+        message_y: i32,
+        message_width: i32,
+        message_height: i32,
+        accept_x: i32,
+        accept_y: i32,
+        cancel_x: i32,
+        cancel_y: i32,
+        button_width: i32,
+        button_height: i32,
+    }
+
+    fn confirmation_geometry(dpi: u32) -> ConfirmationGeometry {
+        let dpi = if dpi == 0 { 96 } else { dpi };
+        let scale = |value: i32| scale_dialog_dimension(value, dpi);
+        ConfirmationGeometry {
+            // These are client coordinates measured from the original
+            // 350x164 owner-modal dialog at 96 DPI.  Keep the question icon
+            // and message aligned on the upper row, with the buttons in the
+            // lower command band instead of crowding the rounded frame.
+            width: scale(350),
+            height: scale(164),
+            icon_x: scale(26),
+            icon_y: scale(28),
+            icon_size: scale(32),
+            message_x: scale(64),
+            message_y: scale(28),
+            message_width: scale(264),
+            message_height: scale(44),
+            accept_x: scale(145),
+            accept_y: scale(100),
+            cancel_x: scale(242),
+            cancel_y: scale(100),
+            button_width: scale(88),
+            button_height: scale(28),
+        }
+    }
+
     fn select_confirmation_dpi(owner_dpi: Option<u32>, system_dpi: u32) -> u32 {
         owner_dpi
             .filter(|dpi| *dpi != 0)
@@ -2653,8 +2698,8 @@ mod windows {
         // the Japanese labels or move the default button out of the client
         // area.
         let dpi = confirmation_dpi(owner);
-        let scale = |value: i32| scale_dialog_dimension(value, dpi);
-        let (width, height) = (scale(350), scale(164));
+        let geometry = confirmation_geometry(dpi);
+        let (width, height) = (geometry.width, geometry.height);
         let (x, y) = dialog_position(owner, width, height)?;
         let dialog = unsafe {
             CreateWindowExW(
@@ -2696,10 +2741,10 @@ mod windows {
                 WS_CHILD
                     | WS_VISIBLE
                     | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_ICON.0),
-                scale(18),
-                scale(38),
-                scale(32),
-                scale(32),
+                geometry.icon_x,
+                geometry.icon_y,
+                geometry.icon_size,
+                geometry.icon_size,
                 Some(dialog),
                 None,
                 Some(instance),
@@ -2730,10 +2775,10 @@ mod windows {
                 PCWSTR(widestring("STATIC").as_ptr()),
                 PCWSTR(message_wide.as_ptr()),
                 WS_CHILD | WS_VISIBLE,
-                scale(64),
-                scale(38),
-                scale(264),
-                scale(44),
+                geometry.message_x,
+                geometry.message_y,
+                geometry.message_width,
+                geometry.message_height,
                 Some(dialog),
                 None,
                 Some(instance),
@@ -2761,10 +2806,10 @@ mod windows {
                     | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
                         BS_DEFPUSHBUTTON as u32,
                     ),
-                scale(145),
-                scale(110),
-                scale(88),
-                scale(28),
+                geometry.accept_x,
+                geometry.accept_y,
+                geometry.button_width,
+                geometry.button_height,
                 Some(dialog),
                 Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
                     CONFIRMATION_ACCEPT_ID as *mut c_void,
@@ -2792,10 +2837,10 @@ mod windows {
                     | WS_VISIBLE
                     | WS_TABSTOP
                     | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_PUSHBUTTON as u32),
-                scale(242),
-                scale(110),
-                scale(88),
-                scale(28),
+                geometry.cancel_x,
+                geometry.cancel_y,
+                geometry.button_width,
+                geometry.button_height,
                 Some(dialog),
                 Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
                     CONFIRMATION_CANCEL_ID as *mut c_void,
@@ -3221,6 +3266,34 @@ mod windows {
             assert_eq!(super::scale_dialog_dimension(350, 96), 350);
             assert_eq!(super::scale_dialog_dimension(350, 192), 700);
             assert_eq!(super::scale_dialog_dimension(164, 144), 246);
+        }
+
+        #[test]
+        fn confirmation_geometry_matches_observed_base_layout() {
+            let geometry = super::confirmation_geometry(96);
+            assert_eq!(geometry.width, 350);
+            assert_eq!(geometry.height, 164);
+            assert_eq!((geometry.icon_x, geometry.icon_y), (26, 28));
+            assert_eq!(
+                (
+                    geometry.message_x,
+                    geometry.message_y,
+                    geometry.message_width,
+                    geometry.message_height,
+                ),
+                (64, 28, 264, 44)
+            );
+            assert_eq!((geometry.accept_x, geometry.accept_y), (145, 100));
+            assert_eq!((geometry.cancel_x, geometry.cancel_y), (242, 100));
+            assert_eq!((geometry.button_width, geometry.button_height), (88, 28));
+        }
+
+        #[test]
+        fn confirmation_geometry_zero_dpi_uses_the_base_scale() {
+            assert_eq!(
+                super::confirmation_geometry(0),
+                super::confirmation_geometry(96)
+            );
         }
 
         #[test]

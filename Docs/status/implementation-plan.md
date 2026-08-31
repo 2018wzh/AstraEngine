@@ -2,7 +2,8 @@
 
 2026 年 8 月 31 日 Windows 原生确认框几何复核：Family ABI v13 的 Host presenter
 现在以原版接近的 350×164（96 DPI）为紧凑基准，依据 owner window 的有效 DPI 缩放
-窗口、消息和按钮；无 owner 的 Manager service 调用使用系统 DPI，并使用标准 Win32
+窗口、消息和按钮；无 owner 的 Manager service 调用使用系统 DPI。客户区位置按观测
+固定为 question icon `(26,28)`、消息 `(64,28)`、按钮带 `y=100`，并使用标准 Win32
 question icon。`是(Y)`/`否(N)` 助记键、owner modal 生命周期和关闭即取消保持不变；
 缩放边界测试通过。该项改善高 DPI 下的原生
 系统 UI 对齐，不改变 Family transaction，也不提升 About artwork、Linux 原生菜单、
