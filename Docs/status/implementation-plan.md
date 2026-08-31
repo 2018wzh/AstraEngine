@@ -36,6 +36,13 @@ sampler，不重建 family scene；Minori 对这些 host-owned 操作的 `Applie
 继续显式回送 `Unsupported`，不以通用事件字符串或隐式平台 fallback 代替。About
 图像复刻、Linux GTK 原生菜单和外部帮助/浏览器的正式验收仍未完成。
 
+2026 年 8 月 31 日原生菜单回执校验：Windows/macOS Host 在 native menu tracking
+结束后，将 `MenuEvent` id 严格限制在当前 Family transaction 的启用 `Command` 项；
+未知、过期、submenu、separator 和禁用项直接阻断，避免进程级事件队列的迟到回执被
+误投递到 Minori。`astra-platform-windows`、`astra-platform-macos` 定向检查及文档
+检查通过；这只是 Host 边界回归，不改变 Linux context-menu unsupported、完整路线、
+Release Sandbox 或 Windows E3 的状态。
+
 2026 年 8 月 31 日原生菜单分类标题对齐：Sandbox 观察确认剧情右键菜单的两个顶层分类
 使用日文 `ヘルプ (&H)` 与 `ゲーム (&G)`，此前 family transaction 的英文标题已
 移除。菜单顺序、分隔线、启用/勾选状态和 Host 仅呈现不解释命令的边界不变；Minori

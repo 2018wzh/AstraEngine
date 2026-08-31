@@ -75,6 +75,15 @@ glyph run。正文仍单独进入翻译 Hook、backlog 和一次性 text lease�
 到另一套 UI。该项仅证明 Host 分层和平台边界，完整路线、媒体、正式视觉对照和
 Windows E3 仍保持原有证据状态。
 
+## 2026-08-31：原生菜单选择回执的 Host 校验
+
+Windows 和 macOS Host 在 `muda` 返回选择后，会把事件 id 与当前 Family ABI
+transaction 的 item 集合重新比对，只接受启用的 `Command`；过期事件、未知 id、
+submenu、separator 或已禁用项都在 Host 边界返回稳定错误，不会送回 Minori session。
+这层校验与 Family 自身的重复/错配检查互补，避免进程级 `MenuEvent` 队列中的迟到事件
+污染下一次右键菜单。该改动只增加错误可见性和平台安全边界，没有改变原版菜单顺序或
+标签，也没有把 Linux 未绑定 GTK window 的 context-menu 能力伪装成已支持。
+
 ## 2026-08-31：原生菜单分类标题对齐
 
 在授权 Windows Sandbox 中重新打开剧情右键菜单，确认底部两个顶层分类带有日文标题和

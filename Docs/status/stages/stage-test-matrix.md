@@ -5,6 +5,12 @@ owner caption when presenting a Family confirmation and keeps the typed Family t
 for windowless service calls. The source-level host check and affected desktop tests
 pass; native Linux context-menu/window-command evidence remains explicitly pending.
 
+2026-08-31 native menu result validation: Windows and macOS `muda` presenters now
+re-check the returned event against the active Family menu transaction and accept only
+enabled command items. Stale/unknown ids and non-selectable entries are blocking Host
+errors. Focused platform checks and docs validation pass; this does not close Linux
+context-menu, Release Sandbox, or Windows E3 evidence.
+
 2026-08-31 Windows Manager service confirmation seam: the focused
 `astra-platform-windows` library tests pass 2/2 and `cargo check -p
 astra-emu-manager` passes after the audio/decode service host gained a native
