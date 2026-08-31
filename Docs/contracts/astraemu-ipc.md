@@ -74,6 +74,11 @@ Family ABI v13 对 descriptor、instance、probe、open、step、surface、Hook�
 
 `LegacySystemMenuTransactionV1` 最多包含 64 项，菜单深度最多为 4。重复 id、重复 sibling order、无效 parent、空 submenu、不可选 item 或错配 menu id 都会阻断。Windows native host 通过平台 context-menu provider 显示菜单；Manager 使用同一 transaction 构建 Slint overlay；Headless 只接受序列化物理方向键、确认键和取消键，不提供语义化选项快捷命令。菜单选中的窗口、帮助和关于操作会生成有界 `LegacySystemCommandTransactionV1`；Host 只按 typed kind 选择原生平台能力，结果在下一固定 step 以 `LegacySystemCommandResultV1` 回传。Family 不接收窗口句柄、URL 或本地路径，也不依赖通用事件字符串。
 
+Family 可以根据当前游戏状态发布不同的菜单项集合。Minori 的窗口化菜单发布全屏切换、
+原始尺寸、禁用的高精度尺寸変更和抗锯齿项；全屏状态隐藏全屏切换项，Host 不应自行
+补回未发布的命令。Family 在消费 `Select` 前会再次核对活动 transaction 中的 item、
+启用状态和 `Command` 类型，Host 的同类校验不能替代这一层边界。
+
 只读 VFS range 请求绑定 expected revision、offset、length 与 bounds，Host 不传文件句柄或本地路径，也不计算 per-read content hash。Family 只能 acquire Host-owned writable surface。lease 明确携带 RGBA8/BGRA8 sRGB premultiplied-alpha format、dimensions、stride 与 generation；core 写入后提交 `Unchanged`、`Full` 或 surface 像素坐标 `Rects` damage。step 成功且 Layer transaction 验证完成后才公开 staged generation；失败时整批回收。pool 暂时耗尽时重试同一 generation 并输出节流 WARN，不临时分配、不丢帧、不切换 presentation mode。设备丢失、整数溢出、尺寸或 stride 不匹配、所有权错误与实际分配失败继续 fail-fast。
 
 Typed PCM 由 `LegacyLiveOutput.audio` 直接携带 `LegacyAudioPacketV7` 和 ABI-owned
