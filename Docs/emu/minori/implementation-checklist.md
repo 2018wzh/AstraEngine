@@ -1,5 +1,15 @@
 # Minori Implementation Checklist
 
+## Japanese-original CP932 message boundary (2026-09-01)
+
+- [x] Script operands and message markup continue to use the bound Japanese CP932
+  locale before interpreting `\\v`/`\\a` controls.
+- [x] A regression covers a CP932 multibyte character whose encoded trail byte is
+  `0x5c`; the character remains visible and the following controls remain typed as
+  voice-wait and auto-advance.
+- [ ] Chinese/localized content and translation overlay remain outside this phase;
+  same-point original screenshots and full route visual review are still open.
+
 ## Title-page exit transaction (2026-08-31)
 
 - [x] The provider regression `title_exit_terminates_directly_without_confirmation_transaction`
