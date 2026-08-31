@@ -35,6 +35,8 @@ SUPPORTED_FAMILIES = {
     "minori": ("astra-emu-minori", "astra-minori-descriptor.json"),
 }
 MAX_REPORT_BYTES = 1024 * 1024
+WINDOWS_MSVC_TARGET = "x86_64-pc-windows-msvc"
+CRT_STATIC_FLAG = "+crt-static"
 
 
 def main() -> int:
@@ -68,6 +70,7 @@ def main() -> int:
         args.development_reuse_build,
         args.signer_identity,
     )
+    configure_windows_runtime(target, environment)
     identity = build_identity(root, target)
     target_id = (
         "development-" + hashlib.sha256(target.encode("utf-8")).hexdigest()[:16]
@@ -182,6 +185,39 @@ def configure_signer(
     validate_hex(environment["ASTRA_EMU_FAMILY_SIGNING_KEY_HEX"], 64, "ASTRA_EMU_FAMILY_SIGNING_KEY_ENCODING")
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", environment["ASTRA_EMU_FAMILY_SIGNER_ID"]):
         fail("ASTRA_EMU_DESKTOP_SIGNER_IDENTITY")
+
+
+def configure_windows_runtime(target: str, environment: dict[str, str]) -> None:
+    """Require a self-contained MSVC CRT for shipped Windows programs.
+
+    The desktop package is install-relative and intentionally does not copy a
+    machine's VC redistributable DLLs.  Static CRT linkage is therefore part of
+    the Windows package contract.  Keep unrelated caller flags, but reject an
+    explicit dynamic CRT request instead of letting the last flag win
+    implicitly.  Cargo may receive flags through either environment spelling,
+    so both are checked and updated when present.
+    """
+
+    if target != WINDOWS_MSVC_TARGET:
+        return
+    variables = ["RUSTFLAGS"]
+    if "CARGO_ENCODED_RUSTFLAGS" in environment:
+        variables.append("CARGO_ENCODED_RUSTFLAGS")
+    for variable in variables:
+        value = environment.get(variable, "")
+        if re.search(r"(?<![A-Za-z0-9_])-crt-static(?![A-Za-z0-9_])", value):
+            fail("ASTRA_EMU_DESKTOP_CRT_POLICY_CONFLICT")
+        if re.search(r"(?<![A-Za-z0-9_])\+crt-static(?![A-Za-z0-9_])", value):
+            continue
+        if variable == "CARGO_ENCODED_RUSTFLAGS":
+            separator = "\x1f" if value else ""
+            environment[variable] = (
+                value + separator + "-C\x1ftarget-feature=" + CRT_STATIC_FLAG
+            )
+        else:
+            environment[variable] = (
+                f"{value} -C target-feature={CRT_STATIC_FLAG}".strip()
+            )
 
 
 def derive_public_key(root: pathlib.Path, environment: dict[str, str]) -> str:
@@ -379,7 +415,11 @@ def build_identity(root: pathlib.Path, target: str) -> dict[str, str]:
     lock_hash = sha256_file(root / "Cargo.lock")
     toolchain_hash = sha256_file(root / "rust-toolchain.toml")
     state = "dirty" if status.strip() else "clean"
-    identity_seed = f"{commit}\n{state}\n{digest.hexdigest()}\n{lock_hash}\n{toolchain_hash}\n{target}\n"
+    runtime_linkage = "msvc-crt-static" if target == WINDOWS_MSVC_TARGET else "platform-default"
+    identity_seed = (
+        f"{commit}\n{state}\n{digest.hexdigest()}\n{lock_hash}\n{toolchain_hash}\n"
+        f"{target}\n{runtime_linkage}\n"
+    )
     identity_id = hashlib.sha256(identity_seed.encode("utf-8")).hexdigest()[:16]
     return {
         "schema": "astra.build_identity.v1",

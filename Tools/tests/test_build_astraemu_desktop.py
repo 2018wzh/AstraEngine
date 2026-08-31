@@ -29,6 +29,41 @@ class AstraEmuDesktopPackageTests(unittest.TestCase):
                 pathlib.Path.cwd(), {}, False, False, None
             )
 
+    def test_windows_runtime_requires_static_msvc_crt(self):
+        environment = {"RUSTFLAGS": "-C debuginfo=1"}
+        build_astraemu_desktop.configure_windows_runtime(
+            "x86_64-pc-windows-msvc", environment
+        )
+        self.assertIn("-C debuginfo=1", environment["RUSTFLAGS"])
+        self.assertIn("target-feature=+crt-static", environment["RUSTFLAGS"])
+        self.assertNotIn("CARGO_ENCODED_RUSTFLAGS", environment)
+
+    def test_windows_runtime_keeps_existing_static_flag_and_rejects_dynamic(self):
+        environment = {"RUSTFLAGS": "-C target-feature=+crt-static"}
+        build_astraemu_desktop.configure_windows_runtime(
+            "x86_64-pc-windows-msvc", environment
+        )
+        self.assertEqual(environment["RUSTFLAGS"].count("crt-static"), 1)
+        with self.assertRaisesRegex(SystemExit, "ASTRA_EMU_DESKTOP_CRT_POLICY_CONFLICT"):
+            build_astraemu_desktop.configure_windows_runtime(
+                "x86_64-pc-windows-msvc",
+                {"RUSTFLAGS": "-C target-feature=-crt-static"},
+            )
+
+    def test_windows_runtime_updates_encoded_flags(self):
+        environment = {"CARGO_ENCODED_RUSTFLAGS": "-C\x1ftarget-cpu=haswell"}
+        build_astraemu_desktop.configure_windows_runtime(
+            "x86_64-pc-windows-msvc", environment
+        )
+        self.assertIn("-C\x1ftarget-feature=+crt-static", environment["CARGO_ENCODED_RUSTFLAGS"])
+
+    def test_non_windows_runtime_is_unchanged(self):
+        environment = {"RUSTFLAGS": "-C target-feature=-crt-static"}
+        build_astraemu_desktop.configure_windows_runtime(
+            "x86_64-unknown-linux-gnu", environment
+        )
+        self.assertEqual(environment["RUSTFLAGS"], "-C target-feature=-crt-static")
+
     def test_minori_distribution_compiles_only_the_explicit_video_provider(self):
         self.assertEqual(
             build_astraemu_desktop.desktop_features("minori", "ffmpeg-vcpkg"),
