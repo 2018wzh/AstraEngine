@@ -1,5 +1,10 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日 Release Sandbox 启动复核：Windows desktop builder 强制
+`+crt-static`，新的开发签名包已在同一 Sandbox 启动 AstraEMU Manager，VC runtime
+依赖阻断已关闭。该证据只覆盖包启动，不代表 Minori 路线、Headless E2、视觉/音频
+审查或 Windows E3 通过。
+
 2026 年 8 月 31 日 native confirmation caption coverage：Linux Host 在存在 live
 owner window 时读取 owner caption，没有 owner 时保留 Family transaction title；该规则
 与 Windows/macOS presenter 保持一致。此项只属于 Host 接线覆盖，Linux context menu、窗口

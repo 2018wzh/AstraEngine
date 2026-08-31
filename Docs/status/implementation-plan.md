@@ -1,5 +1,10 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日 Release Sandbox 启动复核：Windows desktop builder 现强制
+`+crt-static` 并拒绝动态 CRT flag；新的开发签名包已在同一 Sandbox 打开
+AstraEMU Manager，首个候选的 VC runtime 启动阻断已关闭。该项只覆盖分发启动
+边界，不提升 Minori 完整路线、Headless E2、视觉/音频审查或 Windows E3。
+
 2026 年 8 月 31 日 Linux native confirmation caption 对齐：Linux Host 在有 live
 owner window 时沿用 owner caption，没有 owner 时保留 Family transaction title；该规则与
 Windows/macOS 的 native presenter 一致。Linux context menu、窗口命令和帮助动作仍按显式

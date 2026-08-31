@@ -1,5 +1,12 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日 Release Sandbox 启动复核：首个开发包因机器 VC runtime
+依赖无法启动；官方 desktop builder 已改为 Windows MSVC 强制 `+crt-static`，
+并在环境显式要求动态 CRT 时阻断。新的开发签名 Release 包在同一 Sandbox
+成功打开 AstraEMU Manager，PE import 检查没有发现 `MSVCP140` 或 `VCRUNTIME140`
+依赖。该证据只关闭分发包启动阻断，不提升完整 Minori 路线、Headless E2、正式
+视觉/音频审查或 Windows E3；Stage 5 继续为 `IN_PROGRESS`。
+
 2026 年 8 月 31 日 Linux native confirmation caption 对齐：Linux Host 的
 `rfd` presenter 在存在 live owner window 时沿用 owner caption，无 owner 时使用
 Family ABI transaction title。该改动保持 context menu、窗口命令和 Help/About 的

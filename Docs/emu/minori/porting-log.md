@@ -1,5 +1,18 @@
 # Minori 移植日志
 
+## 2026-08-31：原版 native 菜单与 Release 包启动复核
+
+授权原版在 Windows Sandbox 中进入标题后，右键会在指针位置打开包含窗口项、
+Help 和 Game 子菜单的原生层级菜单；选择退出会显示由窗口拥有的 native 确认框，
+取消后回到同一标题状态。该观察与 Family ABI v13 的菜单/确认 transaction 及
+Host 原生处理路径一致，只记录交互结构，不把截图或商业资源写入仓库。
+
+首个 Release 候选在 Sandbox 启动时暴露了机器 VC runtime 依赖，随后 desktop
+builder 强制 Windows MSVC 使用 `+crt-static`，并拒绝外部动态 CRT flag。新的
+开发签名 Release 候选已能在同一 Sandbox 打开 AstraEMU Manager，PE import
+检查未发现 `MSVCP140`/`VCRUNTIME140` 依赖。该结果只关闭分发包启动阻断；真实
+Minori 路线、完整原版行为对齐、Headless E2 和 Windows E3 仍未完成。
+
 ## 2026-08-31：Windows Manager service host 原生确认框（初始实现）
 
 Manager 的 Windows 音频/解码 lane 使用不创建 Winit 窗口的 service host；此前该 host
