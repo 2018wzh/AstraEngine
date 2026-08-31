@@ -1,5 +1,19 @@
 # Minori 移植日志
 
+## 2026 年 8 月 31 日：标题系统菜单的 About 与全屏状态复核
+
+在授权 Windows Sandbox 中重新打开原版标题页右键菜单，确认 Help→About 是附着
+在游戏窗口上的 owner-modal 对话框，关闭后不会改变标题场景或焦点。该对话框显示
+作品图、版本和版权信息，只有一个 `OK` 结果。随后在同一会话切换全屏并再次打开
+菜单，原版隐藏全屏切换项；选择“ウインドウをオリジナルサイズに”退出全屏后，
+下一次菜单重新出现该项。
+
+Minori Family 继续只发布 `ShowAbout` 与 `RestoreOriginalSize` typed
+`LegacySystemCommandTransactionV1`，由 Windows Host 负责 owner、modal focus、
+窗口几何与原生对话框。该轮没有修改 VM 语义，也没有把截图、图片 payload 或本地
+路径写入文档；它是 Release Sandbox 行为观察，不能替代 Headless E2、正式视觉审查
+或 Windows E3。
+
 ## 2026 年 8 月 31 日：标题页退出回归
 
 在已确认的原版行为基础上，补充 `title_exit_terminates_directly_without_confirmation_transaction`
