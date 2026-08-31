@@ -2049,8 +2049,24 @@ mod macos {
                 "native context menu selected without an item event",
             )
         })?;
+        let item = request
+            .items
+            .iter()
+            .find(|item| item.item_id == event.id.0)
+            .ok_or_else(|| {
+                host_error(
+                    "window.context_menu",
+                    "native context menu returned an item outside the active transaction",
+                )
+            })?;
+        if item.kind != ContextMenuItemKind::Command || !item.enabled {
+            return Err(host_error(
+                "window.context_menu",
+                "native context menu returned a non-selectable item",
+            ));
+        }
         Ok(ContextMenuResult {
-            item_id: Some(event.id.0),
+            item_id: Some(item.item_id.clone()),
         })
     }
 
