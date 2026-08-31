@@ -7,6 +7,13 @@ longer invokes the Minori translation Hook. The focused `astra-emu-minori` libra
 passes 187/187. This is parser/mount boundary evidence only; localized `.mys`/exe files,
 full-route parity, Release Sandbox and Windows E3 remain out of scope.
 
+2026-09-01 script census recheck: the same Japanese-original profile reads 89 `.sc`
+files, 33728 lines and 33695 commands with all 29 observed opcodes present and zero
+unknown opcodes. `chain`/`if`/`goto`/`select`/`movie`/`end` structural counts are
+55/20/10/2/15/85. Include targets now pass through the bound CP932 decoder before the
+ASCII-safe URI check. This remains E1/E2 parser evidence and does not close route,
+visual, Release Sandbox or Windows E3 gates.
+
 2026-08-31 title-page exit seam: the focused provider regression
 `title_exit_terminates_directly_without_confirmation_transaction` verifies direct terminal
 behavior with no confirmation publication. Gameplay exit and return-title remain Host-owned

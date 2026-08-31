@@ -6,6 +6,12 @@ malformed input，message publisher 不再调用 translation Hook。中文 `.mys
 exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。187 项 Minori library
 定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
 
+2026 年 9 月 1 日按同一日文原版 profile 重跑脚本 census：89 个 `.sc`、33728 行、
+33695 条 command、29 个已观察 opcode，unknown opcode 为 0；其中 `chain` 55、
+`if` 20、`goto` 10、`select` 2、`movie` 15、`end` 85。该项同时回归 `.include`
+目标的严格 CP932 解码与 ASCII `.sc` URI 校验，属于 E1/E2 解析证据，不关闭路线或
+视觉验收。
+
 2026 年 8 月 31 日标题页 Exit 回归：provider 定向测试确认标题页 Exit 直接进入 terminal，
 且没有向 Host 发布 confirmation；剧情页 `game_exit`/`game_return_title` 继续使用 Family ABI
 confirmation。该项是 E1 provider 行为证据，不提升 Release Sandbox、完整路线或 Windows E3。

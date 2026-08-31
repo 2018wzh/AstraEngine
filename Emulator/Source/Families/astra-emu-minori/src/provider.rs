@@ -59,12 +59,12 @@ use crate::{
     MinoriAudioEncoding, MinoriAxisScrollFrame, MinoriCharacterFrame, MinoriCharacterState,
     MinoriChoicePresentation, MinoriConfigAudioBus, MinoriConfigChange, MinoriConfigControl,
     MinoriConfigState, MinoriEffectFrame, MinoriExecutedCommand, MinoriImageDecodeProvider,
-    MinoriLinearScrollFrame, MinoriMessageMarkupError, MinoriMovieState, MinoriPlayMode,
-    MinoriRuntimeError, MinoriRuntimeState, MinoriScreenShakeFrame, MinoriScrollXfFrame,
-    MinoriSecondaryEffectFrame, MinoriStageCommand, MinoriStageLayer, MinoriStandLayer,
-    MinoriSystemPage, MinoriVm, MinoriVmEvent, MinoriWScroll2Frame, MinoriWaitState,
-    ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA, MINORI_IMAGE_DECODE_PROVIDER_ID,
-    MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
+    MinoriLinearScrollFrame, MinoriLocaleHook, MinoriMessageMarkupError, MinoriMovieState,
+    MinoriPlayMode, MinoriRuntimeError, MinoriRuntimeState, MinoriScreenShakeFrame,
+    MinoriScrollXfFrame, MinoriSecondaryEffectFrame, MinoriStageCommand, MinoriStageLayer,
+    MinoriStandLayer, MinoriSystemPage, MinoriVm, MinoriVmEvent, MinoriWScroll2Frame,
+    MinoriWaitState, ScOpcodeCatalog, MINORI_CHOICE_PRESENTATION_SCHEMA,
+    MINORI_IMAGE_DECODE_PROVIDER_ID, MINORI_MAX_RESOURCE_AUDIT_SCRIPTS,
 };
 use crate::{MinoriAniArchive, MinoriSqzArchive};
 
@@ -5314,7 +5314,11 @@ fn parse_include_target(line: &[u8]) -> Option<String> {
     if target.is_empty() || tokens.next().is_some() {
         return None;
     }
-    let target = std::str::from_utf8(target).ok()?.to_owned();
+    // Include operands are part of the same CP932 source stream as the rest
+    // of the script.  Decode them through the bound original-game locale
+    // before applying the URI's ASCII-safe filename policy; using UTF-8 here
+    // would make the parser's encoding contract depend on the host console.
+    let target = MinoriLocaleHook::japanese_cp932().decode(target).ok()?;
     if !target.to_ascii_lowercase().ends_with(".sc") {
         return None;
     }
@@ -11180,6 +11184,18 @@ mod tests {
         });
         let error = load_script(&cycle_reader, "mount.test", "a.sc").unwrap_err();
         assert_eq!(error.code(), "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_CYCLE");
+    }
+
+    #[test]
+    fn script_include_target_uses_the_bound_cp932_locale() {
+        let reader: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([(
+                "minori:/scr/root.sc".into(),
+                b".include \x82.sc\r\n".to_vec(),
+            )]),
+        });
+        let error = load_script(&reader, "mount.test", "root.sc").unwrap_err();
+        assert_eq!(error.code(), "ASTRA_EMU_MINORI_SCRIPT_INCLUDE_OPERAND");
     }
 
     #[test]

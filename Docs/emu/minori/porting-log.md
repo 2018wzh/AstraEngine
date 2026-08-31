@@ -1260,3 +1260,17 @@ Minori 菜单的 item id、顺序或平台呈现。
   `astra-emu-minori --lib --no-default-features` 定向 187/187 通过。证据等级为
   E1/E2 的代码与定向测试边界；不关闭四路线、原版同点视觉、Release Sandbox、正式
   音频审查或 Windows E3。
+
+## 2026-09-01：日文原版脚本 census 复核
+
+- 使用当前 `mount_options.v3` 日文原版 profile 重新读取授权样本的脚本树，严格
+  CP932 解码后得到 89 个 `.sc`、33728 行和 33695 条 command；29 个已观察 opcode
+  均在 census 中出现，unknown opcode 为 0。结构计数包含 55 个 `chain`、20 个
+  `if`、10 个 `goto`、2 个 `select`、15 个 `movie` 和 85 个 `end`，与已提交的
+  脱敏脚本基线一致。
+- 两条 `select` 均保持原始 `display:label` 形式，四项与三项选择各一条；解析器只
+  记录选项 hash 和 label，不把正文写入 report。`.include` 目标现在也经过同一
+  日文 locale binding，再进入安全的 ASCII `.sc` URI 校验，非法 CP932 直接阻断。
+- 本轮只新增 census 和 parser 边界证据，没有执行汉化入口、MYS overlay 或翻译
+  provider。该项属于 E1/E2 解析复核，不关闭四路线运行、原版同点视觉、Release
+  Sandbox、正式音频审查或 Windows E3。
