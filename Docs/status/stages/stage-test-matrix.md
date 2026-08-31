@@ -1,5 +1,11 @@
 # Stage Test Matrix
 
+2026-08-31 title-page exit seam: the focused provider regression
+`title_exit_terminates_directly_without_confirmation_transaction` verifies direct terminal
+behavior with no confirmation publication. Gameplay exit and return-title remain Host-owned
+Family ABI confirmations. This is provider evidence only; Release Sandbox and Windows E3 remain
+open.
+
 2026-08-31 confirmation text seam: the authorized Windows Sandbox observation shows that
 Game→Exit and Game→Return title use ASCII `?` in their native two-button bodies, while
 the title-page Exit item terminates directly. Minori publishes the same bounded text through

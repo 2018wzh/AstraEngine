@@ -1,5 +1,14 @@
 # Minori Implementation Checklist
 
+## Title-page exit transaction (2026-08-31)
+
+- [x] The provider regression `title_exit_terminates_directly_without_confirmation_transaction`
+  verifies the observed title-page Exit path terminates directly and publishes no Family ABI
+  confirmation.
+- [x] Gameplay Exit and Return-title remain separate Host-owned confirmation transactions;
+  their ASCII `?` messages and `Y`/`N` ordering are covered by the adjacent confirmation tests.
+- [ ] Release Sandbox visual review and Windows E3 remain open.
+
 ## Native confirmation text (2026-08-31)
 
 - [x] The authorized original-game observation confirms ASCII `?` in the Game→Exit and

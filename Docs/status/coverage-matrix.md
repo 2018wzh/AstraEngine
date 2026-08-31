@@ -1,5 +1,9 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日标题页 Exit 回归：provider 定向测试确认标题页 Exit 直接进入 terminal，
+且没有向 Host 发布 confirmation；剧情页 `game_exit`/`game_return_title` 继续使用 Family ABI
+confirmation。该项是 E1 provider 行为证据，不提升 Release Sandbox、完整路线或 Windows E3。
+
 2026 年 8 月 31 日确认框覆盖：原版剧情 Game→Exit/Return title 的正文使用 ASCII `?`，
 标题页 Exit 不弹确认；Minori provider 的 Family ABI transaction 已同步文案，取消与
 接受仍分别恢复 wait 或进入返回标题/terminal。定向 provider 与 Host 结果校验通过；这

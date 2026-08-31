@@ -1,5 +1,10 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日标题页退出回归：Minori provider 已用
+`title_exit_terminates_directly_without_confirmation_transaction` 固定原版标题页 Exit 的直退
+语义，不发布 confirmation transaction；剧情页退出仍由 Host 原生确认框处理。该回归只属于
+provider/Family ABI 行为证据，完整路线、Release Sandbox 和 Windows E3 仍未完成。
+
 2026 年 8 月 31 日确认框文案对齐：授权 Windows Sandbox 复核显示剧情 Game→Exit 与
 Game→Return title 使用 ASCII `?` 的两按钮正文，标题页主菜单 Exit 则直接结束程序。
 Minori Family ABI 已采用精确字符串，Host 仍只负责 owner-modal 原生呈现和 typed 结果；

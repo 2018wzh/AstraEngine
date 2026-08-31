@@ -1,5 +1,12 @@
 # Minori 移植日志
 
+## 2026 年 8 月 31 日：标题页退出回归
+
+在已确认的原版行为基础上，补充 `title_exit_terminates_directly_without_confirmation_transaction`
+回归。标题页的 Exit 现在由 Minori provider 直接结束 session，不发布 Family ABI confirmation；
+剧情页的 `game_exit` 和 `game_return_title` 仍通过 Host 原生确认框处理。该项是 provider
+行为回归，不能替代 Release Sandbox 视觉验收或 Windows E3。
+
 ## 2026 年 8 月 31 日：确认框标点与原版按钮事务对齐
 
 在授权 Windows Sandbox 中复核剧情菜单的 Game→Exit 与 Game→Return title 后，确认框

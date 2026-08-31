@@ -1,5 +1,10 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日标题页 Exit 回归已加入 provider 测试：标题页直接结束 session，不发布
+confirmation；剧情页退出仍经 Family ABI 交给 Host 原生处理。该项只覆盖已观察语义的
+provider/Host 边界，Stage 5 继续为 `IN_PROGRESS`，Release Sandbox、完整路线、视觉/音频和
+Windows E3 仍未闭合。
+
 2026 年 8 月 31 日剧情确认框文案对齐：授权 Windows Sandbox 复核确认 Game→Exit 与
 Game→Return title 的正文采用 ASCII `?`，标题页 Exit 直接结束程序。Minori Family ABI
 继续发布有界 confirmation transaction，Host 只呈现原生 owner-modal 对话框并回送 typed

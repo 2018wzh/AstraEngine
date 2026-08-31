@@ -12386,6 +12386,91 @@ mod tests {
     }
 
     #[test]
+    fn title_exit_terminates_directly_without_confirmation_transaction() {
+        let mut title_png = Vec::new();
+        PngEncoder::new(&mut title_png)
+            .write_image(
+                &vec![0; 1280 * 720 * 4],
+                1280,
+                720,
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let confirmations = Arc::new(RecordingConfirmationHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs: Arc::new(MemoryReader {
+                scripts: BTreeMap::from([
+                    ("minori:/scr/test.sc".into(), b".end\r\n".to_vec()),
+                    ("minori:/sys/topMenu0.png".into(), title_png),
+                ]),
+            }),
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: Arc::new(RejectWritableFiles),
+            system_menus: Arc::new(RecordingSystemMenuHost::default()),
+            confirmations: confirmations.clone(),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.title-exit".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                        ("astra.launch_entry_explicit".into(), "false".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            provider
+                .step(&ctx, &session, step_input(1, Vec::new()))
+                .unwrap()
+                .status,
+            LegacyRuntimeStatus::Active
+        );
+
+        let mut input_edges = Vec::with_capacity(4);
+        for sequence in 1..=3 {
+            input_edges.push(LegacyInputEdge {
+                control: "arrow_down".into(),
+                pressed: true,
+                value: 1.0,
+                sequence,
+            });
+        }
+        input_edges.push(LegacyInputEdge {
+            control: "enter".into(),
+            pressed: true,
+            value: 1.0,
+            sequence: 4,
+        });
+        let output = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges,
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(output.status, LegacyRuntimeStatus::Terminal);
+        assert!(provider.sessions[&session.0].vm.state().terminal);
+        assert!(confirmations.published.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn host_window_close_publishes_family_confirmation_before_exit() {
         let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
             scripts: BTreeMap::from([(
