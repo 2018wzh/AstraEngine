@@ -14,6 +14,11 @@ unknown opcodes. `chain`/`if`/`goto`/`select`/`movie`/`end` structural counts ar
 ASCII-safe URI check. This remains E1/E2 parser evidence and does not close route,
 visual, Release Sandbox or Windows E3 gates.
 
+The same seam now has a regression for a CP932 multibyte character whose encoded trail
+byte is `0x5c`: the decoded message keeps that character visible while the following
+`\\v\\a` controls remain typed as voice-wait and auto-advance. Chinese/localized
+content and translation overlays remain outside this Japanese-original slice.
+
 2026-08-31 title-page exit seam: the focused provider regression
 `title_exit_terminates_directly_without_confirmation_transaction` verifies direct terminal
 behavior with no confirmation publication. Gameplay exit and return-title remain Host-owned

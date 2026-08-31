@@ -720,4 +720,27 @@ mod tests {
             ScParseError::Encoding(0)
         );
     }
+
+    #[test]
+    fn cp932_trail_backslash_survives_message_control_decoding() {
+        let locale = MinoriLocaleHook::japanese_cp932();
+        let authored_text = locale.encode("表\\v\\a").unwrap();
+        assert!(authored_text.ends_with(b"\\v\\a"));
+
+        let mut source = b".message 1  speaker ".to_vec();
+        source.extend_from_slice(&authored_text);
+        source.extend_from_slice(b"\r\n");
+        let script = parse_sc(&source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let ScLineKind::Command { command } = &script.lines[0].kind else {
+            panic!("message fixture must parse as a command");
+        };
+        let tokens =
+            tokenize_operands(&command.raw_operands, command.span.offset as usize).unwrap();
+        assert_eq!(tokens.get(3).map(String::as_str), Some("表\\v\\a"));
+
+        let markup = crate::parse_minori_message_markup(tokens.get(3).unwrap()).unwrap();
+        assert_eq!(markup.visible_text, "表");
+        assert!(markup.waits_for_voice());
+        assert!(markup.auto_advance());
+    }
 }

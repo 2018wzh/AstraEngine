@@ -12,6 +12,10 @@ exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。187 项 
 目标的严格 CP932 解码与 ASCII `.sc` URI 校验，属于 E1/E2 解析证据，不关闭路线或
 视觉验收。
 
+同轮新增 CP932 多字节尾字节回归：消息正文中编码后以 `0x5c` 结尾的字符不会被
+误识别为控制起始符，后续 `\\v\\a` 仍分别解析为等待语音和自动推进。该测试只覆盖
+日文原版 locale 边界；汉化、翻译 overlay 和其他编码继续明确排除。
+
 2026 年 8 月 31 日标题页 Exit 回归：provider 定向测试确认标题页 Exit 直接进入 terminal，
 且没有向 Host 发布 confirmation；剧情页 `game_exit`/`game_return_title` 继续使用 Family ABI
 confirmation。该项是 E1 provider 行为证据，不提升 Release Sandbox、完整路线或 Windows E3。
