@@ -46,6 +46,9 @@
   `Unsupported` explicitly.
 - [x] Windows keeps the native `muda-win`/`rfd` path, and macOS now uses AppKit `muda`
   with flipped-view anchor conversion on the event-loop thread.
+- [x] Windows and macOS native confirmation presenters bind the dialog caption to the
+  live owner window when one exists; windowless Manager service calls retain the typed
+  Family title.
 - [x] Release CLI selects the macOS native presenter through the same platform Host client;
   Headless continues to use only physical navigation/confirmation input.
 - [x] Linux native CLI no longer leaves a menu transaction pending when the Wayland Host
