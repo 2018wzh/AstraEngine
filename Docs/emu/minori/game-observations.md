@@ -25,6 +25,30 @@ Volume、Visual、Font、Sound、Voice、Play Mode、Other 九组，含滑杆、
 `sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`；截图文件
 和本地路径不进入仓库。
 
+## 2026-09-01 原版首段剧情与右键菜单
+
+从标题页选择 `New Game` 后，原版先显示黑场和中央竖排标题，再进入深蓝色底部消息
+面板。首条日文消息带有下三角推进指示；Enter 只推进一条消息，未观察到自动跳过或
+场景层级变化。该结构与当前 CP932 message publisher 的输入边界一致，但不作为完整
+语音或 route 语义证据。
+
+剧情等待期间右键会打开以物理指针为锚点的原生白色菜单。菜单包含消息框、Auto、Skip、
+Quick Save、Save、Load、Config，以及 Help、Game 两个子菜单；Help 包含帮助、关于和
+minori 主页，Game 包含返回标题和退出。关闭菜单后等待状态保持不变，本次没有触发保存、
+跳转或退出。该观察支持 Host 处理 Family menu transaction，而不是由游戏 underlay
+绘制弹窗或菜单。
+
+Sandbox 非日文 code page 下窗口标题和原生菜单标签出现乱码，但游戏消息仍为可读日文；
+因此当前移植继续只支持原版日文，并在 Host/字节边界使用
+`astra.emu.minori.locale.ja-jp.cp932.v1` 转区 hook，不加载汉化 exe、`.mys` 或翻译
+overlay。私有截图的公开 hash 为首条消息
+`sha256:d36a32752924bcd20f7e96522f4a07013d2a098097043795c045f34cd2f99445`，右键菜单
+`sha256:9cfd779a7cb5e042f8296cf4d5ac3bd1df9cdf3eaf483a6f299151af555ee7e4`；图片本身和
+本地路径不进入仓库。
+
+上述仅是原版现场行为观察，不关闭 Save 注释列表布局、Auto/Skip 完整副作用、四路线
+自然结局、原版同点视觉比较或正式 E2/E3。
+
 ## 未知
 
 当前 manifest v3/key-file reader identity 已完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 个逻辑读取范围、6624958365 个 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。同一 identity 的 `scr.paz` census 包含 89 个文件、33728 行、33695 个 command 和 29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。

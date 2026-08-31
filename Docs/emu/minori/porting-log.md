@@ -1306,3 +1306,24 @@ Minori 菜单的 item id、顺序或平台呈现。
 - 本轮只新增 census 和 parser 边界证据，没有执行汉化入口、MYS overlay 或翻译
   provider。该项属于 E1/E2 解析复核，不关闭四路线运行、原版同点视觉、Release
   Sandbox、正式音频审查或 Windows E3。
+
+## 2026-09-01：原版首段剧情与右键菜单基线
+
+- 在同一 Windows Sandbox 原版会话中从标题页选择 `New Game`，先出现黑场和中央竖排
+  标题，随后进入深蓝色底部消息面板。首条消息使用日文正文，面板保留推进用的下三角
+  指示；按 Enter 后只推进到下一条消息，没有跳过首条消息或改变场景层级。该观察支持
+  当前 message publisher 的 CP932→UTF-8→CosmicText 路径，但不推断正文、语音时序或
+  route 条件。
+- 在剧情消息等待期间右键，原版打开以物理指针为锚点的 Host 原生白色菜单；菜单包含
+  消息框、Auto、Skip、Quick Save、Save、Load、Config 等剧情项，以及 Help 和 Game
+  子菜单。Help 提供帮助、关于和 minori 主页，Game 提供返回标题和退出。菜单关闭后
+  消息等待状态不变；本次观察没有触发存档、跳转或退出。
+- Sandbox 的非日文系统 code page 会使窗口标题和原生菜单标签出现乱码，而游戏画面中的
+  日文消息仍可读。这进一步支持严格 `astra.emu.minori.locale.ja-jp.cp932.v1` 转区
+  hook 只放在 Host/字节边界，不引入汉化入口、GBK 回退或翻译 overlay。
+- 公开记录只保留截图尺寸和 hash：首条消息 checkpoint 为
+  `sha256:d36a32752924bcd20f7e96522f4a07013d2a098097043795c045f34cd2f99445`，右键菜单
+  checkpoint 为 `sha256:9cfd779a7cb5e042f8296cf4d5ac3bd1df9cdf3eaf483a6f299151af555ee7e4`。
+  原始图片留在 ignored 私有目录，不进入仓库、report 或日志正文。
+- 这是原版行为和 Host-native Family ABI 的 E1/E2 观察证据；Save 注释在列表中的绘制、
+  Auto/Skip 的完整持久化副作用、四路线结局、同点视觉比较和正式 E2/E3 仍未闭合。
