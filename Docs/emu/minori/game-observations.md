@@ -9,6 +9,22 @@
 - 八个 archive 均非空。当前 key-file identity 已通过八个 index 和全部 entry 的 full verify。
 - 已验证的 entry 数为 `bg=4616`、`bgm=49`、`scr=89`、`st=2321`、`sys=302`、`se=73`、`voice=7047`、`mov=5`，合计 14502。
 
+## 2026-09-01 原版标题与 System 页视觉基线
+
+Windows Sandbox 中直接启动原版入口后，标题页在 1280×720 窗口内显示 16:9 内容，
+左右保留黑色 pillarbox；右侧菜单顺序为 `New Game`、`Load Data`、`System`、`Exit`。
+`System` 是游戏内页面：模糊角色/向日葵背景上分为 Message Speed、Screen Mode、
+Volume、Visual、Font、Sound、Voice、Play Mode、Other 九组，含滑杆、MUTE/TEST、
+全屏/窗口、Visual 开关、Auto/Skip、角色语音开关以及 `OK`/`Cancel`。这是原版页面
+结构观察，不把它误记为 Host-native popup。
+
+窗口标题在 Sandbox 默认非日文 code page 下出现乱码，但画面资源仍保持日文，说明
+运行时应在 Host/字节边界绑定 `astra.emu.minori.locale.ja-jp.cp932.v1`；当前阶段不
+加载汉化 exe、`.mys` 或翻译 overlay。对应私有截图的公开 hash 为标题
+`sha256:eb3d18cbb0079f049729e222e6669ca0c5cdaad19973d44fcb135409b74c4bcf`、System
+`sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`；截图文件
+和本地路径不进入仓库。
+
 ## 未知
 
 当前 manifest v3/key-file reader identity 已完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 个逻辑读取范围、6624958365 个 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。同一 identity 的 `scr.paz` census 包含 89 个文件、33728 行、33695 个 command 和 29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。

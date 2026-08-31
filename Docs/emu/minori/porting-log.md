@@ -9,6 +9,23 @@
 该测试只使用合成文本，未把原始脚本内容、路径或 locale 数据写入报告。中文版本、
 翻译 overlay 与其他编码仍不在本轮范围内。
 
+## 2026 年 9 月 1 日：原版标题与 System 页基线（Windows Sandbox）
+
+在授权 Windows Sandbox 中以日文原版入口启动同一份样本，记录了两个新的视觉基线。
+标题页在 1280×720 窗口内保持 16:9 内容区，两侧有黑色 pillarbox；右侧主菜单按
+`New Game`、`Load Data`、`System`、`Exit` 排列。进入 `System` 后仍是游戏自己的
+全屏页面，而不是 Host 对话框：背景为模糊的角色与向日葵场景，页面分成 Message
+Speed、Screen Mode、Volume、Visual、Font、Sound、Voice、Play Mode、Other 九组，
+包含三个音量滑杆、MUTE/TEST、全屏/窗口、三项 Visual 开关、Auto/Skip 和五个角色
+语音开关，底部有 `OK`/`Cancel`。
+
+Sandbox 默认非日文 code page 下，窗口标题的 CP932 字节会显示为乱码，而游戏画面内
+的日文资源仍可呈现；这进一步支持在 Host/字节边界绑定严格 CP932 locale hook，不能
+用 GBK、替换字符或翻译 overlay 修补。该观察只记录布局和交互入口，截图留在 ignored
+私有目录；公开证据仅保留尺寸与 hash（标题 `sha256:eb3d18cbb0079f049729e222e6669ca0c5cdaad19973d44fcb135409b74c4bcf`，
+System `sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`）。
+尚未据此推断 Save 注释、逐字速度公式或四路线终局语义。
+
 ## 2026 年 8 月 31 日：标题系统菜单的 About 与全屏状态复核
 
 在授权 Windows Sandbox 中重新打开原版标题页右键菜单，确认 Help→About 是附着
