@@ -889,3 +889,9 @@ Family-owned fullscreen 配置并原子持久化；重开菜单会重新发布�
 provider 回归覆盖切换全屏、恢复原始尺寸和菜单重开，拒绝/不支持结果仍阻断。
 这只修复 Host 与 Family 状态一致性，不改变 Release Sandbox、完整路线或
 Windows E3 的开放状态。
+
+2026 年 8 月 31 日 Release Headless smoke：当前开发签名 Release 候选使用显式 WMF
+provider 和新输入观察键完成 33 条物理输入、4008 fixed steps、491 个提交/栅格帧、
+2713600 个音频帧，报告为 `passed` 且 diagnostic 为空。代表性黑场、日文消息和背景
+checkpoint 已人工查看；这是有限片段的输入/呈现质量证据，不关闭四路线、Save/restore、
+完整媒体听审、Release Sandbox 或 Windows E3。

@@ -1213,3 +1213,16 @@ E3 证据。
 的 Family transaction，也会在 `window.context_menu` 边界返回稳定 diagnostic，
 不会让平台菜单 API 接收断裂树或由 Host 静默丢弃分支。该校验是契约防线，不改变
 Minori 菜单的 item id、顺序或平台呈现。
+
+## 2026-08-31：当前 Release Headless 输入契约 smoke
+
+- 在已通过启动检查的开发签名 Release 候选上，使用显式 WMF provider 和当前
+  `astra.user_input_sequence.v1` 输入，完成 33 条物理输入、4008 个 fixed step、
+  491 个提交/栅格帧和 2713600 个音频帧；`astra.headless_run_report.v2` 为
+  `passed`，diagnostic 为空，输入序列完整消费。
+- 人工查看了首个黑场、首条日文消息、背景场景和人物消息四个代表性 checkpoint。
+  舞台比例、消息框位置、日文字形、背景层次和推进指示均可见，未发现裁剪、拉伸、
+  缺字或错层。该检查只给出本次短程输入的质量结论，不是原版同点像素 parity。
+- 这次运行只证明当前 Family ABI 菜单/确认接线、WMF 绑定和新输入观察键在 Release
+  CLI Headless 中可以稳定完成一个有限片段；四路线完整运行、save/restore required
+  checkpoint、正式音频听审、Release Sandbox 视觉验收和 Windows E3 仍保持开放。
