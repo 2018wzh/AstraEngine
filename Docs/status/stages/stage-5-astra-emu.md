@@ -55,6 +55,12 @@ linear/nearest sampler，不重建 family scene。Linux、Web、Android、Headle
 语义仍由 Minori Family ABI 发布，Windows Host 只构建/呈现并回送选择；完整 Release
 Sandbox、Linux 原生菜单和 Windows E3 继续保持 blocking，macOS 原生菜单已接通。
 
+同轮 Manager 的 Host UI 完成层级菜单导航：只显示当前父节点的启用同级项，方向键
+循环移动，Right/Enter/Space 进入 submenu 或提交 command，Left/Escape 返回或关闭。
+焦点事件在菜单激活期间不会送入 gameplay，适配器与 Manager Host 都会重验 active
+transaction、parent、kind 和 enabled 状态。该项只有定向 UI/Host 回归，真实窗口焦点、
+锚点和原版同点截图仍未形成，因此 Stage 5 继续为 `IN_PROGRESS`。
+
 同轮把菜单选择的窗口/帮助动作改为 `LegacySystemCommandTransactionV1`。Family 只
 发布 typed kind，Host 按当前平台窗口绑定执行全屏、原始尺寸恢复、缩放采样和外部
 帮助动作，再以 `LegacySystemCommandResultV1` 回送结果。Minori 对 Host 已 `Applied`

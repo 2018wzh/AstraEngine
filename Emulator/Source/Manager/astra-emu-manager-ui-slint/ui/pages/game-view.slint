@@ -7,6 +7,7 @@ import { FloatingPanel } from "../components/floating-panel.slint";
 
 export struct SystemMenuItem {
     item-id: string,
+    parent-id: string,
     label: string,
     depth: int,
     enabled: bool,
@@ -26,7 +27,12 @@ export component GameViewPage inherits Rectangle {
     in property <bool> system-menu-active: false;
     in property <float> system-menu-x: 0;
     in property <float> system-menu-y: 0;
+    in-out property <string> system-menu-parent-id: "";
+    in-out property <string> system-menu-focus-id: "";
     callback system-menu-select(string);
+    callback system-menu-open-submenu(string);
+    callback system-menu-back();
+    callback system-menu-key(string);
     callback system-menu-dismiss();
 
     // Overlay panel visibility
@@ -248,20 +254,47 @@ export component GameViewPage inherits Rectangle {
             x: min(root.width - self.width - 8px, max(8px, root.stage-x + root.system-menu-x / root.stage-native-width * root.stage-width));
             y: min(root.height - self.height - 8px, max(8px, root.stage-y + root.system-menu-y / root.stage-native-height * root.stage-height));
             width: 380px;
-            height: menu-layout.preferred-height + 12px;
+            height: menu-layout.preferred-height + (root.system-menu-parent-id == "" ? 12px : 48px);
             background: Theme.surface-overlay;
             border-color: Theme.border;
             border-width: 1px;
             border-radius: 4px;
+
+            // Keep keyboard navigation on a zero-sized focus scope so the
+            // overlay still lets its buttons receive pointer events.  The
+            // host maps these physical keys to the current Family menu
+            // transaction instead of forwarding them to gameplay.
+            menu-focus := FocusScope {
+                width: 0px;
+                height: 0px;
+                init => { self.focus(); }
+                key-pressed(event) => {
+                    if event.text == Key.UpArrow { root.system-menu-key("arrow_up"); return accept; }
+                    if event.text == Key.DownArrow { root.system-menu-key("arrow_down"); return accept; }
+                    if event.text == Key.LeftArrow { root.system-menu-key("arrow_left"); return accept; }
+                    if event.text == Key.RightArrow { root.system-menu-key("arrow_right"); return accept; }
+                    if event.text == Key.Return { root.system-menu-key("enter"); return accept; }
+                    if event.text == Key.Escape { root.system-menu-key("escape"); return accept; }
+                    if event.text == " " { root.system-menu-key("space"); return accept; }
+                    return reject;
+                }
+            }
 
             menu-layout := VerticalLayout {
                 x: 6px;
                 y: 6px;
                 width: parent.width - 12px;
                 spacing: 0px;
+                if root.system-menu-parent-id != "" : Button {
+                    text: "←";
+                    height: 30px;
+                    enabled: true;
+                    clicked => { root.system-menu-back(); }
+                }
                 for item in root.system-menu-items : Rectangle {
-                    height: item.separator ? 9px : 30px;
-                    background: transparent;
+                    visible: item.parent-id == root.system-menu-parent-id;
+                    height: self.visible ? (item.separator ? 9px : 30px) : 0px;
+                    background: item.item-id == root.system-menu-focus-id && !item.separator ? Theme.card-hover : transparent;
                     if item.separator : Rectangle {
                         x: 4px;
                         y: 4px;
@@ -270,12 +303,18 @@ export component GameViewPage inherits Rectangle {
                         background: Theme.border;
                     }
                     if !item.separator : Button {
-                        x: item.depth * 16px;
-                        width: parent.width - self.x;
+                        x: 0px;
+                        width: parent.width;
                         height: parent.height;
-                        enabled: item.enabled && !item.submenu;
+                        enabled: item.enabled;
                         text: (item.checked ? "✓  " : "    ") + item.label + (item.submenu ? "  ▶" : "");
-                        clicked => { root.system-menu-select(item.item-id); }
+                        clicked => {
+                            if item.submenu {
+                                root.system-menu-open-submenu(item.item-id);
+                            } else {
+                                root.system-menu-select(item.item-id);
+                            }
+                        }
                     }
                 }
             }

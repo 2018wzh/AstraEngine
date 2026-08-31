@@ -17,6 +17,24 @@
 - [ ] Native Linux menu support, same-point original screenshots, Release
   Sandbox visual review and Windows E3 remain open.
 
+## Manager submenu navigation (2026-08-31)
+
+- [x] The Slint Manager now carries each item's validated parent id and
+  renders only the current sibling set. Enabled submenu rows open a bounded
+  child view; the Back control returns to the published parent without
+  sending a fake command to the family.
+- [x] The adapter rechecks the active menu, submenu kind, enabled state and
+  current parent before changing the view. The mapping path revalidates the
+  Family transaction and rejects cycles, missing parents and depth beyond
+  four before UI presentation.
+- [x] The Manager Host consumes physical menu navigation keys without sending
+  them to gameplay: Up/Down cycle enabled siblings, Right/Enter/Space enters
+  an enabled submenu or resolves a command, and Left/Escape returns or
+  dismisses the root menu. Root and nested Escape behavior remains an
+  explicit Family transaction resolution.
+- [ ] Native Windows/macOS same-point screenshots, Linux native menu support,
+  Release Sandbox visual review and Windows E3 remain open.
+
 ## Family ABI v14 native text-input Host split (2026-08-31)
 
 - [x] Minori Save publishes a bounded `LegacyTextInputTransactionV1` for the

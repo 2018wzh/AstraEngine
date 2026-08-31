@@ -444,6 +444,23 @@ impl ContextMenuRequest {
                 }
             }
         }
+        for submenu in self
+            .items
+            .iter()
+            .filter(|item| item.kind == ContextMenuItemKind::Submenu)
+        {
+            if !self
+                .items
+                .iter()
+                .any(|item| item.parent_id.as_deref() == Some(submenu.item_id.as_str()))
+            {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "window.context_menu",
+                    "context menu submenu must contain at least one item",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -2748,6 +2765,25 @@ mod tests {
 
         let mut invalid = request;
         invalid.x = None;
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.context_menu"
+        );
+
+        let invalid = ContextMenuRequest {
+            window: WindowHandle::from_parts(1, 1).unwrap(),
+            x: None,
+            y: None,
+            items: vec![ContextMenuItem {
+                item_id: "empty".into(),
+                parent_id: None,
+                order: 0,
+                kind: ContextMenuItemKind::Submenu,
+                label: "Empty".into(),
+                enabled: true,
+                checked: false,
+            }],
+        };
         assert_eq!(
             invalid.validate().unwrap_err().operation,
             "window.context_menu"

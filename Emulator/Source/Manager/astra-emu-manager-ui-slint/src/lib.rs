@@ -1,6 +1,6 @@
-use std::{path::Path, rc::Rc};
+use std::{cell::Cell, path::Path, rc::Rc};
 
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Model, ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -121,12 +121,82 @@ pub struct AppearanceViewModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemMenuItemViewModel {
     pub item_id: String,
+    pub parent_id: String,
     pub label: String,
     pub depth: i32,
     pub enabled: bool,
     pub checked: bool,
     pub separator: bool,
     pub submenu: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SystemMenuNavigation {
+    None,
+    Select(String),
+    OpenSubmenu(String),
+    Back,
+    Dismiss,
+}
+
+fn reduce_system_menu_navigation(
+    parent: &str,
+    items: &[SystemMenuItem],
+    current_focus: usize,
+    control: &str,
+) -> Result<(usize, SystemMenuNavigation), String> {
+    if control == "arrow_left" {
+        return Ok((
+            current_focus,
+            if parent.is_empty() {
+                SystemMenuNavigation::None
+            } else {
+                SystemMenuNavigation::Back
+            },
+        ));
+    }
+    if control == "escape" {
+        return Ok((
+            current_focus,
+            if parent.is_empty() {
+                SystemMenuNavigation::Dismiss
+            } else {
+                SystemMenuNavigation::Back
+            },
+        ));
+    }
+    if items.is_empty() {
+        return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_EMPTY".to_owned());
+    }
+    let mut focus = current_focus.min(items.len() - 1);
+    let action = match control {
+        "arrow_up" => {
+            focus = (focus + items.len() - 1) % items.len();
+            SystemMenuNavigation::None
+        }
+        "arrow_down" => {
+            focus = (focus + 1) % items.len();
+            SystemMenuNavigation::None
+        }
+        "arrow_right" => {
+            let item = &items[focus];
+            if item.submenu {
+                SystemMenuNavigation::OpenSubmenu(item.item_id.to_string())
+            } else {
+                SystemMenuNavigation::None
+            }
+        }
+        "enter" | "space" => {
+            let item = &items[focus];
+            if item.submenu {
+                SystemMenuNavigation::OpenSubmenu(item.item_id.to_string())
+            } else {
+                SystemMenuNavigation::Select(item.item_id.to_string())
+            }
+        }
+        _ => return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_INPUT_UNSUPPORTED".to_owned()),
+    };
+    Ok((focus, action))
 }
 
 impl Default for AppearanceViewModel {
@@ -222,6 +292,7 @@ pub struct SlintManagerAdapter {
     releases: Rc<VecModel<ReleaseOption>>,
     gamepad_bindings: Rc<VecModel<GamepadBinding>>,
     system_menu_items: Rc<VecModel<SystemMenuItem>>,
+    system_menu_focus: Cell<usize>,
 }
 
 impl SlintManagerAdapter {
@@ -250,6 +321,7 @@ impl SlintManagerAdapter {
             releases,
             gamepad_bindings,
             system_menu_items,
+            system_menu_focus: Cell::new(0),
         })
     }
 
@@ -265,6 +337,7 @@ impl SlintManagerAdapter {
                 .iter()
                 .map(|item| SystemMenuItem {
                     item_id: item.item_id.as_str().into(),
+                    parent_id: item.parent_id.as_str().into(),
                     label: item.label.as_str().into(),
                     depth: item.depth,
                     enabled: item.enabled,
@@ -274,16 +347,109 @@ impl SlintManagerAdapter {
                 })
                 .collect::<Vec<_>>(),
         );
+        self.window.set_system_menu_parent_id("".into());
+        self.system_menu_focus.set(0);
         self.window.set_system_menu_x(pointer_x as f32);
         self.window.set_system_menu_y(pointer_y as f32);
         self.window.set_system_menu_id(menu_id.into());
         self.window.set_system_menu_active(true);
+        self.set_system_menu_focus_for_current_parent();
     }
 
     pub fn hide_system_menu(&self) {
         self.window.set_system_menu_active(false);
         self.window.set_system_menu_id("".into());
+        self.window.set_system_menu_parent_id("".into());
+        self.window.set_system_menu_focus_id("".into());
+        self.system_menu_focus.set(0);
         self.system_menu_items.set_vec(Vec::new());
+    }
+
+    /// Move the Manager's host-owned menu into an enabled submenu.  The
+    /// Family transaction has already been validated before it reaches this
+    /// adapter, but the UI transition still checks the current parent and
+    /// item kind so a stale callback cannot expose an unrelated branch.
+    pub fn open_system_menu_submenu(&self, item_id: &str) -> Result<(), String> {
+        if !self.window.get_system_menu_active() {
+            return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_NOT_ACTIVE".to_owned());
+        }
+        let current_parent = self.window.get_system_menu_parent_id().to_string();
+        let item = self
+            .menu_item(item_id)
+            .ok_or_else(|| "ASTRA_EMU_MANAGER_SYSTEM_MENU_ITEM_UNKNOWN".to_owned())?;
+        if !item.submenu || !item.enabled || item.parent_id.as_str() != current_parent {
+            return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_SUBMENU_INVALID".to_owned());
+        }
+        self.window.set_system_menu_parent_id(item.item_id);
+        self.system_menu_focus.set(0);
+        self.set_system_menu_focus_for_current_parent();
+        Ok(())
+    }
+
+    /// Return from the current submenu to its validated parent.  The root
+    /// menu is represented by an empty parent id and cannot move further up.
+    pub fn back_system_menu(&self) -> Result<(), String> {
+        if !self.window.get_system_menu_active() {
+            return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_NOT_ACTIVE".to_owned());
+        }
+        let current_parent = self.window.get_system_menu_parent_id().to_string();
+        if current_parent.is_empty() {
+            return Ok(());
+        }
+        let item = self
+            .menu_item(&current_parent)
+            .ok_or_else(|| "ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_UNKNOWN".to_owned())?;
+        if !item.submenu {
+            return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_INVALID".to_owned());
+        }
+        self.window.set_system_menu_parent_id(item.parent_id);
+        self.system_menu_focus.set(0);
+        self.set_system_menu_focus_for_current_parent();
+        Ok(())
+    }
+
+    /// Apply one physical keyboard navigation operation to the active menu.
+    /// The returned action is consumed by the Manager Host, which is the only
+    /// layer allowed to resolve the Family transaction or dismiss it.
+    pub fn navigate_system_menu(&self, control: &str) -> Result<SystemMenuNavigation, String> {
+        if !self.window.get_system_menu_active() {
+            return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_NOT_ACTIVE".to_owned());
+        }
+        let parent = self.window.get_system_menu_parent_id().to_string();
+        let items = self.current_system_menu_items();
+        let (focus, action) =
+            reduce_system_menu_navigation(&parent, &items, self.system_menu_focus.get(), control)?;
+        self.system_menu_focus.set(focus);
+        self.window.set_system_menu_focus_id(
+            items
+                .get(focus)
+                .map_or_else(|| "".into(), |item| item.item_id.clone()),
+        );
+        Ok(action)
+    }
+
+    fn current_system_menu_items(&self) -> Vec<SystemMenuItem> {
+        let current_parent = self.window.get_system_menu_parent_id().to_string();
+        (0..self.system_menu_items.row_count())
+            .filter_map(|row| self.system_menu_items.row_data(row))
+            .filter(|item| {
+                item.parent_id.as_str() == current_parent && item.enabled && !item.separator
+            })
+            .collect()
+    }
+
+    fn set_system_menu_focus_for_current_parent(&self) {
+        let item = self.current_system_menu_items().into_iter().next();
+        self.window
+            .set_system_menu_focus_id(item.map_or_else(|| "".into(), |item| item.item_id));
+    }
+
+    fn menu_item(&self, item_id: &str) -> Option<SystemMenuItem> {
+        (0..self.system_menu_items.row_count()).find_map(|row| {
+            self.system_menu_items
+                .row_data(row)
+                .filter(|item| item.item_id.as_str() == item_id)
+        })
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
@@ -534,8 +700,9 @@ impl SlintManagerAdapter {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-        MatchReviewViewModel, PlaySessionViewModel, SystemMenuItemViewModel, VfsEntryViewModel,
+        reduce_system_menu_navigation, AppearanceViewModel, GameCardViewModel,
+        InputConfigViewModel, ManagerViewModel, MatchReviewViewModel, PlaySessionViewModel,
+        SystemMenuItem, SystemMenuItemViewModel, SystemMenuNavigation, VfsEntryViewModel,
         VfsPreviewViewModel,
     };
 
@@ -552,5 +719,61 @@ mod tests {
         assert_contract_is_send_sync::<AppearanceViewModel>();
         assert_contract_is_send_sync::<PlaySessionViewModel>();
         assert_contract_is_send_sync::<SystemMenuItemViewModel>();
+    }
+
+    #[test]
+    fn system_menu_navigation_keeps_submenus_host_owned() {
+        let root_items = vec![SystemMenuItem {
+            item_id: "game".into(),
+            parent_id: "".into(),
+            label: "Game".into(),
+            depth: 0,
+            enabled: true,
+            checked: false,
+            separator: false,
+            submenu: true,
+        }];
+        assert_eq!(
+            reduce_system_menu_navigation("", &root_items, 0, "enter")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::OpenSubmenu("game".into())
+        );
+        let child_items = vec![SystemMenuItem {
+            item_id: "exit".into(),
+            parent_id: "game".into(),
+            label: "Exit".into(),
+            depth: 1,
+            enabled: true,
+            checked: false,
+            separator: false,
+            submenu: false,
+        }];
+        assert_eq!(
+            reduce_system_menu_navigation("game", &child_items, 0, "escape")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::Back
+        );
+        assert!(matches!(
+            reduce_system_menu_navigation("", &root_items, 0, "escape")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::Dismiss
+        ));
+        assert_eq!(
+            reduce_system_menu_navigation("", &root_items, 0, "unknown").unwrap_err(),
+            "ASTRA_EMU_MANAGER_SYSTEM_MENU_INPUT_UNSUPPORTED"
+        );
+        assert_eq!(
+            reduce_system_menu_navigation("", &[], 0, "arrow_down").unwrap_err(),
+            "ASTRA_EMU_MANAGER_SYSTEM_MENU_EMPTY"
+        );
+        assert_eq!(
+            reduce_system_menu_navigation("", &[], 0, "arrow_left")
+                .unwrap()
+                .1,
+            SystemMenuNavigation::None
+        );
     }
 }

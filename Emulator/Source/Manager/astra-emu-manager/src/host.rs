@@ -4,6 +4,7 @@ use astra_emu_manager_core::{
     PendingFamilySystemMenu, PendingFamilyTextInput,
 };
 use std::{
+    collections::{BTreeMap, BTreeSet},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -11,7 +12,9 @@ use std::{
     time::Instant,
 };
 
-use astra_emu_manager_ui_slint::{ManagerViewModel, SlintManagerAdapter, SystemMenuItemViewModel};
+use astra_emu_manager_ui_slint::{
+    ManagerViewModel, SlintManagerAdapter, SystemMenuItemViewModel, SystemMenuNavigation,
+};
 use slint::ComponentHandle;
 use thiserror::Error;
 
@@ -25,32 +28,48 @@ type HostCallbackSlot = std::rc::Rc<std::cell::RefCell<Option<HostCallback>>>;
 /// controller or renderer state from a worker.
 pub type HostWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
-fn manager_system_menu_items(pending: &PendingFamilySystemMenu) -> Vec<SystemMenuItemViewModel> {
-    pending
+fn manager_system_menu_items(
+    pending: &PendingFamilySystemMenu,
+) -> Result<Vec<SystemMenuItemViewModel>, String> {
+    // The queue validates on publish, but validate again at the UI boundary:
+    // Manager must never let a stale or malformed transaction drive a
+    // recursive parent walk or expose an unbounded submenu depth.
+    pending.menu.validate().map_err(|error| error.to_string())?;
+    let by_id = pending
         .menu
         .items
         .iter()
+        .map(|item| (item.item_id.as_str(), item))
+        .collect::<BTreeMap<_, _>>();
+    let mut ordered_items = pending.menu.items.iter().collect::<Vec<_>>();
+    ordered_items.sort_by_key(|item| (item.parent_id.as_deref(), item.order));
+    ordered_items
+        .into_iter()
         .map(|item| {
             let mut depth = 0_i32;
             let mut parent_id = item.parent_id.as_deref();
+            let mut visited = BTreeSet::new();
             while let Some(parent) = parent_id {
-                depth += 1;
-                parent_id = pending
-                    .menu
-                    .items
-                    .iter()
-                    .find(|candidate| candidate.item_id == parent)
+                depth = depth
+                    .checked_add(1)
+                    .ok_or_else(|| "ASTRA_EMU_MANAGER_SYSTEM_MENU_DEPTH".to_owned())?;
+                if depth > 4 || !visited.insert(parent) {
+                    return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_HIERARCHY".to_owned());
+                }
+                parent_id = by_id
+                    .get(parent)
                     .and_then(|candidate| candidate.parent_id.as_deref());
             }
-            SystemMenuItemViewModel {
+            Ok(SystemMenuItemViewModel {
                 item_id: item.item_id.clone(),
+                parent_id: item.parent_id.clone().unwrap_or_default(),
                 label: item.label.clone(),
                 depth,
                 enabled: item.enabled,
                 checked: item.checked,
                 separator: item.kind == LegacySystemMenuItemKindV1::Separator,
                 submenu: item.kind == LegacySystemMenuItemKindV1::Submenu,
-            }
+            })
         })
         .collect()
 }
@@ -407,15 +426,15 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                             adapter.apply(&model);
                         }
                         match controller.borrow_mut().take_pending_system_menu() {
-                            Ok(Some(pending)) => {
-                                let items = manager_system_menu_items(&pending);
-                                adapter.show_system_menu(
+                            Ok(Some(pending)) => match manager_system_menu_items(&pending) {
+                                Ok(items) => adapter.show_system_menu(
                                     &pending.menu.menu_id,
                                     &items,
                                     pending.menu.pointer_x.unwrap_or_default(),
                                     pending.menu.pointer_y.unwrap_or_default(),
-                                );
-                            }
+                                ),
+                                Err(error) => window.set_global_diagnostic(error.into()),
+                            },
                             Ok(None) => {}
                             Err(error) => {
                                 window.set_global_diagnostic(error.into());
@@ -502,6 +521,83 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                 fire_host_callback(&menu_select_schedule);
             }
             Err(error) => window.set_global_diagnostic(error.into()),
+        }
+    });
+    let menu_submenu_weak = adapter.window().as_weak();
+    let menu_submenu_adapter = adapter.clone();
+    adapter
+        .window()
+        .on_system_menu_open_submenu(move |item_id| {
+            let Some(window) = menu_submenu_weak.upgrade() else {
+                return;
+            };
+            if let Err(error) = menu_submenu_adapter.open_system_menu_submenu(item_id.as_str()) {
+                window.set_global_diagnostic(error.into());
+            }
+        });
+    let menu_back_weak = adapter.window().as_weak();
+    let menu_back_adapter = adapter.clone();
+    adapter.window().on_system_menu_back(move || {
+        let Some(window) = menu_back_weak.upgrade() else {
+            return;
+        };
+        if let Err(error) = menu_back_adapter.back_system_menu() {
+            window.set_global_diagnostic(error.into());
+        }
+    });
+    let menu_key_weak = adapter.window().as_weak();
+    let menu_key_controller = controller.clone();
+    let menu_key_adapter = adapter.clone();
+    let menu_key_schedule = runtime_schedule.clone();
+    adapter.window().on_system_menu_key(move |control| {
+        let Some(window) = menu_key_weak.upgrade() else {
+            return;
+        };
+        let navigation = match menu_key_adapter.navigate_system_menu(control.as_str()) {
+            Ok(navigation) => navigation,
+            Err(error) => {
+                window.set_global_diagnostic(error.into());
+                return;
+            }
+        };
+        match navigation {
+            SystemMenuNavigation::None => {}
+            SystemMenuNavigation::OpenSubmenu(item_id) => {
+                if let Err(error) = menu_key_adapter.open_system_menu_submenu(&item_id) {
+                    window.set_global_diagnostic(error.into());
+                }
+            }
+            SystemMenuNavigation::Back => {
+                if let Err(error) = menu_key_adapter.back_system_menu() {
+                    window.set_global_diagnostic(error.into());
+                }
+            }
+            SystemMenuNavigation::Select(item_id) => {
+                let menu_id = window.get_system_menu_id();
+                match menu_key_controller
+                    .borrow_mut()
+                    .resolve_system_menu(menu_id.as_str(), Some(item_id.as_str()))
+                {
+                    Ok(()) => {
+                        menu_key_adapter.hide_system_menu();
+                        fire_host_callback(&menu_key_schedule);
+                    }
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+            SystemMenuNavigation::Dismiss => {
+                let menu_id = window.get_system_menu_id();
+                match menu_key_controller
+                    .borrow_mut()
+                    .resolve_system_menu(menu_id.as_str(), None)
+                {
+                    Ok(()) => {
+                        menu_key_adapter.hide_system_menu();
+                        fire_host_callback(&menu_key_schedule);
+                    }
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
         }
     });
     let menu_dismiss_weak = adapter.window().as_weak();

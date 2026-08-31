@@ -14,6 +14,21 @@
 report 或日志。原版 About artwork、Linux 原生菜单和正式 Release Sandbox/E3 视觉
 验收仍是独立开放项。
 
+## 2026-08-31：Manager 菜单子层级导航
+
+Family transaction 的 submenu 不能被当成命令点击。Manager 的 Host UI 现在保留每个
+菜单项的 parent id，只显示当前 parent 的同级项；启用的 submenu 通过有界的 Host UI
+导航进入，返回按钮回到已发布的父项，真正的 command 才会送回 Family ABI。适配器在
+切换前再次核对 active menu、parent、kind 和 enabled 状态，并重跑菜单层级校验，循环、
+断链或超过四层的树在进入 Slint 前直接返回稳定 diagnostic。这样 Manager 与 Windows/
+macOS 原生 Host 的语义一致，也不会用一个假的 item id 绕过 Minori 的结果校验。
+
+Manager 的菜单焦点也由 Host UI 保持：Up/Down 只在当前父节点的启用项中循环，
+Right/Enter/Space 进入 submenu 或选择 command，Left/Escape 在子菜单返回、在根菜单
+关闭。焦点键不会泄漏到 gameplay。该改动只修复宿主菜单导航和错误边界，不改变 Family
+transaction 或原版菜单顺序；Linux 原生 context menu、同点截图、Release Sandbox、
+完整路线和 Windows E3 仍保持开放。
+
 ## 2026-08-31：原版 native 菜单与 Release 包启动复核
 
 授权原版在 Windows Sandbox 中进入标题后，右键会在指针位置打开包含窗口项、

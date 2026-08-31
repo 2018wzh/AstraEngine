@@ -2319,6 +2319,8 @@ mod windows {
         window: &Window,
         request: ContextMenuRequest,
     ) -> Result<ContextMenuResult, PlatformError> {
+        let size = window.inner_size();
+        validate_context_menu_anchor(size.width, size.height, request.x, request.y)?;
         while MenuEvent::receiver().try_recv().is_ok() {}
         let menu = Menu::new();
         let submenus = request
@@ -3715,6 +3717,46 @@ mod windows {
         PlatformError::new(PlatformErrorCode::ProviderUnavailable, operation, message)
     }
 
+    fn validate_context_menu_anchor(
+        width: u32,
+        height: u32,
+        x: Option<i32>,
+        y: Option<i32>,
+    ) -> Result<(), PlatformError> {
+        let Some((x, y)) = x.zip(y) else {
+            if x.is_some() || y.is_some() {
+                return Err(PlatformError::new(
+                    PlatformErrorCode::InvalidState,
+                    "window.context_menu",
+                    "native context menu anchor coordinates must be paired",
+                ));
+            }
+            return Ok(());
+        };
+        let x = u32::try_from(x).map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.context_menu",
+                "native context menu anchor is negative",
+            )
+        })?;
+        let y = u32::try_from(y).map_err(|_| {
+            PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.context_menu",
+                "native context menu anchor is negative",
+            )
+        })?;
+        if width == 0 || height == 0 || x >= width || y >= height {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.context_menu",
+                "native context menu anchor is outside the client area",
+            ));
+        }
+        Ok(())
+    }
+
     fn unsupported(operation: &'static str, message: &'static str) -> PlatformError {
         PlatformError::new(
             PlatformErrorCode::PlatformNotImplemented,
@@ -3751,6 +3793,7 @@ mod windows {
     mod tests {
         use super::{
             confirmation_button_result, confirmation_dialog_title, confirmation_key_result,
+            validate_context_menu_anchor,
         };
         use astra_platform::ConfirmationResult;
 
@@ -3850,6 +3893,17 @@ mod windows {
             assert_eq!(super::select_confirmation_dpi(Some(192), 144), 192);
             assert_eq!(super::select_confirmation_dpi(Some(0), 144), 144);
             assert_eq!(super::select_confirmation_dpi(None, 0), 96);
+        }
+
+        #[test]
+        fn context_menu_anchor_is_bounded_to_client_area() {
+            validate_context_menu_anchor(640, 480, Some(639), Some(479)).unwrap();
+            assert!(validate_context_menu_anchor(640, 480, Some(640), Some(479)).is_err());
+            assert!(validate_context_menu_anchor(640, 480, Some(10), Some(480)).is_err());
+            assert!(validate_context_menu_anchor(640, 480, Some(-1), Some(0)).is_err());
+            assert!(validate_context_menu_anchor(640, 480, Some(0), None).is_err());
+            validate_context_menu_anchor(0, 0, None, None).unwrap();
+            assert!(validate_context_menu_anchor(0, 0, Some(0), Some(0)).is_err());
         }
     }
 }

@@ -1,5 +1,12 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日 Manager Host 菜单导航覆盖：Slint 宿主只渲染 Family transaction
+当前父节点的启用同级项；方向键在该集合中循环，Right/Enter/Space 进入 submenu 或
+选择 command，Left/Escape 返回或关闭根菜单。焦点输入不会进入 gameplay，submenu
+不会被伪装成 command。适配器、Manager、Family 菜单校验和 Windows native anchor
+定向回归通过；真实 Manager 窗口焦点/定位截图、Linux 原生菜单、Release Sandbox
+视觉验收和 Windows E3 仍保持 blocking。
+
 2026 年 8 月 31 日 Family ABI v14 text-input coverage：Minori Save 的 Comment
 提示改为 Host-owned `LegacyTextInputTransactionV1`。Windows 使用 DPI-aware
 owner-modal Win32 编辑框，Host 只返回一次有界结果；Minori 保存格式负责持久化

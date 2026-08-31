@@ -79,6 +79,8 @@ export component ManagerWindow inherits Window {
     in property <[SystemMenuItem]> system-menu-items;
     in-out property <bool> system-menu-active: false;
     in-out property <string> system-menu-id;
+    in-out property <string> system-menu-parent-id;
+    in-out property <string> system-menu-focus-id;
     in-out property <float> system-menu-x: 0;
     in-out property <float> system-menu-y: 0;
 
@@ -152,6 +154,9 @@ export component ManagerWindow inherits Window {
     callback game-input(string, bool, float);
     callback leave-game();
     callback system-menu-select(string);
+    callback system-menu-open-submenu(string);
+    callback system-menu-back();
+    callback system-menu-key(string);
     callback system-menu-dismiss();
     callback open-diagnostics();
     callback open-translation();
@@ -206,9 +211,14 @@ export component ManagerWindow inherits Window {
         leave-game => { root.leave-game(); }
         system-menu-items: root.system-menu-items;
         system-menu-active: root.system-menu-active;
+        system-menu-parent-id <=> root.system-menu-parent-id;
+        system-menu-focus-id <=> root.system-menu-focus-id;
         system-menu-x: root.system-menu-x;
         system-menu-y: root.system-menu-y;
         system-menu-select(item-id) => { root.system-menu-select(item-id); }
+        system-menu-open-submenu(item-id) => { root.system-menu-open-submenu(item-id); }
+        system-menu-back => { root.system-menu-back(); }
+        system-menu-key(control) => { root.system-menu-key(control); }
         system-menu-dismiss => { root.system-menu-dismiss(); }
 
         translation-overlay-active <=> root.translation-overlay-active;
