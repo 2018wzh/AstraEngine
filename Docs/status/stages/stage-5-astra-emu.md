@@ -1,5 +1,11 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日剧情确认框文案对齐：授权 Windows Sandbox 复核确认 Game→Exit 与
+Game→Return title 的正文采用 ASCII `?`，标题页 Exit 直接结束程序。Minori Family ABI
+继续发布有界 confirmation transaction，Host 只呈现原生 owner-modal 对话框并回送 typed
+结果；定向 provider/Host 测试通过。该项不关闭完整路线、Release Sandbox、视觉/音频
+审查或 Windows E3，Stage 5 仍为 `IN_PROGRESS`。
+
 2026 年 8 月 31 日原版菜单禁用项导航对齐：授权 Windows Sandbox 的标题右键菜单
 确认方向键焦点会经过灰色禁用项、跳过分隔线；鼠标点击禁用项不提交命令，Enter
 关闭弹出菜单而不选择，Space/Right 保持菜单活动；submenu 返回时焦点恢复到父项。

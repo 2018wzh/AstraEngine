@@ -1,5 +1,10 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日确认框文案对齐：授权 Windows Sandbox 复核显示剧情 Game→Exit 与
+Game→Return title 使用 ASCII `?` 的两按钮正文，标题页主菜单 Exit 则直接结束程序。
+Minori Family ABI 已采用精确字符串，Host 仍只负责 owner-modal 原生呈现和 typed 结果；
+provider 定向回归通过。该项不提升完整路线、Release Sandbox 或 Windows E3 的证据等级。
+
 2026 年 8 月 31 日原版菜单禁用项复核：授权 Windows Sandbox 显示方向键会聚焦灰色
 禁用项、跳过分隔线，鼠标点禁用项保持菜单打开。CLI 与 Manager Host 已把非分隔线
 项按 Family ABI `order` 纳入焦点序列；禁用项上的 Right/Space 保持事务，Enter 关闭

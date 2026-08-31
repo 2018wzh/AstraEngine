@@ -1,5 +1,14 @@
 # Minori Implementation Checklist
 
+## Native confirmation text (2026-08-31)
+
+- [x] The authorized original-game observation confirms ASCII `?` in the Game→Exit and
+  Game→Return title bodies, with `是(Y)` before `否(N)`; the title-page Exit action remains
+  direct termination.
+- [x] Minori publishes the exact bounded strings through the Family ABI confirmation port;
+  Host ownership, modal focus and typed result validation remain unchanged.
+- [ ] Same-point native screenshots, Release Sandbox visual review and Windows E3 remain open.
+
 ## Native menu anchor handoff (2026-08-31)
 
 - [x] Release CLI now converts the Family ABI stage-space anchor to the live

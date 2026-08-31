@@ -1,5 +1,10 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日确认框覆盖：原版剧情 Game→Exit/Return title 的正文使用 ASCII `?`，
+标题页 Exit 不弹确认；Minori provider 的 Family ABI transaction 已同步文案，取消与
+接受仍分别恢复 wait 或进入返回标题/terminal。定向 provider 与 Host 结果校验通过；这
+不是完整路线、Release Sandbox 或 Windows E3 证据。
+
 2026 年 8 月 31 日原版禁用菜单项导航覆盖：授权 Windows Sandbox 观察到，右键菜单的
 方向键焦点会经过灰色禁用项、跳过分隔线，鼠标点击禁用项不会提交 command；Enter
 在禁用项上关闭弹出菜单，Space/Right 保持菜单活动。submenu 返回时焦点恢复到父项。

@@ -1,5 +1,11 @@
 # Stage Test Matrix
 
+2026-08-31 confirmation text seam: the authorized Windows Sandbox observation shows that
+Game→Exit and Game→Return title use ASCII `?` in their native two-button bodies, while
+the title-page Exit item terminates directly. Minori publishes the same bounded text through
+Family ABI; focused provider/Host result validation passes. This is behavior evidence only,
+not Release Sandbox or Windows E3 acceptance.
+
 2026-08-31 disabled-menu navigation seam: the authorized Windows Sandbox run showed
 that arrow-key focus includes disabled rows, skips separators, and a pointer click on a
 disabled row does not publish a command. Enter closes the popup without a selection,

@@ -575,6 +575,19 @@ enum MinoriConfirmationAction {
     ReturnTitle,
 }
 
+const MINORI_CONFIRMATION_TITLE: &str = "確認";
+const MINORI_CONFIRMATION_ACCEPT_LABEL: &str = "是(Y)";
+const MINORI_CONFIRMATION_CANCEL_LABEL: &str = "否(N)";
+
+fn minori_confirmation_message(action: MinoriConfirmationAction) -> &'static str {
+    match action {
+        MinoriConfirmationAction::Exit => "終了してもよろしいですか?",
+        MinoriConfirmationAction::ReturnTitle => {
+            "ゲームを中断してメニューに戻ります。よろしいですか?"
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ActiveMinoriConfirmation {
     confirmation_id: String,
@@ -1178,10 +1191,10 @@ impl MinoriRuntimeProvider {
                     // contract observed in the original Windows build.  The
                     // host owns the modal presentation, but the family owns
                     // the Japanese wording and button order.
-                    title: "確認".into(),
-                    message: "終了してもよろしいですか？".into(),
-                    accept_label: "是(Y)".into(),
-                    cancel_label: "否(N)".into(),
+                    title: MINORI_CONFIRMATION_TITLE.into(),
+                    message: minori_confirmation_message(MinoriConfirmationAction::Exit).into(),
+                    accept_label: MINORI_CONFIRMATION_ACCEPT_LABEL.into(),
+                    cancel_label: MINORI_CONFIRMATION_CANCEL_LABEL.into(),
                 },
             )?;
             session.active_confirmation = Some(ActiveMinoriConfirmation {
@@ -6831,14 +6844,10 @@ fn handle_system_menu_request(
                     let confirmation = LegacyConfirmationTransactionV1 {
                         sequence,
                         confirmation_id: confirmation_id.clone(),
-                        title: "確認".into(),
-                        message: if action == MinoriConfirmationAction::Exit {
-                            "終了してもよろしいですか？".into()
-                        } else {
-                            "ゲームを中断してメニューに戻ります。よろしいですか？".into()
-                        },
-                        accept_label: "是(Y)".into(),
-                        cancel_label: "否(N)".into(),
+                        title: MINORI_CONFIRMATION_TITLE.into(),
+                        message: minori_confirmation_message(action).into(),
+                        accept_label: MINORI_CONFIRMATION_ACCEPT_LABEL.into(),
+                        cancel_label: MINORI_CONFIRMATION_CANCEL_LABEL.into(),
                     };
                     services
                         .confirmations
@@ -12315,7 +12324,7 @@ mod tests {
             let published = confirmations.published.lock().unwrap();
             let confirmation = &published.last().unwrap().1;
             assert_eq!(confirmation.title, "確認");
-            assert_eq!(confirmation.message, "終了してもよろしいですか？");
+            assert_eq!(confirmation.message, "終了してもよろしいですか?");
             assert_eq!(confirmation.accept_label, "是(Y)");
             assert_eq!(confirmation.cancel_label, "否(N)");
         }
@@ -12362,6 +12371,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(accepted.status, LegacyRuntimeStatus::Terminal);
+    }
+
+    #[test]
+    fn confirmation_messages_match_original_ascii_question_marks() {
+        assert_eq!(
+            minori_confirmation_message(MinoriConfirmationAction::Exit),
+            "終了してもよろしいですか?"
+        );
+        assert_eq!(
+            minori_confirmation_message(MinoriConfirmationAction::ReturnTitle),
+            "ゲームを中断してメニューに戻ります。よろしいですか?"
+        );
     }
 
     #[test]

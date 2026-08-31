@@ -1,5 +1,14 @@
 # Minori 移植日志
 
+## 2026 年 8 月 31 日：确认框标点与原版按钮事务对齐
+
+在授权 Windows Sandbox 中复核剧情菜单的 Game→Exit 与 Game→Return title 后，确认框
+正文使用 ASCII `?`，而不是全角问号；标题、`是(Y)`/`否(N)`按钮顺序和 owner-modal
+行为保持不变。Minori Family ABI 现在按该精确文案发布，Host 继续只负责原生呈现、
+焦点和结果回传。定向 provider 回归覆盖两种确认路径，未改变标题页直接 Exit 的行为。
+这项修正只针对字符串与原版观察对齐，不提升完整路线、Release Sandbox 或 Windows E3
+证据等级。
+
 ## 2026-08-31：原版菜单禁用项的键盘焦点语义
 
 授权 Windows Sandbox 的标题右键菜单复核确认：方向键会把焦点移动到灰色的禁用项，
@@ -205,8 +214,8 @@ Family ABI confirmation transaction 激活期间接受 `Y`/`N`，分别回送 ty
 
 - 在干净的原版 Windows Sandbox 会话中分别打开 Game→Exit 和
   Game→Return title。两者都使用原生两按钮确认框，按钮顺序为
-  `是(Y)`、`否(N)`；退出正文为 `終了してもよろしいですか？`，返回标题正文为
-  `ゲームを中断してメニューに戻ります。よろしいですか？`。取消后舞台和当前消息
+  `是(Y)`、`否(N)`；退出正文为 `終了してもよろしいですか?`，返回标题正文为
+  `ゲームを中断してメニューに戻ります。よろしいですか?`。取消后舞台和当前消息
   保持不变，接受才结束当前 session 或回到标题。截图只留在 ignored 私有研究目录，
   本页不保存图片或路径。
 - Minori provider 的 Family ABI v13 confirmation transaction 已采用上述原版
