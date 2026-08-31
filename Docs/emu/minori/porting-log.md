@@ -7,6 +7,11 @@ Help 和 Game 子菜单的原生层级菜单；选择退出会显示由窗口拥
 取消后回到同一标题状态。该观察与 Family ABI v13 的菜单/确认 transaction 及
 Host 原生处理路径一致，只记录交互结构，不把截图或商业资源写入仓库。
 
+同一 session 开始新游戏后，菜单会增加消息控制、Quick Save、Save、Load、Config
+以及 Auto/Skip/Control 分组；Game 子菜单的 Return-title 项同样通过 native
+confirmation。取消会保留当前消息等待，接受后回到标题页，标题画面和菜单状态
+重新出现。该行为已在 Sandbox 现场复核，仍不等价于完整路线或正式 E3 证据。
+
 首个 Release 候选在 Sandbox 启动时暴露了机器 VC runtime 依赖，随后 desktop
 builder 强制 Windows MSVC 使用 `+crt-static`，并拒绝外部动态 CRT flag。新的
 开发签名 Release 候选已能在同一 Sandbox 打开 AstraEMU Manager，PE import
