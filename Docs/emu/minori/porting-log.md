@@ -1266,7 +1266,7 @@ Minori 菜单的 item id、顺序或平台呈现。
   publisher 删除了 production translation Hook 调用，原版日文正文直接进入
   CosmicText/Renderer2D 路径。
 - 新增 locale round-trip、非法 CP932、变体/入口拒绝和严格 ANI 名称回归；
-  `astra-emu-minori --lib --no-default-features` 定向 187/187 通过。证据等级为
+  `astra-emu-minori --lib --no-default-features` 定向 189/189 通过。证据等级为
   E1/E2 的代码与定向测试边界；不关闭四路线、原版同点视觉、Release Sandbox、正式
   音频审查或 Windows E3。
 
