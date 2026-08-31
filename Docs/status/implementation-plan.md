@@ -1,6 +1,6 @@
 # Implementation Plan Status
 
-2026 年 8 月 31 日 Minori 原版 locale 边界：family options 已硬切为
+2026 年 9 月 1 日 Minori 原版 locale 边界：family options 已硬切为
 `astra.emu.minori.mount_options.v3`，要求 `content_variant` 为
 `natsuzora-no-perseus.original-ja`、`locale_hook` 为
 `astra.emu.minori.locale.ja-jp.cp932.v1`，并在 mount 时确认原版 `perseus.exe` 是
@@ -8,7 +8,7 @@
 CP932 locale binding；乱码不会通过替换字符或 GBK/翻译回退被吞掉。样本中观察到的
 `perseus_chs.mys` 与本地化 exe 只保留 inventory 事实，不会被 runtime 探测或合并。
 Minori message path 已删除 translation Hook 调用，正文保持原版日文；Minori 定向
-187 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
+189 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
 
 2026 年 8 月 31 日标题页退出回归：Minori provider 已用

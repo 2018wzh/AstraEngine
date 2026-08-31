@@ -1,10 +1,10 @@
 # Stage Test Matrix
 
-2026-08-31 Minori original-locale seam: `astra.emu.minori.mount_options.v3` now requires
+2026-09-01 Minori original-locale seam: `astra.emu.minori.mount_options.v3` now requires
 the original Japanese variant, a strict CP932 locale hook, and the regular non-symlink
 `perseus.exe` entrypoint. PAZ/ANI/script text decoding rejects malformed bytes and no
 longer invokes the Minori translation Hook. The focused `astra-emu-minori` library suite
-passes 187/187. This is parser/mount boundary evidence only; localized `.mys`/exe files,
+passes 189/189. This is parser/mount boundary evidence only; localized `.mys`/exe files,
 full-route parity, Release Sandbox and Windows E3 remain out of scope.
 
 2026-09-01 script census recheck: the same Japanese-original profile reads 89 `.sc`
