@@ -3,8 +3,8 @@
 2026 年 8 月 31 日原版菜单禁用项复核：授权 Windows Sandbox 显示方向键会聚焦灰色
 禁用项、跳过分隔线，鼠标点禁用项保持菜单打开。CLI 与 Manager Host 已把非分隔线
 项按 Family ABI `order` 纳入焦点序列；禁用项上的 Right/Space 保持事务，Enter 关闭
-弹出菜单且不发布选择；CLI/Manager 定向测试通过。该项修复 Host 导航语义，不提升
-完整路线、Release Sandbox、视觉/音频审查或 Windows E3。
+弹出菜单且不发布选择，submenu 返回恢复父项焦点；CLI/Manager 定向测试通过。该项
+修复 Host 导航语义，不提升完整路线、Release Sandbox、视觉/音频审查或 Windows E3。
 
 2026 年 8 月 31 日 Family ABI v14 text-input seam：Minori Save 的 Comment
 提示现在通过 `LegacyTextInputTransactionV1` 交给 Host。Windows 使用 owner-modal

@@ -7,7 +7,8 @@
 enabled 集合中循环”的旧 Headless/Manager 实现不同。现在 CLI 的物理菜单和 Manager
 Host 都把非分隔线项按 ABI `order` 纳入焦点序列；Right/Space 对禁用项保持无操作，
 Enter 关闭弹出菜单但不向 Family 发布该项选择；可用 submenu 和 command 仍按原有
-事务路径处理。
+事务路径处理。进入 Help submenu 后按 Left/Escape 会回到根菜单，并把焦点恢复到
+Help 行，而不是跳到第一项。
 
 该修复只调整 Host 导航状态机，不改变 Family transaction、命令校验或平台能力边界。
 本次现场观察和 CLI/Manager 定向回归属于菜单 E1/E2 证据，真实 Manager 窗口、完整路线、

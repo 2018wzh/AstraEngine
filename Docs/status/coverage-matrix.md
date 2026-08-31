@@ -2,10 +2,10 @@
 
 2026 年 8 月 31 日原版禁用菜单项导航覆盖：授权 Windows Sandbox 观察到，右键菜单的
 方向键焦点会经过灰色禁用项、跳过分隔线，鼠标点击禁用项不会提交 command；Enter
-在禁用项上关闭弹出菜单，Space/Right 保持菜单活动。CLI Headless 与 Manager Host
-现按 ABI `order` 保留非分隔线禁用项，并区分这些激活结果；对应定向回归通过。该项
-只关闭 Host 导航语义差异，不代表真实 Manager 窗口、Release Sandbox 视觉验收或
-Windows E3 已完成。
+在禁用项上关闭弹出菜单，Space/Right 保持菜单活动。submenu 返回时焦点恢复到父项。
+CLI Headless 与 Manager Host 现按 ABI `order` 保留非分隔线禁用项，并区分这些激活
+结果；对应定向回归通过。该项只关闭 Host 导航语义差异，不代表真实 Manager 窗口、
+Release Sandbox 视觉验收或 Windows E3 已完成。
 
 2026 年 8 月 31 日 Manager Host 菜单导航覆盖：Slint 宿主只渲染 Family transaction
 当前父节点的启用同级项；方向键在该集合中循环，Right/Enter/Space 进入 submenu 或

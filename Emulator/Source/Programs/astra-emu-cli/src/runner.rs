@@ -4323,18 +4323,34 @@ impl VirtualSystemMenu {
                 }
             }
             "arrow_left" | "escape" if self.parent_id.is_some() => {
-                let parent_id = self
+                let child_parent_id = self
                     .parent_id
-                    .as_deref()
+                    .clone()
                     .ok_or_else(|| "ASTRA_EMU_HEADLESS_SYSTEM_MENU_PARENT_MISSING".to_owned())?;
-                self.parent_id = self
+                let parent_item = self
                     .pending
                     .menu
                     .items
                     .iter()
-                    .find(|item| item.item_id == parent_id)
-                    .and_then(|item| item.parent_id.clone());
-                self.focus = 0;
+                    .find(|item| item.item_id == child_parent_id)
+                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_SYSTEM_MENU_PARENT_MISSING".to_owned())?;
+                let parent_id = parent_item.parent_id.clone();
+                self.parent_id = parent_id.clone();
+                let mut siblings = self
+                    .pending
+                    .menu
+                    .items
+                    .iter()
+                    .filter(|item| {
+                        item.parent_id == parent_id
+                            && item.kind != LegacySystemMenuItemKindV1::Separator
+                    })
+                    .collect::<Vec<_>>();
+                siblings.sort_by_key(|item| item.order);
+                self.focus = siblings
+                    .iter()
+                    .position(|item| item.item_id == child_parent_id)
+                    .ok_or_else(|| "ASTRA_EMU_HEADLESS_SYSTEM_MENU_PARENT_MISSING".to_owned())?;
             }
             "escape" => return Ok(VirtualSystemMenuDecision::Dismiss),
             "pointer.x" | "pointer.y" | "pointer.secondary" => {}
@@ -8036,6 +8052,17 @@ mod native_tests {
             menu.consume("enter").unwrap(),
             VirtualSystemMenuDecision::Select(item) if item == "exit"
         ));
+
+        let mut menu = virtual_menu();
+        menu.consume("arrow_down").unwrap();
+        menu.consume("enter").unwrap();
+        assert_eq!(menu.parent_id.as_deref(), Some("game"));
+        assert!(matches!(
+            menu.consume("arrow_left").unwrap(),
+            VirtualSystemMenuDecision::None
+        ));
+        assert!(menu.parent_id.is_none());
+        assert_eq!(menu.focus, 1);
 
         let mut menu = virtual_menu();
         assert!(matches!(

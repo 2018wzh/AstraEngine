@@ -420,9 +420,19 @@ impl SlintManagerAdapter {
         if !item.submenu {
             return Err("ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_INVALID".to_owned());
         }
-        self.window.set_system_menu_parent_id(item.parent_id);
-        self.system_menu_focus.set(0);
-        self.set_system_menu_focus_for_current_parent();
+        let parent_id = item.parent_id.clone();
+        self.window.set_system_menu_parent_id(parent_id);
+        let items = self.current_system_menu_items();
+        let focus = items
+            .iter()
+            .position(|candidate| candidate.item_id == current_parent)
+            .ok_or_else(|| "ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_MISSING".to_owned())?;
+        self.system_menu_focus.set(focus);
+        self.window.set_system_menu_focus_id(
+            items
+                .get(focus)
+                .map_or_else(|| "".into(), |candidate| candidate.item_id.clone()),
+        );
         Ok(())
     }
 

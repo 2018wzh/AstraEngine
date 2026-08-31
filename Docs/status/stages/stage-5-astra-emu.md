@@ -2,10 +2,10 @@
 
 2026 年 8 月 31 日原版菜单禁用项导航对齐：授权 Windows Sandbox 的标题右键菜单
 确认方向键焦点会经过灰色禁用项、跳过分隔线；鼠标点击禁用项不提交命令，Enter
-关闭弹出菜单而不选择，Space/Right 保持菜单活动。CLI Headless 与 Manager Host
-按 Family ABI `order` 保留这些焦点项并区分三种结果，定向测试通过。该项只修复
-Host 导航语义，不提升真实 Manager 窗口、完整路线、Release Sandbox 视觉验收或
-Windows E3，Stage 5 仍为 `IN_PROGRESS`。
+关闭弹出菜单而不选择，Space/Right 保持菜单活动；submenu 返回时焦点恢复到父项。
+CLI Headless 与 Manager Host 按 Family ABI `order` 保留这些焦点项并区分三种结果，
+定向测试通过。该项只修复 Host 导航语义，不提升真实 Manager 窗口、完整路线、
+Release Sandbox 视觉验收或 Windows E3，Stage 5 仍为 `IN_PROGRESS`。
 
 2026 年 8 月 31 日 Family ABI v14 文本输入 Host 分层：Minori Save 空槽按原版行为
 发布有界的 `LegacyTextInputTransactionV1`，由 Host 原生编辑器负责焦点、IME、DPI、
