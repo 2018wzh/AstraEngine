@@ -1630,8 +1630,16 @@ mod linux {
         window: Option<&Window>,
         request: ConfirmationRequest,
     ) -> Result<ConfirmationResult, PlatformError> {
+        // Keep the native prompt attached to the live game caption when a
+        // parent window is available.  Minori's original return-to-title and
+        // exit prompts use that owner caption; service-only callers (for
+        // example Manager) still carry the Family-provided title.
+        let title = window
+            .map(Window::title)
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or_else(|| request.title.clone());
         let mut dialog = rfd::AsyncMessageDialog::new()
-            .set_title(request.title)
+            .set_title(title)
             .set_description(request.message)
             .set_buttons(rfd::MessageButtons::OkCancelCustom(
                 request.accept_label.clone(),

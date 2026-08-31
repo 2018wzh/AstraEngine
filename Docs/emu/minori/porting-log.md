@@ -1035,3 +1035,13 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
 - 该改动只改变 Host presentation，不改变确认 transaction、输入消费或 VM 状态。当前
   Windows 定向测试通过；macOS 交叉检查受限于本机没有 Apple C/链接工具链，尚未形成
   macOS 运行时 evidence。
+
+### 2026-08-31 Linux 原生确认框标题绑定
+
+- Linux Host 的确认框也在原生 `rfd` presenter 边界读取 live owner caption；没有宿主窗口的
+  Manager/service 调用继续使用 Family transaction 的标题。这样各桌面 Host 对退出和返回标题
+  的 caption 选择保持一致，同时不把平台窗口句柄或标题判断下沉到 Minori。
+- Linux 的 context menu、窗口命令和 Help/About/Homepage 仍按能力矩阵返回显式
+  `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED` 或对应 unsupported diagnostic；没有用
+  临时 GTK widget、Slint overlay 或外部进程伪造原生菜单证据。Linux 编译和实际桌面行为仍需在
+  具备 GTK/winit 原生窗口的环境中单独验收。
