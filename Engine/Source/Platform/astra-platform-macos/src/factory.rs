@@ -663,6 +663,13 @@ mod macos {
                             .and_then(|window| show_confirmation(window.map(Arc::as_ref), request));
                         let _ = reply.send(result);
                     }
+                    HostCommand::ShowTextInput { reply, .. } => {
+                        let _ = reply.send(Err(PlatformError::new(
+                            PlatformErrorCode::PlatformNotImplemented,
+                            "window.text_input",
+                            "macOS text input is owned by the native application UI",
+                        )));
+                    }
                     HostCommand::ApplyWindowCommand {
                         window,
                         command,

@@ -17,7 +17,7 @@
 | Script / VN | [script-vn.md](script-vn.md) |
 | AstraRPG / `rpg.trpg` | [rpg-trpg.md](rpg-trpg.md) |
 | AI / MCP | [ai-mcp.md](ai-mcp.md) |
-| AstraEMU Family ABI v13、Layer2D、Hook、typed system-menu/confirmation/system-command 与原生存档文件 | [astraemu-ipc.md](astraemu-ipc.md) |
+| AstraEMU Family ABI v14、Layer2D、Hook、typed system-menu/confirmation/system-command/text-input 与原生存档文件 | [astraemu-ipc.md](astraemu-ipc.md) |
 | AstraEMU Family ABI v9 迁移 | [astraemu-family-abi-v9-migration.md](astraemu-family-abi-v9-migration.md) |
 | Release Gate | [release-gate.md](release-gate.md) |
 | TsuiNoSora Sidecar Schema | [tsuinosora-sidecar-schema.md](tsuinosora-sidecar-schema.md) |

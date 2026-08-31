@@ -131,6 +131,13 @@ mod browser {
                         "Web confirmation is owned by the browser host",
                     )));
                 }
+                HostCommand::ShowTextInput { reply, .. } => {
+                    let _ = reply.send(Err(PlatformError::new(
+                        PlatformErrorCode::PlatformNotImplemented,
+                        "window.text_input",
+                        "Web text input is owned by the browser application UI",
+                    )));
+                }
                 HostCommand::ApplyWindowCommand { reply, .. } => {
                     let _ = reply.send(Err(PlatformError::new(
                         PlatformErrorCode::PlatformNotImplemented,

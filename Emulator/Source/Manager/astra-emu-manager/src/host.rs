@@ -1,7 +1,7 @@
 use astra_emu_family_api::LegacySystemMenuItemKindV1;
 use astra_emu_manager_core::{
     default_vn_preset, InputMapping, PendingFamilyConfirmation, PendingFamilySystemCommand,
-    PendingFamilySystemMenu,
+    PendingFamilySystemMenu, PendingFamilyTextInput,
 };
 use std::{
     sync::{
@@ -190,6 +190,12 @@ pub trait ManagerController: 'static {
     }
     fn present_confirmation(&mut self, _pending: PendingFamilyConfirmation) -> Result<(), String> {
         Err("ASTRA_EMU_CONFIRMATION_NOT_CONFIGURED".into())
+    }
+    fn take_pending_text_input(&mut self) -> Result<Option<PendingFamilyTextInput>, String> {
+        Ok(None)
+    }
+    fn present_text_input(&mut self, _pending: PendingFamilyTextInput) -> Result<(), String> {
+        Err("ASTRA_EMU_TEXT_INPUT_NOT_CONFIGURED".into())
     }
     // ===== UI redesign callbacks (default implementations keep existing
     // controllers source-compatible until they opt in) =====
@@ -420,6 +426,19 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
                             Ok(Some(pending)) => {
                                 if let Err(error) =
                                     controller.borrow_mut().present_confirmation(pending)
+                                {
+                                    window.set_global_diagnostic(error.into());
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                window.set_global_diagnostic(error.into());
+                            }
+                        }
+                        match controller.borrow_mut().take_pending_text_input() {
+                            Ok(Some(pending)) => {
+                                if let Err(error) =
+                                    controller.borrow_mut().present_text_input(pending)
                                 {
                                     window.set_global_diagnostic(error.into());
                                 }

@@ -15,8 +15,10 @@ use astra_emu_family_api::{
     LegacySurfaceLeaseV9, LegacySystemCommandHostV1, LegacySystemCommandResultV1,
     LegacySystemCommandStatusV1, LegacySystemCommandTransactionV1, LegacySystemMenuActionV1,
     LegacySystemMenuHostV1, LegacySystemMenuItemKindV1, LegacySystemMenuRequestV1,
-    LegacySystemMenuTransactionV1, LegacyVfsReader, LegacyWritableFileEntryV1,
-    LegacyWritableFileHostV1, LegacyWritableFileRequestV1, LegacyWritableFileResultV1,
+    LegacySystemMenuTransactionV1, LegacyTextInputChoiceV1, LegacyTextInputHostV1,
+    LegacyTextInputResultV1, LegacyTextInputTransactionV1, LegacyVfsReader,
+    LegacyWritableFileEntryV1, LegacyWritableFileHostV1, LegacyWritableFileRequestV1,
+    LegacyWritableFileResultV1,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -947,6 +949,149 @@ pub struct PendingFamilyConfirmation {
     pub confirmation: LegacyConfirmationTransactionV1,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingFamilyTextInput {
+    pub session_id: String,
+    pub text_input: LegacyTextInputTransactionV1,
+}
+
+#[derive(Default)]
+struct FamilyTextInputState {
+    active: BTreeMap<String, LegacyTextInputTransactionV1>,
+    delivered: BTreeMap<String, bool>,
+    resolutions: BTreeMap<String, LegacyTextInputResultV1>,
+}
+
+/// Host-side queue for family-owned, bounded single-line text prompts.
+/// Presentation remains platform-native; this object only owns lifecycle and
+/// validates that the returned value belongs to the active transaction.
+#[derive(Default)]
+pub struct FamilyTextInputHost {
+    state: Mutex<FamilyTextInputState>,
+}
+
+impl FamilyTextInputHost {
+    pub fn has_pending_interaction(&self) -> Result<bool, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| text_input_lock_error())
+            .map(|state| !state.active.is_empty() || !state.resolutions.is_empty())
+    }
+
+    pub fn take_next_pending(&self) -> Result<Option<PendingFamilyTextInput>, LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| text_input_lock_error())?;
+        let session_id = state
+            .active
+            .keys()
+            .find(|session_id| !state.delivered.contains_key(*session_id))
+            .cloned();
+        let Some(session_id) = session_id else {
+            return Ok(None);
+        };
+        let text_input = state.active.get(&session_id).cloned().ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_STATE",
+                "pending text-input state changed unexpectedly",
+            )
+        })?;
+        state.delivered.insert(session_id.clone(), true);
+        Ok(Some(PendingFamilyTextInput {
+            session_id,
+            text_input,
+        }))
+    }
+
+    pub fn resolve(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        choice: LegacyTextInputChoiceV1,
+        value: &str,
+        sequence: u64,
+    ) -> Result<(), LegacyProviderError> {
+        let mut state = self.state.lock().map_err(|_| text_input_lock_error())?;
+        if state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_RESULT_DUPLICATE",
+                "text-input host already queued a result for the session",
+            ));
+        }
+        let text_input = state.active.get(session_id).ok_or_else(|| {
+            LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_NOT_ACTIVE",
+                "text-input result has no active transaction",
+            )
+        })?;
+        if text_input.prompt_id != prompt_id {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_ID_MISMATCH",
+                "text-input result does not match the active transaction",
+            ));
+        }
+        if value.len() > text_input.max_bytes as usize {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_VALUE",
+                "text-input result exceeds the active transaction byte bound",
+            ));
+        }
+        let result = LegacyTextInputResultV1 {
+            prompt_id: prompt_id.into(),
+            choice,
+            value: value.into(),
+            sequence,
+        };
+        result.validate()?;
+        state.active.remove(session_id);
+        state.delivered.remove(session_id);
+        state.resolutions.insert(session_id.into(), result);
+        Ok(())
+    }
+
+    pub fn take_resolution(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LegacyTextInputResultV1>, LegacyProviderError> {
+        self.state
+            .lock()
+            .map_err(|_| text_input_lock_error())
+            .map(|mut state| state.resolutions.remove(session_id))
+    }
+
+    pub fn release_session(&self, session_id: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active.remove(session_id);
+            state.delivered.remove(session_id);
+            state.resolutions.remove(session_id);
+        }
+    }
+}
+
+impl LegacyTextInputHostV1 for FamilyTextInputHost {
+    fn publish(
+        &self,
+        session_id: &str,
+        text_input: LegacyTextInputTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        text_input.validate()?;
+        let mut state = self.state.lock().map_err(|_| text_input_lock_error())?;
+        if state.active.contains_key(session_id) || state.resolutions.contains_key(session_id) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_ALREADY_ACTIVE",
+                "text-input host accepts only one active transaction per session",
+            ));
+        }
+        state.active.insert(session_id.into(), text_input);
+        Ok(())
+    }
+}
+
+fn text_input_lock_error() -> LegacyProviderError {
+    LegacyProviderError::invalid(
+        "ASTRA_EMU_TEXT_INPUT_LOCK_POISONED",
+        "text-input host lock is poisoned",
+    )
+}
+
 #[derive(Default)]
 struct FamilyConfirmationState {
     active: BTreeMap<String, LegacyConfirmationTransactionV1>,
@@ -1222,6 +1367,7 @@ pub struct AstraEmuFamilyHost {
     pub system_menus: Arc<FamilySystemMenuHost>,
     pub confirmations: Arc<FamilyConfirmationHost>,
     pub system_commands: Arc<FamilySystemCommandHost>,
+    pub text_inputs: Arc<FamilyTextInputHost>,
     vfs: Arc<dyn LegacyVfsReader>,
     services: LegacyFamilyHostServicesV9,
 }
@@ -1234,6 +1380,7 @@ impl AstraEmuFamilyHost {
         let system_menus = Arc::new(FamilySystemMenuHost::default());
         let confirmations = Arc::new(FamilyConfirmationHost::default());
         let system_commands = Arc::new(FamilySystemCommandHost::default());
+        let text_inputs = Arc::new(FamilyTextInputHost::default());
         let services = LegacyFamilyHostServicesV9 {
             vfs: vfs.clone(),
             surfaces: surfaces.clone(),
@@ -1242,6 +1389,7 @@ impl AstraEmuFamilyHost {
             system_menus: system_menus.clone(),
             confirmations: confirmations.clone(),
             system_commands: system_commands.clone(),
+            text_inputs: text_inputs.clone(),
         };
         Self {
             surfaces,
@@ -1250,6 +1398,7 @@ impl AstraEmuFamilyHost {
             system_menus,
             confirmations,
             system_commands,
+            text_inputs,
             vfs,
             services,
         }
@@ -1269,6 +1418,7 @@ impl AstraEmuFamilyHost {
         self.system_menus.release_session(session_id);
         self.confirmations.release_session(session_id);
         self.system_commands.release_session(session_id);
+        self.text_inputs.release_session(session_id);
     }
 }
 
@@ -1623,6 +1773,57 @@ mod tests {
         let result = host.take_resolution("session").unwrap().unwrap();
         assert_eq!(result.choice, LegacyConfirmationChoiceV1::Cancelled);
         assert_eq!(result.confirmation_id, "exit_game");
+        assert!(host.take_resolution("session").unwrap().is_none());
+    }
+
+    #[test]
+    fn text_input_host_enforces_one_transaction_and_bounded_resolution() {
+        let host = FamilyTextInputHost::default();
+        let text_input = LegacyTextInputTransactionV1 {
+            sequence: 7,
+            prompt_id: "minori.text_input.save_comment.0.7".into(),
+            title: "SAVE".into(),
+            label: "Comment".into(),
+            initial_value: String::new(),
+            accept_label: "OK".into(),
+            cancel_label: "Cancel".into(),
+            max_bytes: 8,
+        };
+        host.publish("session", text_input.clone()).unwrap();
+        assert_eq!(
+            host.publish("session", text_input).unwrap_err().code(),
+            "ASTRA_EMU_TEXT_INPUT_ALREADY_ACTIVE"
+        );
+        let pending = host.take_next_pending().unwrap().unwrap();
+        assert_eq!(pending.session_id, "session");
+        assert_eq!(
+            pending.text_input.prompt_id,
+            "minori.text_input.save_comment.0.7"
+        );
+        assert!(host.take_next_pending().unwrap().is_none());
+        assert_eq!(
+            host.resolve(
+                "session",
+                "minori.text_input.save_comment.0.7",
+                LegacyTextInputChoiceV1::Accepted,
+                "too long!",
+                9,
+            )
+            .unwrap_err()
+            .code(),
+            "ASTRA_EMU_TEXT_INPUT_VALUE"
+        );
+        host.resolve(
+            "session",
+            "minori.text_input.save_comment.0.7",
+            LegacyTextInputChoiceV1::Cancelled,
+            "",
+            10,
+        )
+        .unwrap();
+        let result = host.take_resolution("session").unwrap().unwrap();
+        assert_eq!(result.choice, LegacyTextInputChoiceV1::Cancelled);
+        assert_eq!(result.prompt_id, "minori.text_input.save_comment.0.7");
         assert!(host.take_resolution("session").unwrap().is_none());
     }
 

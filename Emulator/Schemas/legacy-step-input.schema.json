@@ -76,6 +76,17 @@
         }
       ]
     },
+    "text_input": {
+      "description": "Result of one family-owned single-line text prompt published through the Host.  The value is bounded, ephemeral presentation input (for example the comment attached to a save slot) and is never persisted by the Host or included in evidence.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LegacyTextInputResultV1"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "tick_index": {
       "type": "integer",
       "format": "uint64",
@@ -279,6 +290,39 @@
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
+        }
+      }
+    },
+    "LegacyTextInputChoiceV1": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "cancelled"
+      ]
+    },
+    "LegacyTextInputResultV1": {
+      "description": "Completion of a Host-native bounded single-line text prompt.",
+      "type": "object",
+      "required": [
+        "choice",
+        "prompt_id",
+        "sequence",
+        "value"
+      ],
+      "properties": {
+        "choice": {
+          "$ref": "#/definitions/LegacyTextInputChoiceV1"
+        },
+        "prompt_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "value": {
+          "type": "string"
         }
       }
     }

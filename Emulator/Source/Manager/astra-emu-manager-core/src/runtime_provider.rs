@@ -995,6 +995,10 @@ impl AstraEmuRuntimeProvider {
         Arc::clone(&self.host.system_commands)
     }
 
+    pub fn text_input_host(&self) -> Arc<crate::FamilyTextInputHost> {
+        Arc::clone(&self.host.text_inputs)
+    }
+
     /// Shuts down one concrete AstraEMU session and returns the family-owned
     /// cold-path evidence alongside the generic provider lifecycle report.
     pub fn shutdown_with_family_report(
@@ -1474,6 +1478,11 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
             .system_commands
             .take_resolution(&session.family_session_id.0)
             .map_err(|error| error.to_string())?;
+        let text_input = self
+            .host
+            .text_inputs
+            .take_resolution(&session.family_session_id.0)
+            .map_err(|error| error.to_string())?;
         if physical_system_menu.is_some() && resolved_system_menu.is_some() {
             session.poisoned = true;
             return Err("ASTRA_EMU_SYSTEM_MENU_RESULT_AND_OPEN_CONFLICT".into());
@@ -1486,6 +1495,12 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
         if system_command.is_some() && (system_menu.is_some() || confirmation.is_some()) {
             session.poisoned = true;
             return Err("ASTRA_EMU_SYSTEM_COMMAND_AND_INTERACTION_CONFLICT".into());
+        }
+        if text_input.is_some()
+            && (system_menu.is_some() || confirmation.is_some() || system_command.is_some())
+        {
+            session.poisoned = true;
+            return Err("ASTRA_EMU_TEXT_INPUT_AND_INTERACTION_CONFLICT".into());
         }
         let await_results = await_results.clone();
         let mut surface_guard = SurfaceStepGuard::new(
@@ -1505,6 +1520,7 @@ impl ProductRuntimeProvider for AstraEmuRuntimeProvider {
                 system_menu,
                 confirmation,
                 system_command,
+                text_input,
                 await_results: await_results.clone(),
                 provider_results,
             },

@@ -33,8 +33,8 @@ use astra_emu_family_api::{
     LegacyAudioPacketV7, LegacyAudioSampleFormat, LegacyAwaitResult, LegacyConfirmationChoiceV1,
     LegacyDrawV1, LegacyInputEdge, LegacyPcmBufferV7, LegacyProbeRequest, LegacyResourceRead,
     LegacyRuntimeHostCtx, LegacySystemCommandKindV1, LegacySystemCommandStatusV1,
-    LegacySystemMenuItemKindV1, LegacyTextureFilter, LegacyTextureFormat, LegacyVfsReader,
-    LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
+    LegacySystemMenuItemKindV1, LegacyTextInputChoiceV1, LegacyTextureFilter, LegacyTextureFormat,
+    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
 use astra_emu_family_support::{
     verify_vfs, FamilyAudioService, LegacyMountedVfsReaderAdapter, LegacyRuntimeVfsByteSource,
@@ -74,8 +74,8 @@ use astra_platform::{
     GpuAdapterPolicy, GpuBackendPolicy, GpuDeviceTypePolicy, HeadlessArtifactPolicy,
     HeadlessArtifactRetention, HeadlessHostProfile, HeadlessReadbackPolicy, HeadlessRenderPolicy,
     HomepageRequest, ManualRequest, PlatformDecodeRequest, PlatformHostClient, PlatformHostFactory,
-    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, WindowCommand,
-    WindowHandle, WindowRequest,
+    RgbaFrame, SceneFrame, ScenePresentReceipt, SurfaceHandle, SurfaceRequest, TextInputRequest,
+    WindowCommand, WindowHandle, WindowRequest,
 };
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use astra_platform::{
@@ -4175,6 +4175,7 @@ struct RuntimeDriver<'a> {
     window: Option<WindowHandle>,
     virtual_system_menu: Option<VirtualSystemMenu>,
     virtual_confirmation: Option<VirtualConfirmation>,
+    virtual_text_input: Option<VirtualTextInput>,
     fixed_step: u64,
     input_sequence: u64,
     await_sequence: u64,
@@ -4251,6 +4252,10 @@ struct VirtualSystemMenu {
 struct VirtualConfirmation {
     pending: PendingFamilyConfirmation,
     accept_focused: bool,
+}
+
+struct VirtualTextInput {
+    pending: astra_emu_manager_core::PendingFamilyTextInput,
 }
 
 #[derive(Debug)]
@@ -5318,6 +5323,7 @@ impl<'a> RuntimeDriver<'a> {
             window: config.window,
             virtual_system_menu: None,
             virtual_confirmation: None,
+            virtual_text_input: None,
             fixed_step: 0,
             input_sequence: 0,
             await_sequence: 0,
@@ -5418,6 +5424,9 @@ impl<'a> RuntimeDriver<'a> {
             .input_sequence
             .checked_add(1)
             .ok_or_else(|| "ASTRA_EMU_HEADLESS_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        if self.virtual_text_input.is_some() {
+            return self.consume_virtual_text_input(control, pressed);
+        }
         if self.virtual_confirmation.is_some() {
             return self.consume_virtual_confirmation_input(control, pressed);
         }
@@ -6180,7 +6189,9 @@ impl<'a> RuntimeDriver<'a> {
         self.reject_unsupported_native_system_command_if_pending()?;
         self.resolve_virtual_system_command_if_pending()?;
         self.present_native_confirmation_if_pending().await?;
+        self.present_native_text_input_if_pending().await?;
         self.capture_virtual_confirmation_if_pending()?;
+        self.capture_virtual_text_input_if_pending()?;
         self.capture_virtual_system_menu_if_pending()?;
         self.terminal = output.status == "terminal";
         self.step_timings_ns.push(elapsed_ns(step_started)?);
@@ -6191,6 +6202,7 @@ impl<'a> RuntimeDriver<'a> {
         if self.window.is_some()
             || self.virtual_system_menu.is_some()
             || self.virtual_confirmation.is_some()
+            || self.virtual_text_input.is_some()
         {
             return Ok(());
         }
@@ -6214,6 +6226,7 @@ impl<'a> RuntimeDriver<'a> {
         if self.window.is_some()
             || self.virtual_confirmation.is_some()
             || self.virtual_system_menu.is_some()
+            || self.virtual_text_input.is_some()
         {
             return Ok(());
         }
@@ -6229,6 +6242,26 @@ impl<'a> RuntimeDriver<'a> {
             pending,
             accept_focused: false,
         });
+        Ok(())
+    }
+
+    fn capture_virtual_text_input_if_pending(&mut self) -> Result<(), String> {
+        if self.window.is_some()
+            || self.virtual_text_input.is_some()
+            || self.virtual_confirmation.is_some()
+            || self.virtual_system_menu.is_some()
+        {
+            return Ok(());
+        }
+        let Some(pending) = self
+            .runtime
+            .text_input_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        self.virtual_text_input = Some(VirtualTextInput { pending });
         Ok(())
     }
 
@@ -6256,10 +6289,36 @@ impl<'a> RuntimeDriver<'a> {
         .map_err(|error| error.to_string())
     }
 
+    fn consume_virtual_text_input(&mut self, control: &str, pressed: bool) -> Result<(), String> {
+        if !pressed {
+            return Ok(());
+        }
+        let choice = match control {
+            "enter" | "space" | "text_input_accept" => LegacyTextInputChoiceV1::Accepted,
+            "escape" | "text_input_cancel" => LegacyTextInputChoiceV1::Cancelled,
+            _ => return Err("ASTRA_EMU_HEADLESS_TEXT_INPUT_INPUT_UNSUPPORTED".into()),
+        };
+        let pending = self
+            .virtual_text_input
+            .take()
+            .ok_or_else(|| "ASTRA_EMU_HEADLESS_TEXT_INPUT_STATE".to_owned())?;
+        self.runtime
+            .text_input_host()
+            .resolve(
+                &pending.pending.session_id,
+                &pending.pending.text_input.prompt_id,
+                choice,
+                &pending.pending.text_input.initial_value,
+                self.input_sequence,
+            )
+            .map_err(|error| error.to_string())
+    }
+
     async fn present_native_confirmation_if_pending(&mut self) -> Result<(), String> {
         if self.window.is_none()
             || self.virtual_confirmation.is_some()
             || self.virtual_system_menu.is_some()
+            || self.virtual_text_input.is_some()
         {
             return Ok(());
         }
@@ -6293,6 +6352,52 @@ impl<'a> RuntimeDriver<'a> {
             &pending.session_id,
             &pending.confirmation.confirmation_id,
             choice,
+            self.input_sequence,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    async fn present_native_text_input_if_pending(&mut self) -> Result<(), String> {
+        if self.window.is_none()
+            || self.virtual_text_input.is_some()
+            || self.virtual_confirmation.is_some()
+            || self.virtual_system_menu.is_some()
+        {
+            return Ok(());
+        }
+        let host = self.runtime.text_input_host();
+        let Some(pending) = host
+            .take_next_pending()
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        let result = self
+            .platform
+            .show_text_input(TextInputRequest {
+                window: self.window,
+                title: pending.text_input.title.clone(),
+                label: pending.text_input.label.clone(),
+                initial_value: pending.text_input.initial_value.clone(),
+                accept_label: pending.text_input.accept_label.clone(),
+                cancel_label: pending.text_input.cancel_label.clone(),
+                max_bytes: pending.text_input.max_bytes,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        self.input_sequence = self
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_TEXT_INPUT_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        host.resolve(
+            &pending.session_id,
+            &pending.text_input.prompt_id,
+            if result.accepted {
+                LegacyTextInputChoiceV1::Accepted
+            } else {
+                LegacyTextInputChoiceV1::Cancelled
+            },
+            &result.value,
             self.input_sequence,
         )
         .map_err(|error| error.to_string())

@@ -1,5 +1,16 @@
 # Stage Test Matrix
 
+2026-08-31 Family ABI v14 text-input seam: Minori Save now publishes a bounded
+`LegacyTextInputTransactionV1` through the same Host-owned interaction channel as
+menus and confirmations. Windows presents the prompt with a native owner-modal
+Win32 editor (DPI-aware geometry, IME, focus restoration and Enter/Escape), while
+macOS/Linux/Web/Android/Headless return an explicit unsupported diagnostic until
+their application-owned text UI or typed Headless driver is bound. The result is
+returned once with the prompt id and is persisted only by the Minori save format;
+the Host never stores the value. Family API, FFI, Manager, Minori and platform
+validation tests pass. This is focused ABI/Host coverage, not a claim of full
+save-page visual parity, Release Sandbox or Windows E3.
+
 2026-08-31 Windows native confirmation geometry seam: the Host presenter now uses the
 observed compact 350×164 base at 96 DPI, scales the owner-modal dialog from the live
 owner DPI (or the system DPI for windowless service calls), and places the standard Win32
@@ -48,7 +59,7 @@ save/restore checkpoints, Release Sandbox, and Windows E3 remain open.
 
 2026-08-31 confirmation wording alignment: the original Windows Sandbox was
 observed using the native Exit and Return-title confirmation dialogs with the
-same two-button order and cancel semantics now sent through Family ABI v13.
+same two-button order and cancel semantics now sent through Family ABI v14.
 The observation is private visual evidence only. A legacy private input sequence
 that referenced the removed `runtime.awaiting_input` key is rejected; no alias is
 retained. Full Release Sandbox and Windows E3 remain open.
@@ -82,12 +93,14 @@ ports. Older ABI v8 and snapshot wording is historical migration evidence, not
 an accepted runtime identity. Clean Release and Windows E3 parity remain
 required before the row can leave `IN_PROGRESS`.
 
-The current identity is `astra.emu.family_abi.v13`; the v12 value above is
-historical migration evidence. The v13 step wire adds a typed system-command
-transaction/result pair for window and help actions. Windows/macOS hosts apply
-the two bound window operations natively; Manager, Headless, and windowless CLI
-return `Unsupported` explicitly. No generic event-string interpretation or
-platform fallback is accepted.
+The current identity is `astra.emu.family_abi.v14`; v12 and v13 values above are
+historical migration evidence. The v14 step wire adds a typed system-command
+transaction/result pair for window and help actions and a bounded text-input
+transaction/result pair for native single-line editors. Windows/macOS hosts apply
+the bound window operations natively; Windows also owns the native text editor;
+Manager, Headless, and windowless CLI return `Unsupported` explicitly where no
+native surface is available. No generic event-string interpretation or platform
+fallback is accepted.
 
 The v11 contract carries `LegacySystemMenuRequestV1` plus a bounded
 `LegacySystemMenuTransactionV1` Host publication port. A physical secondary click

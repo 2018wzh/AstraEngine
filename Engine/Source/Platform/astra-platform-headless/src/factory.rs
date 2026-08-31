@@ -842,6 +842,13 @@ impl HostState {
                     "Headless confirmation is driven by the Family host test input",
                 )));
             }
+            HostCommand::ShowTextInput { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.text_input",
+                    "Headless text input must be supplied by a typed host driver",
+                )));
+            }
             HostCommand::ApplyWindowCommand { reply, .. } => {
                 let _ = reply.send(Err(PlatformError::new(
                     PlatformErrorCode::PlatformNotImplemented,

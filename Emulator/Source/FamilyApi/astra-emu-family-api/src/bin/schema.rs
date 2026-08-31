@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, env, fs, path::PathBuf};
 use astra_emu_family_api::{
     LegacyFamilyPluginDescriptor, LegacyLayerTransactionV9, LegacyStepInput,
     LegacySystemCommandResultV1, LegacySystemCommandTransactionV1, LegacySystemMenuRequestV1,
-    LegacySystemMenuTransactionV1, LegacyWritableFileRequestV1,
+    LegacySystemMenuTransactionV1, LegacyTextInputResultV1, LegacyTextInputTransactionV1,
+    LegacyWritableFileRequestV1,
 };
 use schemars::{schema::RootSchema, schema_for};
 
@@ -41,6 +42,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (
             "legacy-system-command-transaction-v1.schema.json",
             schema_for!(LegacySystemCommandTransactionV1),
+        ),
+        (
+            "legacy-text-input-result-v1.schema.json",
+            schema_for!(LegacyTextInputResultV1),
+        ),
+        (
+            "legacy-text-input-transaction-v1.schema.json",
+            schema_for!(LegacyTextInputTransactionV1),
         ),
         (
             "legacy-writable-file-v1.schema.json",

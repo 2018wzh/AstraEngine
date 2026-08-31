@@ -355,6 +355,13 @@ impl AndroidHostApp {
                     "Android confirmation is owned by the Activity UI",
                 )));
             }
+            HostCommand::ShowTextInput { reply, .. } => {
+                let _ = reply.send(Err(PlatformError::new(
+                    PlatformErrorCode::PlatformNotImplemented,
+                    "window.text_input",
+                    "Android text input is owned by the Activity UI",
+                )));
+            }
             HostCommand::ApplyWindowCommand { reply, .. } => {
                 let _ = reply.send(Err(PlatformError::new(
                     PlatformErrorCode::PlatformNotImplemented,

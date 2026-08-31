@@ -51,8 +51,8 @@ use astra_emu_manager_core::{
     CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord, GrantedSourceReader, Library,
     LibraryScanner, LiveWaitBindingKind, MatchCandidateRecord, MatchDecisionRecord,
     MetadataSnapshotRecord, PendingFamilyConfirmation, PendingFamilySystemCommand,
-    PendingFamilySystemMenu, ProviderConsentRecord, ScanLimits, SourceGrant, TranslationConsent,
-    TranslationProfileRecord, VfsResourceInfo,
+    PendingFamilySystemMenu, PendingFamilyTextInput, ProviderConsentRecord, ScanLimits,
+    SourceGrant, TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -77,7 +77,7 @@ use astra_media::{
     ImageDecodeProvider, SymphoniaAudioDecodeProvider,
 };
 use astra_media_core::Layer2DTransaction;
-use astra_platform::{ConfirmationRequest, ConfirmationResult};
+use astra_platform::{ConfirmationRequest, ConfirmationResult, TextInputRequest};
 use astra_plugin::ProductRuntimeProvider;
 use astra_plugin_abi::{
     GameRuntimeSessionId, ProviderInstanceId, RuntimeAwaitResult, RuntimeInputEdge,
@@ -314,6 +314,13 @@ impl RuntimeBridge {
             .map_err(|error| error.to_string())
     }
 
+    fn take_pending_text_input(&self) -> Result<Option<PendingFamilyTextInput>, String> {
+        self.provider
+            .text_input_host()
+            .take_next_pending()
+            .map_err(|error| error.to_string())
+    }
+
     fn resolve_system_menu(&mut self, menu_id: &str, item_id: Option<&str>) -> Result<(), String> {
         let active = self
             .active
@@ -374,6 +381,47 @@ impl RuntimeBridge {
                 &pending.session_id,
                 &pending.confirmation.confirmation_id,
                 choice,
+                active.input_sequence,
+            )
+            .map_err(|error| error.to_string())
+    }
+
+    fn present_text_input(&mut self, pending: PendingFamilyTextInput) -> Result<(), String> {
+        let client = self
+            .audio
+            .as_ref()
+            .ok_or_else(|| "ASTRA_EMU_TEXT_INPUT_PLATFORM_NOT_READY".to_owned())?
+            .platform_client();
+        let request = TextInputRequest {
+            window: None,
+            title: pending.text_input.title.clone(),
+            label: pending.text_input.label.clone(),
+            initial_value: pending.text_input.initial_value.clone(),
+            accept_label: pending.text_input.accept_label.clone(),
+            cancel_label: pending.text_input.cancel_label.clone(),
+            max_bytes: pending.text_input.max_bytes,
+        };
+        let result = pollster::block_on(client.show_text_input(request))
+            .map_err(|error| error.to_string())?;
+        let active = self
+            .active
+            .as_mut()
+            .ok_or_else(|| "ASTRA_EMU_RUNTIME_SESSION_NOT_ACTIVE".to_owned())?;
+        active.input_sequence = active
+            .input_sequence
+            .checked_add(1)
+            .ok_or_else(|| "ASTRA_EMU_INPUT_SEQUENCE_OVERFLOW".to_owned())?;
+        self.provider
+            .text_input_host()
+            .resolve(
+                &pending.session_id,
+                &pending.text_input.prompt_id,
+                if result.accepted {
+                    astra_emu_family_api::LegacyTextInputChoiceV1::Accepted
+                } else {
+                    astra_emu_family_api::LegacyTextInputChoiceV1::Cancelled
+                },
+                &result.value,
                 active.input_sequence,
             )
             .map_err(|error| error.to_string())
@@ -3305,6 +3353,12 @@ impl ManagerController for AstraEmuManagerController {
             .take_next_pending()
             .map_err(|error| error.to_string())
     }
+    fn take_pending_text_input(&mut self) -> Result<Option<PendingFamilyTextInput>, String> {
+        self.runtime
+            .try_borrow()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .take_pending_text_input()
+    }
     fn take_pending_system_command(
         &mut self,
     ) -> Result<Option<PendingFamilySystemCommand>, String> {
@@ -3328,6 +3382,13 @@ impl ManagerController for AstraEmuManagerController {
             .try_borrow_mut()
             .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
             .present_confirmation(pending)
+    }
+
+    fn present_text_input(&mut self, pending: PendingFamilyTextInput) -> Result<(), String> {
+        self.runtime
+            .try_borrow_mut()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .present_text_input(pending)
     }
 
     fn model(&self) -> Result<ManagerViewModel, String> {

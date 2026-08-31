@@ -289,6 +289,11 @@ pub struct LegacyStepInput {
     /// The command itself is published through `LegacySystemCommandHostV1`;
     /// only the bounded status crosses back into the fixed-step input.
     pub system_command: Option<LegacySystemCommandResultV1>,
+    /// Result of one family-owned single-line text prompt published through
+    /// the Host.  The value is bounded, ephemeral presentation input (for
+    /// example the comment attached to a save slot) and is never persisted by
+    /// the Host or included in evidence.
+    pub text_input: Option<LegacyTextInputResultV1>,
     pub await_results: Vec<LegacyAwaitResult>,
     pub provider_results: Vec<LegacyProviderResult>,
 }
@@ -369,6 +374,31 @@ impl LegacyStepInput {
                 ));
             }
         }
+        if let Some(result) = self.text_input.as_ref() {
+            result.validate()?;
+            if self
+                .input_edges
+                .iter()
+                .any(|edge| edge.sequence == result.sequence)
+                || self
+                    .system_menu
+                    .as_ref()
+                    .is_some_and(|request| request.sequence == result.sequence)
+                || self
+                    .confirmation
+                    .as_ref()
+                    .is_some_and(|confirmation| confirmation.sequence == result.sequence)
+                || self
+                    .system_command
+                    .as_ref()
+                    .is_some_and(|command| command.sequence == result.sequence)
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_TEXT_INPUT_SEQUENCE_DUPLICATE",
+                    "text-input result sequence duplicates another input item",
+                ));
+            }
+        }
         for edge in &self.input_edges {
             if !is_valid_input_control(&edge.control) {
                 return Err(LegacyProviderError::invalid(
@@ -408,6 +438,103 @@ pub struct LegacyConfirmationResultV1 {
     pub confirmation_id: String,
     pub choice: LegacyConfirmationChoiceV1,
     pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyTextInputChoiceV1 {
+    Accepted,
+    Cancelled,
+}
+
+/// Completion of a Host-native bounded single-line text prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextInputResultV1 {
+    pub prompt_id: String,
+    pub choice: LegacyTextInputChoiceV1,
+    pub value: String,
+    pub sequence: u64,
+}
+
+impl LegacyTextInputResultV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        const MAX_VALUE_BYTES: usize = 4096;
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_SEQUENCE",
+                "text-input result sequence must be non-zero",
+            ));
+        }
+        validate_symbol("text_input_prompt_id", &self.prompt_id)?;
+        if self.value.len() > MAX_VALUE_BYTES || self.value.chars().any(char::is_control) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_VALUE",
+                "text-input result value is invalid or exceeds its byte bound",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Host-native single-line text prompt.  The family owns the semantic labels
+/// and the Host owns the platform-specific editor, focus and IME behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LegacyTextInputTransactionV1 {
+    pub sequence: u64,
+    pub prompt_id: String,
+    pub title: String,
+    pub label: String,
+    pub initial_value: String,
+    pub accept_label: String,
+    pub cancel_label: String,
+    pub max_bytes: u32,
+}
+
+impl LegacyTextInputTransactionV1 {
+    pub fn validate(&self) -> Result<(), LegacyProviderError> {
+        const MAX_TITLE_BYTES: usize = 256;
+        const MAX_LABEL_BYTES: usize = 256;
+        const MAX_BUTTON_BYTES: usize = 64;
+        const MAX_VALUE_BYTES: usize = 4096;
+        if self.sequence == 0 {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_SEQUENCE",
+                "text-input transaction sequence must be non-zero",
+            ));
+        }
+        if !(1..=MAX_VALUE_BYTES as u32).contains(&self.max_bytes) {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_BOUNDS",
+                "text-input max_bytes must be within 1..=4096",
+            ));
+        }
+        validate_symbol("text_input_prompt_id", &self.prompt_id)?;
+        for (field, value, bound) in [
+            ("title", self.title.as_str(), MAX_TITLE_BYTES),
+            ("label", self.label.as_str(), MAX_LABEL_BYTES),
+            ("accept_label", self.accept_label.as_str(), MAX_BUTTON_BYTES),
+            ("cancel_label", self.cancel_label.as_str(), MAX_BUTTON_BYTES),
+        ] {
+            if value.trim().is_empty() || value.len() > bound || value.chars().any(char::is_control)
+            {
+                return Err(LegacyProviderError::invalid(
+                    "ASTRA_EMU_TEXT_INPUT_TEXT",
+                    format!("text-input {field} is empty, invalid, or exceeds its byte bound"),
+                ));
+            }
+        }
+        if self.accept_label == self.cancel_label
+            || self.initial_value.len() > self.max_bytes as usize
+            || self.initial_value.len() > MAX_VALUE_BYTES
+            || self.initial_value.chars().any(char::is_control)
+        {
+            return Err(LegacyProviderError::invalid(
+                "ASTRA_EMU_TEXT_INPUT_VALUE",
+                "text-input initial value is invalid or exceeds its byte bound",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Semantic operations exposed by a family-owned system menu.  The Host is
@@ -2191,6 +2318,7 @@ mod tests {
             system_menu: None,
             confirmation: None,
             system_command: None,
+            text_input: None,
             await_results: Vec::new(),
             provider_results: Vec::new(),
         }
@@ -2245,6 +2373,66 @@ mod tests {
         assert_eq!(
             input.validate().unwrap_err().code(),
             "ASTRA_EMU_CONFIRMATION_SEQUENCE_DUPLICATE"
+        );
+    }
+
+    #[test]
+    fn text_input_contract_is_bounded_and_sequence_unique() {
+        let transaction = LegacyTextInputTransactionV1 {
+            sequence: 7,
+            prompt_id: "minori.text_input.save_comment.0.7".into(),
+            title: "SAVE".into(),
+            label: "Comment".into(),
+            initial_value: "memo".into(),
+            accept_label: "OK".into(),
+            cancel_label: "Cancel".into(),
+            max_bytes: 256,
+        };
+        transaction.validate().unwrap();
+        LegacyTextInputResultV1 {
+            prompt_id: transaction.prompt_id.clone(),
+            choice: LegacyTextInputChoiceV1::Accepted,
+            value: "next memo".into(),
+            sequence: 8,
+        }
+        .validate()
+        .unwrap();
+
+        let mut invalid = transaction.clone();
+        invalid.max_bytes = 0;
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_INPUT_BOUNDS"
+        );
+        let mut invalid = transaction.clone();
+        invalid.cancel_label = invalid.accept_label.clone();
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_INPUT_VALUE"
+        );
+        let mut invalid = transaction;
+        invalid.label = "bad\nlabel".into();
+        assert_eq!(
+            invalid.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_INPUT_TEXT"
+        );
+
+        let mut duplicate = valid_step_input();
+        duplicate.input_edges.push(LegacyInputEdge {
+            control: "enter".into(),
+            pressed: true,
+            value: 0.0,
+            sequence: 8,
+        });
+        duplicate.text_input = Some(LegacyTextInputResultV1 {
+            prompt_id: "minori.text_input.save_comment.0.7".into(),
+            choice: LegacyTextInputChoiceV1::Cancelled,
+            value: String::new(),
+            sequence: 8,
+        });
+        assert_eq!(
+            duplicate.validate().unwrap_err().code(),
+            "ASTRA_EMU_TEXT_INPUT_SEQUENCE_DUPLICATE"
         );
     }
 

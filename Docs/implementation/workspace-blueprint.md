@@ -4,10 +4,10 @@ AstraEngine v1 采用 UE 风格顶层代码分区和 Rust workspace。顶层目�
 
 ## Layout
 
-The current AstraEMU boundary is Family ABI v13. Existing v6/v7/v8/v9/v10/v11/v12
-references in historical status rows describe migrations that preceded the v13
-hard cut. The v13 step wire includes typed family-owned system-menu,
-confirmation, and system-command transactions; no compatibility shim is retained.
+The current AstraEMU boundary is Family ABI v14. Existing v6/v7/v8/v9/v10/v11/v12/v13
+references in historical status rows describe migrations that preceded the v14
+hard cut. The v14 step wire includes typed family-owned system-menu,
+confirmation, system-command, and text-input transactions; no compatibility shim is retained.
 
 | 路径 | 状态 | 职责 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ confirmation, and system-command transactions; no compatibility shim is retained
 | `Engine/Plugins/Fixtures/` | Stage 1/3 implemented | 测试插件 fixture，覆盖真实 load/unload；`headless-presentation-provider` 覆盖 Stage 1 presentation/action provider，`vn-extension-provider` 覆盖 Stage 3 VN extension provider slots |
 | `Engine/Plugins/Providers/` | Stage 2 implemented, Stage 4 reopened | 通用 provider 插件由 Stage 1/2 registry 和 gate 管理；VFS backend provider 统一走 `vfs_provider` slot，NativeVN runtime provider 位于 AstraVN module，第三方 gameplay runtime provider、OpenAI、Ollama、ComfyUI 和 ONNX 仍是后续 provider |
 | `Editor/Source/` | Stage 4 not implemented | Qt/QML editor bridge 和应用入口 |
-| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v13 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、family-owned system-menu/confirmation/system-command、FVP/Minori provider boundary、fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；AstraEMU Luau patch/decode 已删除，RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
+| `Emulator/Source/` | Stage 5 `IN_PROGRESS` | 已接入 Family ABI v14 typed lifecycle/VFS、writable surface/Layer2D、Hook、writable-file、family-owned system-menu/confirmation/system-command/text-input、FVP/Minori provider boundary、fixed-step 与 streaming archive、`AstraEmuRuntimeProvider`、RuntimeWorld bridge、SQLite Library v5、auto probe、ECNU translation、共享 PlatformHost audio、Slint Manager、共享 wgpu host、签名工具、evidence encoder、Android package 和 iOS static-registry scaffold；AstraEMU Luau patch/decode 已删除，RFVP fork thinness、实际游戏逐帧 parity、最终原生性能、正式平台签名与 E3 仍开放 |
 | `Examples/` | Stage 3 in progress | 产品样例和发布样例；`Examples/NativeVN` 是可提交 commercial baseline sample，`Examples/TsuiNoSora/Docs/Title.png`、`Game.png` 作为 TsuiNoSora 视觉参考证据；`Examples/TsuiNoSora/Tools/original-patcher` 是不发布到 crates.io 的 1999 原版独立副本补丁器 |
 | `Tools/TsuiNoSora/` | Stage 3 in progress | 本地合法数据的 inventory、visual reference report 和 Asset analysis helper；输出脱敏 report，不提交商业 payload |
 
@@ -115,16 +115,16 @@ python Tools/check_dynamic_artifacts.py
 | `astra-mcp` | 4 | MCP tool descriptor、Context Pack、permission、audit、command allowlist | `astra-core`, `astra-plugin` | Editor widget in Runtime tools |
 | `astra-emu-family-core` | 5 in progress | in-process legacy VFS、manifest v3、安全相对 private-file reader 与 family factory contract | `astra-core`, `serde`, `schemars` | ABI trait object、family key、商业 payload、本地路径 |
 | `astra-emu-family-support` | 5 in progress | 显式 factory registry、strict launch profile、viewer、verify、extract 与 Linux FUSE | `astra-emu-family-core`, `astra-media` | family 解密算法、私有 key 格式、隐式 provider 选择、media fallback |
-| `astra-emu-family-api` | 5 in progress | Family ABI v13 descriptor、probe/session/step、surface lease、Layer2D、Hook、writable-file、system-menu/confirmation/system-command、audio/video/wait/control DTO | `astra-core`, `astra-byte-source`, `astra-media-core`, `abi_stable`, `serde` | snapshot/save slot、text lease、Manager UI、RuntimeWorld、GPU/audio native handle |
+| `astra-emu-family-api` | 5 in progress | Family ABI v14 descriptor、probe/session/step、surface lease、Layer2D、Hook、writable-file、system-menu/confirmation/system-command/text-input、audio/video/wait/control DTO | `astra-core`, `astra-byte-source`, `astra-media-core`, `abi_stable`, `serde` | snapshot/save slot、text lease、Manager UI、RuntimeWorld、GPU/audio native handle |
 | `astra-emu-extension-api` | 5 in progress | Extension ABI v1 descriptor/lifecycle、同步 opaque Hook 与 UTF-8 translation companion contract | `astra-emu-family-api`, `abi_stable`, `serde`, `schemars` | HTTP provider、cache、字体布局、Host overlay、save/load slot |
 | `astra-emu-manager-core` | 5 in progress | SQLite Library、probe、family loading、RuntimeWorld lifecycle、launch profile、FilterGraph 与 evidence schema | `astra-emu-family-api`, `astra-runtime`, `astra-plugin`, `rusqlite` | Slint、winit、wgpu、family VFS implementation、脚本 patch runtime |
 | `astra-emu-metadata` | 5 in progress | VNDB/Bangumi provider adapter、版本化 matcher、license/consent、受限封面与 Bangumi 收藏状态 contract | `vn`, `bangumi-api`, `reqwest`, `unicode-normalization`, `strsim` | EngineCore、RuntimeWorld、family ABI、save/replay、package |
 | `astra-emu-manager-ui-slint` | 5 in progress | Slint ViewModel adapter、desktop/mobile/large-screen layout、overlay 与 accessibility | `slint`, `astra-emu-manager-core` | public runtime/package/save/ABI 类型泄漏 |
 | `astra-emu-manager` | 5 in progress | Program target、平台授权 source、显式 family VFS composition、Slint/WGPU same-device host、FVP runtime orchestration | `astra-emu-manager-core`, `astra-emu-manager-ui-slint`, `astra-emu-family-support`, `astra-emu-fvp`, `astra-emu-minori`, `wgpu`, `winit` | family VM 私有状态、第二套 RuntimeWorld、隐式 factory 注册 |
-| `astra-emu-fvp` | 5 in progress | thin dylib/export/build identity/error boundary；pinned RFVP fork 目标为直接实现 Family ABI v13 `Ported + SingleLayer`、surface/Hook/writable-file、system-menu/confirmation/system-command 与 input/audio/control；fork thinness audit 当前 blocking | `astra-emu-family-api`, `rfvp-astra-provider` | framebuffer compositor、scene translator、pixel copy、snapshot、text lease、runtime semantic hash |
+| `astra-emu-fvp` | 5 in progress | thin dylib/export/build identity/error boundary；pinned RFVP fork 目标为直接实现 Family ABI v14 `Ported + SingleLayer`、surface/Hook/writable-file、system-menu/confirmation/system-command 与 input/audio/control；fork thinness audit 当前 blocking | `astra-emu-family-api`, `rfvp-astra-provider` | framebuffer compositor、scene translator、pixel copy、snapshot、text lease、runtime semantic hash |
 | `astra-emu-translation-openai-compatible` | 5 in progress | ECNU/OpenAI-compatible Responses SSE、显式 Chat adapter、预算、熔断与平台 secret store | `reqwest`, `tokio`, `keyring` | Manager Core HTTP DTO、shipping credential persistence |
 | `astra-emu-schema` | 5 in progress | 从 Rust 真源生成 AstraEMU JSON Schema | `schemars` 与 AstraEMU contract crates | 手写 schema 真源 |
-| `astra-emu-minori` | 5 in progress | Minori PAZ v0-v2 family factory、纯 Rust流式 decrypt、`.sc` VM、Family ABI v13 `Native + MultiLayer`、core-owned text raster、原生 writable-file save、Host confirmation 与 typed system-command | `astra-emu-family-core`, `astra-emu-family-support`, `astra-emu-family-api`, `cosmic-text`, `blowfish`, `rc4`, `flate2` | key、商业 payload、明文 cache、Luau decrypt callback、Host text presentation、save slot API 或本地路径 |
+| `astra-emu-minori` | 5 in progress | Minori PAZ v0-v2 family factory、纯 Rust流式 decrypt、`.sc` VM、Family ABI v14 `Native + MultiLayer`、core-owned text raster、原生 writable-file save、Host confirmation、typed system-command 与 text-input | `astra-emu-family-core`, `astra-emu-family-support`, `astra-emu-family-api`, `cosmic-text`, `blowfish`, `rc4`, `flate2` | key、商业 payload、明文 cache、Luau decrypt callback、Host text presentation、save slot API 或本地路径 |
 | `astra-emu-minori-cli` | 5 in progress | archive/media inventory 与 `.sc` census | `astra-emu-minori`, `astra-emu-family-support` | key 生成、GARbro import、managed helper、runtime fallback |
 | `astra-emu-evidence` | 5 in progress | 校验 runtime/family/UI/FVP/translation/六平台 continuity，生成原子 Postcard evidence sections、hash summary 和 project-relative package fragment | `astra-emu-manager-core`, `postcard`, `serde_yaml` | 商业 payload、绝对路径、secret、key、手填 passing evidence |
 | `astra-emu-family-package` | 5 in progress | 检查 desktop/Android dynamic descriptor 或 iOS static archive identity，重算 binary hash，并通过 secure environment key 生成 detached Ed25519 manifest | `astra-emu-manager-core`, `ed25519-dalek`, `object` | 私钥文件、未签名发布包、运行时下载 |

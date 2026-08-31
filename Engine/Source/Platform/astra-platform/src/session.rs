@@ -249,6 +249,74 @@ pub enum ConfirmationResult {
     Cancelled,
 }
 
+/// A bounded native single-line text editor owned by the platform host.
+/// Families provide semantic labels; each target supplies its native IME,
+/// focus, accessibility and modal behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextInputRequest {
+    pub window: Option<WindowHandle>,
+    pub title: String,
+    pub label: String,
+    pub initial_value: String,
+    pub accept_label: String,
+    pub cancel_label: String,
+    pub max_bytes: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextInputResult {
+    pub accepted: bool,
+    pub value: String,
+}
+
+impl TextInputRequest {
+    pub fn validate(&self) -> Result<(), PlatformError> {
+        const MAX_TITLE_BYTES: usize = 256;
+        const MAX_LABEL_BYTES: usize = 256;
+        const MAX_BUTTON_BYTES: usize = 128;
+        const MAX_VALUE_BYTES: usize = 4096;
+        if !(1..=MAX_VALUE_BYTES as u32).contains(&self.max_bytes)
+            || self.title.trim().is_empty()
+            || self.label.trim().is_empty()
+            || self.accept_label.trim().is_empty()
+            || self.cancel_label.trim().is_empty()
+            || self.title.len() > MAX_TITLE_BYTES
+            || self.label.len() > MAX_LABEL_BYTES
+            || self.accept_label.len() > MAX_BUTTON_BYTES
+            || self.cancel_label.len() > MAX_BUTTON_BYTES
+            || self.initial_value.len() > self.max_bytes as usize
+            || self.initial_value.len() > MAX_VALUE_BYTES
+            || self.title.chars().any(char::is_control)
+            || self.label.chars().any(char::is_control)
+            || self.accept_label.chars().any(char::is_control)
+            || self.cancel_label.chars().any(char::is_control)
+            || self.initial_value.chars().any(char::is_control)
+            || self.accept_label == self.cancel_label
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.text_input",
+                "text-input title, label, value, or bounds are invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl TextInputResult {
+    pub fn validate_for(&self, request: &TextInputRequest) -> Result<(), PlatformError> {
+        if self.value.len() > request.max_bytes as usize || self.value.chars().any(char::is_control)
+        {
+            return Err(PlatformError::new(
+                PlatformErrorCode::InvalidState,
+                "window.text_input",
+                "text-input result exceeds the request bound",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl ConfirmationRequest {
     fn validate(&self) -> Result<(), PlatformError> {
         const MAX_TITLE_BYTES: usize = 256;
@@ -668,6 +736,10 @@ pub enum HostCommand {
         request: ConfirmationRequest,
         reply: oneshot::Sender<Result<ConfirmationResult, PlatformError>>,
     },
+    ShowTextInput {
+        request: TextInputRequest,
+        reply: oneshot::Sender<Result<TextInputResult, PlatformError>>,
+    },
     ApplyWindowCommand {
         window: WindowHandle,
         command: WindowCommand,
@@ -807,6 +879,7 @@ impl HostCommand {
             Self::CreateSurface { .. } => "surface.create",
             Self::ShowContextMenu { .. } => "window.context_menu",
             Self::ShowConfirmation { .. } => "window.confirmation",
+            Self::ShowTextInput { .. } => "window.text_input",
             Self::ApplyWindowCommand { .. } => "window.command",
             Self::OpenManual { .. } => "window.manual",
             Self::ShowAbout { .. } => "window.about",
@@ -889,6 +962,7 @@ impl HostCommand {
             Self::CreateSurface { reply, .. } => send_error!(reply),
             Self::ShowContextMenu { reply, .. } => send_error!(reply),
             Self::ShowConfirmation { reply, .. } => send_error!(reply),
+            Self::ShowTextInput { reply, .. } => send_error!(reply),
             Self::ApplyWindowCommand { reply, .. } => send_error!(reply),
             Self::OpenManual { reply, .. } => send_error!(reply),
             Self::ShowAbout { reply, .. } => send_error!(reply),
@@ -1188,6 +1262,22 @@ impl PlatformHostClient {
         response
             .await
             .map_err(|_| queue_closed("window.confirmation"))?
+    }
+
+    pub async fn show_text_input(
+        &self,
+        request: TextInputRequest,
+    ) -> Result<TextInputResult, PlatformError> {
+        request.validate()?;
+        self.ensure_running("window.text_input")?;
+        let expected = request.clone();
+        let (reply, response) = oneshot::channel();
+        self.try_send(HostCommand::ShowTextInput { request, reply })?;
+        let result = response
+            .await
+            .map_err(|_| queue_closed("window.text_input"))??;
+        result.validate_for(&expected)?;
+        Ok(result)
     }
 
     pub async fn apply_window_command(
@@ -2528,7 +2618,7 @@ mod tests {
     use super::{
         AboutRequest, AudioWakeRegistration, ConfirmationRequest, ContextMenuItem,
         ContextMenuItemKind, ContextMenuRequest, HomepageRequest, HostCommand, ManualRequest,
-        WindowCommand,
+        TextInputRequest, TextInputResult, WindowCommand,
     };
     use crate::WindowHandle;
     use std::{sync::Arc, thread, time::Duration};
@@ -2650,6 +2740,47 @@ mod tests {
     }
 
     #[test]
+    fn text_input_validates_bounds_and_result_identity() {
+        let request = TextInputRequest {
+            window: None,
+            title: "SAVE".into(),
+            label: "Comment".into(),
+            initial_value: "memo".into(),
+            accept_label: "OK".into(),
+            cancel_label: "Cancel".into(),
+            max_bytes: 8,
+        };
+        request.validate().unwrap();
+        TextInputResult {
+            accepted: true,
+            value: "new".into(),
+        }
+        .validate_for(&request)
+        .unwrap();
+
+        let mut invalid = request.clone();
+        invalid.max_bytes = 0;
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.text_input"
+        );
+        let mut invalid = request.clone();
+        invalid.initial_value = "012345678".into();
+        assert_eq!(
+            invalid.validate().unwrap_err().operation,
+            "window.text_input"
+        );
+        let invalid_result = TextInputResult {
+            accepted: true,
+            value: "012345678".into(),
+        };
+        assert_eq!(
+            invalid_result.validate_for(&request).unwrap_err().operation,
+            "window.text_input"
+        );
+    }
+
+    #[test]
     fn window_command_is_a_typed_host_operation() {
         let (reply, _response) = tokio::sync::oneshot::channel();
         let command = HostCommand::ApplyWindowCommand {
@@ -2757,6 +2888,23 @@ mod tests {
             }
             .operation(),
             "window.homepage"
+        );
+        let (text_reply, _) = tokio::sync::oneshot::channel();
+        assert_eq!(
+            HostCommand::ShowTextInput {
+                request: TextInputRequest {
+                    window: None,
+                    title: "SAVE".into(),
+                    label: "Comment".into(),
+                    initial_value: String::new(),
+                    accept_label: "OK".into(),
+                    cancel_label: "Cancel".into(),
+                    max_bytes: 256,
+                },
+                reply: text_reply,
+            }
+            .operation(),
+            "window.text_input"
         );
     }
 }

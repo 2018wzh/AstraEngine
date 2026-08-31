@@ -1093,3 +1093,24 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
   `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED` 或对应 unsupported diagnostic；没有用
   临时 GTK widget、Slint overlay 或外部进程伪造原生菜单证据。Linux 编译和实际桌面行为仍需在
   具备 GTK/winit 原生窗口的环境中单独验收。
+
+### 2026-08-31 Family ABI v14 文本输入与保存注释
+
+- Sandbox 观察确认 Save 空槽不是立即写入，而是先出现 Host-owned 的单行 Comment
+  编辑框；Family 只发布 prompt id、标题、标签、初值、按钮和 UTF-8 字节上限，Host
+  负责焦点、IME、Enter/Escape、DPI 和 owner-modal 生命周期。正文不进入日志、report、
+  replay 或路径相关字段。
+- Family API/FFI v14 增加 `LegacyTextInputTransactionV1` 和 typed result。Manager
+  只维护一个 session 内的 pending/resolution 队列；CLI Headless 通过显式的 typed
+  输入事件完成 Accepted/Cancelled，不能把字符事件伪装成 gameplay input。Minori
+  只有 Accepted 才把注释写入与 slot payload 同一 writable-file 原子替换，Cancelled
+  保持底层 wait 和存档文件不变。
+- Windows 已接入 owner-modal Win32 单行编辑框，按 live owner/system DPI 建立布局并
+  恢复焦点；macOS、Linux、Web、Android、Headless 当前明确返回
+  `PlatformNotImplemented`，待各自宿主绑定原生 UI 或 typed driver，不回退到 Slint、
+  Manager overlay 或逐字节模拟。Save 页已保存的注释如何在列表中显示尚未由原版同点
+  观察和资源证据闭合，因此保持为下一验收项。
+- `astra-emu-family-api` 38/38、Manager Core 文本输入/系统事务 5/5、Minori
+  180/180、`astra-platform` 11/11 和 Windows target 9/9 定向测试通过；这些是
+  contract/provider/Host 接线证据，不是完整路线、Release Sandbox、正式音频或 Windows
+  E3 证据。

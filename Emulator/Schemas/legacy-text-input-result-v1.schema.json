@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyTextInputResultV1",
+  "description": "Completion of a Host-native bounded single-line text prompt.",
+  "type": "object",
+  "required": [
+    "choice",
+    "prompt_id",
+    "sequence",
+    "value"
+  ],
+  "properties": {
+    "choice": {
+      "$ref": "#/definitions/LegacyTextInputChoiceV1"
+    },
+    "prompt_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "value": {
+      "type": "string"
+    }
+  },
+  "definitions": {
+    "LegacyTextInputChoiceV1": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "cancelled"
+      ]
+    }
+  }
+}

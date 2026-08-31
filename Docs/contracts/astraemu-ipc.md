@@ -4,13 +4,15 @@ AstraEMU v1 采用 Manager + `AstraEmuRuntimeProvider` + AstraEngine `RuntimeWor
 
 `EMUCoreBridge` 只作为 extension point 保留，用于外部工具或研究环境。它不属于 v1 主路径，也不能替换 `RuntimeWorld`。
 
-## v13 迁移状态
+## v14 迁移状态
 
-当前 hard-cut identity 为 `astra.emu.family_abi.v13`。v7/v8/v9/v10/v11/v12 module、fingerprint 与旧 runtime snapshot 必须在 provider 执行前拒绝；没有 compatibility shim。Product Runtime Provider ABI 保持 v4，Extension ABI identity 为 `astra.emu.extension_abi.v1`。v13 保留有界 typed system-menu 与 confirmation transaction，并新增同一 Family ABI session 的 typed system-command publication port。
+当前 hard-cut identity 为 `astra.emu.family_abi.v14`。v7/v8/v9/v10/v11/v12/v13 module、fingerprint 与旧 runtime snapshot 必须在 provider 执行前拒绝；没有 compatibility shim。Product Runtime Provider ABI 保持 v4，Extension ABI identity 为 `astra.emu.extension_abi.v1`。v14 保留有界 typed system-menu、confirmation 和 system-command transaction，并新增同一 Family ABI session 的 Host-native text-input publication port。
 
 Family 只发布菜单层级、启用状态、勾选状态和确认语义；Host 负责按当前平台能力呈现，并把 `Select`、`Dismiss`、`Accepted` 或 `Cancelled` 送回同一 session。Family action 只在已验证的结果进入固定 step 后执行，Host/Manager/CLI 不按 item 名称或确认文本解释 family 语义。Manager 的宿主界面使用 Slint，桌面 CLI 通过 `astra-platform` 的原生 context-menu/confirmation provider；Headless 使用序列化物理输入，不伪造桌面 native evidence。
 
 Windows Host 使用 Win32 `muda-win` 和原生 message dialog；macOS Host 使用 AppKit `muda`，在主线程按 live winit view 进行菜单追踪并转换 flipped-view 锚点。Windows Manager 的 audio/decode service host 没有 game window，但可以在自身 service thread 直接调用同一 native confirmation provider；该特例只覆盖 `ShowConfirmation`，不创建第二个 Winit loop，也不扩展到菜单、全屏、帮助、About 或 surface。Family 选择的窗口/帮助命令也只通过 typed system-command 交给 Host：Windows/macOS 对已绑定窗口执行原生全屏、原始尺寸恢复、缩放采样切换、HTML Help、About 对话框和系统浏览器打开；未绑定能力必须返回 `Applied`、`Rejected` 或 `Unsupported`，不能由 Family 或 Manager 自行改写窗口。缩放抗锯齿由 `astra-platform-common` 的 presentation core 在 GPU sampler 间切换，不重建 Family scene。当前 Linux Wayland Host 没有 GTK window 绑定，原生 context-menu 请求必须返回 `ASTRA_EMU_PLATFORM_CONTEXT_MENU_UNSUPPORTED`，不能保留 pending transaction 或隐式切换到 Manager/Headless UI。该差异是平台能力边界，不改变 Family ABI 的语义 ownership。
+
+`LegacyTextInputTransactionV1` 用有界 title、label、初始值和按钮标签描述单行编辑语义，Host 只返回带 prompt id 的 `Accepted`/`Cancelled` 结果；文本值只在该固定 step 中传递，不进入日志、evidence 或 Family ABI 的持久状态。Windows 使用 owner-modal Win32 编辑框、系统 DPI、IME、焦点恢复和 Enter/Escape 处理。macOS、Linux、Web、Android 与 Headless 在当前版本明确返回 `PlatformNotImplemented`，要求调用方绑定各自原生应用 UI 或 Headless typed driver，不回退到 Slint、Manager overlay 或逐字节模拟。
 
 本次 ABI 契约已经落地，FVP、Minori、Manager、CLI、Headless 与平台 renderer 的 consumer 迁移仍是 `IN_PROGRESS`。v7 的 scene transaction、snapshot/save/restore、text lease、session resource presentation 与 step budget 只属于历史实现，不是当前接口能力。
 
@@ -70,7 +72,7 @@ pub trait LegacyRuntimeProvider {
 }
 ```
 
-Family ABI v13 对 descriptor、instance、probe、open、step、surface、Hook、writable-file、system-menu、confirmation、system-command、只读 VFS 与 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。
+Family ABI v14 对 descriptor、instance、probe、open、step、surface、Hook、writable-file、system-menu、confirmation、system-command、text-input、只读 VFS 与 shutdown 使用显式 `StableAbi` wire DTO。字符串、数组、optional/result 和 map 分别使用 `RString`、`RVec`、`ROption`/`RResult` 与有序 pair list；serde 类型仍是业务契约真源，wire 层只做明确转换。
 
 `LegacySystemMenuTransactionV1` 最多包含 64 项，菜单深度最多为 4。重复 id、重复 sibling order、无效 parent、空 submenu、不可选 item 或错配 menu id 都会阻断。Windows native host 通过平台 context-menu provider 显示菜单；Manager 使用同一 transaction 构建 Slint overlay；Headless 只接受序列化物理方向键、确认键和取消键，不提供语义化选项快捷命令。菜单选中的窗口、帮助和关于操作会生成有界 `LegacySystemCommandTransactionV1`；Host 只按 typed kind 选择原生平台能力，结果在下一固定 step 以 `LegacySystemCommandResultV1` 回传。Family 不接收窗口句柄、URL 或本地路径，也不依赖通用事件字符串。
 

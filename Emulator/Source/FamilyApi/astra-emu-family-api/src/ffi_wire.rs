@@ -18,8 +18,9 @@ use crate::{
     LegacyRuntimeSessionId, LegacyRuntimeStatus, LegacySequenced, LegacyShutdownReport,
     LegacyStepInput, LegacyStepOutput, LegacySystemCommandKindV1, LegacySystemCommandResultV1,
     LegacySystemCommandStatusV1, LegacySystemCommandTransactionV1, LegacySystemMenuActionV1,
-    LegacySystemMenuRequestV1, LegacyTraceEntry, LegacyVfsListedFile, LegacyVideoCommandV1,
-    LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacySystemMenuRequestV1, LegacyTextInputChoiceV1, LegacyTextInputResultV1, LegacyTraceEntry,
+    LegacyVfsListedFile, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord,
+    LegacyWaitRequest,
 };
 
 #[repr(C)]
@@ -715,6 +716,62 @@ impl From<FfiConfirmationResultV1> for LegacyConfirmationResultV1 {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, StableAbi)]
+pub enum FfiTextInputChoiceV1 {
+    Accepted,
+    Cancelled,
+}
+
+impl From<LegacyTextInputChoiceV1> for FfiTextInputChoiceV1 {
+    fn from(value: LegacyTextInputChoiceV1) -> Self {
+        match value {
+            LegacyTextInputChoiceV1::Accepted => Self::Accepted,
+            LegacyTextInputChoiceV1::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+impl From<FfiTextInputChoiceV1> for LegacyTextInputChoiceV1 {
+    fn from(value: FfiTextInputChoiceV1) -> Self {
+        match value {
+            FfiTextInputChoiceV1::Accepted => Self::Accepted,
+            FfiTextInputChoiceV1::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiTextInputResultV1 {
+    pub prompt_id: RString,
+    pub choice: FfiTextInputChoiceV1,
+    pub value: RString,
+    pub sequence: u64,
+}
+
+impl From<LegacyTextInputResultV1> for FfiTextInputResultV1 {
+    fn from(value: LegacyTextInputResultV1) -> Self {
+        Self {
+            prompt_id: value.prompt_id.into(),
+            choice: value.choice.into(),
+            value: value.value.into(),
+            sequence: value.sequence,
+        }
+    }
+}
+
+impl From<FfiTextInputResultV1> for LegacyTextInputResultV1 {
+    fn from(value: FfiTextInputResultV1) -> Self {
+        Self {
+            prompt_id: value.prompt_id.to_string(),
+            choice: value.choice.into(),
+            value: value.value.to_string(),
+            sequence: value.sequence,
+        }
+    }
+}
+
 macro_rules! ffi_result_item {
     ($ffi:ident, $native:ident, $($field:ident),+) => {
         #[repr(C)]
@@ -786,6 +843,7 @@ pub struct FfiStepInput {
     pub system_menu: ROption<FfiSystemMenuRequestV1>,
     pub confirmation: ROption<FfiConfirmationResultV1>,
     pub system_command: ROption<FfiSystemCommandResultV1>,
+    pub text_input: ROption<FfiTextInputResultV1>,
     pub await_results: RVec<FfiAwaitResult>,
     pub provider_results: RVec<FfiProviderResult>,
 }
@@ -806,6 +864,7 @@ impl From<LegacyStepInput> for FfiStepInput {
             system_menu: value.system_menu.map(Into::into).into(),
             confirmation: value.confirmation.map(Into::into).into(),
             system_command: value.system_command.map(Into::into).into(),
+            text_input: value.text_input.map(Into::into).into(),
             await_results: value
                 .await_results
                 .into_iter()
@@ -833,6 +892,7 @@ impl From<FfiStepInput> for LegacyStepInput {
             system_menu: value.system_menu.into_option().map(Into::into),
             confirmation: value.confirmation.into_option().map(Into::into),
             system_command: value.system_command.into_option().map(Into::into),
+            text_input: value.text_input.into_option().map(Into::into),
             await_results: value
                 .await_results
                 .iter()
@@ -1846,6 +1906,7 @@ mod live_zero_copy_tests {
             }),
             confirmation: None,
             system_command: None,
+            text_input: None,
             await_results: Vec::new(),
             provider_results: Vec::new(),
         };
@@ -1868,6 +1929,7 @@ mod live_zero_copy_tests {
                 sequence: 15,
             }),
             system_command: None,
+            text_input: None,
             await_results: Vec::new(),
             provider_results: Vec::new(),
         };
@@ -1889,6 +1951,31 @@ mod live_zero_copy_tests {
                 command_id: "minori.system_command.window_fullscreen.12".into(),
                 status: LegacySystemCommandStatusV1::Applied,
                 sequence: 21,
+            }),
+            text_input: None,
+            await_results: Vec::new(),
+            provider_results: Vec::new(),
+        };
+        let decoded: LegacyStepInput = FfiStepInput::from(legacy.clone()).into();
+        assert_eq!(decoded, legacy);
+    }
+
+    #[test]
+    fn text_input_result_round_trips_through_family_ffi_wire() {
+        let legacy = LegacyStepInput {
+            tick_index: 16,
+            delta_ns: 16_666_667,
+            session_seed: 19,
+            mode: LegacyReplayMode::Live,
+            input_edges: Vec::new(),
+            system_menu: None,
+            confirmation: None,
+            system_command: None,
+            text_input: Some(LegacyTextInputResultV1 {
+                prompt_id: "minori.text_input.save_comment.0.7".into(),
+                choice: LegacyTextInputChoiceV1::Accepted,
+                value: "memo".into(),
+                sequence: 29,
             }),
             await_results: Vec::new(),
             provider_results: Vec::new(),

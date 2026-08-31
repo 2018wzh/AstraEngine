@@ -9,8 +9,6 @@ use astra_core::Hash256;
 #[cfg(test)]
 use astra_core::SchemaVersion;
 use astra_emu_extension_api::{translation_response, TRANSLATION_TEXT_HOOK_ID};
-#[cfg(test)]
-use astra_emu_family_api::LegacySystemCommandResultV1;
 use astra_emu_family_api::{
     validate_symbol, FamilyId, LegacyAudioCommandV1, LegacyAudioEncoding, LegacyAudioPacketV7,
     LegacyBlackboardMutation, LegacyBlendMode, LegacyConfirmationChoiceV1,
@@ -25,11 +23,14 @@ use astra_emu_family_api::{
     LegacyStepOutput as LegacyStepOutputV9, LegacySurfaceCommitV9, LegacySurfaceDamageV9,
     LegacySurfaceFormatV9, LegacySystemCommandKindV1, LegacySystemCommandStatusV1,
     LegacySystemCommandTransactionV1, LegacySystemMenuActionV1, LegacySystemMenuItemKindV1,
-    LegacySystemMenuItemV1, LegacySystemMenuTransactionV1, LegacyTextureFilter,
-    LegacyTextureFormat, LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1,
-    LegacyVfsReader, LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
+    LegacySystemMenuItemV1, LegacySystemMenuTransactionV1, LegacyTextInputChoiceV1,
+    LegacyTextInputTransactionV1, LegacyTextureFilter, LegacyTextureFormat,
+    LegacyTextureResourceV1, LegacyTraceEntry, LegacyVertexV1, LegacyVfsReader,
+    LegacyVideoCommandV1, LegacyVideoMode, LegacyVmTraceRecord, LegacyWaitRequest,
     LEGACY_FAMILY_ABI_FINGERPRINT, LEGACY_SYSTEM_UI_ACTIVE_BLACKBOARD_KEY,
 };
+#[cfg(test)]
+use astra_emu_family_api::{LegacySystemCommandResultV1, LegacyTextInputResultV1};
 use astra_emu_family_core::LegacyCoreError;
 use astra_emu_family_support::LegacyRuntimeVfsByteSource;
 use astra_media::{
@@ -46,7 +47,8 @@ use crate::save::{
     decode as decode_save, decode_config, encode as encode_save, encode_config, slot_path,
     slot_temporary_path, MinoriConfigEnvelope, MinoriSaveEnvelope, MINORI_CONFIG_MAX_BYTES,
     MINORI_CONFIG_PATH, MINORI_CONFIG_ROOT, MINORI_CONFIG_SCHEMA, MINORI_CONFIG_TEMPORARY_PATH,
-    MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT, MINORI_SAVE_SCHEMA,
+    MINORI_SAVE_COMMENT_MAX_BYTES, MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT,
+    MINORI_SAVE_SCHEMA,
 };
 use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
@@ -537,6 +539,7 @@ struct MinoriSession {
     /// payload; the platform host remains the source of the actual sampler.
     resize_antialias: bool,
     save_slots: BTreeSet<u32>,
+    save_slot_comments: BTreeMap<u32, String>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
     /// Last resource-backed presentation descriptor committed to the host.
@@ -561,6 +564,7 @@ struct MinoriSession {
     active_system_menu: Option<LegacySystemMenuTransactionV1>,
     active_confirmation: Option<ActiveMinoriConfirmation>,
     active_system_command: Option<ActiveMinoriSystemCommand>,
+    active_text_input: Option<ActiveMinoriTextInput>,
     poisoned: bool,
 }
 
@@ -584,6 +588,13 @@ struct ActiveMinoriSystemCommand {
     /// the retained gameplay presentation while the Host applies fullscreen.
     /// Native-menu window commands keep the existing retained scene.
     resume_gameplay: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveMinoriTextInput {
+    prompt_id: String,
+    slot: u32,
+    max_bytes: u32,
 }
 
 #[derive(Default)]
@@ -906,6 +917,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 config_persisted: persisted_config,
                 resize_antialias: true,
                 save_slots: BTreeSet::new(),
+                save_slot_comments: BTreeMap::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
                         MinoriTextSurfaceRenderer::new(width, height)
@@ -920,6 +932,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 active_system_menu: None,
                 active_confirmation: None,
                 active_system_command: None,
+                active_text_input: None,
                 poisoned: false,
             },
         );
@@ -1048,6 +1061,23 @@ impl MinoriRuntimeProvider {
         if session.active_confirmation.is_some() || input.confirmation.is_some() {
             let audio_commands = take_restore_audio_commands(session, &vfs)?;
             return handle_confirmation_step(session, &vfs, &input, audio_commands);
+        }
+        if session.active_text_input.is_some() || input.text_input.is_some() {
+            let audio_commands = take_restore_audio_commands(session, &vfs)?;
+            let services = host_services.as_ref().ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                    "text input requires current Family ABI Host services",
+                )
+            })?;
+            return handle_text_input_step(
+                services,
+                session_id,
+                session,
+                &vfs,
+                &input,
+                audio_commands,
+            );
         }
         for edge in &input.input_edges {
             if edge.control == MINORI_CONTROL_KEY {
@@ -1458,31 +1488,44 @@ impl MinoriRuntimeProvider {
             }
             if action != MinoriSystemUiAction::StartGame {
                 if let MinoriSystemUiAction::SaveSlot(slot) = action {
-                    save_slot(
-                        host_services
-                            .as_ref()
-                            .ok_or_else(|| {
-                                invalid(
-                                    "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
-                                    "save requires current Family ABI Host services",
-                                )
-                            })?
-                            .writable_files
-                            .as_ref(),
-                        session_id,
-                        session,
+                    let services = host_services.as_ref().ok_or_else(|| {
+                        invalid(
+                            "ASTRA_EMU_MINORI_RUNTIME_HOST_SERVICES",
+                            "save requires current Family ABI Host services",
+                        )
+                    })?;
+                    let sequence = session
+                        .vm
+                        .allocate_effect_sequence()
+                        .map_err(runtime_error)?;
+                    let prompt_id = format!("minori.text_input.save_comment.{slot}.{sequence}");
+                    let text_input = LegacyTextInputTransactionV1 {
+                        sequence,
+                        prompt_id: prompt_id.clone(),
+                        title: "SAVE".into(),
+                        label: "Comment".into(),
+                        initial_value: session
+                            .save_slot_comments
+                            .get(&slot)
+                            .cloned()
+                            .unwrap_or_default(),
+                        accept_label: "OK".into(),
+                        cancel_label: "Cancel".into(),
+                        max_bytes: MINORI_SAVE_COMMENT_MAX_BYTES as u32,
+                    };
+                    services
+                        .text_inputs
+                        .publish(&session_id.0, text_input.clone())?;
+                    session.active_text_input = Some(ActiveMinoriTextInput {
+                        prompt_id,
                         slot,
-                    )?;
-                    session.save_slots.insert(slot);
+                        max_bytes: text_input.max_bytes,
+                    });
                     session
                         .vm
-                        .advance_system_tick(input.tick_index)
+                        .advance_provider_tick(input.tick_index)
                         .map_err(runtime_error)?;
-                    session
-                        .vm
-                        .close_gameplay_system_page()
-                        .map_err(runtime_error)?;
-                    return gameplay_resume_output(session, &vfs, &input, restore_audio);
+                    return system_ui_output(session, &vfs, &input, restore_audio);
                 }
                 if let MinoriSystemUiAction::LoadSlot(slot) = action {
                     load_slot(
@@ -5916,12 +5959,19 @@ fn save_slot(
     session_id: &LegacyRuntimeSessionId,
     session: &MinoriSession,
     slot: u32,
+    comment: &str,
 ) -> Result<(), LegacyProviderError> {
     validate_save_slot(slot)?;
     if session.vm.state().system_ui.page != MinoriSystemPage::Save {
         return Err(invalid(
             "ASTRA_EMU_MINORI_SAVE_PAGE",
             "save slot writes require the save page",
+        ));
+    }
+    if comment.len() > MINORI_SAVE_COMMENT_MAX_BYTES || comment.chars().any(char::is_control) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_COMMENT",
+            "save comment is invalid or exceeds the bounded text length",
         ));
     }
     let mut state = MinoriVm::decode_snapshot(&session.vm.snapshot_bytes().map_err(runtime_error)?)
@@ -5944,6 +5994,7 @@ fn save_slot(
         profile_fingerprint: session.profile_fingerprint,
         script_uri: state.script_uri.clone(),
         script_hash: state.script_hash,
+        comment: comment.into(),
         vm_snapshot,
     };
     let payload = encode_save(&envelope).map_err(|_| {
@@ -6089,6 +6140,14 @@ fn load_slot(
             "load slot identity does not match the active case",
         ));
     }
+    if envelope.comment.len() > MINORI_SAVE_COMMENT_MAX_BYTES
+        || envelope.comment.chars().any(char::is_control)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_LOAD_SLOT_COMMENT",
+            "load slot comment is invalid or exceeds the bounded text length",
+        ));
+    }
     validate_script_uri(&envelope.script_uri)?;
     let target = envelope
         .script_uri
@@ -6162,6 +6221,7 @@ fn load_slot(
     session.reported_gallery_unlock_count = None;
     session.reported_choice_active = None;
     session.reported_progress_in_background = Some(false);
+    session.save_slot_comments.insert(slot, envelope.comment);
     Ok(())
 }
 
@@ -6631,7 +6691,7 @@ fn handle_system_menu_request(
                 }
                 "quick_save" => {
                     session.vm.open_save_page().map_err(runtime_error)?;
-                    save_slot(services.writable_files.as_ref(), session_id, session, 0)?;
+                    save_slot(services.writable_files.as_ref(), session_id, session, 0, "")?;
                     session
                         .vm
                         .close_gameplay_system_page()
@@ -6771,6 +6831,7 @@ fn handle_confirmation_step(
     audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
     if input.system_menu.is_some()
+        || input.text_input.is_some()
         || !input.input_edges.is_empty()
         || !input.await_results.is_empty()
         || !input.provider_results.is_empty()
@@ -6823,6 +6884,83 @@ fn handle_confirmation_step(
     }
 }
 
+fn handle_text_input_step(
+    services: &LegacyFamilyHostServicesV9,
+    session_id: &LegacyRuntimeSessionId,
+    session: &mut MinoriSession,
+    vfs: &Arc<dyn LegacyVfsReader>,
+    input: &LegacyStepInput,
+    audio_commands: Vec<LegacySequenced<LegacyAudioCommandV1>>,
+) -> Result<LegacyStepOutput, LegacyProviderError> {
+    if input.system_menu.is_some()
+        || input.confirmation.is_some()
+        || input.system_command.is_some()
+        || !input.input_edges.is_empty()
+        || !input.await_results.is_empty()
+        || !input.provider_results.is_empty()
+    {
+        session.poisoned = true;
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_INPUT_INPUT_WHILE_ACTIVE",
+            "active native text input must suspend gameplay input and completions",
+        ));
+    }
+    let active = session.active_text_input.clone().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_TEXT_INPUT_NOT_ACTIVE",
+            "text-input result has no active Minori transaction",
+        )
+    })?;
+    let Some(result) = input.text_input.as_ref() else {
+        session
+            .vm
+            .advance_provider_tick(input.tick_index)
+            .map_err(runtime_error)?;
+        return system_ui_output(session, vfs, input, audio_commands);
+    };
+    result.validate()?;
+    if result.prompt_id != active.prompt_id {
+        session.poisoned = true;
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_INPUT_ID_MISMATCH",
+            "text-input result does not match the active Minori transaction",
+        ));
+    }
+    if result.value.len() > active.max_bytes as usize {
+        session.poisoned = true;
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_TEXT_INPUT_VALUE",
+            "text-input result exceeds the active Minori transaction bound",
+        ));
+    }
+    session.active_text_input = None;
+    session
+        .vm
+        .advance_provider_tick(input.tick_index)
+        .map_err(runtime_error)?;
+    match result.choice {
+        LegacyTextInputChoiceV1::Accepted => {
+            save_slot(
+                services.writable_files.as_ref(),
+                session_id,
+                session,
+                active.slot,
+                &result.value,
+            )?;
+            session.save_slots.insert(active.slot);
+            session
+                .save_slot_comments
+                .insert(active.slot, result.value.clone());
+        }
+        LegacyTextInputChoiceV1::Cancelled => {}
+    }
+    session
+        .vm
+        .close_gameplay_system_page()
+        .map_err(runtime_error)?;
+    gameplay_resume_output(session, vfs, input, audio_commands)
+}
+
 fn handle_system_command_step(
     services: &LegacyFamilyHostServicesV9,
     session_id: &LegacyRuntimeSessionId,
@@ -6833,6 +6971,7 @@ fn handle_system_command_step(
 ) -> Result<LegacyStepOutput, LegacyProviderError> {
     if input.system_menu.is_some()
         || input.confirmation.is_some()
+        || input.text_input.is_some()
         || !input.input_edges.is_empty()
         || !input.await_results.is_empty()
         || !input.provider_results.is_empty()
@@ -10738,6 +10877,26 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingTextInputHost {
+        published: std::sync::Mutex<Vec<(String, LegacyTextInputTransactionV1)>>,
+    }
+
+    impl astra_emu_family_api::LegacyTextInputHostV1 for RecordingTextInputHost {
+        fn publish(
+            &self,
+            session_id: &str,
+            text_input: LegacyTextInputTransactionV1,
+        ) -> Result<(), LegacyProviderError> {
+            text_input.validate()?;
+            self.published
+                .lock()
+                .unwrap()
+                .push((session_id.into(), text_input));
+            Ok(())
+        }
+    }
+
     struct ReplacingHookHost {
         count: Arc<std::sync::atomic::AtomicUsize>,
     }
@@ -11118,7 +11277,7 @@ mod tests {
         refresh_save_slots(&writable, &session_id, session).unwrap();
         assert!(session.save_slots.is_empty());
         session.vm.open_save_page().unwrap();
-        save_slot(&writable, &session_id, session, 7).unwrap();
+        save_slot(&writable, &session_id, session, 7, "memo").unwrap();
         assert!(writable.files.lock().unwrap().contains_key(&slot_path(7)));
         session.vm.close_gameplay_system_page().unwrap();
         session.vm.open_load_page().unwrap();
@@ -11126,6 +11285,7 @@ mod tests {
         assert_eq!(session.vm.state().system_ui.page, MinoriSystemPage::None);
         assert_eq!(session.vm.state().fixed_tick, 2);
         assert!(session.vm.state().wait.is_some());
+        assert_eq!(session.save_slot_comments.get(&7), Some(&"memo".to_owned()));
     }
 
     #[test]
@@ -11221,14 +11381,16 @@ mod tests {
         let surfaces = Arc::new(RecordingSurfaceHost::default());
         let writable = Arc::new(InMemoryWritableFiles::default());
         let system_menus = Arc::new(RecordingSystemMenuHost::default());
+        let text_inputs = Arc::new(RecordingTextInputHost::default());
         let services = LegacyFamilyHostServicesV9 {
             vfs: Arc::clone(&vfs),
             surfaces,
             hooks: Arc::new(UnboundHookHost),
-            writable_files: writable,
+            writable_files: writable.clone(),
             system_menus: system_menus.clone(),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
             system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: text_inputs.clone(),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11371,6 +11533,58 @@ mod tests {
                 .iter()
                 .any(|resource| resource.resource_uri == "minori:/sys/saveloadBase.png")
         }));
+
+        let prompt_output = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: "enter".into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 3,
+                    }],
+                    ..step_input(4, Vec::new())
+                },
+            )
+            .unwrap();
+        let prompt = text_inputs.published.lock().unwrap()[0].1.clone();
+        assert!(prompt
+            .prompt_id
+            .starts_with("minori.text_input.save_comment.0."));
+        assert_eq!(prompt.title, "SAVE");
+        assert_eq!(prompt.label, "Comment");
+        assert_eq!(prompt.initial_value, "");
+        assert_eq!(prompt.max_bytes, 256);
+        assert!(prompt_output.live.resource_scenes.iter().any(|scene| {
+            scene
+                .value
+                .texture_resources
+                .iter()
+                .any(|resource| resource.resource_uri == "minori:/sys/saveloadBase.png")
+        }));
+
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    text_input: Some(LegacyTextInputResultV1 {
+                        prompt_id: prompt.prompt_id,
+                        choice: LegacyTextInputChoiceV1::Accepted,
+                        value: "memo".into(),
+                        sequence: 4,
+                    }),
+                    ..step_input(5, Vec::new())
+                },
+            )
+            .unwrap();
+        assert!(writable.files.lock().unwrap().contains_key(&slot_path(0)));
+        assert_eq!(
+            provider.sessions[&session.0].save_slot_comments.get(&0),
+            Some(&"memo".to_owned())
+        );
     }
 
     #[test]
@@ -11391,6 +11605,7 @@ mod tests {
             system_menus: system_menus.clone(),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
             system_commands: system_commands.clone(),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11538,6 +11753,7 @@ mod tests {
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
             system_commands: system_commands.clone(),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11668,6 +11884,7 @@ mod tests {
                 system_menus: system_menus.clone(),
                 confirmations: Arc::new(RecordingConfirmationHost::default()),
                 system_commands: system_commands.clone(),
+                text_inputs: Arc::new(RecordingTextInputHost::default()),
             };
             let mut provider = MinoriRuntimeProvider::with_host_services(services);
             let ctx = context();
@@ -11797,6 +12014,7 @@ mod tests {
             system_menus: system_menus.clone(),
             confirmations: confirmations.clone(),
             system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -11954,6 +12172,7 @@ mod tests {
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: confirmations.clone(),
             system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -12128,6 +12347,7 @@ mod tests {
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
             system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let mut published_layers = BTreeSet::new();
         let mut presentation_layers = BTreeMap::new();
@@ -12215,6 +12435,7 @@ mod tests {
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
             system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let mut provider = MinoriRuntimeProvider::with_host_services(services);
         let ctx = context();
@@ -12551,6 +12772,7 @@ mod tests {
             system_menus: Arc::new(RecordingSystemMenuHost::default()),
             confirmations: Arc::new(RecordingConfirmationHost::default()),
             system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
         };
         let storage_options = BTreeMap::from([(
             MINORI_GLOBAL_PROGRESS_OPTION.into(),
@@ -16060,6 +16282,7 @@ mod tests {
             system_menu: None,
             confirmation: None,
             system_command: None,
+            text_input: None,
             await_results,
             provider_results: Vec::new(),
         }

@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LegacyTextInputTransactionV1",
+  "description": "Host-native single-line text prompt.  The family owns the semantic labels and the Host owns the platform-specific editor, focus and IME behavior.",
+  "type": "object",
+  "required": [
+    "accept_label",
+    "cancel_label",
+    "initial_value",
+    "label",
+    "max_bytes",
+    "prompt_id",
+    "sequence",
+    "title"
+  ],
+  "properties": {
+    "accept_label": {
+      "type": "string"
+    },
+    "cancel_label": {
+      "type": "string"
+    },
+    "initial_value": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "max_bytes": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "prompt_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "title": {
+      "type": "string"
+    }
+  }
+}

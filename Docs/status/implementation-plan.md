@@ -1,6 +1,15 @@
 # Implementation Plan Status
 
-2026 年 8 月 31 日 Windows 原生确认框几何复核：Family ABI v13 的 Host presenter
+2026 年 8 月 31 日 Family ABI v14 text-input seam：Minori Save 的 Comment
+提示现在通过 `LegacyTextInputTransactionV1` 交给 Host。Windows 使用 owner-modal
+Win32 单行编辑框，沿用系统 DPI、IME、焦点恢复以及 Enter/Escape 语义；结果以
+prompt id 和有界 UTF-8 值回到下一固定 step，并由 Minori save envelope 持久化。
+macOS/Linux/Web/Android/Headless 当前明确返回 `PlatformNotImplemented`，等待各自
+原生应用 UI 或 typed Headless driver；不回退到 Slint/Manager overlay。Family API、
+FFI、Manager、Minori、平台和 schema 定向测试通过。该项只关闭 Host 接线，不提升
+Save 页面文字视觉、Release Sandbox、完整路线或 Windows E3。
+
+2026 年 8 月 31 日 Windows 原生确认框几何复核：Family ABI v14 的 Host presenter
 现在以原版接近的 350×164（96 DPI）为紧凑基准，依据 owner window 的有效 DPI 缩放
 窗口、消息和按钮；无 owner 的 Manager service 调用使用系统 DPI。客户区位置按观测
 固定为 question icon `(26,28)`、消息 `(64,28)`、按钮带 `y=100`，并使用标准 Win32
@@ -29,7 +38,7 @@ Windows/macOS 的 native presenter 一致。Linux context menu、窗口命令和
 运行验收仍未形成。
 
 2026 年 8 月 31 日 Windows Manager confirmation service 接线：Manager 的
-audio/decode service host 现在直接消费 Family ABI v13 的 `ShowConfirmation`，在
+audio/decode service host 现在直接消费 Family ABI v14 的 `ShowConfirmation`，在
 自己的 service thread 通过 Host-owned Win32 modal window 回送 typed
 `Accepted`/`Cancelled`；它不创建第二个 Winit loop，也不接管菜单、全屏、帮助、
 About 或 surface。根 `rfd` 移除 `common-controls-v6` 后，CLI 不再在进入 `main` 前
@@ -39,7 +48,7 @@ About 或 surface。根 `rfd` 移除 `common-controls-v6` 后，CLI 不再在进
 正式音频或 Windows E3。
 
 2026 年 8 月 31 日 Family ABI 原生菜单 Host 分层：确认框和右键菜单仍由
-Family ABI v13 typed transaction 传递，Windows 使用原生 provider，macOS 使用
+Family ABI v14 typed transaction 传递，Windows 使用原生 provider，macOS 使用
 AppKit `muda` 原生 context menu，并处理 winit flipped view 的显式锚点。窗口/帮助
 动作也已由同一 Host port 接通：Windows 通过 `hh.exe`、Win32 ShellExecute 和
 `rfd` 呈现手册、主页与 About，macOS 使用系统 `open` 和原生 About 对话框。
@@ -92,7 +101,7 @@ save/restore required checkpoint 继续保持 `IN_PROGRESS`。
 
 2026 年 8 月 31 日原版确认框对齐：Windows Sandbox 的 Game→Exit 与
 Game→Return title 均使用原生两按钮对话框，按钮为 `是(Y)`/`否(N)`；Minori
- provider 已把观察到的日文正文通过 Family ABI v13 交给 Host，取消保持原有
+ provider 已把观察到的日文正文通过 Family ABI v14 交给 Host，取消保持原有
 剧情 wait，接受才退出或回到标题。Headless 仍只使用物理输入路径。旧私有
 路线序列引用了已删除的 `runtime.awaiting_input` 观察键，按 hard-cut 规则拒绝；
 新序列尚未形成完整 Release Sandbox 或 Windows E3 证据，因此整体状态保持
@@ -222,8 +231,8 @@ RFVP hosted fork 固定到 `15d6c1f9fa490f0d1d87a58dda601ca276ccd8f9`，其 Astr
 | Stage 3 AstraVN | `IN_PROGRESS` | Migration 6、Migration 9 与 Migration 12 的 shared implementation 已落地。Engine workspace 使用仅供测试且禁止 release 的 NativeVN `minimal` profile；TsuiNoSora 工具与私有素材验收保持独立，不作为 Engine 主线门禁。2026-07-20 的 source-locked Classic private RC 在 Windows DX12 离散 GPU 上通过 43 个 Headless checkpoint、完整 Y 路线物理输入、13 项同节点视觉比较、安全扫描和人工签署，并形成七天私密交付；package 保留 37 条路线但只保证 Y 可玩。Windows E3、其余路线和正式公开许可均未关闭，Stage 3 继续由 `S3-TSUI-INTERNAL-DEMO-01`、`S3-TSUI-GATE-01` 与 `S3-FLAGSHIP-DEMO-01` 阻断 |
 | Stage 4 Editor + AI/MCP | `REOPENED_SPEC` | Editor workflow、runtime-provider-aware shell、Plugin Manager、AI provider profile、ONNX ModelBundle、Runtime Director、memory、MCP context 和 AI/MCP gate 已写入文档；`Editor/Source` 和 `Engine/Plugins/Providers/astra-ai-onnx` 尚不存在。Stage 4 因 VFS/GameRuntime contract 重开，Project Wizard、PIE、Debugger 和 Release Gate 必须读取 `RuntimeEditorMetadata`，ONNX ModelBundle、Context Pack、generated artifact 和 MCP package access 需要改为统一 VFS mount evidence |
 | Stage 6 Platform Completion | `IN_PROGRESS` | Linux、macOS host 和 packaged Player 已进入静态实现；Android 的真实 Runtime/provider Player、Vulkan/AAudio/MediaCodec/save/package/accessibility/input host services 已接通，bundle、Gradle 和 build driver 同步落地；Linux/macOS Headless portability、真实 host smoke/decode/save/resume/release evidence，以及 Android API 28/36 emulator、arm64 真机和正式同 run E3 仍 blocking；iOS 保持 `SPEC_READY` |
-| Stage 5 AstraEMU | `IN_PROGRESS` | 当前 consumer 统一基于 Family ABI v9（fingerprint `astra.emu.family_abi.v9`，Provider ABI v4）；Minori 走 `Native + MultiLayer`，通过 Host-owned writable surface、retained `Layer2D`、同步 Hook、writable-file port 和 family-owned CosmicText/Astra Renderer2D 运行。FVP 仍从 vendor RFVP 迁至 pinned thin fork hosted-core，但其 scene/text consumer 尚待按 v9 `Ported + SingleLayer` 合同继续迁移；旧 v7/v8 动态运行、snapshot、text lease 和 scene transaction 只保留为历史 evidence，不作为当前可加载 contract。Minori 当前签名 package 已在真实八包完成首路线、Config、backlog、save/load 和鉴赏页的增量 Headless E2；Minori library 145/145、Manager/CLI 受影响定向测试和 `astra-headless` build 通过。显式绑定 `astra.provider.storage = astra.writable_file.v1` 时，已应用 Config 另以 identity-bound `astra.emu.minori.config.v1` envelope 原子持久化；损坏、越界和 case/package/profile 漂移直接阻断，gameplay save restore 不会回滚当前 installation-scoped Config。Manager family-mounted image/audio/video path 现都通过明确的 provider/adapter：PNG/JPEG/BMP/WebP 与 ANI/SQZ 首帧绑定 image providers，Symphonia 音频显式绑定，Minori AVI 绑定 AstraMedia `ffmpeg-vcpkg` 增量 provider；legacy resource-scene 不再绕过 decode registry。v9 audio/video `Play` 没有 seek 起点，restore 只可重新提交从起点开始的确定性播放，原位置媒体 continuation 保持 blocking。完整四路线自然解锁、正式音频听审、movie gallery 原版视觉 parity、cache volume 复验、FVP v9 consumer、Linux FUSE 和 Windows E3 仍保持 blocking，Stage 5 不得标记 `DONE` |
-> 当前身份修正：上表及下方旧条目中的 family ABI v5/v6/v7/v8、signed dynamic v5/v6/v7/v8 与旧 snapshot schema 只描述迁移前历史 evidence，不能代表当前可加载 contract。当前实现仅接受 Family ABI v9；Minori runtime snapshot 是 family-owned schema，不能与 ABI 版本混用。正式结论以当前 v9 consumer 定向测试和新的 host E2/E3 复跑为准。
+| Stage 5 AstraEMU | `IN_PROGRESS` | 当前 consumer 统一基于 Family ABI v14（fingerprint `astra.emu.family_abi.v14`，Provider ABI v4）；Minori 走 `Native + MultiLayer`，通过 Host-owned writable surface、retained `Layer2D`、同步 Hook、writable-file port、family-owned CosmicText/Astra Renderer2D 和 Host-native menu/confirmation/text-input ports 运行。FVP 仍从 vendor RFVP 迁至 pinned thin fork hosted-core，但其 scene/text consumer 尚待按 v9 `Ported + SingleLayer` 合同继续迁移；旧 v7/v8/v9 动态运行、snapshot、text lease 和 scene transaction 只保留为历史 evidence，不作为当前可加载 contract。Minori 当前签名 package 已在真实八包完成首路线、Config、backlog、save/load 和鉴赏页的增量 Headless E2；Minori library 145/145、Manager/CLI 受影响定向测试和 `astra-headless` build 通过。显式绑定 `astra.provider.storage = astra.writable_file.v1` 时，已应用 Config 另以 identity-bound `astra.emu.minori.config.v1` envelope 原子持久化；损坏、越界和 case/package/profile 漂移直接阻断，gameplay save restore 不会回滚当前 installation-scoped Config。Manager family-mounted image/audio/video path 现都通过明确的 provider/adapter：PNG/JPEG/BMP/WebP 与 ANI/SQZ 首帧绑定 image providers，Symphonia 音频显式绑定，Minori AVI 绑定 AstraMedia `ffmpeg-vcpkg` 增量 provider；legacy resource-scene 不再绕过 decode registry。v9 audio/video `Play` 没有 seek 起点，restore 只可重新提交从起点开始的确定性播放，原位置媒体 continuation 保持 blocking。完整四路线自然解锁、正式音频听审、movie gallery 原版视觉 parity、Save 页注释视觉、cache volume 复验、FVP v9 consumer、Linux FUSE 和 Windows E3 仍保持 blocking，Stage 5 不得标记 `DONE` |
+> 当前身份修正：上表及下方旧条目中的 family ABI v5/v6/v7/v8/v9、signed dynamic v5/v6/v7/v8/v9 与旧 snapshot schema 只描述迁移前历史 evidence，不能代表当前可加载 contract。当前实现仅接受 Family ABI v14；Minori runtime snapshot 是 family-owned schema，不能与 ABI 版本混用。正式结论以当前 v14 consumer 定向测试和新的 host E2/E3 复跑为准。
 
 > 2026-08-03 native update：同一授权输入的 4,201-step 复跑，在移除 submit 后冗余 query 后将 `media_queue` p99 从 21.95 ms 降至 16.36 ms，音频 underflow 为零。完整 `fixed_tick` Perfetto span p99 仍为 18.52 ms；原生 60 Hz gate 未通过，不能代替 10 分钟 soak 或作为修复结论。
 

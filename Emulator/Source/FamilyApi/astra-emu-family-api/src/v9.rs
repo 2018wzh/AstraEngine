@@ -83,6 +83,19 @@ pub trait LegacySystemCommandHostV1: Send + Sync {
     ) -> Result<(), LegacyProviderError>;
 }
 
+/// Non-blocking native text-input publication port.
+///
+/// The family owns the prompt semantics and bounded strings. The Host owns
+/// the native editor, IME, focus and accessibility behavior and returns one
+/// typed result through a later fixed step.
+pub trait LegacyTextInputHostV1: Send + Sync {
+    fn publish(
+        &self,
+        session_id: &str,
+        text_input: crate::LegacyTextInputTransactionV1,
+    ) -> Result<(), LegacyProviderError>;
+}
+
 #[derive(Clone)]
 pub struct LegacyFamilyHostServicesV9 {
     pub vfs: Arc<dyn crate::LegacyVfsReader>,
@@ -92,6 +105,7 @@ pub struct LegacyFamilyHostServicesV9 {
     pub system_menus: Arc<dyn LegacySystemMenuHostV1>,
     pub confirmations: Arc<dyn LegacyConfirmationHostV1>,
     pub system_commands: Arc<dyn LegacySystemCommandHostV1>,
+    pub text_inputs: Arc<dyn LegacyTextInputHostV1>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -792,6 +806,27 @@ pub struct FfiPublishSystemCommandCallV1 {
     pub command: crate::FfiSystemCommandTransactionV1,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiTextInputTransactionV1 {
+    pub sequence: u64,
+    pub prompt_id: RString,
+    pub title: RString,
+    pub label: RString,
+    pub initial_value: RString,
+    pub accept_label: RString,
+    pub cancel_label: RString,
+    pub max_bytes: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, StableAbi)]
+pub struct FfiPublishTextInputCallV1 {
+    pub host_token: RString,
+    pub session_id: RString,
+    pub text_input: FfiTextInputTransactionV1,
+}
+
 pub type FfiAcquireSurfaceV9 =
     extern "C" fn(FfiAcquireSurfaceCallV9) -> FfiLegacyResult<FfiSurfaceLeaseV9>;
 pub type FfiCommitSurfaceV9 = extern "C" fn(FfiCommitSurfaceCallV9) -> FfiLegacyResult<()>;
@@ -803,6 +838,7 @@ pub type FfiPublishConfirmationV1 =
     extern "C" fn(FfiPublishConfirmationCallV1) -> FfiLegacyResult<()>;
 pub type FfiPublishSystemCommandV1 =
     extern "C" fn(FfiPublishSystemCommandCallV1) -> FfiLegacyResult<()>;
+pub type FfiPublishTextInputV1 = extern "C" fn(FfiPublishTextInputCallV1) -> FfiLegacyResult<()>;
 
 impl From<crate::LegacyConfirmationTransactionV1> for FfiConfirmationTransactionV1 {
     fn from(value: crate::LegacyConfirmationTransactionV1) -> Self {

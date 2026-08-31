@@ -24,7 +24,8 @@ impl FfiLegacyFamilyHostAdapter {
             writable_files: shared.clone(),
             system_menus: shared.clone(),
             confirmations: shared.clone(),
-            system_commands: shared,
+            system_commands: shared.clone(),
+            text_inputs: shared,
         }
     }
 }
@@ -308,6 +309,32 @@ impl LegacySystemCommandHostV1 for FfiLegacyFamilyHostAdapter {
                 host_token: self.services.host_token.clone(),
                 session_id: session_id.into(),
                 command: command.into(),
+            },
+        ))
+    }
+}
+
+impl LegacyTextInputHostV1 for FfiLegacyFamilyHostAdapter {
+    fn publish(
+        &self,
+        session_id: &str,
+        text_input: LegacyTextInputTransactionV1,
+    ) -> Result<(), LegacyProviderError> {
+        text_input.validate()?;
+        native_result((self.services.publish_text_input)(
+            FfiPublishTextInputCallV1 {
+                host_token: self.services.host_token.clone(),
+                session_id: session_id.into(),
+                text_input: FfiTextInputTransactionV1 {
+                    sequence: text_input.sequence,
+                    prompt_id: text_input.prompt_id.into(),
+                    title: text_input.title.into(),
+                    label: text_input.label.into(),
+                    initial_value: text_input.initial_value.into(),
+                    accept_label: text_input.accept_label.into(),
+                    cancel_label: text_input.cancel_label.into(),
+                    max_bytes: text_input.max_bytes,
+                },
             },
         ))
     }

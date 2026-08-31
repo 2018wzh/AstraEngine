@@ -462,6 +462,13 @@ mod linux {
                             .and_then(|window| show_confirmation(window.map(Arc::as_ref), request));
                         let _ = reply.send(result);
                     }
+                    HostCommand::ShowTextInput { reply, .. } => {
+                        let _ = reply.send(Err(PlatformError::new(
+                            PlatformErrorCode::PlatformNotImplemented,
+                            "window.text_input",
+                            "Linux text input is owned by the native application UI",
+                        )));
+                    }
                     HostCommand::CreateWindow { request, reply } => {
                         let attributes = WindowAttributes::default()
                             .with_title(request.title)

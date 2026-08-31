@@ -104,8 +104,8 @@ mod windows {
         InputState, ManualRequest, OpenedAudioOutput, PackageSourceHandle, PackageSourceRequest,
         PlatformBackendChannels, PlatformCommandWakeRegistration, PlatformDecodeRequest,
         PlatformError, PlatformErrorCode, PlatformEvent, PlatformEventKind, PlatformHostProfile,
-        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TouchPhase,
-        WindowCommand, WindowHandle,
+        PlatformHostSession, PointerButton, SaveTransactionHandle, SurfaceHandle, TextInputRequest,
+        TextInputResult, TouchPhase, WindowCommand, WindowHandle,
     };
     use astra_platform_common::{
         AtomicSaveStore, CachedPackageSource, FilePackageSource, NullAudioProducer, ResourceTable,
@@ -312,6 +312,10 @@ mod windows {
                         // so Family ABI transactions do not get stranded in
                         // Manager sessions.
                         let result = show_confirmation(None, request);
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::ShowTextInput { request, reply } => {
+                        let result = show_text_input(None, request);
                         let _ = reply.send(result);
                     }
                     #[cfg(feature = "platform-test-driver")]
@@ -692,6 +696,14 @@ mod windows {
                             .map(|handle| self.windows.get(handle))
                             .transpose()
                             .and_then(|window| show_confirmation(window.map(Arc::as_ref), request));
+                        let _ = reply.send(result);
+                    }
+                    HostCommand::ShowTextInput { request, reply } => {
+                        let result = request
+                            .window
+                            .map(|handle| self.windows.get(handle))
+                            .transpose()
+                            .and_then(|window| show_text_input(window.map(Arc::as_ref), request));
                         let _ = reply.send(result);
                     }
                     HostCommand::ApplyWindowCommand {
@@ -2986,6 +2998,538 @@ mod windows {
                 "native confirmation closed without a result",
             )
         })
+    }
+
+    struct TextInputDialogState {
+        result: Option<TextInputResult>,
+        closed: bool,
+        edit: Option<windows::Win32::Foundation::HWND>,
+        read_error: bool,
+    }
+
+    const TEXT_INPUT_ACCEPT_ID: usize = 1101;
+    const TEXT_INPUT_CANCEL_ID: usize = 1102;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct TextInputGeometry {
+        width: i32,
+        height: i32,
+        label_x: i32,
+        label_y: i32,
+        label_width: i32,
+        label_height: i32,
+        edit_x: i32,
+        edit_y: i32,
+        edit_width: i32,
+        edit_height: i32,
+        accept_x: i32,
+        accept_y: i32,
+        cancel_x: i32,
+        cancel_y: i32,
+        button_width: i32,
+        button_height: i32,
+    }
+
+    fn text_input_geometry(dpi: u32) -> TextInputGeometry {
+        let dpi = if dpi == 0 { 96 } else { dpi };
+        let scale = |value: i32| scale_dialog_dimension(value, dpi);
+        TextInputGeometry {
+            width: scale(420),
+            height: scale(190),
+            label_x: scale(24),
+            label_y: scale(30),
+            label_width: scale(372),
+            label_height: scale(24),
+            edit_x: scale(24),
+            edit_y: scale(58),
+            edit_width: scale(372),
+            edit_height: scale(28),
+            accept_x: scale(214),
+            accept_y: scale(126),
+            cancel_x: scale(310),
+            cancel_y: scale(126),
+            button_width: scale(88),
+            button_height: scale(28),
+        }
+    }
+
+    fn show_text_input(
+        window: Option<&Window>,
+        request: TextInputRequest,
+    ) -> Result<TextInputResult, PlatformError> {
+        use std::ffi::c_void;
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::{HINSTANCE, HWND, LPARAM, WPARAM},
+                Graphics::Gdi::{GetStockObject, DEFAULT_GUI_FONT},
+                System::{LibraryLoader::GetModuleHandleW, SystemServices::SS_LEFT},
+                UI::{
+                    Controls::EM_LIMITTEXT,
+                    Input::KeyboardAndMouse::{EnableWindow, IsWindowEnabled, SetFocus},
+                    WindowsAndMessaging::{
+                        CreateWindowExW, DestroyWindow, DispatchMessageW, GetMessageW,
+                        IsDialogMessageW, SendMessageW, SetForegroundWindow, SetWindowTextW,
+                        ShowWindow, TranslateMessage, BS_DEFPUSHBUTTON, BS_PUSHBUTTON,
+                        ES_AUTOHSCROLL, ES_LEFT, SW_SHOW, WM_KEYDOWN, WM_SETFONT, WS_BORDER,
+                        WS_CAPTION, WS_CHILD, WS_EX_CLIENTEDGE, WS_EX_CONTROLPARENT,
+                        WS_EX_DLGMODALFRAME, WS_POPUP, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+                    },
+                },
+            },
+        };
+
+        request
+            .validate()
+            .map_err(|_| host_error("window.text_input", "native text-input request is invalid"))?;
+        ensure_text_input_class()?;
+        let owner = window
+            .map(|window| {
+                let raw = window
+                    .window_handle()
+                    .map_err(|_| host_error("window.text_input", "window handle is unavailable"))?
+                    .as_raw();
+                match raw {
+                    RawWindowHandle::Win32(handle) => Ok(HWND(handle.hwnd.get() as *mut c_void)),
+                    _ => Err(host_error(
+                        "window.text_input",
+                        "Windows host returned a non-Win32 window handle",
+                    )),
+                }
+            })
+            .transpose()?;
+
+        let class_name = widestring("AstraEmuTextInputDialog");
+        let title_wide = widestring(&request.title);
+        let label_wide = widestring(&request.label);
+        let accept_wide = widestring(&request.accept_label);
+        let cancel_wide = widestring(&request.cancel_label);
+        let initial_wide = widestring(&request.initial_value);
+        let module = unsafe {
+            GetModuleHandleW(None).map_err(|_| {
+                host_error("window.text_input", "Windows module handle is unavailable")
+            })?
+        };
+        let instance = HINSTANCE(module.0);
+        let mut state = TextInputDialogState {
+            result: None,
+            closed: false,
+            edit: None,
+            read_error: false,
+        };
+        let dpi = confirmation_dpi(owner);
+        let geometry = text_input_geometry(dpi);
+        let (x, y) = dialog_position(owner, geometry.width, geometry.height)?;
+        let dialog = unsafe {
+            CreateWindowExW(
+                WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
+                PCWSTR(class_name.as_ptr()),
+                PCWSTR(title_wide.as_ptr()),
+                WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                x,
+                y,
+                geometry.width,
+                geometry.height,
+                owner,
+                None,
+                Some(instance),
+                Some((&mut state as *mut TextInputDialogState).cast::<c_void>()),
+            )
+        }
+        .map_err(|_| {
+            host_error(
+                "window.text_input",
+                "native text-input window could not be created",
+            )
+        })?;
+
+        let label = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("STATIC").as_ptr()),
+                PCWSTR(label_wide.as_ptr()),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_LEFT.0),
+                geometry.label_x,
+                geometry.label_y,
+                geometry.label_width,
+                geometry.label_height,
+                Some(dialog),
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.text_input",
+                "native text-input label could not be created",
+            )
+        })?;
+        let edit = unsafe {
+            CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                PCWSTR(widestring("EDIT").as_ptr()),
+                PCWSTR::null(),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_TABSTOP
+                    | WS_BORDER
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
+                        (ES_LEFT | ES_AUTOHSCROLL) as u32,
+                    ),
+                geometry.edit_x,
+                geometry.edit_y,
+                geometry.edit_width,
+                geometry.edit_height,
+                Some(dialog),
+                None,
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.text_input",
+                "native text-input editor could not be created",
+            )
+        })?;
+        state.edit = Some(edit);
+        unsafe {
+            let _ = SetWindowTextW(edit, PCWSTR(initial_wide.as_ptr()));
+            let _ = SendMessageW(
+                edit,
+                EM_LIMITTEXT,
+                Some(WPARAM(request.max_bytes as usize)),
+                Some(LPARAM(0)),
+            );
+        }
+        let accept = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("BUTTON").as_ptr()),
+                PCWSTR(accept_wide.as_ptr()),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_TABSTOP
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
+                        BS_DEFPUSHBUTTON as u32,
+                    ),
+                geometry.accept_x,
+                geometry.accept_y,
+                geometry.button_width,
+                geometry.button_height,
+                Some(dialog),
+                Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
+                    TEXT_INPUT_ACCEPT_ID as *mut c_void,
+                )),
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.text_input",
+                "native text-input accept button could not be created",
+            )
+        })?;
+        let cancel = unsafe {
+            CreateWindowExW(
+                Default::default(),
+                PCWSTR(widestring("BUTTON").as_ptr()),
+                PCWSTR(cancel_wide.as_ptr()),
+                WS_CHILD
+                    | WS_VISIBLE
+                    | WS_TABSTOP
+                    | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_PUSHBUTTON as u32),
+                geometry.cancel_x,
+                geometry.cancel_y,
+                geometry.button_width,
+                geometry.button_height,
+                Some(dialog),
+                Some(windows::Win32::UI::WindowsAndMessaging::HMENU(
+                    TEXT_INPUT_CANCEL_ID as *mut c_void,
+                )),
+                Some(instance),
+                None,
+            )
+        }
+        .map_err(|_| {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            host_error(
+                "window.text_input",
+                "native text-input cancel button could not be created",
+            )
+        })?;
+
+        let font = unsafe { GetStockObject(DEFAULT_GUI_FONT) };
+        if font.is_invalid() {
+            unsafe {
+                let _ = DestroyWindow(dialog);
+            }
+            return Err(host_error(
+                "window.text_input",
+                "Windows default dialog font is unavailable",
+            ));
+        }
+        let font_param = Some(WPARAM(font.0 as usize));
+        let redraw = Some(LPARAM(1));
+        unsafe {
+            for control in [label, edit, accept, cancel] {
+                let _ = SendMessageW(control, WM_SETFONT, font_param, redraw);
+            }
+            let _ = ShowWindow(dialog, SW_SHOW);
+            let _ = SetFocus(Some(edit));
+        }
+        let owner_was_enabled = owner.map(|owner| unsafe { IsWindowEnabled(owner).as_bool() });
+        if let Some(owner) = owner {
+            unsafe {
+                let _ = EnableWindow(owner, false);
+                let _ = SetForegroundWindow(dialog);
+            }
+            if unsafe { IsWindowEnabled(owner).as_bool() } {
+                unsafe {
+                    let _ = DestroyWindow(dialog);
+                }
+                return Err(host_error(
+                    "window.text_input",
+                    "owner window could not be disabled for modal text input",
+                ));
+            }
+        }
+        let mut message_loop_error = false;
+        if !state.closed {
+            loop {
+                if state.closed {
+                    break;
+                }
+                let mut native_message = windows::Win32::UI::WindowsAndMessaging::MSG::default();
+                let result = unsafe { GetMessageW(&mut native_message, None, 0, 0) };
+                if result.0 == -1 {
+                    message_loop_error = true;
+                    break;
+                }
+                if result.0 == 0 {
+                    break;
+                }
+                if native_message.message == WM_KEYDOWN && native_message.wParam.0 == 0x1b {
+                    state.result = Some(TextInputResult {
+                        accepted: false,
+                        value: String::new(),
+                    });
+                    unsafe {
+                        let _ = DestroyWindow(dialog);
+                    }
+                    continue;
+                }
+                let handled = unsafe { IsDialogMessageW(dialog, &native_message).as_bool() };
+                if !handled {
+                    unsafe {
+                        let _ = TranslateMessage(&native_message);
+                        let _ = DispatchMessageW(&native_message);
+                    }
+                }
+            }
+        }
+        if !state.closed {
+            unsafe {
+                DestroyWindow(dialog).map_err(|_| {
+                    host_error(
+                        "window.text_input",
+                        "native text-input window could not be closed",
+                    )
+                })?;
+            }
+        }
+        if let (Some(owner), Some(true)) = (owner, owner_was_enabled) {
+            unsafe {
+                let _ = EnableWindow(owner, true);
+                let _ = SetForegroundWindow(owner);
+            }
+            if !unsafe { IsWindowEnabled(owner).as_bool() } {
+                return Err(host_error(
+                    "window.text_input",
+                    "owner window could not be restored after modal text input",
+                ));
+            }
+        }
+        if message_loop_error || state.read_error {
+            return Err(host_error(
+                "window.text_input",
+                "Windows text-input message loop failed",
+            ));
+        }
+        let result = state.result.ok_or_else(|| {
+            host_error(
+                "window.text_input",
+                "native text-input closed without a result",
+            )
+        })?;
+        result.validate_for(&request).map_err(|_| {
+            host_error(
+                "window.text_input",
+                "native text-input result exceeds the request bound",
+            )
+        })?;
+        Ok(result)
+    }
+
+    fn read_text_input_value(state: &mut TextInputDialogState) -> Option<String> {
+        let edit = state.edit?;
+        let length = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(edit) };
+        if length < 0 {
+            state.read_error = true;
+            return None;
+        }
+        let mut buffer = vec![0_u16; usize::try_from(length).ok()?.saturating_add(1)];
+        let copied =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(edit, &mut buffer) };
+        if copied < 0 {
+            state.read_error = true;
+            return None;
+        }
+        let copied = usize::try_from(copied).ok()?;
+        String::from_utf16(&buffer[..copied]).ok().or_else(|| {
+            state.read_error = true;
+            None
+        })
+    }
+
+    fn ensure_text_input_class() -> Result<(), PlatformError> {
+        use std::sync::OnceLock;
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::{GetLastError, HINSTANCE},
+                Graphics::Gdi::{GetSysColorBrush, COLOR_WINDOW},
+                System::LibraryLoader::GetModuleHandleW,
+                UI::WindowsAndMessaging::{
+                    LoadCursorW, RegisterClassExW, IDC_ARROW, WNDCLASSEXW, WNDCLASS_STYLES,
+                },
+            },
+        };
+        static REGISTERED: OnceLock<bool> = OnceLock::new();
+        if *REGISTERED.get_or_init(|| {
+            let class_name = widestring("AstraEmuTextInputDialog");
+            let module = match unsafe { GetModuleHandleW(None) } {
+                Ok(module) => module,
+                Err(_) => return false,
+            };
+            let instance = HINSTANCE(module.0);
+            let cursor = match unsafe { LoadCursorW(None, IDC_ARROW) } {
+                Ok(cursor) => cursor,
+                Err(_) => return false,
+            };
+            let class = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                style: WNDCLASS_STYLES(0),
+                lpfnWndProc: Some(text_input_window_proc),
+                hInstance: instance,
+                hCursor: cursor,
+                hbrBackground: unsafe { GetSysColorBrush(COLOR_WINDOW) },
+                lpszClassName: PCWSTR(class_name.as_ptr()),
+                ..WNDCLASSEXW::default()
+            };
+            let atom = unsafe { RegisterClassExW(&class) };
+            atom != 0
+                || unsafe { GetLastError() }
+                    == windows::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS
+        }) {
+            Ok(())
+        } else {
+            Err(host_error(
+                "window.text_input",
+                "native text-input window class could not be registered",
+            ))
+        }
+    }
+
+    unsafe extern "system" fn text_input_window_proc(
+        hwnd: windows::Win32::Foundation::HWND,
+        message: u32,
+        wparam: windows::Win32::Foundation::WPARAM,
+        lparam: windows::Win32::Foundation::LPARAM,
+    ) -> windows::Win32::Foundation::LRESULT {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DefWindowProcW, DestroyWindow, GetWindowLongPtrW, SetWindowLongPtrW, BN_CLICKED,
+            CREATESTRUCTW, GWLP_USERDATA, WM_CLOSE, WM_COMMAND, WM_NCCREATE, WM_NCDESTROY,
+        };
+        let state = if message == WM_NCCREATE {
+            let create = lparam.0 as *const CREATESTRUCTW;
+            if create.is_null() {
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            let state = unsafe { (*create).lpCreateParams as *mut TextInputDialogState };
+            if state.is_null() {
+                return windows::Win32::Foundation::LRESULT(0);
+            }
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, state as isize);
+            }
+            state
+        } else {
+            unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut TextInputDialogState }
+        };
+        if !state.is_null() {
+            match message {
+                WM_COMMAND if ((wparam.0 >> 16) as u32) == BN_CLICKED => {
+                    let command_id = wparam.0 & 0xffff;
+                    match command_id {
+                        TEXT_INPUT_ACCEPT_ID => {
+                            if let Some(value) = read_text_input_value(unsafe { &mut *state }) {
+                                unsafe {
+                                    (*state).result = Some(TextInputResult {
+                                        accepted: true,
+                                        value,
+                                    });
+                                    let _ = DestroyWindow(hwnd);
+                                }
+                            }
+                            return windows::Win32::Foundation::LRESULT(0);
+                        }
+                        TEXT_INPUT_CANCEL_ID => {
+                            unsafe {
+                                (*state).result = Some(TextInputResult {
+                                    accepted: false,
+                                    value: String::new(),
+                                });
+                                let _ = DestroyWindow(hwnd);
+                            }
+                            return windows::Win32::Foundation::LRESULT(0);
+                        }
+                        _ => {}
+                    }
+                }
+                WM_CLOSE => {
+                    unsafe {
+                        (*state).result = Some(TextInputResult {
+                            accepted: false,
+                            value: String::new(),
+                        });
+                        let _ = DestroyWindow(hwnd);
+                    }
+                    return windows::Win32::Foundation::LRESULT(0);
+                }
+                WM_NCDESTROY => unsafe {
+                    (*state).closed = true;
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                },
+                _ => {}
+            }
+        }
+        DefWindowProcW(hwnd, message, wparam, lparam)
     }
 
     fn ensure_confirmation_class() -> Result<(), PlatformError> {

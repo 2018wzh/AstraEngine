@@ -327,6 +327,7 @@ impl DynamicFamilyLoader {
             publish_system_menu: ffi_publish_system_menu,
             publish_confirmation: ffi_publish_confirmation,
             publish_system_command: ffi_publish_system_command,
+            publish_text_input: ffi_publish_text_input,
         };
         if let Err(error) = native_result::<_, ()>((module.create_instance())(services, request)) {
             remove_host_services(&host_token);
@@ -726,6 +727,26 @@ extern "C" fn ffi_publish_system_command(
         command.validate()?;
         host.system_commands
             .publish(call.session_id.as_str(), command)
+    })();
+    ffi_result(result)
+}
+
+extern "C" fn ffi_publish_text_input(call: FfiPublishTextInputCallV1) -> FfiLegacyResult<()> {
+    let result = (|| {
+        let host = registered_host(call.host_token.as_str())?;
+        let text_input = LegacyTextInputTransactionV1 {
+            sequence: call.text_input.sequence,
+            prompt_id: call.text_input.prompt_id.to_string(),
+            title: call.text_input.title.to_string(),
+            label: call.text_input.label.to_string(),
+            initial_value: call.text_input.initial_value.to_string(),
+            accept_label: call.text_input.accept_label.to_string(),
+            cancel_label: call.text_input.cancel_label.to_string(),
+            max_bytes: call.text_input.max_bytes,
+        };
+        text_input.validate()?;
+        host.text_inputs
+            .publish(call.session_id.as_str(), text_input)
     })();
     ffi_result(result)
 }
@@ -1180,6 +1201,7 @@ mod tests {
                         system_menu: None,
                         confirmation: None,
                         system_command: None,
+                        text_input: None,
                         await_results: Vec::new(),
                         provider_results: Vec::new(),
                     },
