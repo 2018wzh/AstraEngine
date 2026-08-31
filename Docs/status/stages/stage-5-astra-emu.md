@@ -1,5 +1,11 @@
 # Stage 5 AstraEMU Work
 
+2026 年 8 月 31 日 Linux native confirmation caption 对齐：Linux Host 的
+`rfd` presenter 在存在 live owner window 时沿用 owner caption，无 owner 时使用
+Family ABI transaction title。该改动保持 context menu、窗口命令和 Help/About 的
+unsupported 能力边界，不引入临时 GTK widget 或平台 fallback；Linux 实际桌面
+验收与 Stage 5 总体状态仍为 `IN_PROGRESS`。
+
 2026 年 8 月 31 日 Windows Manager confirmation service 接线：无游戏窗口的
 audio/decode service host 现在直接在 service thread 处理 Family ABI v13
 `ShowConfirmation`，使用 Host-owned Win32 modal window，并把 typed 结果送回同一

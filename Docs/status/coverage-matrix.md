@@ -1,5 +1,10 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日 native confirmation caption coverage：Linux Host 在存在 live
+owner window 时读取 owner caption，没有 owner 时保留 Family transaction title；该规则
+与 Windows/macOS presenter 保持一致。此项只属于 Host 接线覆盖，Linux context menu、窗口
+命令和实际桌面 evidence 仍保持开放。
+
 2026 年 8 月 31 日 Windows Manager confirmation coverage：Manager 的无窗口
 audio/decode service host 已接入 Family ABI v13 `ShowConfirmation`，在同一 service
 thread 使用 Host-owned Win32 modal window，并保留 `是(Y)`/`否(N)` typed label；不

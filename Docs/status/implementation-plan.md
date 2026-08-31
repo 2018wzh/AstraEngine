@@ -1,5 +1,12 @@
 # Implementation Plan Status
 
+2026 年 8 月 31 日 Linux native confirmation caption 对齐：Linux Host 在有 live
+owner window 时沿用 owner caption，没有 owner 时保留 Family transaction title；该规则与
+Windows/macOS 的 native presenter 一致。Linux context menu、窗口命令和帮助动作仍按显式
+能力边界阻断，不以 GTK 临时窗口或 Manager overlay 伪造原生 evidence。变更通过
+`astra-platform-linux` host check、Windows confirmation 回归和文档检查；Linux 实际桌面
+运行验收仍未形成。
+
 2026 年 8 月 31 日 Windows Manager confirmation service 接线：Manager 的
 audio/decode service host 现在直接消费 Family ABI v13 的 `ShowConfirmation`，在
 自己的 service thread 通过 Host-owned Win32 modal window 回送 typed

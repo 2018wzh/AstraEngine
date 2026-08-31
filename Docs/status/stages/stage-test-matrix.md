@@ -1,5 +1,10 @@
 # Stage Test Matrix
 
+2026-08-31 Linux confirmation presenter seam: the Linux Host now chooses the live
+owner caption when presenting a Family confirmation and keeps the typed Family title
+for windowless service calls. The source-level host check and affected desktop tests
+pass; native Linux context-menu/window-command evidence remains explicitly pending.
+
 2026-08-31 Windows Manager service confirmation seam: the focused
 `astra-platform-windows` library tests pass 2/2 and `cargo check -p
 astra-emu-manager` passes after the audio/decode service host gained a native
