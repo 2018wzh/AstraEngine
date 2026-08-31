@@ -191,12 +191,11 @@ pub trait ManagerController: 'static {
     fn present_confirmation(&mut self, _pending: PendingFamilyConfirmation) -> Result<(), String> {
         Err("ASTRA_EMU_CONFIRMATION_NOT_CONFIGURED".into())
     }
-    fn take_pending_text_input(&mut self) -> Result<Option<PendingFamilyTextInput>, String> {
-        Ok(None)
-    }
-    fn present_text_input(&mut self, _pending: PendingFamilyTextInput) -> Result<(), String> {
-        Err("ASTRA_EMU_TEXT_INPUT_NOT_CONFIGURED".into())
-    }
+    /// Every Manager composition root must explicitly consume the Family ABI
+    /// text-input queue.  A host without a native editor must return its
+    /// platform diagnostic instead of silently dropping the transaction.
+    fn take_pending_text_input(&mut self) -> Result<Option<PendingFamilyTextInput>, String>;
+    fn present_text_input(&mut self, pending: PendingFamilyTextInput) -> Result<(), String>;
     // ===== UI redesign callbacks (default implementations keep existing
     // controllers source-compatible until they opt in) =====
     /// Sidebar / bottom navigation. Pure UI state; the host applies the page
