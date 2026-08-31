@@ -26,6 +26,12 @@ Sandbox 默认非日文 code page 下，窗口标题的 CP932 字节会显示为
 System `sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`）。
 尚未据此推断 Save 注释、逐字速度公式或四路线终局语义。
 
+同轮只运行受影响的 Host/Family 回归：`astra-platform` 11/11、
+`astra-platform-windows` 10/10、`astra-emu-manager-core` Host services 7/7，
+以及 `astra-emu-minori` library 189/189 均通过。覆盖内容包括 Family ABI 菜单树校验、
+Windows 客户区锚点与 DPI 几何、确认框/文本输入生命周期、系统命令结果和 session 清理；
+这只是契约与 Host 边界证据，不能替代真实 Manager 窗口、完整路线或正式 Windows E3。
+
 ## 2026 年 8 月 31 日：标题系统菜单的 About 与全屏状态复核
 
 在授权 Windows Sandbox 中重新打开原版标题页右键菜单，确认 Help→About 是附着
