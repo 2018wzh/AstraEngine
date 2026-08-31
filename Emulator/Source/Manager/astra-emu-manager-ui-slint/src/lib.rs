@@ -216,6 +216,16 @@ fn reduce_system_menu_navigation(
     Ok((focus, action))
 }
 
+fn restore_system_menu_parent_focus(
+    items: &[SystemMenuItem],
+    child_parent_id: &str,
+) -> Result<usize, String> {
+    items
+        .iter()
+        .position(|item| item.item_id == child_parent_id)
+        .ok_or_else(|| "ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_MISSING".to_owned())
+}
+
 impl Default for AppearanceViewModel {
     fn default() -> Self {
         Self {
@@ -423,10 +433,7 @@ impl SlintManagerAdapter {
         let parent_id = item.parent_id.clone();
         self.window.set_system_menu_parent_id(parent_id);
         let items = self.current_system_menu_items();
-        let focus = items
-            .iter()
-            .position(|candidate| candidate.item_id == current_parent)
-            .ok_or_else(|| "ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_MISSING".to_owned())?;
+        let focus = restore_system_menu_parent_focus(&items, &current_parent)?;
         self.system_menu_focus.set(focus);
         self.window.set_system_menu_focus_id(
             items
@@ -728,10 +735,10 @@ impl SlintManagerAdapter {
 #[cfg(test)]
 mod tests {
     use super::{
-        reduce_system_menu_navigation, AppearanceViewModel, GameCardViewModel,
-        InputConfigViewModel, ManagerViewModel, MatchReviewViewModel, PlaySessionViewModel,
-        SystemMenuItem, SystemMenuItemViewModel, SystemMenuNavigation, VfsEntryViewModel,
-        VfsPreviewViewModel,
+        reduce_system_menu_navigation, restore_system_menu_parent_focus, AppearanceViewModel,
+        GameCardViewModel, InputConfigViewModel, ManagerViewModel, MatchReviewViewModel,
+        PlaySessionViewModel, SystemMenuItem, SystemMenuItemViewModel, SystemMenuNavigation,
+        VfsEntryViewModel, VfsPreviewViewModel,
     };
 
     fn assert_contract_is_send_sync<T: Send + Sync>() {}
@@ -865,6 +872,11 @@ mod tests {
                 .unwrap()
                 .1,
             SystemMenuNavigation::OpenSubmenu("help".into())
+        );
+        assert_eq!(restore_system_menu_parent_focus(&items, "help").unwrap(), 2);
+        assert_eq!(
+            restore_system_menu_parent_focus(&items, "missing").unwrap_err(),
+            "ASTRA_EMU_MANAGER_SYSTEM_MENU_PARENT_MISSING"
         );
     }
 }
