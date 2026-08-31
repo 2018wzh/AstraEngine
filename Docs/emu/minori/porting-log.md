@@ -1,5 +1,17 @@
 # Minori 移植日志
 
+## 2026-08-31：原始尺寸命令同步全屏状态
+
+原版在全屏状态下选择“ウインドウをオリジナルサイズに”会先退出全屏，再恢复
+窗口尺寸；之后重新打开窗口菜单时，全屏项重新出现。此前 Host 已完成窗口操作，
+但 Family VM 仍保留旧的 `fullscreen` 配置，导致下一次菜单继续隐藏该项。现在只有
+收到 Host 的 `Applied` 结果后，Minori 才清除 Family-owned 全屏状态并原子持久化
+配置；`Rejected`/`Unsupported` 仍保持 blocking，不会提前修改 VM。新增回归覆盖
+“切换全屏 → 原始尺寸 → 菜单重开”的 transaction 顺序。
+
+该修复只同步 Host 的确定结果与 Family 菜单状态，不把窗口句柄、路径或商业资源
+写入 ABI、存档、报告或日志。
+
 ## 2026-08-31：Windows 原生确认框尺寸与系统图标对齐
 
 补充复核原版退出/返回标题确认框后，Windows Host 的 Family ABI presenter 采用

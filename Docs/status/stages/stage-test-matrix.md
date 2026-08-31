@@ -1,5 +1,12 @@
 # Stage Test Matrix
 
+2026-08-31 original-size command state seam: after the native Host applies
+`RestoreOriginalSize`, Minori now clears its Family-owned fullscreen setting and
+persists that result before publishing the next menu. The focused provider regression
+covers fullscreen toggle, original-size selection, and menu reopening; rejected or
+unsupported Host results still poison the transaction. This closes a stale-menu-state
+bug only and is not Release Sandbox or Windows E3 evidence.
+
 2026-08-31 Family ABI v14 text-input seam: Minori Save now publishes a bounded
 `LegacyTextInputTransactionV1` through the same Host-owned interaction channel as
 menus and confirmations. Windows presents the prompt with a native owner-modal

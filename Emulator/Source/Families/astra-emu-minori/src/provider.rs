@@ -7105,8 +7105,19 @@ fn handle_system_command_step(
                         .map_err(runtime_error)?;
                     persist_config = true;
                 }
-                LegacySystemCommandKindV1::RestoreOriginalSize
-                | LegacySystemCommandKindV1::SetResizePrecision { .. }
+                LegacySystemCommandKindV1::RestoreOriginalSize => {
+                    // The native host leaves fullscreen before restoring the
+                    // authored window geometry.  Keep the family-owned menu
+                    // state in lockstep with that platform side effect so a
+                    // subsequent transaction exposes the fullscreen command
+                    // again and a save/restart does not re-enter fullscreen.
+                    session
+                        .vm
+                        .set_runtime_fullscreen(false)
+                        .map_err(runtime_error)?;
+                    persist_config = true;
+                }
+                LegacySystemCommandKindV1::SetResizePrecision { .. }
                 | LegacySystemCommandKindV1::OpenManual
                 | LegacySystemCommandKindV1::ShowAbout
                 | LegacySystemCommandKindV1::OpenHomepage => {
@@ -11847,6 +11858,91 @@ mod tests {
                 .map(|item| item.order),
             Some(8)
         );
+
+        // Restoring the authored window size also leaves fullscreen on the
+        // native host.  The next Family transaction must therefore publish
+        // the fullscreen command again instead of retaining stale VM config.
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Select,
+                        menu_id: Some(reopened.menu_id.clone()),
+                        item_id: Some("window_original_size".into()),
+                        pointer_x: None,
+                        pointer_y: None,
+                        sequence: 5,
+                    }),
+                    ..step_input(6, Vec::new())
+                },
+            )
+            .unwrap();
+        let restore_command = system_commands
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .expect("original-size selection must publish a host command")
+            .1
+            .clone();
+        assert_eq!(
+            restore_command.command,
+            LegacySystemCommandKindV1::RestoreOriginalSize
+        );
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_command: Some(LegacySystemCommandResultV1 {
+                        command_id: restore_command.command_id,
+                        status: LegacySystemCommandStatusV1::Applied,
+                        sequence: 6,
+                    }),
+                    ..step_input(7, Vec::new())
+                },
+            )
+            .unwrap();
+        assert!(
+            !provider.sessions[&session.0]
+                .vm
+                .state()
+                .system_ui
+                .config
+                .fullscreen
+        );
+
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Open,
+                        menu_id: None,
+                        item_id: None,
+                        pointer_x: Some(640),
+                        pointer_y: Some(360),
+                        sequence: 7,
+                    }),
+                    ..step_input(8, Vec::new())
+                },
+            )
+            .unwrap();
+        let restored = system_menus
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .expect("restored window must republish a menu")
+            .1
+            .clone();
+        assert!(restored
+            .items
+            .iter()
+            .any(|item| item.item_id == "window_fullscreen"));
     }
 
     #[test]

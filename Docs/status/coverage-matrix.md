@@ -7,6 +7,13 @@
 定向回归通过；真实 Manager 窗口焦点/定位截图、Linux 原生菜单、Release Sandbox
 视觉验收和 Windows E3 仍保持 blocking。
 
+2026 年 8 月 31 日原始尺寸 Host 回执覆盖：Windows/macOS Host 应用
+`RestoreOriginalSize` 后，Minori 在下一固定 step 清除并持久化 Family-owned
+fullscreen 状态；菜单重开重新包含全屏项。新增 provider 回归覆盖切换全屏、原始
+尺寸和重开菜单，Host `Rejected`/`Unsupported` 仍保持 blocking。该覆盖只修复
+平台窗口状态与 Family transaction 的一致性，不提升 Release Sandbox、完整路线
+或 Windows E3 证据等级。
+
 2026 年 8 月 31 日 Family ABI v14 text-input coverage：Minori Save 的 Comment
 提示改为 Host-owned `LegacyTextInputTransactionV1`。Windows 使用 DPI-aware
 owner-modal Win32 编辑框，Host 只返回一次有界结果；Minori 保存格式负责持久化
