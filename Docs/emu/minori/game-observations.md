@@ -49,6 +49,18 @@ overlay。私有截图的公开 hash 为首条消息
 上述仅是原版现场行为观察，不关闭 Save 注释列表布局、Auto/Skip 完整副作用、四路线
 自然结局、原版同点视觉比较或正式 E2/E3。
 
+## 2026-09-01 System 页默认值
+
+新标题会话的 System 页显示：未读、既读和 Auto 播放等待均为中位；BGM、语音、效果音
+均为最大值且 MUTE 未选；窗口模式、画面效果、文字阴影和动画均开启。Sound 中 backlog
+语音自动播放开启、进入下一句停止语音关闭；Play Mode 的 Auto 开启、Skip 关闭；Other
+中的后台继续播放关闭，五个角色语音开关均开启。当前 `MinoriConfigState::default()`
+与这些观察一致，并有 runtime 回归固定该行为。
+
+对应私有截图的公开 hash 为
+`sha256:50dc8af81ed1969897ea92aa2b5c76135cf08730c1fed278155a037cee28e8fd`；不提交图片、
+本地路径或字体列表内容。该记录不替代持久化修改、平台音量绑定和原版同点视觉验收。
+
 ## 未知
 
 当前 manifest v3/key-file reader identity 已完整流读八包 14502 个 entry，并复读每个非空 entry 的首尾最多 4 KiB：共 43818 个逻辑读取范围、6624958365 个 decoded bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。同一 identity 的 `scr.paz` census 包含 89 个文件、33728 行、33695 个 command 和 29 个 command token，unknown opcode 为 0；`select` 等 operand 语义仍待确认。

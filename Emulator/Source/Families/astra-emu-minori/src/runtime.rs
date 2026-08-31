@@ -6632,6 +6632,34 @@ mod tests {
     }
 
     #[test]
+    fn original_system_page_defaults_match_observed_japanese_title_session() {
+        let config = MinoriConfigState::default();
+        assert_eq!(
+            (
+                config.message_speed_unread,
+                config.message_speed_read,
+                config.message_speed_auto_play,
+                config.bgm_volume,
+                config.voice_volume,
+                config.se_volume,
+            ),
+            (50, 50, 50, 100, 100, 100)
+        );
+        assert_eq!(config.preferred_play_mode, MinoriPlayMode::Auto);
+        assert!(!config.fullscreen);
+        assert!(config.screen_effect);
+        assert!(config.text_shadow);
+        assert!(config.animation);
+        assert!(config.backlog_voice_playback);
+        assert!(!config.stop_voice_at_next_message);
+        assert!(!config.progress_in_background);
+        assert!(!config.bgm_muted);
+        assert!(!config.voice_muted);
+        assert!(!config.se_muted);
+        assert_eq!(config.character_voice_enabled, [true; 5]);
+    }
+
+    #[test]
     fn gameplay_menu_state_returns_from_config_and_rebinds_message_waits() {
         let source = b".message 1  speaker body\r\n.end\r\n";
         let mut vm = firefly_vm(source, 7);
