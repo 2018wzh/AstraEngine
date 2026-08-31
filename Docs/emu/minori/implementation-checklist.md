@@ -1,5 +1,18 @@
 # Minori Implementation Checklist
 
+## Native menu anchor handoff (2026-08-31)
+
+- [x] Release CLI now converts the Family ABI stage-space anchor to the live
+  physical client coordinate before calling the platform context-menu Host.
+  Replayed pointer input therefore opens at the same rendered location as an
+  interactive secondary click, including letterboxed window sizes.
+- [x] Windows keeps the physical anchor for `muda-win`; macOS converts that
+  physical point to a logical AppKit view point before applying the flipped-Y
+  transform. An invalid or out-of-stage anchor is a blocking diagnostic and
+  never falls back to the process cursor.
+- [ ] Native Linux menu support, same-point original screenshots, Release
+  Sandbox visual review and Windows E3 remain open.
+
 ## Family ABI v14 native text-input Host split (2026-08-31)
 
 - [x] Minori Save publishes a bounded `LegacyTextInputTransactionV1` for the

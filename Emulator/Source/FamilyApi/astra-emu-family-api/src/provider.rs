@@ -665,6 +665,10 @@ pub struct LegacySystemMenuRequestV1 {
     pub action: LegacySystemMenuActionV1,
     pub menu_id: Option<String>,
     pub item_id: Option<String>,
+    /// Optional authored stage-space pointer anchor. The Host maps physical
+    /// input into the family stage before publishing this request; a family
+    /// menu transaction carries the same stage-space point back to the native
+    /// Host for platform-specific client-coordinate conversion.
     pub pointer_x: Option<i32>,
     pub pointer_y: Option<i32>,
     pub sequence: u64,
@@ -751,6 +755,10 @@ pub struct LegacySystemMenuItemV1 {
 pub struct LegacySystemMenuTransactionV1 {
     pub sequence: u64,
     pub menu_id: String,
+    /// Optional stage-space anchor for native presentation. These coordinates
+    /// are not screen or OS-cursor coordinates. The Host owns the conversion
+    /// to physical client pixels and must reject an invalid stage/viewport
+    /// mapping instead of falling back to the process cursor.
     pub pointer_x: Option<i32>,
     pub pointer_y: Option<i32>,
     pub items: Vec<LegacySystemMenuItemV1>,

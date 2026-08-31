@@ -879,6 +879,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
         stage_width,
         stage_height,
     };
+    driver.set_native_viewport(viewport);
     let mut suspended = false;
     let mut native_input_cursor = 0usize;
     let mut native_shutdown_requested = false;
@@ -4173,6 +4174,12 @@ struct RuntimeDriver<'a> {
     platform: &'a PlatformHostClient,
     surface: SurfaceHandle,
     window: Option<WindowHandle>,
+    /// Physical client-space viewport used to translate a Family ABI menu
+    /// anchor from the authored stage into the live native window.  The
+    /// native Host must receive an explicit anchor; using the OS cursor here
+    /// would make replayed pointer input land at an unrelated location.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    native_viewport: Option<NativeViewport>,
     virtual_system_menu: Option<VirtualSystemMenu>,
     virtual_confirmation: Option<VirtualConfirmation>,
     virtual_text_input: Option<VirtualTextInput>,
@@ -4583,7 +4590,7 @@ enum NativeEventAction {
 }
 
 #[derive(Debug, Clone, Copy)]
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 struct NativeViewport {
     window_width: u32,
     window_height: u32,
@@ -4615,6 +4622,7 @@ fn route_native_event(
             }
             viewport.window_width = width;
             viewport.window_height = height;
+            driver.set_native_viewport(*viewport);
             Ok(NativeEventAction::Continue)
         }
         PlatformEventKind::WindowFocused {
@@ -4857,8 +4865,9 @@ fn consume_native_inputs_due(
     Ok(due)
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 impl NativeViewport {
+    #[cfg(any(target_os = "windows", test))]
     fn map_pointer(&self, x: f64, y: f64) -> Option<[f32; 2]> {
         if self.window_width == 0
             || self.window_height == 0
@@ -4879,6 +4888,50 @@ impl NativeViewport {
             return None;
         }
         Some([((x - left) / scale) as f32, ((y - top) / scale) as f32])
+    }
+
+    /// Convert an authored stage-space menu anchor into physical client
+    /// pixels.  The platform context-menu Host consumes physical coordinates
+    /// so Windows can call TrackPopupMenuEx directly and macOS can perform
+    /// its own logical-point conversion.  Out-of-stage anchors are rejected;
+    /// they must never fall back to the process cursor.
+    fn map_stage_anchor(&self, x: i32, y: i32) -> Result<(i32, i32), String> {
+        if x < 0 || y < 0 {
+            return Err("ASTRA_EMU_NATIVE_MENU_ANCHOR_NEGATIVE".into());
+        }
+        let stage_x = u32::try_from(x).map_err(|_| "ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS")?;
+        let stage_y = u32::try_from(y).map_err(|_| "ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS")?;
+        if stage_x >= self.stage_width || stage_y >= self.stage_height {
+            return Err("ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS".into());
+        }
+        if self.window_width == 0
+            || self.window_height == 0
+            || self.stage_width == 0
+            || self.stage_height == 0
+        {
+            return Err("ASTRA_EMU_NATIVE_MENU_VIEWPORT_INVALID".into());
+        }
+        let scale = (f64::from(self.window_width) / f64::from(self.stage_width))
+            .min(f64::from(self.window_height) / f64::from(self.stage_height));
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err("ASTRA_EMU_NATIVE_MENU_VIEWPORT_SCALE_INVALID".into());
+        }
+        let display_width = f64::from(self.stage_width) * scale;
+        let display_height = f64::from(self.stage_height) * scale;
+        let left = (f64::from(self.window_width) - display_width) * 0.5;
+        let top = (f64::from(self.window_height) - display_height) * 0.5;
+        let client_x = (left + f64::from(stage_x) * scale).round();
+        let client_y = (top + f64::from(stage_y) * scale).round();
+        if !client_x.is_finite()
+            || !client_y.is_finite()
+            || client_x < 0.0
+            || client_y < 0.0
+            || client_x > f64::from(i32::MAX)
+            || client_y > f64::from(i32::MAX)
+        {
+            return Err("ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS".into());
+        }
+        Ok((client_x as i32, client_y as i32))
     }
 }
 
@@ -5321,6 +5374,8 @@ impl<'a> RuntimeDriver<'a> {
             platform,
             surface,
             window: config.window,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            native_viewport: None,
             virtual_system_menu: None,
             virtual_confirmation: None,
             virtual_text_input: None,
@@ -5382,6 +5437,11 @@ impl<'a> RuntimeDriver<'a> {
             last_runtime_blackboard_count: 0,
         };
         Ok(driver)
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    fn set_native_viewport(&mut self, viewport: NativeViewport) {
+        self.native_viewport = Some(viewport);
     }
 
     async fn close_active_media(&mut self) -> Result<(), String> {
@@ -6433,14 +6493,24 @@ impl<'a> RuntimeDriver<'a> {
                 checked: item.checked,
             })
             .collect();
+        let anchor = match pending.menu.pointer_x.zip(pending.menu.pointer_y) {
+            None => None,
+            Some((x, y)) => Some(
+                self.native_viewport
+                    .ok_or_else(|| "ASTRA_EMU_NATIVE_MENU_VIEWPORT_MISSING".to_owned())?
+                    .map_stage_anchor(x, y)?,
+            ),
+        };
         let result = self
             .platform
             .show_context_menu(ContextMenuRequest {
                 window,
-                // Native tracking uses the current OS cursor. Family anchor
-                // coordinates remain stage-relative evidence for Headless.
-                x: None,
-                y: None,
+                // Family coordinates are authored in stage space. Convert
+                // them to physical client pixels before crossing the Host
+                // boundary so replay and resized windows use the same menu
+                // location as a real secondary-pointer event.
+                x: anchor.map(|(x, _)| x),
+                y: anchor.map(|(_, y)| y),
                 items,
             })
             .await
@@ -8632,6 +8702,29 @@ mod native_tests {
         };
         assert_eq!(letterboxed.map_pointer(800.0, 100.0), None);
         assert_eq!(letterboxed.map_pointer(800.0, 600.0), Some([640.0, 360.0]));
+    }
+
+    #[test]
+    fn native_menu_anchor_mapping_uses_letterbox_and_rejects_outside_stage() {
+        let viewport = NativeViewport {
+            window_width: 1_600,
+            window_height: 1_200,
+            stage_width: 1_280,
+            stage_height: 720,
+        };
+        // The 16:9 stage is displayed at 1.25x with a 150 px vertical
+        // letterbox.  The menu anchor must follow the rendered stage, not
+        // the old stage coordinate or the process cursor.
+        assert_eq!(viewport.map_stage_anchor(640, 360).unwrap(), (800, 600));
+        assert_eq!(viewport.map_stage_anchor(0, 0).unwrap(), (0, 150));
+        assert_eq!(
+            viewport.map_stage_anchor(1_280, 360).unwrap_err(),
+            "ASTRA_EMU_NATIVE_MENU_ANCHOR_BOUNDS"
+        );
+        assert_eq!(
+            viewport.map_stage_anchor(-1, 0).unwrap_err(),
+            "ASTRA_EMU_NATIVE_MENU_ANCHOR_NEGATIVE"
+        );
     }
 
     fn cpu_layer(blend: BlendMode) -> Layer2DState {

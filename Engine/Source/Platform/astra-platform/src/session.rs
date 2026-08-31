@@ -215,6 +215,9 @@ pub struct ContextMenuItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMenuRequest {
     pub window: WindowHandle,
+    /// Optional physical client-space anchor. Both coordinates must be
+    /// supplied together; platform hosts may convert them into their native
+    /// logical coordinate system before tracking the menu.
     pub x: Option<i32>,
     pub y: Option<i32>,
     pub items: Vec<ContextMenuItem>,

@@ -1124,3 +1124,15 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
   页面刷新返回稳定的 `ASTRA_EMU_MINORI_SAVE_LIST_*` diagnostic；不会把损坏内容
   当作空槽，也不会把槽正文写入报告或日志。Save 页面中已保存注释的具体绘制位置
   仍需原版同点资源/行为证据，当前不做猜测。
+
+## 2026-08-31：Native menu anchor follows the rendered stage
+
+原生 CLI 之前把 Family 发布的菜单锚点丢弃，依赖当前系统鼠标位置。这样在回放
+物理输入、窗口缩放或画面留边时，菜单可能出现在错误的位置。现在 CLI 在调用
+`astra-platform` 前把舞台坐标映射到 live window 的物理 client 像素；Windows
+直接交给 `muda-win`，macOS 再按窗口 scale factor 转成 AppKit logical view
+坐标并翻转 Y。锚点越界、视口无效和整数溢出都会阻断，不会回到系统光标。
+
+新增的 runner 回归覆盖 16:9 留边、舞台边界和负坐标。该项只证明 Family ABI
+语义到 Host 的坐标传递，尚未形成 Linux 原生菜单、Release Sandbox 或 Windows
+E3 证据。

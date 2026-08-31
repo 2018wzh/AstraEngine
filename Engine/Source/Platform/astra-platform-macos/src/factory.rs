@@ -2031,17 +2031,22 @@ mod macos {
                 ));
             }
         };
-        // Winit's AppKit view is flipped while muda positions relative to a
-        // conventional bottom-left view. Convert only explicit family
-        // anchors; None deliberately delegates to the native cursor.
+        // Winit reports pointer/client coordinates in physical pixels while
+        // AppKit/muda expects logical view points. Convert both axes before
+        // flipping Y; an explicit anchor must not silently fall back to the
+        // process cursor when a replay or resized stage supplies it.
+        let scale_factor = window.scale_factor();
+        if !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return Err(host_error(
+                "window.context_menu",
+                "macOS window scale factor is invalid",
+            ));
+        }
+        let logical_size = window.inner_size().to_logical::<f64>(scale_factor);
         let position = request.x.zip(request.y).map(|(x, y)| {
-            let height = window
-                .inner_size()
-                .to_logical::<f64>(window.scale_factor())
-                .height;
             winit::dpi::Position::Logical(winit::dpi::LogicalPosition::new(
-                f64::from(x),
-                height - f64::from(y),
+                f64::from(x) / scale_factor,
+                logical_size.height - f64::from(y) / scale_factor,
             ))
         });
         // SAFETY: the view pointer comes from the live winit Window retained
