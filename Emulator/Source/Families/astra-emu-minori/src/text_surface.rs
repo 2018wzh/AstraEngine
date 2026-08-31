@@ -13,7 +13,7 @@ const FONT_FAMILY: &str = "Noto Sans JP";
 const FONT_ASSET_ID: &str = "asset:/font/emu/noto-sans-jp";
 /// The original Minori message panel draws a small, independent downward
 /// triangle after the completed message.  It is a presentation marker, not
-/// part of the message source, translation input, or backlog text.
+/// part of the message source or backlog text.
 const ADVANCE_INDICATOR: &str = "▼";
 
 #[derive(Debug, Clone, Copy)]

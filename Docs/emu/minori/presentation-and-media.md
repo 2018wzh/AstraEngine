@@ -27,7 +27,7 @@ system overlay
 
 ## Text
 
-消息正文不进入可序列化 presentation DTO。Family 在 session 内保留有界的一次性文字 capture，用 `LegacyTextPresentationV1` 传递脱敏布局：`ja-JP`、显式 Noto Sans JP、body/speaker region、字号、行高、行数和 RGBA；该内部 capture 不跨 ABI。ABI v9 主路径先调用同步 translation Hook，再由 family-owned `CosmicTextLayoutProvider` 和 `astra-media-core` 的 CPU Renderer2D 生成 text surface，最后作为 retained `Layer2D` layer 提交；glyph resource 和合成像素只在当前运行中存在。
+消息正文不进入可序列化 presentation DTO。Family 在 session 内保留有界的一次性文字 capture，用 `LegacyTextPresentationV1` 传递脱敏布局：`ja-JP`、显式 Noto Sans JP、body/speaker region、字号、行高、行数和 RGBA；该内部 capture 不跨 ABI。ABI v9 主路径先通过严格 `astra.emu.minori.locale.ja-jp.cp932.v1` 绑定确认原版日文，不调用 translation Hook，再由 family-owned `CosmicTextLayoutProvider` 和 `astra-media-core` 的 CPU Renderer2D 生成 text surface，最后作为 retained `Layer2D` layer 提交；glyph resource 和合成像素只在当前运行中存在。汉化资源、MYS overlay 和翻译正文不属于本阶段运行路径。
 
 当前参考 stage 固定为 1280×720，原程序默认正文字号已由反编译确认是 26 px，ruby 为 12 px。body/speaker 的区域坐标结合已确认 panel 几何与外部截图结构建立。真实 Headless 首条 message、Config、backlog 和 gallery checkpoint 已人工检查：日文字形完整可读，没有缺字方框、横向裁剪或拉伸，正文位于 panel 有效区域。该结果只构成当前布局的 E2 视觉证据，不是原版像素 parity。缺少精确 stage、字体或 provider 时直接返回稳定 diagnostic，不读取系统字体，也不切换到私有文字 rasterizer。
 

@@ -1,5 +1,11 @@
 # Implementation Coverage Matrix
 
+2026 年 8 月 31 日 Minori 原版 locale coverage：mount options v3 要求日文原版变体、
+严格 CP932 locale hook 和非符号链接 `perseus.exe`；PAZ/ANI/.sc 的字节边界均拒绝
+malformed input，message publisher 不再调用 translation Hook。中文 `.mys` 与本地化
+exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。187 项 Minori library
+定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
+
 2026 年 8 月 31 日标题页 Exit 回归：provider 定向测试确认标题页 Exit 直接进入 terminal，
 且没有向 Host 发布 confirmation；剧情页 `game_exit`/`game_return_title` 继续使用 Family ABI
 confirmation。该项是 E1 provider 行为证据，不提升 Release Sandbox、完整路线或 Windows E3。

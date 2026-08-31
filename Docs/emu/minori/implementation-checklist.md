@@ -173,7 +173,7 @@
 ## 消息控制标记（2026-08-30）
 
 - [x] 依据原程序 `CTextDrawer`/`MsgSubCmd` 静态分析实现 `\\a`、`\\v` 和 `\\x{load,...}` typed parser；未知、截断、越界和未验证子命令全部阻断。
-- [x] 控制标记不进入文字 surface、translation Hook 或 backlog；voice wait 使用 AstraMedia/Symphonia metadata-only probe，不为时长计算解码整段 PCM。
+- [x] 控制标记不进入文字 surface 或 backlog；voice wait 使用 AstraMedia/Symphonia metadata-only probe，不为时长计算解码整段 PCM。原版正文不进入 translation Hook。
 - [x] runtime state v28 保存 voice wait、auto-advance、pending inline load 和 current/next 角色替换；AstraMedia seekable metadata fixture、授权样本 Ogg 探针与定向 Minori 回归通过。
 - [x] Release CLI 的真实标题启动回归完成 5258 fixed steps、83 个采样帧和三个 checkpoint，diagnostic 为空；最大 `runtime_step` 为 0.553 秒。该项只证明本次单路线没有回归。
 - [ ] 用真实罕见行生成 Headless required checkpoint，并与原版同点画面比较。runtime 已提交 current/next 双层和互补 alpha 交叉淡化，但当前采样没有命中中间帧，不能标视觉 parity。
@@ -181,7 +181,7 @@
 ## 消息推进指示器（2026-08-31）
 
 - [x] Windows Sandbox 原版画面确认：消息框末尾的白色下三角是独立的推进指示器，不属于正文字符；打开右键菜单或确认框时该指示器仍由底层消息层保留。
-- [x] Minori text surface 通过现有 CosmicText/Renderer2D 路径追加独立的 `U+25BC` glyph run。正文仍单独进入 translation Hook、backlog 和一次性 text lease，指示器只存在于本次 Host-owned raster surface。
+- [x] Minori text surface 通过现有 CosmicText/Renderer2D 路径追加独立的 `U+25BC` glyph run。正文仍以原版日文进入 backlog 和一次性 text lease，指示器只存在于本次 Host-owned raster surface；locale hook 只负责严格 CP932。
 - [x] Noto Sans JP 的显式 coverage 增加 `U+25BC`，并以真实 glyph raster 回归验证有/无指示器的 surface 输出不同；未新增手写像素绘制或字体 fallback。
 - [ ] 仍需在干净原版与同一条 Headless checkpoint 对齐指示器的出现时机、位置和动画节奏；当前实现只依据已观察到的静态消息等待画面，不宣称像素 parity。
 
@@ -237,7 +237,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - Manager VFS preview 已增加 UTF-8/UTF-16 BOM 与 legacy CP932 的有界编码检测，并在 UI 显示实际编码；不符合文本编码的内容继续进入 hex 视图。Manager 也已按显式 family 接入 Minori launch profile、`LegacyMountedVfsReaderAdapter` 和静态 runtime provider，family-mounted tree/文本 preview 读取解密 URI；PNG/JPEG/BMP/WebP、ANI/SQZ 首帧、音频 metadata 和 Minori AVI video 的 provider binding 已落地，非 AVI Minori video 会在 family 边界直接阻断。真实 Manager 窗口预览和 Windows E3 仍未完成；Headless media slice 已形成独立 E2 证据。
 
-- 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、同步 translation Hook、CosmicText text layer 和 writable-file save/global-progress port；旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
+- 当前 consumer 分支直接 rebase 到 ABI v9 基线 `635527831e89e5ff9b87ac165b5b5532e28356c6`，没有保留 v7/v8 兼容层。Minori 已在 `Native + MultiLayer` 主路径接通 VFS、可写 surface、严格日文 locale hook、CosmicText text layer 和 writable-file save/global-progress port；正文不调用 translation Hook，旧 scene、snapshot、text lease、session-resource 与 provider-result API 只返回 blocking diagnostic。
 - 当前签名 package 在真实八包上完成首路线、Config、backlog、save/load 和 local-private gallery 增量 E2。首路线报告为 `25499` fixed step、`13170` presented frame、`25` 条输入、`7441` coverage id、terminal true、零 diagnostic；gallery 复验为 `82` fixed step、`12` frame、`64` 条输入、9 个 checkpoint、零 diagnostic。`cgthumb` 已按真实 `128x72` 尺寸严格校验。
 - 视觉检查已覆盖标题、Memories、BGM、CG、回想、Config、backlog 和首路线选定 checkpoint；movie gallery 仍只有已验证 Memories 背景 + 有界文字层的严格近似，不能写成原版 parity。local-private global progress 不能证明四条路线自然解锁；正式人工音频 review、完整四路线和 Windows E3 仍未闭合。
 
@@ -270,7 +270,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 | `family-core` mount/read_dir/stat/read_range/open_stream 契约与 manifest v2 | 已实现 | unit/compile；`family-api` 已硬迁移为 ABI DTO，不保留 VFS re-export |
 | PAZ v0-v2、分卷、zlib、随机读取 | 已实现 | GARbro contract + synthetic tests；真实八包 14502 个 entry 完成 decoded full verify |
 | Minori family-owned 流式解密 | 已实现 | Blowfish、RC4 skip、archive XOR、zlib、movie transform；没有 Luau callback、明文 cache 或 fallback |
-| 严格 `key.toml` | 已实现 | 有界私有文件读取、八 role、hex/Blowfish 长度、CP932 和 movie key 约束已有 unit tests |
+| 严格 `key.toml` 与原版 locale 边界 | 已实现 | 有界私有文件读取、八 role、hex/Blowfish 长度、CP932/movie key 约束、`perseus.exe` 原版入口、变体和 locale hook 拒绝已有 unit tests |
 | 公共 viewer tree/stat/page/search/text/hex/media binding | backend 已实现 | image/audio/video 必须显式 `DecodeProviderRegistry` binding；Manager UI 接线和真实预览验收待补 |
 | 公共 desktop verify/extract | 已实现 | Windows 八包 manifest v2 full verify 已通过；extract contract 已接入，macOS 运行证据待补 |
 | Linux foreground read-only FUSE | 代码已接入 | 缺真实 Linux FUSE 证据，不标完成 |

@@ -25,6 +25,8 @@ Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-mi
 
 Minori mount 只接受游戏目录内由 launch profile 指定的安全相对 `key_file`。`key.toml` 使用严格 schema `astra.emu.minori.keys.v1`，mount 时读取一次；VFS 随后从加密 source 流式解密，不建立明文 cache 或临时文件。旧 `astraemu.patch.luau`、private profile、GARbro importer 和 cache 字段都已硬删除。
 
+当前 runtime 只接收日文原版内容变体 `natsuzora-no-perseus.original-ja`，并要求目录内存在原版入口 `perseus.exe`。`astra.emu.minori.locale.ja-jp.cp932.v1` 是严格的 CP932 转区/编码绑定：它解决原版字节在非日文宿主上的乱码，不提供翻译，也不加载汉化 exe、`.mys` 或其它本地化覆盖。汉化样本可以作为 ignored 研究资料，但不会进入挂载、脚本解析或消息呈现路径。
+
 PAZ key、exe patch、安装器保护和 hook 资料不进入公共实现。`key.toml`、导出资源、脚本文本和 disassembly 都是本地私有数据，不进入 Git、package、report 或日志。
 
 当前授权样本包含 `bg/bgm/scr/st/sys/se/voice/mov` 八个逻辑 archive，其中 `bg.paz` 另有 A–J 十个连续分卷，合计 18 个物理文件。迁移前的 no-cache manifest v2 full verify 覆盖 14,502 个 entry、43,818 次 range read 和 6,624,958,365 个 decoded bytes。新的 key-file/streaming identity 仍需重跑真实 full verify；89 个脚本的 payload-free census 已通过。Linux FUSE 与 macOS 验收仍需独立证据，不能由 Windows VFS 结果替代。

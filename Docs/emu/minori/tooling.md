@@ -26,7 +26,7 @@ cargo run -p astra-emu-minori-cli -- census-media --game-dir <case-root> --launc
 
 `scan-archives` 递归识别 `.paz` 与 `.pazA` 至 `.pazZ`，阻断 symlink、空文件、重复 role/part 和不连续分卷。输出只包含 role、文件数、字节数和 inventory hash，不写本地路径或 payload。当前样本结果为 8 个逻辑 archive、18 个物理文件、5742470010 bytes，required role set 完整匹配。
 
-Launch profile 使用 `astra.emu.family_launch_profile.v1`。Minori `family_options` 必须声明 PAZ version、index XOR、八个 archive role 和相对 `key_file`。`key.toml` 由用户手工维护，严格使用 `astra.emu.minori.keys.v1`；不能通过 CLI 参数传 key，也不能写入 YAML、stdout、report 或日志。
+Launch profile 使用 `astra.emu.family_launch_profile.v1`。Minori `family_options` 必须声明原版内容变体、严格的 CP932 locale hook、PAZ version、index XOR、八个 archive role 和相对 `key_file`。当前只支持日文原版 `natsuzora-no-perseus.original-ja`；`key.toml` 由用户手工维护，严格使用 `astra.emu.minori.keys.v1`；不能通过 CLI 参数传 key，也不能写入 YAML、stdout、report 或日志。locale hook 只负责把原版 CP932 bytes 在日文绑定下严格解码/编码，不做翻译、文本替换或 GBK 回退。观察到的 `perseus_chs.mys` 和本地化 exe 只能留在研究 inventory，不能作为 runtime source。
 
 ```yaml
 schema: astra.emu.family_launch_profile.v1
@@ -37,8 +37,10 @@ prefix: "minori:/"
 runtime:
   entry_uri: "minori:/scr/start.sc"
   launch_mode: title
-family_options_schema: astra.emu.minori.mount_options.v2
+family_options_schema: astra.emu.minori.mount_options.v3
 family_options:
+  content_variant: natsuzora-no-perseus.original-ja
+  locale_hook: astra.emu.minori.locale.ja-jp.cp932.v1
   paz_version: 2
   index_size_xor: 0
   key_file: key.toml

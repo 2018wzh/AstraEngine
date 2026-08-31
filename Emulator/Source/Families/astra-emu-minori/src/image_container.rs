@@ -6,9 +6,10 @@ use astra_media::{
     DecodeCapability, DecodeKind, DecodeOutput, DecodeProvider, DecodeRequest, DecodeResult,
     MediaError, ProviderPriority,
 };
-use encoding_rs::SHIFT_JIS;
 use flate2::read::ZlibDecoder;
 use image::RgbaImage;
+
+use crate::MinoriLocaleHook;
 
 const MAX_CONTAINER_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_FRAME_COUNT: usize = 65_536;
@@ -74,8 +75,15 @@ impl MinoriAniArchive {
                 ));
             }
             let name_bytes = checked_slice(&source, cursor, name_end)?;
-            let (name, _, had_errors) = SHIFT_JIS.decode(name_bytes);
-            if had_errors || name.trim().is_empty() {
+            let name = MinoriLocaleHook::japanese_cp932()
+                .decode(name_bytes)
+                .map_err(|_| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_ANI_NAME",
+                        "ANI frame name is not valid CP932",
+                    )
+                })?;
+            if name.trim().is_empty() {
                 return Err(invalid(
                     "ASTRA_EMU_MINORI_ANI_NAME",
                     "ANI frame name is not valid CP932",
@@ -95,7 +103,7 @@ impl MinoriAniArchive {
             })?;
             checked_slice(&source, data_offset, pixel_bytes)?;
             frames.push(MinoriImageFrameDescriptor {
-                name: name.into_owned(),
+                name,
                 width,
                 height,
                 offset_x,
@@ -532,6 +540,17 @@ mod tests {
                 .unwrap_err()
                 .code(),
             "ASTRA_EMU_MINORI_IMAGE_BOUNDS"
+        );
+    }
+
+    #[test]
+    fn ani_rejects_malformed_cp932_frame_names() {
+        let bytes = vec![0x00, 0x01, 0x01, 0x00, 0, 0, 0, 0, 0x82, 0];
+        assert_eq!(
+            MinoriAniArchive::parse(Arc::<[u8]>::from(bytes))
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_ANI_NAME"
         );
     }
 

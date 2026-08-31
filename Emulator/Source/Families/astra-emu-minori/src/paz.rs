@@ -7,7 +7,7 @@ use std::{
     time::SystemTime,
 };
 
-use crate::MINORI_READER_ID;
+use crate::{MinoriLocaleHook, MINORI_READER_ID};
 use astra_core::Hash256;
 use astra_emu_family_core::{
     validate_legacy_vfs_directory_uri, validate_legacy_vfs_uri, LegacyCoreError, LegacyMountedVfs,
@@ -17,7 +17,6 @@ use astra_emu_family_core::{
 };
 use blowfish::cipher::{BlockCipherDecrypt, KeyInit as BlowfishKeyInit};
 use blowfish::Blowfish;
-use encoding_rs::SHIFT_JIS;
 use flate2::read::ZlibDecoder;
 use rc4::{Rc4, StreamCipher};
 use serde::{Deserialize, Serialize};
@@ -69,10 +68,14 @@ pub struct PazRoleScheme {
 #[derive(Debug)]
 pub struct MinoriPazDecryptor {
     roles: BTreeMap<String, PazRoleScheme>,
+    locale_hook: MinoriLocaleHook,
 }
 
 impl MinoriPazDecryptor {
-    pub fn new(roles: BTreeMap<String, PazRoleScheme>) -> Result<Self, PazError> {
+    pub fn new_with_locale(
+        roles: BTreeMap<String, PazRoleScheme>,
+        locale_hook: MinoriLocaleHook,
+    ) -> Result<Self, PazError> {
         if roles
             .keys()
             .any(|role| !REQUIRED_ARCHIVE_ROLES.contains(&role.as_str()))
@@ -101,7 +104,11 @@ impl MinoriPazDecryptor {
                 validate_blowfish_key(&scheme.data_key)?;
             }
         }
-        Ok(Self { roles })
+        Ok(Self { roles, locale_hook })
+    }
+
+    pub const fn locale_hook(&self) -> MinoriLocaleHook {
+        self.locale_hook
     }
 
     fn scheme(&self, role: &str) -> Result<&PazRoleScheme, PazError> {
@@ -151,7 +158,11 @@ impl MinoriPazDecryptor {
                 }
                 return Ok(bytes);
             }
-            let entry_key = entry_key_material(entry, password_for_entry(entry, scheme))?;
+            let entry_key = entry_key_material_with_locale(
+                entry,
+                password_for_entry(entry, scheme),
+                self.locale_hook,
+            )?;
             let key = (0..256)
                 .map(|index| video_key[index] ^ entry_key[index % entry_key.len()])
                 .collect::<Vec<_>>();
@@ -187,7 +198,7 @@ impl MinoriPazDecryptor {
         blowfish_decrypt_in_place(&scheme.data_key, &mut bytes)?;
         if version > 0 {
             if let Some(password) = password_for_entry(entry, scheme) {
-                let key = entry_key_material(entry, Some(password))?;
+                let key = entry_key_material_with_locale(entry, Some(password), self.locale_hook)?;
                 let mut cipher = Rc4::new_from_slice(&key).map_err(|_| {
                     error(
                         "ASTRA_EMU_MINORI_RC4_KEY",
@@ -305,8 +316,12 @@ impl MinoriMountedVfs {
                 hash: Hash256::from_sha256(&[]),
                 xor_key: 0,
             };
-            let parsed =
-                parse_archive_index(&mut source, config.index_size_xor, decryptor.as_ref())?;
+            let parsed = parse_archive_index(
+                &mut source,
+                config.index_size_xor,
+                decryptor.as_ref(),
+                decryptor.locale_hook(),
+            )?;
             prepared.push((config, source, parsed));
         }
         for (config, mut source, parsed) in prepared {
@@ -891,6 +906,7 @@ fn parse_archive_index(
     source: &mut ArchiveSource,
     expected_index_xor: u32,
     decryptor: &MinoriPazDecryptor,
+    locale_hook: MinoriLocaleHook,
 ) -> Result<Vec<PazEntryDescriptor>, PazError> {
     let (index_offset, encrypted_size): (u64, u64) = if source.version == 0 {
         let raw = read_source_range(source, 0, 4)?;
@@ -942,7 +958,7 @@ fn parse_archive_index(
     };
     let mut entries = Vec::with_capacity(count);
     for index in 0..count {
-        let (name, crypto_name) = read_c_string(&mut cursor)?;
+        let (name, crypto_name) = read_c_string(&mut cursor, locale_hook)?;
         let offset = read_u64(&mut cursor)?;
         let unpacked_size = read_u32(&mut cursor)? as u64;
         let stored_size = read_u32(&mut cursor)? as u64;
@@ -993,7 +1009,10 @@ fn normalize_entry_name(name: &str) -> Result<String, PazError> {
     Ok(normalized)
 }
 
-fn read_c_string(cursor: &mut Cursor<&[u8]>) -> Result<(String, Vec<u8>), PazError> {
+fn read_c_string(
+    cursor: &mut Cursor<&[u8]>,
+    locale_hook: MinoriLocaleHook,
+) -> Result<(String, Vec<u8>), PazError> {
     let start = cursor.position() as usize;
     let bytes = cursor.get_ref();
     let end = bytes[start..]
@@ -1013,15 +1032,14 @@ fn read_c_string(cursor: &mut Cursor<&[u8]>) -> Result<(String, Vec<u8>), PazErr
         ));
     }
     let crypto_name = bytes[start..end].to_vec();
-    let (text, _, malformed) = SHIFT_JIS.decode(&crypto_name);
-    if malformed {
-        return Err(error(
+    let text = locale_hook.decode(&crypto_name).map_err(|_| {
+        error(
             "ASTRA_EMU_MINORI_INDEX_ENCODING",
             "PAZ entry name is not valid CP932",
-        ));
-    }
+        )
+    })?;
     cursor.set_position((end + 1) as u64);
-    Ok((text.into_owned(), crypto_name))
+    Ok((text, crypto_name))
 }
 
 fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, PazError> {
@@ -1315,29 +1333,26 @@ fn password_for_entry<'a>(
     }
 }
 
-fn entry_key_material(
+fn entry_key_material_with_locale(
     entry: &PazEntryDescriptor,
     password: Option<&str>,
+    locale_hook: MinoriLocaleHook,
 ) -> Result<Vec<u8>, PazError> {
     let lowered_name = entry.name.to_lowercase();
-    let (encoded_name, _, malformed) = SHIFT_JIS.encode(&lowered_name);
-    if malformed {
-        return Err(error(
+    let mut key = locale_hook.encode(&lowered_name).map_err(|_| {
+        error(
             "ASTRA_EMU_MINORI_RC4_KEY",
             "entry name cannot be encoded as CP932",
-        ));
-    }
-    let mut key = encoded_name.into_owned();
+        )
+    })?;
     key.extend_from_slice(format!(" {:08X} ", entry.unpacked_size).as_bytes());
     if let Some(password) = password {
-        let (encoded, _, malformed) = SHIFT_JIS.encode(password);
-        if malformed {
-            return Err(error(
+        key.extend_from_slice(&locale_hook.encode(password).map_err(|_| {
+            error(
                 "ASTRA_EMU_MINORI_RC4_KEY",
                 "entry password cannot be encoded as CP932",
-            ));
-        }
-        key.extend_from_slice(encoded.as_ref());
+            )
+        })?);
     }
     if key.is_empty() {
         return Err(error("ASTRA_EMU_MINORI_RC4_KEY", "entry RC4 key is empty"));
@@ -1414,7 +1429,8 @@ mod tests {
             video_key: None,
         };
         assert_eq!(
-            entry_key_material(&entry, Some("pw")).unwrap(),
+            entry_key_material_with_locale(&entry, Some("pw"), MinoriLocaleHook::japanese_cp932())
+                .unwrap(),
             b"script.sc 00000012 pw"
         );
     }
@@ -1437,7 +1453,9 @@ mod tests {
             );
         }
         assert_eq!(
-            MinoriPazDecryptor::new(roles).unwrap_err().code(),
+            MinoriPazDecryptor::new_with_locale(roles, MinoriLocaleHook::japanese_cp932())
+                .unwrap_err()
+                .code(),
             "ASTRA_EMU_MINORI_MOVIE_KEY"
         );
     }

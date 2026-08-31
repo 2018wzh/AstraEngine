@@ -54,6 +54,16 @@
 | `mov.paz` | 882835526 | movie archive |
 | `perseus_chs.mys` | 2064280 | 本地化 patch 数据 |
 
+### 运行范围
+
+表中的 `夏空的英仙座.exe` 与 `perseus_chs.mys` 说明样本目录同时保留过本地化材料，
+不表示它们属于当前移植目标。runtime 只接受日文原版内容变体
+`natsuzora-no-perseus.original-ja`，并要求非符号链接的 `perseus.exe`；本地化 exe、MYS
+覆盖和汉化文本不会被探测、挂载或合并。`astra.emu.minori.locale.ja-jp.cp932.v1`
+是严格的原版 CP932 转区绑定，只在字节边界执行日文解码/编码，不替换正文，也不提供
+GBK/翻译回退。缺少该绑定、出现非法 CP932 或选择本地化变体时，mount 以稳定 diagnostic
+阻断。
+
 ## 研究命令
 
 ```bash

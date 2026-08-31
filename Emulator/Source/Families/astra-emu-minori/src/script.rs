@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use encoding_rs::SHIFT_JIS;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::MINORI_SCRIPT_IR_SCHEMA;
+use crate::{MinoriLocaleHook, MINORI_SCRIPT_IR_SCHEMA};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceSpan {
@@ -206,6 +205,17 @@ pub enum ScParseError {
 /// Parses the observed CP932, CRLF-oriented `.command operands` source form.
 /// Every source line and newline is retained verbatim for lossless round-trip.
 pub fn parse_sc(bytes: &[u8], catalog: &ScOpcodeCatalog) -> Result<ScScript, ScParseError> {
+    parse_sc_with_locale(bytes, catalog, MinoriLocaleHook::japanese_cp932())
+}
+
+/// Parses a script through the host-selected Minori locale binding.  The
+/// current original-game binding is strict Japanese CP932; a different or
+/// replacement decoder cannot be supplied by the caller.
+pub fn parse_sc_with_locale(
+    bytes: &[u8],
+    catalog: &ScOpcodeCatalog,
+    locale_hook: MinoriLocaleHook,
+) -> Result<ScScript, ScParseError> {
     let mut cursor = 0usize;
     let mut ordinal = 0u32;
     let mut lines = Vec::new();
@@ -220,17 +230,14 @@ pub fn parse_sc(bytes: &[u8], catalog: &ScOpcodeCatalog) -> Result<ScScript, ScP
             .or_else(|| raw.strip_suffix(b"\n"))
             .map_or(raw.len(), <[u8]>::len);
         let logical = &raw[..logical_end];
-        if SHIFT_JIS
-            .decode_without_bom_handling_and_without_replacement(logical)
-            .is_none()
-        {
+        if locale_hook.decode(logical).is_err() {
             return Err(ScParseError::Encoding(cursor));
         }
         let span = SourceSpan {
             offset: cursor as u64,
             length: u32::try_from(raw.len()).map_err(|_| ScParseError::SourceInvariant(cursor))?,
         };
-        let kind = parse_line(logical, span, ordinal, catalog)?;
+        let kind = parse_line(logical, span, ordinal, catalog, locale_hook)?;
         if matches!(kind, ScLineKind::Command { .. }) {
             ordinal = ordinal
                 .checked_add(1)
@@ -354,16 +361,23 @@ impl ScOperand {
 }
 
 pub fn disassemble_sc(script: &ScScript) -> Result<String, ScParseError> {
+    disassemble_sc_with_locale(script, MinoriLocaleHook::japanese_cp932())
+}
+
+pub fn disassemble_sc_with_locale(
+    script: &ScScript,
+    locale_hook: MinoriLocaleHook,
+) -> Result<String, ScParseError> {
     let mut output = String::new();
     for line in &script.lines {
-        let Some(decoded) = SHIFT_JIS.decode_without_bom_handling_and_without_replacement(
-            line.raw
-                .strip_suffix(b"\r\n")
-                .or_else(|| line.raw.strip_suffix(b"\n"))
-                .unwrap_or(&line.raw),
-        ) else {
-            return Err(ScParseError::Encoding(line.span.offset as usize));
-        };
+        let decoded = locale_hook
+            .decode(
+                line.raw
+                    .strip_suffix(b"\r\n")
+                    .or_else(|| line.raw.strip_suffix(b"\n"))
+                    .unwrap_or(&line.raw),
+            )
+            .map_err(|_| ScParseError::Encoding(line.span.offset as usize))?;
         output.push_str(&format!("{:08x}: {decoded}\n", line.span.offset));
     }
     Ok(output)
@@ -374,6 +388,7 @@ fn parse_line(
     span: SourceSpan,
     ordinal: u32,
     catalog: &ScOpcodeCatalog,
+    locale_hook: MinoriLocaleHook,
 ) -> Result<ScLineKind, ScParseError> {
     let start = logical
         .iter()
@@ -408,12 +423,17 @@ fn parse_line(
         .map_or(trimmed.len(), |relative| token_end + relative);
     let raw_operands = trimmed[operand_start..].to_vec();
     let spec = catalog.specs.get(&opcode);
-    let operands = tokenize_operands(&raw_operands, span.offset as usize)?
+    let operands = tokenize_operands_with_locale(&raw_operands, span.offset as usize, locale_hook)?
         .into_iter()
         .map(classify_operand)
         .collect();
     let control_flow = spec.map_or(Ok(ScControlFlow::Unknown), |spec| {
-        decode_control_flow(&spec.control_flow, &raw_operands, span.offset as usize)
+        decode_control_flow(
+            &spec.control_flow,
+            &raw_operands,
+            span.offset as usize,
+            locale_hook,
+        )
     })?;
     Ok(ScLineKind::Command {
         command: ScCommand {
@@ -451,6 +471,7 @@ fn decode_control_flow(
     kind: &ScControlFlowKind,
     operands: &[u8],
     offset: usize,
+    locale_hook: MinoriLocaleHook,
 ) -> Result<ScControlFlow, ScParseError> {
     match kind {
         ScControlFlowKind::Next => return Ok(ScControlFlow::Next),
@@ -459,7 +480,7 @@ fn decode_control_flow(
         ScControlFlowKind::Unknown => return Ok(ScControlFlow::Unknown),
         _ => {}
     }
-    let tokens = tokenize_operands(operands, offset)?;
+    let tokens = tokenize_operands_with_locale(operands, offset, locale_hook)?;
     let symbol = |position: usize| {
         tokens
             .get(position)
@@ -510,6 +531,14 @@ fn decode_control_flow(
 }
 
 pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<String>, ScParseError> {
+    tokenize_operands_with_locale(bytes, offset, MinoriLocaleHook::japanese_cp932())
+}
+
+fn tokenize_operands_with_locale(
+    bytes: &[u8],
+    offset: usize,
+    locale_hook: MinoriLocaleHook,
+) -> Result<Vec<String>, ScParseError> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
@@ -519,12 +548,11 @@ pub(crate) fn tokenize_operands(bytes: &[u8], offset: usize) -> Result<Vec<Strin
         if cursor != bytes.len() && !matches!(bytes[cursor], b' ' | b'\t') {
             continue;
         }
-        let Some(decoded) =
-            SHIFT_JIS.decode_without_bom_handling_and_without_replacement(&bytes[start..cursor])
-        else {
-            return Err(ScParseError::Encoding(offset + start));
-        };
-        tokens.push(decoded.into_owned());
+        tokens.push(
+            locale_hook
+                .decode(&bytes[start..cursor])
+                .map_err(|_| ScParseError::Encoding(offset + start))?,
+        );
         start = cursor + 1;
     }
     Ok(tokens)
@@ -681,6 +709,15 @@ mod tests {
         assert_eq!(
             parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap_err(),
             ScParseError::OperandSchema(0)
+        );
+    }
+
+    #[test]
+    fn parser_rejects_malformed_cp932_before_interpreting_operands() {
+        let source = b".message \x82\r\n";
+        assert_eq!(
+            parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap_err(),
+            ScParseError::Encoding(0)
         );
     }
 }

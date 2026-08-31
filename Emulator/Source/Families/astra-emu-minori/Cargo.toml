@@ -18,7 +18,6 @@ abi_stable.workspace = true
 astra-core = { path = "../../../../Engine/Source/Runtime/astra-core" }
 astra-byte-source = { path = "../../../../Engine/Source/Runtime/astra-byte-source" }
 astra-emu-family-api = { path = "../../FamilyApi/astra-emu-family-api" }
-astra-emu-extension-api = { path = "../../FamilyApi/astra-emu-extension-api" }
 astra-emu-family-core = { path = "../../FamilyCore/astra-emu-family-core" }
 astra-emu-family-support = { path = "../../FamilySupport/astra-emu-family-support" }
 astra-media-core = { path = "../../../../Engine/Source/Runtime/astra-media-core" }

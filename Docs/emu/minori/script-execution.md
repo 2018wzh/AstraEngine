@@ -15,9 +15,16 @@ Any older snapshot is a migration-rejection input and is never restored.
 
 `message` 按原程序的 space/tab tokenizer 和 handler contract 解析：每个分隔符都产生一个位置，连续分隔符保留为空字段。四个起始字段依次为 integer id、voice identity、speaker 和正文首段，余下 operand 用单个 ASCII space 拼回正文。因此 `id` 后的三空格表示 voice、speaker 都为空，而不是可折叠的排版空白。少于四个 operand 时仍执行原程序的空默认更新。voice 使用 `resource[volume,pan]` 语法；原程序与全样本绑定共同确认 `[` 前部分是 archive identity。每条新 message 先停止 stream 4，非空 voice 再以单次播放加载。确定性 state 保存 voice URI、volume、pan 与 hash；正文和 speaker 只进入 local-private snapshot/backlog，并通过一次性 lease 交给 host，report 和日志不记录这些 payload。
 
-正文随后由独立的 typed markup parser 处理。IDA 已确认 `\\a`、`\\v` 和 `\\x{load,...}`：前两者分别请求自动推进、等待当前语音结束；组合时先等语音完成再继续。provider 只对需要 `\\v` 的已验证 voice 读取 Ogg 容器 metadata，并用 AstraMedia/Symphonia 给出的时长建立可中断的时间等待，不展开整段 PCM，也不以文件大小估算。metadata reader 直接消费 revision-pinned VFS stream，避免在无缓存 zlib entry 上整文件物化。`load` 保存延时、角色 slot、资源、transition 与 opacity；到期后同时呈现 current/next 节点，以互补 alpha 更新，结束后原子提升 next。消息输入会强制完成仍在进行的替换。控制字节在 backlog、translation Hook 和 text surface 之前移除。缺 voice duration、未知子命令、越界参数或不安全资源名均阻断。当前只有定向测试和授权样本 metadata 探针，不能据此声明与原版像素或演出一致。
+正文随后由独立的 typed markup parser 处理。IDA 已确认 `\\a`、`\\v` 和 `\\x{load,...}`：前两者分别请求自动推进、等待当前语音结束；组合时先等语音完成再继续。provider 只对需要 `\\v` 的已验证 voice 读取 Ogg 容器 metadata，并用 AstraMedia/Symphonia 给出的时长建立可中断的时间等待，不展开整段 PCM，也不以文件大小估算。metadata reader 直接消费 revision-pinned VFS stream，避免在无缓存 zlib entry 上整文件物化。`load` 保存延时、角色 slot、资源、transition 与 opacity；到期后同时呈现 current/next 节点，以互补 alpha 更新，结束后原子提升 next。消息输入会强制完成仍在进行的替换。控制字节在 backlog 和 text surface 之前移除；正文继续保持原版日文，不经过翻译或 overlay。缺 voice duration、未知子命令、越界参数或不安全资源名均阻断。当前只有定向测试和授权样本 metadata 探针，不能据此声明与原版像素或演出一致。
 
-Family ABI v9 不再传递 text lease 或 text presentation。Minori 在调用任何 framebuffer acquire 之前，把 speaker 和正文交给同步 `astra.emu.translation.text.v1` Hook；`Unbound` 明确保留原文，`Completed` 只接受有界 UTF-8，timeout、失败和畸形输出都会阻断本次 step。随后 family 使用 `CosmicTextLayoutProvider`、仓库打包的 Noto Sans JP 与 Astra CPU Renderer2D 生成 premultiplied RGBA，写入 Host-owned `minori.surface.text`，并把 `minori.layer.text` 作为 retained Layer2D 提交。Config 的 `text_shadow` 仍只控制既有 2 px 黑色 outline。缺字体、布局 diagnostic、区域越界、surface lease 冲突或 Hook 错误均 fail fast；没有系统字体、位图文字、字符宽度估算或旧 ABI fallback。消息提交后建立非零物理输入 mask 的 await，等待 confirm、space 或主指针输入。
+Family ABI v9 不再传递 text lease 或 text presentation。Minori 在调用任何 framebuffer acquire 之前，
+使用 `astra.emu.minori.locale.ja-jp.cp932.v1` 确认 speaker 与正文已经是原版日文；该绑定只做
+严格 CP932 转换，不调用 translation Hook，也不接受翻译 overlay。随后 family 使用
+`CosmicTextLayoutProvider`、仓库打包的 Noto Sans JP 与 Astra CPU Renderer2D 生成 premultiplied RGBA，
+写入 Host-owned `minori.surface.text`，并把 `minori.layer.text` 作为 retained Layer2D 提交。Config 的
+`text_shadow` 仍只控制既有 2 px 黑色 outline。缺字体、布局 diagnostic、区域越界、surface lease 冲突
+或 locale binding 错误均 fail fast；没有系统字体、位图文字、字符宽度估算或旧 ABI fallback。消息提交
+后建立非零物理输入 mask 的 await，等待 confirm、space 或主指针输入。
 
 活动消息中切换 Auto 或进入有效快进不会创建第二个等待。VM 保留同一 token，并把等待 modality 从 `Input` 重绑定为 `Time`；切回 Normal 或在尚未完成前释放 Control 时执行反向重绑定。Host 只允许这两种同 token 互换，重复的同类等待或其他 kind 仍直接阻断。Config 的 Auto 速度值 `0` 和有效的 Skip/Control 消息快进都映射为一个 10 ms timing unit，避免制造零时长公共等待；设置值本身不被改写。持久 Skip 只对已存在 read identity 的当前消息生效，遇到未读消息时保留原 `Input` wait；Control 在 `.pragma enable_control` 下仍可快进未读消息。movie、presentation 和 provider fence 不参与重绑定。该契约不放宽 Await 的唯一性和正时长约束。
 

@@ -11,7 +11,7 @@ const DATA_KEY: &[u8] = b"data-key";
 
 fn decryptor(passwords: BTreeMap<String, String>) -> Arc<MinoriPazDecryptor> {
     Arc::new(
-        MinoriPazDecryptor::new(
+        MinoriPazDecryptor::new_with_locale(
             REQUIRED_ARCHIVE_ROLES
                 .into_iter()
                 .map(|role| {
@@ -29,6 +29,7 @@ fn decryptor(passwords: BTreeMap<String, String>) -> Arc<MinoriPazDecryptor> {
                     )
                 })
                 .collect(),
+            MinoriLocaleHook::japanese_cp932(),
         )
         .unwrap(),
     )
@@ -49,7 +50,8 @@ fn blowfish_encrypt(key: &[u8], plain: &[u8]) -> Vec<u8> {
 }
 
 fn rc4_transform(version: u8, entry: &PazEntryDescriptor, bytes: &mut [u8]) {
-    let key = entry_key_material(entry, Some("pw")).unwrap();
+    let key = entry_key_material_with_locale(entry, Some("pw"), MinoriLocaleHook::japanese_cp932())
+        .unwrap();
     let mut cipher = Rc4::new_from_slice(&key).unwrap();
     let skip = if version >= 2 {
         (crc32(&key) >> 12 & 0xff) as usize
@@ -181,7 +183,8 @@ fn movie_v0_substitution_and_v1_periodic_rc4_are_range_stable() {
     );
 
     entry.video_key = Some((0u8..=255).collect());
-    let entry_key = entry_key_material(&entry, None).unwrap();
+    let entry_key =
+        entry_key_material_with_locale(&entry, None, MinoriLocaleHook::japanese_cp932()).unwrap();
     let key = (0..256)
         .map(|index| index as u8 ^ entry_key[index % entry_key.len()])
         .collect::<Vec<_>>();

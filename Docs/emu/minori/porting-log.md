@@ -1240,3 +1240,23 @@ Minori 菜单的 item id、顺序或平台呈现。
   save/restore required checkpoint、原版同点视觉、正式音频听审、Release Sandbox
   或 Windows E3。此前将 checkpoint 放在同 tick await 之后的旧序列会被
   `ASTRA_EMU_HEADLESS_CHECKPOINT_ORDER` 拒绝，现已修正输入生成约束。
+
+## 2026-08-31：只运行日文原版与严格 CP932 locale hook
+
+- `astra.emu.minori.mount_options.v3` 现在要求 `content_variant` 为
+  `natsuzora-no-perseus.original-ja`、`locale_hook` 为
+  `astra.emu.minori.locale.ja-jp.cp932.v1`，并在挂载时确认 `perseus.exe` 是原版的
+  非符号链接普通文件。该边界来自当前游戏目录的原版/本地化文件并存观察，不把本地
+  路径或商业文件内容写入公开记录。
+- `perseus_chs.mys`、本地化 exe 和汉化备份目录只作为 inventory 事实；本轮没有
+  汉化版入口、MYS overlay 或翻译资源解析。locale hook 是 host 可绑定的转区/编码
+  语义，严格执行 CP932 decode/encode，用来避免非日文宿主的乱码，不会替换正文，也
+  不会回退 GBK 或 translation provider。
+- PAZ index/entry key、ANI frame name 和 `.sc` lossless parser 已统一经过该 binding；
+  malformed CP932、未知 hook 或本地化变体均以稳定 diagnostic 阻断。Minori message
+  publisher 删除了 production translation Hook 调用，原版日文正文直接进入
+  CosmicText/Renderer2D 路径。
+- 新增 locale round-trip、非法 CP932、变体/入口拒绝和严格 ANI 名称回归；
+  `astra-emu-minori --lib --no-default-features` 定向 187/187 通过。证据等级为
+  E1/E2 的代码与定向测试边界；不关闭四路线、原版同点视觉、Release Sandbox、正式
+  音频审查或 Windows E3。

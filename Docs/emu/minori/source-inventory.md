@@ -28,6 +28,15 @@ bgm.paz
 
 当前样本有八个非空逻辑 archive、18 个物理文件。`bg` 由主包和 A–J 十个连续分卷组成；`bgm` 是独立主包。文件名、计数和大小可以进入脱敏研究记录，key、payload、完整脚本文本与导出内容只保存在 ignored 私有目录。
 
+### 运行范围
+
+`perseus_chs.mys`、`夏空的英仙座.exe` 和单独备份的汉化目录是观察到的本地化材料，
+不属于本阶段 runtime。launch profile 只能声明
+`natsuzora-no-perseus.original-ja`，factory 只接受目录内的原版 `perseus.exe`。
+日文原版通过 `astra.emu.minori.locale.ja-jp.cp932.v1` 做严格 CP932 转区绑定；该 hook
+用于避免宿主 code page 造成乱码，不承担翻译、MYS overlay 或 GBK 解码。未声明原版变体、
+locale hook 或入口时，挂载直接阻断。
+
 ## 参考文件
 
 | 文件 | 可借鉴点 | 不纳入内容 |

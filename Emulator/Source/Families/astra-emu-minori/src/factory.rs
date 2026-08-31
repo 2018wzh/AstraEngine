@@ -9,13 +9,13 @@ use astra_emu_family_core::{
     read_private_file, LegacyCoreError, LegacyMountedVfs, LegacyVfsFamilyFactory,
     LegacyVfsMountContext,
 };
-use encoding_rs::SHIFT_JIS;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    MinoriMountedVfs, MinoriPazDecryptor, PazArchiveConfig, PazRoleScheme,
-    MINORI_FAMILY_OPTIONS_SCHEMA, REQUIRED_ARCHIVE_ROLES,
+    MinoriLocaleHook, MinoriMountedVfs, MinoriPazDecryptor, PazArchiveConfig, PazRoleScheme,
+    MINORI_FAMILY_OPTIONS_SCHEMA, MINORI_LOCALE_HOOK_ID, MINORI_ORIGINAL_VARIANT_ID,
+    REQUIRED_ARCHIVE_ROLES,
 };
 
 pub const MINORI_KEY_FILE_SCHEMA: &str = "astra.emu.minori.keys.v1";
@@ -24,6 +24,8 @@ pub const MAX_KEY_FILE_BYTES: u64 = 64 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MinoriFamilyOptions {
+    pub content_variant: String,
+    pub locale_hook: String,
     pub paz_version: u8,
     pub index_size_xor: u32,
     pub key_file: PathBuf,
@@ -92,6 +94,13 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
             )
         })?;
         validate_options(&options)?;
+        let locale_hook = MinoriLocaleHook::from_id(&options.locale_hook).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_LOCALE_HOOK",
+                "Minori requires the Japanese CP932 locale hook",
+            )
+        })?;
+        validate_original_entrypoint(&context.game_root)?;
         let key_bytes =
             read_private_file(&context.game_root, &options.key_file, MAX_KEY_FILE_BYTES)?;
         let key_text = std::str::from_utf8(&key_bytes).map_err(|_| {
@@ -107,7 +116,7 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
             )
         })?;
         let schemes = key_file.into_schemes()?;
-        let decryptor = Arc::new(MinoriPazDecryptor::new(schemes)?);
+        let decryptor = Arc::new(MinoriPazDecryptor::new_with_locale(schemes, locale_hook)?);
         let configs = options
             .archive_roles
             .iter()
@@ -158,8 +167,7 @@ impl MinoriKeyFile {
         .filter_map(|(kind, value)| value.map(|value| (kind.to_owned(), value)))
         .collect::<BTreeMap<_, _>>();
         for password in type_passwords.values() {
-            let (_, _, malformed) = SHIFT_JIS.encode(password);
-            if malformed {
+            if MinoriLocaleHook::japanese_cp932().encode(password).is_err() {
                 return Err(invalid(
                     "ASTRA_EMU_MINORI_KEY_CP932",
                     "Minori type password cannot be encoded as CP932",
@@ -221,7 +229,9 @@ fn validate_options(options: &MinoriFamilyOptions) -> Result<(), LegacyCoreError
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    if options.paz_version > 2
+    if options.content_variant != MINORI_ORIGINAL_VARIANT_ID
+        || options.locale_hook != MINORI_LOCALE_HOOK_ID
+        || options.paz_version > 2
         || options.key_file.as_os_str().is_empty()
         || options.key_file.is_absolute()
         || options
@@ -234,6 +244,23 @@ fn validate_options(options: &MinoriFamilyOptions) -> Result<(), LegacyCoreError
         return Err(invalid(
             "ASTRA_EMU_MINORI_MOUNT_OPTIONS",
             "Minori family options violate their contract",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_original_entrypoint(game_root: &std::path::Path) -> Result<(), LegacyCoreError> {
+    let entrypoint = game_root.join("perseus.exe");
+    let metadata = std::fs::symlink_metadata(&entrypoint).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_ORIGINAL_ENTRYPOINT",
+            "the Japanese original entrypoint perseus.exe is required",
+        )
+    })?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_ORIGINAL_ENTRYPOINT",
+            "the Minori entrypoint must be a regular non-symlink file",
         ));
     }
     Ok(())
@@ -314,6 +341,8 @@ mod tests {
     #[test]
     fn family_options_require_exact_roles_and_safe_key_path() {
         let valid = MinoriFamilyOptions {
+            content_variant: MINORI_ORIGINAL_VARIANT_ID.into(),
+            locale_hook: MINORI_LOCALE_HOOK_ID.into(),
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -331,5 +360,52 @@ mod tests {
         let mut duplicate = valid;
         duplicate.archive_roles[0] = duplicate.archive_roles[1].clone();
         assert!(validate_options(&duplicate).is_err());
+    }
+
+    #[test]
+    fn family_options_reject_localized_variant_and_non_japanese_hook() {
+        let mut options = MinoriFamilyOptions {
+            content_variant: MINORI_ORIGINAL_VARIANT_ID.into(),
+            locale_hook: MINORI_LOCALE_HOOK_ID.into(),
+            paz_version: 2,
+            index_size_xor: 0,
+            key_file: PathBuf::from("key.toml"),
+            archive_roles: REQUIRED_ARCHIVE_ROLES
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        };
+        options.content_variant = "natsuzora-no-perseus.chs".into();
+        assert_eq!(
+            validate_options(&options).unwrap_err().code(),
+            "ASTRA_EMU_MINORI_MOUNT_OPTIONS"
+        );
+        options.content_variant = MINORI_ORIGINAL_VARIANT_ID.into();
+        options.locale_hook = "astra.emu.minori.locale.gbk.v1".into();
+        assert_eq!(
+            validate_options(&options).unwrap_err().code(),
+            "ASTRA_EMU_MINORI_MOUNT_OPTIONS"
+        );
+    }
+
+    #[test]
+    fn original_entrypoint_must_be_a_regular_file() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            validate_original_entrypoint(root.path())
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_ORIGINAL_ENTRYPOINT"
+        );
+        std::fs::create_dir(root.path().join("perseus.exe")).unwrap();
+        assert_eq!(
+            validate_original_entrypoint(root.path())
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_ORIGINAL_ENTRYPOINT"
+        );
+        std::fs::remove_dir(root.path().join("perseus.exe")).unwrap();
+        std::fs::write(root.path().join("perseus.exe"), b"fixture").unwrap();
+        assert!(validate_original_entrypoint(root.path()).is_ok());
     }
 }
