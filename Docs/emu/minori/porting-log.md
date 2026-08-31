@@ -1226,3 +1226,17 @@ Minori 菜单的 item id、顺序或平台呈现。
 - 这次运行只证明当前 Family ABI 菜单/确认接线、WMF 绑定和新输入观察键在 Release
   CLI Headless 中可以稳定完成一个有限片段；四路线完整运行、save/restore required
   checkpoint、正式音频听审、Release Sandbox 视觉验收和 Windows E3 仍保持开放。
+
+## 2026-08-31：48 checkpoint Release Headless slice
+
+- 使用同一开发签名 Release 候选、显式 WMF provider 和校正过 checkpoint 顺序的物理
+  输入序列，完成 193 条输入消息、24048 个 fixed step、238 个提交/栅格帧和
+  16757248 个音频帧；48 个 checkpoint 全部通过，报告为 `passed` 且 diagnostic 为空。
+  该序列在尾部显式 shutdown，没有把有限片段误报为 terminal。
+- 查看了早段黑场、中段日文消息、背景过渡和后段人物构图。消息框、日文 glyph、背景
+  层次、转场颜色与人物裁剪均可见，未发现明显拉伸、缺字、残影或坐标漂移；图片只
+  留在 ignored 私有 artifact，不进入仓库或公开报告。
+- 这是当前输入契约下的长片段 Headless E2 质量证据，不能替代四路线自然结局、
+  save/restore required checkpoint、原版同点视觉、正式音频听审、Release Sandbox
+  或 Windows E3。此前将 checkpoint 放在同 tick await 之后的旧序列会被
+  `ASTRA_EMU_HEADLESS_CHECKPOINT_ORDER` 拒绝，现已修正输入生成约束。

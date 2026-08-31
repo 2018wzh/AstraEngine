@@ -895,3 +895,9 @@ provider 和新输入观察键完成 33 条物理输入、4008 fixed steps、491
 2713600 个音频帧，报告为 `passed` 且 diagnostic 为空。代表性黑场、日文消息和背景
 checkpoint 已人工查看；这是有限片段的输入/呈现质量证据，不关闭四路线、Save/restore、
 完整媒体听审、Release Sandbox 或 Windows E3。
+
+2026 年 8 月 31 日长片段复验：校正 checkpoint 顺序后的当前输入在显式 WMF provider
+下完成 193 条物理输入、24048 fixed steps、238 个提交/栅格帧和 16757248 个音频帧，
+48 个 checkpoint 全部通过且 diagnostic 为空。尾部是显式 shutdown，未伪造 terminal；
+早中晚代表性画面已人工检查。该证据继续只覆盖 Headless 长片段，不关闭四路线自然
+解锁、Save/restore、原版同点视觉、正式音频、Release Sandbox 或 Windows E3。

@@ -84,6 +84,17 @@ checkpoint, so it is not terminal evidence; sparse sampling is not the 120 Hz
 GPU E2 gate. Full-route natural unlock, same-point visual review, audio review,
 save/restore checkpoints, Release Sandbox, and Windows E3 remain open.
 
+2026-08-31 long route-input slice: the corrected sequence (checkpoint messages
+are not followed by same-tick await messages) completed 193 physical-input
+messages, 24048 fixed steps, 238 submitted/rasterized frames and 16757248 audio
+frames. All 48 checkpoints passed and diagnostics were empty. The sequence ends
+with an explicit shutdown rather than a terminal signature; selected early,
+middle and late frames were visually inspected for Japanese glyphs, message
+placement, transitions, background layers and character cropping. This is
+long-slice Headless E2 evidence only, not four-route natural unlock, save/restore
+required checkpoints, original same-point parity, formal audio review, Release
+Sandbox or Windows E3 acceptance.
+
 2026-08-31 confirmation wording alignment: the original Windows Sandbox was
 observed using the native Exit and Return-title confirmation dialogs with the
 same two-button order and cancel semantics now sent through Family ABI v14.

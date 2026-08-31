@@ -652,3 +652,10 @@ Windows E3 parity claim is made here.
 未发现明显布局或图层问题。该证据只覆盖有限片段的当前 Family ABI/Host 接线，不提升
 完整四路线、Save/restore、正式音频、Release Sandbox 或 Windows E3，Stage 5 继续保持
 `IN_PROGRESS`。
+
+2026-08-31 长片段 Release Headless slice：校正 checkpoint 顺序后的当前输入在显式 WMF
+provider 下完成 193 条物理输入、24048 fixed steps、238 个提交/栅格帧和 16757248 个
+音频帧；48 个 checkpoint 全部通过且 diagnostic 为空。序列以显式 shutdown 结束，未
+伪造 terminal；早、中、晚代表性画面已人工检查。该证据仅覆盖 Headless 长片段，不提升
+四路线自然解锁、Save/restore、原版同点视觉、正式音频、Release Sandbox 或 Windows E3，
+Stage 5 继续保持 `IN_PROGRESS`。
