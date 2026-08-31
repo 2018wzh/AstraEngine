@@ -1114,3 +1114,13 @@ Linux read-only FUSE 的 EOF read 也已收紧：offset 位于文件尾或请求
   180/180、`astra-platform` 11/11 和 Windows target 9/9 定向测试通过；这些是
   contract/provider/Host 接线证据，不是完整路线、Release Sandbox、正式音频或 Windows
   E3 证据。
+
+### 2026-08-31 Save slot comment rehydration
+
+- 在不改变原版空槽页面资源布局的前提下，Minori 现在会在 Save/Load 页面首次刷新
+  以及槽文件长度变化后读取并校验 v2 slot envelope，只保留有界的用户注释供下一次
+  Host-owned Comment prompt 使用。重复刷新不会逐 tick 重新读取未变化的槽文件。
+- 槽文件的 schema、case/package/profile identity、长度和注释字符边界任一不满足时，
+  页面刷新返回稳定的 `ASTRA_EMU_MINORI_SAVE_LIST_*` diagnostic；不会把损坏内容
+  当作空槽，也不会把槽正文写入报告或日志。Save 页面中已保存注释的具体绘制位置
+  仍需原版同点资源/行为证据，当前不做猜测。

@@ -540,6 +540,7 @@ struct MinoriSession {
     resize_antialias: bool,
     save_slots: BTreeSet<u32>,
     save_slot_comments: BTreeMap<u32, String>,
+    save_slot_lengths: BTreeMap<u32, u64>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
     published_layers: BTreeSet<String>,
     /// Last resource-backed presentation descriptor committed to the host.
@@ -918,6 +919,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 resize_antialias: true,
                 save_slots: BTreeSet::new(),
                 save_slot_comments: BTreeMap::new(),
+                save_slot_lengths: BTreeMap::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
                         MinoriTextSurfaceRenderer::new(width, height)
@@ -5917,6 +5919,8 @@ fn refresh_save_slots(
         ));
     }
     let mut slots = BTreeSet::new();
+    let mut slot_lengths = BTreeMap::new();
+    let mut slot_comments = BTreeMap::new();
     for entry in result.entries {
         if !entry.is_file {
             return Err(invalid(
@@ -5949,9 +5953,86 @@ fn refresh_save_slots(
                 "save slot directory contains a duplicate slot",
             ));
         }
+        let comment = if session.save_slot_lengths.get(&slot) == Some(&entry.length) {
+            session
+                .save_slot_comments
+                .get(&slot)
+                .cloned()
+                .ok_or_else(|| {
+                    invalid(
+                        "ASTRA_EMU_MINORI_SAVE_LIST_STATE",
+                        "save slot comment cache is incomplete",
+                    )
+                })?
+        } else {
+            read_save_slot_comment(writable_files, session_id, session, slot, entry.length)?
+        };
+        slot_lengths.insert(slot, entry.length);
+        slot_comments.insert(slot, comment);
     }
     session.save_slots = slots;
+    session.save_slot_lengths = slot_lengths;
+    session.save_slot_comments = slot_comments;
     Ok(())
+}
+
+fn read_save_slot_comment(
+    writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
+    session_id: &LegacyRuntimeSessionId,
+    session: &MinoriSession,
+    slot: u32,
+    expected_length: u64,
+) -> Result<String, LegacyProviderError> {
+    let path = slot_path(slot);
+    let stat = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::Stat { path: path.clone() },
+    )?;
+    if !stat.exists || !stat.is_file || stat.length != expected_length {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LIST_CHANGED",
+            "save slot changed while its metadata was being read",
+        ));
+    }
+    let read = writable_files.execute(
+        &session_id.0,
+        astra_emu_family_api::LegacyWritableFileRequestV1::ReadRange {
+            path,
+            offset: 0,
+            length: expected_length,
+        },
+    )?;
+    if read.written != 0 || read.bytes.len() as u64 != expected_length {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LIST_READ",
+            "save slot comment read returned a short or unexpected payload",
+        ));
+    }
+    let envelope = decode_save(read.bytes.as_slice()).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_LIST_FORMAT",
+            "save slot envelope is malformed",
+        )
+    })?;
+    if envelope.schema != MINORI_SAVE_SCHEMA
+        || envelope.case_fingerprint != session.case_fingerprint
+        || envelope.package_hash != session.package_hash
+        || envelope.profile_fingerprint != session.profile_fingerprint
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LIST_IDENTITY",
+            "save slot identity does not match the active case",
+        ));
+    }
+    if envelope.comment.len() > MINORI_SAVE_COMMENT_MAX_BYTES
+        || envelope.comment.chars().any(char::is_control)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LIST_COMMENT",
+            "save slot comment is invalid or exceeds the bounded text length",
+        ));
+    }
+    Ok(envelope.comment)
 }
 
 fn save_slot(
@@ -5960,7 +6041,7 @@ fn save_slot(
     session: &MinoriSession,
     slot: u32,
     comment: &str,
-) -> Result<(), LegacyProviderError> {
+) -> Result<u64, LegacyProviderError> {
     validate_save_slot(slot)?;
     if session.vm.state().system_ui.page != MinoriSystemPage::Save {
         return Err(invalid(
@@ -6075,7 +6156,8 @@ fn save_slot(
         0,
         "replace save slot",
         "ASTRA_EMU_MINORI_SAVE_WRITE",
-    )
+    )?;
+    Ok(payload.len() as u64)
 }
 
 fn load_slot(
@@ -6691,12 +6773,15 @@ fn handle_system_menu_request(
                 }
                 "quick_save" => {
                     session.vm.open_save_page().map_err(runtime_error)?;
-                    save_slot(services.writable_files.as_ref(), session_id, session, 0, "")?;
+                    let save_length =
+                        save_slot(services.writable_files.as_ref(), session_id, session, 0, "")?;
                     session
                         .vm
                         .close_gameplay_system_page()
                         .map_err(runtime_error)?;
                     session.save_slots.insert(0);
+                    session.save_slot_lengths.insert(0, save_length);
+                    session.save_slot_comments.insert(0, String::new());
                     session
                         .vm
                         .advance_provider_tick(input.tick_index)
@@ -6940,7 +7025,7 @@ fn handle_text_input_step(
         .map_err(runtime_error)?;
     match result.choice {
         LegacyTextInputChoiceV1::Accepted => {
-            save_slot(
+            let save_length = save_slot(
                 services.writable_files.as_ref(),
                 session_id,
                 session,
@@ -6951,6 +7036,7 @@ fn handle_text_input_step(
             session
                 .save_slot_comments
                 .insert(active.slot, result.value.clone());
+            session.save_slot_lengths.insert(active.slot, save_length);
         }
         LegacyTextInputChoiceV1::Cancelled => {}
     }
@@ -11279,6 +11365,12 @@ mod tests {
         session.vm.open_save_page().unwrap();
         save_slot(&writable, &session_id, session, 7, "memo").unwrap();
         assert!(writable.files.lock().unwrap().contains_key(&slot_path(7)));
+        session.save_slots.clear();
+        session.save_slot_comments.clear();
+        session.save_slot_lengths.clear();
+        refresh_save_slots(&writable, &session_id, session).unwrap();
+        assert_eq!(session.save_slots, BTreeSet::from([7]));
+        assert_eq!(session.save_slot_comments.get(&7), Some(&"memo".to_owned()));
         session.vm.close_gameplay_system_page().unwrap();
         session.vm.open_load_page().unwrap();
         load_slot(&writable, &vfs, &session_id, session, 7, 2).unwrap();
@@ -11286,6 +11378,27 @@ mod tests {
         assert_eq!(session.vm.state().fixed_tick, 2);
         assert!(session.vm.state().wait.is_some());
         assert_eq!(session.save_slot_comments.get(&7), Some(&"memo".to_owned()));
+
+        session.vm.open_save_page().unwrap();
+        let mut envelope = {
+            let files = writable.files.lock().unwrap();
+            decode_save(files.get(&slot_path(7)).unwrap()).unwrap()
+        };
+        envelope.package_hash = Hash256::from_sha256(b"different-package");
+        writable
+            .files
+            .lock()
+            .unwrap()
+            .insert(slot_path(7), encode_save(&envelope).unwrap());
+        session.save_slots.clear();
+        session.save_slot_comments.clear();
+        session.save_slot_lengths.clear();
+        assert_eq!(
+            refresh_save_slots(&writable, &session_id, session)
+                .unwrap_err()
+                .code(),
+            "ASTRA_EMU_MINORI_SAVE_LIST_IDENTITY"
+        );
     }
 
     #[test]

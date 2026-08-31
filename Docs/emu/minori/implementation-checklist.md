@@ -10,6 +10,9 @@
   persisted in the v2 Minori save envelope only after `Accepted`.
 - [x] Family API/FFI, Manager, Minori, platform validation and generated schemas
   cover the transaction/result bounds and duplicate/stale resolution paths.
+- [x] Existing v2 slot envelopes are re-read on the first page refresh (and
+  again after a length change) so the Host prompt starts with the persisted
+  comment; malformed or identity-mismatched slots fail closed.
 - [ ] macOS/Linux/Web/Android/Headless native application UI or typed driver is not
   implemented yet; those hosts return an explicit unsupported diagnostic. Save-page
   comment rendering, Release Sandbox and Windows E3 remain open.
