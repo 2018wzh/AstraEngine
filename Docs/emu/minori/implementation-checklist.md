@@ -11,6 +11,17 @@
   evidence are not implemented in this phase. There is no replacement-character or
   implicit code-page fallback.
 
+## Profile v4 Release Headless evidence (2026-09-01)
+
+- [x] The corrected physical-input sequence completes 193 messages, 24048 fixed steps,
+  48 checkpoints, 146 submitted frames and 16758784 audio frames with an empty diagnostic
+  set under the same Release Minori binding.
+- [x] Representative black, message, background-transition and character checkpoints were
+  inspected; the output is non-empty and the Japanese text/stage layers are visible.
+- [ ] The sequence ends with an explicit shutdown rather than a natural route terminal. Same-
+  point original screenshots, four independent routes, full audio listening review, gallery
+  parity, Release Sandbox and Windows E3 remain open.
+
 ## Japanese-original CP932 message boundary (2026-09-01)
 
 - [x] Script operands and message markup continue to use the bound Japanese CP932
