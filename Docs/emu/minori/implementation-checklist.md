@@ -1,5 +1,16 @@
 # Minori Implementation Checklist
 
+## FVP-compatible profile encoding reservation (2026-09-01)
+
+- [x] `family_options.nls` is required by `astra.emu.minori.mount_options.v4` and is
+  stored under the `minori.nls` profile key, matching the existing FVP selector shape.
+- [x] `shift_jis`, `gbk` and `utf8` are parsed as explicit values. Only `shift_jis` is
+  currently verified for the Japanese original; reserved values and unknown values fail
+  at the Minori mount/runtime boundary with stable diagnostics.
+- [ ] GBK/UTF-8 localized content, matching password/type encoding, fonts and route
+  evidence are not implemented in this phase. There is no replacement-character or
+  implicit code-page fallback.
+
 ## Japanese-original CP932 message boundary (2026-09-01)
 
 - [x] Script operands and message markup continue to use the bound Japanese CP932

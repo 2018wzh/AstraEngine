@@ -1337,7 +1337,7 @@ Minori 菜单的 item id、顺序或平台呈现。
 
 ## 2026-09-01：日文原版脚本 census 复核
 
-- 使用当前 `mount_options.v3` 日文原版 profile 重新读取授权样本的脚本树，严格
+- 使用当前 `mount_options.v4` 日文原版 profile 重新读取授权样本的脚本树，严格
   CP932 解码后得到 89 个 `.sc`、33728 行和 33695 条 command；29 个已观察 opcode
   均在 census 中出现，unknown opcode 为 0。结构计数包含 55 个 `chain`、20 个
   `if`、10 个 `goto`、2 个 `select`、15 个 `movie` 和 85 个 `end`，与已提交的
@@ -1415,3 +1415,17 @@ Minori 菜单的 item id、顺序或平台呈现。
   本地化资源、转码 key、字体或路线行为已经实现。
 - 新增 NLS 枚举、factory 选项验证、无回退测试；后续若接入汉化版，必须先补齐对应
   `content_variant`、locale hook、key/password 编码和真实样本证据，再解除该阻断。
+
+## 2026-09-01：Profile v4 Release 短程启动复核
+
+- 使用重新构建的 Release `astra-emu-cli`、显式 `wmf` video provider 和当前
+  `mount_options.v4` profile，启动同一份日文原版样本的短 Headless 输入序列。运行
+  完成 4008 个 fixed step、消费 33 条物理输入并呈现 57 帧；报告没有 diagnostic，
+  但该序列尚未到达 route terminal。
+- 首个过渡 checkpoint 保持黑场，后续消息 checkpoint 能看到日文姓名、正文和推进
+  指示；当前只检查了非同点的两个画面，不能据此宣称与原版像素或指示器位置一致。
+- 以 `disabled` video provider 启动会在 mount 前返回
+  `ASTRA_EMU_MINORI_VIDEO_PROVIDER_REQUIRED`，说明 Release CLI 沿用了显式 provider
+  契约；没有把无媒体设备或禁用 provider 当作成功运行。
+- 这是 Release Sandbox 的短程启动证据（E2），用于确认 NLS/schema v4 没有破坏真实
+  启动链；四路线、同点截图、完整音视频审查、Windows E3 和峰值内存证据仍保持开放。
