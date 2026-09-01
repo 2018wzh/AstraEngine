@@ -9,6 +9,13 @@ use thiserror::Error;
 /// byte boundary.
 pub const MINORI_ORIGINAL_VARIANT_ID: &str = "natsuzora-no-perseus.original-ja";
 pub const MINORI_LOCALE_HOOK_ID: &str = "astra.emu.minori.locale.ja-jp.cp932.v1";
+/// BCP-47 locale carried by the runtime-open boundary for the original game.
+///
+/// The hook remains the authority for byte conversion; this value is the
+/// presentation/runtime identity used by host composition roots so Japanese
+/// text is not opened as an unspecified locale and subsequently rendered with
+/// a host-default code-page policy.
+pub const MINORI_RUNTIME_LOCALE: &str = "ja-JP";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MinoriLocaleHook;

@@ -17,6 +17,14 @@ fn cli_writable_root(family_id: &str, game_id: Hash256) -> Result<PathBuf, Strin
         .join(writable_game_component(game_id)))
 }
 
+fn runtime_locale_for_family(family_id: &str) -> &'static str {
+    if family_id == "minori" {
+        astra_emu_minori::MINORI_RUNTIME_LOCALE
+    } else {
+        "und"
+    }
+}
+
 fn writable_game_component(game_id: Hash256) -> String {
     hex::encode(game_id.as_bytes())
 }
@@ -784,7 +792,7 @@ async fn run_native_windows(launch: NativeLaunch) -> Result<(), String> {
     let open = runtime.open(RuntimeOpenRequest {
         target_id: "astra-emu-native-case".into(),
         profile: format!("{}-v1", launch.family_id),
-        locale: "und".into(),
+        locale: runtime_locale_for_family(&launch.family_id).into(),
         seed,
         integrity_mode: RuntimeTickIntegrityMode::Shipping,
         executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
@@ -1284,7 +1292,7 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
     let open = runtime.open(RuntimeOpenRequest {
         target_id: "astra-emu-headless-case".into(),
         profile: format!("{}-v1", launch.family_id),
-        locale: "und".into(),
+        locale: runtime_locale_for_family(&launch.family_id).into(),
         seed,
         integrity_mode: if launch.perfetto_trace.is_some() || launch.performance.is_some() {
             RuntimeTickIntegrityMode::Shipping
@@ -7989,6 +7997,15 @@ fn validate_image_decode_output(
 mod native_tests {
     use super::*;
     use astra_emu_family_api::{FamilyId, LegacySystemMenuItemV1, LegacySystemMenuTransactionV1};
+
+    #[test]
+    fn runtime_locale_is_explicit_for_the_original_minori_family() {
+        assert_eq!(
+            runtime_locale_for_family("minori"),
+            astra_emu_minori::MINORI_RUNTIME_LOCALE
+        );
+        assert_eq!(runtime_locale_for_family("fvp"), "und");
+    }
 
     fn virtual_menu() -> VirtualSystemMenu {
         VirtualSystemMenu {

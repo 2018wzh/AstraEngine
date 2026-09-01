@@ -13,6 +13,11 @@ Sandbox 中对原版 System 页做了 Font 上箭头、`OK` 和重新打开的�
 overlay。宿主字体枚举和绑定尚未形成可复现的 package identity，因此 Font
 选择继续列为开放项；本轮不把观察结果拔高为实现或视觉 parity。
 
+同日，CLI 与 Manager 的 runtime-open 请求改用 Minori 固定 `ja-JP` locale identity；
+其它 family 保持 `und`。这只影响运行时元数据和 Host 的 locale 选择，不改变 CP932
+解码规则，也不把本地化文件纳入挂载。该项通过受影响 crate 的增量测试后记录，仍不
+构成原版同点视觉或 Windows E3 证据。
+
 ## 2026 年 9 月 1 日：CP932 多字节尾字节与消息控制边界
 
 原版脚本的消息正文先经过绑定的 Japanese CP932 locale hook，再交给消息控制

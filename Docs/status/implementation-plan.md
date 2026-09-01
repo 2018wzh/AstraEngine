@@ -11,6 +11,12 @@ Minori message path 已删除 translation Hook 调用，正文保持原版日文
 194 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
 
+同日补齐 runtime-open locale identity：CLI 与 Manager 在选择 Minori 时传递
+`ja-JP`，其它 family 仍使用 `und`。这只声明原版日文 session 的 BCP-47 运行时身份；
+字节转换仍由 `astra.emu.minori.locale.ja-jp.cp932.v1` 严格完成，不启用汉化内容、GBK
+回退或翻译 overlay。该修复避免 Host composition 以 unspecified locale 打开原版 session，
+但不替代同点视觉、完整路线、Release Sandbox 或 Windows E3 证据。
+
 2026 年 9 月 1 日标题页 pointer 对齐：Windows Sandbox 观察确认右侧菜单支持舞台坐标
 鼠标 hover 与点击；Minori provider 现在按标题变体解析四/五个菜单行，复用
 `topMenu*Over.png` 的右侧裁剪，并将点击映射到既有 typed action。focus 只存在于 session，

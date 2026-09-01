@@ -133,6 +133,14 @@ fn platform_data_dir() -> Result<PathBuf, String> {
     android_platform::package_identity().map(|identity| PathBuf::from(identity.data_directory))
 }
 
+fn runtime_locale_for_family(family_id: &str) -> &'static str {
+    if family_id == "minori" {
+        astra_emu_minori::MINORI_RUNTIME_LOCALE
+    } else {
+        "und"
+    }
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn platform_grant_kind() -> &'static str {
     "desktop-directory-v1"
@@ -535,7 +543,7 @@ impl RuntimeBridge {
         let open = self.provider.open(RuntimeOpenRequest {
             target_id: "astra-emu-case".into(),
             profile: format!("{}-v1", self.family_id),
-            locale: "und".into(),
+            locale: runtime_locale_for_family(&self.family_id).into(),
             seed,
             integrity_mode: astra_plugin_abi::RuntimeTickIntegrityMode::Shipping,
             executor: astra_plugin_abi::RuntimeExecutorConfig::serial(),
@@ -5065,11 +5073,20 @@ mod manager_tests {
     use super::{
         decode_image_preview, decode_text_preview, fvp_pack_paths_option, media_preview_summary,
         parse_glossary, pending_wait_can_rebind, quick_entry_is_valid, quick_entry_matches,
-        refresh_cover_cache, retain_non_completed_input_edges, system_menu_open_requested,
-        system_ui_activity_from_blackboard, PendingWait,
+        refresh_cover_cache, retain_non_completed_input_edges, runtime_locale_for_family,
+        system_menu_open_requested, system_ui_activity_from_blackboard, PendingWait,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
+
+    #[test]
+    fn runtime_locale_is_explicit_for_the_original_minori_family() {
+        assert_eq!(
+            runtime_locale_for_family("minori"),
+            astra_emu_minori::MINORI_RUNTIME_LOCALE
+        );
+        assert_eq!(runtime_locale_for_family("fvp"), "und");
+    }
 
     #[test]
     fn fvp_profile_declares_sorted_pack_paths_from_the_bound_vfs() {
