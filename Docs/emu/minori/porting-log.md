@@ -1,5 +1,18 @@
 # Minori 移植日志
 
+## 2026 年 9 月 1 日：原版 Font 控件与日文 locale 范围
+
+Sandbox 中对原版 System 页做了 Font 上箭头、`OK` 和重新打开的定向观察。Font
+名称和两行示例文字会在箭头点击后立即变化；`OK` 关闭页面后再次进入仍保留
+选择。观察到 `Malgun Gothic Semilight`、`Arial Unicode MS` 与多个日文/东亚
+字体条目。非日文宿主 code page 只影响窗口标题和部分字体名的显示，游戏正文
+仍能按 CP932 读取。
+
+实现边界保持为日文原版：`astra.emu.minori.locale.ja-jp.cp932.v1` 在 Host/字节
+边界严格执行 CP932 转换，禁止替换字符、GBK 回退、汉化 exe、`.mys` 或翻译
+overlay。宿主字体枚举和绑定尚未形成可复现的 package identity，因此 Font
+选择继续列为开放项；本轮不把观察结果拔高为实现或视觉 parity。
+
 ## 2026 年 9 月 1 日：CP932 多字节尾字节与消息控制边界
 
 原版脚本的消息正文先经过绑定的 Japanese CP932 locale hook，再交给消息控制

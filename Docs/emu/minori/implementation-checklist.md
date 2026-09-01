@@ -10,6 +10,18 @@
 - [ ] Chinese/localized content and translation overlay remain outside this phase;
   same-point original screenshots and full route visual review are still open.
 
+## Original Font control observation (2026-09-01)
+
+- [x] The original Japanese build changes the Font label and sample immediately
+  when the up arrow is clicked, and retains the selected entry after `OK` and a
+  subsequent System-page reopen. The observed list includes `Malgun Gothic
+  Semilight`, `Arial Unicode MS`, and additional East-Asian entries.
+- [x] Non-Japanese host code pages can garble the native font label while the
+  game text remains readable through the strict CP932 locale hook.
+- [ ] A deterministic packaged font-provider binding for the host font list and
+  same-point visual parity is still open. This phase does not load Chinese
+  executables, `.mys` overlays, or translation text.
+
 ## Original title pointer menu (2026-09-01)
 
 - [x] Stage-space pointer coordinates select the observed title rows for the base and

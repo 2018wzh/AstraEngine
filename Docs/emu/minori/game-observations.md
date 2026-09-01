@@ -1,5 +1,19 @@
 # Minori Game Observations
 
+## 2026-09-01 原版 Font 控件与日文 locale 边界
+
+在同一份原版日文运行中，System 页的 Font 上箭头会立即替换字体名称和示例
+文字；观察到 `Malgun Gothic Semilight`、`Arial Unicode MS` 以及多个日文/东亚
+字体条目。点击 `OK` 后重新打开 System 页仍保留选择，说明 Font 是配置状态而
+不是只影响当前绘制的临时 hover。Sandbox 宿主的非日文 code page 会把部分字体
+名称显示为乱码，但游戏正文仍按 CP932 正常显示。
+
+本阶段只支持 `natsuzora-no-perseus.original-ja`。`astra.emu.minori.locale.ja-jp.cp932.v1`
+是唯一的转区/编码 hook：它在字节边界严格完成 CP932 decode/encode，用于保持
+原版日文可读；不加载汉化 exe、`.mys` 或翻译 overlay，也不提供 GBK 回退。Font
+列表依赖宿主字体目录，当前只作为原版行为观察记录；在补齐显式字体 provider
+绑定和同点视觉证据前，不把字体选择标记为完成。
+
 ## 当前样本
 
 2026-08-29 起，Minori 已硬切为 `key.toml` 与无明文缓存的流式解密。此前 private-profile/cache profile 下的八包 full verify 只保留为历史观察；当前 reader identity 已在 2026-08-30 重新完成八包 full verify。重复密文读取有合成回归，峰值内存规模验证仍待执行。

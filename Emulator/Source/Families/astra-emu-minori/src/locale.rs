@@ -66,6 +66,15 @@ mod tests {
     }
 
     #[test]
+    fn japanese_hook_round_trips_original_font_names() {
+        let hook = MinoriLocaleHook::japanese_cp932();
+        for name in ["ＭＳ Ｐゴシック", "メイリオ", "游ゴシック"] {
+            let encoded = hook.encode(name).unwrap();
+            assert_eq!(hook.decode(&encoded).unwrap(), name);
+        }
+    }
+
+    #[test]
     fn locale_hook_rejects_unknown_id_and_malformed_cp932() {
         assert_eq!(
             MinoriLocaleHook::from_id("astra.emu.minori.locale.gbk.v1").unwrap_err(),
