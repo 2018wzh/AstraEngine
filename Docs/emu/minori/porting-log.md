@@ -1531,3 +1531,12 @@ Minori 菜单的 item id、顺序或平台呈现。
 - runtime 的 Quick Save 已改为写入槽 10，并加入 provider 回归，确认不会创建或覆盖
   Auto Save 槽 0。该静态结论只覆盖文件编号和分区；自动保存触发时机、Quick Save
   是否轮换 10..19 仍需要原版现场行为确认，Save/Load 完整 parity 继续保持开放。
+
+## 2026 年 9 月 1 日：静态 stand 绘制契约同步
+
+- 代码与合成回归已经固定当前 host 绘制路径的可验证边界：静态 PNG stand 使用脚本
+  `position` 作为中心 X，图像底边锚定到 stage 高度；资源编码、尺寸或有符号坐标
+  无法表示时直接返回稳定 diagnostic。
+- 公开脚本文档已从“所有 stand 均阻断”改为记录这一已实现的静态几何契约，同时保留
+  原版动态资源和 transition 动画时序未闭合的状态。该同步不增加新的原版 parity
+  结论，也不改变当前 NLS 仅预留 GBK/UTF-8、实际只支持 Shift JIS 的范围。

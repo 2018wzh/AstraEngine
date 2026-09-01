@@ -15,7 +15,7 @@ parser 逐字节保留原始行与换行，同时记录 command ordinal、source
 | `.sc` 文件 | 89 | 当前本地样本全包 |
 | command | 33695 | 29 个已知 token，未知 token 为 0 |
 | `message` | 18319 | 已确认四段起始字段、正文尾段拼接和短参数默认值；不在文档记录正文 |
-| `stage` / `transition` | 6538 / 6556 | 已确认前景、背景、坐标和最多十组 stand pair；stand position 与 transition 动画时序仍未闭合 |
+| `stage` / `transition` | 6538 / 6556 | 已确认前景、背景、坐标和最多十组 stand pair；静态 PNG stand 已按中心 X/底边 Y 生成 host 绘制，transition 动画时序仍未闭合 |
 | `label` / `goto` / `if` | 34 / 10 / 20 | 所有本地 target 均闭合，无重复 label |
 | `chain` | 55 | 55 个 operand 均匹配同包脚本名；原程序处理函数把目标写入全局 `NEXT` 后结束当前脚本，是尾链式切换，不建立返回栈 |
 | `select` | 2 | token 已知，choice/target operand 语义未知 |
@@ -42,7 +42,7 @@ Minori 脚本研究以 `scr.paz` 中解出的 `.sc` 为核心。`perseus_chs.mys
 - `CommandWait` 把整数写入引擎 timer slot；multimedia timer 以 10 ms 为基本周期递减该值。因此 `.wait 20` 表示 20 个 timer tick，也就是 200 ms，不是 20 ms。
 - `CommandMessage` 在 positional operand 不少于四个时，把第一个 operand 解析为 message id，第二个保存为 voice identity，第三个保存为 speaker，第四个起以单个 ASCII space 重新连接为正文。连续分隔符形成的空 voice/speaker 必须保留。operand 不足四个时，parse handler 不写字段，但 execute 仍以构造器默认值 `id=-1` 和三个空字符串提交一次空消息更新。
 - `CommandTransition` 接收 integer、string、integer 三个 operand，并把它们保存为后续 stage 的 mode、可选资源与 duration tick。单字符 `*` 走原程序的默认 transition 分支；具名 transition 的像素时序仍未接入 host，因此不能声明转场动画完成。
-- `CommandStage` 的顺序已经由 parser 和 stage core 调用共同确认：前景资源、可选前景 `x/y`、背景资源、背景 `x/y`，随后是最多十组 `stand resource[,offset] + position`。`*` 表示该层无资源。背景和前景绑定 `bg` role；stand 绑定 `st` role。stand position 是引擎参数，不是像素坐标，当前遇到 stand 时继续阻断。
+- `CommandStage` 的顺序已经由 parser 和 stage core 调用共同确认：前景资源、可选前景 `x/y`、背景资源、背景 `x/y`，随后是最多十组 `stand resource[,offset] + position`。`*` 表示该层无资源。背景和前景绑定 `bg` role；stand 绑定 `st` role。当前 host 绘制路径只接受已验证的静态 PNG：`position` 作为立绘中心 X，图像底边锚定 stage 高度；资源尺寸、坐标溢出或非 PNG 直接阻断。该几何契约已有合成回归证据，但原版在不同资源/转场下的动态时序仍未闭合。
 - `CommandPlayBGM` 与三个 SE command 已确认各自 parse/execute handler。资源 operand 不能原样拼成 URI，必须先经过下一条所述的 metadata 解析，再做精确 VFS 绑定。
 - 音频资源规格现已确认是 `resource[volume,pan]`。volume 缺失时为 100，并夹在 0–100；pan 缺失时为 0，并夹在 -100–100。BGM 的两个整数依次控制新流 fade-in/音量过渡和旧流 fade-out；SE 的 boolean 由首字节是否为 `t` 决定，随后两个整数也按 fade-in、fade-out 传入各自 bus。
 - census v3 对 811 条 BGM/SE/voice 引用做了 VFS 绑定测量：401 条非控制引用全部精确、唯一命中对应 archive entry；其余 410 条全部是 `*`。IDA 已确认 BGM、三个 SE bus 与 `playvoice` 的 `*` 都先停止各自固定 stream，并使用对应 fade-out 参数；runtime 不再把它当资源名。
