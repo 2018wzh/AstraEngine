@@ -4,7 +4,7 @@
 the original Japanese variant, a strict CP932 locale hook, and the regular non-symlink
 `perseus.exe` entrypoint. PAZ/ANI/script text decoding rejects malformed bytes and no
 longer invokes the Minori translation Hook. The focused `astra-emu-minori` library suite
-passes 194/194. This is parser/mount boundary evidence only; localized `.mys`/exe files,
+passes 201/201. This is parser/mount boundary evidence only; localized `.mys`/exe files,
 full-route parity, Release Sandbox and Windows E3 remain out of scope.
 
 2026-09-01 message indicator seam: the original short-message checkpoint keeps the advance
@@ -17,7 +17,7 @@ or Windows E3 acceptance.
 
 2026-09-01 title pointer coverage: the original title menu accepts stage-space hover and
 clicks; the Minori provider covers base/unlocked row maps, clipped `topMenu*Over.png`
-resources, outside clicks and typed action reuse. The focused library suite passes 194/194;
+resources, outside clicks and typed action reuse. The focused library suite passes 201/201;
 same-point visual parity, Release Sandbox and Windows E3 remain open.
 
 2026-09-01 script census recheck: the same Japanese-original profile reads 89 `.sc`

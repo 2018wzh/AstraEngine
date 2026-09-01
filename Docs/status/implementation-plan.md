@@ -22,7 +22,7 @@ schema 已提升为 `astra.emu.minori.mount_options.v4`。
 CP932 locale binding；乱码不会通过替换字符或 GBK/翻译回退被吞掉。样本中观察到的
 `perseus_chs.mys` 与本地化 exe 只保留 inventory 事实，不会被 runtime 探测或合并。
 Minori message path 已删除 translation Hook 调用，正文保持原版日文；Minori 定向
-194 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
+201 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
 
 同日补齐 Manager VFS 预览的 locale 绑定：活动 Minori 挂载下的无 BOM 文本先经严格
@@ -40,7 +40,7 @@ CP932 解码，再交给有界文本视图；BOM 标记的 UTF-8/UTF-16 仍按�
 2026 年 9 月 1 日标题页 pointer 对齐：Windows Sandbox 观察确认右侧菜单支持舞台坐标
 鼠标 hover 与点击；Minori provider 现在按标题变体解析四/五个菜单行，复用
 `topMenu*Over.png` 的右侧裁剪，并将点击映射到既有 typed action。focus 只存在于 session，
-不会进入 VM/save snapshot；新增回归后定向 library 为 194/194。该项是 E1/E2 行为证据，
+不会进入 VM/save snapshot；新增回归后定向 library 为 201/201。该项是 E1/E2 行为证据，
 原版同点视觉、完整路线、Release Sandbox 与 Windows E3 仍未完成。
 
 2026 年 8 月 31 日标题页退出回归：Minori provider 已用

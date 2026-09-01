@@ -3,7 +3,7 @@
 2026 年 9 月 1 日 Minori 原版 locale coverage：mount options v3 要求日文原版变体、
 严格 CP932 locale hook 和非符号链接 `perseus.exe`；PAZ/ANI/.sc 的字节边界均拒绝
 malformed input，message publisher 不再调用 translation Hook。中文 `.mys` 与本地化
-exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。194 项 Minori library
+exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。201 项 Minori library
 定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
 
 2026 年 9 月 1 日消息推进指示符 coverage：原版短消息截图确认下三角与正文同一行；

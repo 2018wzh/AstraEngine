@@ -366,7 +366,10 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - [x] Probe game root and classify `bg/bgm/scr/st/sys/se/voice/mov`，包括 `bg.pazA` 至 `bg.pazJ`。
 - [x] 严格解析八 role `key.toml` 并在 mount 时一次性读取。
-- [ ] 对八包执行 key-file/streaming identity 的 decoded full verify；旧 no-cache 结果不作为本项通过证据。
+- [x] 对八包执行 key-file/streaming identity 的 decoded full verify；当前 Release reader
+  覆盖 8 个 source、14502 个 entry、43818 个逻辑读取范围和 6624958365 个 decoded
+  bytes，aggregate hash 为 `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。
+  旧 cache/no-cache 结果只保留为迁移历史，不作为当前 identity 证据。
 - [x] 对每个 entry descriptor 校验 offset、packed size、unpacked size 和 method。
 - [x] 拒绝 path traversal 和绝对路径 entry。
 

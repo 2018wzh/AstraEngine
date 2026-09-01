@@ -5,7 +5,7 @@
 日文原版目录；汉化 exe、`.mys` 和其它本地化覆盖不会进入 runtime。PAZ、ANI 和脚本
 文本统一使用严格 `astra.emu.minori.locale.ja-jp.cp932.v1` 转区绑定，非法字节直接
 阻断，不做翻译或 GBK 回退。Minori message publisher 已删除 translation Hook；定向
-library 194/194 通过。该项只关闭当前实现的原版/乱码边界，Stage 5、完整路线、视觉
+library 201/201 通过。该项只关闭当前实现的原版/乱码边界，Stage 5、完整路线、视觉
 音频审查、Release Sandbox 和 Windows E3 仍为 `IN_PROGRESS`。
 
 2026 年 9 月 1 日消息推进指示符布局复核：原版短消息中的下三角与正文同一行；Minori
@@ -24,7 +24,7 @@ Sandbox 或 Windows E3，Stage 5 继续保持 `IN_PROGRESS`。
 
 2026 年 9 月 1 日标题页 pointer 对齐：Minori 按 stage-space 处理原版右侧菜单 hover 与
 点击，使用 `topMenu*Over.png` 行裁剪并复用键盘 typed action；基础/解锁变体和 restore
-清理均有定向回归，当前 library 194/194。该项只计 E1/E2 provider 证据，原版同点视觉、
+清理均有定向回归，当前 library 201/201。该项只计 E1/E2 provider 证据，原版同点视觉、
 完整路线、Release Sandbox 和 Windows E3 继续阻断 Stage 5 完成。
 
 2026 年 8 月 31 日标题页 Exit 回归已加入 provider 测试：标题页直接结束 session，不发布

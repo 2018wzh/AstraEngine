@@ -1472,3 +1472,15 @@ Minori 菜单的 item id、顺序或平台呈现。
   定向测试通过。
 - 该保护只收紧损坏/过时状态边界，不改变已确认的执行时 markup 解析；目标行的原版
   等待时序、current/next 中间帧和同点视觉比较仍保持 blocking。
+
+## 2026 年 9 月 1 日：key-file 流式 full verify 复核
+
+- 使用当前 Release reader、`mount_options.v4` profile 和游戏目录内一次性读取的
+  `key.toml`，重新执行八个逻辑 archive 的完整顺序流读取。报告为
+  `astra.emu.vfs.verify.v2`，覆盖 8 个 source、14502 个 entry、43818 个逻辑读取
+  范围和 6624958365 个 decoded bytes；aggregate hash 为
+  `sha256:e641854399512fea4182ebc7de845436d37d3eaef0b31d748b41c8bd23f9e64b`。
+- 该轮未建立明文 cache 或临时解密文件，报告没有 URI、路径、key、payload 或 cache
+  字段；重复 range 的无缓存行为仍由合成 source 计数回归覆盖。它关闭当前 key-file /
+  streaming identity 的真实 full verify，不等价于峰值内存规模、四路线、影片质量、
+  正式音频 review、Release Sandbox 或 Windows E3。
