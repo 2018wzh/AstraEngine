@@ -1,5 +1,16 @@
 # Minori Implementation Checklist
 
+## FVP-compatible dynamic ABI boundary (2026-09-01)
+
+- [x] Minori descriptor validation runs before the descriptor crosses the
+  dynamic Family ABI boundary.
+- [x] Descriptor, instance lifecycle, probe/open/step and shutdown share one
+  panic boundary and return `ASTRA_EMU_MINORI_DYLIB_PANIC` on unwinding.
+- [x] The boundary does not recover with another provider or publish partial
+  output; the host receives one stable error result.
+- [x] Feature-gated regression tests cover panic conversion and descriptor
+  validation.
+
 ## FVP-compatible profile encoding reservation (2026-09-01)
 
 - [x] `family_options.nls` is required by `astra.emu.minori.mount_options.v4` and is

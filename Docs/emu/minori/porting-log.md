@@ -1,5 +1,13 @@
 # Minori 移植日志
 
+## 2026 年 9 月 1 日：动态插件边界与 FVP 预留对齐
+
+Minori 的动态 Family ABI 入口现在与 FVP 采用同一层边界策略：descriptor、实例
+生命周期、probe/open/step/shutdown 都在进入宿主前执行 descriptor 校验，并把 Rust
+panic 转换为稳定的 `ASTRA_EMU_MINORI_DYLIB_PANIC` diagnostic。异常不会跨 C ABI
+栈展开，也不会选择备用 provider 或继续提交部分结果。该改动只收紧插件边界，不改变
+Minori VM、VFS、媒体或日文 locale 语义；定向 feature build 与边界回归已通过。
+
 ## 2026 年 9 月 1 日：原版 Font 控件与日文 locale 范围
 
 Sandbox 中对原版 System 页做了 Font 上箭头、`OK` 和重新打开的定向观察。Font

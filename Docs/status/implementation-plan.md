@@ -1,5 +1,12 @@
 # Implementation Plan Status
 
+2026 年 9 月 1 日 Minori 动态 Family ABI 边界按 FVP 方式收紧：descriptor 在跨 ABI
+前完成 v14 合同校验，create/destroy/probe/open/step/shutdown 全部经过同一
+`catch_unwind` 边界。Rust panic 统一转换为 `ASTRA_EMU_MINORI_DYLIB_PANIC`，不会
+跨 C ABI 展开、提交半笔结果或切换备用 provider。该项只补齐插件生命周期的错误边界，
+不改变 Minori 行为、VFS 解密、媒体 provider 或 locale 选择；feature build 与两个边界
+回归通过。
+
 2026 年 9 月 1 日 Save/Load 页眉几何对齐：原版 1280×720 截图确认标题图和页标签图
 分别从舞台 `(64,16)` 与 `(608,16)` 开始；provider 现通过命名常量使用这两个起点，
 并以回归测试锁定首顶点。Save 页的按钮裁剪也按页面类型统一隐藏 `Back`，不再只对
