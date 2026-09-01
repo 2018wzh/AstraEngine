@@ -9,6 +9,24 @@
 该测试只使用合成文本，未把原始脚本内容、路径或 locale 数据写入报告。中文版本、
 翻译 overlay 与其他编码仍不在本轮范围内。
 
+## 2026 年 9 月 1 日：标题页鼠标命中与 hover 资源
+
+Windows Sandbox 的原版标题页观察确认，物理指针移到右侧菜单行时会出现星形 hover
+标记；点击 `New Game` 和 `System` 分别进入首段剧情与游戏内 System 页。窗口保持
+16:9 舞台并出现 pillarbox 时，命中仍按 1280×720 stage-space 解释，而不是按客户区
+像素直接猜测。
+
+Minori provider 现保留 session-local 的 title pointer focus：Host 输入先更新有界
+stage 坐标，family 按标题变体解析行并在下一次 resource scene 中叠加对应的
+`topMenu*Over.png`，只裁剪右侧菜单行，避免把 hover 资源的白色背景带入舞台。点击
+使用与键盘完全相同的 typed action；点击行外只刷新 hover，不改变页面。pointer focus
+不进入 VM/save snapshot，restore 或离开标题时清除。
+
+新增 provider 回归覆盖基础标题四行、解锁标题五行、hover scissor 和 `New Game`
+点击后的页面状态；`astra-emu-minori --lib --no-default-features` 定向测试为
+194/194。该项是原版行为观察和 E1/E2 provider 证据，尚未关闭原版同点视觉、完整
+路线、Release Sandbox 或 Windows E3。
+
 ## 2026 年 9 月 1 日：原版标题与 System 页基线（Windows Sandbox）
 
 在授权 Windows Sandbox 中以日文原版入口启动同一份样本，记录了两个新的视觉基线。
@@ -28,7 +46,7 @@ System `sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`
 
 同轮只运行受影响的 Host/Family 回归：`astra-platform` 11/11、
 `astra-platform-windows` 10/10、`astra-emu-manager-core` Host services 7/7，
-以及 `astra-emu-minori` library 192/192 均通过。覆盖内容包括 Family ABI 菜单树校验、
+以及 `astra-emu-minori` library 194/194 均通过。覆盖内容包括 Family ABI 菜单树校验、
 Windows 客户区锚点与 DPI 几何、确认框/文本输入生命周期、系统命令结果和 session 清理；
 这只是契约与 Host 边界证据，不能替代真实 Manager 窗口、完整路线或正式 Windows E3。
 
@@ -1354,6 +1372,6 @@ Minori 菜单的 item id、顺序或平台呈现。
 - Host-owned Layer2D 的 Save/Load panel 在占用槽位置叠加缩略图，时间和注释通过
   原有日文文本 presentation 通道输出；metadata 变化会使 retained panel 失效并重发，
   不建立明文缓存或静默回退。
-- 当前 `astra-emu-minori --lib --no-default-features` 定向测试为 192/192；这是保存页
+- 当前 `astra-emu-minori --lib --no-default-features` 定向测试为 194/194；这是保存页
   资源与 provider 边界证据，不等价于四路线、原版同点视觉 parity、Release Sandbox
   或 Windows E3。

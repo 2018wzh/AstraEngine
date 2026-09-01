@@ -10,6 +10,17 @@
 - [ ] Chinese/localized content and translation overlay remain outside this phase;
   same-point original screenshots and full route visual review are still open.
 
+## Original title pointer menu (2026-09-01)
+
+- [x] Stage-space pointer coordinates select the observed title rows for the base and
+  unlocked `Memories` variants; clicks outside the menu do not change the page.
+- [x] Hover uses the original `topMenu*Over.png` resource through a bounded right-side
+  scissor, and `New Game`/`System` clicks reuse the existing typed keyboard actions.
+- [x] Focus is session-local and is cleared on restore, title exit, and transition to a
+  non-title page; it is not serialized as gameplay/save state.
+- [ ] Same-point original/emulator visual comparison, Release Sandbox and Windows E3 remain
+  open; row-edge behavior beyond the observed stage regions is not independently verified.
+
 ## Title-page exit transaction (2026-08-31)
 
 - [x] The provider regression `title_exit_terminates_directly_without_confirmation_transaction`

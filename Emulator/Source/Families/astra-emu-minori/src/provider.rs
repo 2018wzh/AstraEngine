@@ -86,6 +86,18 @@ const MINORI_CONTROL_KEY: &str = "control";
 const MINORI_POINTER_X: &str = "pointer.x";
 const MINORI_POINTER_Y: &str = "pointer.y";
 const MINORI_POINTER_PRIMARY: &str = "pointer.primary";
+// The title artwork is authored at the fixed 1280x720 stage.  Its menu hit
+// regions are deliberately kept in stage space so the host can scale and
+// letterbox the window without changing family semantics.  The left edge is
+// aligned with the transparent/hover artwork rather than the visible glyphs;
+// this matches the original's generous mouse target without accepting clicks
+// from the gameplay area.
+const MINORI_TITLE_MENU_LEFT: i32 = 1024;
+const MINORI_TITLE_MENU_RIGHT: i32 = 1280;
+const MINORI_TITLE_MENU_ROW_HEIGHT: i32 = 48;
+const MINORI_TITLE_MENU_ROW_TOPS_BASE: [i32; 4] = [24, 72, 120, 216];
+const MINORI_TITLE_MENU_ROW_TOPS_MEMORIES: [i32; 5] = [24, 72, 120, 168, 216];
+const MINORI_TITLE_MENU_HOVER_SCISSOR_X: i32 = 1024;
 const MINORI_GAME_MENU_PLAY_MODE_LEFT: i32 = 1125;
 const MINORI_GAME_MENU_PLAY_MODE_TOP: i32 = 577;
 const MINORI_GAME_MENU_PLAY_MODE_RIGHT: i32 = 1177;
@@ -592,6 +604,10 @@ struct MinoriSession {
     /// next native menu transaction. It is not part of the game save/config
     /// payload; the platform host remains the source of the actual sampler.
     resize_antialias: bool,
+    /// Current title-menu pointer target.  This is host input presentation
+    /// state, not gameplay/save state, so it is intentionally rebuilt after a
+    /// restore rather than serialized into the VM snapshot.
+    title_pointer_focus: Option<u32>,
     save_slots: BTreeSet<u32>,
     save_slot_comments: BTreeMap<u32, String>,
     save_slot_lengths: BTreeMap<u32, u64>,
@@ -987,6 +1003,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 config_storage_enabled,
                 config_persisted: persisted_config,
                 resize_antialias: true,
+                title_pointer_focus: None,
                 save_slots: BTreeSet::new(),
                 save_slot_comments: BTreeMap::new(),
                 save_slot_lengths: BTreeMap::new(),
@@ -1170,6 +1187,27 @@ impl MinoriRuntimeProvider {
             } else if edge.control == MINORI_POINTER_PRIMARY {
                 session.vm.set_pointer_primary_pressed(edge.pressed);
             }
+        }
+        if session.vm.state().system_ui.page == MinoriSystemPage::Title {
+            let pointer_axis = input
+                .input_edges
+                .iter()
+                .any(|edge| matches!(edge.control.as_str(), MINORI_POINTER_X | MINORI_POINTER_Y));
+            let pointer_primary = input
+                .input_edges
+                .iter()
+                .any(|edge| edge.control == MINORI_POINTER_PRIMARY && edge.pressed);
+            if pointer_axis || pointer_primary {
+                session.title_pointer_focus = title_menu_focus_at(
+                    session.vm.title_variant(),
+                    session.vm.state().system_ui.pointer_x,
+                    session.vm.state().system_ui.pointer_y,
+                );
+            } else if input.input_edges.iter().any(|edge| edge.pressed) {
+                session.title_pointer_focus = None;
+            }
+        } else {
+            session.title_pointer_focus = None;
         }
         let system_menu_request = input.system_menu.clone();
         if let Some(request) = system_menu_request.as_ref() {
@@ -3147,6 +3185,7 @@ impl MinoriRuntimeProvider {
         session.reported_gallery_unlock_count = None;
         session.reported_choice_active = None;
         session.reported_progress_in_background = Some(false);
+        session.title_pointer_focus = None;
         session.poisoned = false;
         Ok(())
     }
@@ -6614,7 +6653,89 @@ fn load_slot(
     session.last_text_surface = None;
     session.last_resource_frame = None;
     session.presentation_layers.clear();
+    session.title_pointer_focus = None;
     Ok(())
+}
+
+fn title_menu_item_count(variant: u8) -> u32 {
+    if variant == 2 {
+        MINORI_TITLE_MEMORIES_ITEM_COUNT
+    } else {
+        MINORI_TITLE_BASE_ITEM_COUNT
+    }
+}
+
+fn title_menu_focus_at(variant: u8, x: i32, y: i32) -> Option<u32> {
+    if !(MINORI_TITLE_MENU_LEFT..MINORI_TITLE_MENU_RIGHT).contains(&x) {
+        return None;
+    }
+    let row_tops = if variant == 2 {
+        &MINORI_TITLE_MENU_ROW_TOPS_MEMORIES[..]
+    } else {
+        &MINORI_TITLE_MENU_ROW_TOPS_BASE[..]
+    };
+    row_tops
+        .iter()
+        .position(|top| (*top..(*top + MINORI_TITLE_MENU_ROW_HEIGHT)).contains(&y))
+        .and_then(|index| u32::try_from(index).ok())
+}
+
+fn title_menu_hover_scissor(
+    variant: u8,
+    focus_index: u32,
+) -> Result<LegacyScissorV1, LegacyProviderError> {
+    let row = usize::try_from(focus_index).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_TITLE_POINTER",
+            "title pointer focus cannot be represented",
+        )
+    })?;
+    let row_tops = if variant == 2 {
+        &MINORI_TITLE_MENU_ROW_TOPS_MEMORIES[..]
+    } else {
+        &MINORI_TITLE_MENU_ROW_TOPS_BASE[..]
+    };
+    let top = *row_tops.get(row).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_TITLE_POINTER",
+            "title pointer focus is outside the verified menu bounds",
+        )
+    })?;
+    Ok(LegacyScissorV1 {
+        x: MINORI_TITLE_MENU_HOVER_SCISSOR_X,
+        y: top,
+        width: MINORI_TITLE_MENU_RIGHT - MINORI_TITLE_MENU_HOVER_SCISSOR_X,
+        height: MINORI_TITLE_MENU_ROW_HEIGHT,
+    })
+}
+
+fn activate_title_focus(vm: &mut MinoriVm) -> Result<MinoriSystemUiAction, LegacyProviderError> {
+    match (vm.title_variant(), vm.state().system_ui.focus_index) {
+        (_, 0) => {
+            vm.set_system_page(MinoriSystemPage::None, 0)
+                .map_err(runtime_error)?;
+            Ok(MinoriSystemUiAction::StartGame)
+        }
+        (_, 1) => {
+            vm.set_system_page(MinoriSystemPage::Load, 0)
+                .map_err(runtime_error)?;
+            Ok(MinoriSystemUiAction::Present)
+        }
+        (_, 2) => {
+            vm.open_config().map_err(runtime_error)?;
+            Ok(MinoriSystemUiAction::Present)
+        }
+        (2, 3) => {
+            vm.set_system_page(MinoriSystemPage::Memories, 0)
+                .map_err(runtime_error)?;
+            Ok(MinoriSystemUiAction::Present)
+        }
+        (_, 3) | (2, 4) => Ok(MinoriSystemUiAction::Exit),
+        _ => Err(invalid(
+            "ASTRA_EMU_MINORI_TITLE_FOCUS",
+            "title focus is outside the verified menu bounds",
+        )),
+    }
 }
 
 fn apply_system_ui_input(
@@ -6741,14 +6862,50 @@ fn apply_system_ui_input(
         }
         return Ok(MinoriSystemUiAction::Present);
     }
+    let title_pointer_pressed = vm.state().system_ui.page == MinoriSystemPage::Title
+        && input
+            .input_edges
+            .iter()
+            .any(|edge| edge.pressed && edge.control == MINORI_POINTER_PRIMARY);
+    let title_pointer_axis = vm.state().system_ui.page == MinoriSystemPage::Title
+        && input
+            .input_edges
+            .iter()
+            .any(|edge| matches!(edge.control.as_str(), MINORI_POINTER_X | MINORI_POINTER_Y));
+    if title_pointer_pressed || title_pointer_axis {
+        if input.input_edges.iter().any(|edge| {
+            edge.pressed
+                && !matches!(
+                    edge.control.as_str(),
+                    MINORI_POINTER_X | MINORI_POINTER_Y | MINORI_POINTER_PRIMARY
+                )
+        }) {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_TITLE_POINTER_INPUT_AMBIGUOUS",
+                "title pointer interaction cannot share a tick with another pressed control",
+            ));
+        }
+        let focus = title_menu_focus_at(
+            vm.title_variant(),
+            vm.state().system_ui.pointer_x,
+            vm.state().system_ui.pointer_y,
+        );
+        if let Some(focus) = focus {
+            vm.set_system_focus(focus, title_menu_item_count(vm.title_variant()))
+                .map_err(runtime_error)?;
+        }
+        if title_pointer_pressed {
+            return focus
+                .map(|_| activate_title_focus(vm))
+                .unwrap_or(Ok(MinoriSystemUiAction::Present));
+        }
+        return Ok(MinoriSystemUiAction::Present);
+    }
+
     let mut action = MinoriSystemUiAction::Present;
     for edge in input.input_edges.iter().filter(|edge| edge.pressed) {
         let page = vm.state().system_ui.page;
-        let title_item_count = if vm.title_variant() == 2 {
-            MINORI_TITLE_MEMORIES_ITEM_COUNT
-        } else {
-            MINORI_TITLE_BASE_ITEM_COUNT
-        };
+        let title_item_count = title_menu_item_count(vm.title_variant());
         match (page, edge.control.as_str()) {
             (MinoriSystemPage::Title, "arrow_up") => vm
                 .move_system_focus(-1, title_item_count)
@@ -6757,34 +6914,7 @@ fn apply_system_ui_input(
                 .move_system_focus(1, title_item_count)
                 .map_err(runtime_error)?,
             (MinoriSystemPage::Title, "enter" | "space") => {
-                action = match (vm.title_variant(), vm.state().system_ui.focus_index) {
-                    (_, 0) => {
-                        vm.set_system_page(MinoriSystemPage::None, 0)
-                            .map_err(runtime_error)?;
-                        MinoriSystemUiAction::StartGame
-                    }
-                    (_, 1) => {
-                        vm.set_system_page(MinoriSystemPage::Load, 0)
-                            .map_err(runtime_error)?;
-                        MinoriSystemUiAction::Present
-                    }
-                    (_, 2) => {
-                        vm.open_config().map_err(runtime_error)?;
-                        MinoriSystemUiAction::Present
-                    }
-                    (2, 3) => {
-                        vm.set_system_page(MinoriSystemPage::Memories, 0)
-                            .map_err(runtime_error)?;
-                        MinoriSystemUiAction::Present
-                    }
-                    (_, 3) | (2, 4) => MinoriSystemUiAction::Exit,
-                    _ => {
-                        return Err(invalid(
-                            "ASTRA_EMU_MINORI_TITLE_FOCUS",
-                            "title focus is outside the verified menu bounds",
-                        ));
-                    }
-                };
+                action = activate_title_focus(vm)?;
             }
             (MinoriSystemPage::Memories, "arrow_up") => vm
                 .move_system_focus(-1, MINORI_MEMORIES_ITEM_COUNT)
@@ -8083,12 +8213,15 @@ fn system_ui_output(
                     sequence,
                 )?
             } else {
-                describe_system_page_with_slots(
+                describe_system_page_with_slots_and_hover(
                     vfs,
                     &session.mount_set_id,
                     session.stage_size,
                     &session.vm,
                     &session.save_slots,
+                    (session.vm.state().system_ui.page == MinoriSystemPage::Title)
+                        .then_some(session.title_pointer_focus)
+                        .flatten(),
                 )?
             },
         });
@@ -8823,6 +8956,17 @@ fn describe_system_page_with_slots(
     vm: &MinoriVm,
     save_slots: &BTreeSet<u32>,
 ) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
+    describe_system_page_with_slots_and_hover(vfs, mount_set_id, stage_size, vm, save_slots, None)
+}
+
+fn describe_system_page_with_slots_and_hover(
+    vfs: &Arc<dyn LegacyVfsReader>,
+    mount_set_id: &str,
+    stage_size: Option<(u32, u32)>,
+    vm: &MinoriVm,
+    save_slots: &BTreeSet<u32>,
+    title_pointer_focus: Option<u32>,
+) -> Result<LegacyRenderResourceFrameV1, LegacyProviderError> {
     let (width, height) = stage_size.ok_or_else(|| {
         invalid(
             "ASTRA_EMU_MINORI_SYSTEM_STAGE_SIZE",
@@ -8856,6 +9000,7 @@ fn describe_system_page_with_slots(
     if vm.state().system_ui.page == MinoriSystemPage::GalleryCg {
         return describe_gallery_cg_page(vfs, mount_set_id, width, height, vm);
     }
+    let title_variant = vm.title_variant();
     let resource_uri = match vm.state().system_ui.page {
         MinoriSystemPage::Title => match vm.title_variant() {
             0 => "minori:/sys/topMenu0.png",
@@ -8903,12 +9048,42 @@ fn describe_system_page_with_slots(
             "system page resource dimensions do not match the reference stage",
         ));
     }
-    let mut draws = Vec::with_capacity(1);
-    append_texture_draw(&resource, 0, 0, 1.0, &mut draws)?;
+    let mut texture_resources = vec![resource];
+    let mut draws = Vec::with_capacity(2);
+    let resource = texture_resources
+        .first()
+        .ok_or_else(|| invalid("ASTRA_EMU_MINORI_SYSTEM_RESOURCE", "title resource missing"))?;
+    append_texture_draw(resource, 0, 0, 1.0, &mut draws)?;
+    if vm.state().system_ui.page == MinoriSystemPage::Title {
+        if let Some(focus) = title_pointer_focus {
+            let over_uri = match title_variant {
+                0 => "minori:/sys/topMenu0Over.png",
+                1 => "minori:/sys/topMenu1Over.png",
+                2 => "minori:/sys/topMenu2Over.png",
+                _ => {
+                    return Err(invalid(
+                        "ASTRA_EMU_MINORI_TITLE_VARIANT",
+                        "verified title variant is outside the supported range",
+                    ));
+                }
+            };
+            let over =
+                read_texture_resource(vfs, mount_set_id, over_uri, MINORI_SYSTEM_TEXTURE_ID + 1)?;
+            if (over.decoded_width, over.decoded_height) != (width, height) {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_TITLE_HOVER_RESOURCE_DIMENSIONS",
+                    "title hover resource does not match the reference stage",
+                ));
+            }
+            let scissor = title_menu_hover_scissor(title_variant, focus)?;
+            append_texture_draw_with_scissor(&over, 0, 0, 1.0, Some(scissor), &mut draws)?;
+            texture_resources.push(over);
+        }
+    }
     let frame = LegacyRenderResourceFrameV1 {
         width,
         height,
-        texture_resources: vec![resource],
+        texture_resources,
         draws,
     };
     frame.validate()?;
@@ -11357,6 +11532,140 @@ mod tests {
         let first = next_layer_sequence(&staged, 0).unwrap();
         let second = next_layer_sequence(&staged, first).unwrap();
         assert_eq!((first, second), (1, 2));
+    }
+
+    #[test]
+    fn title_pointer_hit_regions_follow_the_original_stage_menu() {
+        assert_eq!(title_menu_focus_at(0, 1_174, 47), Some(0));
+        assert_eq!(title_menu_focus_at(0, 1_174, 95), Some(1));
+        assert_eq!(title_menu_focus_at(0, 1_174, 143), Some(2));
+        assert_eq!(title_menu_focus_at(0, 1_174, 239), Some(3));
+        assert_eq!(title_menu_focus_at(2, 1_174, 191), Some(3));
+        assert_eq!(title_menu_focus_at(2, 1_174, 239), Some(4));
+        assert_eq!(title_menu_focus_at(0, 1_023, 47), None);
+        assert_eq!(title_menu_focus_at(0, 1_174, 20), None);
+        assert_eq!(title_menu_focus_at(0, 1_174, 264), None);
+    }
+
+    #[test]
+    fn provider_title_pointer_hover_and_click_follow_original_menu() {
+        let encode_stage = |rgba: u8| {
+            let mut png = Vec::new();
+            PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![rgba; 1280 * 720 * 4],
+                    1280,
+                    720,
+                    ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
+        let mut provider = MinoriRuntimeProvider::with_vfs(Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/test.sc".into(),
+                    b".wait 20\r\n.end\r\n".to_vec(),
+                ),
+                ("minori:/sys/topMenu0.png".into(), encode_stage(0)),
+                ("minori:/sys/topMenu0Over.png".into(), encode_stage(255)),
+            ]),
+        }));
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.title-pointer".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                        ("astra.launch_entry_explicit".into(), "false".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+        let title = provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        assert_eq!(title.live.resource_scenes.len(), 1);
+        assert_eq!(
+            title.live.resource_scenes[0].value.texture_resources.len(),
+            1
+        );
+
+        let hover = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_X.into(),
+                            pressed: false,
+                            value: 1_174.0,
+                            sequence: 1,
+                        },
+                        LegacyInputEdge {
+                            control: MINORI_POINTER_Y.into(),
+                            pressed: false,
+                            value: 47.0,
+                            sequence: 2,
+                        },
+                    ],
+                    ..step_input(2, Vec::new())
+                },
+            )
+            .unwrap();
+        let hover_frame = &hover.live.resource_scenes[0].value;
+        assert_eq!(hover_frame.texture_resources.len(), 2);
+        assert_eq!(
+            hover_frame.texture_resources[1].resource_uri,
+            "minori:/sys/topMenu0Over.png"
+        );
+        assert_eq!(hover_frame.draws.len(), 2);
+        assert_eq!(
+            hover_frame.draws[1].scissor,
+            Some(LegacyScissorV1 {
+                x: 1024,
+                y: 24,
+                width: 256,
+                height: 48,
+            })
+        );
+
+        let click = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    input_edges: vec![LegacyInputEdge {
+                        control: MINORI_POINTER_PRIMARY.into(),
+                        pressed: true,
+                        value: 1.0,
+                        sequence: 1,
+                    }],
+                    ..step_input(3, Vec::new())
+                },
+            )
+            .unwrap();
+        assert_eq!(click.status, LegacyRuntimeStatus::Awaiting);
+        assert_eq!(
+            provider
+                .sessions
+                .get(&session.0)
+                .expect("title-pointer session remains active")
+                .vm
+                .state()
+                .system_ui
+                .page,
+            MinoriSystemPage::None
+        );
     }
 
     struct MemoryReader {

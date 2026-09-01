@@ -8,8 +8,14 @@
 CP932 locale binding；乱码不会通过替换字符或 GBK/翻译回退被吞掉。样本中观察到的
 `perseus_chs.mys` 与本地化 exe 只保留 inventory 事实，不会被 runtime 探测或合并。
 Minori message path 已删除 translation Hook 调用，正文保持原版日文；Minori 定向
-192 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
+194 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
+
+2026 年 9 月 1 日标题页 pointer 对齐：Windows Sandbox 观察确认右侧菜单支持舞台坐标
+鼠标 hover 与点击；Minori provider 现在按标题变体解析四/五个菜单行，复用
+`topMenu*Over.png` 的右侧裁剪，并将点击映射到既有 typed action。focus 只存在于 session，
+不会进入 VM/save snapshot；新增回归后定向 library 为 194/194。该项是 E1/E2 行为证据，
+原版同点视觉、完整路线、Release Sandbox 与 Windows E3 仍未完成。
 
 2026 年 8 月 31 日标题页退出回归：Minori provider 已用
 `title_exit_terminates_directly_without_confirmation_transaction` 固定原版标题页 Exit 的直退
@@ -918,5 +924,5 @@ save envelope 为 `astra.emu.minori.save_slot.v3`，保存时写入本地时间�
 图像边界。Host-owned Layer2D 在占用槽位置叠加缩略图，时间与注释沿既有日文文本
 presentation 通道发送，metadata 变化会使 retained panel 重新发布。Save 页首屏隐藏
 Back，Load 页保留 Back/Next/Return；缺少本地时间或 gameplay surface 直接阻断，不
-使用兼容格式或明文缓存。当前 Minori library 192/192 通过；完整路线、同点视觉
+使用兼容格式或明文缓存。当前 Minori library 194/194 通过；完整路线、同点视觉
 parity、Release Sandbox 和 Windows E3 仍未完成。

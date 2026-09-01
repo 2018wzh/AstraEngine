@@ -4,8 +4,13 @@
 the original Japanese variant, a strict CP932 locale hook, and the regular non-symlink
 `perseus.exe` entrypoint. PAZ/ANI/script text decoding rejects malformed bytes and no
 longer invokes the Minori translation Hook. The focused `astra-emu-minori` library suite
-passes 192/192. This is parser/mount boundary evidence only; localized `.mys`/exe files,
+passes 194/194. This is parser/mount boundary evidence only; localized `.mys`/exe files,
 full-route parity, Release Sandbox and Windows E3 remain out of scope.
+
+2026-09-01 title pointer coverage: the original title menu accepts stage-space hover and
+clicks; the Minori provider covers base/unlocked row maps, clipped `topMenu*Over.png`
+resources, outside clicks and typed action reuse. The focused library suite passes 194/194;
+same-point visual parity, Release Sandbox and Windows E3 remain open.
 
 2026-09-01 script census recheck: the same Japanese-original profile reads 89 `.sc`
 files, 33728 lines and 33695 commands with all 29 observed opcodes present and zero
@@ -425,7 +430,7 @@ Typed filter graph consumer implementation 基线为 `635527831e89e5ff9b87ac165b
 | `T-S8-RPG-NET-SERVER-01` | Stage 8 | `astra-rpg-server` planned target | `Engine/Source/Modules/AstraRPG/astra-rpg-server/` | `cargo test -p astra-rpg-server server_session` | `S8-RPG-NET-SERVER-01` | RPG network server | server assigns seats, validates permissions, appends action transcript and emits redacted audit |
 | `T-S8-RPG-NET-CLIENT-01` | Stage 8 | `astra-rpg-client` planned target | `Engine/Source/Modules/AstraRPG/astra-rpg-client/` | `cargo test -p astra-rpg-client client_session` | `S8-RPG-NET-CLIENT-01` | RPG network client | client validates handshake, seat permissions, local transcript view and reconnect cursor |
 | `T-S8-RPG-NET-REPLAY-01` | Stage 8 | `astra-release` planned target | `Engine/Source/Developer/astra-release/tests/rpg_network_gate.rs` | `cargo test -p astra-release rpg_network_gate` | `S8-RPG-NET-REPLAY-01` | RPG network replay | synced transcript replays without live provider and state/event/provider hash matches |
-2026-09-01 Save/Load fidelity slice: the focused Minori library suite is now 192/192.
+2026-09-01 Save/Load fidelity slice: the focused Minori library suite is now 194/194.
 The new coverage validates strict v3 save metadata, local-time bounds, thumbnail PNG
 dimensions, occupied-card Layer2D overlay coordinates, and the Save-vs-Load button
 scissor. This remains provider/Host evidence only; four-route parity, Release Sandbox,

@@ -3,8 +3,13 @@
 2026 年 9 月 1 日 Minori 原版 locale coverage：mount options v3 要求日文原版变体、
 严格 CP932 locale hook 和非符号链接 `perseus.exe`；PAZ/ANI/.sc 的字节边界均拒绝
 malformed input，message publisher 不再调用 translation Hook。中文 `.mys` 与本地化
-exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。192 项 Minori library
+exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。194 项 Minori library
 定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
+
+2026 年 9 月 1 日标题页 pointer coverage：原版 Sandbox 确认右侧菜单行的 hover 星标、
+`New Game`/`System` 鼠标点击和 1280×720 stage-space 坐标。provider regression 覆盖
+基础四行、解锁五行、hover scissor、行外点击和页面状态；focus 不写入 save。该项仍是
+E1/E2 provider 证据，不关闭同点视觉、完整路线、Release Sandbox 或 Windows E3。
 
 2026 年 9 月 1 日按同一日文原版 profile 重跑脚本 census：89 个 `.sc`、33728 行、
 33695 条 command、29 个已观察 opcode，unknown opcode 为 0；其中 `chain` 55、
@@ -318,5 +323,5 @@ TsuiNoSora `stage3-gate` 当前会把 route-bound cast source map member 通过 
 包含有界本地时间、注释和 96x54 PNG 缩略图。Provider 对占用槽执行严格 identity/边界
 校验，并在 Host-owned Layer2D panel 中叠加缩略图，文本继续走日文 presentation
 通道；Save 与 Load 的底部按钮按原版首屏差异提交。新增回归后 Minori library 为
-192/192。该项只证明 provider/Host 对齐，完整路线、视觉 parity、Release Sandbox
+194/194。该项只证明 provider/Host 对齐，完整路线、视觉 parity、Release Sandbox
 和 Windows E3 仍保持未完成。

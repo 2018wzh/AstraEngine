@@ -25,6 +25,20 @@ Volume、Visual、Font、Sound、Voice、Play Mode、Other 九组，含滑杆、
 `sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`；截图文件
 和本地路径不进入仓库。
 
+## 2026-09-01 原版标题页鼠标菜单
+
+标题页的主菜单不仅接受方向键和 Enter，也接受舞台坐标中的物理鼠标。将指针移到
+右侧菜单行时，原版显示对应的星形 hover 标记；点击 `New Game` 和 `System` 分别
+进入首段剧情与游戏内 System 页。菜单的 stage-space 命中区随标题变体保留，不因
+窗口缩放或两侧 pillarbox 改变；Host 只负责把物理指针转换为该坐标后提交 Family
+input。当前实现从 `topMenu*Over.png` 资源裁剪右侧行区域，未另行绘制矩形或文字
+替身。
+
+这一观察确认标题页 pointer 输入与键盘焦点是两条等价入口，但没有据此推断未观察到
+的边缘命中细节。定向 provider 回归覆盖四项基础菜单和五项已解锁 Memories 菜单的
+行映射、hover 资源与点击后页面状态；仍不等于原版同点像素 parity、Release Sandbox
+或 Windows E3。
+
 ## 2026-09-01 原版首段剧情与右键菜单
 
 从标题页选择 `New Game` 后，原版先显示黑场和中央竖排标题，再进入深蓝色底部消息
