@@ -1,5 +1,13 @@
 # Implementation Plan Status
 
+2026 年 9 月 1 日按 FVP 预留 Minori profile 编码选择：`family_options` 新增必填
+`nls`，并在 Manager/CLI 运行时 profile 中使用 `minori.nls` 保存选择。允许值固定为
+`shift_jis`、`gbk`、`utf8`；当前日文原版只验证 `shift_jis`，后两者解析成功后以
+`ASTRA_EMU_MINORI_NLS_UNSUPPORTED` 阻断，未知值以 `ASTRA_EMU_MINORI_NLS_INVALID`
+阻断，不存在隐式 CP932/替换字符回退。本轮只完成 profile/schema 预留，没有启用汉化
+内容或改变 key/password 编码边界。为使旧的无 `nls` profile 不会被误读，family options
+schema 已提升为 `astra.emu.minori.mount_options.v4`。
+
 2026 年 9 月 1 日 Minori 原版 locale 边界：family options 已硬切为
 `astra.emu.minori.mount_options.v3`，要求 `content_variant` 为
 `natsuzora-no-perseus.original-ja`、`locale_hook` 为

@@ -64,8 +64,8 @@ use astra_emu_metadata::{
     MatchInput, MetadataProviderId, MetadataSearchQuery, DEFAULT_COMPATIBILITY_SOURCE_URL,
 };
 use astra_emu_minori::{
-    MinoriAviDecodeProvider, MinoriImageDecodeProvider, MinoriVfsFamilyFactory,
-    MINORI_AVI_DECODE_PROVIDER_ID,
+    MinoriAviDecodeProvider, MinoriImageDecodeProvider, MinoriNls, MinoriVfsFamilyFactory,
+    MINORI_AVI_DECODE_PROVIDER_ID, MINORI_NLS_OPTION,
 };
 use astra_emu_translation_openai_compatible::{
     SecretResolver, TranslationEndpointKind, TranslationProfile, TranslationProtocol,
@@ -724,6 +724,10 @@ impl RuntimeBridge {
             (
                 "astra.provider.storage".into(),
                 "astra.writable_file.v1".into(),
+            ),
+            (
+                astra_emu_minori::MINORI_NLS_OPTION.into(),
+                astra_emu_minori::MINORI_NLS_SHIFT_JIS.into(),
             ),
         ]);
         if env::var("ASTRA_EMU_QUICK_EVIDENCE").as_deref() == Ok("1") {
@@ -3584,7 +3588,14 @@ impl ManagerController for AstraEmuManagerController {
             .transpose()
             .map_err(|error| error.to_string())?
             .flatten()
-            .and_then(|profile| profile.family_options.get("fvp.nls").cloned())
+            .and_then(|profile| {
+                let option = if profile.family_id == "minori" {
+                    MINORI_NLS_OPTION
+                } else {
+                    "fvp.nls"
+                };
+                profile.family_options.get(option).cloned()
+            })
             .unwrap_or_else(|| "Not configured".into());
         let consent_present = self
             .library
@@ -4096,7 +4107,12 @@ impl ManagerController for AstraEmuManagerController {
             .case_runtime_profile(&case_identity)
             .map_err(|error| error.to_string())?
             .unwrap_or_else(|| default_case_profile(case_identity));
-        profile.family_options.insert("fvp.nls".into(), nls.into());
+        let option = if profile.family_id == "minori" {
+            MINORI_NLS_OPTION
+        } else {
+            "fvp.nls"
+        };
+        profile.family_options.insert(option.into(), nls.into());
         self.library
             .set_case_runtime_profile(&profile)
             .map_err(|error| error.to_string())?;
@@ -4675,6 +4691,25 @@ impl ManagerController for AstraEmuManagerController {
                 }
             }
             detected.family_options.extend(explicit_options);
+        }
+        if family_id == "minori" {
+            match detected.family_options.get(MINORI_NLS_OPTION) {
+                Some(value) => match MinoriNls::parse(value) {
+                    Ok(nls) if nls.is_currently_supported() => {}
+                    Ok(_) => {
+                        self.vfs.unbind(&mount_set_id);
+                        return Err("ASTRA_EMU_MINORI_NLS_UNSUPPORTED".into());
+                    }
+                    Err(_) => {
+                        self.vfs.unbind(&mount_set_id);
+                        return Err("ASTRA_EMU_MINORI_NLS_INVALID".into());
+                    }
+                },
+                None => {
+                    self.vfs.unbind(&mount_set_id);
+                    return Err("ASTRA_EMU_MINORI_NLS_MISSING".into());
+                }
+            }
         }
         if let Err(error) = self.library.set_case_runtime_profile(&detected) {
             self.vfs.unbind(&mount_set_id);

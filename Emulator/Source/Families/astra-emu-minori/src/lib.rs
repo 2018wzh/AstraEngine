@@ -32,5 +32,5 @@ pub use script::*;
 pub const MINORI_READER_ID: &str = "astra.emu.minori.paz.v5";
 /// Retained as the family format identity required by the legacy factory ABI;
 /// it is not a registry, callback or manifest provider identity.
-pub const MINORI_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.minori.mount_options.v3";
+pub const MINORI_FAMILY_OPTIONS_SCHEMA: &str = "astra.emu.minori.mount_options.v4";
 pub const MINORI_SCRIPT_IR_SCHEMA: &str = "astra.emu.minori.script_ir.v2";

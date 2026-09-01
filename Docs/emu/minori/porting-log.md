@@ -1399,3 +1399,19 @@ Minori 菜单的 item id、顺序或平台呈现。
 - 当前 `astra-emu-minori --lib --no-default-features` 定向测试为 194/194；这是保存页
   资源与 provider 边界证据，不等价于四路线、原版同点视觉 parity、Release Sandbox
   或 Windows E3。
+
+## 2026-09-01：按 FVP 预留 Minori profile 编码选择
+
+- Minori `family_options` 新增必填 `nls` 字段，取值固定为 `shift_jis`、`gbk` 或
+  `utf8`，并使用 `minori.nls` 作为 Manager/CLI 的运行时 profile key。这个命名和
+  FVP 的 NLS 选择保持一致，方便后续在同一 Profile UI 中切换原版与本地化资源。
+- 当前实现只对已验证的日文原版启用 `shift_jis`。`gbk`、`utf8` 会被严格解析后以
+  `ASTRA_EMU_MINORI_NLS_UNSUPPORTED` 阻断；未知值以
+  `ASTRA_EMU_MINORI_NLS_INVALID` 阻断。没有 CP932、UTF-8 或替换字符的隐式回退，
+  也没有在本轮启用汉化内容。
+- Manager 和 CLI 的 Minori 探测 Profile 会显式写入 `minori.nls=shift_jis`，UI
+  选择器改为 family-neutral 文案；选择预留值只会保存 Profile 选择，下一次启动在
+  mount/runtime 边界拒绝。此项只完成 Profile/schema 预留与阻断回归，不代表 GBK/UTF-8
+  本地化资源、转码 key、字体或路线行为已经实现。
+- 新增 NLS 枚举、factory 选项验证、无回退测试；后续若接入汉化版，必须先补齐对应
+  `content_variant`、locale hook、key/password 编码和真实样本证据，再解除该阻断。

@@ -2412,6 +2412,10 @@ fn probe_profile(
                         "astra.provider.storage".into(),
                         "astra.writable_file.v1".into(),
                     ),
+                    (
+                        astra_emu_minori::MINORI_NLS_OPTION.into(),
+                        astra_emu_minori::MINORI_NLS_SHIFT_JIS.into(),
+                    ),
                 ]
                 .into_iter()
                 .collect(),

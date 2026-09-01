@@ -21,6 +21,11 @@ PAZ reader 采用三段式：
 2. mount 时通过有界私有文件接口读取严格 `key.toml`，解开 TOC 后立即释放 index 明文。
 3. entry 读取按请求范围建立 source、decrypt 和可选 zlib 流，不落盘明文。
 
+文本编码由 launch profile 的 `family_options.nls` 显式选择，取值与 FVP
+保持一致：`shift_jis`、`gbk` 或 `utf8`。当前原版日文资源只完成了 `shift_jis` 的
+验证；`gbk` 与 `utf8` 是预留值，挂载时返回
+`ASTRA_EMU_MINORI_NLS_UNSUPPORTED`，不会把资源静默按 CP932 解码。
+
 ## 证据分层
 
 | 结论 | 来源 | 状态 |

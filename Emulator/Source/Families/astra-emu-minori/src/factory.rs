@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    MinoriLocaleHook, MinoriMountedVfs, MinoriPazDecryptor, PazArchiveConfig, PazRoleScheme,
-    MINORI_FAMILY_OPTIONS_SCHEMA, MINORI_LOCALE_HOOK_ID, MINORI_ORIGINAL_VARIANT_ID,
+    MinoriLocaleHook, MinoriMountedVfs, MinoriNls, MinoriPazDecryptor, PazArchiveConfig,
+    PazRoleScheme, MINORI_FAMILY_OPTIONS_SCHEMA, MINORI_LOCALE_HOOK_ID, MINORI_ORIGINAL_VARIANT_ID,
     REQUIRED_ARCHIVE_ROLES,
 };
 
@@ -26,6 +26,10 @@ pub const MAX_KEY_FILE_BYTES: u64 = 64 * 1024;
 pub struct MinoriFamilyOptions {
     pub content_variant: String,
     pub locale_hook: String,
+    /// FVP-compatible profile selector. The Japanese source currently
+    /// requires `shift_jis`; `gbk` and `utf8` are reserved and fail closed at
+    /// mount until a verified localized source contract exists.
+    pub nls: String,
     pub paz_version: u8,
     pub index_size_xor: u32,
     pub key_file: PathBuf,
@@ -93,7 +97,19 @@ impl LegacyVfsFamilyFactory for MinoriVfsFamilyFactory {
                 "Minori family options are invalid",
             )
         })?;
+        let nls = MinoriNls::parse(&options.nls).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_NLS_INVALID",
+                "Minori profile nls must be shift_jis, gbk, or utf8",
+            )
+        })?;
         validate_options(&options)?;
+        if !nls.is_currently_supported() {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_NLS_UNSUPPORTED",
+                "the selected Minori text encoding is reserved but not implemented",
+            ));
+        }
         let locale_hook = MinoriLocaleHook::from_id(&options.locale_hook).map_err(|_| {
             invalid(
                 "ASTRA_EMU_MINORI_LOCALE_HOOK",
@@ -231,6 +247,7 @@ fn validate_options(options: &MinoriFamilyOptions) -> Result<(), LegacyCoreError
         .collect::<BTreeSet<_>>();
     if options.content_variant != MINORI_ORIGINAL_VARIANT_ID
         || options.locale_hook != MINORI_LOCALE_HOOK_ID
+        || MinoriNls::parse(&options.nls).is_err()
         || options.paz_version > 2
         || options.key_file.as_os_str().is_empty()
         || options.key_file.is_absolute()
@@ -272,6 +289,8 @@ fn invalid(code: &'static str, message: &'static str) -> LegacyCoreError {
 
 #[cfg(test)]
 mod tests {
+    use astra_emu_family_core::LegacyOpaqueFamilyConfig;
+
     use super::*;
 
     fn key_file() -> MinoriKeyFile {
@@ -343,6 +362,7 @@ mod tests {
         let valid = MinoriFamilyOptions {
             content_variant: MINORI_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MINORI_LOCALE_HOOK_ID.into(),
+            nls: crate::MINORI_NLS_SHIFT_JIS.into(),
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -367,6 +387,7 @@ mod tests {
         let mut options = MinoriFamilyOptions {
             content_variant: MINORI_ORIGINAL_VARIANT_ID.into(),
             locale_hook: MINORI_LOCALE_HOOK_ID.into(),
+            nls: crate::MINORI_NLS_SHIFT_JIS.into(),
             paz_version: 2,
             index_size_xor: 0,
             key_file: PathBuf::from("key.toml"),
@@ -386,6 +407,63 @@ mod tests {
             validate_options(&options).unwrap_err().code(),
             "ASTRA_EMU_MINORI_MOUNT_OPTIONS"
         );
+        options.content_variant = MINORI_ORIGINAL_VARIANT_ID.into();
+        options.nls = "cp936".into();
+        assert_eq!(
+            validate_options(&options).unwrap_err().code(),
+            "ASTRA_EMU_MINORI_MOUNT_OPTIONS"
+        );
+    }
+
+    #[test]
+    fn family_options_reserve_non_japanese_nls_without_fallback() {
+        let options = MinoriFamilyOptions {
+            content_variant: MINORI_ORIGINAL_VARIANT_ID.into(),
+            locale_hook: MINORI_LOCALE_HOOK_ID.into(),
+            nls: "gbk".into(),
+            paz_version: 2,
+            index_size_xor: 0,
+            key_file: PathBuf::from("key.toml"),
+            archive_roles: REQUIRED_ARCHIVE_ROLES
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        };
+        assert!(validate_options(&options).is_ok());
+        let parsed = MinoriNls::parse(&options.nls).unwrap();
+        assert!(!parsed.is_currently_supported());
+        assert_eq!(crate::MINORI_NLS_OPTION, "minori.nls");
+    }
+
+    #[test]
+    fn mount_blocks_reserved_nls_before_reading_private_game_files() {
+        let root = tempfile::tempdir().unwrap();
+        let options = MinoriFamilyOptions {
+            content_variant: MINORI_ORIGINAL_VARIANT_ID.into(),
+            locale_hook: MINORI_LOCALE_HOOK_ID.into(),
+            nls: crate::MINORI_NLS_GBK.into(),
+            paz_version: 2,
+            index_size_xor: 0,
+            key_file: PathBuf::from("key.toml"),
+            archive_roles: REQUIRED_ARCHIVE_ROLES
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        };
+        let context = LegacyVfsMountContext {
+            game_root: root.path().to_path_buf(),
+            profile_id: "profile".into(),
+            profile_hash: Hash256::from_sha256(b"profile"),
+            mount_id: "mount".into(),
+            prefix: "minori:/".into(),
+            family_config: LegacyOpaqueFamilyConfig {
+                schema_id: MINORI_FAMILY_OPTIONS_SCHEMA.into(),
+                schema_hash: Hash256::from_sha256(MINORI_FAMILY_OPTIONS_SCHEMA.as_bytes()),
+                payload: serde_json::to_vec(&options).unwrap(),
+            },
+        };
+        let error = MinoriVfsFamilyFactory.mount(&context).err().unwrap();
+        assert_eq!(error.code(), "ASTRA_EMU_MINORI_NLS_UNSUPPORTED");
     }
 
     #[test]

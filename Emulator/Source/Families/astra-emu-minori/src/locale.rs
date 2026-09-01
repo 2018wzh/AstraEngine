@@ -9,6 +9,13 @@ use thiserror::Error;
 /// byte boundary.
 pub const MINORI_ORIGINAL_VARIANT_ID: &str = "natsuzora-no-perseus.original-ja";
 pub const MINORI_LOCALE_HOOK_ID: &str = "astra.emu.minori.locale.ja-jp.cp932.v1";
+/// Profile option used by the Minori launch profile to select the source text
+/// encoding.  The value names intentionally match the FVP profile contract so
+/// the manager can expose one consistent selector across legacy families.
+pub const MINORI_NLS_OPTION: &str = "minori.nls";
+pub const MINORI_NLS_SHIFT_JIS: &str = "shift_jis";
+pub const MINORI_NLS_GBK: &str = "gbk";
+pub const MINORI_NLS_UTF8: &str = "utf8";
 /// BCP-47 locale carried by the runtime-open boundary for the original game.
 ///
 /// The hook remains the authority for byte conversion; this value is the
@@ -17,6 +24,43 @@ pub const MINORI_LOCALE_HOOK_ID: &str = "astra.emu.minori.locale.ja-jp.cp932.v1"
 /// a host-default code-page policy.
 pub const MINORI_RUNTIME_LOCALE: &str = "ja-JP";
 
+/// Encoding values that may be persisted in a Minori launch profile.
+///
+/// Only Shift JIS is currently implemented for the verified Japanese source.
+/// The other values are deliberately represented here so a profile can be
+/// selected before the localized source contract is implemented.  Mounting a
+/// profile with one of those reserved values is a hard error; it never falls
+/// back to CP932 or to replacement decoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinoriNls {
+    ShiftJis,
+    Gbk,
+    Utf8,
+}
+
+impl MinoriNls {
+    pub fn parse(value: &str) -> Result<Self, MinoriLocaleError> {
+        match value {
+            MINORI_NLS_SHIFT_JIS => Ok(Self::ShiftJis),
+            MINORI_NLS_GBK => Ok(Self::Gbk),
+            MINORI_NLS_UTF8 => Ok(Self::Utf8),
+            _ => Err(MinoriLocaleError::UnsupportedEncoding),
+        }
+    }
+
+    pub const fn profile_value(self) -> &'static str {
+        match self {
+            Self::ShiftJis => MINORI_NLS_SHIFT_JIS,
+            Self::Gbk => MINORI_NLS_GBK,
+            Self::Utf8 => MINORI_NLS_UTF8,
+        }
+    }
+
+    pub const fn is_currently_supported(self) -> bool {
+        matches!(self, Self::ShiftJis)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MinoriLocaleHook;
 
@@ -24,6 +68,8 @@ pub struct MinoriLocaleHook;
 pub enum MinoriLocaleError {
     #[error("ASTRA_EMU_MINORI_LOCALE_HOOK: unsupported locale hook")]
     UnsupportedHook,
+    #[error("ASTRA_EMU_MINORI_NLS: unsupported text encoding")]
+    UnsupportedEncoding,
     #[error("ASTRA_EMU_MINORI_LOCALE_DECODE: bytes are not valid CP932")]
     Decode,
     #[error("ASTRA_EMU_MINORI_LOCALE_ENCODE: text cannot be encoded as CP932")]
@@ -96,6 +142,24 @@ mod tests {
         assert_eq!(
             MinoriLocaleHook::japanese_cp932().encode("🙂").unwrap_err(),
             MinoriLocaleError::Encode
+        );
+    }
+
+    #[test]
+    fn nls_profile_values_match_fvp_and_only_shift_jis_is_live() {
+        for (value, expected, supported) in [
+            (MINORI_NLS_SHIFT_JIS, MinoriNls::ShiftJis, true),
+            (MINORI_NLS_GBK, MinoriNls::Gbk, false),
+            (MINORI_NLS_UTF8, MinoriNls::Utf8, false),
+        ] {
+            let parsed = MinoriNls::parse(value).unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.profile_value(), value);
+            assert_eq!(parsed.is_currently_supported(), supported);
+        }
+        assert_eq!(
+            MinoriNls::parse("cp936").unwrap_err(),
+            MinoriLocaleError::UnsupportedEncoding
         );
     }
 }

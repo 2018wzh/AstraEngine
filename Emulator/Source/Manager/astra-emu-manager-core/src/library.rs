@@ -1414,10 +1414,10 @@ mod tests {
             family_id: "minori".into(),
             fixed_delta_ns: 16_666_667,
             compatibility_profile: "minori.reference".into(),
-            family_options: BTreeMap::from([(
-                "astra.entry_uri".into(),
-                "minori:/scr/A01.sc".into(),
-            )]),
+            family_options: BTreeMap::from([
+                ("astra.entry_uri".into(), "minori:/scr/A01.sc".into()),
+                ("minori.nls".into(), "shift_jis".into()),
+            ]),
         };
         library.set_case_runtime_profile(&profile).unwrap();
         assert_eq!(
