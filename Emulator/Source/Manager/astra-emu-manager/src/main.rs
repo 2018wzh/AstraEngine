@@ -2229,7 +2229,7 @@ impl AstraEmuManagerController {
             }
         } else {
             let bytes = self.read_vfs_preview_bytes(mount_set_id, resource).ok()?;
-            match decode_text_preview(&bytes, &resource.path) {
+            match decode_text_preview(&bytes, &resource.path, self.active_family_text_locale()) {
                 Some((name, text)) => {
                     kind = "text";
                     encoding = name;
@@ -2256,6 +2256,14 @@ impl AstraEmuManagerController {
             source_layer: resource.source_layer.clone(),
             resolve_path: resource.resolve_path.clone(),
         })
+    }
+
+    fn active_family_text_locale(&self) -> TextPreviewLocale {
+        self.active_family_mount
+            .as_ref()
+            .filter(|mounted| mounted.manifest().family_id == "minori")
+            .map(|_| TextPreviewLocale::MinoriJapaneseCp932)
+            .unwrap_or(TextPreviewLocale::Auto)
     }
 
     fn family_media_kind(&self, resource: &VfsResourceInfo) -> Option<String> {
@@ -3090,7 +3098,27 @@ fn media_preview_summary(
 /// UTF-8. Minori scripts and legacy configuration files are commonly encoded
 /// as CP932, while newer metadata is UTF-8; BOMs always take precedence. The
 /// function returns `None` for binary data so the caller can render a hex view.
-fn decode_text_preview(bytes: &[u8], path: &str) -> Option<(String, String)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextPreviewLocale {
+    Auto,
+    MinoriJapaneseCp932,
+}
+
+fn decode_text_preview(
+    bytes: &[u8],
+    path: &str,
+    locale: TextPreviewLocale,
+) -> Option<(String, String)> {
+    let has_bom = bytes.starts_with(&[0xef, 0xbb, 0xbf])
+        || bytes.starts_with(&[0xff, 0xfe])
+        || bytes.starts_with(&[0xfe, 0xff]);
+    // The original Minori payload is a CP932 byte stream.  Apply the bound
+    // before trying generic UTF-8 so a byte sequence that happens to be
+    // valid UTF-8 cannot silently change the displayed text.  BOM-marked
+    // metadata remains explicit and takes precedence below.
+    if !has_bom && locale == TextPreviewLocale::MinoriJapaneseCp932 && is_legacy_text_path(path) {
+        return decode_cp932_strict(bytes).map(|text| ("shift_jis".into(), text));
+    }
     let (encoding, payload) = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
         (UTF_8, &bytes[3..])
     } else if bytes.starts_with(&[0xff, 0xfe]) {
@@ -3107,6 +3135,12 @@ fn decode_text_preview(bytes: &[u8], path: &str) -> Option<(String, String)> {
         return None;
     }
     decode_with(SHIFT_JIS, bytes).map(|text| ("shift_jis".into(), text))
+}
+
+fn decode_cp932_strict(bytes: &[u8]) -> Option<String> {
+    astra_emu_minori::MinoriLocaleHook::japanese_cp932()
+        .decode(bytes)
+        .ok()
 }
 
 fn decode_with(encoding: &'static Encoding, bytes: &[u8]) -> Option<String> {
@@ -5075,6 +5109,7 @@ mod manager_tests {
         parse_glossary, pending_wait_can_rebind, quick_entry_is_valid, quick_entry_matches,
         refresh_cover_cache, retain_non_completed_input_edges, runtime_locale_for_family,
         system_menu_open_requested, system_ui_activity_from_blackboard, PendingWait,
+        TextPreviewLocale,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -5298,22 +5333,45 @@ mod manager_tests {
         let mut utf16le = vec![0xff, 0xfe];
         utf16le.extend_from_slice(&[b'h', 0, b'i', 0]);
         assert_eq!(
-            decode_text_preview(&utf16le, "sys/message.txt"),
+            decode_text_preview(&utf16le, "sys/message.txt", TextPreviewLocale::Auto),
             Some(("utf-16le".into(), "hi".into()))
         );
         let mut japanese_utf16le = vec![0xff, 0xfe];
         japanese_utf16le.extend("夏空".encode_utf16().flat_map(|unit| unit.to_le_bytes()));
         assert_eq!(
-            decode_text_preview(&japanese_utf16le, "sys/message.txt"),
+            decode_text_preview(
+                &japanese_utf16le,
+                "sys/message.txt",
+                TextPreviewLocale::MinoriJapaneseCp932,
+            ),
             Some(("utf-16le".into(), "夏空".into()))
         );
         let (encoded, _, malformed) = encoding_rs::SHIFT_JIS.encode("夏空");
         assert!(!malformed);
         assert_eq!(
-            decode_text_preview(&encoded, "scr/test.sc"),
+            decode_text_preview(
+                &encoded,
+                "scr/test.sc",
+                TextPreviewLocale::MinoriJapaneseCp932,
+            ),
             Some(("shift_jis".into(), "夏空".into()))
         );
-        assert_eq!(decode_text_preview(&[0x00, 0x01, 0x02], "data.bin"), None);
+        assert_eq!(
+            decode_text_preview(&[0x00, 0x01, 0x02], "data.bin", TextPreviewLocale::Auto),
+            None
+        );
+    }
+
+    #[test]
+    fn minori_text_preview_rejects_invalid_cp932_without_fallback() {
+        assert_eq!(
+            decode_text_preview(
+                &[0x82],
+                "scr/test.sc",
+                TextPreviewLocale::MinoriJapaneseCp932,
+            ),
+            None
+        );
     }
 
     #[test]

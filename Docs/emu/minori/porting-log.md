@@ -13,6 +13,12 @@ Sandbox 中对原版 System 页做了 Font 上箭头、`OK` 和重新打开的�
 overlay。宿主字体枚举和绑定尚未形成可复现的 package identity，因此 Font
 选择继续列为开放项；本轮不把观察结果拔高为实现或视觉 parity。
 
+Manager 的 family-mounted VFS 文本预览也已绑定同一 locale 边界：无 BOM 的 Minori
+文本按严格 CP932 解析，BOM 文件保留显式 UTF 编码优先级；非法输入显示有界 hex，
+不会被 UTF-8、GBK 或替换字符吞掉。该改动只影响预览入口，不改变 runtime 的原版
+日文正文，也没有加入汉化资源或翻译 overlay。定向 Manager 测试通过，真实窗口预览
+与同点视觉 parity 仍未形成。
+
 同日，CLI 与 Manager 的 runtime-open 请求改用 Minori 固定 `ja-JP` locale identity；
 其它 family 保持 `und`。这只影响运行时元数据和 Host 的 locale 选择，不改变 CP932
 解码规则，也不把本地化文件纳入挂载。该项通过受影响 crate 的增量测试后记录，仍不

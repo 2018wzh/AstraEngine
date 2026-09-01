@@ -11,6 +11,12 @@ Minori message path 已删除 translation Hook 调用，正文保持原版日文
 194 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
 
+同日补齐 Manager VFS 预览的 locale 绑定：活动 Minori 挂载下的无 BOM 文本先经严格
+CP932 解码，再交给有界文本视图；BOM 标记的 UTF-8/UTF-16 仍按显式标记优先。非法
+字节直接回到十六进制视图，不尝试 UTF-8/GBK 替换或汉化回退。该路径与 runtime 的
+`ja-JP`/CP932 hook 保持同一边界，定向 Manager 测试通过；它不提升原版同点视觉、
+完整路线、Release Sandbox 或 Windows E3 证据。
+
 同日补齐 runtime-open locale identity：CLI 与 Manager 在选择 Minori 时传递
 `ja-JP`，其它 family 仍使用 `und`。这只声明原版日文 session 的 BCP-47 运行时身份；
 字节转换仍由 `astra.emu.minori.locale.ja-jp.cp932.v1` 严格完成，不启用汉化内容、GBK
