@@ -50,6 +50,8 @@ family_options:
 
 旧 `astraemu.minori.mount.yaml` 不再读取。Manager 只读取游戏目录内的 `astraemu.minori.launch.yaml`；CLI 和研究工具通过 `--launch-profile` 显式接收同一 schema。runtime entry 和 `direct`/`title` 启动模式只来自该文件，不扫描第一个脚本，也不读取环境变量覆盖。
 
+Manager 遇到旧的 v2/v3 Minori launch profile 时会以 `ASTRA_EMU_MINORI_LAUNCH_PROFILE_STALE` 阻断，并要求用户重新生成当前 v4 profile；不会就地迁移、改写游戏目录或回退到旧 patch/cache 路径。该诊断只说明 profile schema 已过期，不代表 key 或资源内容已验证。
+
 Headless 输入固定采用 `astra.user_input_sequence.v1` 的 internally-tagged `event` 形状，例如键盘输入使用 `{"type":"keyboard","state":"pressed",...}`，退出使用 `{"type":"shutdown"}`。旧 externally-tagged 的 `{"Keyboard":...}`、PascalCase button state 与裸 `"Shutdown"` 会以 `ASTRA_EMU_HEADLESS_INPUT_PARSE` 阻断；调用方必须重新序列化同一物理事件，不能让 reader 兼容两种 wire format。
 
 脚本在等待输入时会暴露 host-owned 的 `runtime.awaiting_input` 观测值。它仅由等待所接受的物理输入 mask 聚合哈希，适合输入序列的 `await` 条件；不会输出 await token、脚本位置、商业文本或资源名。一次确认应将 press/release 排在同一 fixed tick，避免 release 在等待已解决后成为未消费 edge。

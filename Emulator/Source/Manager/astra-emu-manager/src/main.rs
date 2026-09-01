@@ -3234,6 +3234,14 @@ fn default_case_profile(case_identity: String, family_id: &str) -> CaseRuntimePr
     }
 }
 
+fn minori_launch_profile_error(error: astra_emu_family_core::LegacyCoreError) -> String {
+    if error.code() == "ASTRA_EMU_VFS_OPTIONS_SCHEMA" {
+        "ASTRA_EMU_MINORI_LAUNCH_PROFILE_STALE".to_owned()
+    } else {
+        error.to_string()
+    }
+}
+
 const MAX_COVER_SOURCE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_COVER_DIMENSION: u32 = 8_192;
 const COVER_WIDTH: u32 = 512;
@@ -4622,7 +4630,7 @@ impl ManagerController for AstraEmuManagerController {
             let loaded = self
                 .family_vfs_registry
                 .load_profile(&game_root.join("astraemu.minori.launch.yaml"))
-                .map_err(|error| error.to_string())?;
+                .map_err(minori_launch_profile_error)?;
             let entry_uri = loaded.profile.runtime.entry_uri.clone();
             let launch_entry_explicit = match loaded.profile.runtime.launch_mode.as_str() {
                 "direct" => true,
@@ -4632,7 +4640,7 @@ impl ManagerController for AstraEmuManagerController {
             let mounted = self
                 .family_vfs_registry
                 .mount("minori", &game_root, &loaded)
-                .map_err(|error| error.to_string())?;
+                .map_err(minori_launch_profile_error)?;
             if !mounted
                 .manifest()
                 .entries
@@ -5165,8 +5173,8 @@ mod manager_tests {
 
     use super::{
         decode_image_preview, decode_text_preview, default_case_profile, family_id_for_case,
-        fvp_pack_paths_option, media_preview_summary, parse_glossary, pending_wait_can_rebind,
-        quick_entry_is_valid, quick_entry_matches, refresh_cover_cache,
+        fvp_pack_paths_option, media_preview_summary, minori_launch_profile_error, parse_glossary,
+        pending_wait_can_rebind, quick_entry_is_valid, quick_entry_matches, refresh_cover_cache,
         retain_non_completed_input_edges, runtime_locale_for_family, system_menu_open_requested,
         system_ui_activity_from_blackboard, PendingWait, TextPreviewLocale,
     };
@@ -5216,6 +5224,18 @@ mod manager_tests {
         };
         let profile = default_case_profile(case.case_identity.clone(), "fvp");
         assert_eq!(family_id_for_case(&case, Some(&profile)).unwrap(), "fvp");
+    }
+
+    #[test]
+    fn stale_minori_launch_profile_has_stable_diagnostic() {
+        let error = astra_emu_family_core::LegacyCoreError::invalid(
+            "ASTRA_EMU_VFS_OPTIONS_SCHEMA",
+            "family options schema does not match the factory",
+        );
+        assert_eq!(
+            minori_launch_profile_error(error),
+            "ASTRA_EMU_MINORI_LAUNCH_PROFILE_STALE"
+        );
     }
 
     #[test]
