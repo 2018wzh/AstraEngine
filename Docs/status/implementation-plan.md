@@ -8,6 +8,12 @@
 内容或改变 key/password 编码边界。为使旧的无 `nls` profile 不会被误读，family options
 schema 已提升为 `astra.emu.minori.mount_options.v4`。
 
+同日 Release Headless 短程复核修正了已确认的消息推进指示符布局差异：正文与下三角
+现在分别由同一 CosmicText provider 排版，按最后一行真实宽度行内放置，空间不足时才
+在有界行数内换行。当前 v4 Release 候选完成 4008 fixed step、8 个 checkpoint、491
+个提交/栅格帧和 2714112 个音频帧，diagnostic 为空；这只是该单点视觉修正的 E2 证据，
+不提升原版同点 parity、四路线、完整音频、Release Sandbox 或 Windows E3。
+
 2026 年 9 月 1 日 Minori 原版 locale 边界：family options 已硬切为
 `astra.emu.minori.mount_options.v4`，要求 `content_variant` 为
 `natsuzora-no-perseus.original-ja`、`locale_hook` 为

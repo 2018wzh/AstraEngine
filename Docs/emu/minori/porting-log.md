@@ -1442,3 +1442,18 @@ Minori 菜单的 item id、顺序或平台呈现。
 - 实际查看了首个黑场、日文消息、背景转场和人物构图 checkpoint；画面区域非空，
   日文 glyph、消息层和背景层均可见，没有明显裁剪或拉伸。它仍不是原版同点截图，
   不能替代四路线自然结局、同点视觉 parity、完整音频/影片审查或 Windows E3。
+
+## 2026-09-01：推进指示符行内布局复核
+
+- 原版首段截图显示推进用下三角与短消息正文处于同一行。此前 Minori 文本 surface
+  把指示符作为第二个 `TextRun` 追加，CosmicText 在部分短消息上把它排到下一行，
+  形成了可见的布局偏差。
+- 现改为正文和指示符分别使用同一 `CosmicTextLayoutProvider` 排版；指示符根据正文
+  最后一行的真实 glyph 宽度放在行末，只有剩余宽度不足且仍在 `max_lines` 内时才换到
+  下一行。正文 source、backlog 和语音 identity 不包含该指示符；所有坐标和有限宽度
+  仍经过稳定 bounds diagnostic 校验。
+- 重新构建当前 v4 Release 候选后，短程物理输入完成 33 条序列消息、4008 个 fixed
+  step、8 个 checkpoint、491 个提交/栅格帧和 2714112 个音频帧，diagnostic 为空；
+  已查看消息 checkpoint，指示符在短消息末尾保持行内显示。该复核只证明已确认的
+  一处视觉差异修正，不代表原版同点像素 parity、四路线、完整音频听审、Release
+  Sandbox 或 Windows E3 已完成。

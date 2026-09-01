@@ -8,6 +8,13 @@
 library 194/194 通过。该项只关闭当前实现的原版/乱码边界，Stage 5、完整路线、视觉
 音频审查、Release Sandbox 和 Windows E3 仍为 `IN_PROGRESS`。
 
+2026 年 9 月 1 日消息推进指示符布局复核：原版短消息中的下三角与正文同一行；Minori
+文本 surface 改为正文/指示符独立 CosmicText layout，并按最后一行测量宽度定位，
+避免第二个 `TextRun` 导致的意外换行。当前 v4 Release Headless 短程完成 4008 fixed
+step、8 个 checkpoint、491 个提交/栅格帧和 2714112 个音频帧，diagnostic 为空，
+消息 checkpoint 已人工查看。该项只计单点视觉 E2 修正，Stage 5、同点 parity、完整路线、
+正式音频、Release Sandbox 和 Windows E3 继续保持 `IN_PROGRESS`。
+
 2026 年 9 月 1 日标题页 pointer 对齐：Minori 按 stage-space 处理原版右侧菜单 hover 与
 点击，使用 `topMenu*Over.png` 行裁剪并复用键盘 typed action；基础/解锁变体和 restore
 清理均有定向回归，当前 library 194/194。该项只计 E1/E2 provider 证据，原版同点视觉、

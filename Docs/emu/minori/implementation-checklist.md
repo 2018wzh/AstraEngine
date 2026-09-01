@@ -22,6 +22,16 @@
   point original screenshots, four independent routes, full audio listening review, gallery
   parity, Release Sandbox and Windows E3 remain open.
 
+## Message advance indicator placement (2026-09-01)
+
+- [x] The advance marker is laid out by the shared CosmicText provider as an independent
+  glyph layer positioned after the measured final body line, matching the observed inline
+  marker in the original short-message frame.
+- [x] The marker remains outside message source/backlog/voice identity, and the fallback to a
+  following line is bounded by the region line budget with a stable layout diagnostic.
+- [ ] Same-point original/emulator captures, long-line wrap parity and the remaining system
+  and route visual gates are still open.
+
 ## Japanese-original CP932 message boundary (2026-09-01)
 
 - [x] Script operands and message markup continue to use the bound Japanese CP932

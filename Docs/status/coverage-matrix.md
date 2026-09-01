@@ -6,6 +6,13 @@ malformed input，message publisher 不再调用 translation Hook。中文 `.mys
 exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。194 项 Minori library
 定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
 
+2026 年 9 月 1 日消息推进指示符 coverage：原版短消息截图确认下三角与正文同一行；
+文本 surface 现由共享 CosmicText provider 独立排版指示符并按最后一行实测宽度定位，
+避免原先第二个 `TextRun` 的意外换行。当前 v4 Release Headless 短程完成 4008 fixed
+step、8 个 checkpoint、491 个提交/栅格帧和 2714112 个音频帧，diagnostic 为空，
+消息 checkpoint 已人工查看。该项只覆盖已确认的单点布局差异，不关闭同点视觉 parity、
+四路线、正式音频、Release Sandbox 或 Windows E3。
+
 2026 年 9 月 1 日标题页 pointer coverage：原版 Sandbox 确认右侧菜单行的 hover 星标、
 `New Game`/`System` 鼠标点击和 1280×720 stage-space 坐标。provider regression 覆盖
 基础四行、解锁五行、hover scissor、行外点击和页面状态；focus 不写入 save。该项仍是

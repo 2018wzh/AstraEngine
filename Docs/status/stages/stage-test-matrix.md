@@ -7,6 +7,14 @@ longer invokes the Minori translation Hook. The focused `astra-emu-minori` libra
 passes 194/194. This is parser/mount boundary evidence only; localized `.mys`/exe files,
 full-route parity, Release Sandbox and Windows E3 remain out of scope.
 
+2026-09-01 message indicator seam: the original short-message checkpoint keeps the advance
+marker on the same line as the body. Minori now uses separate CosmicText layouts and the
+measured final-line width to place that marker, with bounded next-line placement and a stable
+diagnostic when the region cannot contain it. The v4 Release Headless slice completes 4008
+fixed steps, eight checkpoints, 491 submitted/rasterized frames and 2714112 audio frames with
+no diagnostics; this remains single-point E2 evidence, not same-point parity, Release Sandbox
+or Windows E3 acceptance.
+
 2026-09-01 title pointer coverage: the original title menu accepts stage-space hover and
 clicks; the Minori provider covers base/unlocked row maps, clipped `topMenu*Over.png`
 resources, outside clicks and typed action reuse. The focused library suite passes 194/194;
