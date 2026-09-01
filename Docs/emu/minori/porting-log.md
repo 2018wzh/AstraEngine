@@ -1429,3 +1429,16 @@ Minori 菜单的 item id、顺序或平台呈现。
   契约；没有把无媒体设备或禁用 provider 当作成功运行。
 - 这是 Release Sandbox 的短程启动证据（E2），用于确认 NLS/schema v4 没有破坏真实
   启动链；四路线、同点截图、完整音视频审查、Windows E3 和峰值内存证据仍保持开放。
+
+## 2026-09-01：Profile v4 Release 长程 Headless 复核
+
+- 旧的本地长程输入在 checkpoint 后安排同 tick `await`，严格运行器会返回
+  `ASTRA_EMU_HEADLESS_CHECKPOINT_ORDER`。按既有输入契约只把这些 `await` 推迟一个
+  tick，未改变任何物理按键、选择或脚本内容；校正序列留在 ignored 私有目录。
+- 重新使用同一 Release CLI、Minori 动态库、`wmf` video provider 和 `mount_options.v4`
+  profile，完成 193 条输入、24048 个 fixed step、48 个 checkpoint、146 个提交帧和
+  16758784 个音频帧。报告为 `passed`，diagnostic 为空，输入完整消费；尾部是显式
+  shutdown，`terminal_reached` 保持 false。
+- 实际查看了首个黑场、日文消息、背景转场和人物构图 checkpoint；画面区域非空，
+  日文 glyph、消息层和背景层均可见，没有明显裁剪或拉伸。它仍不是原版同点截图，
+  不能替代四路线自然结局、同点视觉 parity、完整音频/影片审查或 Windows E3。
