@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    parse_minori_message_markup, script::tokenize_operands, MinoriMessageControl,
-    MinoriMessageMarkupError, ScCommand, ScControlFlow, ScLineKind, ScOperand, ScScript,
-    SourceSpan,
+    parse_minori_message_markup, script::tokenize_operands, validate_canonical_minori_message_text,
+    MinoriMessageControl, MinoriMessageMarkupError, ScCommand, ScControlFlow, ScLineKind,
+    ScOperand, ScScript, SourceSpan,
 };
 
 pub const MINORI_RUNTIME_STATE_SCHEMA: &str = "astra.emu.minori.runtime_state.v28";
@@ -4129,6 +4129,8 @@ fn validate_backlog_state(state: &MinoriRuntimeState) -> Result<(), MinoriRuntim
     }
     let mut total_bytes = 0usize;
     for entry in &state.backlog {
+        validate_canonical_minori_message_text(&entry.text)
+            .map_err(MinoriRuntimeError::MessageControl)?;
         if entry.text.len() > MINORI_BACKLOG_MAX_ENTRY_BYTES
             || entry
                 .speaker
@@ -8214,6 +8216,33 @@ mod tests {
         let message = vm.state().message.as_ref().unwrap();
         assert!(message.auto_advance);
         assert!(message.wait_for_voice);
+    }
+
+    #[test]
+    fn snapshot_rejects_noncanonical_backlog_controls_without_silent_stripping() {
+        let source = b".message 42  speaker visible\r\n.end\r\n";
+        let script = parse_sc(source, &ScOpcodeCatalog::observed_minori()).unwrap();
+        let mut vm = MinoriVm::new(
+            "minori:/scr/test.sc".into(),
+            Hash256::from_sha256(source),
+            script,
+            1,
+        )
+        .unwrap();
+        vm.step(1, 4).unwrap();
+
+        let mut corrupt = MinoriVm::decode_snapshot(&vm.snapshot_bytes().unwrap()).unwrap();
+        let text = String::from("visible\\v\\a");
+        corrupt.backlog[0].text_hash = Hash256::from_sha256(text.as_bytes());
+        corrupt.backlog[0].text = text.clone();
+        corrupt.backlog_bytes =
+            u64::try_from(text.len() + corrupt.backlog[0].speaker.as_ref().map_or(0, String::len))
+                .unwrap();
+        let bytes = postcard::to_allocvec(&corrupt).unwrap();
+        assert_eq!(
+            MinoriVm::decode_snapshot(&bytes).unwrap_err(),
+            MinoriRuntimeError::MessageControl(MinoriMessageMarkupError::NonCanonical)
+        );
     }
 
     #[test]

@@ -11491,6 +11491,9 @@ fn runtime_error_code(error: &MinoriRuntimeError) -> &'static str {
         MinoriRuntimeError::MessageControl(error) => match error {
             MinoriMessageMarkupError::Truncated => "ASTRA_EMU_MINORI_MESSAGE_CONTROL_TRUNCATED",
             MinoriMessageMarkupError::Unsupported => "ASTRA_EMU_MINORI_MESSAGE_CONTROL_UNSUPPORTED",
+            MinoriMessageMarkupError::NonCanonical => {
+                "ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL"
+            }
             MinoriMessageMarkupError::Bounds => "ASTRA_EMU_MINORI_MESSAGE_CONTROL_BOUNDS",
             MinoriMessageMarkupError::LoadSchema => "ASTRA_EMU_MINORI_MESSAGE_LOAD_SCHEMA",
         },

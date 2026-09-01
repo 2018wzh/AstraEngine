@@ -32,6 +32,17 @@
 - [ ] Same-point original/emulator captures, long-line wrap parity and the remaining system
   and route visual gates are still open.
 
+## Persisted message markup boundary (2026-09-01)
+
+- [x] Snapshot/backlog validation reparses stored visible text and rejects a retained `\\v\\a`
+  (or any other recognized control) with `ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL`;
+  it never silently strips markup during restore.
+- [x] Parser and snapshot regression tests cover the blocking path while the normal execution
+  path continues to keep voice/auto controls out of the visible text and backlog identity.
+- [ ] The unique real-script line still needs an original same-point checkpoint with a working
+  voice completion path; until then its timing, intermediate frame and visual parity remain
+  blocking.
+
 ## Japanese-original CP932 message boundary (2026-09-01)
 
 - [x] Script operands and message markup continue to use the bound Japanese CP932

@@ -15,6 +15,13 @@ step、8 个 checkpoint、491 个提交/栅格帧和 2714112 个音频帧，diag
 消息 checkpoint 已人工查看。该项只计单点视觉 E2 修正，Stage 5、同点 parity、完整路线、
 正式音频、Release Sandbox 和 Windows E3 继续保持 `IN_PROGRESS`。
 
+2026 年 9 月 1 日行末 message markup 恢复边界：私有 census 确认唯一的 `\\v\\a` 组合
+属于真实路线消息的控制序列；原版首段 Sandbox 只观察到独立下三角，尚未在无音频输出的
+环境中可靠推进到目标语音等待点。Minori snapshot/backlog 现在严格重解析持久化可见文本，
+发现残留控制序列即返回 `ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL`，不静默剥离。
+该项只收紧损坏状态的 fail-fast 边界，不关闭目标行同点视觉、四路线、正式音频、Release
+Sandbox 或 Windows E3，Stage 5 继续保持 `IN_PROGRESS`。
+
 2026 年 9 月 1 日标题页 pointer 对齐：Minori 按 stage-space 处理原版右侧菜单 hover 与
 点击，使用 `topMenu*Over.png` 行裁剪并复用键盘 typed action；基础/解锁变体和 restore
 清理均有定向回归，当前 library 194/194。该项只计 E1/E2 provider 证据，原版同点视觉、

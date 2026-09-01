@@ -13,6 +13,12 @@ step、8 个 checkpoint、491 个提交/栅格帧和 2714112 个音频帧，diag
 消息 checkpoint 已人工查看。该项只覆盖已确认的单点布局差异，不关闭同点视觉 parity、
 四路线、正式音频、Release Sandbox 或 Windows E3。
 
+2026 年 9 月 1 日持久化 message markup coverage：唯一的 `\\v\\a` 组合已在私有
+脚本 census 中定位；snapshot/backlog restore 现在重新解析可见文本，残留控制序列返回
+`ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL`，不进行静默规范化。parser 与 snapshot
+回归通过；原版目标语音等待点尚未在有音频输出的环境复现，因此该保护不计入同点视觉或
+完整路线完成度。
+
 2026 年 9 月 1 日标题页 pointer coverage：原版 Sandbox 确认右侧菜单行的 hover 星标、
 `New Game`/`System` 鼠标点击和 1280×720 stage-space 坐标。provider regression 覆盖
 基础四行、解锁五行、hover scissor、行外点击和页面状态；focus 不写入 save。该项仍是

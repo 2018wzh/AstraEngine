@@ -53,6 +53,10 @@ pub enum MinoriMessageMarkupError {
     Truncated,
     #[error("ASTRA_EMU_MINORI_MESSAGE_CONTROL_UNSUPPORTED: message control is not verified")]
     Unsupported,
+    #[error(
+        "ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL: stored message text still contains a control sequence"
+    )]
+    NonCanonical,
     #[error("ASTRA_EMU_MINORI_MESSAGE_CONTROL_BOUNDS: message controls exceed their bounds")]
     Bounds,
     #[error("ASTRA_EMU_MINORI_MESSAGE_LOAD_SCHEMA: inline character load is malformed")]
@@ -127,6 +131,22 @@ pub fn parse_minori_message_markup(
     })
 }
 
+/// Validate text persisted in the runtime backlog or snapshot.
+///
+/// Message controls are parsed exactly once at command execution and are not
+/// part of the stored visible text.  A snapshot carrying a control sequence in
+/// this field is therefore stale or malformed; accepting it would make the
+/// presentation layer render script markup as ordinary text.  Keep this check
+/// strict rather than silently normalizing the value so restore failures remain
+/// observable and no control semantics are guessed.
+pub fn validate_canonical_minori_message_text(text: &str) -> Result<(), MinoriMessageMarkupError> {
+    let parsed = parse_minori_message_markup(text)?;
+    if parsed.visible_text != text {
+        return Err(MinoriMessageMarkupError::NonCanonical);
+    }
+    Ok(())
+}
+
 fn parse_inline_load(
     payload: &str,
     visible_byte_offset: u32,
@@ -193,6 +213,15 @@ mod tests {
         assert!(parsed.waits_for_voice());
         assert!(parsed.auto_advance());
         assert_eq!(parsed.controls.len(), 2);
+    }
+
+    #[test]
+    fn persisted_text_rejects_script_controls_instead_of_stripping_them() {
+        assert_eq!(
+            validate_canonical_minori_message_text("body\\v\\a").unwrap_err(),
+            MinoriMessageMarkupError::NonCanonical
+        );
+        validate_canonical_minori_message_text("visible body").unwrap();
     }
 
     #[test]

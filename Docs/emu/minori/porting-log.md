@@ -1457,3 +1457,18 @@ Minori 菜单的 item id、顺序或平台呈现。
   已查看消息 checkpoint，指示符在短消息末尾保持行内显示。该复核只证明已确认的
   一处视觉差异修正，不代表原版同点像素 parity、四路线、完整音频听审、Release
   Sandbox 或 Windows E3 已完成。
+
+## 2026-09-01：行末 message 控制序列的恢复边界
+
+- 私有脚本 census 将唯一的行末 `\\v\\a` 组合定位到一条真实路线消息；该结果只
+  记录计数和路线段 identity，不把正文或脚本文件名写入公开资料。它确认这两个字节
+  序列属于 message markup，而不是可持久化的可见正文。
+- 原版 Sandbox 的首段消息显示独立的下三角推进指示，未显示字面 `\\v`/`\\a`；
+  由于当前 Sandbox 没有可用音频输出，尚未可靠推进到该语音等待点，因而没有把这条
+  观察升级为目标行的同点证据。
+- runtime 现在在解码/恢复 snapshot 时重新解析 backlog 的可见文本。若持久化字段仍
+  含已知控制序列，返回 `ASTRA_EMU_MINORI_MESSAGE_CONTROL_NONCANONICAL` 并阻断，
+  不静默删除控制符或猜测其表现。新增 parser 与 snapshot regression，Minori library
+  定向测试通过。
+- 该保护只收紧损坏/过时状态边界，不改变已确认的执行时 markup 解析；目标行的原版
+  等待时序、current/next 中间帧和同点视觉比较仍保持 blocking。
