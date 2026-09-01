@@ -28,7 +28,7 @@ System `sha256:780ee54a1be14b877d75fd80448e014cd320065f9ceaa6b8907bef01d3c9b300`
 
 同轮只运行受影响的 Host/Family 回归：`astra-platform` 11/11、
 `astra-platform-windows` 10/10、`astra-emu-manager-core` Host services 7/7，
-以及 `astra-emu-minori` library 189/189 均通过。覆盖内容包括 Family ABI 菜单树校验、
+以及 `astra-emu-minori` library 192/192 均通过。覆盖内容包括 Family ABI 菜单树校验、
 Windows 客户区锚点与 DPI 几何、确认框/文本输入生命周期、系统命令结果和 session 清理；
 这只是契约与 Host 边界证据，不能替代真实 Manager 窗口、完整路线或正式 Windows E3。
 
@@ -1341,3 +1341,19 @@ Minori 菜单的 item id、顺序或平台呈现。
 - System 页截图的公开 hash 为
   `sha256:50dc8af81ed1969897ea92aa2b5c76135cf08730c1fed278155a037cee28e8fd`；图片和
   本地路径仍留在 ignored 私有目录，不进入仓库。
+
+### 2026-09-01 Save slot metadata fidelity
+
+- Sandbox 中的空槽与占用槽结构已按原版行为收敛：每页十个槽，`saveload_Page0..9.png`
+  显示页标签，保存页首屏只显示 Next/Return，Load 页保留 Back/Next/Return；空槽使用
+  `notsaved.png` 的原始尺寸和槽内偏移。
+- save envelope 已硬切为 `astra.emu.minori.save_slot.v3`，保存时写入本地时间
+  `YYYY/MM/DD HH:MM`、有界用户注释和由当前 1280x720 premultiplied gameplay surface
+  生成的 96x54 PNG 缩略图。读取列表和 Load 均严格校验 identity、时间、注释、PNG
+  尺寸与字节边界；缺少本地时间或当前 gameplay surface 直接返回阻断 diagnostic。
+- Host-owned Layer2D 的 Save/Load panel 在占用槽位置叠加缩略图，时间和注释通过
+  原有日文文本 presentation 通道输出；metadata 变化会使 retained panel 失效并重发，
+  不建立明文缓存或静默回退。
+- 当前 `astra-emu-minori --lib --no-default-features` 定向测试为 192/192；这是保存页
+  资源与 provider 边界证据，不等价于四路线、原版同点视觉 parity、Release Sandbox
+  或 Windows E3。

@@ -8,7 +8,7 @@
 CP932 locale binding；乱码不会通过替换字符或 GBK/翻译回退被吞掉。样本中观察到的
 `perseus_chs.mys` 与本地化 exe 只保留 inventory 事实，不会被 runtime 探测或合并。
 Minori message path 已删除 translation Hook 调用，正文保持原版日文；Minori 定向
-189 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
+192 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
 
 2026 年 8 月 31 日标题页退出回归：Minori provider 已用
@@ -912,3 +912,11 @@ checkpoint 已人工查看；这是有限片段的输入/呈现质量证据，�
 48 个 checkpoint 全部通过且 diagnostic 为空。尾部是显式 shutdown，未伪造 terminal；
 早中晚代表性画面已人工检查。该证据继续只覆盖 Headless 长片段，不关闭四路线自然
 解锁、Save/restore、原版同点视觉、正式音频、Release Sandbox 或 Windows E3。
+2026 年 9 月 1 日 Save/Load 原版卡片对齐：Minori provider 按 Sandbox 观察硬切
+save envelope 为 `astra.emu.minori.save_slot.v3`，保存时写入本地时间、有界注释和
+96x54 PNG gameplay 缩略图；列表与 Load 严格校验 metadata identity、时间、注释和
+图像边界。Host-owned Layer2D 在占用槽位置叠加缩略图，时间与注释沿既有日文文本
+presentation 通道发送，metadata 变化会使 retained panel 重新发布。Save 页首屏隐藏
+Back，Load 页保留 Back/Next/Return；缺少本地时间或 gameplay surface 直接阻断，不
+使用兼容格式或明文缓存。当前 Minori library 192/192 通过；完整路线、同点视觉
+parity、Release Sandbox 和 Windows E3 仍未完成。

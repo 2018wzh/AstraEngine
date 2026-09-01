@@ -3,7 +3,7 @@
 2026 年 9 月 1 日 Minori 原版 locale coverage：mount options v3 要求日文原版变体、
 严格 CP932 locale hook 和非符号链接 `perseus.exe`；PAZ/ANI/.sc 的字节边界均拒绝
 malformed input，message publisher 不再调用 translation Hook。中文 `.mys` 与本地化
-exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。189 项 Minori library
+exe 仍仅是脱敏 inventory 事实，未被加入 source resolution。192 项 Minori library
 定向测试通过；该覆盖不代表完整路线、原版同点视觉、Release Sandbox 或 Windows E3。
 
 2026 年 9 月 1 日按同一日文原版 profile 重跑脚本 census：89 个 `.sc`、33728 行、
@@ -314,3 +314,9 @@ TsuiNoSora `stage3-gate` 当前会把 route-bound cast source map member 通过 
 补充：Minori GameView 已把舞台内真实右键接入 system-menu contract。v11 不再把右键等同于 Save：family 先发布原版层级，Host 回送选择或取消，随后才执行 Save、Load、Config、消息框或 Auto/Skip。Manager 在菜单交互期间保留底层 gameplay wait；定向回归通过。新的 v11 Release Sandbox 复测、完整路线、媒体/音频审查和 Windows E3 仍开放。
 
 2026-08-30 后续补充：开发签名 Release v24 通过同一 v11 hierarchy 和 82 条物理输入打开 Save、Load 与 gameplay Config，再分别返回剧情。报告为 138 fixed steps、9 个呈现帧、8 个 checkpoint、零 diagnostic；全部页面已视觉复核，页面前后的四张 gameplay PNG 字节一致。Load 与 Config 的页面所有权回归已进入 Minori tests。该证据是定向 Headless E2，不替代实际存档跨进程、退出确认、Release Sandbox、性能门禁或 Windows E3。
+2026 年 9 月 1 日 Save/Load fidelity：当前 Minori save envelope 硬切为 v3，metadata
+包含有界本地时间、注释和 96x54 PNG 缩略图。Provider 对占用槽执行严格 identity/边界
+校验，并在 Host-owned Layer2D panel 中叠加缩略图，文本继续走日文 presentation
+通道；Save 与 Load 的底部按钮按原版首屏差异提交。新增回归后 Minori library 为
+192/192。该项只证明 provider/Host 对齐，完整路线、视觉 parity、Release Sandbox
+和 Windows E3 仍保持未完成。

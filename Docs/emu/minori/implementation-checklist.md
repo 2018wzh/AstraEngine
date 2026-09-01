@@ -70,15 +70,18 @@
   with the matching prompt id.
 - [x] Windows uses an owner-modal Win32 editor with system-DPI scaling, IME/focus
   handling, Enter/Escape and explicit close/error paths. The returned value is
-  persisted in the v2 Minori save envelope only after `Accepted`.
+  persisted in the v3 Minori save envelope only after `Accepted`, together with
+  the bounded local timestamp and gameplay thumbnail.
 - [x] Family API/FFI, Manager, Minori, platform validation and generated schemas
   cover the transaction/result bounds and duplicate/stale resolution paths.
-- [x] Existing v2 slot envelopes are re-read on the first page refresh (and
+- [x] Existing v3 slot envelopes are re-read on the first page refresh (and
   again after a length change) so the Host prompt starts with the persisted
-  comment; malformed or identity-mismatched slots fail closed.
+-  comment, timestamp and thumbnail; malformed or identity-mismatched slots fail
+  closed.
 - [ ] macOS/Linux/Web/Android/Headless native application UI or typed driver is not
   implemented yet; those hosts return an explicit unsupported diagnostic. Save-page
-  comment rendering, Release Sandbox and Windows E3 remain open.
+  metadata rendering has focused provider coverage, while real visual parity,
+  Release Sandbox and Windows E3 remain open.
 
 ## Windows native confirmation geometry (2026-08-31)
 

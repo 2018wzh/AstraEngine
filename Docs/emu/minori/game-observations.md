@@ -124,3 +124,16 @@ python Tools/AstraEMU/minori_paz.py "<minori-case-root>/scr.paz" --json
 ```
 
 预期输出包含 PAZ 文件列表、大小、hash、head bytes 和 `key_supplied=false`。
+
+## 2026-09-01 Save/Load 占用槽观察
+
+原版 Save/Load 页每页显示十个槽。空槽在白色卡片左侧显示灰色 `nodata` 图块；
+占用槽保留同一位置的 96x54 预览图，并在右侧以红色显示本地时间
+`YYYY/MM/DD HH:MM` 和用户注释。Save 页首屏只显示 `Next`、`Return`，Load 页还显示
+`Back`；页标签由 `saveload_Page0..9.png` 提供，不能用 Quick/Auto 文本猜测替代。
+
+当前 runtime 的 save envelope 已硬切为 `astra.emu.minori.save_slot.v3`，严格绑定
+case/package/profile identity，并验证时间、注释、缩略图 PNG 尺寸和有界字节数。缩略图
+从当前 1280x720 premultiplied gameplay surface 生成，metadata 经现有日文文本
+presentation 通道发送；缺少本地时间或 gameplay surface 时保存阻断。此记录只描述
+原版行为和脱敏实现边界，不处理汉化版，也不把截图或商业 payload 写入仓库。

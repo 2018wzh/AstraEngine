@@ -40,6 +40,7 @@ use astra_media_core::{
     BlendMode, CpuRendererProvider, MeshMaterial2D, MeshVertex2D, RectI, RenderTargetFormat,
     Renderer2DProvider, RendererCreateRequest, SceneCommand, TextureFilter2D, TextureFrame,
 };
+use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder, ImageFormat};
 use serde::{Deserialize, Serialize};
 
 use crate::save::{
@@ -47,7 +48,8 @@ use crate::save::{
     slot_temporary_path, MinoriConfigEnvelope, MinoriSaveEnvelope, MINORI_CONFIG_MAX_BYTES,
     MINORI_CONFIG_PATH, MINORI_CONFIG_ROOT, MINORI_CONFIG_SCHEMA, MINORI_CONFIG_TEMPORARY_PATH,
     MINORI_SAVE_COMMENT_MAX_BYTES, MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT,
-    MINORI_SAVE_SCHEMA,
+    MINORI_SAVE_SCHEMA, MINORI_SAVE_THUMBNAIL_HEIGHT, MINORI_SAVE_THUMBNAIL_MAX_BYTES,
+    MINORI_SAVE_THUMBNAIL_WIDTH, MINORI_SAVE_TIMESTAMP_MAX_BYTES,
 };
 use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
@@ -315,6 +317,61 @@ struct StagedTextLease {
     source_ref: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MinoriSaveSlotMetadata {
+    timestamp: String,
+    comment: String,
+    thumbnail_rgba: Arc<[u8]>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SaveSlotMetadataContext {
+    List,
+    Load,
+}
+
+impl SaveSlotMetadataContext {
+    const fn diagnostic(self, kind: SaveSlotMetadataDiagnostic) -> &'static str {
+        match (self, kind) {
+            (Self::List, SaveSlotMetadataDiagnostic::Format) => "ASTRA_EMU_MINORI_SAVE_LIST_FORMAT",
+            (Self::Load, SaveSlotMetadataDiagnostic::Format) => "ASTRA_EMU_MINORI_LOAD_SLOT_FORMAT",
+            (Self::List, SaveSlotMetadataDiagnostic::Identity) => {
+                "ASTRA_EMU_MINORI_SAVE_LIST_IDENTITY"
+            }
+            (Self::Load, SaveSlotMetadataDiagnostic::Identity) => {
+                "ASTRA_EMU_MINORI_LOAD_SLOT_IDENTITY"
+            }
+            (Self::List, SaveSlotMetadataDiagnostic::Timestamp) => {
+                "ASTRA_EMU_MINORI_SAVE_LIST_TIMESTAMP"
+            }
+            (Self::Load, SaveSlotMetadataDiagnostic::Timestamp) => {
+                "ASTRA_EMU_MINORI_LOAD_SLOT_TIMESTAMP"
+            }
+            (Self::List, SaveSlotMetadataDiagnostic::Comment) => {
+                "ASTRA_EMU_MINORI_SAVE_LIST_COMMENT"
+            }
+            (Self::Load, SaveSlotMetadataDiagnostic::Comment) => {
+                "ASTRA_EMU_MINORI_LOAD_SLOT_COMMENT"
+            }
+            (Self::List, SaveSlotMetadataDiagnostic::Thumbnail) => {
+                "ASTRA_EMU_MINORI_SAVE_LIST_THUMBNAIL"
+            }
+            (Self::Load, SaveSlotMetadataDiagnostic::Thumbnail) => {
+                "ASTRA_EMU_MINORI_LOAD_SLOT_THUMBNAIL"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SaveSlotMetadataDiagnostic {
+    Format,
+    Identity,
+    Timestamp,
+    Comment,
+    Thumbnail,
+}
+
 impl LegacyTextPresentationLeaseV1 {
     fn validate(&self) -> Result<(), LegacyProviderError> {
         validate_symbol("text_presentation_lease_id", &self.lease_id)?;
@@ -538,7 +595,10 @@ struct MinoriSession {
     save_slots: BTreeSet<u32>,
     save_slot_comments: BTreeMap<u32, String>,
     save_slot_lengths: BTreeMap<u32, u64>,
+    save_slot_metadata: BTreeMap<u32, MinoriSaveSlotMetadata>,
     text_renderer: Option<MinoriTextSurfaceRenderer>,
+    last_text_surface: Option<Arc<[u8]>>,
+    last_gameplay_frame: Option<Arc<[u8]>>,
     published_layers: BTreeSet<String>,
     /// Last resource-backed presentation descriptor committed to the host.
     ///
@@ -930,6 +990,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 save_slots: BTreeSet::new(),
                 save_slot_comments: BTreeMap::new(),
                 save_slot_lengths: BTreeMap::new(),
+                save_slot_metadata: BTreeMap::new(),
                 text_renderer: match stage_size {
                     Some((width, height)) => Some(
                         MinoriTextSurfaceRenderer::new(width, height)
@@ -937,6 +998,8 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     ),
                     None => None,
                 },
+                last_text_surface: None,
+                last_gameplay_frame: None,
                 published_layers: BTreeSet::new(),
                 last_resource_frame: None,
                 presentation_layers: BTreeMap::new(),
@@ -1687,6 +1750,10 @@ impl MinoriRuntimeProvider {
             }
             started_game = true;
             session.restore_presentation_pending = false;
+            session.last_gameplay_frame = None;
+            session.last_text_surface = None;
+            session.last_resource_frame = None;
+            session.presentation_layers.clear();
         }
         // Control is part of an eligible message's Host-owned input wait, so
         // pressing it completes that wait instead of replacing an already
@@ -4834,6 +4901,17 @@ fn append_texture_draw(
     opacity: f32,
     draws: &mut Vec<LegacyDrawV1>,
 ) -> Result<(), LegacyProviderError> {
+    append_texture_draw_with_scissor(resource, x, y, opacity, None, draws)
+}
+
+fn append_texture_draw_with_scissor(
+    resource: &LegacyTextureResourceV1,
+    x: i32,
+    y: i32,
+    opacity: f32,
+    scissor: Option<LegacyScissorV1>,
+    draws: &mut Vec<LegacyDrawV1>,
+) -> Result<(), LegacyProviderError> {
     if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
         return Err(invalid(
             "ASTRA_EMU_MINORI_EFFECT_ALPHA",
@@ -4859,7 +4937,7 @@ fn append_texture_draw(
         ],
         blend: LegacyBlendMode::Alpha,
         texture_filter: LegacyTextureFilter::Linear,
-        scissor: None,
+        scissor,
     });
     Ok(())
 }
@@ -5935,6 +6013,7 @@ fn refresh_save_slots(
     let mut slots = BTreeSet::new();
     let mut slot_lengths = BTreeMap::new();
     let mut slot_comments = BTreeMap::new();
+    let mut slot_metadata = BTreeMap::new();
     for entry in result.entries {
         if !entry.is_file {
             return Err(invalid(
@@ -5967,36 +6046,46 @@ fn refresh_save_slots(
                 "save slot directory contains a duplicate slot",
             ));
         }
-        let comment = if session.save_slot_lengths.get(&slot) == Some(&entry.length) {
+        let metadata = if session.save_slot_lengths.get(&slot) == Some(&entry.length) {
             session
-                .save_slot_comments
+                .save_slot_metadata
                 .get(&slot)
                 .cloned()
                 .ok_or_else(|| {
                     invalid(
                         "ASTRA_EMU_MINORI_SAVE_LIST_STATE",
-                        "save slot comment cache is incomplete",
+                        "save slot metadata cache is incomplete",
                     )
                 })?
         } else {
-            read_save_slot_comment(writable_files, session_id, session, slot, entry.length)?
+            read_save_slot_metadata(writable_files, session_id, session, slot, entry.length)?
         };
         slot_lengths.insert(slot, entry.length);
-        slot_comments.insert(slot, comment);
+        slot_comments.insert(slot, metadata.comment.clone());
+        slot_metadata.insert(slot, metadata);
     }
+    let metadata_changed = session.save_slot_metadata != slot_metadata;
     session.save_slots = slots;
     session.save_slot_lengths = slot_lengths;
     session.save_slot_comments = slot_comments;
+    session.save_slot_metadata = slot_metadata;
+    if metadata_changed {
+        // The retained panel descriptor does not include private save metadata.
+        // Invalidate it so a changed timestamp/comment/thumbnail is published
+        // on the next system-page output instead of leaving stale pixels in the
+        // host-owned surface.
+        session.last_resource_frame = None;
+    }
     Ok(())
 }
 
-fn read_save_slot_comment(
+fn read_save_slot_metadata(
     writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
     session_id: &LegacyRuntimeSessionId,
     session: &MinoriSession,
     slot: u32,
     expected_length: u64,
-) -> Result<String, LegacyProviderError> {
+) -> Result<MinoriSaveSlotMetadata, LegacyProviderError> {
     let path = slot_path(slot);
     let stat = writable_files.execute(
         &session_id.0,
@@ -6022,37 +6111,224 @@ fn read_save_slot_comment(
             "save slot comment read returned a short or unexpected payload",
         ));
     }
-    let envelope = decode_save(read.bytes.as_slice()).map_err(|_| {
+    decode_save_slot_metadata(
+        read.bytes.as_slice(),
+        session,
+        SaveSlotMetadataContext::List,
+    )
+}
+
+fn decode_save_slot_metadata(
+    bytes: &[u8],
+    session: &MinoriSession,
+    context: SaveSlotMetadataContext,
+) -> Result<MinoriSaveSlotMetadata, LegacyProviderError> {
+    let envelope = decode_save(bytes).map_err(|_| {
         invalid(
-            "ASTRA_EMU_MINORI_SAVE_LIST_FORMAT",
+            context.diagnostic(SaveSlotMetadataDiagnostic::Format),
             "save slot envelope is malformed",
         )
     })?;
+    save_slot_metadata_from_envelope(&envelope, session, context)
+}
+
+fn save_slot_metadata_from_envelope(
+    envelope: &MinoriSaveEnvelope,
+    session: &MinoriSession,
+    context: SaveSlotMetadataContext,
+) -> Result<MinoriSaveSlotMetadata, LegacyProviderError> {
     if envelope.schema != MINORI_SAVE_SCHEMA
         || envelope.case_fingerprint != session.case_fingerprint
         || envelope.package_hash != session.package_hash
         || envelope.profile_fingerprint != session.profile_fingerprint
     {
         return Err(invalid(
-            "ASTRA_EMU_MINORI_SAVE_LIST_IDENTITY",
+            context.diagnostic(SaveSlotMetadataDiagnostic::Identity),
             "save slot identity does not match the active case",
         ));
     }
+    validate_save_timestamp(&envelope.timestamp).map_err(|_| {
+        invalid(
+            context.diagnostic(SaveSlotMetadataDiagnostic::Timestamp),
+            "save slot timestamp is malformed",
+        )
+    })?;
     if envelope.comment.len() > MINORI_SAVE_COMMENT_MAX_BYTES
         || envelope.comment.chars().any(char::is_control)
     {
         return Err(invalid(
-            "ASTRA_EMU_MINORI_SAVE_LIST_COMMENT",
+            context.diagnostic(SaveSlotMetadataDiagnostic::Comment),
             "save slot comment is invalid or exceeds the bounded text length",
         ));
     }
-    Ok(envelope.comment)
+    let thumbnail_rgba = decode_save_thumbnail(&envelope.thumbnail_png).map_err(|_| {
+        invalid(
+            context.diagnostic(SaveSlotMetadataDiagnostic::Thumbnail),
+            "save slot thumbnail is malformed or outside the verified dimensions",
+        )
+    })?;
+    Ok(MinoriSaveSlotMetadata {
+        timestamp: envelope.timestamp.clone(),
+        comment: envelope.comment.clone(),
+        thumbnail_rgba,
+    })
+}
+
+fn validate_save_timestamp(timestamp: &str) -> Result<(), ()> {
+    let bytes = timestamp.as_bytes();
+    if bytes.len() != MINORI_SAVE_TIMESTAMP_MAX_BYTES
+        || bytes[4] != b'/'
+        || bytes[7] != b'/'
+        || bytes[10] != b' '
+        || bytes[13] != b':'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(index, byte)| !matches!(index, 4 | 7 | 10 | 13) && !byte.is_ascii_digit())
+    {
+        return Err(());
+    }
+    let parse = |start: usize, end: usize| {
+        timestamp
+            .get(start..end)
+            .ok_or(())
+            .and_then(|value| value.parse::<u32>().map_err(|_| ()))
+    };
+    let year = parse(0, 4)?;
+    let month = parse(5, 7)?;
+    let day = parse(8, 10)?;
+    let hour = parse(11, 13)?;
+    let minute = parse(14, 16)?;
+    if !(1..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn decode_save_thumbnail(bytes: &[u8]) -> Result<Arc<[u8]>, ()> {
+    if bytes.is_empty() || bytes.len() > MINORI_SAVE_THUMBNAIL_MAX_BYTES {
+        return Err(());
+    }
+    let image = image::load_from_memory_with_format(bytes, ImageFormat::Png).map_err(|_| ())?;
+    if image.width() != MINORI_SAVE_THUMBNAIL_WIDTH
+        || image.height() != MINORI_SAVE_THUMBNAIL_HEIGHT
+    {
+        return Err(());
+    }
+    let mut rgba = image.into_rgba8().into_raw();
+    let expected = usize::try_from(MINORI_SAVE_THUMBNAIL_WIDTH)
+        .ok()
+        .and_then(|width| width.checked_mul(usize::try_from(MINORI_SAVE_THUMBNAIL_HEIGHT).ok()?))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(())?;
+    if rgba.len() != expected {
+        return Err(());
+    }
+    premultiply_rgba8(&mut rgba);
+    Ok(Arc::from(rgba))
+}
+
+fn format_save_timestamp() -> Result<String, LegacyProviderError> {
+    let now = time::OffsetDateTime::now_local().map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_TIMESTAMP",
+            "local time is unavailable for the original save-card format",
+        )
+    })?;
+    let timestamp = format!(
+        "{:04}/{:02}/{:02} {:02}:{:02}",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute()
+    );
+    validate_save_timestamp(&timestamp).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_TIMESTAMP",
+            "current local time cannot be represented in the Minori save format",
+        )
+    })?;
+    Ok(timestamp)
+}
+
+fn encode_save_thumbnail(frame: &[u8]) -> Result<Vec<u8>, LegacyProviderError> {
+    let expected = usize::try_from(1280_u32)
+        .ok()
+        .and_then(|width| width.checked_mul(usize::try_from(720_u32).ok()?))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "thumbnail size overflowed",
+            )
+        })?;
+    if frame.len() != expected {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "current gameplay frame does not match the verified stage",
+        ));
+    }
+    let mut straight_rgba = frame.to_vec();
+    unpremultiply_rgba8(&mut straight_rgba);
+    let image = image::RgbaImage::from_raw(1280, 720, straight_rgba).ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "current gameplay frame could not be wrapped as RGBA8",
+        )
+    })?;
+    let thumbnail = image::imageops::resize(
+        &image,
+        MINORI_SAVE_THUMBNAIL_WIDTH,
+        MINORI_SAVE_THUMBNAIL_HEIGHT,
+        image::imageops::FilterType::Triangle,
+    );
+    let mut encoded = Vec::new();
+    PngEncoder::new(&mut encoded)
+        .write_image(
+            thumbnail.as_raw(),
+            MINORI_SAVE_THUMBNAIL_WIDTH,
+            MINORI_SAVE_THUMBNAIL_HEIGHT,
+            ExtendedColorType::Rgba8,
+        )
+        .map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "save thumbnail PNG encoding failed",
+            )
+        })?;
+    if encoded.is_empty() || encoded.len() > MINORI_SAVE_THUMBNAIL_MAX_BYTES {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "save thumbnail exceeds the bounded PNG size",
+        ));
+    }
+    Ok(encoded)
+}
+
+fn unpremultiply_rgba8(rgba: &mut [u8]) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        let alpha = u16::from(pixel[3]);
+        if alpha == 0 {
+            pixel[..3].fill(0);
+            continue;
+        }
+        for channel in &mut pixel[..3] {
+            *channel =
+                u8::try_from((u16::from(*channel) * 255_u16 + alpha / 2) / alpha).unwrap_or(255);
+        }
+    }
 }
 
 fn save_slot(
     writable_files: &dyn astra_emu_family_api::LegacyWritableFileHostV1,
     session_id: &LegacyRuntimeSessionId,
-    session: &MinoriSession,
+    session: &mut MinoriSession,
     slot: u32,
     comment: &str,
 ) -> Result<u64, LegacyProviderError> {
@@ -6069,6 +6345,20 @@ fn save_slot(
             "save comment is invalid or exceeds the bounded text length",
         ));
     }
+    let gameplay_frame = session.last_gameplay_frame.as_deref().ok_or_else(|| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL_MISSING",
+            "save requires a previously presented gameplay frame",
+        )
+    })?;
+    let thumbnail_png = encode_save_thumbnail(gameplay_frame)?;
+    let thumbnail_rgba = decode_save_thumbnail(&thumbnail_png).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "encoded save thumbnail could not be decoded",
+        )
+    })?;
+    let timestamp = format_save_timestamp()?;
     let mut state = MinoriVm::decode_snapshot(&session.vm.snapshot_bytes().map_err(runtime_error)?)
         .map_err(runtime_error)?;
     state.system_ui.page = MinoriSystemPage::None;
@@ -6089,7 +6379,9 @@ fn save_slot(
         profile_fingerprint: session.profile_fingerprint,
         script_uri: state.script_uri.clone(),
         script_hash: state.script_hash,
+        timestamp: timestamp.clone(),
         comment: comment.into(),
+        thumbnail_png,
         vm_snapshot,
     };
     let payload = encode_save(&envelope).map_err(|_| {
@@ -6171,6 +6463,17 @@ fn save_slot(
         "replace save slot",
         "ASTRA_EMU_MINORI_SAVE_WRITE",
     )?;
+    session.save_slots.insert(slot);
+    session.save_slot_lengths.insert(slot, payload.len() as u64);
+    session.save_slot_comments.insert(slot, comment.to_owned());
+    session.save_slot_metadata.insert(
+        slot,
+        MinoriSaveSlotMetadata {
+            timestamp,
+            comment: comment.to_owned(),
+            thumbnail_rgba,
+        },
+    );
     Ok(payload.len() as u64)
 }
 
@@ -6226,24 +6529,8 @@ fn load_slot(
             "load slot envelope is malformed",
         )
     })?;
-    if envelope.schema != MINORI_SAVE_SCHEMA
-        || envelope.case_fingerprint != session.case_fingerprint
-        || envelope.package_hash != session.package_hash
-        || envelope.profile_fingerprint != session.profile_fingerprint
-    {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_LOAD_SLOT_IDENTITY",
-            "load slot identity does not match the active case",
-        ));
-    }
-    if envelope.comment.len() > MINORI_SAVE_COMMENT_MAX_BYTES
-        || envelope.comment.chars().any(char::is_control)
-    {
-        return Err(invalid(
-            "ASTRA_EMU_MINORI_LOAD_SLOT_COMMENT",
-            "load slot comment is invalid or exceeds the bounded text length",
-        ));
-    }
+    let metadata =
+        save_slot_metadata_from_envelope(&envelope, session, SaveSlotMetadataContext::Load)?;
     validate_script_uri(&envelope.script_uri)?;
     let target = envelope
         .script_uri
@@ -6317,7 +6604,16 @@ fn load_slot(
     session.reported_gallery_unlock_count = None;
     session.reported_choice_active = None;
     session.reported_progress_in_background = Some(false);
-    session.save_slot_comments.insert(slot, envelope.comment);
+    session.save_slots.insert(slot);
+    session.save_slot_lengths.insert(slot, stat.length);
+    session
+        .save_slot_comments
+        .insert(slot, metadata.comment.clone());
+    session.save_slot_metadata.insert(slot, metadata);
+    session.last_gameplay_frame = None;
+    session.last_text_surface = None;
+    session.last_resource_frame = None;
+    session.presentation_layers.clear();
     Ok(())
 }
 
@@ -7800,6 +8096,11 @@ fn system_ui_output(
             append_backlog_text(session, input.tick_index, &mut live)?;
         } else if session.vm.state().system_ui.page == MinoriSystemPage::GalleryMovie {
             append_gallery_movie_text(session, input.tick_index, &mut live)?;
+        } else if matches!(
+            session.vm.state().system_ui.page,
+            MinoriSystemPage::Save | MinoriSystemPage::Load
+        ) {
+            append_save_load_text(session, input.tick_index, &mut live)?;
         }
     }
     let mut output = LegacyStepOutput {
@@ -8078,6 +8379,135 @@ fn append_resumed_message_text(
         source_ref: "minori.sc.message.resume".into(),
     });
     Ok(())
+}
+
+fn append_save_load_text(
+    session: &mut MinoriSession,
+    tick_index: u64,
+    live: &mut LegacyLiveOutput,
+) -> Result<(), LegacyProviderError> {
+    let page_base = (session.vm.state().system_ui.focus_index / 10) * 10;
+    let slot_left = [64_i32, 456_i32];
+    let slot_top = [81_i32, 189_i32, 297_i32, 405_i32, 513_i32];
+    for visible_index in 0..10_u32 {
+        let slot = page_base.checked_add(visible_index).ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_LOAD_TEXT",
+                "save slot index overflowed",
+            )
+        })?;
+        let Some(metadata) = session.save_slot_metadata.get(&slot).cloned() else {
+            continue;
+        };
+        let text = if metadata.comment.is_empty() {
+            metadata.timestamp
+        } else {
+            format!("{}\n{}", metadata.timestamp, metadata.comment)
+        };
+        if text.len() > MAX_EPHEMERAL_TEXT_BYTES {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_LOAD_TEXT",
+                "save slot metadata exceeds the bounded text channel",
+            ));
+        }
+        let row = usize::try_from(visible_index / 2).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_LOAD_TEXT",
+                "save slot row cannot be represented",
+            )
+        })?;
+        let column = usize::try_from(visible_index % 2).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_LOAD_TEXT",
+                "save slot column cannot be represented",
+            )
+        })?;
+        let presentation_sequence = session
+            .vm
+            .allocate_effect_sequence()
+            .map_err(runtime_error)?;
+        let capture_sequence = session
+            .vm
+            .allocate_effect_sequence()
+            .map_err(runtime_error)?;
+        let lease_id = format!("minori.save-slot.{tick_index}.{slot}.{capture_sequence}");
+        let presentation = LegacyTextPresentationLeaseV1 {
+            lease_id: lease_id.clone(),
+            presentation: minori_save_slot_text_presentation(
+                session.stage_size,
+                slot_left[column] + 124,
+                slot_top[row] + 11,
+            )?,
+        };
+        presentation.validate()?;
+        if session
+            .ephemeral_text
+            .insert(
+                lease_id.clone(),
+                StagedEphemeralText {
+                    lease_id: lease_id.clone(),
+                    text: text.clone(),
+                    speaker: None,
+                    show_advance_indicator: false,
+                },
+            )
+            .is_some()
+        {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_TEXT_LEASE_DUPLICATE",
+                "save slot text lease id is duplicated",
+            ));
+        }
+        live.text_presentations.push(LegacySequenced {
+            sequence: presentation_sequence,
+            value: presentation,
+        });
+        live.text.push(StagedTextLease {
+            sequence: capture_sequence,
+            lease_id,
+            byte_len: text.len().try_into().map_err(|_| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SAVE_LOAD_TEXT",
+                    "save slot text length cannot be represented",
+                )
+            })?,
+            source_ref: "minori.save_slot.metadata".into(),
+        });
+    }
+    Ok(())
+}
+
+fn minori_save_slot_text_presentation(
+    stage_size: Option<(u32, u32)>,
+    x: i32,
+    y: i32,
+) -> Result<LegacyTextPresentationV1, LegacyProviderError> {
+    if stage_size != Some((1280, 720)) {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LOAD_TEXT_STAGE",
+            "save slot metadata requires the verified 1280x720 stage",
+        ));
+    }
+    let presentation = LegacyTextPresentationV1 {
+        layout_id: format!("minori.save-slot.{x}.{y}"),
+        language: "ja-JP".into(),
+        font_families: vec!["Noto Sans JP".into()],
+        body: LegacyTextRegionV1 {
+            x,
+            y,
+            width: 218,
+            height: 58,
+            font_size: 18.0,
+            line_height: 23.0,
+            max_lines: 2,
+            horizontal_alignment: LegacyTextHorizontalAlignmentV1::Start,
+        },
+        speaker: None,
+        rgba: [255, 0, 0, 255],
+        outline: None,
+    };
+    presentation.validate()?;
+    Ok(presentation)
 }
 
 fn append_gallery_movie_text(
@@ -8782,36 +9212,32 @@ fn describe_save_load_page(
         "minori:/sys/saveloadSelect.png",
         MINORI_SYSTEM_TEXTURE_ID + 2,
     )?;
+    let page_index = vm.state().system_ui.focus_index / 10;
+    if page_index >= 10 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_LOAD_PAGE",
+            "save/load page index is outside the verified range",
+        ));
+    }
+    let page_uri = format!("minori:/sys/saveload_Page{page_index}.png");
+    let page = read_texture_resource(vfs, mount_set_id, &page_uri, MINORI_SYSTEM_TEXTURE_ID + 3)?;
     let buttons = read_texture_resource(
         vfs,
         mount_set_id,
         "minori:/sys/saveloadButtons.png",
-        MINORI_SYSTEM_TEXTURE_ID + 3,
-    )?;
-    let page_auto = read_texture_resource(
-        vfs,
-        mount_set_id,
-        "minori:/sys/saveload_Page0.png",
         MINORI_SYSTEM_TEXTURE_ID + 4,
-    )?;
-    let page_quick = read_texture_resource(
-        vfs,
-        mount_set_id,
-        "minori:/sys/saveload_Page1.png",
-        MINORI_SYSTEM_TEXTURE_ID + 5,
     )?;
     let not_saved = read_texture_resource(
         vfs,
         mount_set_id,
         "minori:/sys/notsaved.png",
-        MINORI_SYSTEM_TEXTURE_ID + 6,
+        MINORI_SYSTEM_TEXTURE_ID + 5,
     )?;
     if (base.decoded_width, base.decoded_height) != (width, height)
         || (title.decoded_width, title.decoded_height) != (352, 48)
         || (select.decoded_width, select.decoded_height) != (344, 98)
+        || (page.decoded_width, page.decoded_height) != (208, 48)
         || (buttons.decoded_width, buttons.decoded_height) != (356, 48)
-        || (page_auto.decoded_width, page_auto.decoded_height) != (208, 48)
-        || (page_quick.decoded_width, page_quick.decoded_height) != (208, 48)
         || (not_saved.decoded_width, not_saved.decoded_height) != (106, 60)
     {
         return Err(invalid(
@@ -8823,7 +9249,22 @@ fn describe_save_load_page(
     let mut draws = Vec::with_capacity(16);
     append_texture_draw(&base, 0, 0, 1.0, &mut draws)?;
     append_texture_draw(&title, 464, 16, 1.0, &mut draws)?;
-    append_texture_draw(&buttons, 462, 656, 1.0, &mut draws)?;
+    append_texture_draw_with_scissor(
+        &buttons,
+        462,
+        656,
+        1.0,
+        (vm.state().system_ui.page == MinoriSystemPage::Save && page_index == 0).then_some(
+            LegacyScissorV1 {
+                x: 578,
+                y: 656,
+                width: 240,
+                height: 48,
+            },
+        ),
+        &mut draws,
+    )?;
+    append_texture_draw(&page, 536, 16, 1.0, &mut draws)?;
 
     let page_base = (vm.state().system_ui.focus_index / 10) * 10;
     let slot_index = vm.state().system_ui.focus_index % 10;
@@ -8838,13 +9279,7 @@ fn describe_save_load_page(
             if save_slots.contains(&slot) {
                 continue;
             }
-            if page_base == 0 && slot == 0 {
-                append_texture_draw(&page_auto, left + 68, top + 25, 1.0, &mut draws)?;
-            } else if page_base == 0 && slot == 1 {
-                append_texture_draw(&page_quick, left + 68, top + 25, 1.0, &mut draws)?;
-            } else {
-                append_texture_draw(&not_saved, left + 119, top + 19, 1.0, &mut draws)?;
-            }
+            append_texture_draw(&not_saved, left + 4, top + 18, 1.0, &mut draws)?;
         }
     }
     let selected_row = slot_index / 2;
@@ -8859,9 +9294,7 @@ fn describe_save_load_page(
     let frame = LegacyRenderResourceFrameV1 {
         width,
         height,
-        texture_resources: vec![
-            base, title, select, buttons, page_auto, page_quick, not_saved,
-        ],
+        texture_resources: vec![base, title, select, page, buttons, not_saved],
         draws,
     };
     frame.validate()?;
@@ -9655,6 +10088,11 @@ fn publish_v9_output(
     staged: LegacyStepOutput,
 ) -> Result<LegacyStepOutputV9, LegacyProviderError> {
     let prepared_text = prepare_text_surface(session, &staged)?;
+    let next_text_surface = match prepared_text.as_ref() {
+        Some(prepared) => Some(Arc::<[u8]>::from(prepared.rgba8_premultiplied.clone())),
+        None if staged.live.clear_text => None,
+        None => session.last_text_surface.clone(),
+    };
     let layer_sequence = next_layer_sequence(&staged, session.last_layer_sequence)?;
     // Resource-backed scenes are retained by the current Family ABI host. Minori emits a
     // new Layer2D transaction only when the bounded descriptor actually
@@ -9664,6 +10102,14 @@ fn publish_v9_output(
     let changed_resource_scene = staged.live.resource_scenes.last().filter(|resource_scene| {
         session.last_resource_frame.as_ref() != Some(&resource_scene.value)
     });
+    let save_overlay = matches!(
+        session.vm.state().system_ui.page,
+        MinoriSystemPage::Save | MinoriSystemPage::Load
+    )
+    .then_some((
+        &session.save_slot_metadata,
+        (session.vm.state().system_ui.focus_index / 10) * 10,
+    ));
     let mut layers = if let Some(resource_scene) = changed_resource_scene {
         let mount_set_id = session.mount_set_id.clone();
         let layers = publish_resource_scene(
@@ -9676,6 +10122,7 @@ fn publish_v9_output(
             &mut session.published_layers,
             &mut session.presentation_layers,
             &resource_scene.value,
+            save_overlay,
         )?;
         session.last_resource_frame = Some(resource_scene.value.clone());
         layers
@@ -9712,6 +10159,16 @@ fn publish_v9_output(
             };
             transaction.validate()?;
             layers.push(transaction);
+        }
+    }
+    session.last_text_surface = next_text_surface.clone();
+    if session.vm.state().system_ui.page == MinoriSystemPage::None {
+        if let Some(frame) = compose_minori_frame(
+            session.stage_size,
+            &session.presentation_layers,
+            next_text_surface.as_deref(),
+        )? {
+            session.last_gameplay_frame = Some(Arc::from(frame));
         }
     }
     if !layers.is_empty() {
@@ -9925,6 +10382,82 @@ fn publish_text_surface(
     )
 }
 
+fn compose_minori_frame(
+    stage_size: Option<(u32, u32)>,
+    layers: &BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
+    text_surface: Option<&[u8]>,
+) -> Result<Option<Vec<u8>>, LegacyProviderError> {
+    let Some((width, height)) = stage_size else {
+        return Ok(None);
+    };
+    let pixel_count = u64::from(width)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "frame dimensions overflowed",
+            )
+        })?;
+    let byte_count = pixel_count
+        .checked_mul(4)
+        .and_then(|bytes| usize::try_from(bytes).ok())
+        .ok_or_else(|| invalid("ASTRA_EMU_MINORI_SAVE_THUMBNAIL", "frame size overflowed"))?;
+    let mut frame = vec![0_u8; byte_count];
+    let mut has_surface = false;
+    for role in MinoriLayerRole::ALL {
+        if let Some(layer) = layers.get(&role) {
+            if layer.width != width
+                || layer.height != height
+                || layer.rgba8_premultiplied.len() != byte_count
+            {
+                return Err(invalid(
+                    "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                    "cached Minori layer does not match the verified stage",
+                ));
+            }
+            alpha_over_premultiplied(&mut frame, &layer.rgba8_premultiplied);
+            has_surface = true;
+        }
+    }
+    if let Some(text) = text_surface {
+        if text.len() != byte_count {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "cached Minori text surface does not match the verified stage",
+            ));
+        }
+        alpha_over_premultiplied(&mut frame, text);
+        has_surface = true;
+    }
+    Ok(has_surface.then_some(frame))
+}
+
+fn alpha_over_premultiplied(destination: &mut [u8], source: &[u8]) {
+    for (dst, src) in destination
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(source.as_chunks::<4>().0)
+    {
+        let source_alpha = u16::from(src[3]);
+        let inverse_alpha = 255_u16 - source_alpha;
+        for channel in 0..3 {
+            dst[channel] = (u16::from(src[channel]).saturating_add(
+                u16::from(dst[channel])
+                    .saturating_mul(inverse_alpha)
+                    .saturating_add(127)
+                    / 255,
+            )) as u8;
+        }
+        dst[3] = (u16::from(src[3]).saturating_add(
+            u16::from(dst[3])
+                .saturating_mul(inverse_alpha)
+                .saturating_add(127)
+                / 255,
+        )) as u8;
+    }
+}
+
 fn next_layer_sequence(
     staged: &LegacyStepOutput,
     last_layer_sequence: u64,
@@ -9969,9 +10502,27 @@ fn publish_resource_scene(
     published_layers: &mut BTreeSet<String>,
     presentation_layers: &mut BTreeMap<MinoriLayerRole, CachedMinoriLayer>,
     frame: &LegacyRenderResourceFrameV1,
+    save_overlay: Option<(&BTreeMap<u32, MinoriSaveSlotMetadata>, u32)>,
 ) -> Result<Vec<LegacyLayerTransactionV9>, LegacyProviderError> {
     frame.validate()?;
     let prepared = prepare_resource_layers(vfs, mount_set_id, frame, presentation_layers)?;
+    let prepared = prepared
+        .into_iter()
+        .map(|layer| {
+            if layer.role == MinoriLayerRole::Panel {
+                if let Some((metadata, page_base)) = save_overlay {
+                    return overlay_save_thumbnails(
+                        layer,
+                        metadata,
+                        page_base,
+                        frame.width,
+                        frame.height,
+                    );
+                }
+            }
+            Ok(layer)
+        })
+        .collect::<Result<Vec<_>, LegacyProviderError>>()?;
     let mut leases = Vec::with_capacity(prepared.len());
     for layer in prepared {
         let surface_id = format!("minori.surface.{}", layer.role.symbol());
@@ -10039,6 +10590,193 @@ fn publish_resource_scene(
     };
     transaction.validate()?;
     Ok(vec![transaction])
+}
+
+fn overlay_save_thumbnails(
+    layer: PreparedMinoriLayer,
+    metadata: &BTreeMap<u32, MinoriSaveSlotMetadata>,
+    page_base: u32,
+    width: u32,
+    height: u32,
+) -> Result<PreparedMinoriLayer, LegacyProviderError> {
+    if width != 1280 || height != 720 {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL_STAGE",
+            "save thumbnail composition requires the verified 1280x720 stage",
+        ));
+    }
+    let expected = usize::try_from(width)
+        .ok()
+        .and_then(|value| value.checked_mul(usize::try_from(height).ok()?))
+        .and_then(|value| value.checked_mul(4))
+        .ok_or_else(|| invalid("ASTRA_EMU_MINORI_SAVE_THUMBNAIL", "panel size overflowed"))?;
+    if layer.rgba8_premultiplied.len() != expected {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "save panel layer does not match the verified stage",
+        ));
+    }
+    let mut rgba = layer.rgba8_premultiplied.to_vec();
+    let slot_left = [64_i32, 456_i32];
+    let slot_top = [81_i32, 189_i32, 297_i32, 405_i32, 513_i32];
+    for visible_index in 0..10_u32 {
+        let Some(slot) = page_base.checked_add(visible_index) else {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "save slot index overflowed",
+            ));
+        };
+        let Some(slot_metadata) = metadata.get(&slot) else {
+            continue;
+        };
+        let thumbnail_expected = usize::try_from(MINORI_SAVE_THUMBNAIL_WIDTH)
+            .ok()
+            .and_then(|value| {
+                value.checked_mul(usize::try_from(MINORI_SAVE_THUMBNAIL_HEIGHT).ok()?)
+            })
+            .and_then(|value| value.checked_mul(4))
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                    "thumbnail dimensions overflowed",
+                )
+            })?;
+        if slot_metadata.thumbnail_rgba.len() != thumbnail_expected {
+            return Err(invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "save slot thumbnail does not match the verified dimensions",
+            ));
+        }
+        let row = usize::try_from(visible_index / 2).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "save slot row cannot be represented",
+            )
+        })?;
+        let column = usize::try_from(visible_index % 2).map_err(|_| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "save slot column cannot be represented",
+            )
+        })?;
+        let x = slot_left[column] + 10;
+        let y = slot_top[row] + 15;
+        blit_save_thumbnail(
+            &mut rgba,
+            width,
+            height,
+            &slot_metadata.thumbnail_rgba,
+            x,
+            y,
+        )?;
+    }
+    Ok(PreparedMinoriLayer {
+        role: layer.role,
+        rgba8_premultiplied: Arc::from(rgba),
+    })
+}
+
+fn blit_save_thumbnail(
+    destination: &mut [u8],
+    destination_width: u32,
+    destination_height: u32,
+    source: &[u8],
+    x: i32,
+    y: i32,
+) -> Result<(), LegacyProviderError> {
+    let source_width = usize::try_from(MINORI_SAVE_THUMBNAIL_WIDTH).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "thumbnail width cannot be represented",
+        )
+    })?;
+    let source_height = usize::try_from(MINORI_SAVE_THUMBNAIL_HEIGHT).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "thumbnail height cannot be represented",
+        )
+    })?;
+    let destination_width = usize::try_from(destination_width).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "save panel width cannot be represented",
+        )
+    })?;
+    let destination_height = usize::try_from(destination_height).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "save panel height cannot be represented",
+        )
+    })?;
+    let source_len = source_width
+        .checked_mul(source_height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            invalid(
+                "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                "thumbnail size overflowed",
+            )
+        })?;
+    if source.len() != source_len {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "thumbnail buffer length is invalid",
+        ));
+    }
+    let x = usize::try_from(x).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "thumbnail X coordinate is invalid",
+        )
+    })?;
+    let y = usize::try_from(y).map_err(|_| {
+        invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "thumbnail Y coordinate is invalid",
+        )
+    })?;
+    if x.checked_add(source_width)
+        .is_none_or(|right| right > destination_width)
+        || y.checked_add(source_height)
+            .is_none_or(|bottom| bottom > destination_height)
+    {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+            "thumbnail lies outside the save panel",
+        ));
+    }
+    for row in 0..source_height {
+        let destination_start = (y + row)
+            .checked_mul(destination_width)
+            .and_then(|index| index.checked_add(x))
+            .and_then(|index| index.checked_mul(4))
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                    "thumbnail destination offset overflowed",
+                )
+            })?;
+        let source_start = row
+            .checked_mul(source_width)
+            .and_then(|index| index.checked_mul(4))
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                    "thumbnail source offset overflowed",
+                )
+            })?;
+        let destination_row = destination
+            .get_mut(destination_start..destination_start + source_width * 4)
+            .ok_or_else(|| {
+                invalid(
+                    "ASTRA_EMU_MINORI_SAVE_THUMBNAIL",
+                    "thumbnail destination row is out of bounds",
+                )
+            })?;
+        let source_row = &source[source_start..source_start + source_width * 4];
+        alpha_over_premultiplied(destination_row, source_row);
+    }
+    Ok(())
 }
 
 fn prepare_resource_layers(
@@ -11297,6 +12035,8 @@ mod tests {
             .unwrap();
         let writable = InMemoryWritableFiles::default();
         let session = provider.sessions.get_mut(&session_id.0).unwrap();
+        session.stage_size = Some((1280, 720));
+        session.last_gameplay_frame = Some(Arc::from(vec![0x20; 1280 * 720 * 4]));
         refresh_save_slots(&writable, &session_id, session).unwrap();
         assert!(session.save_slots.is_empty());
         session.vm.open_save_page().unwrap();
@@ -11465,6 +12205,11 @@ mod tests {
         provider
             .step(&ctx, &session, step_input(1, Vec::new()))
             .unwrap();
+        provider
+            .sessions
+            .get_mut(&session.0)
+            .unwrap()
+            .last_gameplay_frame = Some(Arc::from(vec![0x20; 1280 * 720 * 4]));
         let output = provider
             .step(
                 &ctx,
@@ -12526,8 +13271,8 @@ mod tests {
             &BTreeSet::from([0, 7]),
         )
         .unwrap();
-        assert_eq!(frame.texture_resources.len(), 7);
-        assert_eq!(frame.draws.len(), 12);
+        assert_eq!(frame.texture_resources.len(), 6);
+        assert_eq!(frame.draws.len(), 13);
         assert_eq!(
             frame.texture_resources[0].resource_uri,
             "minori:/sys/saveloadBase.png"
@@ -12543,6 +13288,58 @@ mod tests {
         vm.set_save_focus(17).unwrap();
         vm.move_save_page(1).unwrap();
         assert_eq!(vm.state().system_ui.focus_index, 27);
+    }
+
+    #[test]
+    fn occupied_save_slot_overlays_verified_thumbnail_coordinates() {
+        let stage_bytes = 1280 * 720 * 4;
+        let thumbnail = Arc::<[u8]>::from([255, 0, 0, 255].repeat(96 * 54));
+        let metadata = BTreeMap::from([(
+            0,
+            MinoriSaveSlotMetadata {
+                timestamp: "2026/09/01 12:34".into(),
+                comment: "memo".into(),
+                thumbnail_rgba: thumbnail,
+            },
+        )]);
+        let prepared = overlay_save_thumbnails(
+            PreparedMinoriLayer {
+                role: MinoriLayerRole::Panel,
+                rgba8_premultiplied: Arc::from(vec![0; stage_bytes]),
+            },
+            &metadata,
+            0,
+            1280,
+            720,
+        )
+        .unwrap();
+        let pixel = (96 * 1280 + 74) * 4;
+        assert_eq!(
+            &prepared.rgba8_premultiplied[pixel..pixel + 4],
+            &[255, 0, 0, 255]
+        );
+        assert_eq!(&prepared.rgba8_premultiplied[..4], &[0; 4]);
+    }
+
+    #[test]
+    fn save_metadata_timestamp_and_thumbnail_validation_are_strict() {
+        assert!(validate_save_timestamp("2026/09/01 12:34").is_ok());
+        assert!(validate_save_timestamp("2026-09-01 12:34").is_err());
+        assert!(validate_save_timestamp("2026/13/01 12:34").is_err());
+
+        let mut png = Vec::new();
+        PngEncoder::new(&mut png)
+            .write_image(&vec![64; 96 * 54 * 4], 96, 54, ExtendedColorType::Rgba8)
+            .unwrap();
+        let decoded = decode_save_thumbnail(&png).unwrap();
+        assert_eq!(decoded.len(), 96 * 54 * 4);
+        assert_eq!(&decoded[..4], &[16, 16, 16, 64]);
+
+        let mut wrong_size = Vec::new();
+        PngEncoder::new(&mut wrong_size)
+            .write_image(&vec![0; 95 * 54 * 4], 95, 54, ExtendedColorType::Rgba8)
+            .unwrap();
+        assert!(decode_save_thumbnail(&wrong_size).is_err());
     }
 
     #[test]
@@ -12593,6 +13390,7 @@ mod tests {
             &mut published_layers,
             &mut presentation_layers,
             &frame,
+            None,
         )
         .unwrap();
         assert_eq!(transactions.len(), 1);

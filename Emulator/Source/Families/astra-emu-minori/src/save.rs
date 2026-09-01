@@ -3,11 +3,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::MinoriConfigState;
 
-pub(crate) const MINORI_SAVE_SCHEMA: &str = "astra.emu.minori.save_slot.v2";
+pub(crate) const MINORI_SAVE_SCHEMA: &str = "astra.emu.minori.save_slot.v3";
 pub(crate) const MINORI_SAVE_ROOT: &str = "minori/saves";
 pub(crate) const MINORI_SAVE_MAX_SLOTS: u32 = 100;
 pub(crate) const MINORI_SAVE_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const MINORI_SAVE_COMMENT_MAX_BYTES: usize = 256;
+pub(crate) const MINORI_SAVE_TIMESTAMP_MAX_BYTES: usize = 16;
+pub(crate) const MINORI_SAVE_THUMBNAIL_WIDTH: u32 = 96;
+pub(crate) const MINORI_SAVE_THUMBNAIL_HEIGHT: u32 = 54;
+pub(crate) const MINORI_SAVE_THUMBNAIL_MAX_BYTES: usize = 1024 * 1024;
 pub(crate) const MINORI_CONFIG_SCHEMA: &str = "astra.emu.minori.config.v1";
 pub(crate) const MINORI_CONFIG_ROOT: &str = "minori";
 pub(crate) const MINORI_CONFIG_PATH: &str = "minori/config-v1.bin";
@@ -31,7 +35,9 @@ pub(crate) struct MinoriSaveEnvelope {
     pub profile_fingerprint: Hash256,
     pub script_uri: String,
     pub script_hash: Hash256,
+    pub timestamp: String,
     pub comment: String,
+    pub thumbnail_png: Vec<u8>,
     pub vm_snapshot: Vec<u8>,
 }
 
