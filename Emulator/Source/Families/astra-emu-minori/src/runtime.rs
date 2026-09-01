@@ -5,6 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::save::MINORI_MANUAL_SAVE_FIRST_PAGE_INDEX;
 use crate::{
     parse_minori_message_markup, script::tokenize_operands, validate_canonical_minori_message_text,
     MinoriMessageControl, MinoriMessageMarkupError, ScCommand, ScControlFlow, ScLineKind,
@@ -61,7 +62,7 @@ const MINORI_SAVE_PAGE_COUNT: u32 = 10;
 // gameplay Save/Load entry opens the first manual page (Page2 artwork).
 // Keep the distinction in the family VM instead of making the Host infer it
 // from a rendered label.
-const MINORI_GAMEPLAY_MANUAL_PAGE_INDEX: u32 = 2;
+const MINORI_GAMEPLAY_MANUAL_PAGE_INDEX: u32 = MINORI_MANUAL_SAVE_FIRST_PAGE_INDEX;
 pub(crate) const MINORI_BGM_STREAM_ID: u32 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -166,8 +166,11 @@ python Tools/AstraEMU/minori_paz.py "<minori-case-root>/scr.paz" --json
 保存后从剧情打开 Load，首屏显示 `saveload_Page2` 的 `page #01`。这说明标题 Load
 与剧情 Save/Load 至少存在不同的页选择语义；当前 runtime 已让剧情 Save/Load 从
 `focus_index=20`（Page2）开始，标题 Load 仍由 title transaction 选择 Page0。槽 ID
-与 Auto/Quick/manual 的完整持久化映射尚未由原版行为或 IDA 共同确认，当前实现不据此
-猜测 Quick/Auto 的写入规则。
+IDA 对原版 `perseus_%04d.sav` filename builder 的确认表明槽 ID 为
+`page * 10 + slot`：Page0 是 Auto Save（0..9），Page1 是 Quick Save（10..19），
+Page2..9 是手动页（20..99）。当前 runtime 的 Quick Save 写入槽 10，不会覆盖
+Auto Save 槽 0。该结论只确认文件编号与页分区；原版自动保存触发时机和 quick
+slot 轮换策略仍需现场行为确认，不能据此宣称完整 Save/Load parity。
 Save 页无论当前是 Auto、Quick 还是 manual 页面都隐藏左侧 `Back`，Load 页才显示
 `Back`；provider 的按钮 scissor 因而按页面类型而不是 page index 决定。
 

@@ -4,10 +4,13 @@
 分别从舞台 `(64,16)` 与 `(608,16)` 开始；provider 现通过命名常量使用这两个起点，
 并以回归测试锁定首顶点。Save 页的按钮裁剪也按页面类型统一隐藏 `Back`，不再只对
 Page0 生效；卡片、缩略图和底部按钮的既有坐标未改动。标题 Load 的
-`Auto Save` 与剧情 Save/Load 的 `page #01` 上下文差异已记录，但 Auto/Quick/manual
-剧情 Save/Load 现从全局槽 20（Page2）开始，标题 Load 仍从槽 0（Page0）开始；该
-上下文选择已进入 VM。Auto/Quick/manual 槽 ID 的持久化映射（尤其 Quick Save 的写入
-目标）尚未由原版与 IDA 双重确认，不能据此标记 Save/Load parity 完成。
+`Auto Save` 与剧情 Save/Load 的 `page #01` 上下文差异已记录。IDA 对原版
+`perseus_%04d.sav` filename builder 的确认表明槽 ID 为 `page * 10 + slot`：Page0
+是 Auto Save（0..9），Page1 是 Quick Save（10..19），Page2..9 是手动页
+（20..99）。剧情 Save/Load 现从全局槽 20（Page2）开始，标题 Load 仍从槽 0
+（Page0）开始；Quick Save 已写入槽 10，避免覆盖 Auto Save。该结论只覆盖文件
+编号与当前页选择，不等同于完整 Save/Load parity；原版自动保存触发时机和 quick
+slot 轮换策略仍需现场行为确认。
 
 2026 年 9 月 1 日按 FVP 预留 Minori profile 编码选择：`family_options` 新增必填
 `nls`，并在 Manager/CLI 运行时 profile 中使用 `minori.nls` 保存选择。允许值固定为

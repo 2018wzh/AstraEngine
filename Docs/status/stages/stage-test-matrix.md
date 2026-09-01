@@ -5,8 +5,10 @@ draw origin at `(64,16)` and the page-label draw origin at `(608,16)`. The focus
 `save_load_page_uses_the_verified_assets_and_slot_grid` regression checks both
 provider vertices and Save-page `Back` clipping on Page2; card and thumbnail geometry remain covered by the existing
 tests. Title-Load `Auto Save` versus gameplay `page #01` context selection is now fixed in
-the VM (Page0 versus global slot 20/Page2); the Auto/Quick/manual slot-ID persistence mapping
-remains open, so this is not Save/Load parity or E3 evidence.
+the VM (Page0 versus global slot 20/Page2). IDA now confirms the original
+`page * 10 + slot` filename mapping: Auto Save Page0 (0..9), Quick Save Page1 (10..19),
+and manual Page2..9 (20..99); runtime Quick Save targets slot 10. Automatic-save timing,
+quick-slot rotation, Save/Load parity and E3 evidence remain open.
 
 2026-09-01 Minori original-locale seam: `astra.emu.minori.mount_options.v4` now requires
 the original Japanese variant, a strict CP932 locale hook, and the regular non-symlink

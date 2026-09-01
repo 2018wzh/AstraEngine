@@ -6,6 +6,15 @@ use crate::MinoriConfigState;
 pub(crate) const MINORI_SAVE_SCHEMA: &str = "astra.emu.minori.save_slot.v3";
 pub(crate) const MINORI_SAVE_ROOT: &str = "minori/saves";
 pub(crate) const MINORI_SAVE_MAX_SLOTS: u32 = 100;
+/// The original SaveLoad page uses ten records per page.  Its filename
+/// expression is `page * 10 + slot`, with page 1 reserved for Quick Save.
+/// Keep this identity separate from the user-visible manual page index so a
+/// quick save cannot accidentally overwrite Auto Save slot 0.
+pub(crate) const MINORI_SAVE_PAGE_WIDTH: u32 = 10;
+pub(crate) const MINORI_QUICK_SAVE_PAGE_INDEX: u32 = 1;
+pub(crate) const MINORI_MANUAL_SAVE_FIRST_PAGE_INDEX: u32 = 2;
+pub(crate) const MINORI_QUICK_SAVE_SLOT: u32 =
+    MINORI_QUICK_SAVE_PAGE_INDEX * MINORI_SAVE_PAGE_WIDTH;
 pub(crate) const MINORI_SAVE_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const MINORI_SAVE_COMMENT_MAX_BYTES: usize = 256;
 pub(crate) const MINORI_SAVE_TIMESTAMP_MAX_BYTES: usize = 16;

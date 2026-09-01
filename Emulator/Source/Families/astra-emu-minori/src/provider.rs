@@ -47,9 +47,9 @@ use crate::save::{
     decode as decode_save, decode_config, encode as encode_save, encode_config, slot_path,
     slot_temporary_path, MinoriConfigEnvelope, MinoriSaveEnvelope, MINORI_CONFIG_MAX_BYTES,
     MINORI_CONFIG_PATH, MINORI_CONFIG_ROOT, MINORI_CONFIG_SCHEMA, MINORI_CONFIG_TEMPORARY_PATH,
-    MINORI_SAVE_COMMENT_MAX_BYTES, MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT,
-    MINORI_SAVE_SCHEMA, MINORI_SAVE_THUMBNAIL_HEIGHT, MINORI_SAVE_THUMBNAIL_MAX_BYTES,
-    MINORI_SAVE_THUMBNAIL_WIDTH, MINORI_SAVE_TIMESTAMP_MAX_BYTES,
+    MINORI_QUICK_SAVE_SLOT, MINORI_SAVE_COMMENT_MAX_BYTES, MINORI_SAVE_MAX_BYTES,
+    MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT, MINORI_SAVE_SCHEMA, MINORI_SAVE_THUMBNAIL_HEIGHT,
+    MINORI_SAVE_THUMBNAIL_MAX_BYTES, MINORI_SAVE_THUMBNAIL_WIDTH, MINORI_SAVE_TIMESTAMP_MAX_BYTES,
 };
 use crate::text_surface::{
     MinoriTextSurfaceRenderer, TextAlignment, TextOutline, TextRegion, TextSurfaceRequest,
@@ -7219,15 +7219,24 @@ fn handle_system_menu_request(
                 }
                 "quick_save" => {
                     session.vm.open_save_page().map_err(runtime_error)?;
-                    let save_length =
-                        save_slot(services.writable_files.as_ref(), session_id, session, 0, "")?;
+                    let save_length = save_slot(
+                        services.writable_files.as_ref(),
+                        session_id,
+                        session,
+                        MINORI_QUICK_SAVE_SLOT,
+                        "",
+                    )?;
                     session
                         .vm
                         .close_gameplay_system_page()
                         .map_err(runtime_error)?;
-                    session.save_slots.insert(0);
-                    session.save_slot_lengths.insert(0, save_length);
-                    session.save_slot_comments.insert(0, String::new());
+                    session.save_slots.insert(MINORI_QUICK_SAVE_SLOT);
+                    session
+                        .save_slot_lengths
+                        .insert(MINORI_QUICK_SAVE_SLOT, save_length);
+                    session
+                        .save_slot_comments
+                        .insert(MINORI_QUICK_SAVE_SLOT, String::new());
                     session
                         .vm
                         .advance_provider_tick(input.tick_index)
@@ -12712,6 +12721,57 @@ mod tests {
             provider.sessions[&session.0].save_slot_comments.get(&20),
             Some(&"memo".to_owned())
         );
+
+        // The original filename builder uses page * 10 + slot.  Quick Save
+        // therefore occupies page 1 (slot 10), while slot 0 remains the
+        // title-page Auto Save range.
+        let output = provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Open,
+                        menu_id: None,
+                        item_id: None,
+                        pointer_x: Some(640),
+                        pointer_y: Some(360),
+                        sequence: 6,
+                    }),
+                    ..step_input(6, Vec::new())
+                },
+            )
+            .unwrap();
+        assert!(output.live.resource_scenes.is_empty());
+        let quick_menu_id = system_menus
+            .published
+            .lock()
+            .unwrap()
+            .last()
+            .expect("quick-save menu is published before selection")
+            .1
+            .menu_id
+            .clone();
+        provider
+            .step(
+                &ctx,
+                &session,
+                LegacyStepInput {
+                    system_menu: Some(LegacySystemMenuRequestV1 {
+                        action: LegacySystemMenuActionV1::Select,
+                        menu_id: Some(quick_menu_id),
+                        item_id: Some("quick_save".into()),
+                        pointer_x: None,
+                        pointer_y: None,
+                        sequence: 7,
+                    }),
+                    ..step_input(7, Vec::new())
+                },
+            )
+            .unwrap();
+        let files = writable.files.lock().unwrap();
+        assert!(files.contains_key(&slot_path(MINORI_QUICK_SAVE_SLOT)));
+        assert!(!files.contains_key(&slot_path(0)));
     }
 
     #[test]

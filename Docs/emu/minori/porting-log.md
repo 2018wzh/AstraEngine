@@ -1509,6 +1509,17 @@ Minori 菜单的 item id、顺序或平台呈现。
   页面统一隐藏 `Back`，Load 页面保留完整按钮条，并由 provider 回归锁定 Page2 路径。
 - 原版标题 Load 首屏显示 `Auto Save`，剧情 Save 及保存后的剧情 Load 首屏显示
   `page #01`。runtime 现把剧情 Save/Load 的初始 focus 设为全局槽 20（Page2），
-  title Load 继续由 title transaction 设为 focus 0（Page0）。Auto/Quick/manual 槽
-  ID 如何持久化映射尚未由原版交互和 IDA 同时确认；Quick Save 的写入目标仍保持
-  独立 blocking，不以页面标签推断。
+  title Load 继续由 title transaction 设为 focus 0（Page0）。此时仍未确认的是
+  自动保存触发时机与 Quick Save 轮换策略；后续 IDA 交叉引用已确认文件编号采用
+  `page * 10 + slot`，因此 runtime Quick Save 写入 Page1 的槽 10，不再把页面标签
+  当作写入规则。
+
+## 2026 年 9 月 1 日：Save/Load 槽文件编号确认
+
+- 对原版 SaveLoad listing routine 做静态交叉引用：每个页对象保存 page index，
+  每页固定构造 10 个 slot；生成 `perseus_%04d.sav` 前使用 `page * 10 + slot`。
+  因而 Page0 对应 Auto Save 槽 0..9，Page1 对应 Quick Save 槽 10..19，Page2..9
+  对应手动槽 20..99。
+- runtime 的 Quick Save 已改为写入槽 10，并加入 provider 回归，确认不会创建或覆盖
+  Auto Save 槽 0。该静态结论只覆盖文件编号和分区；自动保存触发时机、Quick Save
+  是否轮换 10..19 仍需要原版现场行为确认，Save/Load 完整 parity 继续保持开放。

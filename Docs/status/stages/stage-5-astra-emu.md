@@ -694,6 +694,8 @@ Stage 5 继续保持 `IN_PROGRESS`。
 完成。
 同日页眉复核进一步固定标题图 `(64,16)` 与页标签图 `(608,16)` 的舞台坐标，并新增
 provider draw-origin regression。原版标题 Load 与剧情 Save/Load 的 `Auto Save`/
-`page #01` 上下文差异已进入 VM（Page0 与全局槽 20/Page2）；Auto/Quick/manual 槽
-ID 的持久化规则仍未确认。Save 页 `Back` 裁剪已统一到所有 page index，Save/Load
-parity 继续保持开放。
+`page #01` 上下文差异已进入 VM（Page0 与全局槽 20/Page2）。IDA 已确认原版
+filename builder 使用 `page * 10 + slot`，因此 Auto Save 为 Page0（0..9）、Quick
+Save 为 Page1（10..19）、手动页为 Page2..9（20..99）；runtime Quick Save 目标为
+槽 10。自动保存触发时机和 Quick Save 轮换仍未确认。Save 页 `Back` 裁剪已统一到
+所有 page index，Save/Load parity 继续保持开放。

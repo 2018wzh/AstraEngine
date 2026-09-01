@@ -34,8 +34,10 @@
 - [x] Title Load opens the observed `Auto Save` Page0, while gameplay Save/Load opens the
   observed `page #01` Page2; the VM keeps this context selection rather than deriving it from
   rendered labels.
-- [ ] The exact Auto/Quick/manual slot-ID persistence mapping (including Quick Save's target)
-  still requires original behavior plus IDA evidence.
+- [x] IDA confirmed the original `perseus_%04d.sav` filename expression as
+  `page * 10 + slot`: Auto Save uses Page0 (0..9), Quick Save uses Page1 (10..19),
+  and manual pages use Page2..9 (20..99). Runtime Quick Save targets slot 10.
+  Automatic-save timing and quick-slot rotation remain open behavior questions.
 
 ## Message advance indicator placement (2026-09-01)
 
