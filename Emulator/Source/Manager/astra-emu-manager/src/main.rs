@@ -47,12 +47,13 @@ use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerControl
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
     evidence_vm_coverage_ids, live_wait_can_rebind, AstraEmuRuntimeProvider,
-    BangumiPlayStateRecord, CancellationToken, CaseRuntimeProfileRecord, CompatibilityCacheEntry,
-    CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord, GrantedSourceReader, Library,
-    LibraryScanner, LiveWaitBindingKind, MatchCandidateRecord, MatchDecisionRecord,
-    MetadataSnapshotRecord, PendingFamilyConfirmation, PendingFamilySystemCommand,
-    PendingFamilySystemMenu, PendingFamilyTextInput, ProviderConsentRecord, ScanLimits,
-    SourceGrant, TranslationConsent, TranslationProfileRecord, VfsResourceInfo,
+    BangumiPlayStateRecord, CancellationToken, CaseRecord, CaseRuntimeProfileRecord,
+    CompatibilityCacheEntry, CompatibilitySyncState, EmuCaseProfile, ExternalIdentityRecord,
+    GrantedSourceReader, Library, LibraryScanner, LiveWaitBindingKind, MatchCandidateRecord,
+    MatchDecisionRecord, MetadataSnapshotRecord, PendingFamilyConfirmation,
+    PendingFamilySystemCommand, PendingFamilySystemMenu, PendingFamilyTextInput,
+    ProviderConsentRecord, ScanLimits, SourceGrant, TranslationConsent, TranslationProfileRecord,
+    VfsResourceInfo,
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
@@ -3196,12 +3197,39 @@ fn scan_error_code(error: &astra_emu_manager_core::SourceScanError) -> &'static 
     }
 }
 
-fn default_case_profile(case_identity: String) -> CaseRuntimeProfileRecord {
+fn family_id_for_case(
+    case: &CaseRecord,
+    profile: Option<&CaseRuntimeProfileRecord>,
+) -> Result<String, String> {
+    let family_id = case
+        .family_override
+        .clone()
+        .or_else(|| {
+            case.relative_path
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("scr.paz"))
+                .then_some("minori".to_owned())
+        })
+        .or_else(|| profile.map(|value| value.family_id.clone()))
+        .unwrap_or_else(|| "fvp".to_owned());
+    if !matches!(family_id.as_str(), "fvp" | "minori") {
+        return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
+    }
+    Ok(family_id)
+}
+
+fn default_case_profile(case_identity: String, family_id: &str) -> CaseRuntimeProfileRecord {
+    let compatibility_profile = match family_id {
+        "fvp" => "rfvp-v1",
+        "minori" => "minori.reference",
+        _ => unreachable!("family id validated before default profile creation"),
+    };
     CaseRuntimeProfileRecord {
         case_identity,
-        family_id: "fvp".into(),
+        family_id: family_id.into(),
         fixed_delta_ns: 16_666_667,
-        compatibility_profile: "rfvp-v1".into(),
+        compatibility_profile: compatibility_profile.into(),
         family_options: BTreeMap::new(),
     }
 }
@@ -4096,18 +4124,28 @@ impl ManagerController for AstraEmuManagerController {
 
     fn configure_nls(&mut self, nls: &str) -> Result<ManagerViewModel, String> {
         if !matches!(nls, "shift_jis" | "gbk" | "utf8") {
-            return Err("ASTRA_EMU_FVP_NLS_INVALID".into());
+            return Err("ASTRA_EMU_NLS_INVALID".into());
         }
         let case_identity = self
             .selected_case_id
             .clone()
             .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
-        let mut profile = self
+        let case = self
+            .library
+            .case(&case_identity)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "ASTRA_EMU_CASE_SELECTION_MISSING".to_owned())?;
+        let existing_profile = self
             .library
             .case_runtime_profile(&case_identity)
-            .map_err(|error| error.to_string())?
-            .unwrap_or_else(|| default_case_profile(case_identity));
-        let option = if profile.family_id == "minori" {
+            .map_err(|error| error.to_string())?;
+        let family_id = family_id_for_case(&case, existing_profile.as_ref())?;
+        let mut profile = existing_profile
+            .unwrap_or_else(|| default_case_profile(case_identity.clone(), &family_id));
+        if profile.family_id != family_id {
+            return Err("ASTRA_EMU_EXPLICIT_PROFILE_BINDING_MISMATCH".into());
+        }
+        let option = if family_id == "minori" {
             MINORI_NLS_OPTION
         } else {
             "fvp.nls"
@@ -4554,21 +4592,7 @@ impl ManagerController for AstraEmuManagerController {
         if grant.token_kind != platform_grant_kind() {
             return Err("ASTRA_EMU_SOURCE_GRANT_PLATFORM_MISMATCH".into());
         }
-        let family_id = case
-            .family_override
-            .clone()
-            .or_else(|| {
-                case.relative_path
-                    .rsplit('/')
-                    .next()
-                    .is_some_and(|name| name.eq_ignore_ascii_case("scr.paz"))
-                    .then_some("minori".into())
-            })
-            .or_else(|| profile.as_ref().map(|value| value.family_id.clone()))
-            .unwrap_or_else(|| "fvp".into());
-        if !matches!(family_id.as_str(), "fvp" | "minori") {
-            return Err("ASTRA_EMU_FAMILY_UNSUPPORTED".into());
-        }
+        let family_id = family_id_for_case(&case, profile.as_ref())?;
         // `Hash256::to_string()` includes the `sha256:` display prefix, which
         // is not a valid VFS mount-set symbol. Use the bounded hexadecimal
         // representation for the stable identity instead.
@@ -5140,11 +5164,11 @@ mod manager_tests {
     };
 
     use super::{
-        decode_image_preview, decode_text_preview, fvp_pack_paths_option, media_preview_summary,
-        parse_glossary, pending_wait_can_rebind, quick_entry_is_valid, quick_entry_matches,
-        refresh_cover_cache, retain_non_completed_input_edges, runtime_locale_for_family,
-        system_menu_open_requested, system_ui_activity_from_blackboard, PendingWait,
-        TextPreviewLocale,
+        decode_image_preview, decode_text_preview, default_case_profile, family_id_for_case,
+        fvp_pack_paths_option, media_preview_summary, parse_glossary, pending_wait_can_rebind,
+        quick_entry_is_valid, quick_entry_matches, refresh_cover_cache,
+        retain_non_completed_input_edges, runtime_locale_for_family, system_menu_open_requested,
+        system_ui_activity_from_blackboard, PendingWait, TextPreviewLocale,
     };
 
     struct MemorySource(BTreeMap<String, Vec<u8>>);
@@ -5156,6 +5180,42 @@ mod manager_tests {
             astra_emu_minori::MINORI_RUNTIME_LOCALE
         );
         assert_eq!(runtime_locale_for_family("fvp"), "und");
+    }
+
+    #[test]
+    fn minori_nls_profile_infers_family_before_creating_default_profile() {
+        let case = astra_emu_manager_core::CaseRecord {
+            case_identity: "case-minori".into(),
+            source_id: "source".into(),
+            relative_path: "game/scr.paz".into(),
+            content_hash: "sha256:case".into(),
+            modified_ns: 1,
+            byte_size: 1,
+            title: "Minori".into(),
+            family_override: None,
+        };
+        let family_id = family_id_for_case(&case, None).unwrap();
+        assert_eq!(family_id, "minori");
+        let profile = default_case_profile(case.case_identity.clone(), &family_id);
+        assert_eq!(profile.family_id, "minori");
+        assert_eq!(profile.compatibility_profile, "minori.reference");
+        assert_eq!(family_id_for_case(&case, Some(&profile)).unwrap(), "minori");
+    }
+
+    #[test]
+    fn explicit_case_family_override_wins_over_path_and_profile() {
+        let case = astra_emu_manager_core::CaseRecord {
+            case_identity: "case-fvp".into(),
+            source_id: "source".into(),
+            relative_path: "game/scr.paz".into(),
+            content_hash: "sha256:case".into(),
+            modified_ns: 1,
+            byte_size: 1,
+            title: "FVP".into(),
+            family_override: Some("fvp".into()),
+        };
+        let profile = default_case_profile(case.case_identity.clone(), "fvp");
+        assert_eq!(family_id_for_case(&case, Some(&profile)).unwrap(), "fvp");
     }
 
     #[test]
