@@ -42,6 +42,12 @@ byte is `0x5c`: the decoded message keeps that character visible while the follo
 `\\v\\a` controls remain typed as voice-wait and auto-advance. Chinese/localized
 content and translation overlays remain outside this Japanese-original slice.
 
+2026-09-01 select structure recheck: the same v4 key-file reader observes exactly two
+`select` commands, with three and four `display:label` pairs respectively; every target
+label closes within the same script package. Parser/runtime pair validation is therefore
+sample-backed. Original focus, pointer hit regions and post-choice presentation timing
+remain unverified, so route, Release Sandbox and Windows E3 gates stay open.
+
 2026-08-31 title-page exit seam: the focused provider regression
 `title_exit_terminates_directly_without_confirmation_transaction` verifies direct terminal
 behavior with no confirmation publication. Gameplay exit and return-title remain Host-owned

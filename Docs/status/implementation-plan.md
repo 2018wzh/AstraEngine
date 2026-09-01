@@ -7,6 +7,12 @@
 不改变 Minori 行为、VFS 解密、媒体 provider 或 locale 选择；feature build 与两个边界
 回归通过。
 
+2026 年 9 月 1 日全包 `select` 结构复核：当前 v4 key-file reader 读取 89 个 `.sc`
+后，脱敏 census 确认两条 `select` 分别为 3 项和 4 项，全部采用
+`display:label` pair，target label 均在同包 `.label` 中闭合，没有其它 arity 或裸
+target 形态。该证据收敛 parser/runtime 的输入结构，但没有覆盖原版界面焦点、鼠标
+命中区或确认后的演出时序；因此不改变完整路线和 E3 的开放状态。
+
 2026 年 9 月 1 日 Save/Load 页眉几何对齐：原版 1280×720 截图确认标题图和页标签图
 分别从舞台 `(64,16)` 与 `(608,16)` 开始；provider 现通过命名常量使用这两个起点，
 并以回归测试锁定首顶点。Save 页的按钮裁剪也按页面类型统一隐藏 `Back`，不再只对
