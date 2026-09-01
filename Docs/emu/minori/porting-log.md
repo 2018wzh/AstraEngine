@@ -1540,3 +1540,11 @@ Minori 菜单的 item id、顺序或平台呈现。
 - 公开脚本文档已从“所有 stand 均阻断”改为记录这一已实现的静态几何契约，同时保留
   原版动态资源和 transition 动画时序未闭合的状态。该同步不增加新的原版 parity
   结论，也不改变当前 NLS 仅预留 GBK/UTF-8、实际只支持 Shift JIS 的范围。
+
+## 2026 年 9 月 1 日：全包 select 结构复核
+
+- 使用当前 v4 key-file reader 重新运行 89 个 `.sc` 的脱敏 census。两条 `select` 命令
+  分别包含 3 项和 4 项，所有 operand 都符合 `display:label` 结构，且 target label
+  在同包脚本中闭合；没有出现其它 arity 或裸 target 形态。
+- 这项结果把 parser/runtime 的 pair 结构从“未知”收敛为已验证输入契约，但不推断
+  原版界面的焦点初始项、鼠标命中区或确认后的演出时序；这些仍需原版现场证据。

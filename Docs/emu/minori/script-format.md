@@ -18,7 +18,7 @@ parser 逐字节保留原始行与换行，同时记录 command ordinal、source
 | `stage` / `transition` | 6538 / 6556 | 已确认前景、背景、坐标和最多十组 stand pair；静态 PNG stand 已按中心 X/底边 Y 生成 host 绘制，transition 动画时序仍未闭合 |
 | `label` / `goto` / `if` | 34 / 10 / 20 | 所有本地 target 均闭合，无重复 label |
 | `chain` | 55 | 55 个 operand 均匹配同包脚本名；原程序处理函数把目标写入全局 `NEXT` 后结束当前脚本，是尾链式切换，不建立返回栈 |
-| `select` | 2 | token 已知，choice/target operand 语义未知 |
+| `select` | 2 | 全包均为 `display:label` pair；一条含 3 项、一条含 4 项，label 均闭合到同包 `.label`；显示顺序和默认首项由 runtime 保持，原版鼠标/键盘焦点细节仍需现场确认 |
 | `end` | 85 | 75 个位于文件末尾；原程序与 `chain` 共用结束流程，空 `NEXT` 时终止，不是 return |
 
 Minori 脚本研究以 `scr.paz` 中解出的 `.sc` 为核心。`perseus_chs.mys` 是本地样本的中文 patch/映射证据，不能当作原生 runtime source。
