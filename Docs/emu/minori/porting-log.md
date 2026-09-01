@@ -1484,3 +1484,15 @@ Minori 菜单的 item id、顺序或平台呈现。
   字段；重复 range 的无缓存行为仍由合成 source 计数回归覆盖。它关闭当前 key-file /
   streaming identity 的真实 full verify，不等价于峰值内存规模、四路线、影片质量、
   正式音频 review、Release Sandbox 或 Windows E3。
+
+## 2026 年 9 月 1 日：原版 Config 入口复测阻断
+
+- 在同一原版 Sandbox 会话中，从剧情消息右键菜单选择 Config 后出现原程序的
+  `exception!` 对话框；确认后再次出现同类异常。对话框消失前无法进入 Config 页面，
+  因而没有取得可靠的控件、滑杆或保存页同点画面。
+- 这是该次 Sandbox 会话的原版运行环境阻断，不把异常对话框当作 Config 的产品语义，
+  也不据此修改 Minori 的系统页状态机。原版首段消息和右键菜单的已确认结构仍以此前
+  观察为准；Config 的现场行为需要在不触发异常的原版环境重新采集。
+- 本轮只保留脱敏的画面尺寸、hash 和“原生异常阻断”结论，异常参数、窗口标题细节、
+  本地路径和商业画面留在 ignored 私有目录。该证据继续保持原版同点视觉、Config
+  完整行为、正式音频审查、Release Sandbox 和 Windows E3 为 blocking。
