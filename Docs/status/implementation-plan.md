@@ -1,5 +1,11 @@
 # Implementation Plan Status
 
+2026 年 9 月 1 日 Save/Load 页眉几何对齐：原版 1280×720 截图确认标题图和页标签图
+分别从舞台 `(64,16)` 与 `(608,16)` 开始；provider 现通过命名常量使用这两个起点，
+并以回归测试锁定首顶点。卡片、缩略图和底部按钮的既有坐标未改动。标题 Load 的
+`Auto Save` 与剧情 Save/Load 的 `page #01` 上下文差异已记录，但 Auto/Quick/manual
+槽 ID 映射尚未由原版与 IDA 双重确认，不能据此标记 Save/Load parity 完成。
+
 2026 年 9 月 1 日按 FVP 预留 Minori profile 编码选择：`family_options` 新增必填
 `nls`，并在 Manager/CLI 运行时 profile 中使用 `minori.nls` 保存选择。允许值固定为
 `shift_jis`、`gbk`、`utf8`；当前日文原版只验证 `shift_jis`，后两者解析成功后以

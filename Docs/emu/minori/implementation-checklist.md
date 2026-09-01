@@ -22,6 +22,16 @@
   point original screenshots, four independent routes, full audio listening review, gallery
   parity, Release Sandbox and Windows E3 remain open.
 
+## Save/load header geometry (2026-09-01)
+
+- [x] The provider uses the observed 1280x720 stage coordinates `(64,16)` for the Save/Load
+  title artwork and `(608,16)` for the page label artwork; the card grid and bottom buttons
+  remain in their separately verified positions.
+- [x] A provider regression asserts both header draw origins, so a future resource or layer
+  reorder cannot silently move the page headings back to the pre-observation positions.
+- [ ] Title Load `Auto Save` versus gameplay Save/Load `page #01` context selection, and the
+  exact Auto/Quick/manual slot-ID mapping, still require original behavior plus IDA evidence.
+
 ## Message advance indicator placement (2026-09-01)
 
 - [x] The advance marker is laid out by the shared CosmicText provider as an independent

@@ -160,6 +160,13 @@ python Tools/AstraEMU/minori_paz.py "<minori-case-root>/scr.paz" --json
 `YYYY/MM/DD HH:MM` 和用户注释。Save 页首屏只显示 `Next`、`Return`，Load 页还显示
 `Back`；页标签由 `saveload_Page0..9.png` 提供，不能用 Quick/Auto 文本猜测替代。
 
+同日的原版截图还固定了页眉的舞台坐标：标题图从 `(64,16)` 开始，页标签图从
+`(608,16)` 开始；卡片列为 `x=64/456`，行首为 `y=81/189/297/405/513`。标题页
+进入 Load 时首屏实际显示 `saveload_Page0` 的 `Auto Save`，而剧情中打开 Save，或
+保存后从剧情打开 Load，首屏显示 `saveload_Page2` 的 `page #01`。这说明标题 Load
+与剧情 Save/Load 至少存在不同的页选择语义；槽 ID 与 Auto/Quick/manual 的完整映射
+尚未由原版行为或 IDA 共同确认，当前实现不据此猜测写入规则。
+
 当前 runtime 的 save envelope 已硬切为 `astra.emu.minori.save_slot.v3`，严格绑定
 case/package/profile identity，并验证时间、注释、缩略图 PNG 尺寸和有界字节数。缩略图
 从当前 1280x720 premultiplied gameplay surface 生成，metadata 经现有日文文本

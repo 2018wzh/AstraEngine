@@ -2,6 +2,11 @@
 
 日期：2026-08-25
 
+本页保留当日的历史 Headless 记录；当前实现已升级到 `astra.emu.minori.save_slot.v3`，
+并以原版截图重新校正 Save/Load 页眉坐标。下文的 Page0/Auto Save 描述只适用于该次
+旧 fixture，不能覆盖后来确认的“标题 Load 为 Auto Save、剧情 Save/Load 为 page #01”
+上下文差异。
+
 本次验证覆盖 ABI v9 的 `LegacyWritableFileHostV1` 路径，使用同一 development-reuse package、mount profile 和真实 Minori PAZ 数据。记录只保留 schema、计数、状态和 hash，不保存 key、商业文本、媒体 payload 或本地路径。
 
 ## 实现边界
@@ -15,7 +20,7 @@
 
 ### Save
 
-`astra.emu.headless_run_report.v3` 为 `passed`：28 fixed steps、28 presented frames、17 consumed inputs，checkpoint 为 `before_save`、`save_page`、`after_save`，diagnostic 为空。Save 页面显示 Auto Save、Quick Save、slot grid、Page0 和 Back/Next/Return 控件；视觉检查未发现裁剪、拉伸或图层残留。
+`astra.emu.headless_run_report.v3` 为 `passed`：28 fixed steps、28 presented frames、17 consumed inputs，checkpoint 为 `before_save`、`save_page`、`after_save`，diagnostic 为空。该历史 fixture 的 Save 页面包含 slot grid 与底部控件；它没有证明原版剧情页的 Auto/Quick/manual 上下文或槽 ID 映射。视觉检查未发现裁剪、拉伸或图层残留。
 
 ### Load
 
@@ -24,4 +29,3 @@
 ## 尚未关闭的门禁
 
 以上是 Headless E2，不是 Windows Manager E3。原版逐点 parity、完整路线上的自然 save/load、音频人工听审、CG/BGM/回想所有页面、movie fence 以及真实 Windows 输入仍需独立证据；不能由本记录推导为产品完成。
-

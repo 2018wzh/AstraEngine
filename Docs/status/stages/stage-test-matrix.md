@@ -1,5 +1,13 @@
 # Stage Test Matrix
 
+2026-09-01 Minori Save/Load header seam: original 1280x720 captures fix the title
+draw origin at `(64,16)` and the page-label draw origin at `(608,16)`. The focused
+`save_load_page_uses_the_verified_assets_and_slot_grid` regression checks both
+provider vertices; card, thumbnail and button geometry remain covered by the existing
+tests. Title-Load `Auto Save` versus gameplay `page #01` context selection and the
+Auto/Quick/manual slot-ID mapping remain open, so this is not Save/Load parity or E3
+evidence.
+
 2026-09-01 Minori original-locale seam: `astra.emu.minori.mount_options.v4` now requires
 the original Japanese variant, a strict CP932 locale hook, and the regular non-symlink
 `perseus.exe` entrypoint. PAZ/ANI/script text decoding rejects malformed bytes and no

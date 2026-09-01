@@ -692,3 +692,7 @@ Stage 5 继续保持 `IN_PROGRESS`。
 使用已验证资源。Minori library 194/194 通过，仍只计 E1/E2 provider/Host 证据；
 真实原版同点视觉 parity、四路线、Release Sandbox 和 Windows E3 继续阻断 Stage 5
 完成。
+同日页眉复核进一步固定标题图 `(64,16)` 与页标签图 `(608,16)` 的舞台坐标，并新增
+provider draw-origin regression。原版标题 Load 与剧情 Save/Load 的 `Auto Save`/
+`page #01` 上下文差异已记录；槽 ID 规则未确认前不改变写入映射，Save/Load parity
+仍保持开放。

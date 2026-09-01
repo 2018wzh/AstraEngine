@@ -1496,3 +1496,15 @@ Minori 菜单的 item id、顺序或平台呈现。
 - 本轮只保留脱敏的画面尺寸、hash 和“原生异常阻断”结论，异常参数、窗口标题细节、
   本地路径和商业画面留在 ignored 私有目录。该证据继续保持原版同点视觉、Config
   完整行为、正式音频审查、Release Sandbox 和 Windows E3 为 blocking。
+
+## 2026 年 9 月 1 日：Save/Load 页眉坐标对齐
+
+- 对照同一轮原版 Save、Load 和占用槽截图，确认 1280×720 舞台的 Save/Load 标题图起点
+  为 `(64,16)`，页标签图起点为 `(608,16)`。卡片列、行首、缩略图和红色时间/注释的
+  既有坐标与截图相符；本次只修正页眉，不改动槽内容或保存格式。
+- `describe_save_load_page` 现在把两个起点作为命名常量传给同一 `Renderer2D` draw
+  路径，provider 回归直接检查两项首顶点位置。对应 `astra-emu-minori` 定向测试通过，
+  未生成新的媒体或截图到仓库。
+- 原版标题 Load 首屏显示 `Auto Save`，剧情 Save 及保存后的剧情 Load 首屏显示
+  `page #01`。这是已观察到的上下文差异；Auto/Quick/manual 槽 ID 如何映射尚未由
+  原版交互和 IDA 同时确认，因此仍保持 blocking，不在实现中猜测。

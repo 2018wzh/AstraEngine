@@ -115,6 +115,12 @@ const MINORI_CHARACTER_REPLACEMENT_TEXTURE_BASE: u32 = 15_000;
 const MINORI_SYSTEM_TEXTURE_ID: u32 = 20_000;
 const MINORI_BACKLOG_GAUGE_TEXTURE_ID: u32 = 20_001;
 const MINORI_BACKLOG_BALL_TEXTURE_ID: u32 = 20_002;
+// Save/load headings are authored against the fixed 1280x720 Minori stage.
+// Keep these positions in stage coordinates so host scaling and letterboxing
+// do not change the family-owned system-page layout.
+const MINORI_SAVE_LOAD_TITLE_X: i32 = 64;
+const MINORI_SAVE_LOAD_HEADER_Y: i32 = 16;
+const MINORI_SAVE_LOAD_PAGE_X: i32 = 608;
 const MINORI_CONFIG_KNOB_TEXTURE_ID: u32 = 20_010;
 const MINORI_CONFIG_CHECKMARK_TEXTURE_ID: u32 = 20_011;
 const MINORI_CONFIG_CIRCLE_TEXTURE_ID: u32 = 20_012;
@@ -9423,7 +9429,13 @@ fn describe_save_load_page(
 
     let mut draws = Vec::with_capacity(16);
     append_texture_draw(&base, 0, 0, 1.0, &mut draws)?;
-    append_texture_draw(&title, 464, 16, 1.0, &mut draws)?;
+    append_texture_draw(
+        &title,
+        MINORI_SAVE_LOAD_TITLE_X,
+        MINORI_SAVE_LOAD_HEADER_Y,
+        1.0,
+        &mut draws,
+    )?;
     append_texture_draw_with_scissor(
         &buttons,
         462,
@@ -9439,7 +9451,13 @@ fn describe_save_load_page(
         ),
         &mut draws,
     )?;
-    append_texture_draw(&page, 536, 16, 1.0, &mut draws)?;
+    append_texture_draw(
+        &page,
+        MINORI_SAVE_LOAD_PAGE_X,
+        MINORI_SAVE_LOAD_HEADER_Y,
+        1.0,
+        &mut draws,
+    )?;
 
     let page_base = (vm.state().system_ui.focus_index / 10) * 10;
     let slot_index = vm.state().system_ui.focus_index % 10;
@@ -13593,6 +13611,22 @@ mod tests {
             frame.texture_resources[1].resource_uri,
             "minori:/sys/saveloadSave.png"
         );
+        assert!(frame.draws.iter().any(|draw| {
+            draw.texture_id == MINORI_SYSTEM_TEXTURE_ID + 1
+                && draw.vertices[0].position
+                    == [
+                        MINORI_SAVE_LOAD_TITLE_X as f32,
+                        MINORI_SAVE_LOAD_HEADER_Y as f32,
+                    ]
+        }));
+        assert!(frame.draws.iter().any(|draw| {
+            draw.texture_id == MINORI_SYSTEM_TEXTURE_ID + 3
+                && draw.vertices[0].position
+                    == [
+                        MINORI_SAVE_LOAD_PAGE_X as f32,
+                        MINORI_SAVE_LOAD_HEADER_Y as f32,
+                    ]
+        }));
         assert!(frame.draws.iter().any(|draw| {
             draw.texture_id == MINORI_SYSTEM_TEXTURE_ID + 2
                 && draw.vertices[0].position == [64.0, 81.0]
