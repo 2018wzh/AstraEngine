@@ -29,8 +29,13 @@
   remain in their separately verified positions.
 - [x] A provider regression asserts both header draw origins, so a future resource or layer
   reorder cannot silently move the page headings back to the pre-observation positions.
-- [ ] Title Load `Auto Save` versus gameplay Save/Load `page #01` context selection, and the
-  exact Auto/Quick/manual slot-ID mapping, still require original behavior plus IDA evidence.
+- [x] Save-page button clipping hides `Back` on every Save page, while Load retains the full
+  `Back`/`Next`/`Return` strip; this is independent of the Auto/Quick/manual page index.
+- [x] Title Load opens the observed `Auto Save` Page0, while gameplay Save/Load opens the
+  observed `page #01` Page2; the VM keeps this context selection rather than deriving it from
+  rendered labels.
+- [ ] The exact Auto/Quick/manual slot-ID persistence mapping (including Quick Save's target)
+  still requires original behavior plus IDA evidence.
 
 ## Message advance indicator placement (2026-09-01)
 

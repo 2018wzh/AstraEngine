@@ -3,16 +3,16 @@
 2026-09-01 Minori Save/Load header seam: original 1280x720 captures fix the title
 draw origin at `(64,16)` and the page-label draw origin at `(608,16)`. The focused
 `save_load_page_uses_the_verified_assets_and_slot_grid` regression checks both
-provider vertices; card, thumbnail and button geometry remain covered by the existing
-tests. Title-Load `Auto Save` versus gameplay `page #01` context selection and the
-Auto/Quick/manual slot-ID mapping remain open, so this is not Save/Load parity or E3
-evidence.
+provider vertices and Save-page `Back` clipping on Page2; card and thumbnail geometry remain covered by the existing
+tests. Title-Load `Auto Save` versus gameplay `page #01` context selection is now fixed in
+the VM (Page0 versus global slot 20/Page2); the Auto/Quick/manual slot-ID persistence mapping
+remains open, so this is not Save/Load parity or E3 evidence.
 
 2026-09-01 Minori original-locale seam: `astra.emu.minori.mount_options.v4` now requires
 the original Japanese variant, a strict CP932 locale hook, and the regular non-symlink
 `perseus.exe` entrypoint. PAZ/ANI/script text decoding rejects malformed bytes and no
 longer invokes the Minori translation Hook. The focused `astra-emu-minori` library suite
-passes 201/201. This is parser/mount boundary evidence only; localized `.mys`/exe files,
+passes 202/202. This is parser/mount boundary evidence only; localized `.mys`/exe files,
 full-route parity, Release Sandbox and Windows E3 remain out of scope.
 
 2026-09-01 message indicator seam: the original short-message checkpoint keeps the advance
@@ -25,7 +25,7 @@ or Windows E3 acceptance.
 
 2026-09-01 title pointer coverage: the original title menu accepts stage-space hover and
 clicks; the Minori provider covers base/unlocked row maps, clipped `topMenu*Over.png`
-resources, outside clicks and typed action reuse. The focused library suite passes 201/201;
+resources, outside clicks and typed action reuse. The focused library suite passes 202/202;
 same-point visual parity, Release Sandbox and Windows E3 remain open.
 
 2026-09-01 script census recheck: the same Japanese-original profile reads 89 `.sc`

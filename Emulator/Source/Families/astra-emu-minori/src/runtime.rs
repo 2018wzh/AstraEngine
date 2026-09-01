@@ -57,6 +57,11 @@ const MINORI_CONFIG_TEST_BGM_STREAM_ID: u32 = 0xffff_ff00;
 const MINORI_CONFIG_TEST_VOICE_STREAM_ID: u32 = 0xffff_ff01;
 const MINORI_CONFIG_TEST_SE_STREAM_ID: u32 = 0xffff_ff02;
 const MINORI_SAVE_PAGE_COUNT: u32 = 10;
+// Page 0 is the title-page Auto Save view, page 1 is Quick Save, and the
+// gameplay Save/Load entry opens the first manual page (Page2 artwork).
+// Keep the distinction in the family VM instead of making the Host infer it
+// from a rendered label.
+const MINORI_GAMEPLAY_MANUAL_PAGE_INDEX: u32 = 2;
 pub(crate) const MINORI_BGM_STREAM_ID: u32 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1520,7 +1525,7 @@ impl MinoriVm {
             return Err(MinoriRuntimeError::State);
         }
         self.state.system_ui.page = MinoriSystemPage::Save;
-        self.state.system_ui.focus_index = 0;
+        self.state.system_ui.focus_index = MINORI_GAMEPLAY_MANUAL_PAGE_INDEX * 10;
         Ok(())
     }
 
@@ -1532,7 +1537,7 @@ impl MinoriVm {
             return Err(MinoriRuntimeError::State);
         }
         self.state.system_ui.page = MinoriSystemPage::Load;
-        self.state.system_ui.focus_index = 0;
+        self.state.system_ui.focus_index = MINORI_GAMEPLAY_MANUAL_PAGE_INDEX * 10;
         Ok(())
     }
 
@@ -6177,6 +6182,20 @@ mod tests {
             seed,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn gameplay_save_and_load_open_on_the_first_manual_page() {
+        let mut vm = firefly_vm(b".message 1 speaker body\r\n.end\r\n", 7);
+        vm.begin_title_launch().unwrap();
+        vm.set_system_page(MinoriSystemPage::None, 0).unwrap();
+        assert!(vm.step(1, 4).unwrap().is_some());
+
+        vm.open_save_page().unwrap();
+        assert_eq!(vm.state().system_ui.focus_index, 20);
+        vm.close_gameplay_system_page().unwrap();
+        vm.open_load_page().unwrap();
+        assert_eq!(vm.state().system_ui.focus_index, 20);
     }
 
     #[test]

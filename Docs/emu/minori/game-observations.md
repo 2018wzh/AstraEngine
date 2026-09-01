@@ -164,8 +164,12 @@ python Tools/AstraEMU/minori_paz.py "<minori-case-root>/scr.paz" --json
 `(608,16)` 开始；卡片列为 `x=64/456`，行首为 `y=81/189/297/405/513`。标题页
 进入 Load 时首屏实际显示 `saveload_Page0` 的 `Auto Save`，而剧情中打开 Save，或
 保存后从剧情打开 Load，首屏显示 `saveload_Page2` 的 `page #01`。这说明标题 Load
-与剧情 Save/Load 至少存在不同的页选择语义；槽 ID 与 Auto/Quick/manual 的完整映射
-尚未由原版行为或 IDA 共同确认，当前实现不据此猜测写入规则。
+与剧情 Save/Load 至少存在不同的页选择语义；当前 runtime 已让剧情 Save/Load 从
+`focus_index=20`（Page2）开始，标题 Load 仍由 title transaction 选择 Page0。槽 ID
+与 Auto/Quick/manual 的完整持久化映射尚未由原版行为或 IDA 共同确认，当前实现不据此
+猜测 Quick/Auto 的写入规则。
+Save 页无论当前是 Auto、Quick 还是 manual 页面都隐藏左侧 `Back`，Load 页才显示
+`Back`；provider 的按钮 scissor 因而按页面类型而不是 page index 决定。
 
 当前 runtime 的 save envelope 已硬切为 `astra.emu.minori.save_slot.v3`，严格绑定
 case/package/profile identity，并验证时间、注释、缩略图 PNG 尺寸和有界字节数。缩略图

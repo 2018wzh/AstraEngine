@@ -9441,14 +9441,12 @@ fn describe_save_load_page(
         462,
         656,
         1.0,
-        (vm.state().system_ui.page == MinoriSystemPage::Save && page_index == 0).then_some(
-            LegacyScissorV1 {
-                x: 578,
-                y: 656,
-                width: 240,
-                height: 48,
-            },
-        ),
+        (vm.state().system_ui.page == MinoriSystemPage::Save).then_some(LegacyScissorV1 {
+            x: 578,
+            y: 656,
+            width: 240,
+            height: 48,
+        }),
         &mut draws,
     )?;
     append_texture_draw(
@@ -12495,6 +12493,10 @@ mod tests {
                     "minori:/sys/saveload_Page1.png".into(),
                     encode_rgba(208, 48),
                 ),
+                (
+                    "minori:/sys/saveload_Page2.png".into(),
+                    encode_rgba(208, 48),
+                ),
                 ("minori:/sys/notsaved.png".into(), encode_rgba(106, 60)),
             ]),
         });
@@ -12677,7 +12679,7 @@ mod tests {
         let prompt = text_inputs.published.lock().unwrap()[0].1.clone();
         assert!(prompt
             .prompt_id
-            .starts_with("minori.text_input.save_comment.0."));
+            .starts_with("minori.text_input.save_comment.20."));
         assert_eq!(prompt.title, "SAVE");
         assert_eq!(prompt.label, "Comment");
         assert_eq!(prompt.initial_value, "");
@@ -12705,9 +12707,9 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(writable.files.lock().unwrap().contains_key(&slot_path(0)));
+        assert!(writable.files.lock().unwrap().contains_key(&slot_path(20)));
         assert_eq!(
-            provider.sessions[&session.0].save_slot_comments.get(&0),
+            provider.sessions[&session.0].save_slot_comments.get(&20),
             Some(&"memo".to_owned())
         );
     }
@@ -13581,6 +13583,10 @@ mod tests {
                     "minori:/sys/saveload_Page1.png".into(),
                     encode_rgba(208, 48),
                 ),
+                (
+                    "minori:/sys/saveload_Page2.png".into(),
+                    encode_rgba(208, 48),
+                ),
                 ("minori:/sys/notsaved.png".into(), encode_rgba(106, 60)),
             ]),
         });
@@ -13630,6 +13636,29 @@ mod tests {
         assert!(frame.draws.iter().any(|draw| {
             draw.texture_id == MINORI_SYSTEM_TEXTURE_ID + 2
                 && draw.vertices[0].position == [64.0, 81.0]
+        }));
+        vm.set_system_page(MinoriSystemPage::Save, 20).unwrap();
+        let manual_frame = describe_system_page_with_slots(
+            &vfs,
+            "mount.test",
+            Some((1280, 720)),
+            &vm,
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            manual_frame.texture_resources[3].resource_uri,
+            "minori:/sys/saveload_Page2.png"
+        );
+        assert!(manual_frame.draws.iter().any(|draw| {
+            draw.texture_id == MINORI_SYSTEM_TEXTURE_ID + 4
+                && draw.scissor
+                    == Some(LegacyScissorV1 {
+                        x: 578,
+                        y: 656,
+                        width: 240,
+                        height: 48,
+                    })
         }));
         vm.set_save_focus(17).unwrap();
         vm.move_save_page(1).unwrap();

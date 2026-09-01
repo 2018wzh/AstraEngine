@@ -2,9 +2,12 @@
 
 2026 年 9 月 1 日 Save/Load 页眉几何对齐：原版 1280×720 截图确认标题图和页标签图
 分别从舞台 `(64,16)` 与 `(608,16)` 开始；provider 现通过命名常量使用这两个起点，
-并以回归测试锁定首顶点。卡片、缩略图和底部按钮的既有坐标未改动。标题 Load 的
+并以回归测试锁定首顶点。Save 页的按钮裁剪也按页面类型统一隐藏 `Back`，不再只对
+Page0 生效；卡片、缩略图和底部按钮的既有坐标未改动。标题 Load 的
 `Auto Save` 与剧情 Save/Load 的 `page #01` 上下文差异已记录，但 Auto/Quick/manual
-槽 ID 映射尚未由原版与 IDA 双重确认，不能据此标记 Save/Load parity 完成。
+剧情 Save/Load 现从全局槽 20（Page2）开始，标题 Load 仍从槽 0（Page0）开始；该
+上下文选择已进入 VM。Auto/Quick/manual 槽 ID 的持久化映射（尤其 Quick Save 的写入
+目标）尚未由原版与 IDA 双重确认，不能据此标记 Save/Load parity 完成。
 
 2026 年 9 月 1 日按 FVP 预留 Minori profile 编码选择：`family_options` 新增必填
 `nls`，并在 Manager/CLI 运行时 profile 中使用 `minori.nls` 保存选择。允许值固定为
@@ -28,7 +31,7 @@ schema 已提升为 `astra.emu.minori.mount_options.v4`。
 CP932 locale binding；乱码不会通过替换字符或 GBK/翻译回退被吞掉。样本中观察到的
 `perseus_chs.mys` 与本地化 exe 只保留 inventory 事实，不会被 runtime 探测或合并。
 Minori message path 已删除 translation Hook 调用，正文保持原版日文；Minori 定向
-201 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
+202 项 library tests 通过。该项是原版边界与 parser/VFS 回归，不提升完整路线、原版
 同点视觉、Release Sandbox 或 Windows E3。
 
 同日补齐 Manager VFS 预览的 locale 绑定：活动 Minori 挂载下的无 BOM 文本先经严格

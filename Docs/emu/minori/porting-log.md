@@ -1505,6 +1505,10 @@ Minori 菜单的 item id、顺序或平台呈现。
 - `describe_save_load_page` 现在把两个起点作为命名常量传给同一 `Renderer2D` draw
   路径，provider 回归直接检查两项首顶点位置。对应 `astra-emu-minori` 定向测试通过，
   未生成新的媒体或截图到仓库。
+- 原版 Save 页在 Page2 截图中仍只显示 `Next`/`Return`；按钮裁剪条件已改为所有 Save
+  页面统一隐藏 `Back`，Load 页面保留完整按钮条，并由 provider 回归锁定 Page2 路径。
 - 原版标题 Load 首屏显示 `Auto Save`，剧情 Save 及保存后的剧情 Load 首屏显示
-  `page #01`。这是已观察到的上下文差异；Auto/Quick/manual 槽 ID 如何映射尚未由
-  原版交互和 IDA 同时确认，因此仍保持 blocking，不在实现中猜测。
+  `page #01`。runtime 现把剧情 Save/Load 的初始 focus 设为全局槽 20（Page2），
+  title Load 继续由 title transaction 设为 focus 0（Page0）。Auto/Quick/manual 槽
+  ID 如何持久化映射尚未由原版交互和 IDA 同时确认；Quick Save 的写入目标仍保持
+  独立 blocking，不以页面标签推断。

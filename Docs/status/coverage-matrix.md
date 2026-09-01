@@ -2,9 +2,10 @@
 
 2026 年 9 月 1 日 Save/Load 页眉 coverage：provider 按原版 1280×720 舞台使用
 `(64,16)` 的标题图和 `(608,16)` 的页标签图，定向回归检查两个 draw origin；卡片、
-缩略图和底部按钮保持此前已验证位置。原版标题 Load 显示 `Auto Save`，剧情 Save/Load
-显示 `page #01` 的上下文差异已进入观察记录，但槽 ID 映射、同点视觉和完整 save/load
-路线仍为 blocking。
+缩略图和底部按钮保持此前已验证位置；Save 的 `Back` 裁剪现在覆盖所有 page index，
+Load 保留完整按钮条。原版标题 Load 显示 `Auto Save`，剧情 Save/Load
+显示 `page #01` 的上下文差异已进入 VM：剧情入口从全局槽 20 开始，标题入口从槽 0
+开始；槽 ID 持久化映射、同点视觉和完整 save/load 路线仍为 blocking。
 
 2026 年 9 月 1 日 Minori 原版 locale coverage：mount options v3 要求日文原版变体、
 严格 CP932 locale hook 和非符号链接 `perseus.exe`；PAZ/ANI/.sc 的字节边界均拒绝
