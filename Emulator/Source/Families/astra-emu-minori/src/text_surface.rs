@@ -216,7 +216,7 @@ fn append_text(
     outline: Option<TextOutline>,
     show_advance_indicator: bool,
 ) -> Result<(), &'static str> {
-    let mut runs = vec![TextRun {
+    let runs = vec![TextRun {
         text: text.into(),
         language: "ja-JP".into(),
         script: Some("Jpan".into()),
@@ -224,16 +224,6 @@ fn append_text(
         ruby: Vec::new(),
         voice: None,
     }];
-    if show_advance_indicator {
-        runs.push(TextRun {
-            text: ADVANCE_INDICATOR.into(),
-            language: "ja-JP".into(),
-            script: Some("Jpan".into()),
-            direction: TextDirection::LeftToRight,
-            ruby: Vec::new(),
-            voice: None,
-        });
-    }
     let layout = provider
         .layout(&TextLayoutRequest {
             key: layout_id.into(),
@@ -259,6 +249,63 @@ fn append_text(
     }) {
         return Err("ASTRA_EMU_MINORI_TEXT_LAYOUT_DIAGNOSTIC");
     }
+    let origin_x = text_origin_x(&layout, region)?;
+    append_layout_layers(
+        owner, commands, layout_id, &layout, origin_x, region.y, rgba, outline,
+    )?;
+    if show_advance_indicator {
+        let indicator_layout = provider
+            .layout(&TextLayoutRequest {
+                key: format!("{layout_id}.indicator"),
+                runs: vec![TextRun {
+                    text: ADVANCE_INDICATOR.into(),
+                    language: "ja-JP".into(),
+                    script: Some("Jpan".into()),
+                    direction: TextDirection::LeftToRight,
+                    ruby: Vec::new(),
+                    voice: None,
+                }],
+                constraint: LayoutConstraint {
+                    max_width: region.width as f32,
+                    max_height: Some(region.height as f32),
+                    max_lines: Some(1),
+                    font_size: region.font_size,
+                    line_height: region.line_height,
+                    wrap: WrapPolicy::None,
+                    overflow: OverflowPolicy::Clip,
+                },
+                font_families: vec![FONT_FAMILY.into()],
+                features: Vec::new(),
+            })
+            .map_err(|_| "ASTRA_EMU_MINORI_TEXT_LAYOUT")?;
+        if indicator_layout.diagnostics.iter().any(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                DiagnosticSeverity::Error | DiagnosticSeverity::Blocking
+            )
+        }) {
+            return Err("ASTRA_EMU_MINORI_TEXT_LAYOUT_DIAGNOSTIC");
+        }
+        let (indicator_x, indicator_y) =
+            advance_indicator_origin(&layout, indicator_layout.width, region, origin_x)?;
+        append_layout_layers(
+            owner,
+            commands,
+            &format!("{layout_id}.indicator"),
+            &indicator_layout,
+            indicator_x,
+            indicator_y,
+            rgba,
+            outline,
+        )?;
+    }
+    Ok(())
+}
+
+fn text_origin_x(
+    layout: &astra_media::TextLayoutResult,
+    region: TextRegion,
+) -> Result<i32, &'static str> {
     let occupied = layout.width.ceil().min(region.width as f32) as i64;
     let remaining = i64::from(region.width)
         .checked_sub(occupied)
@@ -267,10 +314,62 @@ fn append_text(
         TextAlignment::Start => 0,
         TextAlignment::Center => remaining / 2,
     };
-    let origin_x = i64::from(region.x)
+    i64::from(region.x)
         .checked_add(offset)
         .and_then(|value| i32::try_from(value).ok())
-        .ok_or("ASTRA_EMU_MINORI_TEXT_ALIGNMENT")?;
+        .ok_or("ASTRA_EMU_MINORI_TEXT_ALIGNMENT")
+}
+
+fn advance_indicator_origin(
+    body_layout: &astra_media::TextLayoutResult,
+    indicator_width: f32,
+    region: TextRegion,
+    origin_x: i32,
+) -> Result<(i32, i32), &'static str> {
+    if !indicator_width.is_finite() || indicator_width <= 0.0 {
+        return Err("ASTRA_EMU_MINORI_TEXT_INDICATOR_LAYOUT");
+    }
+    let last_line = body_layout
+        .lines
+        .iter()
+        .filter(|line| line.run_index == 0)
+        .max_by_key(|line| line.line);
+    let (line, line_top, line_width) = last_line
+        .map(|line| (line.line, line.top, line.width))
+        .unwrap_or((0, 0.0, 0.0));
+    if !line_top.is_finite() || !line_width.is_finite() || line_top < 0.0 || line_width < 0.0 {
+        return Err("ASTRA_EMU_MINORI_TEXT_INDICATOR_LAYOUT");
+    }
+    let mut local_x = line_width;
+    let mut local_y = line_top;
+    if line_width + indicator_width > region.width as f32 {
+        let next_line = line
+            .checked_add(1)
+            .ok_or("ASTRA_EMU_MINORI_TEXT_INDICATOR_LAYOUT")?;
+        if next_line >= region.max_lines {
+            return Err("ASTRA_EMU_MINORI_TEXT_INDICATOR_LAYOUT");
+        }
+        local_x = 0.0;
+        local_y = next_line as f32 * region.line_height;
+    }
+    let x = (i64::from(origin_x) as f32 + local_x).round();
+    let y = (i64::from(region.y) as f32 + local_y).round();
+    let x = i32::try_from(x as i64).map_err(|_| "ASTRA_EMU_MINORI_TEXT_INDICATOR_LAYOUT")?;
+    let y = i32::try_from(y as i64).map_err(|_| "ASTRA_EMU_MINORI_TEXT_INDICATOR_LAYOUT")?;
+    Ok((x, y))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_layout_layers(
+    owner: &mut TextRenderResourceOwner,
+    commands: &mut Vec<SceneCommand>,
+    layout_id: &str,
+    layout: &astra_media::TextLayoutResult,
+    origin_x: i32,
+    origin_y: i32,
+    rgba: [u8; 4],
+    outline: Option<TextOutline>,
+) -> Result<(), &'static str> {
     let mut layers = Vec::new();
     if let Some(outline) = outline {
         let radius =
@@ -285,8 +384,7 @@ fn append_text(
                     origin_x
                         .checked_add(x)
                         .ok_or("ASTRA_EMU_MINORI_TEXT_OUTLINE_BOUNDS")?,
-                    region
-                        .y
+                    origin_y
                         .checked_add(y)
                         .ok_or("ASTRA_EMU_MINORI_TEXT_OUTLINE_BOUNDS")?,
                     outline.rgba,
@@ -294,10 +392,10 @@ fn append_text(
             }
         }
     }
-    layers.push((layout_id.to_owned(), origin_x, region.y, rgba));
+    layers.push((layout_id.to_owned(), origin_x, origin_y, rgba));
     for (id, x, y, color) in layers {
         let mut layout_commands = owner
-            .update_layout(&id, &layout, color)
+            .update_layout(&id, layout, color)
             .map_err(|_| "ASTRA_EMU_MINORI_TEXT_RESOURCE")?;
         commands.push(SceneCommand::PushTransform {
             transform: Transform2D::translation(x as f32, y as f32),
@@ -404,5 +502,79 @@ mod tests {
         request.show_advance_indicator = true;
         let with = renderer.render(&[request]).unwrap();
         assert_ne!(with, without);
+    }
+
+    #[test]
+    fn advance_indicator_stays_inline_when_the_last_line_has_room() {
+        let renderer = MinoriTextSurfaceRenderer::new(1280, 720).unwrap();
+        let region = TextRegion {
+            x: 160,
+            y: 568,
+            width: 960,
+            height: 112,
+            font_size: 26.0,
+            line_height: 32.0,
+            max_lines: 3,
+            alignment: TextAlignment::Start,
+        };
+        let body_layout = renderer
+            .provider
+            .layout(&TextLayoutRequest {
+                key: "minori.test.indicator-placement".into(),
+                runs: vec![TextRun {
+                    text: "本文".into(),
+                    language: "ja-JP".into(),
+                    script: Some("Jpan".into()),
+                    direction: TextDirection::LeftToRight,
+                    ruby: Vec::new(),
+                    voice: None,
+                }],
+                constraint: LayoutConstraint {
+                    max_width: region.width as f32,
+                    max_height: Some(region.height as f32),
+                    max_lines: Some(region.max_lines),
+                    font_size: region.font_size,
+                    line_height: region.line_height,
+                    wrap: WrapPolicy::WordOrGlyph,
+                    overflow: OverflowPolicy::Clip,
+                },
+                font_families: vec![FONT_FAMILY.into()],
+                features: Vec::new(),
+            })
+            .unwrap();
+        let indicator_layout = renderer
+            .provider
+            .layout(&TextLayoutRequest {
+                key: "minori.test.indicator-placement.marker".into(),
+                runs: vec![TextRun {
+                    text: ADVANCE_INDICATOR.into(),
+                    language: "ja-JP".into(),
+                    script: Some("Jpan".into()),
+                    direction: TextDirection::LeftToRight,
+                    ruby: Vec::new(),
+                    voice: None,
+                }],
+                constraint: LayoutConstraint {
+                    max_width: region.width as f32,
+                    max_height: Some(region.height as f32),
+                    max_lines: Some(1),
+                    font_size: region.font_size,
+                    line_height: region.line_height,
+                    wrap: WrapPolicy::None,
+                    overflow: OverflowPolicy::Clip,
+                },
+                font_families: vec![FONT_FAMILY.into()],
+                features: Vec::new(),
+            })
+            .unwrap();
+        let (x, y) = advance_indicator_origin(
+            &body_layout,
+            indicator_layout.width,
+            region,
+            text_origin_x(&body_layout, region).unwrap(),
+        )
+        .unwrap();
+        assert!(x > region.x);
+        assert_eq!(y, region.y);
     }
 }
