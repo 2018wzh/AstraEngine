@@ -1,8 +1,11 @@
-// Game library page - cover grid, search, inspector (desktop 3-column / mobile 2-column).
+// Game library page - M3 Search Bar, Filter Chip Bar, Cover Grid, and Side Sheet Inspector.
 
 import { Button, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
 import { GameCard, CoverCard } from "../components/cover-card.slint";
+import { ConfigField, GenericConfigForm } from "../components/generic-config.slint";
+import { M3Button, M3IconButton, M3Chip, M3Card } from "../components/m3-widgets.slint";
 
 export struct PlaySession {
     start-time: string,
@@ -19,29 +22,165 @@ component InspectorRow inherits Rectangle {
     in property <string> label;
     in property <string> value;
 
-    height: 20px;
-
-    HorizontalLayout {
-        spacing: 8px;
-
-        Text {
-            text: label;
-            color: Theme.text-muted;
-            font-size: 12px;
-            width: 70px;
-        }
-        Text {
-            text: value;
-            color: Theme.text;
-            font-size: 12px;
-            horizontal-stretch: 1;
-            overflow: elide;
+    VerticalLayout {
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: label;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                width: 74px;
+                vertical-alignment: top;
+            }
+            Text {
+                text: value;
+                color: Theme.on-surface;
+                font-size: Theme.font-body-sm;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
         }
     }
 }
 
-// Bangumi collection progress for the selected game. Lives in the library so the
-// status is always tied to the currently selected case rather than a global page.
+component GameListRow inherits Rectangle {
+    in property <GameCard> game;
+    in property <bool> selected: false;
+    in property <string> density: "comfortable";
+    callback activated(string);
+    callback launch(string);
+
+    height: density == "compact" ? 60px : 72px;
+    background: selected
+        ? Theme.surface-container-high
+        : (row-area.has-hover ? Theme.surface-container : Theme.surface-container-low);
+    border-radius: Theme.shape-md;
+    border-width: selected ? 2px : 1px;
+    border-color: selected ? Theme.primary : Theme.outline-variant;
+    accessible-role: button;
+    accessible-label: game.title;
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 12px;
+        alignment: start;
+
+        // Cover thumbnail
+        Rectangle {
+            width: 44px;
+            height: 58px;
+            background: Theme.surface-container-highest;
+            border-radius: Theme.shape-xs;
+            clip: true;
+
+            if game.cover-uri != "" : Image {
+                source: game.cover;
+                image-fit: cover;
+                width: parent.width;
+                height: parent.height;
+            }
+            if game.cover-uri == "" : Icon {
+                glyph: Icons.gamepad;
+                font-size: 16px;
+                color: Theme.outline;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Info stack
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: game.title;
+                color: Theme.on-surface;
+                font-size: Theme.font-title-sm;
+                font-weight: 600;
+                overflow: elide;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: game.family; color: Theme.on-surface-variant; font-size: Theme.font-label-md; }
+                if game.play-time != "" : Text { text: "· " + game.play-time; color: Theme.on-surface-variant; font-size: Theme.font-label-md; }
+                if game.diagnostic != "" : Text { text: game.diagnostic; color: Theme.error; font-size: Theme.font-label-sm; overflow: elide; }
+            }
+            if game.last-played != "" : Text { text: game.last-played; color: Theme.on-surface-variant; font-size: Theme.font-label-sm; overflow: elide; }
+        }
+
+        // Compatibility badge
+        if game.compatibility-status != "" : Rectangle {
+            width: comp-label.preferred-width + 12px;
+            height: 22px;
+            border-radius: Theme.shape-xs;
+            y: (parent.height - self.height) / 2;
+            background: game.compatibility-status == "perfect" ? Theme.compat-perfect-bg
+                : game.compatibility-status == "completable" ? Theme.compat-ok-bg
+                : game.compatibility-status == "flawed" ? Theme.compat-flawed-bg
+                : game.compatibility-status == "boot_only" ? Theme.compat-boot-bg
+                : Theme.compat-bad-bg;
+
+            comp-label := Text {
+                text: game.compatibility-status == "perfect" ? "完美"
+                    : game.compatibility-status == "completable" ? "可通关"
+                    : game.compatibility-status == "flawed" ? "有瑕疵"
+                    : game.compatibility-status == "boot_only" ? "仅启动" : "无法运行";
+                color: game.compatibility-status == "perfect" ? Theme.compat-perfect-fg
+                    : game.compatibility-status == "completable" ? Theme.compat-ok-fg
+                    : game.compatibility-status == "flawed" ? Theme.compat-flawed-fg
+                    : game.compatibility-status == "boot_only" ? Theme.compat-boot-fg
+                    : Theme.compat-bad-fg;
+                font-size: Theme.font-label-sm;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Launch button
+        Rectangle {
+            width: 68px;
+            height: 32px;
+            border-radius: 16px;
+            background: game.diagnostic != "" ? Theme.surface-container-highest : Theme.primary;
+            y: (parent.height - self.height) / 2;
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+                Icon {
+                    glyph: Icons.play;
+                    font-size: 11px;
+                    color: game.diagnostic != "" ? Theme.outline : Theme.on-primary;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: "启动";
+                    color: game.diagnostic != "" ? Theme.outline : Theme.on-primary;
+                    font-size: Theme.font-label-md;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            TouchArea {
+                enabled: game.diagnostic == "";
+                clicked => { root.launch(game.case-id); }
+            }
+        }
+    }
+
+    row-area := TouchArea { clicked => { root.activated(game.case-id); } }
+}
+
+// Bangumi collection progress section with M3 Segmented Buttons and rating
 component BangumiProgressSection inherits VerticalLayout {
     in-out property <string> play-status: "doing";
     in-out property <int> rating: 1;
@@ -52,38 +191,146 @@ component BangumiProgressSection inherits VerticalLayout {
 
     spacing: 8px;
 
-    Text {
-        text: "Bangumi progress";
-        color: Theme.text;
-        font-size: 13px;
-        font-weight: 600;
+    HorizontalLayout {
+        spacing: 6px;
+        Icon {
+            glyph: Icons.database;
+            font-size: 14px;
+            color: Theme.primary;
+            vertical-alignment: center;
+        }
+        Text {
+            text: "Bangumi 收藏与进度同步";
+            color: Theme.on-surface;
+            font-size: Theme.font-title-sm;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
     }
 
-    ComboBox {
-        model: ["wish", "doing", "collect", "on_hold", "dropped"];
-        current-index: root.play-status == "wish" ? 0 : root.play-status == "collect" ? 2 : root.play-status == "on_hold" ? 3 : root.play-status == "dropped" ? 4 : 1;
-        selected(value) => { root.play-status = value; }
+    // Status segmented buttons
+    HorizontalLayout {
+        height: 32px;
+        spacing: 2px;
+
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.shape-xs;
+            background: root.play-status == "wish" ? Theme.primary-container : Theme.surface-container;
+            Text {
+                text: "想看";
+                color: root.play-status == "wish" ? Theme.on-primary-container : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: root.play-status == "wish" ? 700 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.play-status = "wish"; } }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.shape-xs;
+            background: root.play-status == "doing" ? Theme.primary-container : Theme.surface-container;
+            Text {
+                text: "在看";
+                color: root.play-status == "doing" ? Theme.on-primary-container : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: root.play-status == "doing" ? 700 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.play-status = "doing"; } }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.shape-xs;
+            background: root.play-status == "collect" ? Theme.primary-container : Theme.surface-container;
+            Text {
+                text: "看过";
+                color: root.play-status == "collect" ? Theme.on-primary-container : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: root.play-status == "collect" ? 700 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.play-status = "collect"; } }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.shape-xs;
+            background: root.play-status == "on_hold" ? Theme.primary-container : Theme.surface-container;
+            Text {
+                text: "搁置";
+                color: root.play-status == "on_hold" ? Theme.on-primary-container : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: root.play-status == "on_hold" ? 700 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.play-status = "on_hold"; } }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            border-radius: Theme.shape-xs;
+            background: root.play-status == "dropped" ? Theme.primary-container : Theme.surface-container;
+            Text {
+                text: "抛弃";
+                color: root.play-status == "dropped" ? Theme.on-primary-container : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: root.play-status == "dropped" ? 700 : 400;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            TouchArea { clicked => { root.play-status = "dropped"; } }
+        }
     }
 
-    SpinBox { value <=> root.rating; minimum: 1; maximum: 10; }
+    // Rating row
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+
+        Icon {
+            glyph: Icons.star;
+            font-size: 16px;
+            color: Theme.primary;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: "个人评分: " + root.rating + " / 10";
+            color: Theme.on-surface;
+            font-size: Theme.font-body-sm;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        SpinBox {
+            value <=> root.rating;
+            minimum: 1;
+            maximum: 10;
+            width: 90px;
+        }
+    }
 
     TextEdit {
         text <=> root.note;
-        placeholder-text: "Private note (maximum 1024 characters)";
-        min-height: 80px;
+        placeholder-text: "填写私密备忘录（最多 1024 字符）";
+        min-height: 72px;
     }
 
-    Button {
+    M3Button {
         enabled: root.has-case;
-        text: "Sync play status";
+        text: "同步至 Bangumi 进度";
+        primary: true;
         clicked => { root.sync(root.play-status, root.rating, root.note); }
     }
 
-    Text {
+    if root.sync-summary != "" : Text {
         text: root.sync-summary;
-        color: Theme.text-muted;
+        color: Theme.on-surface-variant;
         wrap: word-wrap;
-        font-size: 12px;
+        font-size: Theme.font-label-md;
     }
 }
 
@@ -115,6 +362,18 @@ export component LibraryPage inherits Rectangle {
     in property <string> bangumi-sync-summary;
     in property <int> grid-columns: 3;
     in property <bool> desktop-mode: true;
+    in-out property <string> view-mode: "grid";
+    in property <string> density: "comfortable";
+    in property <[ConfigField]> family-config-fields;
+    // Extended metadata (PotatoVN-style)
+    in property <string> selected-developer;
+    in property <string> selected-release-date;
+    in property <string> selected-platforms;
+    in property <string> selected-engine;
+    in property <string> selected-cover-meta;
+    in property <string> selected-description;
+    in property <string> selected-tags;
+    in property <string> selected-aliases;
     callback launch(string);
     callback select-case(string);
     callback search(string);
@@ -127,135 +386,474 @@ export component LibraryPage inherits Rectangle {
     callback fetch-releases();
     callback pin-release(string);
     callback update-bangumi-play-status(string, int, string);
+    callback set-view-mode(string);
+    callback family-config-changed(string, string);
+    callback save-family-config();
+    callback reset-family-config();
 
-    background: Theme.background;
+    background: Theme.surface;
 
-    // Desktop layout: grid + inspector
-    if root.desktop-mode : HorizontalLayout {
-        spacing: 0px;
+    // Desktop layout
+    if root.desktop-mode : Rectangle {
+        clip: true;
 
-        // Main grid area
         VerticalLayout {
-            padding: 18px;
-            spacing: 12px;
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            padding: 20px;
+            spacing: 14px;
 
+            searchDebounce := Timer {
+                interval: 300ms;
+                triggered => { root.search(root.search-query); }
+            }
+
+            // M3 Search Bar row
             HorizontalLayout {
-                spacing: 8px;
+                height: 48px;
+                spacing: 10px;
 
-                LineEdit {
-                    text <=> root.search-query;
-                    placeholder-text: "Search library";
+                Rectangle {
                     horizontal-stretch: 1;
-                    edited => { root.search(self.text); }
+                    height: 48px;
+                    border-radius: 24px;
+                    background: Theme.surface-container-high;
+                    border-width: 1px;
+                    border-color: Theme.outline-variant;
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 14px;
+                        spacing: 10px;
+                        alignment: center;
+
+                        Icon {
+                            glyph: Icons.search;
+                            font-size: 16px;
+                            color: Theme.on-surface-variant;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 32px;
+
+                            if root.search-query == "" : Text {
+                                text: "搜索作品库（标题、别名、开发商）";
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-body-md;
+                                vertical-alignment: center;
+                                x: 0px;
+                                width: parent.width;
+                            }
+
+                            TextInput {
+                                text <=> root.search-query;
+                                color: Theme.on-surface;
+                                font-size: Theme.font-body-md;
+                                vertical-alignment: center;
+                                single-line: true;
+                                x: 0px;
+                                width: parent.width;
+                                edited => { searchDebounce.restart(); }
+                            }
+                        }
+
+                        if root.search-query != "" : Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 12px;
+                            background: Theme.surface-container-highest;
+
+                            Icon {
+                                glyph: Icons.xmark;
+                                font-size: 11px;
+                                color: Theme.on-surface-variant;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => { root.search-query = ""; root.search(""); }
+                            }
+                        }
+                    }
                 }
 
-                Button {
-                    text: "Rescan";
+                M3Button {
+                    text: "扫描游戏";
+                    icon: Icons.rotate;
+                    variant: "tonal";
                     clicked => { root.rescan(); }
                 }
 
-                ComboBox {
-                    model: ["Sort: Title", "Sort: Recent played", "Sort: Play time"];
-                    current-index: root.library-sort == "recent" ? 1 : root.library-sort == "play_time" ? 2 : 0;
-                    selected(value) => { root.set-library-sort(value == "Sort: Recent played" ? "recent" : value == "Sort: Play time" ? "play_time" : "title"); }
-                }
+                // View mode toggle (Grid / List)
+                Rectangle {
+                    width: 80px;
+                    height: 36px;
+                    y: 6px;
+                    border-radius: 18px;
+                    background: Theme.surface-container;
+                    border-width: 1px;
+                    border-color: Theme.outline-variant;
 
-                ComboBox {
-                    model: ["Compat: All", "Compat: Perfect", "Compat: Completable", "Compat: Flawed", "Compat: Boot only", "Compat: Unplayable", "Compat: Unknown"];
-                    current-index: root.compatibility-filter == "perfect" ? 1 : root.compatibility-filter == "completable" ? 2 : root.compatibility-filter == "flawed" ? 3 : root.compatibility-filter == "boot_only" ? 4 : root.compatibility-filter == "unplayable" ? 5 : root.compatibility-filter == "unknown" ? 6 : 0;
-                    selected(value) => { root.set-compatibility-filter(value == "Compat: Perfect" ? "perfect" : value == "Compat: Completable" ? "completable" : value == "Compat: Flawed" ? "flawed" : value == "Compat: Boot only" ? "boot_only" : value == "Compat: Unplayable" ? "unplayable" : value == "Compat: Unknown" ? "unknown" : "all"); }
-                }
+                    HorizontalLayout {
+                        padding: 3px;
+                        spacing: 2px;
 
-                Button {
-                    text: "Refresh compat";
-                    clicked => { root.refresh-compatibility(); }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 15px;
+                            background: root.view-mode == "grid" ? Theme.primary : transparent;
+
+                            Text {
+                                text: "网格";
+                                color: root.view-mode == "grid" ? Theme.on-primary : Theme.on-surface-variant;
+                                font-size: Theme.font-label-md;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea { clicked => { root.set-view-mode("grid"); root.view-mode = "grid"; } }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 15px;
+                            background: root.view-mode == "list" ? Theme.primary : transparent;
+
+                            Text {
+                                text: "列表";
+                                color: root.view-mode == "list" ? Theme.on-primary : Theme.on-surface-variant;
+                                font-size: Theme.font-label-md;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea { clicked => { root.set-view-mode("list"); root.view-mode = "list"; } }
+                        }
+                    }
                 }
             }
 
-            ScrollView {
+            // M3 Filter & Sort Chip row
+            HorizontalLayout {
+                spacing: 10px;
+
+                ComboBox {
+                    model: ["排序: 标题", "排序: 最近游玩", "排序: 累计时长"];
+                    current-index: root.library-sort == "recent" ? 1 : root.library-sort == "play_time" ? 2 : 0;
+                    selected(value) => { root.set-library-sort(value == "排序: 最近游玩" ? "recent" : value == "排序: 累计时长" ? "play_time" : "title"); }
+                }
+
+                ComboBox {
+                    model: ["适配: 全部", "适配: 完美", "适配: 可通关", "适配: 有瑕疵", "适配: 仅启动", "适配: 无法运行", "适配: 未知"];
+                    current-index: root.compatibility-filter == "perfect" ? 1 : root.compatibility-filter == "completable" ? 2 : root.compatibility-filter == "flawed" ? 3 : root.compatibility-filter == "boot_only" ? 4 : root.compatibility-filter == "unplayable" ? 5 : root.compatibility-filter == "unknown" ? 6 : 0;
+                    selected(value) => { root.set-compatibility-filter(value == "适配: 完美" ? "perfect" : value == "适配: 可通关" ? "completable" : value == "适配: 有瑕疵" ? "flawed" : value == "适配: 仅启动" ? "boot_only" : value == "适配: 无法运行" ? "unplayable" : value == "适配: 未知" ? "unknown" : "all"); }
+                }
+
+                M3Button {
+                    text: "刷新适配数据";
+                    icon: Icons.arrows-rotate;
+                    variant: "outlined";
+                    clicked => { root.refresh-compatibility(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Text {
+                    text: root.games.length + " 部作品";
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label-md;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Content view (Grid or List)
+            if root.view-mode == "grid" : ScrollView {
                 mouse-drag-pan-enabled: true;
 
-                GridLayout {
-                    spacing: 12px;
+                VerticalLayout {
+                    spacing: 14px;
+                    GridLayout {
+                        spacing: root.density == "compact" ? 10px : 14px;
 
-                    for game[index] in games: CoverCard {
-                        row: Math.floor(index / root.grid-columns);
-                        col: Math.mod(index, root.grid-columns);
+                        for game[index] in games: CoverCard {
+                            row: Math.floor(index / root.grid-columns);
+                            col: Math.mod(index, root.grid-columns);
+                            game: game;
+                            selected: game.case-id == root.selected-case-id;
+                            activated(id) => { root.select-case(id); }
+                            launch(id) => { root.launch(id); }
+                        }
+                    }
+
+                    // Empty state
+                    if games.length == 0 : Rectangle {
+                        height: 240px;
+                        border-radius: Theme.shape-lg;
+                        background: Theme.surface-container-low;
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 12px;
+                            Icon {
+                                glyph: Icons.gamepad;
+                                font-size: 40px;
+                                color: Theme.outline;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: root.search-query != "" ? "未找到匹配 \"" + root.search-query + "\" 的游戏" : "游戏库暂无作品";
+                                color: Theme.on-surface;
+                                font-size: Theme.font-title-md;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: root.search-query != "" ? "尝试更换关键字或重置筛选条件" : "引导：1. 添加游戏根目录  2. 在设置中开启网络授权  3. 点击“扫描游戏”自动探测 Family 与元数据";
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-body-sm;
+                                wrap: word-wrap;
+                                horizontal-alignment: center;
+                            }
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 10px;
+                                if root.search-query != "" : M3Button {
+                                    text: "清除搜索";
+                                    variant: "outlined";
+                                    clicked => { root.search-query = ""; root.search(""); }
+                                }
+                                M3Button {
+                                    text: "扫描本地游戏";
+                                    icon: Icons.rotate;
+                                    primary: true;
+                                    clicked => { root.rescan(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // List View
+            if root.view-mode == "list" : ScrollView {
+                mouse-drag-pan-enabled: true;
+
+                VerticalLayout {
+                    spacing: root.density == "compact" ? 6px : 8px;
+
+                    for game in games: GameListRow {
                         game: game;
                         selected: game.case-id == root.selected-case-id;
-                        activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                        density: root.density;
+                        activated(id) => { root.select-case(id); }
+                        launch(id) => { root.launch(id); }
+                    }
+
+                    if games.length == 0 : Rectangle {
+                        height: 220px;
+                        border-radius: Theme.shape-lg;
+                        background: Theme.surface-container-low;
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 12px;
+                            Text {
+                                text: root.search-query != "" ? "未找到匹配的游戏" : "游戏库暂无作品";
+                                color: Theme.on-surface;
+                                font-size: Theme.font-title-md;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "请点击“扫描游戏”载入已授权目录中的作品。";
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-body-sm;
+                                horizontal-alignment: center;
+                            }
+                            HorizontalLayout {
+                                alignment: center;
+                                Button { text: "扫描游戏"; clicked => { root.rescan(); } }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Inspector panel
-        Rectangle {
-            width: 300px;
-            background: Theme.surface;
+        // Backdrop to dismiss side sheet
+        if root.selected-case-id != "" : Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width - 340px;
+            height: parent.height;
+            background: #66000000;
+            z: 9;
+            TouchArea { clicked => { root.select-case(""); } }
+        }
+
+        // M3 Side Sheet Inspector (Desktop)
+        if root.selected-case-id != "" : Rectangle {
+            x: parent.width - 340px;
+            y: 0px;
+            width: 340px;
+            height: parent.height;
+            background: Theme.surface-container-low;
             border-width: 1px;
-            border-color: Theme.border;
+            border-color: Theme.outline-variant;
+            border-radius: Theme.shape-xl;
+            clip: true;
+            z: 10;
+            animate x { duration: 180ms; easing: ease-out; }
 
             VerticalLayout {
                 padding: 18px;
-                spacing: 10px;
+                spacing: 12px;
 
-                Text {
-                    text: root.selected-case-id == "" ? "Select a game" : (root.selected-title != "" ? root.selected-title : root.selected-case-id);
-                    color: Theme.text;
-                    font-size: 18px;
-                    font-weight: 700;
-                    wrap: word-wrap;
+                // Header & Close
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+
+                        Text {
+                            text: root.selected-title != "" ? root.selected-title : root.selected-case-id;
+                            color: Theme.on-surface;
+                            font-size: Theme.font-title-md;
+                            font-weight: 700;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: "Family: " + root.selected-family;
+                            color: Theme.primary;
+                            font-size: Theme.font-label-md;
+                            font-weight: 600;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 16px;
+                        background: close-btn.has-hover ? Theme.surface-container-high : transparent;
+
+                        Icon {
+                            glyph: Icons.xmark;
+                            font-size: 14px;
+                            color: Theme.on-surface-variant;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        close-btn := TouchArea {
+                            clicked => { root.select-case(""); }
+                        }
+                    }
                 }
 
+                // Quick Launch & VFS Action Bar
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    M3Button {
+                        horizontal-stretch: 1;
+                        text: "立即启动";
+                        icon: Icons.play;
+                        primary: true;
+                        clicked => { root.launch(root.selected-case-id); }
+                    }
+                    M3Button {
+                        text: "VFS 浏览";
+                        icon: Icons.folder-tree;
+                        variant: "tonal";
+                        clicked => { root.open-vfs(); }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.outline-variant; }
+
+                // Scrollable Inspector Details
                 ScrollView {
                     mouse-drag-pan-enabled: true;
 
                     VerticalLayout {
-                        spacing: 10px;
+                        spacing: 12px;
 
-                        if root.selected-case-id != "" : VerticalLayout {
+                        // Metadata section
+                        VerticalLayout {
                             spacing: 6px;
 
-                            InspectorRow { label: "Family"; value: root.selected-family; }
-                            InspectorRow { label: "Case ID"; value: root.selected-case-id; }
-                            if root.selected-play-time != "" : InspectorRow { label: "Play time"; value: root.selected-play-time; }
-                            if root.selected-last-played != "" : InspectorRow { label: "Last played"; value: root.selected-last-played; }
-                            if root.selected-vfs-status != "" : InspectorRow { label: "VFS"; value: root.selected-vfs-status; }
-                        }
+                            Text {
+                                text: "作品元数据 (PotatoVN 对标)";
+                                color: Theme.primary;
+                                font-size: Theme.font-title-sm;
+                                font-weight: 600;
+                            }
 
-                        if root.selected-case-id != "" && root.play-history.length > 0 : VerticalLayout {
-                            spacing: 4px;
-
-                            Text { text: "Play history"; color: Theme.text; font-size: 13px; font-weight: 600; }
-
-                            for session in root.play-history : HorizontalLayout {
-                                spacing: 6px;
-
-                                Text { text: session.start-time; color: Theme.text-muted; font-size: 11px; width: 132px; overflow: elide; }
-                                Text { text: session.duration; color: Theme.text; font-size: 11px; }
-                                Text { text: session.ended-by; color: Theme.text-muted; font-size: 11px; horizontal-stretch: 1; overflow: elide; }
+                            if root.selected-developer != "" : InspectorRow { label: "开发商"; value: root.selected-developer; }
+                            if root.selected-release-date != "" : InspectorRow { label: "发售日"; value: root.selected-release-date; }
+                            if root.selected-platforms != "" : InspectorRow { label: "发售平台"; value: root.selected-platforms; }
+                            if root.selected-engine != "" : InspectorRow { label: "原版引擎"; value: root.selected-engine; }
+                            if root.selected-play-time != "" : InspectorRow { label: "累计时长"; value: root.selected-play-time; }
+                            if root.selected-last-played != "" : InspectorRow { label: "最后运行"; value: root.selected-last-played; }
+                            if root.selected-aliases != "" : InspectorRow { label: "别名"; value: root.selected-aliases; }
+                            if root.selected-tags != "" : InspectorRow { label: "标签"; value: root.selected-tags; }
+                            if root.selected-description != "" : Text {
+                                text: root.selected-description;
+                                color: Theme.on-surface;
+                                font-size: Theme.font-body-sm;
+                                wrap: word-wrap;
                             }
                         }
 
-                        if root.selected-case-id != "" : VerticalLayout {
+                        Rectangle { height: 1px; background: Theme.outline-variant; }
+
+                        // Compatibility & VNDB release pinning
+                        VerticalLayout {
                             spacing: 6px;
 
-                            Text { text: "Compatibility"; color: Theme.text; font-size: 13px; font-weight: 600; }
-                            InspectorRow { label: "Status"; value: root.selected-compatibility-status == "" ? "Not listed" : root.selected-compatibility-status; }
-                            if root.selected-compatibility-vndb-id != "" : InspectorRow { label: "VNDB (vID / rID)"; value: root.selected-compatibility-vndb-id; }
-                            if root.selected-compatibility-updated != "" : InspectorRow { label: "Updated"; value: root.selected-compatibility-updated; }
+                            Text {
+                                text: "社区兼容性分级";
+                                color: Theme.primary;
+                                font-size: Theme.font-title-sm;
+                                font-weight: 600;
+                            }
 
-                            Text { text: "Game version (VNDB release)"; color: Theme.text-muted; font-size: 12px; }
-                            for rel[index] in root.releases : Button {
-                                horizontal-stretch: 1;
+                            InspectorRow {
+                                label: "运行评级";
+                                value: root.selected-compatibility-status == "" ? "未收录" : root.selected-compatibility-status;
+                            }
+                            if root.selected-compatibility-vndb-id != "" : InspectorRow {
+                                label: "VNDB 锚点";
+                                value: root.selected-compatibility-vndb-id;
+                            }
+                            if root.selected-compatibility-updated != "" : InspectorRow {
+                                label: "更新时间";
+                                value: root.selected-compatibility-updated;
+                            }
+
+                            Text {
+                                text: "版本精确钉选 (VNDB Release rID)";
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-label-md;
+                            }
+
+                            for rel[index] in root.releases : M3Button {
                                 text: rel.label;
+                                variant: "outlined";
+                                custom-radius: Theme.shape-sm;
                                 clicked => { root.pin-release(rel.release-id); }
                             }
+
                             HorizontalLayout {
-                                spacing: 6px;
-                                Button {
-                                    text: "Fetch releases";
+                                M3Button {
+                                    text: "拉取 VNDB 版本列表";
+                                    icon: Icons.cloud-arrow-down;
+                                    variant: "tonal";
                                     enabled: root.selected-case-id != "";
                                     clicked => { root.fetch-releases(); }
                                 }
@@ -263,27 +861,36 @@ export component LibraryPage inherits Rectangle {
 
                             if root.selected-compatibility-notes != "" : Text {
                                 text: root.selected-compatibility-notes;
-                                color: Theme.text-muted;
-                                font-size: 12px;
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-label-md;
                                 wrap: word-wrap;
                             }
                         }
 
-                        Rectangle { height: 1px; background: Theme.divider; }
+                        Rectangle { height: 1px; background: Theme.outline-variant; }
 
-                        Text { text: "Endpoint: " + root.endpoint-identity; color: Theme.text-muted; wrap: word-wrap; font-size: 12px; }
-                        Text { text: "Model: " + root.model-identity; color: Theme.text-muted; wrap: word-wrap; font-size: 12px; }
+                        // Play session history
+                        if root.play-history.length > 0 : VerticalLayout {
+                            spacing: 4px;
 
-                        Text { text: "FVP text encoding"; color: Theme.text-muted; font-size: 12px; }
-                        ComboBox {
-                            enabled: root.selected-case-id != "";
-                            model: ["Not configured", "shift_jis", "gbk", "utf8"];
-                            current-index: root.selected-nls == "shift_jis" ? 1 : root.selected-nls == "gbk" ? 2 : root.selected-nls == "utf8" ? 3 : 0;
-                            selected(value) => { if value != "Not configured" { root.configure-nls(value); } }
+                            Text {
+                                text: "近期游玩记录";
+                                color: Theme.on-surface;
+                                font-size: Theme.font-title-sm;
+                                font-weight: 600;
+                            }
+
+                            for session in root.play-history : HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: session.start-time; color: Theme.on-surface-variant; font-size: Theme.font-label-sm; width: 120px; overflow: elide; }
+                                Text { text: session.duration; color: Theme.on-surface; font-size: Theme.font-label-sm; }
+                                Text { text: session.ended-by; color: Theme.on-surface-variant; font-size: Theme.font-label-sm; horizontal-stretch: 1; overflow: elide; }
+                            }
+
+                            Rectangle { height: 1px; background: Theme.outline-variant; }
                         }
 
-                        Rectangle { height: 1px; background: Theme.divider; }
-
+                        // Bangumi progress section
                         BangumiProgressSection {
                             play-status <=> root.bangumi-play-status;
                             rating <=> root.bangumi-rating;
@@ -292,36 +899,39 @@ export component LibraryPage inherits Rectangle {
                             has-case: root.selected-case-id != "";
                             sync(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
                         }
-                    }
-                }
 
-                // Quick actions
-                VerticalLayout {
-                    spacing: 8px;
+                        Rectangle { height: 1px; background: Theme.outline-variant; }
 
-                    Button {
-                        enabled: root.selected-case-id != "";
-                        text: "Launch";
-                        clicked => { root.launch(root.selected-case-id); }
-                    }
-                    Button {
-                        enabled: root.selected-case-id != "";
-                        text: "Open VFS";
-                        clicked => { root.open-vfs(); }
-                    }
+                        // Text encoding quick selector
+                        Text {
+                            text: "文本编码快捷选项 (FVP)";
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-label-md;
+                        }
+                        ComboBox {
+                            enabled: root.selected-case-id != "";
+                            model: ["未配置", "shift_jis", "gbk", "utf8"];
+                            current-index: root.selected-nls == "shift_jis" ? 1 : root.selected-nls == "gbk" ? 2 : root.selected-nls == "utf8" ? 3 : 0;
+                            selected(value) => { if value != "未配置" { root.configure-nls(value); } }
+                        }
 
-                    if root.compatibility-sync-summary != "" : Text {
-                        text: root.compatibility-sync-summary;
-                        color: Theme.text-muted;
-                        font-size: 11px;
-                        wrap: word-wrap;
+                        // Family specific config
+                        if root.family-config-fields.length > 0 : GenericConfigForm {
+                            fields: root.family-config-fields;
+                            form-title: "Family 选项";
+                            form-description: "通用配置表单引擎";
+                            has-selected-case: root.selected-case-id != "";
+                            field-changed(key, value) => { root.family-config-changed(key, value); }
+                            save => { root.save-family-config(); }
+                            reset => { root.reset-family-config(); }
+                        }
                     }
                 }
             }
         }
     }
 
-    // Mobile layout: 2-column grid + bottom action bar
+    // Mobile layout: 2-column grid + bottom action sheet
     if !root.desktop-mode : VerticalLayout {
         padding-top: 12px;
         padding-left: 12px;
@@ -329,23 +939,71 @@ export component LibraryPage inherits Rectangle {
         padding-bottom: 8px;
         spacing: 10px;
 
+        mobileSearchDebounce := Timer {
+            interval: 300ms;
+            triggered => { root.search(root.search-query); }
+        }
+
         HorizontalLayout {
             spacing: 8px;
 
-            LineEdit {
-                text <=> root.search-query;
-                placeholder-text: "Search library";
+            Rectangle {
                 horizontal-stretch: 1;
-                edited => { root.search(self.text); }
+                height: 38px;
+                border-radius: 19px;
+                background: Theme.surface-container-high;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    Icon {
+                        glyph: Icons.search;
+                        font-size: 14px;
+                        color: Theme.on-surface-variant;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 28px;
+
+                        if root.search-query == "" : Text {
+                            text: "搜索作品库";
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-body-md;
+                            vertical-alignment: center;
+                            x: 0px;
+                            width: parent.width;
+                        }
+
+                        TextInput {
+                            text <=> root.search-query;
+                            color: Theme.on-surface;
+                            font-size: Theme.font-body-md;
+                            vertical-alignment: center;
+                            single-line: true;
+                            x: 0px;
+                            width: parent.width;
+                            edited => { mobileSearchDebounce.restart(); }
+                        }
+                    }
+                }
             }
 
-            Button {
-                text: "Scan";
+            M3Button {
+                text: "扫描";
+                icon: Icons.rotate;
+                variant: "tonal";
                 clicked => { root.rescan(); }
             }
         }
 
-        ScrollView {
+        if root.view-mode == "grid" : ScrollView {
             mouse-drag-pan-enabled: true;
 
             GridLayout {
@@ -356,17 +1014,37 @@ export component LibraryPage inherits Rectangle {
                     col: Math.mod(index, 2);
                     game: game;
                     selected: game.case-id == root.selected-case-id;
-                    activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                    activated(id) => { root.select-case(id); }
+                    launch(id) => { root.launch(id); }
                 }
             }
         }
 
-        if root.selected-case-id != "" : Rectangle {
-            background: Theme.surface-raised;
-            border-radius: Theme.radius;
+        if root.view-mode == "list" : ScrollView {
+            mouse-drag-pan-enabled: true;
 
             VerticalLayout {
-                padding: 12px;
+                spacing: 6px;
+
+                for game in games: GameListRow {
+                    game: game;
+                    selected: game.case-id == root.selected-case-id;
+                    density: root.density;
+                    activated(id) => { root.selected-case-id = id; root.select-case(id); }
+                    launch(id) => { root.launch(id); }
+                }
+            }
+        }
+
+        // Mobile Bottom Sheet on selection
+        if root.selected-case-id != "" : Rectangle {
+            background: Theme.surface-container-high;
+            border-radius: Theme.shape-lg;
+            border-width: 1px;
+            border-color: Theme.outline-variant;
+
+            VerticalLayout {
+                padding: 14px;
                 spacing: 10px;
 
                 HorizontalLayout {
@@ -379,30 +1057,24 @@ export component LibraryPage inherits Rectangle {
 
                         Text {
                             text: root.selected-title != "" ? root.selected-title : root.selected-case-id;
-                            color: Theme.text;
+                            color: Theme.on-surface;
                             wrap: word-wrap;
                             font-weight: 600;
                         }
                         Text {
                             text: root.selected-family;
-                            color: Theme.text-muted;
-                            font-size: 12px;
+                            color: Theme.primary;
+                            font-size: Theme.font-label-md;
                         }
                     }
 
-                    ComboBox {
-                        model: ["Not configured", "shift_jis", "gbk", "utf8"];
-                        current-index: root.selected-nls == "shift_jis" ? 1 : root.selected-nls == "gbk" ? 2 : root.selected-nls == "utf8" ? 3 : 0;
-                        selected(value) => { if value != "Not configured" { root.configure-nls(value); } }
-                    }
-
                     Button {
-                        text: "Launch";
+                        text: "启动";
                         clicked => { root.launch(root.selected-case-id); }
                     }
                 }
 
-                Rectangle { height: 1px; background: Theme.divider; }
+                Rectangle { height: 1px; background: Theme.outline-variant; }
 
                 BangumiProgressSection {
                     play-status <=> root.bangumi-play-status;

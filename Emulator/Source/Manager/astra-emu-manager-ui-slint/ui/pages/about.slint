@@ -2,6 +2,7 @@
 
 import { AboutSlint, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
 
 export component AboutPage inherits Rectangle {
@@ -19,54 +20,73 @@ export component AboutPage inherits Rectangle {
 
             // App header
             VerticalLayout {
-                spacing: 6px;
+                spacing: 8px;
                 alignment: center;
+
+                Rectangle {
+                    width: 64px;
+                    height: 64px;
+                    border-radius: Theme.shape-xl;
+                    background: Theme.primary-container;
+                    x: (parent.width - self.width) / 2;
+
+                    Icon {
+                        glyph: Icons.gamepad;
+                        font-size: 32px;
+                        color: Theme.on-primary-container;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
 
                 Text {
                     text: "AstraEMU";
-                    color: Theme.text;
-                    font-size: 28px;
+                    color: Theme.on-surface;
+                    font-size: Theme.font-headline-md;
                     font-weight: 700;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "Legacy visual novel runtime manager";
-                    color: Theme.text-muted;
-                    font-size: 14px;
+                    text: "下一代旧引擎视觉小说运行时与通用管理器";
+                    color: Theme.primary;
+                    font-size: Theme.font-title-sm;
+                    font-weight: 600;
                     horizontal-alignment: center;
                 }
                 if version != "" : Text {
-                    text: "Version " + version;
-                    color: Theme.text-muted;
-                    font-size: 12px;
+                    text: "版本 (Version) " + version;
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label-md;
                     horizontal-alignment: center;
                 }
                 if build-identity != "" : Text {
                     text: build-identity;
-                    color: Theme.text-muted;
-                    font-size: 11px;
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label-sm;
                     horizontal-alignment: center;
                 }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "About"; }
+            SettingsSectionHeader { title: "关于架构与项目定位"; }
 
             Text {
-                text: "AstraEMU is a manager and runtime host for legacy visual novel engines. It provides auto probing, trusted Luau patching, text translation, metadata integration and a unified library experience.";
-                color: Theme.text-muted;
+                text: "AstraEMU 作为 AstraEngine 系列原生独立产品，提供多 Family 旧引擎（FVP、Minori、KrKr、BGI 等）的原生加载与探测、Trusted Luau 补丁沙盒、LLM 实时翻译与统一的视觉小说书架管理体验。遵循系列宪章 Migration 12，采用 Slint 1.17 + wgpu 29 同设备硬件单通道渲染合成。";
+                color: Theme.on-surface-variant;
                 wrap: word-wrap;
-                font-size: 13px;
+                font-size: Theme.font-body-sm;
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Slint"; }
+            SettingsSectionHeader { title: "Slint 跨平台 GUI 框架"; }
 
             Rectangle {
-                background: Theme.surface;
-                border-radius: Theme.radius;
+                background: Theme.surface-container-low;
+                border-radius: Theme.shape-lg;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
                 min-height: 120px;
 
                 AboutSlint { }
@@ -74,27 +94,13 @@ export component AboutPage inherits Rectangle {
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Third-party notices"; }
+            SettingsSectionHeader { title: "开源协议与第三方声明"; }
 
             Text {
-                text: "Slint 1.17.1 — Royalty-free Desktop, Mobile, and Web Applications License 2.0.\nThe top-level About page displays the official AboutSlint widget.";
-                color: Theme.text-muted;
+                text: "Slint 1.17.1 — Royalty-free Desktop, Mobile, and Web Applications License 2.0.\nwgpu 29.0.4 — MIT / Apache-2.0\nwinit 0.30 — Apache-2.0\nFont Awesome 6 Free (Solid) — SIL OFL 1.1 (内嵌矢量字元库)";
+                color: Theme.on-surface-variant;
                 wrap: word-wrap;
-                font-size: 12px;
-            }
-
-            Text {
-                text: "wgpu 29.0.4 — MIT / Apache-2.0\nwinit 0.30 — Apache-2.0";
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-
-            Text {
-                text: "Font Awesome 6 Free (Solid) — SIL OFL 1.1. Embedded as the UI icon font.";
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                font-size: 12px;
+                font-size: Theme.font-label-md;
             }
         }
     }

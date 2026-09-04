@@ -29,6 +29,22 @@ pub struct FilterValidation {
 }
 
 impl FilterGraph {
+    pub fn for_preset(preset_id: &str) -> Self {
+        let preset_id = preset_id.to_owned();
+        let binding = FilterBinding {
+            preset_id: preset_id.clone(),
+            layer: FilterLayer::FinalFrame,
+        };
+        Self {
+            schema: "astra.emu.filter.graph.v1".into(),
+            bindings: if preset_id == "none" {
+                Vec::new()
+            } else {
+                vec![binding]
+            },
+        }
+    }
+
     pub fn validate(&self, layer_metadata: Option<&BTreeSet<String>>) -> FilterValidation {
         let mut active = Vec::new();
         let mut diagnostics = Vec::new();

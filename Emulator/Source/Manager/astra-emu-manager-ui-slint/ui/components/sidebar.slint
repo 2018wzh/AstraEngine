@@ -1,6 +1,6 @@
 // Sidebar grouped navigation component.
-// Desktop: left sidebar with icon+text grouped items.
-// Mobile: hidden (replaced by bottom nav in main.slint).
+// Desktop: M3 Navigation Drawer with stadium active indicator.
+// Mobile: M3 Navigation Bar with active pill container.
 
 import { Theme } from "../theme.slint";
 import { Icon, Icons } from "./icons.slint";
@@ -11,14 +11,19 @@ component SidebarItem inherits Rectangle {
     in property <bool> active: false;
     callback clicked();
 
-    height: 40px;
-    border-radius: Theme.radius-sm;
-    background: active ? Theme.primary-muted : (item-area.pressed ? Theme.card-hover : transparent);
+    height: 44px;
+    border-radius: 22px;
+    background: active
+        ? Theme.primary-container
+        : (item-area.pressed
+            ? Theme.surface-container-highest
+            : (item-area.has-hover ? Theme.surface-container-high : transparent));
+    animate background { duration: 150ms; }
 
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 10px;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 12px;
         alignment: start;
 
         Icon {
@@ -27,15 +32,21 @@ component SidebarItem inherits Rectangle {
             vertical-alignment: center;
             horizontal-alignment: center;
             width: 22px;
-            color: active ? Theme.primary : Theme.text-muted;
+            color: active
+                ? Theme.on-primary-container
+                : (item-area.has-hover ? Theme.on-surface : Theme.on-surface-variant);
+            animate color { duration: 150ms; }
         }
 
         Text {
             text: label;
-            color: active ? Theme.primary : Theme.text;
-            font-size: 14px;
-            font-weight: active ? 600 : 400;
+            color: active
+                ? Theme.on-primary-container
+                : (item-area.has-hover ? Theme.on-surface : Theme.on-surface-variant);
+            font-size: Theme.font-label-lg;
+            font-weight: active ? 600 : 500;
             vertical-alignment: center;
+            animate color { duration: 150ms; }
         }
     }
 
@@ -50,34 +61,63 @@ export component Sidebar inherits Rectangle {
     callback navigate(string);
     callback toggle-theme();
 
-    background: Theme.sidebar-bg;
+    background: Theme.surface-container-low;
     border-width: 0px;
     width: Theme.sidebar-width;
 
     VerticalLayout {
-        padding-top: 20px;
-        padding-bottom: 16px;
-        padding-left: 12px;
-        padding-right: 12px;
+        padding-top: 24px;
+        padding-bottom: 20px;
+        padding-left: 14px;
+        padding-right: 14px;
         spacing: 4px;
 
-        // App title
-        Text {
-            text: "AstraEMU";
-            color: Theme.text;
-            font-size: 20px;
-            font-weight: 700;
-            horizontal-alignment: left;
+        // App title & badge
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: "AstraEMU";
+                color: Theme.on-surface;
+                font-size: Theme.font-title-lg;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 44px;
+                height: 20px;
+                border-radius: Theme.shape-xs;
+                background: Theme.primary-container;
+                y: (parent.height - self.height) / 2;
+
+                Text {
+                    text: "CORE";
+                    color: Theme.on-primary-container;
+                    font-size: Theme.font-label-sm;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
 
-        Rectangle { height: 12px; }
+        Rectangle { height: 16px; }
 
         // Group: 游戏
-        Text {
-            text: "游戏";
-            color: Theme.text-muted;
-            font-size: 11px;
-            font-weight: 600;
+        HorizontalLayout {
+            height: 20px;
+            padding-left: 14px;
+            Text {
+                text: "游戏管理";
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
         }
 
         SidebarItem {
@@ -94,31 +134,26 @@ export component Sidebar inherits Rectangle {
             clicked => { root.navigate("vfs"); }
         }
 
-        Rectangle { height: 8px; }
+        Rectangle { height: 12px; }
 
         // Group: 系统
-        Text {
-            text: "系统";
-            color: Theme.text-muted;
-            font-size: 11px;
-            font-weight: 600;
+        HorizontalLayout {
+            height: 20px;
+            padding-left: 14px;
+            Text {
+                text: "系统与设置";
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
         }
 
         SidebarItem {
-            label: "设置";
+            label: "设置中心";
             icon: Icons.gear;
             active: current-page == "settings";
             clicked => { root.navigate("settings"); }
-        }
-
-        Rectangle { height: 8px; }
-
-        // Group: 关于
-        Text {
-            text: "关于";
-            color: Theme.text-muted;
-            font-size: 11px;
-            font-weight: 600;
         }
 
         SidebarItem {
@@ -133,16 +168,25 @@ export component Sidebar inherits Rectangle {
         // Theme toggle at bottom
         Rectangle {
             height: 1px;
-            background: Theme.divider;
+            background: Theme.outline-variant;
         }
         Rectangle { height: 8px; }
 
         SidebarItem {
-            label: dark-mode ? "浅色模式" : "深色模式";
+            label: dark-mode ? "浅色外观" : "深色外观";
             icon: dark-mode ? Icons.sun : Icons.moon;
             active: false;
             clicked => { root.toggle-theme(); }
         }
+    }
+
+    // Right border separator
+    Rectangle {
+        x: parent.width - 1px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.outline-variant;
     }
 }
 
@@ -156,20 +200,32 @@ component BottomNavItem inherits Rectangle {
 
     VerticalLayout {
         alignment: center;
-        spacing: 2px;
+        spacing: 4px;
 
-        Icon {
-            glyph: icon;
-            font-size: 20px;
-            horizontal-alignment: center;
-            color: active ? Theme.primary : Theme.text-muted;
+        // M3 Active pill indicator
+        Rectangle {
+            width: 56px;
+            height: 30px;
+            border-radius: 15px;
+            background: active ? Theme.primary-container : transparent;
+            x: (parent.width - self.width) / 2;
+            animate background { duration: 150ms; }
+
+            Icon {
+                glyph: icon;
+                font-size: 17px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: active ? Theme.on-primary-container : Theme.on-surface-variant;
+            }
         }
+
         Text {
             text: label;
-            font-size: 10px;
-            color: active ? Theme.primary : Theme.text-muted;
+            font-size: Theme.font-label-md;
+            color: active ? Theme.primary : Theme.on-surface-variant;
             horizontal-alignment: center;
-            font-weight: active ? 600 : 400;
+            font-weight: active ? 600 : 500;
         }
     }
 
@@ -178,19 +234,21 @@ component BottomNavItem inherits Rectangle {
     }
 }
 
-// Bottom navigation bar for mobile layout
+// Bottom navigation bar for mobile layout (M3 76dp height)
 export component BottomNav inherits Rectangle {
     in property <string> current-page: "library";
     callback navigate(string);
 
-    background: Theme.surface;
-    height: 56px;
+    background: Theme.surface-container;
+    height: 72px;
     border-width: 1px;
-    border-color: Theme.border;
+    border-color: Theme.outline-variant;
 
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
+        padding-top: 4px;
+        padding-bottom: 4px;
 
         BottomNavItem {
             label: "游戏库";

@@ -1,0 +1,131 @@
+// Generic schema-driven config form.
+// Renders any Family / Extension / Filter config without hard-coding per-owner UI.
+
+import { Button, ComboBox, LineEdit, SpinBox, CheckBox, ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { M3Button } from "./m3-widgets.slint";
+
+export struct ConfigField {
+    key: string,
+    label: string,
+    description: string,
+    kind: string,
+    value: string,
+    required: bool,
+    min: int,
+    max: int,
+}
+
+export struct ConfigEnumOption {
+    key: string,
+    value: string,
+}
+
+export component GenericConfigForm inherits Rectangle {
+    in property <[ConfigField]> fields;
+    in property <string> form-title: "Configuration";
+    in property <string> form-description: "";
+    in property <bool> has-selected-case: true;
+    callback field-changed(string, string);
+    callback save();
+    callback reset();
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 12px;
+
+        if form-title != "" : Text {
+            text: form-title;
+            color: Theme.text;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        if form-description != "" : Text {
+            text: form-description;
+            color: Theme.text-muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+
+        for field in fields : VerticalLayout {
+            spacing: 4px;
+
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: field.label + (field.required ? " *" : "");
+                    color: Theme.text;
+                    font-size: 13px;
+                    font-weight: 500;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: field.kind;
+                    color: Theme.text-muted;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                text: field.description;
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+
+            if field.kind == "enum" : ComboBox {
+                // Enum values are encoded as comma-separated in description suffix or value list?
+                // For simplicity, we treat value as single selected, and we show a text edit for now.
+                // Real enum will be rendered via dedicated model passed as separate property in future.
+                model: ["shift_jis", "gbk", "utf8", "ja-JP", "zh-CN", "en-US", "ecnu", "openai", "third_party", "responses", "chat_completions", "none", "grayscale", "crt-soft", "warm", "true", "false"];
+                current-value: field.value;
+                selected(value) => { root.field-changed(field.key, value); }
+            }
+
+            if field.kind == "string" : LineEdit {
+                text: field.value;
+                placeholder-text: field.required ? "Required" : "Optional";
+                edited(value) => { root.field-changed(field.key, value); }
+            }
+
+            if field.kind == "secret" : LineEdit {
+                text: field.value;
+                input-type: password;
+                placeholder-text: field.required ? "Required" : "Leave blank to keep";
+                edited(value) => { root.field-changed(field.key, value); }
+            }
+
+            if field.kind == "integer" : SpinBox {
+                value: field.value == "" ? 0 : 0;
+                minimum: 0;
+                maximum: 100000;
+                edited(value) => { root.field-changed(field.key, value); }
+            }
+
+            if field.kind == "bool" : CheckBox {
+                text: field.value == "true" ? "Enabled" : "Disabled";
+                checked: field.value == "true";
+                toggled => { root.field-changed(field.key, self.checked ? "true" : "false"); }
+            }
+
+            Rectangle { height: 6px; }
+        }
+
+        if fields.length > 0 : HorizontalLayout {
+            spacing: 10px;
+            Rectangle { horizontal-stretch: 1; }
+            M3Button { text: "重置 (Reset)"; variant: "outlined"; clicked => { root.reset(); } }
+            M3Button { text: "保存配置 (Save)"; primary: true; enabled: has-selected-case; clicked => { root.save(); } }
+        }
+
+        if fields.length == 0 : Text {
+            text: "No configurable fields for this selection.";
+            color: Theme.text-muted;
+            font-size: 12px;
+            horizontal-alignment: center;
+        }
+    }
+}

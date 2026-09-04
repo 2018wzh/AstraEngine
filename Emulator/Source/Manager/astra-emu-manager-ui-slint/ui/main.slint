@@ -14,30 +14,42 @@ import { AboutPage } from "./pages/about.slint";
 import { SettingsPage } from "./pages/settings.slint";
 import { VfsBrowserPage } from "./pages/vfs-browser.slint";
 import { GameViewPage } from "./pages/game-view.slint";
+import { ConfigField } from "./components/generic-config.slint";
+import { M3Button } from "./components/m3-widgets.slint";
 
 export { GameCard, MatchReview, VfsEntry, VfsPreview, PlaySession, ReleaseOption }
 
 export component ManagerWindow inherits Window {
-    title: "AstraEMU Manager";
+    in property <bool> demo-mode: false;
+    title: demo-mode ? "AstraEMU Manager [DEMO]" : "AstraEMU Manager";
     background: Theme.background;
     min-width: 360px;
     min-height: 640px;
     preferred-width: 1280px;
     preferred-height: 800px;
 
-    // Safe area / usable region
+    // Safe area / usable region — Rinne three-breakpoint (narrow/medium/wide)
     property <length> usable-x: root.safe-area-insets.left;
     property <length> usable-y: root.safe-area-insets.top;
     property <length> usable-width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
     property <length> usable-height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
+    // narrow <840 → mobile 2-col, medium 840-1280 → 3-col, wide >=1280 → 4-6 col
     property <bool> desktop-mode: root.usable-width >= 840px;
+    property <bool> wide-mode: root.usable-width >= 1280px;
+    property <bool> narrow-mode: root.usable-width < 840px;
+    // Adaptive columns for Rinne-style grid
+    property <int> adaptive-columns: root.wide-mode ? 5 : root.desktop-mode ? 3 : 2;
 
     // ===== Navigation =====
     in-out property <string> current-page: "library";
 
     // ===== Theme / appearance =====
     in-out property <bool> theme-dark <=> Theme.dark-mode;
+    in-out property <string> theme-mode <=> Theme.theme-mode;
+    in-out property <string> accent <=> Theme.accent;
+    in-out property <string> density <=> Theme.density;
     in-out property <int> grid-columns: 3;
+    in-out property <string> view-mode: "grid";
 
     // ===== Library =====
     in property <[GameCard]> games;
@@ -65,6 +77,15 @@ export component ManagerWindow inherits Window {
     in property <string> selected-compatibility-vndb-id;
     // VNDB releases (rIDs) pinned to a specific game version.
     in property <[ReleaseOption]> releases;
+    // ===== Extended metadata (PotatoVN-style) =====
+    in property <string> selected-developer;
+    in property <string> selected-release-date;
+    in property <string> selected-platforms;
+    in property <string> selected-engine;
+    in property <string> selected-cover-meta;
+    in property <string> selected-description;
+    in property <string> selected-tags;
+    in property <string> selected-aliases;
 
     // ===== Global diagnostic =====
     in property <string> global-diagnostic;
@@ -130,6 +151,11 @@ export component ManagerWindow inherits Window {
     in-out property <string> gamepad-deadzone: "medium";
     in property <[GamepadBinding]> gamepad-bindings;
 
+    // ===== Generic config (Family / Extension / Filter) =====
+    in property <[ConfigField]> family-config-fields;
+    in property <[ConfigField]> extension-config-fields;
+    in property <[ConfigField]> filter-config-fields;
+
     // ===== About =====
     in property <string> version;
     in property <string> build-identity;
@@ -175,6 +201,10 @@ export component ManagerWindow inherits Window {
     // New callbacks
     callback navigate(string);
     callback toggle-theme();
+    callback set-theme-mode(string);
+    callback set-accent(string);
+    callback set-density(string);
+    callback set-view-mode(string);
     callback open-vfs();
     callback save-input-config(string, string, float, bool, string);
     callback set-gamepad-binding(string, string);
@@ -188,6 +218,17 @@ export component ManagerWindow inherits Window {
     callback vfs-refresh();
     callback vfs-export-file(string);
     callback vfs-copy-path(string);
+    callback vfs-search(string);
+    callback vfs-set-type-filter(string);
+    callback family-config-changed(string, string);
+    callback extension-config-changed(string, string);
+    callback filter-config-changed(string, string);
+    callback save-family-config();
+    callback save-extension-config();
+    callback save-filter-config();
+    callback reset-family-config();
+    callback reset-extension-config();
+    callback reset-filter-config();
 
     // ===== Game view (overlays everything when active) =====
     if root.game-active : GameViewPage {
@@ -267,8 +308,19 @@ export component ManagerWindow inherits Window {
                     bangumi-rating <=> root.bangumi-rating;
                     bangumi-note <=> root.bangumi-note;
                     bangumi-sync-summary: root.bangumi-sync-summary;
-                    grid-columns: root.grid-columns;
+                    grid-columns: root.adaptive-columns;
                     desktop-mode: root.desktop-mode;
+                    view-mode <=> root.view-mode;
+                    density: root.density;
+                    family-config-fields: root.family-config-fields;
+                    selected-developer: root.selected-developer;
+                    selected-release-date: root.selected-release-date;
+                    selected-platforms: root.selected-platforms;
+                    selected-engine: root.selected-engine;
+                    selected-cover-meta: root.selected-cover-meta;
+                    selected-description: root.selected-description;
+                    selected-tags: root.selected-tags;
+                    selected-aliases: root.selected-aliases;
                     launch(id) => { root.launch(id); }
                     select-case(id) => { root.select-case(id); }
                     search(query) => { root.search(query); }
@@ -281,6 +333,10 @@ export component ManagerWindow inherits Window {
                     fetch-releases => { root.fetch-releases(); }
                     pin-release(release-id) => { root.pin-release(release-id); }
                     update-bangumi-play-status(status, rating, note) => { root.update-bangumi-play-status(status, rating, note); }
+                    set-view-mode(mode) => { root.set-view-mode(mode); }
+                    family-config-changed(key, value) => { root.family-config-changed(key, value); }
+                    save-family-config => { root.save-family-config(); }
+                    reset-family-config => { root.reset-family-config(); }
                 }
 
                 if root.current-page == "vfs" : VfsBrowserPage {
@@ -297,6 +353,8 @@ export component ManagerWindow inherits Window {
                     refresh => { root.vfs-refresh(); }
                     export-file(path) => { root.vfs-export-file(path); }
                     copy-path(path) => { root.vfs-copy-path(path); }
+                    search(query) => { root.vfs-search(query); }
+                    set-type-filter(filter) => { root.vfs-set-type-filter(filter); }
                 }
 
                 if root.current-page == "settings" : SettingsPage {
@@ -321,6 +379,10 @@ export component ManagerWindow inherits Window {
                         root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
                     }
                     grant-translation-consent => { root.grant-translation-consent(); }
+                    extension-config-fields: root.extension-config-fields;
+                    extension-config-changed(key, value) => { root.extension-config-changed(key, value); }
+                    save-extension-config => { root.save-extension-config(); }
+                    reset-extension-config => { root.reset-extension-config(); }
 
                     // Metadata
                     match-reviews: root.match-reviews;
@@ -341,7 +403,11 @@ export component ManagerWindow inherits Window {
 
                     // Filters
                     filter-preset <=> root.filter-preset;
+                    filter-config-fields: root.filter-config-fields;
                     set-filter-preset(preset) => { root.set-filter-preset(preset); }
+                    filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+                    save-filter-config => { root.save-filter-config(); }
+                    reset-filter-config => { root.reset-filter-config(); }
 
                     // Compatibility
                     compatibility-source-url: root.compatibility-source-url;
@@ -370,9 +436,17 @@ export component ManagerWindow inherits Window {
 
                     // Appearance
                     dark-mode: root.theme-dark;
+                    theme-mode <=> root.theme-mode;
+                    accent <=> root.accent;
                     grid-columns <=> root.grid-columns;
+                    density <=> root.density;
+                    view-mode <=> root.view-mode;
                     toggle-theme => { root.toggle-theme(); }
                     set-grid-columns(cols) => { root.set-grid-columns(cols); }
+                    set-theme-mode(mode) => { root.set-theme-mode(mode); }
+                    set-accent(ac) => { root.set-accent(ac); }
+                    set-density(d) => { root.set-density(d); }
+                    set-view-mode(m) => { root.set-view-mode(m); }
                 }
 
                 if root.current-page == "about" : AboutPage {
@@ -389,32 +463,36 @@ export component ManagerWindow inherits Window {
         }
     }
 
-    // ===== Global diagnostic banner =====
+    // ===== Global diagnostic banner (M3 Snackbar / Banner) =====
     if root.global-diagnostic != "" : Rectangle {
-        x: root.usable-x + 12px;
-        y: root.usable-y + root.usable-height - self.height - 12px;
-        width: root.usable-width - 24px;
-        min-height: 44px;
-        background: #dd5b1b1b;
-        border-radius: Theme.radius;
+        x: root.usable-x + 16px;
+        y: root.usable-y + root.usable-height - self.height - 16px;
+        width: root.usable-width - 32px;
+        min-height: 48px;
+        background: Theme.error-container;
+        border-radius: Theme.shape-md;
+        border-width: 1px;
+        border-color: Theme.error;
         z: 100;
 
         Text {
             text: root.global-diagnostic;
-            color: Theme.danger;
+            color: Theme.on-error-container;
+            font-size: Theme.font-body-sm;
             wrap: word-wrap;
             vertical-alignment: center;
-            x: 12px;
-            width: parent.width - 24px;
+            x: 16px;
+            width: parent.width - 32px;
         }
     }
 
+    // ===== Fatal error dialog (M3 Alert Dialog) =====
     if root.fatal-error-active : Rectangle {
         x: 0px;
         y: 0px;
         width: root.width;
         height: root.height;
-        background: #99000000;
+        background: #88000000;
         z: 1000;
 
         TouchArea {}
@@ -424,30 +502,35 @@ export component ManagerWindow inherits Window {
             min-height: 220px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            background: Theme.surface-raised;
-            border-color: Theme.danger;
-            border-width: 2px;
-            border-radius: Theme.radius;
+            background: Theme.surface-container-high;
+            border-color: Theme.error;
+            border-width: 1px;
+            border-radius: Theme.shape-xl;
 
             VerticalLayout {
-                padding: 20px;
+                padding: 24px;
                 spacing: 16px;
 
                 Text {
-                    text: "Runtime session terminated";
-                    color: Theme.danger;
-                    font-size: 20px;
+                    text: "模拟器运行时异常终止";
+                    color: Theme.error;
+                    font-size: Theme.font-title-lg;
                     font-weight: 700;
                 }
                 Text {
                     text: root.fatal-error-message;
-                    color: Theme.text;
+                    color: Theme.on-surface;
+                    font-size: Theme.font-body-md;
                     wrap: word-wrap;
                     vertical-stretch: 1;
                 }
-                Button {
-                    text: "Acknowledge";
-                    clicked => { root.fatal-error-active = false; }
+                HorizontalLayout {
+                    alignment: end;
+                    M3Button {
+                        text: "知道了 (Acknowledge)";
+                        primary: true;
+                        clicked => { root.fatal-error-active = false; }
+                    }
                 }
             }
         }

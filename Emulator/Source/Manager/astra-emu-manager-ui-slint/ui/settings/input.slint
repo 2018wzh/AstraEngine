@@ -1,13 +1,49 @@
-// Input/gamepad configuration settings sub-page (new).
+// Input/gamepad configuration settings sub-page (M3 upgraded).
 
 import { Button, ComboBox, ScrollView, Slider } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+import { M3Button, M3Card } from "../components/m3-widgets.slint";
 
 export struct GamepadBinding {
     button-id: string,
     button-label: string,
     key-name: string,
+}
+
+component GamepadButtonBadge inherits Rectangle {
+    in property <string> label;
+
+    min-width: 90px;
+    height: 32px;
+    border-radius: 16px;
+    background: Theme.surface-container-high;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: center;
+
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.primary;
+            y: (parent.height - self.height) / 2;
+        }
+
+        Text {
+            text: label;
+            color: Theme.on-surface;
+            font-size: Theme.font-label-lg;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
 }
 
 export component InputSettingsPage inherits Rectangle {
@@ -30,144 +66,270 @@ export component InputSettingsPage inherits Rectangle {
         mouse-drag-pan-enabled: true;
 
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
+            padding: 24px;
+            spacing: 16px;
 
-            SettingsSectionHeader { title: "Keyboard mapping"; }
+            SettingsSectionHeader { title: "键盘控制映射 / Keyboard Mapping"; }
 
-            Text { text: "Confirm key"; color: Theme.text-muted; font-size: 12px; }
-            ComboBox {
-                model: ["return", "space", "e"];
-                current-index: root.confirm-key == "space" ? 1 : root.confirm-key == "e" ? 2 : 0;
-                selected(value) => { root.confirm-key = value; }
-            }
+            Rectangle {
+                border-radius: Theme.shape-lg;
+                background: Theme.surface-container-low;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
 
-            Text { text: "Cancel key"; color: Theme.text-muted; font-size: 12px; }
-            ComboBox {
-                model: ["escape", "backspace", "q"];
-                current-index: root.cancel-key == "backspace" ? 1 : root.cancel-key == "q" ? 2 : 0;
-                selected(value) => { root.cancel-key = value; }
-            }
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
 
-            SettingsDivider {}
+                    Text { text: "确定 / 推进剧情键 (Confirm / Advance)"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+                    ComboBox {
+                        model: ["return (回车)", "space (空格)", "e"];
+                        current-index: root.confirm-key == "space" ? 1 : root.confirm-key == "e" ? 2 : 0;
+                        selected(value) => {
+                            if (value == "space (空格)") { root.confirm-key = "space"; }
+                            else if (value == "e") { root.confirm-key = "e"; }
+                            else { root.confirm-key = "return"; }
+                        }
+                    }
 
-            SettingsSectionHeader { title: "Touch input"; }
-
-            Text { text: "Touch sensitivity"; color: Theme.text-muted; font-size: 12px; }
-            HorizontalLayout {
-                spacing: 10px;
-                Slider {
-                    minimum: 10;
-                    maximum: 100;
-                    value <=> root.touch-sensitivity;
-                    horizontal-stretch: 1;
-                }
-                Text {
-                    text: round(root.touch-sensitivity) + "%";
-                    color: Theme.text;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                    width: 40px;
+                    Text { text: "取消 / 打开系统菜单键 (Cancel / Menu)"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+                    ComboBox {
+                        model: ["escape (Esc)", "backspace (退格)", "q"];
+                        current-index: root.cancel-key == "backspace" ? 1 : root.cancel-key == "q" ? 2 : 0;
+                        selected(value) => {
+                            if (value == "backspace (退格)") { root.cancel-key = "backspace"; }
+                            else if (value == "q") { root.cancel-key = "q"; }
+                            else { root.cancel-key = "escape"; }
+                        }
+                    }
                 }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Gamepad"; }
+            SettingsSectionHeader { title: "移动端与触控 / Touch Input"; }
 
-            Text { text: "Gamepad support"; color: Theme.text-muted; font-size: 12px; }
-            HorizontalLayout {
-                spacing: 10px;
-                Text {
-                    text: root.gamepad-enabled ? "Enabled" : "Disabled";
-                    color: Theme.text;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                ComboBox {
-                    model: ["enabled", "disabled"];
-                    current-index: root.gamepad-enabled ? 0 : 1;
-                    selected(value) => { root.gamepad-enabled = value == "enabled"; }
-                }
-            }
+            Rectangle {
+                border-radius: Theme.shape-lg;
+                background: Theme.surface-container-low;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
 
-            Text { text: "Analog deadzone"; color: Theme.text-muted; font-size: 12px; }
-            ComboBox {
-                model: ["low", "medium", "high"];
-                current-index: root.gamepad-deadzone == "low" ? 0 : root.gamepad-deadzone == "high" ? 2 : 1;
-                selected(value) => { root.gamepad-deadzone = value; }
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    Text { text: "触控与手势灵敏度 / Touch Sensitivity"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        Slider {
+                            minimum: 10;
+                            maximum: 100;
+                            value <=> root.touch-sensitivity;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: 56px;
+                            height: 32px;
+                            border-radius: Theme.shape-sm;
+                            background: Theme.surface-container-highest;
+                            Text {
+                                text: round(root.touch-sensitivity) + "%";
+                                color: Theme.on-surface;
+                                font-size: Theme.font-label-lg;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Gamepad button mapping"; }
+            SettingsSectionHeader { title: "物理手柄支持 / Gamepad Hardware"; }
+
+            Rectangle {
+                border-radius: Theme.shape-lg;
+                background: Theme.surface-container-low;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 14px;
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            Text { text: "启用手柄输入监听 / Gamepad Support"; color: Theme.on-surface; font-size: Theme.font-title-sm; font-weight: 600; }
+                            Text { text: root.gamepad-enabled ? "已启用 (后台独立 Worker 采样)" : "已停用"; color: Theme.on-surface-variant; font-size: Theme.font-body-sm; }
+                        }
+
+                        ComboBox {
+                            width: 130px;
+                            model: ["已启用", "已停用"];
+                            current-index: root.gamepad-enabled ? 0 : 1;
+                            selected(value) => { root.gamepad-enabled = value == "已启用"; }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Theme.outline-variant; }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            Text { text: "摇杆死区阈值 / Analog Deadzone"; color: Theme.on-surface; font-size: Theme.font-title-sm; font-weight: 600; }
+                            Text { text: "防止旧手柄轻微漂移触发自动快进或误选项"; color: Theme.on-surface-variant; font-size: Theme.font-body-sm; }
+                        }
+
+                        ComboBox {
+                            width: 130px;
+                            model: ["低 (Low)", "中 (Medium)", "高 (High)"];
+                            current-index: root.gamepad-deadzone == "low" ? 0 : root.gamepad-deadzone == "high" ? 2 : 1;
+                            selected(value) => {
+                                if (value == "低 (Low)") { root.gamepad-deadzone = "low"; }
+                                else if (value == "高 (High)") { root.gamepad-deadzone = "high"; }
+                                else { root.gamepad-deadzone = "medium"; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "模拟器手柄映射表 / Gamepad Button Mapping"; }
 
             Text {
-                text: "Each gamepad control is translated to a keyboard key for engines without native gamepad support.";
-                color: Theme.text-muted;
-                font-size: 11px;
+                text: "由于许多旧版视觉小说引擎缺少原生手柄协议，AstraEMU 会将手柄物理信号自动转译为内核底层键盘注入事件。";
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-body-sm;
                 wrap: word-wrap;
             }
 
-            for binding in root.gamepad-bindings : HorizontalLayout {
-                spacing: 10px;
-                Text {
-                    text: binding.button-label;
-                    color: Theme.text;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                    width: 150px;
-                }
-                ComboBox {
-                    model: ["enter", "escape", "space", "arrow_up", "arrow_down", "arrow_left", "arrow_right", "shift", "control"];
-                    current-index: binding.key-name == "enter" ? 0 : binding.key-name == "escape" ? 1 : binding.key-name == "space" ? 2 : binding.key-name == "arrow_up" ? 3 : binding.key-name == "arrow_down" ? 4 : binding.key-name == "arrow_left" ? 5 : binding.key-name == "arrow_right" ? 6 : binding.key-name == "shift" ? 7 : binding.key-name == "control" ? 8 : 0;
-                    selected(value) => { root.set-gamepad-binding(binding.button-id, value); }
-                    horizontal-stretch: 1;
+            Rectangle {
+                border-radius: Theme.shape-lg;
+                background: Theme.surface-container-low;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    for binding in root.gamepad-bindings : HorizontalLayout {
+                        spacing: 12px;
+                        alignment: center;
+
+                        GamepadButtonBadge {
+                            label: binding.button-label;
+                        }
+
+                        Text {
+                            text: "→ 映射至";
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-label-lg;
+                            vertical-alignment: center;
+                        }
+
+                        ComboBox {
+                            model: ["enter (回车)", "escape (Esc)", "space (空格)", "arrow_up (上)", "arrow_down (下)", "arrow_left (左)", "arrow_right (右)", "shift (加速/快进)", "control (跳过)"];
+                            current-index: binding.key-name == "enter" ? 0 : binding.key-name == "escape" ? 1 : binding.key-name == "space" ? 2 : binding.key-name == "arrow_up" ? 3 : binding.key-name == "arrow_down" ? 4 : binding.key-name == "arrow_left" ? 5 : binding.key-name == "arrow_right" ? 6 : binding.key-name == "shift" ? 7 : binding.key-name == "control" ? 8 : 0;
+                            selected(value) => {
+                                if (value == "enter (回车)") { root.set-gamepad-binding(binding.button-id, "enter"); }
+                                else if (value == "escape (Esc)") { root.set-gamepad-binding(binding.button-id, "escape"); }
+                                else if (value == "space (空格)") { root.set-gamepad-binding(binding.button-id, "space"); }
+                                else if (value == "arrow_up (上)") { root.set-gamepad-binding(binding.button-id, "arrow_up"); }
+                                else if (value == "arrow_down (下)") { root.set-gamepad-binding(binding.button-id, "arrow_down"); }
+                                else if (value == "arrow_left (左)") { root.set-gamepad-binding(binding.button-id, "arrow_left"); }
+                                else if (value == "arrow_right (右)") { root.set-gamepad-binding(binding.button-id, "arrow_right"); }
+                                else if (value == "shift (加速/快进)") { root.set-gamepad-binding(binding.button-id, "shift"); }
+                                else if (value == "control (跳过)") { root.set-gamepad-binding(binding.button-id, "control"); }
+                            }
+                            horizontal-stretch: 1;
+                        }
+                    }
                 }
             }
 
             HorizontalLayout {
-                spacing: 10px;
+                spacing: 12px;
                 Rectangle { horizontal-stretch: 1; }
-                Button {
-                    text: "Reset to VN default";
+                M3Button {
+                    text: "恢复视觉小说推荐默认手柄键位";
+                    icon: Icons.arrows-rotate;
+                    variant: "outlined";
                     clicked => { root.reset-gamepad-mapping(); }
                 }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Per-game settings"; }
+            SettingsSectionHeader { title: "单游戏独立覆写配置 / Per-Game Profiles"; }
 
-            Text {
-                text: root.has-selected-case
-                    ? "Store the current input mapping for the selected game so it overrides the global settings when that game launches."
-                    : "Select a game in the library to store a per-game input mapping.";
-                color: Theme.text-muted;
-                font-size: 11px;
-                wrap: word-wrap;
+            Rectangle {
+                border-radius: Theme.shape-lg;
+                background: Theme.surface-container-low;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle {
+                            width: 10px;
+                            height: 10px;
+                            border-radius: 5px;
+                            background: root.has-selected-case ? Theme.success : Theme.outline;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: root.has-selected-case
+                                ? "当前已选中游戏，配置将作为该作品的独占键位配置文件保存。"
+                                : "未在书架中选中具体游戏，当前修改将应用于全局默认配置。";
+                            color: root.has-selected-case ? Theme.on-surface : Theme.on-surface-variant;
+                            font-size: Theme.font-body-sm;
+                            font-weight: root.has-selected-case ? 600 : 400;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    if root.has-selected-case : HorizontalLayout {
+                        spacing: 12px;
+                        Rectangle { horizontal-stretch: 1; }
+                        M3Button {
+                            text: "为此游戏保存独占键位";
+                            icon: Icons.check;
+                            primary: true;
+                            clicked => { root.save-per-game-input-mapping(); }
+                        }
+                        M3Button {
+                            text: "清除此游戏独立键位";
+                            icon: Icons.trash;
+                            variant: "outlined";
+                            danger: true;
+                            clicked => { root.clear-per-game-input-mapping(); }
+                        }
+                    }
+                }
             }
 
-            if root.has-selected-case : HorizontalLayout {
-                spacing: 10px;
-                Rectangle { horizontal-stretch: 1; }
-                Button {
-                    text: "Save for selected game";
-                    clicked => { root.save-per-game-input-mapping(); }
-                }
-                Button {
-                    text: "Clear per-game";
-                    clicked => { root.clear-per-game-input-mapping(); }
-                }
-            }
-
-            SettingsDivider {}
-
             Text {
-                text: "Changes are applied immediately to the active game session.";
-                color: Theme.text-muted;
-                font-size: 11px;
+                text: "所有输入配置修改将在当前活动的游戏运行会话中实时生效。";
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label-sm;
                 wrap: word-wrap;
             }
         }

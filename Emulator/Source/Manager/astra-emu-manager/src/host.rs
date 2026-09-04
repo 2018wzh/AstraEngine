@@ -132,6 +132,45 @@ pub trait ManagerController: 'static {
     fn set_grid_columns(&mut self, _columns: i32) -> Result<(), String> {
         Ok(())
     }
+    fn set_theme_mode(&mut self, _mode: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn set_accent(&mut self, _accent: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn set_density(&mut self, _density: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn set_view_mode(&mut self, _view_mode: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn family_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn save_family_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn reset_family_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn extension_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn save_extension_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn reset_extension_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn filter_config_changed(&mut self, _key: &str, _value: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn save_filter_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
+    fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.model()
+    }
     /// Library sort mode: "title" | "recent" | "play_time". Default keeps the
     /// existing ordering and simply re-renders.
     fn set_library_sort(&mut self, _mode: &str) -> Result<ManagerViewModel, String> {
@@ -571,6 +610,162 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             window.set_grid_columns(columns);
         }
     });
+    let theme_mode_weak = adapter.window().as_weak();
+    let theme_mode_controller = controller.clone();
+    adapter.window().on_set_theme_mode(move |mode| {
+        if let Some(window) = theme_mode_weak.upgrade() {
+            let _ = theme_mode_controller
+                .borrow_mut()
+                .set_theme_mode(mode.as_str());
+            window.set_theme_mode(mode.clone());
+            // Sync legacy bool for backwards compat
+            let dark = mode == "dark" || (mode == "system" && window.get_theme_dark());
+            window.set_theme_dark(dark);
+        }
+    });
+    let accent_weak = adapter.window().as_weak();
+    let accent_controller = controller.clone();
+    adapter.window().on_set_accent(move |accent| {
+        if let Some(window) = accent_weak.upgrade() {
+            let _ = accent_controller.borrow_mut().set_accent(accent.as_str());
+            window.set_accent(accent.clone());
+        }
+    });
+    let density_weak = adapter.window().as_weak();
+    let density_controller = controller.clone();
+    adapter.window().on_set_density(move |density| {
+        if let Some(window) = density_weak.upgrade() {
+            let _ = density_controller
+                .borrow_mut()
+                .set_density(density.as_str());
+            window.set_density(density.clone());
+        }
+    });
+    let view_mode_weak = adapter.window().as_weak();
+    let view_mode_controller = controller.clone();
+    adapter.window().on_set_view_mode(move |mode| {
+        if let Some(window) = view_mode_weak.upgrade() {
+            let _ = view_mode_controller
+                .borrow_mut()
+                .set_view_mode(mode.as_str());
+            window.set_view_mode(mode.clone());
+        }
+    });
+    // Generic config handlers
+    {
+        let c = controller.clone();
+        adapter
+            .window()
+            .on_family_config_changed(move |key, value| {
+                let _ = c
+                    .borrow_mut()
+                    .family_config_changed(key.as_str(), value.as_str());
+            });
+    }
+    {
+        let c = controller.clone();
+        let a = adapter.clone();
+        let w = adapter.window().as_weak();
+        adapter.window().on_save_family_config(move || {
+            let result = c.borrow_mut().save_family_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => a.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        let a = adapter.clone();
+        let w = adapter.window().as_weak();
+        adapter.window().on_reset_family_config(move || {
+            let result = c.borrow_mut().reset_family_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => a.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        adapter
+            .window()
+            .on_extension_config_changed(move |key, value| {
+                let _ = c
+                    .borrow_mut()
+                    .extension_config_changed(key.as_str(), value.as_str());
+            });
+    }
+    {
+        let c = controller.clone();
+        let a = adapter.clone();
+        let w = adapter.window().as_weak();
+        adapter.window().on_save_extension_config(move || {
+            let result = c.borrow_mut().save_extension_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => a.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        let a = adapter.clone();
+        let w = adapter.window().as_weak();
+        adapter.window().on_reset_extension_config(move || {
+            let result = c.borrow_mut().reset_extension_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => a.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        adapter
+            .window()
+            .on_filter_config_changed(move |key, value| {
+                let _ = c
+                    .borrow_mut()
+                    .filter_config_changed(key.as_str(), value.as_str());
+            });
+    }
+    {
+        let c = controller.clone();
+        let a = adapter.clone();
+        let w = adapter.window().as_weak();
+        adapter.window().on_save_filter_config(move || {
+            let result = c.borrow_mut().save_filter_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => a.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
+    {
+        let c = controller.clone();
+        let a = adapter.clone();
+        let w = adapter.window().as_weak();
+        adapter.window().on_reset_filter_config(move || {
+            let result = c.borrow_mut().reset_filter_config();
+            if let Some(window) = w.upgrade() {
+                match result {
+                    Ok(model) => a.apply(&model),
+                    Err(error) => window.set_global_diagnostic(error.into()),
+                }
+            }
+        });
+    }
     let sort_weak = adapter.window().as_weak();
     let sort_controller = controller.clone();
     let sort_adapter = adapter.clone();
@@ -801,6 +996,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             .borrow_mut()
             .copy_vfs_path(path.as_str());
     });
+    // VFS search / type filter are local UI state for now (read-only enhance). Host keeps them as no-op.
+    adapter.window().on_vfs_search(|_query| {});
+    adapter.window().on_vfs_set_type_filter(|_filter| {});
     macro_rules! metadata_callback {
         ($callback:ident, $method:ident, |$($arg:ident),*|) => {{
             let weak = adapter.window().as_weak();
@@ -949,9 +1147,7 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             let _ = slint::quit_event_loop();
         } else if matches!(state, slint::RenderingState::BeforeRendering) {
             if let Some(window) = window_weak.upgrade() {
-                if window.get_game_active() {
-                    window.window().request_redraw();
-                }
+                window.window().request_redraw();
             }
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;

@@ -78,6 +78,21 @@ pub struct InputConfigViewModel {
     pub gamepad_bindings: Vec<GamepadBindingViewModel>,
 }
 
+/// Generic config field for Family/Extension/Filter schema-driven forms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GenericConfigFieldViewModel {
+    pub key: String,
+    pub label: String,
+    pub description: String,
+    /// "string" | "secret" | "integer" | "bool" | "enum"
+    pub kind: String,
+    pub value: String,
+    pub enum_values: Vec<String>,
+    pub required: bool,
+    pub min: i32,
+    pub max: i32,
+}
+
 /// A single gamepad-input -> key-name binding row for the settings UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GamepadBindingViewModel {
@@ -103,14 +118,26 @@ impl Default for InputConfigViewModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppearanceViewModel {
     pub theme_dark: bool,
+    /// "dark" | "light" | "system"
+    pub theme_mode: String,
+    /// "blue" | "purple"
+    pub accent: String,
     pub grid_columns: i32,
+    /// "comfortable" | "compact"
+    pub density: String,
+    /// "grid" | "list"
+    pub view_mode: String,
 }
 
 impl Default for AppearanceViewModel {
     fn default() -> Self {
         Self {
             theme_dark: true,
+            theme_mode: "system".into(),
+            accent: "blue".into(),
             grid_columns: 3,
+            density: "comfortable".into(),
+            view_mode: "grid".into(),
         }
     }
 }
@@ -186,9 +213,26 @@ pub struct ManagerViewModel {
     pub input_config: InputConfigViewModel,
     /// Appearance preferences.
     pub appearance: AppearanceViewModel,
+    /// Generic Family config fields for selected game (schema-driven).
+    pub family_config_fields: Vec<GenericConfigFieldViewModel>,
+    /// Generic Extension config fields (e.g. translate).
+    pub extension_config_fields: Vec<GenericConfigFieldViewModel>,
+    /// Generic Filter config fields.
+    pub filter_config_fields: Vec<GenericConfigFieldViewModel>,
     /// About page metadata.
     pub version: String,
     pub build_identity: String,
+    /// Demo mode flag — when true title shows [DEMO] and no diagnostic mask.
+    pub is_demo: bool,
+    // ===== PotatoVN-style extended metadata (VNDB/Bangumi enriched) =====
+    pub selected_developer: String,
+    pub selected_release_date: String,
+    pub selected_platforms: String,
+    pub selected_engine: String,
+    pub selected_cover_meta: String,
+    pub selected_description: String,
+    pub selected_tags: String,
+    pub selected_aliases: String,
 }
 
 pub struct SlintManagerAdapter {
@@ -199,6 +243,9 @@ pub struct SlintManagerAdapter {
     play_history: Rc<VecModel<PlaySession>>,
     releases: Rc<VecModel<ReleaseOption>>,
     gamepad_bindings: Rc<VecModel<GamepadBinding>>,
+    family_config: Rc<VecModel<ConfigField>>,
+    extension_config: Rc<VecModel<ConfigField>>,
+    filter_config: Rc<VecModel<ConfigField>>,
 }
 
 impl SlintManagerAdapter {
@@ -210,12 +257,18 @@ impl SlintManagerAdapter {
         let play_history = Rc::new(VecModel::default());
         let releases = Rc::new(VecModel::default());
         let gamepad_bindings = Rc::new(VecModel::default());
+        let family_config = Rc::new(VecModel::default());
+        let extension_config = Rc::new(VecModel::default());
+        let filter_config = Rc::new(VecModel::default());
         window.set_games(ModelRc::from(games.clone()));
         window.set_match_reviews(ModelRc::from(reviews.clone()));
         window.set_vfs_entries(ModelRc::from(vfs_entries.clone()));
         window.set_play_history(ModelRc::from(play_history.clone()));
         window.set_releases(ModelRc::from(releases.clone()));
         window.set_gamepad_bindings(ModelRc::from(gamepad_bindings.clone()));
+        window.set_family_config_fields(ModelRc::from(family_config.clone()));
+        window.set_extension_config_fields(ModelRc::from(extension_config.clone()));
+        window.set_filter_config_fields(ModelRc::from(filter_config.clone()));
         Ok(Self {
             window,
             games,
@@ -224,6 +277,9 @@ impl SlintManagerAdapter {
             play_history,
             releases,
             gamepad_bindings,
+            family_config,
+            extension_config,
+            filter_config,
         })
     }
 
@@ -277,6 +333,54 @@ impl SlintManagerAdapter {
                     button_id: binding.button_id.as_str().into(),
                     button_label: binding.button_label.as_str().into(),
                     key_name: binding.key_name.as_str().into(),
+                })
+                .collect::<Vec<_>>(),
+        );
+        self.family_config.set_vec(
+            model
+                .family_config_fields
+                .iter()
+                .map(|field| ConfigField {
+                    key: field.key.as_str().into(),
+                    label: field.label.as_str().into(),
+                    description: field.description.as_str().into(),
+                    kind: field.kind.as_str().into(),
+                    value: field.value.as_str().into(),
+                    required: field.required,
+                    min: field.min,
+                    max: field.max,
+                })
+                .collect::<Vec<_>>(),
+        );
+        self.extension_config.set_vec(
+            model
+                .extension_config_fields
+                .iter()
+                .map(|field| ConfigField {
+                    key: field.key.as_str().into(),
+                    label: field.label.as_str().into(),
+                    description: field.description.as_str().into(),
+                    kind: field.kind.as_str().into(),
+                    value: field.value.as_str().into(),
+                    required: field.required,
+                    min: field.min,
+                    max: field.max,
+                })
+                .collect::<Vec<_>>(),
+        );
+        self.filter_config.set_vec(
+            model
+                .filter_config_fields
+                .iter()
+                .map(|field| ConfigField {
+                    key: field.key.as_str().into(),
+                    label: field.label.as_str().into(),
+                    description: field.description.as_str().into(),
+                    kind: field.kind.as_str().into(),
+                    value: field.value.as_str().into(),
+                    required: field.required,
+                    min: field.min,
+                    max: field.max,
                 })
                 .collect::<Vec<_>>(),
         );
@@ -394,10 +498,35 @@ impl SlintManagerAdapter {
         self.window
             .set_gamepad_deadzone(model.input_config.gamepad_deadzone.as_str().into());
         self.window.set_theme_dark(model.appearance.theme_dark);
+        self.window
+            .set_theme_mode(model.appearance.theme_mode.as_str().into());
+        self.window
+            .set_accent(model.appearance.accent.as_str().into());
         self.window.set_grid_columns(model.appearance.grid_columns);
+        self.window
+            .set_density(model.appearance.density.as_str().into());
+        self.window
+            .set_view_mode(model.appearance.view_mode.as_str().into());
         self.window.set_version(model.version.as_str().into());
         self.window
             .set_build_identity(model.build_identity.as_str().into());
+        self.window.set_demo_mode(model.is_demo);
+        self.window
+            .set_selected_developer(model.selected_developer.as_str().into());
+        self.window
+            .set_selected_release_date(model.selected_release_date.as_str().into());
+        self.window
+            .set_selected_platforms(model.selected_platforms.as_str().into());
+        self.window
+            .set_selected_engine(model.selected_engine.as_str().into());
+        self.window
+            .set_selected_cover_meta(model.selected_cover_meta.as_str().into());
+        self.window
+            .set_selected_description(model.selected_description.as_str().into());
+        self.window
+            .set_selected_tags(model.selected_tags.as_str().into());
+        self.window
+            .set_selected_aliases(model.selected_aliases.as_str().into());
         // An empty current_page means "keep whatever the UI is showing".
         if !model.current_page.is_empty() {
             self.window

@@ -10,6 +10,8 @@ use std::collections::BTreeSet;
 
 pub const ASTRA_EMU_EXTENSION_ABI_FINGERPRINT: &str = "astra.emu.extension_abi.v1";
 pub const TRANSLATION_TEXT_HOOK_ID: &str = "astra.emu.translation.text.v1";
+pub const FILTER_GRAPH_HOOK_ID: &str = "astra.emu.filter.graph.v1";
+pub const CONFIG_SCHEMA_HOOK_ID: &str = "astra.emu.config.schema.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +34,54 @@ impl TranslationTextRequestV1 {
 impl TranslationTextResponseV1 {
     pub fn validate(&self) -> Result<&str, std::str::Utf8Error> {
         std::str::from_utf8(&self.utf8)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigSchemaRequestV1 {
+    pub owner_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigSchemaResponseV1 {
+    /// postcard-encoded `ConfigSchema` JSON bytes (Manager's generic schema).
+    pub schema_json: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FilterGraphRequestV1 {
+    pub preset_id: String,
+    pub layer: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FilterGraphResponseV1 {
+    /// postcard-encoded `FilterGraph` bytes.
+    pub graph_json: Vec<u8>,
+}
+
+impl ConfigSchemaRequestV1 {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.owner_id.is_empty() || self.owner_id.len() > 256 {
+            return Err("owner_id must be 1..256".into());
+        }
+        Ok(())
+    }
+}
+
+impl FilterGraphRequestV1 {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.preset_id.is_empty() || self.preset_id.len() > 64 {
+            return Err("preset_id must be 1..64".into());
+        }
+        if self.layer.len() > 64 {
+            return Err("layer must be <=64".into());
+        }
+        Ok(())
     }
 }
 

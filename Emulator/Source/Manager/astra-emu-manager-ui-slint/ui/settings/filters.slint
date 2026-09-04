@@ -4,51 +4,74 @@ import { Button, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+import { ConfigField, GenericConfigForm } from "../components/generic-config.slint";
 
 component FilterPresetRow inherits Rectangle {
-    in property <string> label;
+    in property <string> title;
+    in property <string> description;
     in property <string> preset-id;
     in property <bool> active: false;
     callback selected(string);
 
-    height: 48px;
-    border-radius: Theme.radius-sm;
-    background: active ? Theme.primary-muted : (preset-area.has-hover ? Theme.card-hover : transparent);
-    border-width: active ? 1px : 0px;
-    border-color: Theme.primary;
+    min-height: 56px;
+    border-radius: Theme.shape-lg;
+    background: active
+        ? Theme.primary-container
+        : (preset-area.has-hover ? Theme.surface-container-high : Theme.surface-container-low);
+    border-width: active ? 2px : 1px;
+    border-color: active ? Theme.primary : Theme.outline-variant;
+    animate background, border-color { duration: 120ms; }
 
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 10px;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 12px;
+        alignment: center;
 
         Icon {
-            glyph: active ? Icons.check : "";
-            color: Theme.primary;
+            glyph: active ? Icons.check : Icons.sliders;
+            color: active ? Theme.primary : Theme.on-surface-variant;
             font-size: 16px;
             vertical-alignment: center;
             horizontal-alignment: center;
-            width: 22px;
+            width: 24px;
         }
 
-        Text {
-            text: label;
-            color: active ? Theme.primary : Theme.text;
-            font-size: 14px;
-            font-weight: active ? 600 : 400;
-            vertical-alignment: center;
+        VerticalLayout {
             horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: title;
+                color: active ? Theme.on-primary-container : Theme.on-surface;
+                font-size: Theme.font-title-sm;
+                font-weight: active ? 700 : 600;
+            }
+            Text {
+                text: description;
+                color: active ? Theme.on-primary-container.transparentize(0.2) : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
+                wrap: word-wrap;
+            }
         }
     }
 
     preset-area := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.selected(root.preset-id); }
     }
 }
 
 export component FilterSettingsPage inherits Rectangle {
     in-out property <string> filter-preset: "none";
+    in property <[ConfigField]> filter-config-fields;
     callback set-filter-preset(string);
+    callback filter-config-changed(string, string);
+    callback save-filter-config();
+    callback reset-filter-config();
 
     background: Theme.background;
 
@@ -56,46 +79,59 @@ export component FilterSettingsPage inherits Rectangle {
         mouse-drag-pan-enabled: true;
 
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
+            padding: 24px;
+            spacing: 16px;
 
-            SettingsSectionHeader { title: "Final-frame filter"; }
+            SettingsSectionHeader { title: "后处理着色器滤镜 (Final-frame Shader)"; }
 
             Text {
-                text: "FVP does not expose stable layer metadata, so per-layer bindings are blocked and only final-frame presets are available.";
-                color: Theme.text-muted;
+                text: "由宿主硬件渲染管线驱动。直接在游戏画布输出前执行后处理着色，零额外帧缓冲回读延迟。";
+                color: Theme.on-surface-variant;
                 wrap: word-wrap;
-                font-size: 12px;
+                font-size: Theme.font-body-sm;
             }
 
-            SettingsDivider {}
-
             FilterPresetRow {
-                label: "Off";
+                title: "原画直出 (Off)";
+                description: "无着色器后处理，忠实还原游戏原始分辨率与像素呈现";
                 preset-id: "none";
                 active: root.filter-preset == "none";
                 selected(id) => { root.set-filter-preset(id); }
             }
 
             FilterPresetRow {
-                label: "Grayscale";
+                title: "怀旧黑白 (Grayscale)";
+                description: "经典单色阶灰度滤镜，适合剧情倒叙回忆或老式胶片质感演出";
                 preset-id: "grayscale";
                 active: root.filter-preset == "grayscale";
                 selected(id) => { root.set-filter-preset(id); }
             }
 
             FilterPresetRow {
-                label: "CRT Soft";
+                title: "柔和显像管 (CRT Soft)";
+                description: "模拟经典 CRT 阴极射线管细微扫描线与微光晕，消除早期低分辨率锯齿";
                 preset-id: "crt-soft";
                 active: root.filter-preset == "crt-soft";
                 selected(id) => { root.set-filter-preset(id); }
             }
 
             FilterPresetRow {
-                label: "Warm";
+                title: "日系暖阳 (Warm)";
+                description: "微调色温曲线与暗部色调，增强视觉小说 CG 立绘的温润与梦幻感";
                 preset-id: "warm";
                 active: root.filter-preset == "warm";
                 selected(id) => { root.set-filter-preset(id); }
+            }
+
+            SettingsDivider {}
+
+            GenericConfigForm {
+                fields: root.filter-config-fields;
+                form-title: "Filter 通用配置";
+                form-description: "由 filter_config_schema 驱动，未来可扩展 per-layer 绑定";
+                field-changed(key, value) => { root.filter-config-changed(key, value); }
+                save => { root.save-filter-config(); }
+                reset => { root.reset-filter-config(); }
             }
         }
     }

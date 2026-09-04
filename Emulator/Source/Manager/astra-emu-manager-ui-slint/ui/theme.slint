@@ -1,31 +1,104 @@
-// AstraEMU unified theme system.
-// Replaces the legacy Tokens global with dark/light semantic tokens.
+// AstraEMU unified Material Design 3 (M3) theme system.
+// Cross-platform, follow-system by default, WCAG AA 4.5:1 compliant.
 
 export global Theme {
+    // ===== Mode & Preferences =====
+    in-out property <string> theme-mode: "system";
     in-out property <bool> dark-mode: true;
+    in-out property <string> accent: "blue";
+    in-out property <string> density: "comfortable";
+    out property <bool> effective-dark: theme-mode == "light" ? false : theme-mode == "dark" ? true : dark-mode;
 
-    // Semantic color tokens
-    out property <color> background: dark-mode ? #111318 : #f5f6f8;
-    out property <color> surface: dark-mode ? #1a1d24 : #ffffff;
-    out property <color> surface-raised: dark-mode ? #232832 : #eef1f5;
-    out property <color> surface-overlay: dark-mode ? #ee1a1d24 : #eeffffff;
-    out property <color> primary: dark-mode ? #91caff : #1668dc;
-    out property <color> on-primary: dark-mode ? #05233a : #ffffff;
-    out property <color> primary-muted: dark-mode ? #3a5a7a : #b3d4fc;
-    out property <color> text: dark-mode ? #e4e7ec : #1a1d24;
-    out property <color> text-muted: dark-mode ? #aeb5c2 : #5f6672;
-    out property <color> danger: dark-mode ? #ffb4ab : #d32f2f;
-    out property <color> success: dark-mode ? #a5d6a7 : #2e7d32;
-    out property <color> border: dark-mode ? #2e3440 : #dde1e6;
-    out property <color> divider: dark-mode ? #455064 : #e0e3e8;
-    out property <color> sidebar-bg: dark-mode ? #1a1d24 : #ffffff;
-    out property <color> card-hover: dark-mode ? #2a3040 : #e8ecf2;
+    // ===== M3 Tonal Surface Containers =====
+    out property <color> surface: effective-dark ? #111318 : #f9f9fe;
+    out property <color> surface-dim: effective-dark ? #111318 : #dad9e0;
+    out property <color> surface-bright: effective-dark ? #37393e : #f9f9fe;
+    out property <color> surface-container-lowest: effective-dark ? #0c0e13 : #ffffff;
+    out property <color> surface-container-low: effective-dark ? #181b20 : #f3f3f9;
+    out property <color> surface-container: effective-dark ? #1e2126 : #ededf3;
+    out property <color> surface-container-high: effective-dark ? #282b31 : #e7e8ee;
+    out property <color> surface-container-highest: effective-dark ? #33363c : #e1e2e8;
+    out property <color> surface-overlay: effective-dark ? #ee181b20 : #f2ffffff;
 
-    // Spacing and shape tokens
-    out property <length> radius: 12px;
-    out property <length> radius-sm: 8px;
-    out property <length> spacing: 12px;
-    out property <length> spacing-lg: 18px;
-    out property <length> spacing-sm: 8px;
-    out property <length> sidebar-width: 220px;
+    out property <color> on-surface: effective-dark ? #e1e2e8 : #191c20;
+    out property <color> on-surface-variant: effective-dark ? #c4c6d0 : #44474f;
+    out property <color> outline: effective-dark ? #8e9099 : #74777f;
+    out property <color> outline-variant: effective-dark ? #44474f : #c4c6d0;
+
+    // ===== M3 Primary / Container Pairs =====
+    out property <color> primary: accent == "purple"
+        ? (effective-dark ? #d0bcff : #6750a4)
+        : (effective-dark ? #a8c8ff : #005fb0);
+    out property <color> on-primary: accent == "purple"
+        ? (effective-dark ? #381e72 : #ffffff)
+        : (effective-dark ? #00315f : #ffffff);
+    out property <color> primary-container: accent == "purple"
+        ? (effective-dark ? #4f378b : #eaddff)
+        : (effective-dark ? #004786 : #d6e3ff);
+    out property <color> on-primary-container: accent == "purple"
+        ? (effective-dark ? #eaddff : #21005d)
+        : (effective-dark ? #d6e3ff : #001b3c);
+
+    // ===== M3 Functional & Feedback Tokens =====
+    out property <color> error: effective-dark ? #ffb4ab : #ba1a1a;
+    out property <color> on-error: effective-dark ? #690005 : #ffffff;
+    out property <color> error-container: effective-dark ? #93000a : #ffdad6;
+    out property <color> on-error-container: effective-dark ? #ffdad6 : #410002;
+
+    out property <color> success-container: effective-dark ? #0f5223 : #d7f8db;
+    out property <color> on-success-container: effective-dark ? #a6f5b7 : #00210b;
+
+    // ===== Calibrated Compatibility Badges (WCAG AA 4.5:1 compliant) =====
+    out property <color> compat-perfect-bg: effective-dark ? #184423 : #cbf2d6;
+    out property <color> compat-perfect-fg: effective-dark ? #8ce2a3 : #0a4d20;
+    out property <color> compat-ok-bg: effective-dark ? #153963 : #d0e4ff;
+    out property <color> compat-ok-fg: effective-dark ? #9ecaff : #003264;
+    out property <color> compat-flawed-bg: effective-dark ? #4a3800 : #ffefa8;
+    out property <color> compat-flawed-fg: effective-dark ? #f5cd47 : #5c4300;
+    out property <color> compat-boot-bg: effective-dark ? #4e2500 : #ffe0cb;
+    out property <color> compat-boot-fg: effective-dark ? #ffb078 : #5f2800;
+    out property <color> compat-bad-bg: effective-dark ? #521212 : #ffdad6;
+    out property <color> compat-bad-fg: effective-dark ? #ffb4ab : #5c1414;
+
+    // ===== M3 Shape Scale Tokens =====
+    out property <length> shape-none: 0px;
+    out property <length> shape-xs: 4px;
+    out property <length> shape-sm: 8px;
+    out property <length> shape-md: 12px;
+    out property <length> shape-lg: 16px;
+    out property <length> shape-xl: 28px;
+    out property <length> shape-full: 20px;
+
+    // ===== M3 Typography Scale Tokens =====
+    out property <length> font-headline-md: 28px;
+    out property <length> font-title-lg: 20px;
+    out property <length> font-title-md: 16px;
+    out property <length> font-title-sm: 14px;
+    out property <length> font-body-lg: 15px;
+    out property <length> font-body-md: 13px;
+    out property <length> font-body-sm: 12px;
+    out property <length> font-label-lg: 13px;
+    out property <length> font-label-md: 11px;
+    out property <length> font-label-sm: 10px;
+
+    // ===== Backward Compatibility Aliases =====
+    out property <color> background: surface;
+    out property <color> surface-raised: surface-container;
+    out property <color> primary-muted: primary-container;
+    out property <color> text: on-surface;
+    out property <color> text-muted: on-surface-variant;
+    out property <color> danger: error;
+    out property <color> success: on-success-container;
+    out property <color> border: outline-variant;
+    out property <color> divider: outline-variant;
+    out property <color> sidebar-bg: surface-container-low;
+    out property <color> card-hover: surface-container-high;
+    out property <color> accent-color: primary;
+    out property <color> accent-strong: primary;
+    out property <length> radius: shape-md;
+    out property <length> radius-sm: shape-sm;
+    out property <length> spacing: density == "compact" ? 8px : 12px;
+    out property <length> spacing-lg: density == "compact" ? 12px : 16px;
+    out property <length> spacing-sm: density == "compact" ? 4px : 8px;
+    out property <length> sidebar-width: 232px;
 }

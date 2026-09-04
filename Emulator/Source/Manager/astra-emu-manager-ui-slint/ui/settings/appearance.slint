@@ -1,57 +1,87 @@
-// Appearance/theme settings sub-page (new).
+// Appearance/theme settings sub-page (M3 upgraded).
 
 import { ScrollView, Slider } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
 
-component GridColButton inherits Rectangle {
+component M3ChoiceChip inherits Rectangle {
     in property <string> label;
     in property <bool> active: false;
     callback clicked();
 
-    width: 44px;
+    min-width: 56px;
     height: 36px;
-    border-radius: Theme.radius-sm;
-    background: active ? Theme.primary : Theme.surface-raised;
+    border-radius: 18px;
+    background: active ? Theme.primary-container : Theme.surface-container-high;
     border-width: active ? 0px : 1px;
-    border-color: Theme.border;
+    border-color: active ? transparent : Theme.outline-variant;
 
-    Text {
-        text: label;
-        color: active ? Theme.on-primary : Theme.text;
-        font-size: 14px;
-        font-weight: active ? 700 : 400;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        alignment: center;
+
+        Text {
+            text: label;
+            color: active ? Theme.on-primary-container : Theme.on-surface;
+            font-size: Theme.font-label-lg;
+            font-weight: active ? 700 : 500;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 
-    TouchArea { clicked => { root.clicked(); } }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
 }
 
 component ColorSwatch inherits Rectangle {
     in property <color> color-value;
     in property <string> label;
 
-    width: 56px;
-    border-radius: Theme.radius-sm;
+    width: 60px;
+    height: 48px;
+    border-radius: Theme.shape-md;
     background: color-value;
     border-width: 1px;
-    border-color: Theme.border;
+    border-color: Theme.outline-variant;
 
-    Text {
-        text: label;
-        color: Theme.text;
-        font-size: 9px;
-        horizontal-alignment: center;
-        vertical-alignment: bottom;
+    VerticalLayout {
+        alignment: end;
+        padding: 4px;
+
+        Rectangle {
+            height: 16px;
+            border-radius: Theme.shape-xs;
+            background: #00000088;
+
+            Text {
+                text: label;
+                color: #ffffff;
+                font-size: Theme.font-label-sm;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
     }
 }
 
 export component AppearanceSettingsPage inherits Rectangle {
     in property <bool> dark-mode: true;
+    in-out property <string> theme-mode: "dark";
+    in-out property <string> accent: "blue";
     in-out property <int> grid-columns: 3;
+    in-out property <string> density: "comfortable";
+    in-out property <string> view-mode: "grid";
     callback toggle-theme();
     callback set-grid-columns(int);
+    callback set-theme-mode(string);
+    callback set-accent(string);
+    callback set-density(string);
+    callback set-view-mode(string);
 
     background: Theme.background;
 
@@ -59,92 +89,135 @@ export component AppearanceSettingsPage inherits Rectangle {
         mouse-drag-pan-enabled: true;
 
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
+            padding: 24px;
+            spacing: 16px;
 
-            SettingsSectionHeader { title: "Theme"; }
+            SettingsSectionHeader { title: "主题风格 / Theme & Appearance"; }
 
-            // Theme mode selector
+            // M3 Elevated Setting Card: Theme mode quick toggle
             Rectangle {
-                height: 56px;
-                border-radius: Theme.radius-sm;
-                background: Theme.surface-raised;
+                height: 64px;
+                border-radius: Theme.shape-lg;
+                background: Theme.surface-container-low;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
 
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
-                    spacing: 12px;
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    spacing: 16px;
 
                     VerticalLayout {
                         alignment: center;
                         spacing: 2px;
 
                         Text {
-                            text: "Color mode";
-                            color: Theme.text;
-                            font-size: 14px;
+                            text: "深浅色快捷开关 / Quick Dark Mode";
+                            color: Theme.on-surface;
+                            font-size: Theme.font-title-sm;
+                            font-weight: 600;
                         }
                         Text {
-                            text: dark-mode ? "Dark" : "Light";
-                            color: Theme.text-muted;
-                            font-size: 12px;
+                            text: dark-mode ? "当前为深色模式 (Dark)" : "当前为浅色模式 (Light)";
+                            color: Theme.on-surface-variant;
+                            font-size: Theme.font-body-sm;
                         }
                     }
 
                     Rectangle { horizontal-stretch: 1; }
 
-                    // Toggle button
+                    // M3 Specification Switch
                     Rectangle {
                         width: 52px;
-                        height: 28px;
-                        border-radius: 14px;
-                        background: dark-mode ? Theme.primary : Theme.border;
+                        height: 32px;
+                        border-radius: 16px;
+                        background: dark-mode ? Theme.primary : Theme.surface-container-highest;
+                        border-width: dark-mode ? 0px : 2px;
+                        border-color: dark-mode ? transparent : Theme.outline;
                         y: (parent.height - self.height) / 2;
 
+                        // Thumb
                         Rectangle {
-                            x: dark-mode ? parent.width - self.width - 3px : 3px;
-                            y: 3px;
-                            width: 22px;
-                            height: 22px;
-                            border-radius: 11px;
-                            background: white;
+                            x: dark-mode ? parent.width - self.width - 4px : 6px;
+                            y: dark-mode ? 4px : 6px;
+                            width: dark-mode ? 24px : 16px;
+                            height: dark-mode ? 24px : 16px;
+                            border-radius: self.height / 2;
+                            background: dark-mode ? Theme.on-primary : Theme.outline;
                         }
 
                         TouchArea {
+                            mouse-cursor: pointer;
                             clicked => { root.toggle-theme(); }
                         }
                     }
                 }
             }
 
-            SettingsDivider {}
-
-            SettingsSectionHeader { title: "Library layout"; }
-
-            Text { text: "Cover grid columns (desktop)"; color: Theme.text-muted; font-size: 12px; }
+            Text { text: "色彩模式 / Color Mode"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
             HorizontalLayout {
                 spacing: 10px;
+                M3ChoiceChip { label: "深色 (Dark)"; active: root.theme-mode == "dark"; clicked => { root.set-theme-mode("dark"); root.theme-mode = "dark"; } }
+                M3ChoiceChip { label: "浅色 (Light)"; active: root.theme-mode == "light"; clicked => { root.set-theme-mode("light"); root.theme-mode = "light"; } }
+                M3ChoiceChip { label: "跟随系统 (Auto)"; active: root.theme-mode == "system"; clicked => { root.set-theme-mode("system"); root.theme-mode = "system"; } }
+                Rectangle { horizontal-stretch: 1; }
+            }
 
-                GridColButton { label: "2"; active: root.grid-columns == 2; clicked => { root.set-grid-columns(2); } }
-                GridColButton { label: "3"; active: root.grid-columns == 3; clicked => { root.set-grid-columns(3); } }
-                GridColButton { label: "4"; active: root.grid-columns == 4; clicked => { root.set-grid-columns(4); } }
-                GridColButton { label: "5"; active: root.grid-columns == 5; clicked => { root.set-grid-columns(5); } }
+            Text { text: "强调色 / Accent Hue"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+            HorizontalLayout {
+                spacing: 10px;
+                M3ChoiceChip { label: "Astra 经典蓝"; active: root.accent == "blue"; clicked => { root.set-accent("blue"); root.accent = "blue"; } }
+                M3ChoiceChip { label: "星云紫"; active: root.accent == "purple"; clicked => { root.set-accent("purple"); root.accent = "purple"; } }
+                Rectangle { horizontal-stretch: 1; }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Preview"; }
+            SettingsSectionHeader { title: "游戏库布局 / Library Layout"; }
+
+            Text { text: "视图模式 / View Mode"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+            HorizontalLayout {
+                spacing: 10px;
+                M3ChoiceChip { label: "网格海报 (Grid)"; active: root.view-mode == "grid"; clicked => { root.set-view-mode("grid"); root.view-mode = "grid"; } }
+                M3ChoiceChip { label: "紧凑列表 (List)"; active: root.view-mode == "list"; clicked => { root.set-view-mode("list"); root.view-mode = "list"; } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            Text { text: "展示密度 / Layout Density"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+            HorizontalLayout {
+                spacing: 10px;
+                M3ChoiceChip { label: "舒适 (Comfortable)"; active: root.density == "comfortable"; clicked => { root.set-density("comfortable"); root.density = "comfortable"; } }
+                M3ChoiceChip { label: "紧凑 (Compact)"; active: root.density == "compact"; clicked => { root.set-density("compact"); root.density = "compact"; } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            Text { text: "桌面端网格列数 / Desktop Grid Columns"; color: Theme.on-surface-variant; font-size: Theme.font-label-lg; }
+            HorizontalLayout {
+                spacing: 10px;
+
+                M3ChoiceChip { label: "2 列"; active: root.grid-columns == 2; clicked => { root.set-grid-columns(2); } }
+                M3ChoiceChip { label: "3 列"; active: root.grid-columns == 3; clicked => { root.set-grid-columns(3); } }
+                M3ChoiceChip { label: "4 列"; active: root.grid-columns == 4; clicked => { root.set-grid-columns(4); } }
+                M3ChoiceChip { label: "5 列"; active: root.grid-columns == 5; clicked => { root.set-grid-columns(5); } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+
+            SettingsDivider {}
+
+            SettingsSectionHeader { title: "设计令牌色彩体系预览 / M3 Token Palette"; }
 
             // Color preview swatches
             HorizontalLayout {
-                spacing: 8px;
-                height: 40px;
+                spacing: 12px;
+                height: 48px;
 
                 ColorSwatch { color-value: Theme.background; label: "BG"; }
                 ColorSwatch { color-value: Theme.surface; label: "Surface"; }
+                ColorSwatch { color-value: Theme.surface-container; label: "Tonal"; }
                 ColorSwatch { color-value: Theme.primary; label: "Primary"; }
-                ColorSwatch { color-value: Theme.text; label: "Text"; }
-                ColorSwatch { color-value: Theme.danger; label: "Danger"; }
+                ColorSwatch { color-value: Theme.on-surface; label: "Text"; }
+                ColorSwatch { color-value: Theme.error; label: "Danger"; }
+                Rectangle { horizontal-stretch: 1; }
             }
         }
     }

@@ -6,6 +6,7 @@ import { Button, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+import { M3Button, M3Card } from "../components/m3-widgets.slint";
 
 export component CompatibilitySettingsPage inherits Rectangle {
     in property <string> source-url;
@@ -71,17 +72,21 @@ export component CompatibilitySettingsPage inherits Rectangle {
                 font-size: 12px;
             }
 
-            Button {
-                text: "Refresh compatibility";
-                enabled: root.network-consent;
-                clicked => { root.refresh-compatibility(); }
+            HorizontalLayout {
+                M3Button {
+                    text: "刷新社区适配数据";
+                    icon: Icons.arrows-rotate;
+                    primary: true;
+                    enabled: root.network-consent;
+                    clicked => { root.refresh-compatibility(); }
+                }
             }
 
             if !root.network-consent : Text {
-                text: "Enable network access for VNDB or Bangumi under Metadata to refresh the compatibility database.";
-                color: Theme.danger;
+                text: "请先在“作品元数据”中开启 VNDB 或 Bangumi 网络访问授权，以拉取社区兼容性数据。";
+                color: Theme.error;
                 wrap: word-wrap;
-                font-size: 12px;
+                font-size: Theme.font-label-md;
             }
         }
     }

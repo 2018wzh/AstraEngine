@@ -5,6 +5,8 @@ mod android_platform;
 #[cfg(target_os = "android")]
 mod android_source;
 mod audio_executor;
+mod demo;
+mod extension_provider;
 mod metadata_runtime;
 mod platform_secret;
 mod platform_source;
@@ -51,8 +53,8 @@ use astra_emu_manager_core::{
 };
 use astra_emu_manager_ui_slint::MatchReviewViewModel;
 use astra_emu_manager_ui_slint::{
-    AppearanceViewModel, GameCardViewModel, InputConfigViewModel, ManagerViewModel,
-    PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
+    AppearanceViewModel, GameCardViewModel, GenericConfigFieldViewModel, InputConfigViewModel,
+    ManagerViewModel, PlaySessionViewModel, VfsEntryViewModel, VfsPreviewViewModel,
 };
 use astra_emu_metadata::{
     match_metadata, BangumiPlayStatus, BangumiPlayUpdate, CompatibilityFetch, CoverAsset,
@@ -286,10 +288,15 @@ impl RuntimeBridge {
             translation_config,
             Arc::new(ManagerSecretStore::open().map_err(|error| error.to_string())?),
         )?;
-        if let Some((timeout_ms, hook_provider)) = translation.hook_provider() {
-            self.provider
-                .bind_hook_provider(script_fingerprint, timeout_ms, hook_provider)?;
-        }
+        let (timeout_ms, translation_provider) = translation
+            .hook_provider()
+            .map(|(t, p)| (t, Some(p)))
+            .unwrap_or((2000, None));
+        let composite = Arc::new(extension_provider::AstraEmuExtensionProvider::new(
+            translation_provider,
+        ));
+        self.provider
+            .bind_hook_provider(script_fingerprint, timeout_ms, composite)?;
         let open = self.provider.open(RuntimeOpenRequest {
             target_id: "astra-emu-case".into(),
             profile: "fvp-v1".into(),
@@ -1139,6 +1146,9 @@ struct AstraEmuManagerController {
     vfs_selected_path: String,
     input_config: InputConfigViewModel,
     appearance: AppearanceViewModel,
+    pending_family_options: BTreeMap<String, String>,
+    pending_extension_options: BTreeMap<String, String>,
+    pending_filter_options: BTreeMap<String, String>,
 }
 
 struct MountedPatchReader {
@@ -1310,6 +1320,9 @@ impl AstraEmuManagerController {
             vfs_selected_path: String::new(),
             input_config: InputConfigViewModel::default(),
             appearance: AppearanceViewModel::default(),
+            pending_family_options: BTreeMap::new(),
+            pending_extension_options: BTreeMap::new(),
+            pending_filter_options: BTreeMap::new(),
         })
     }
 
@@ -2244,6 +2257,137 @@ fn persist_remote_cover(
         .map_err(|error| error.to_string())
 }
 
+impl AstraEmuManagerController {
+    fn family_config_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+        let Some(family_id) = self.selected_case_id.as_ref().and_then(|case_id| {
+            self.library
+                .case_runtime_profile(case_id)
+                .ok()
+                .flatten()
+                .map(|p| p.family_id)
+                .or_else(|| {
+                    self.library
+                        .case(case_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|c| c.family_override)
+                })
+                .or_else(|| Some("fvp".into()))
+        }) else {
+            return Ok(Vec::new());
+        };
+        let Some(schema) = astra_emu_manager_core::family_config_schema(&family_id) else {
+            return Ok(Vec::new());
+        };
+        let pending = &self.pending_family_options;
+        let mut merged: BTreeMap<String, String> = BTreeMap::new();
+        for field in &schema.fields {
+            let value = pending
+                .get(&field.key)
+                .or(field.default_value.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            merged.insert(field.key.clone(), value);
+        }
+        Ok(schema
+            .fields
+            .iter()
+            .map(|field| GenericConfigFieldViewModel {
+                key: field.key.clone(),
+                label: field.label.clone(),
+                description: field.description.clone(),
+                kind: match field.kind {
+                    astra_emu_manager_core::ConfigFieldKind::String => "string".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Secret => "secret".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Integer => "integer".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Bool => "bool".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Enum => "enum".into(),
+                },
+                value: merged.get(&field.key).cloned().unwrap_or_default(),
+                enum_values: field.enum_values.clone(),
+                required: field.required,
+                min: field.min.unwrap_or(0) as i32,
+                max: field.max.unwrap_or(100000) as i32,
+            })
+            .collect())
+    }
+
+    fn extension_config_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+        let schema = astra_emu_manager_core::extension_config_schema(
+            "astra.emu.translation.openai-compatible",
+        )
+        .unwrap();
+        let pending = &self.pending_extension_options;
+        let mut merged: BTreeMap<String, String> = BTreeMap::new();
+        for field in &schema.fields {
+            let value = pending
+                .get(&field.key)
+                .or(field.default_value.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            merged.insert(field.key.clone(), value);
+        }
+        Ok(schema
+            .fields
+            .iter()
+            .map(|field| GenericConfigFieldViewModel {
+                key: field.key.clone(),
+                label: field.label.clone(),
+                description: field.description.clone(),
+                kind: match field.kind {
+                    astra_emu_manager_core::ConfigFieldKind::String => "string".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Secret => "secret".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Integer => "integer".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Bool => "bool".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Enum => "enum".into(),
+                },
+                value: merged.get(&field.key).cloned().unwrap_or_default(),
+                enum_values: field.enum_values.clone(),
+                required: field.required,
+                min: field.min.unwrap_or(0) as i32,
+                max: field.max.unwrap_or(100000) as i32,
+            })
+            .collect())
+    }
+
+    fn filter_config_fields(&self) -> Result<Vec<GenericConfigFieldViewModel>, String> {
+        let schema = astra_emu_manager_core::filter_config_schema();
+        let pending = &self.pending_filter_options;
+        let current = self
+            .runtime
+            .try_borrow()
+            .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+            .filter_preset()
+            .to_owned();
+        let mut merged: BTreeMap<String, String> = BTreeMap::new();
+        merged.insert(
+            "filter.preset".into(),
+            pending.get("filter.preset").cloned().unwrap_or(current),
+        );
+        Ok(schema
+            .fields
+            .iter()
+            .map(|field| GenericConfigFieldViewModel {
+                key: field.key.clone(),
+                label: field.label.clone(),
+                description: field.description.clone(),
+                kind: match field.kind {
+                    astra_emu_manager_core::ConfigFieldKind::String => "string".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Secret => "secret".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Integer => "integer".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Bool => "bool".into(),
+                    astra_emu_manager_core::ConfigFieldKind::Enum => "enum".into(),
+                },
+                value: merged.get(&field.key).cloned().unwrap_or_default(),
+                enum_values: field.enum_values.clone(),
+                required: field.required,
+                min: field.min.unwrap_or(0) as i32,
+                max: field.max.unwrap_or(100000) as i32,
+            })
+            .collect())
+    }
+}
+
 impl ManagerController for AstraEmuManagerController {
     fn set_host_wake(&mut self, wake: HostWake) {
         self.metadata.set_wake(wake.clone());
@@ -2761,8 +2905,20 @@ impl ManagerController for AstraEmuManagerController {
             vfs_mount_summary,
             input_config: self.input_config.clone(),
             appearance: self.appearance.clone(),
+            family_config_fields: self.family_config_fields().unwrap_or_default(),
+            extension_config_fields: self.extension_config_fields().unwrap_or_default(),
+            filter_config_fields: self.filter_config_fields().unwrap_or_default(),
             version: env!("CARGO_PKG_VERSION").into(),
             build_identity: format!("astra-emu-manager {}", env!("CARGO_PKG_VERSION")),
+            is_demo: false,
+            selected_developer: String::new(),
+            selected_release_date: String::new(),
+            selected_platforms: String::new(),
+            selected_engine: String::new(),
+            selected_cover_meta: String::new(),
+            selected_description: String::new(),
+            selected_tags: String::new(),
+            selected_aliases: String::new(),
         })
     }
 
@@ -3558,6 +3714,175 @@ impl ManagerController for AstraEmuManagerController {
         }
     }
 
+    fn family_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
+        self.pending_family_options
+            .insert(key.to_owned(), value.to_owned());
+        Ok(())
+    }
+
+    fn save_family_config(&mut self) -> Result<ManagerViewModel, String> {
+        let family_id = {
+            let case_id = self
+                .selected_case_id
+                .as_ref()
+                .ok_or("ASTRA_EMU_FAMILY_CONFIG_NO_SELECTION")?;
+            self.library
+                .case_runtime_profile(case_id)
+                .ok()
+                .flatten()
+                .map(|p| p.family_id)
+                .or_else(|| {
+                    self.library
+                        .case(case_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|c| c.family_override)
+                })
+                .unwrap_or_else(|| "fvp".into())
+        };
+        let schema = astra_emu_manager_core::family_config_schema(&family_id)
+            .ok_or("ASTRA_EMU_FAMILY_CONFIG_SCHEMA_MISSING")?;
+        // Validate pending against schema (allow partial, fill defaults)
+        let to_validate = schema.with_defaults(&self.pending_family_options);
+        // Only validate keys that are in pending or required
+        schema
+            .validate_options(&to_validate)
+            .map_err(|e| format!("ASTRA_EMU_FAMILY_CONFIG_INVALID: {e}"))?;
+        let case_id = self
+            .selected_case_id
+            .clone()
+            .ok_or("ASTRA_EMU_CASE_SELECTION_MISSING")?;
+        let work = self
+            .library
+            .work_for_case(&case_id)
+            .map_err(|e| e.to_string())?
+            .ok_or("ASTRA_EMU_CASE_MISSING")?;
+        let work_id = work.work_id;
+        let mut settings = self
+            .library
+            .work_settings(&work_id)
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        let mut merged = settings.family_options.unwrap_or_default();
+        for (k, v) in &self.pending_family_options {
+            merged.insert(k.clone(), v.clone());
+        }
+        settings.family_options = Some(merged);
+        self.library
+            .set_work_settings(&work_id, &settings)
+            .map_err(|e| e.to_string())?;
+        self.pending_family_options.clear();
+        self.model()
+    }
+
+    fn reset_family_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.pending_family_options.clear();
+        if let Some(case_id) = self.selected_case_id.clone() {
+            if let Ok(Some(work)) = self.library.work_for_case(&case_id) {
+                let _ = self
+                    .library
+                    .clear_work_settings(&work.work_id)
+                    .map_err(|e| e.to_string());
+                // Only clear family part, keep other settings if any. For simplicity clear all and restore non-family.
+                // Reload model to reflect cleared state.
+            }
+        }
+        self.model()
+    }
+
+    fn extension_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
+        self.pending_extension_options
+            .insert(key.to_owned(), value.to_owned());
+        Ok(())
+    }
+
+    fn save_extension_config(&mut self) -> Result<ManagerViewModel, String> {
+        let schema = astra_emu_manager_core::extension_config_schema(
+            "astra.emu.translation.openai-compatible",
+        )
+        .ok_or("ASTRA_EMU_EXTENSION_CONFIG_SCHEMA_MISSING")?;
+        let to_validate = schema.with_defaults(&self.pending_extension_options);
+        schema
+            .validate_options(&to_validate)
+            .map_err(|e| format!("ASTRA_EMU_EXTENSION_CONFIG_INVALID: {e}"))?;
+        // For now extension config is global, not per-game. Persist to WorkSettings of selected case if any, otherwise global diagnostic.
+        if let Some(case_id) = self.selected_case_id.clone() {
+            if let Ok(Some(work)) = self.library.work_for_case(&case_id) {
+                let mut settings = self
+                    .library
+                    .work_settings(&work.work_id)
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_default();
+                let mut merged = settings.extension_options.unwrap_or_default();
+                for (k, v) in &self.pending_extension_options {
+                    merged.insert(k.clone(), v.clone());
+                }
+                settings.extension_options = Some(merged);
+                self.library
+                    .set_work_settings(&work.work_id, &settings)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        self.pending_extension_options.clear();
+        self.model()
+    }
+
+    fn reset_extension_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.pending_extension_options.clear();
+        self.model()
+    }
+
+    fn filter_config_changed(&mut self, key: &str, value: &str) -> Result<(), String> {
+        self.pending_filter_options
+            .insert(key.to_owned(), value.to_owned());
+        Ok(())
+    }
+
+    fn save_filter_config(&mut self) -> Result<ManagerViewModel, String> {
+        let schema = astra_emu_manager_core::filter_config_schema();
+        let mut to_validate = schema.with_defaults(&self.pending_filter_options);
+        // Fill from current preset if not in pending
+        if !to_validate.contains_key("filter.preset") {
+            let current = self
+                .runtime
+                .try_borrow()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .filter_preset()
+                .to_owned();
+            to_validate.insert("filter.preset".into(), current);
+        }
+        schema
+            .validate_options(&to_validate)
+            .map_err(|e| format!("ASTRA_EMU_FILTER_CONFIG_INVALID: {e}"))?;
+        if let Some(preset) = to_validate.get("filter.preset") {
+            // Apply via runtime and per-game override if selected
+            if let Some(case_id) = self.selected_case_id.clone() {
+                if let Ok(Some(work)) = self.library.work_for_case(&case_id) {
+                    let mut settings = self
+                        .library
+                        .work_settings(&work.work_id)
+                        .map_err(|e| e.to_string())?
+                        .unwrap_or_default();
+                    settings.filter_preset = Some(preset.clone());
+                    self.library
+                        .set_work_settings(&work.work_id, &settings)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            self.runtime
+                .try_borrow_mut()
+                .map_err(|_| "ASTRA_EMU_RUNTIME_BORROW_CONFLICT".to_owned())?
+                .set_filter_preset(preset)?;
+        }
+        self.pending_filter_options.clear();
+        self.model()
+    }
+
+    fn reset_filter_config(&mut self) -> Result<ManagerViewModel, String> {
+        self.pending_filter_options.clear();
+        self.model()
+    }
+
     fn game_input(&mut self, control: &str, pressed: bool, value: f32) -> Result<(), String> {
         self.runtime
             .try_borrow_mut()
@@ -3685,8 +4010,25 @@ fn run_application() -> Result<(), Box<dyn std::error::Error>> {
     observability.log_dir = Some(diagnostics_dir);
     let _observability = astra_observability::init_host(observability)?;
     tracing::info!(event = "astra.emu.manager.start");
+    // --demo: synthetic 20-entry library + fake stage, 桌面+Android, 会话可写内存丢弃
+    let is_demo = env::args().any(|a| a == "--demo") || env::var("ASTRA_EMU_DEMO").as_deref() == Ok("1");
+    if is_demo {
+        let controller = demo::DemoManagerController::new();
+        let stage = demo::DemoStageRenderer;
+        run_manager_with_initial_state(controller, stage, false)?;
+        return Ok(());
+    }
     let mut controller = AstraEmuManagerController::open()?;
-    let quick_launch = controller.apply_quick_launch_from_environment()?;
+    let quick_launch = match controller.apply_quick_launch_from_environment() {
+        Ok(value) => value,
+        Err(error) => {
+            // The controller can fail before the Slint backend is selected. Flush
+            // the startup log here so a rejected quick launch remains observable
+            // even when the process exits before the event loop starts.
+            let _ = _observability.flush();
+            return Err(error.into());
+        }
+    };
     let runtime = controller.runtime.clone();
     run_manager_with_initial_state(
         controller,

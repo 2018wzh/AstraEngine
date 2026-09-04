@@ -13,44 +13,50 @@ component PatchModeRow inherits Rectangle {
     callback selected(string);
 
     min-height: 64px;
-    border-radius: Theme.radius-sm;
-    background: active ? Theme.primary-muted : (mode-area.has-hover ? Theme.card-hover : transparent);
-    border-width: active ? 1px : 0px;
-    border-color: Theme.primary;
+    border-radius: Theme.shape-lg;
+    background: active
+        ? Theme.primary-container
+        : (mode-area.has-hover ? Theme.surface-container-high : Theme.surface-container-low);
+    border-width: active ? 2px : 1px;
+    border-color: active ? Theme.primary : Theme.outline-variant;
+    animate background, border-color { duration: 120ms; }
 
     HorizontalLayout {
-        padding: 12px;
-        spacing: 10px;
+        padding: 16px;
+        spacing: 14px;
+        alignment: center;
 
         Icon {
-            glyph: active ? Icons.check : "";
-            color: Theme.primary;
+            glyph: active ? Icons.check : Icons.puzzle-piece;
+            color: active ? Theme.primary : Theme.on-surface-variant;
             font-size: 16px;
             vertical-alignment: center;
             horizontal-alignment: center;
-            width: 22px;
+            width: 24px;
         }
 
         VerticalLayout {
+            horizontal-stretch: 1;
             alignment: center;
             spacing: 2px;
 
             Text {
                 text: label;
-                color: active ? Theme.primary : Theme.text;
-                font-size: 14px;
-                font-weight: active ? 600 : 400;
+                color: active ? Theme.on-primary-container : Theme.on-surface;
+                font-size: Theme.font-title-sm;
+                font-weight: active ? 700 : 600;
             }
             Text {
                 text: description;
-                color: Theme.text-muted;
-                font-size: 12px;
+                color: active ? Theme.on-primary-container.transparentize(0.2) : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
                 wrap: word-wrap;
             }
         }
     }
 
     mode-area := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.selected(root.mode-id); }
     }
 }
@@ -66,38 +72,38 @@ export component PatchSettingsPage inherits Rectangle {
         mouse-drag-pan-enabled: true;
 
         VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
+            padding: 24px;
+            spacing: 16px;
 
-            SettingsSectionHeader { title: "Trusted patches"; }
+            SettingsSectionHeader { title: "Trusted Luau 补丁体系"; }
 
             Text {
                 text: root.patches-summary;
-                color: Theme.text-muted;
+                color: Theme.on-surface-variant;
                 wrap: word-wrap;
-                font-size: 12px;
+                font-size: Theme.font-body-sm;
             }
 
             SettingsDivider {}
 
             Text {
-                text: "Patch mode";
-                color: Theme.text;
-                font-size: 14px;
+                text: "补丁安全策略模式";
+                color: Theme.on-surface;
+                font-size: Theme.font-title-sm;
                 font-weight: 600;
             }
 
             PatchModeRow {
-                label: "No patch";
-                description: "Run the game without any Luau patch overlay.";
+                label: "原生纯净运行 (No patch)";
+                description: "不载入任何外部补丁脚本，完全依赖模拟器 Family 插件的原生内核协议";
                 mode-id: "no_patch";
                 active: root.patch-mode == "no_patch";
                 selected(id) => { root.set-patch-mode(id); }
             }
 
             PatchModeRow {
-                label: "Trusted";
-                description: "Require a signed astraemu.patch.luau from the game directory.";
+                label: "强制签名补丁 (Trusted)";
+                description: "从游戏目录加载 astraemu.patch.luau，在受限 Capabilities 沙盒内执行文本与钩子修正";
                 mode-id: "trusted";
                 active: root.patch-mode == "trusted";
                 selected(id) => { root.set-patch-mode(id); }

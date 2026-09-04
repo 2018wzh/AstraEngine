@@ -1,9 +1,10 @@
-// VFS file browser page - read-only tree + content preview + export.
+// VFS file browser page - read-only tree + content preview + export - M3 Styled.
 
-import { Button, ScrollView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
-import { IconButton, Icons } from "../components/icons.slint";
+import { IconButton, Icon, Icons } from "../components/icons.slint";
 import { VfsEntry, VfsPreview, FileTreeRow, FilePreviewPanel } from "../components/file-tree.slint";
+import { M3Button } from "../components/m3-widgets.slint";
 
 export component VfsBrowserPage inherits Rectangle {
     in property <[VfsEntry]> entries;
@@ -13,29 +14,34 @@ export component VfsBrowserPage inherits Rectangle {
     in property <string> current-dir: "/";
     in property <string> mount-summary: "";
     in property <bool> desktop-mode: true;
+    in-out property <string> search-query: "";
+    in-out property <string> type-filter: "all";
     callback select-entry(string);
     callback toggle-expand(string);
     callback navigate-up();
     callback refresh();
     callback export-file(string);
     callback copy-path(string);
+    callback search(string);
+    callback set-type-filter(string);
 
-    background: Theme.background;
+    background: Theme.surface;
 
     VerticalLayout {
         spacing: 0px;
 
         // Toolbar
         Rectangle {
-            height: 52px;
-            background: Theme.surface;
+            height: 56px;
+            background: Theme.surface-container-low;
             border-width: 1px;
-            border-color: Theme.border;
+            border-color: Theme.outline-variant;
 
             HorizontalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                spacing: 8px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 10px;
+                alignment: center;
 
                 IconButton {
                     glyph: Icons.arrow-up;
@@ -43,54 +49,97 @@ export component VfsBrowserPage inherits Rectangle {
                     clicked => { root.navigate-up(); }
                 }
 
-                // Breadcrumb path
+                // Breadcrumb path container
                 Rectangle {
                     horizontal-stretch: 1;
-                    border-radius: Theme.radius-sm;
-                    background: Theme.surface-raised;
+                    height: 36px;
+                    border-radius: 18px;
+                    background: Theme.surface-container;
+                    border-width: 1px;
+                    border-color: Theme.outline-variant;
 
                     Text {
                         text: root.current-dir;
-                        color: Theme.text;
-                        font-size: 13px;
+                        color: Theme.on-surface;
+                        font-size: Theme.font-body-sm;
+                        font-weight: 500;
                         vertical-alignment: center;
-                        x: 12px;
-                        width: parent.width - 24px;
+                        x: 14px;
+                        width: parent.width - 28px;
                         overflow: elide;
                     }
                 }
 
-                Button {
-                    text: "Refresh";
+                M3Button {
+                    text: "刷新";
+                    icon: Icons.rotate;
+                    variant: "tonal";
                     clicked => { root.refresh(); }
                 }
 
-                Button {
-                    text: "Copy path";
+                M3Button {
+                    text: "复制路径";
+                    icon: Icons.copy;
+                    variant: "outlined";
                     enabled: root.selected-path != "";
                     clicked => { root.copy-path(root.selected-path); }
                 }
 
-                Button {
-                    text: "Export";
+                M3Button {
+                    text: "导出文件";
+                    icon: Icons.download;
+                    primary: true;
                     enabled: root.selected-path != "";
                     clicked => { root.export-file(root.selected-path); }
                 }
             }
         }
 
+        // Search / type filter bar
+        Rectangle {
+            height: 48px;
+            background: Theme.surface-container-low;
+            border-width: 1px;
+            border-color: Theme.outline-variant;
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 10px;
+                alignment: center;
+
+                LineEdit {
+                    text <=> root.search-query;
+                    placeholder-text: "搜索 VFS 虚拟文件系统（文件名 / 虚拟路径）";
+                    horizontal-stretch: 1;
+                    edited => { root.search(self.text); }
+                }
+                ComboBox {
+                    model: ["全部格式", "文本/脚本", "图像纹理", "二进制包"];
+                    current-index: root.type-filter == "text" ? 1 : root.type-filter == "image" ? 2 : root.type-filter == "binary" ? 3 : 0;
+                    selected(value) => { root.set-type-filter(value == "文本/脚本" ? "text" : value == "图像纹理" ? "image" : value == "二进制包" ? "binary" : "all"); }
+                }
+                Text {
+                    text: root.entries.length + " 个节点";
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label-md;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
         // Mount summary bar
         if root.mount-summary != "" : Rectangle {
-            height: 32px;
-            background: Theme.surface-raised;
+            height: 34px;
+            background: Theme.surface-container;
 
             Text {
                 text: root.mount-summary;
-                color: Theme.text-muted;
-                font-size: 11px;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
                 vertical-alignment: center;
-                x: 14px;
-                width: parent.width - 28px;
+                x: 16px;
+                width: parent.width - 32px;
                 overflow: elide;
             }
         }
@@ -102,16 +151,16 @@ export component VfsBrowserPage inherits Rectangle {
 
             // File tree (left)
             Rectangle {
-                width: 340px;
-                background: Theme.surface;
+                width: 360px;
+                background: Theme.surface-container-low;
                 border-width: 1px;
-                border-color: Theme.border;
+                border-color: Theme.outline-variant;
 
                 ScrollView {
                     mouse-drag-pan-enabled: true;
 
                     VerticalLayout {
-                        padding: 8px;
+                        padding: 10px;
                         spacing: 2px;
 
                         for entry in root.entries: FileTreeRow {
@@ -122,12 +171,12 @@ export component VfsBrowserPage inherits Rectangle {
                         }
 
                         if root.entries.length == 0 : Rectangle {
-                            height: 80px;
+                            height: 100px;
 
                             Text {
-                                text: "No VFS entries mounted.\nLaunch a game to populate the virtual filesystem.";
-                                color: Theme.text-muted;
-                                font-size: 12px;
+                                text: "当前暂无挂载的 VFS 节点。\n启动游戏即可自动挂载只读档案层。";
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-body-sm;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                                 wrap: word-wrap;
@@ -138,10 +187,14 @@ export component VfsBrowserPage inherits Rectangle {
             }
 
             // Preview (right)
-            FilePreviewPanel {
+            VerticalLayout {
                 horizontal-stretch: 1;
-                preview: root.preview;
-                has-preview: root.has-preview;
+                padding: 16px;
+
+                FilePreviewPanel {
+                    preview: root.preview;
+                    has-preview: root.has-preview;
+                }
             }
         }
 
@@ -153,13 +206,13 @@ export component VfsBrowserPage inherits Rectangle {
             // File list
             Rectangle {
                 vertical-stretch: 1;
-                background: Theme.surface;
+                background: Theme.surface-container-low;
 
                 ScrollView {
                     mouse-drag-pan-enabled: true;
 
                     VerticalLayout {
-                        padding: 8px;
+                        padding: 10px;
                         spacing: 2px;
 
                         for entry in root.entries: FileTreeRow {
@@ -170,12 +223,12 @@ export component VfsBrowserPage inherits Rectangle {
                         }
 
                         if root.entries.length == 0 : Rectangle {
-                            height: 80px;
+                            height: 100px;
 
                             Text {
-                                text: "No VFS entries mounted.";
-                                color: Theme.text-muted;
-                                font-size: 12px;
+                                text: "当前暂无挂载的 VFS 节点。";
+                                color: Theme.on-surface-variant;
+                                font-size: Theme.font-body-sm;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -186,7 +239,7 @@ export component VfsBrowserPage inherits Rectangle {
 
             // Preview below (when selected)
             if root.has-preview : FilePreviewPanel {
-                height: 260px;
+                height: 280px;
                 preview: root.preview;
                 has-preview: root.has-preview;
             }

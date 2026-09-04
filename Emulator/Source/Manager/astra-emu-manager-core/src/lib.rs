@@ -1,4 +1,5 @@
 mod compatibility_cache;
+mod config_schema;
 mod desktop_source;
 mod evidence;
 mod extension_loader;
@@ -18,6 +19,10 @@ mod work_settings;
 
 pub use compatibility_cache::{
     CompatibilityCacheEntry, CompatibilityMatch, CompatibilitySyncState, VnReleaseRecord,
+};
+pub use config_schema::{
+    extension_config_schema, family_config_schema, filter_config_schema, ConfigFieldDescriptor,
+    ConfigFieldKind, ConfigSchema,
 };
 pub use desktop_source::{
     DesktopGrantedSource, DesktopVfsRegistry, VfsAccessMetrics, VfsAuditSummary, VfsResourceInfo,

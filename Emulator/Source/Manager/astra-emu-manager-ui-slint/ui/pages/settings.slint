@@ -1,5 +1,4 @@
-// Settings center - category list (left) + sub-page (right).
-// Extensible: add a new category item and corresponding sub-page component.
+// Settings center - M3 Styled Category Drawer (left) + Sub-page (right).
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
@@ -12,22 +11,23 @@ import { PatchSettingsPage } from "../settings/patches.slint";
 import { CompatibilitySettingsPage } from "../settings/compatibility.slint";
 import { GamepadBinding, InputSettingsPage } from "../settings/input.slint";
 import { AppearanceSettingsPage } from "../settings/appearance.slint";
+import { ConfigField } from "../components/generic-config.slint";
 
 component MobileCategoryChip inherits Rectangle {
     in property <string> label;
     in property <bool> active: false;
     callback clicked();
 
-    width: chip-text.preferred-width + 28px;
-    height: 34px;
-    border-radius: 17px;
-    background: active ? Theme.primary : Theme.surface-raised;
+    width: chip-text.preferred-width + 24px;
+    height: 32px;
+    border-radius: 16px;
+    background: active ? Theme.primary-container : Theme.surface-container;
 
     chip-text := Text {
         text: label;
-        color: active ? Theme.on-primary : Theme.text;
-        font-size: 13px;
-        font-weight: active ? 600 : 400;
+        color: active ? Theme.on-primary-container : Theme.on-surface-variant;
+        font-size: Theme.font-label-md;
+        font-weight: active ? 700 : 500;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -54,8 +54,12 @@ export component SettingsPage inherits Rectangle {
     in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
+    in property <[ConfigField]> extension-config-fields;
     callback save-translation-profile(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-translation-consent();
+    callback extension-config-changed(string, string);
+    callback save-extension-config();
+    callback reset-extension-config();
 
     // Metadata
     in property <[MatchReview]> match-reviews;
@@ -76,7 +80,11 @@ export component SettingsPage inherits Rectangle {
 
     // Filters
     in-out property <string> filter-preset;
+    in property <[ConfigField]> filter-config-fields;
     callback set-filter-preset(string);
+    callback filter-config-changed(string, string);
+    callback save-filter-config();
+    callback reset-filter-config();
 
     // Compatibility
     in property <string> compatibility-source-url;
@@ -103,11 +111,19 @@ export component SettingsPage inherits Rectangle {
 
     // Appearance
     in property <bool> dark-mode;
+    in-out property <string> theme-mode: "dark";
+    in-out property <string> accent: "blue";
     in-out property <int> grid-columns;
+    in-out property <string> density: "comfortable";
+    in-out property <string> view-mode: "grid";
     callback toggle-theme();
     callback set-grid-columns(int);
+    callback set-theme-mode(string);
+    callback set-accent(string);
+    callback set-density(string);
+    callback set-view-mode(string);
 
-    background: Theme.background;
+    background: Theme.surface;
 
     // Desktop: category sidebar + content
     if root.desktop-mode : HorizontalLayout {
@@ -115,70 +131,70 @@ export component SettingsPage inherits Rectangle {
 
         // Category list
         Rectangle {
-            width: 240px;
-            background: Theme.surface;
+            width: 250px;
+            background: Theme.surface-container-low;
             border-width: 1px;
-            border-color: Theme.border;
+            border-color: Theme.outline-variant;
 
             VerticalLayout {
-                padding: 16px;
+                padding: 18px;
                 spacing: 6px;
 
                 Text {
-                    text: "Settings";
-                    color: Theme.text;
-                    font-size: 20px;
+                    text: "设置中心";
+                    color: Theme.on-surface;
+                    font-size: Theme.font-title-lg;
                     font-weight: 700;
                 }
 
-                Rectangle { height: 8px; }
+                Rectangle { height: 10px; }
 
                 SettingsCategoryItem {
-                    label: "Input";
+                    label: "输入控制";
                     icon: Icons.keyboard;
-                    description: "Gamepad remap, per-game, touch";
+                    description: "按键映射、手柄、触控";
                     active: root.category == "input";
                     clicked => { root.category = "input"; }
                 }
                 SettingsCategoryItem {
-                    label: "Translation";
+                    label: "文本翻译";
                     icon: Icons.language;
-                    description: "Provider, model, glossary";
+                    description: "LLM 模型、端点、术语表";
                     active: root.category == "translation";
                     clicked => { root.category = "translation"; }
                 }
                 SettingsCategoryItem {
-                    label: "Metadata";
+                    label: "作品元数据";
                     icon: Icons.database;
-                    description: "VNDB, Bangumi, identity";
+                    description: "VNDB、Bangumi 关联与审核";
                     active: root.category == "metadata";
                     clicked => { root.category = "metadata"; }
                 }
                 SettingsCategoryItem {
-                    label: "Compatibility";
+                    label: "社区兼容性";
                     icon: Icons.clipboard-check;
-                    description: "Community VN grades";
+                    description: "VN 运行评级与版本适配";
                     active: root.category == "compatibility";
                     clicked => { root.category = "compatibility"; }
                 }
                 SettingsCategoryItem {
-                    label: "Filters";
+                    label: "视觉滤镜";
                     icon: Icons.funnel;
-                    description: "Final-frame presets";
+                    description: "GPU 着色器、后处理预设";
                     active: root.category == "filters";
                     clicked => { root.category = "filters"; }
                 }
                 SettingsCategoryItem {
-                    label: "Patches";
+                    label: "Luau 补丁";
                     icon: Icons.puzzle-piece;
-                    description: "Trusted Luau patches";
+                    description: "Trusted 脚本补丁策略";
                     active: root.category == "patches";
                     clicked => { root.category = "patches"; }
                 }
                 SettingsCategoryItem {
-                    label: "Appearance";
+                    label: "界面外观";
                     icon: Icons.palette;
-                    description: "Theme, layout";
+                    description: "深浅色彩、网格密度";
                     active: root.category == "appearance";
                     clicked => { root.category = "appearance"; }
                 }
@@ -205,10 +221,14 @@ export component SettingsPage inherits Rectangle {
                 glossary <=> root.glossary;
                 secret-input <=> root.secret-input;
                 consent-present: root.consent-present;
+                extension-config-fields: root.extension-config-fields;
                 save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
                     root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
                 }
                 grant-consent => { root.grant-translation-consent(); }
+                extension-config-changed(key, value) => { root.extension-config-changed(key, value); }
+                save-extension-config => { root.save-extension-config(); }
+                reset-extension-config => { root.reset-extension-config(); }
             }
 
             if root.category == "metadata" : MetadataSettingsPage {
@@ -231,7 +251,11 @@ export component SettingsPage inherits Rectangle {
 
             if root.category == "filters" : FilterSettingsPage {
                 filter-preset <=> root.filter-preset;
+                filter-config-fields: root.filter-config-fields;
                 set-filter-preset(preset) => { root.set-filter-preset(preset); }
+                filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+                save-filter-config => { root.save-filter-config(); }
+                reset-filter-config => { root.reset-filter-config(); }
             }
 
             if root.category == "compatibility" : CompatibilitySettingsPage {
@@ -266,21 +290,29 @@ export component SettingsPage inherits Rectangle {
 
             if root.category == "appearance" : AppearanceSettingsPage {
                 dark-mode: root.dark-mode;
+                theme-mode <=> root.theme-mode;
+                accent <=> root.accent;
                 grid-columns <=> root.grid-columns;
+                density <=> root.density;
+                view-mode <=> root.view-mode;
                 toggle-theme => { root.toggle-theme(); }
                 set-grid-columns(cols) => { root.set-grid-columns(cols); }
+                set-theme-mode(mode) => { root.set-theme-mode(mode); }
+                set-accent(ac) => { root.set-accent(ac); }
+                set-density(d) => { root.set-density(d); }
+                set-view-mode(m) => { root.set-view-mode(m); }
             }
         }
     }
 
-    // Mobile: vertical category chips + content below
+    // Mobile: horizontal category chips + content below
     if !root.desktop-mode : VerticalLayout {
         spacing: 0px;
 
         // Horizontal category chips
         Rectangle {
             height: 52px;
-            background: Theme.surface;
+            background: Theme.surface-container-low;
 
             ScrollView {
                 horizontal-stretch: 1;
@@ -291,18 +323,18 @@ export component SettingsPage inherits Rectangle {
                     spacing: 8px;
                     alignment: start;
 
-                    MobileCategoryChip { label: "Input"; active: root.category == "input"; clicked => { root.category = "input"; } }
-                    MobileCategoryChip { label: "Translation"; active: root.category == "translation"; clicked => { root.category = "translation"; } }
-                    MobileCategoryChip { label: "Metadata"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
-                    MobileCategoryChip { label: "Compatibility"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
-                    MobileCategoryChip { label: "Filters"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
-                    MobileCategoryChip { label: "Patches"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
-                    MobileCategoryChip { label: "Appearance"; active: root.category == "appearance"; clicked => { root.category = "appearance"; } }
+                    MobileCategoryChip { label: "输入"; active: root.category == "input"; clicked => { root.category = "input"; } }
+                    MobileCategoryChip { label: "翻译"; active: root.category == "translation"; clicked => { root.category = "translation"; } }
+                    MobileCategoryChip { label: "元数据"; active: root.category == "metadata"; clicked => { root.category = "metadata"; } }
+                    MobileCategoryChip { label: "兼容性"; active: root.category == "compatibility"; clicked => { root.category = "compatibility"; } }
+                    MobileCategoryChip { label: "滤镜"; active: root.category == "filters"; clicked => { root.category = "filters"; } }
+                    MobileCategoryChip { label: "补丁"; active: root.category == "patches"; clicked => { root.category = "patches"; } }
+                    MobileCategoryChip { label: "外观"; active: root.category == "appearance"; clicked => { root.category = "appearance"; } }
                 }
             }
         }
 
-        Rectangle { height: 1px; background: Theme.divider; }
+        Rectangle { height: 1px; background: Theme.outline-variant; }
 
         // Content
         Rectangle {
@@ -322,10 +354,14 @@ export component SettingsPage inherits Rectangle {
                 glossary <=> root.glossary;
                 secret-input <=> root.secret-input;
                 consent-present: root.consent-present;
+                extension-config-fields: root.extension-config-fields;
                 save(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret) => {
                     root.save-translation-profile(kind, endpoint, protocol, model, language, context, body-limit, timeout, background, glossary, secret);
                 }
                 grant-consent => { root.grant-translation-consent(); }
+                extension-config-changed(key, value) => { root.extension-config-changed(key, value); }
+                save-extension-config => { root.save-extension-config(); }
+                reset-extension-config => { root.reset-extension-config(); }
             }
 
             if root.category == "metadata" : MetadataSettingsPage {
@@ -348,7 +384,11 @@ export component SettingsPage inherits Rectangle {
 
             if root.category == "filters" : FilterSettingsPage {
                 filter-preset <=> root.filter-preset;
+                filter-config-fields: root.filter-config-fields;
                 set-filter-preset(preset) => { root.set-filter-preset(preset); }
+                filter-config-changed(key, value) => { root.filter-config-changed(key, value); }
+                save-filter-config => { root.save-filter-config(); }
+                reset-filter-config => { root.reset-filter-config(); }
             }
 
             if root.category == "compatibility" : CompatibilitySettingsPage {
@@ -383,9 +423,17 @@ export component SettingsPage inherits Rectangle {
 
             if root.category == "appearance" : AppearanceSettingsPage {
                 dark-mode: root.dark-mode;
+                theme-mode <=> root.theme-mode;
+                accent <=> root.accent;
                 grid-columns <=> root.grid-columns;
+                density <=> root.density;
+                view-mode <=> root.view-mode;
                 toggle-theme => { root.toggle-theme(); }
                 set-grid-columns(cols) => { root.set-grid-columns(cols); }
+                set-theme-mode(mode) => { root.set-theme-mode(mode); }
+                set-accent(ac) => { root.set-accent(ac); }
+                set-density(d) => { root.set-density(d); }
+                set-view-mode(m) => { root.set-view-mode(m); }
             }
         }
     }

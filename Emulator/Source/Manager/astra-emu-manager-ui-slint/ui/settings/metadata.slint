@@ -2,7 +2,9 @@
 
 import { Button, CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+import { M3Button, M3Card } from "../components/m3-widgets.slint";
 
 export struct MatchReview {
     candidate-id: string,
@@ -86,65 +88,95 @@ export component MetadataSettingsPage inherits Rectangle {
             }
 
             HorizontalLayout {
-                spacing: 8px;
-                Button {
+                spacing: 10px;
+                M3Button {
                     enabled: root.selected-case-id != "";
-                    text: "Validate and link";
+                    text: "校验并关联 (Link)";
+                    icon: Icons.link;
+                    primary: true;
                     clicked => { root.link-external-id(root.metadata-provider, root.external-id-input); }
                 }
-                Button {
+                M3Button {
                     enabled: root.selected-case-id != "";
-                    text: "Refresh";
+                    text: "刷新元数据 (Refresh)";
+                    icon: Icons.arrows-rotate;
+                    variant: "tonal";
                     clicked => { root.refresh-metadata(root.metadata-provider); }
                 }
-                Button {
+                M3Button {
                     enabled: root.selected-case-id != "";
-                    text: "Unlink";
+                    text: "解除关联 (Unlink)";
+                    icon: Icons.link-slash;
+                    variant: "outlined";
+                    danger: true;
                     clicked => { root.unlink-identity(root.metadata-provider); }
                 }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Review queue"; }
+            SettingsSectionHeader { title: "待审核匹配队列 (Match Review Queue)"; }
 
             for item in root.match-reviews: Rectangle {
-                min-height: 150px;
-                background: Theme.surface-raised;
-                border-radius: Theme.radius;
+                background: Theme.surface-container-low;
+                border-radius: Theme.shape-lg;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
 
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 4px;
+                    padding: 16px;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            width: provider-text.preferred-width + 12px;
+                            height: 22px;
+                            border-radius: Theme.shape-xs;
+                            background: Theme.primary-container;
+
+                            provider-text := Text {
+                                text: item.provider + " · " + item.remote-id;
+                                color: Theme.on-primary-container;
+                                font-size: Theme.font-label-sm;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: item.title;
+                            color: Theme.on-surface;
+                            font-size: Theme.font-title-sm;
+                            font-weight: 700;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                    }
 
                     Text {
-                        text: item.provider + " " + item.remote-id + " · " + item.title;
-                        color: Theme.text;
-                        font-weight: 700;
-                        wrap: word-wrap;
-                    }
-                    Text {
                         text: item.aliases + " · " + item.release-date + " · " + item.developer;
-                        color: Theme.text-muted;
+                        color: Theme.on-surface-variant;
                         wrap: word-wrap;
-                        font-size: 12px;
+                        font-size: Theme.font-body-sm;
                     }
                     Text {
-                        text: item.evidence;
-                        color: Theme.text-muted;
+                        text: "匹配依据: " + item.evidence;
+                        color: Theme.on-surface-variant;
                         wrap: word-wrap;
-                        font-size: 12px;
+                        font-size: Theme.font-label-md;
                     }
                     if item.diagnostic != "" : Text {
                         text: item.diagnostic;
-                        color: Theme.danger;
+                        color: Theme.error;
                         wrap: word-wrap;
-                        font-size: 12px;
+                        font-size: Theme.font-body-sm;
                     }
                     HorizontalLayout {
-                        spacing: 8px;
-                        Button { text: "Accept"; clicked => { root.accept-match(item.candidate-id); } }
-                        Button { text: "Reject"; clicked => { root.reject-match(item.candidate-id); } }
+                        spacing: 10px;
+                        M3Button { text: "采纳此匹配 (Accept)"; icon: Icons.check; primary: true; clicked => { root.accept-match(item.candidate-id); } }
+                        M3Button { text: "拒绝此匹配 (Reject)"; icon: Icons.xmark; variant: "outlined"; danger: true; clicked => { root.reject-match(item.candidate-id); } }
                     }
                 }
             }

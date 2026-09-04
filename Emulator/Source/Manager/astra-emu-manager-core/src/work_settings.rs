@@ -5,6 +5,8 @@
 //! overrides are persisted as JSON in the `work_settings` table and resolved
 //! on top of the global settings when a game launches.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -22,12 +24,24 @@ pub struct WorkSettings {
     /// Per-game patch mode override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_mode: Option<String>,
+    /// Generic Family options override (e.g. fvp.nls). Validated against
+    /// `family_config_schema(family_id)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_options: Option<BTreeMap<String, String>>,
+    /// Generic Extension options override (e.g. translate.*). Validated against
+    /// `extension_config_schema(extension_id)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_options: Option<BTreeMap<String, String>>,
 }
 
 impl WorkSettings {
     /// Whether no override is set at all.
     pub fn is_empty(&self) -> bool {
-        self.input_mapping.is_none() && self.filter_preset.is_none() && self.patch_mode.is_none()
+        self.input_mapping.is_none()
+            && self.filter_preset.is_none()
+            && self.patch_mode.is_none()
+            && self.family_options.is_none()
+            && self.extension_options.is_none()
     }
 }
 

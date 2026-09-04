@@ -2,7 +2,10 @@
 
 import { Button, ComboBox, LineEdit, ScrollView, SpinBox, TextEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { Icon, Icons } from "../components/icons.slint";
 import { SettingsSectionHeader, SettingsDivider } from "../components/settings-card.slint";
+import { ConfigField, GenericConfigForm } from "../components/generic-config.slint";
+import { M3Button, M3Card } from "../components/m3-widgets.slint";
 
 export component TranslationSettingsPage inherits Rectangle {
     in-out property <string> endpoint-kind;
@@ -17,8 +20,13 @@ export component TranslationSettingsPage inherits Rectangle {
     in-out property <string> glossary;
     in-out property <string> secret-input;
     in property <bool> consent-present;
+    in-out property <bool> expert-mode: false;
+    in property <[ConfigField]> extension-config-fields;
     callback save(string, string, string, string, string, int, int, int, string, string, string);
     callback grant-consent();
+    callback extension-config-changed(string, string);
+    callback save-extension-config();
+    callback reset-extension-config();
 
     background: Theme.background;
 
@@ -38,6 +46,34 @@ export component TranslationSettingsPage inherits Rectangle {
                 font-size: 12px;
             }
 
+            // Simple / Expert toggle
+            Rectangle {
+                height: 36px;
+                border-radius: 18px;
+                background: Theme.surface-raised;
+                border-width: 1px;
+                border-color: Theme.border;
+
+                HorizontalLayout {
+                    padding: 3px;
+                    spacing: 3px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 15px;
+                        background: !root.expert-mode ? Theme.primary : transparent;
+                        Text { text: "简易"; color: !root.expert-mode ? Theme.on-primary : Theme.text-muted; font-size: 13px; font-weight: !root.expert-mode ? 600 : 400; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.expert-mode = false; } }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 15px;
+                        background: root.expert-mode ? Theme.primary : transparent;
+                        Text { text: "专家"; color: root.expert-mode ? Theme.on-primary : Theme.text-muted; font-size: 13px; font-weight: root.expert-mode ? 600 : 400; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { root.expert-mode = true; } }
+                    }
+                }
+            }
+
             Text { text: "Endpoint kind"; color: Theme.text-muted; font-size: 12px; }
             ComboBox {
                 model: ["ecnu", "openai", "third_party"];
@@ -48,63 +84,82 @@ export component TranslationSettingsPage inherits Rectangle {
             Text { text: "HTTPS API base URL"; color: Theme.text-muted; font-size: 12px; }
             LineEdit { text <=> root.endpoint; placeholder-text: "https://…/v1"; }
 
-            Text { text: "Protocol"; color: Theme.text-muted; font-size: 12px; }
-            ComboBox {
-                model: ["responses", "chat_completions"];
-                current-index: root.protocol == "chat_completions" ? 1 : 0;
-                selected(value) => { root.protocol = value; }
-            }
-
             Text { text: "Model"; color: Theme.text-muted; font-size: 12px; }
             LineEdit { text <=> root.model; placeholder-text: "Required; no implicit default"; }
 
             Text { text: "Target language"; color: Theme.text-muted; font-size: 12px; }
             LineEdit { text <=> root.target-language; placeholder-text: "zh-CN"; }
 
-            Text { text: "Context sentences (0–32)"; color: Theme.text-muted; font-size: 12px; }
-            SpinBox { value <=> root.context-sentences; minimum: 0; maximum: 32; }
+            if root.expert-mode : Text { text: "Protocol"; color: Theme.text-muted; font-size: 12px; }
+            if root.expert-mode : ComboBox {
+                model: ["responses", "chat_completions"];
+                current-index: root.protocol == "chat_completions" ? 1 : 0;
+                selected(value) => { root.protocol = value; }
+            }
 
-            Text { text: "Maximum request body bytes (1–16384)"; color: Theme.text-muted; font-size: 12px; }
-            SpinBox { value <=> root.body-limit-bytes; minimum: 1; maximum: 16384; step-size: 256; }
+            if root.expert-mode : Text { text: "Context sentences (0–32)"; color: Theme.text-muted; font-size: 12px; }
+            if root.expert-mode : SpinBox { value <=> root.context-sentences; minimum: 0; maximum: 32; }
 
-            Text { text: "Timeout milliseconds (1000–120000)"; color: Theme.text-muted; font-size: 12px; }
-            SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
+            if root.expert-mode : Text { text: "Maximum request body bytes (1–16384)"; color: Theme.text-muted; font-size: 12px; }
+            if root.expert-mode : SpinBox { value <=> root.body-limit-bytes; minimum: 1; maximum: 16384; step-size: 256; }
 
-            Text { text: "Character and world background"; color: Theme.text-muted; font-size: 12px; }
-            TextEdit { text <=> root.background-context; min-height: 96px; placeholder-text: "Optional context supplied with each request"; wrap: word-wrap; }
+            if root.expert-mode : Text { text: "Timeout milliseconds (1000–120000)"; color: Theme.text-muted; font-size: 12px; }
+            if root.expert-mode : SpinBox { value <=> root.timeout-ms; minimum: 1000; maximum: 120000; step-size: 1000; }
 
-            Text { text: "Glossary (one source = target pair per line)"; color: Theme.text-muted; font-size: 12px; }
-            TextEdit { text <=> root.glossary; min-height: 112px; placeholder-text: "character name = translated name"; wrap: word-wrap; }
+            if root.expert-mode : Text { text: "Character and world background"; color: Theme.text-muted; font-size: 12px; }
+            if root.expert-mode : TextEdit { text <=> root.background-context; min-height: 96px; placeholder-text: "Optional context supplied with each request"; wrap: word-wrap; }
+
+            if root.expert-mode : Text { text: "Glossary (one source = target pair per line)"; color: Theme.text-muted; font-size: 12px; }
+            if root.expert-mode : TextEdit { text <=> root.glossary; min-height: 112px; placeholder-text: "character name = translated name"; wrap: word-wrap; }
 
             Text { text: "API credential"; color: Theme.text-muted; font-size: 12px; }
             LineEdit { text <=> root.secret-input; input-type: password; placeholder-text: "Leave blank to keep the platform-stored credential"; }
 
-            Button {
-                text: "Save provider profile";
-                clicked => {
-                    root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model,
-                        root.target-language, root.context-sentences, root.body-limit-bytes,
-                        root.timeout-ms, root.background-context, root.glossary, root.secret-input);
-                    root.secret-input = "";
+            HorizontalLayout {
+                M3Button {
+                    text: "保存翻译提供方配置";
+                    icon: Icons.check;
+                    primary: true;
+                    clicked => {
+                        root.save(root.endpoint-kind, root.endpoint, root.protocol, root.model,
+                            root.target-language, root.context-sentences, root.body-limit-bytes,
+                            root.timeout-ms, root.background-context, root.glossary, root.secret-input);
+                        root.secret-input = "";
+                    }
                 }
             }
 
             SettingsDivider {}
 
-            SettingsSectionHeader { title: "Network consent"; }
+            SettingsSectionHeader { title: "网络访问授权"; }
 
             Text {
                 text: root.consent-present
-                    ? "Granted globally. Changing the profile does not prompt again."
-                    : "Translation sends the current line, up to the configured recent context, background and glossary to the displayed endpoint and model. Consent is global and does not expire automatically.";
-                color: Theme.text-muted;
+                    ? "已全局授予网络翻译授权。切换配置无需再次确认。"
+                    : "翻译服务会将当前游戏台词及上下文发送至指定的端点与模型。授权为全局生效。";
+                color: Theme.on-surface-variant;
                 wrap: word-wrap;
-                font-size: 12px;
+                font-size: Theme.font-body-sm;
             }
 
-            if !root.consent-present : Button {
-                text: "Grant global translation consent";
-                clicked => { root.grant-consent(); }
+            if !root.consent-present : HorizontalLayout {
+                M3Button {
+                    text: "授予全局翻译网络权限";
+                    icon: Icons.shield;
+                    variant: "tonal";
+                    clicked => { root.grant-consent(); }
+                }
+            }
+
+            SettingsDivider {}
+
+            GenericConfigForm {
+                fields: root.extension-config-fields;
+                form-title: "Extension 通用配置（Translate）";
+                form-description: "由 extension_config_schema 驱动，同一表单引擎服务所有翻译提供方";
+                field-changed(key, value) => { root.extension-config-changed(key, value); }
+                save => { root.save-extension-config(); }
+                reset => { root.reset-extension-config(); }
             }
 
         }

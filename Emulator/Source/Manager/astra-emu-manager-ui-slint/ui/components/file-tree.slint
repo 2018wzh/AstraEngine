@@ -1,4 +1,4 @@
-// VFS file tree and list components for the file browser page.
+// VFS file tree and list components for the file browser page - M3 Styled.
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
@@ -32,24 +32,27 @@ export component FileTreeRow inherits Rectangle {
     callback activated(string);
     callback toggle-expand(string);
 
-    height: 32px;
-    background: selected ? Theme.primary-muted : (row-area.has-hover ? Theme.card-hover : transparent);
-    border-radius: 6px;
+    height: 34px;
+    background: selected
+        ? Theme.primary-container
+        : (row-area.has-hover ? Theme.surface-container-high : transparent);
+    border-radius: Theme.shape-sm;
+    animate background { duration: 120ms; }
 
     HorizontalLayout {
-        padding-left: 8px + entry.depth * 18px;
+        padding-left: 8px + entry.depth * 16px;
         padding-right: 8px;
         spacing: 6px;
         alignment: start;
 
         // Expand/collapse indicator for directories
         if entry.is-dir : Rectangle {
-            width: 14px;
+            width: 16px;
             height: parent.height;
 
             Icon {
                 glyph: entry.expanded ? Icons.chevron-down : Icons.chevron-right;
-                color: Theme.text-muted;
+                color: Theme.on-surface-variant;
                 font-size: 10px;
                 vertical-alignment: center;
                 horizontal-alignment: center;
@@ -59,12 +62,12 @@ export component FileTreeRow inherits Rectangle {
                 clicked => { root.toggle-expand(root.entry.path); }
             }
         }
-        if !entry.is-dir : Rectangle { width: 14px; }
+        if !entry.is-dir : Rectangle { width: 16px; }
 
         // File/folder icon
         Icon {
             glyph: entry.is-dir ? Icons.folder : Icons.file;
-            color: entry.is-dir ? Theme.primary : Theme.text-muted;
+            color: entry.is-dir ? Theme.primary : Theme.on-surface-variant;
             font-size: 13px;
             vertical-alignment: center;
             horizontal-alignment: center;
@@ -74,8 +77,9 @@ export component FileTreeRow inherits Rectangle {
         // Name
         Text {
             text: entry.name;
-            color: Theme.text;
-            font-size: 13px;
+            color: selected ? Theme.on-primary-container : Theme.on-surface;
+            font-size: Theme.font-body-sm;
+            font-weight: entry.is-dir ? 600 : 400;
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
@@ -84,22 +88,23 @@ export component FileTreeRow inherits Rectangle {
         // Size display for files
         if !entry.is-dir && entry.size-display != "" : Text {
             text: entry.size-display;
-            color: Theme.text-muted;
-            font-size: 11px;
+            color: selected ? Theme.on-primary-container : Theme.on-surface-variant;
+            font-size: Theme.font-label-sm;
             vertical-alignment: center;
         }
 
         // Source layer badge
         if entry.source-layer != "" : Rectangle {
-            width: layer-text.preferred-width + 12px;
+            width: layer-text.preferred-width + 10px;
             height: 18px;
-            border-radius: 9px;
-            background: Theme.primary-muted;
+            border-radius: Theme.shape-xs;
+            background: selected ? Theme.surface-overlay : Theme.surface-container-highest;
 
             layer-text := Text {
                 text: entry.source-layer;
-                color: Theme.primary;
-                font-size: 10px;
+                color: selected ? Theme.on-surface : Theme.on-surface-variant;
+                font-size: Theme.font-label-sm;
+                font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -116,16 +121,26 @@ export component FilePreviewPanel inherits Rectangle {
     in property <VfsPreview> preview;
     in property <bool> has-preview: false;
 
-    background: Theme.surface;
-    border-radius: Theme.radius;
+    background: Theme.surface-container-low;
+    border-radius: Theme.shape-lg;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
 
     if !has-preview : VerticalLayout {
         alignment: center;
+        spacing: 8px;
+
+        Icon {
+            glyph: Icons.file;
+            font-size: 32px;
+            color: Theme.outline;
+            horizontal-alignment: center;
+        }
 
         Text {
             text: "选择文件以预览内容";
-            color: Theme.text-muted;
-            font-size: 14px;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-body-md;
             horizontal-alignment: center;
         }
     }
@@ -137,9 +152,9 @@ export component FilePreviewPanel inherits Rectangle {
         // File path header
         Text {
             text: preview.path;
-            color: Theme.text;
-            font-size: 14px;
-            font-weight: 600;
+            color: Theme.on-surface;
+            font-size: Theme.font-title-sm;
+            font-weight: 700;
             overflow: elide;
         }
 
@@ -149,22 +164,23 @@ export component FilePreviewPanel inherits Rectangle {
 
             Text {
                 text: "大小: " + preview.size-display;
-                color: Theme.text-muted;
-                font-size: 12px;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-body-sm;
             }
             Text {
                 text: "来源层: " + preview.source-layer;
-                color: Theme.text-muted;
-                font-size: 12px;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-body-sm;
             }
             Text {
                 text: "类型: " + preview.kind;
-                color: Theme.text-muted;
-                font-size: 12px;
+                color: Theme.primary;
+                font-size: Theme.font-body-sm;
+                font-weight: 600;
             }
         }
 
-        Rectangle { height: 1px; background: Theme.divider; }
+        Rectangle { height: 1px; background: Theme.outline-variant; }
 
         // Content preview area
         if preview.kind == "text" : ScrollView {
@@ -173,16 +189,16 @@ export component FilePreviewPanel inherits Rectangle {
 
             Text {
                 text: preview.text-content;
-                color: Theme.text;
-                font-size: 12px;
+                color: Theme.on-surface;
+                font-size: Theme.font-body-sm;
                 wrap: no-wrap;
             }
         }
 
         if preview.kind == "image" : Rectangle {
             vertical-stretch: 1;
-            background: #313846;
-            border-radius: Theme.radius-sm;
+            background: Theme.surface-container-lowest;
+            border-radius: Theme.shape-sm;
 
             Image {
                 source: preview.image-data;
@@ -196,19 +212,19 @@ export component FilePreviewPanel inherits Rectangle {
 
             Text {
                 text: preview.hex-summary;
-                color: Theme.text-muted;
-                font-size: 11px;
+                color: Theme.on-surface-variant;
+                font-size: Theme.font-label-sm;
                 wrap: no-wrap;
             }
         }
 
         // Resolve path footer
-        Rectangle { height: 1px; background: Theme.divider; }
+        Rectangle { height: 1px; background: Theme.outline-variant; }
 
         Text {
-            text: "Resolve: " + preview.resolve-path;
-            color: Theme.text-muted;
-            font-size: 11px;
+            text: "物理定位: " + preview.resolve-path;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-label-sm;
             overflow: elide;
         }
     }

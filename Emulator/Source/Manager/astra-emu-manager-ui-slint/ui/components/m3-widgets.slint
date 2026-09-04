@@ -1,0 +1,251 @@
+// Material Design 3 (M3) Reusable Widget Primitives for AstraEMU.
+// Provides expressive, accessible, and theme-adaptive interactive components.
+
+import { Theme } from "../theme.slint";
+import { Icon, Icons } from "./icons.slint";
+
+export component M3Button inherits Rectangle {
+    in property <string> text: "";
+    in property <string> icon: "";
+    in property <string> variant: "tonal"; // "filled" | "tonal" | "outlined" | "text"
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <length> custom-height: 38px;
+    in property <length> custom-radius: -1px;
+    callback clicked();
+
+    height: custom-height;
+    min-width: 64px;
+    border-radius: custom-radius >= 0px ? custom-radius : self.height / 2;
+    accessible-role: button;
+    accessible-label: text;
+
+    // Background calculation
+    background: !enabled
+        ? Theme.surface-container-highest.transparentize(0.5)
+        : danger
+            ? (btn-area.pressed ? Theme.error.darker(15%) : btn-area.has-hover ? Theme.error.brighter(10%) : Theme.error)
+            : primary || variant == "filled"
+                ? (btn-area.pressed ? Theme.primary.darker(15%) : btn-area.has-hover ? Theme.primary.brighter(10%) : Theme.primary)
+                : variant == "tonal"
+                    ? (btn-area.pressed ? Theme.surface-container-highest : btn-area.has-hover ? Theme.surface-container-high : Theme.surface-container)
+                    : variant == "outlined"
+                        ? (btn-area.pressed ? Theme.surface-container-high : btn-area.has-hover ? Theme.surface-container-low : transparent)
+                        : (btn-area.pressed ? Theme.surface-container-high : btn-area.has-hover ? Theme.surface-container-low : transparent);
+
+    // Border
+    border-width: (!enabled || variant != "outlined") ? 0px : 1px;
+    border-color: danger ? Theme.error : Theme.outline-variant;
+
+    animate background { duration: 120ms; easing: ease-out; }
+
+    HorizontalLayout {
+        padding-left: text == "" ? 10px : 16px;
+        padding-right: text == "" ? 10px : 16px;
+        spacing: 8px;
+        alignment: center;
+
+        if icon != "" : Icon {
+            glyph: icon;
+            font-size: 14px;
+            color: !root.enabled
+                ? Theme.on-surface-variant.transparentize(0.5)
+                : root.danger || root.primary || root.variant == "filled"
+                    ? #ffffff
+                    : Theme.on-surface;
+            vertical-alignment: center;
+        }
+
+        if text != "" : Text {
+            text: root.text;
+            font-size: Theme.font-label-lg;
+            font-weight: (root.primary || root.variant == "filled") ? 700 : 600;
+            color: !root.enabled
+                ? Theme.on-surface-variant.transparentize(0.5)
+                : root.danger || root.primary || root.variant == "filled"
+                    ? #ffffff
+                    : Theme.on-surface;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    btn-area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component M3IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> variant: "tonal"; // "standard" | "tonal" | "filled" | "outlined"
+    in property <length> size: 36px;
+    in property <length> icon-size: 15px;
+    in property <bool> enabled: true;
+    in property <color> icon-color: Theme.on-surface-variant;
+    callback clicked();
+
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    accessible-role: button;
+
+    background: !enabled
+        ? transparent
+        : variant == "filled"
+            ? (icon-btn-area.pressed ? Theme.primary.darker(15%) : icon-btn-area.has-hover ? Theme.primary.brighter(10%) : Theme.primary)
+            : variant == "tonal"
+                ? (icon-btn-area.pressed ? Theme.surface-container-highest : icon-btn-area.has-hover ? Theme.surface-container-high : Theme.surface-container-low)
+                : variant == "outlined"
+                    ? (icon-btn-area.pressed ? Theme.surface-container-high : icon-btn-area.has-hover ? Theme.surface-container-low : transparent)
+                    : (icon-btn-area.pressed ? Theme.surface-container-high : icon-btn-area.has-hover ? Theme.surface-container-low : transparent);
+
+    border-width: (variant == "outlined" && enabled) ? 1px : 0px;
+    border-color: Theme.outline-variant;
+
+    animate background { duration: 120ms; }
+
+    Icon {
+        glyph: icon;
+        font-size: icon-size;
+        color: !root.enabled
+            ? Theme.outline
+            : root.variant == "filled"
+                ? #ffffff
+                : icon-btn-area.has-hover
+                    ? Theme.on-surface
+                    : root.icon-color;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    icon-btn-area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component M3Chip inherits Rectangle {
+    in property <string> label;
+    in property <string> icon: "";
+    in property <bool> active: false;
+    in property <bool> has-close: false;
+    callback clicked();
+    callback closed();
+
+    height: 32px;
+    border-radius: Theme.shape-sm;
+    background: active
+        ? Theme.primary-container
+        : (chip-area.has-hover ? Theme.surface-container-high : Theme.surface-container-low);
+    border-width: active ? 0px : 1px;
+    border-color: Theme.outline-variant;
+
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        alignment: center;
+
+        if icon != "" : Icon {
+            glyph: icon;
+            font-size: 12px;
+            color: root.active ? Theme.on-primary-container : Theme.on-surface-variant;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: label;
+            font-size: Theme.font-label-md;
+            font-weight: root.active ? 700 : 500;
+            color: root.active ? Theme.on-primary-container : Theme.on-surface;
+            vertical-alignment: center;
+        }
+
+        if has-close : Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            background: close-area.has-hover ? Theme.surface-container-highest : transparent;
+
+            Icon {
+                glyph: Icons.xmark;
+                font-size: 10px;
+                color: root.active ? Theme.on-primary-container : Theme.on-surface-variant;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            close-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.closed(); }
+            }
+        }
+    }
+
+    chip-area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component M3Card inherits Rectangle {
+    in property <string> variant: "elevated"; // "elevated" | "tonal" | "outlined"
+    in property <length> custom-radius: Theme.shape-lg;
+
+    border-radius: custom-radius;
+    background: variant == "elevated"
+        ? Theme.surface-container-low
+        : variant == "tonal"
+            ? Theme.surface-container
+            : Theme.surface;
+    border-width: variant == "outlined" ? 1px : 0px;
+    border-color: Theme.outline-variant;
+
+    @children
+}
+
+export component M3Switch inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    width: 52px;
+    height: 32px;
+    border-radius: 16px;
+    background: !enabled
+        ? Theme.surface-container-highest.transparentize(0.5)
+        : checked
+            ? Theme.primary
+            : Theme.surface-container-highest;
+    border-width: checked ? 0px : 2px;
+    border-color: checked ? transparent : Theme.outline;
+
+    animate background { duration: 150ms; }
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 4px : 6px;
+        y: root.checked ? 4px : 6px;
+        width: root.checked ? 24px : 16px;
+        height: root.checked ? 24px : 16px;
+        border-radius: self.height / 2;
+        background: root.checked ? Theme.on-primary : Theme.outline;
+        animate x { duration: 150ms; easing: ease-out; }
+        animate width { duration: 150ms; easing: ease-out; }
+        animate height { duration: 150ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}

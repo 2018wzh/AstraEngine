@@ -1,6 +1,8 @@
-// Game cover card component - evolved from the legacy CoverCard.
+// Game cover card component - M3 Elevated/Outlined Card.
+// Posters conform to 3:4 VN cover standard with calibrated WCAG AA badges.
 
 import { Theme } from "../theme.slint";
+import { Icon, Icons } from "./icons.slint";
 
 export struct GameCard {
     case-id: string,
@@ -19,100 +21,160 @@ export component CoverCard inherits Rectangle {
     in property <GameCard> game;
     in property <bool> selected: false;
     callback activated(string);
+    callback launch(string);
 
-    background: selected ? Theme.card-hover : Theme.surface-raised;
-    border-radius: Theme.radius;
-    border-width: selected || card-focus.has-focus ? 2px : 0px;
-    border-color: Theme.primary;
+    background: selected
+        ? Theme.surface-container-high
+        : (card-area.has-hover ? Theme.surface-container : Theme.surface-container-low);
+    border-radius: Theme.shape-lg;
+    border-width: selected || card-focus.has-focus ? 2px : 1px;
+    border-color: selected || card-focus.has-focus ? Theme.primary : Theme.outline-variant;
+    animate background, border-color { duration: 150ms; }
+
     accessible-role: button;
     accessible-id: "library-case-" + game.case-id;
     accessible-label: game.title + ", " + game.family;
     accessible-description: game.diagnostic == "" ? "Launchable legacy game" : game.diagnostic;
     accessible-action-default => { root.activated(game.case-id); }
-    min-width: 148px;
-    min-height: 224px;
+    min-width: 156px;
+    min-height: 252px;
 
     VerticalLayout {
         padding: 10px;
-        spacing: 6px;
+        spacing: 8px;
 
+        // Cover box (3:4 aspect ratio container)
         Rectangle {
-            background: #313846;
-            border-radius: Theme.radius-sm;
-            min-height: 142px;
+            background: Theme.surface-container-highest;
+            border-radius: Theme.shape-md;
+            min-height: 180px;
+            clip: true;
 
             if game.cover-uri != "" : Image {
                 source: game.cover;
                 image-fit: cover;
-            }
-            if game.cover-uri == "" : Text {
-                text: "NO COVER";
-                color: Theme.text-muted;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                width: parent.width;
+                height: parent.height;
             }
 
-            // Compatibility badge overlay (top-right of the cover).
+            if game.cover-uri == "" : Rectangle {
+                background: @linear-gradient(135deg, Theme.surface-container-high 0%, Theme.surface-container-lowest 100%);
+                border-radius: Theme.shape-md;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 8px;
+
+                    Rectangle {
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 24px;
+                        background: Theme.surface-container-highest;
+                        x: (parent.width - self.width) / 2;
+
+                        Icon {
+                            glyph: Icons.gamepad;
+                            font-size: 22px;
+                            color: Theme.primary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Text {
+                        text: game.family;
+                        color: Theme.on-surface-variant;
+                        font-size: Theme.font-label-md;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            // Engine badge (top-left)
+            Rectangle {
+                x: 6px;
+                y: 6px;
+                width: engine-label.preferred-width + 10px;
+                height: 20px;
+                border-radius: Theme.shape-xs;
+                background: Theme.surface-overlay;
+
+                engine-label := Text {
+                    text: game.family;
+                    color: Theme.on-surface;
+                    font-size: Theme.font-label-sm;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Compatibility badge overlay (top-right of the cover)
             if game.compatibility-status != "" : Rectangle {
                 x: parent.width - self.width - 6px;
                 y: 6px;
                 width: badge-label.preferred-width + 12px;
-                height: 18px;
-                border-radius: 4px;
-                background: game.compatibility-status == "perfect" ? #2ea043
-                    : game.compatibility-status == "completable" ? #1f6feb
-                    : game.compatibility-status == "flawed" ? #d29922
-                    : game.compatibility-status == "boot_only" ? #db6d28
-                    : #da3633;
+                height: 20px;
+                border-radius: Theme.shape-xs;
+                background: game.compatibility-status == "perfect" ? Theme.compat-perfect-bg
+                    : game.compatibility-status == "completable" ? Theme.compat-ok-bg
+                    : game.compatibility-status == "flawed" ? Theme.compat-flawed-bg
+                    : game.compatibility-status == "boot_only" ? Theme.compat-boot-bg
+                    : Theme.compat-bad-bg;
 
                 badge-label := Text {
-                    text: game.compatibility-status == "perfect" ? "Perfect"
-                        : game.compatibility-status == "completable" ? "Completable"
-                        : game.compatibility-status == "flawed" ? "Flawed"
-                        : game.compatibility-status == "boot_only" ? "Boot only"
-                        : "Unplayable";
-                    color: #ffffff;
-                    font-size: 10px;
-                    font-weight: 600;
+                    text: game.compatibility-status == "perfect" ? "完美"
+                        : game.compatibility-status == "completable" ? "可通关"
+                        : game.compatibility-status == "flawed" ? "有瑕疵"
+                        : game.compatibility-status == "boot_only" ? "仅启动"
+                        : "无法运行";
+                    color: game.compatibility-status == "perfect" ? Theme.compat-perfect-fg
+                        : game.compatibility-status == "completable" ? Theme.compat-ok-fg
+                        : game.compatibility-status == "flawed" ? Theme.compat-flawed-fg
+                        : game.compatibility-status == "boot_only" ? Theme.compat-boot-fg
+                        : Theme.compat-bad-fg;
+                    font-size: Theme.font-label-sm;
+                    font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
             }
         }
 
-        Text {
-            text: game.title;
-            color: Theme.text;
-            font-weight: 600;
-            overflow: elide;
-        }
+        // Info stack
+        VerticalLayout {
+            spacing: 2px;
 
-        HorizontalLayout {
-            spacing: 6px;
             Text {
-                text: game.family;
-                color: Theme.text-muted;
-                font-size: 12px;
+                text: game.title;
+                color: Theme.on-surface;
+                font-size: Theme.font-title-sm;
+                font-weight: 600;
+                overflow: elide;
             }
-            if game.play-time != "" : Text {
-                text: "· " + game.play-time;
-                color: Theme.text-muted;
-                font-size: 11px;
+
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: game.play-time != "" ? game.play-time : "未启动";
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label-md;
+                }
+                if game.last-played != "" : Text {
+                    text: "· " + game.last-played;
+                    color: Theme.on-surface-variant;
+                    font-size: Theme.font-label-md;
+                    overflow: elide;
+                }
             }
-        }
 
-        if game.last-played != "" : Text {
-            text: game.last-played;
-            color: Theme.text-muted;
-            font-size: 11px;
-            overflow: elide;
-        }
-
-        if game.diagnostic != "" : Text {
-            text: game.diagnostic;
-            color: Theme.danger;
-            font-size: 11px;
-            overflow: elide;
+            if game.diagnostic != "" : Text {
+                text: game.diagnostic;
+                color: Theme.error;
+                font-size: Theme.font-label-sm;
+                overflow: elide;
+            }
         }
     }
 
@@ -125,8 +187,46 @@ export component CoverCard inherits Rectangle {
             return reject;
         }
 
-        TouchArea {
+        card-area := TouchArea {
             clicked => { root.activated(game.case-id); }
+        }
+
+        // M3 FAB / Pill Launch Button - hover or active
+        Rectangle {
+            y: 154px;
+            x: parent.width - 76px;
+            width: 70px;
+            height: 30px;
+            border-radius: 15px;
+            background: game.diagnostic != "" ? Theme.surface-container-highest : Theme.primary;
+            opacity: (root.selected || card-area.has-hover || launch-area.has-hover) ? 1 : 0;
+            animate opacity { duration: 120ms; }
+            visible: game.diagnostic == "" || root.selected;
+
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+
+                Icon {
+                    glyph: Icons.play;
+                    font-size: 11px;
+                    color: game.diagnostic != "" ? Theme.outline : Theme.on-primary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "启动";
+                    color: game.diagnostic != "" ? Theme.outline : Theme.on-primary;
+                    font-size: Theme.font-label-md;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+
+            launch-area := TouchArea {
+                enabled: game.diagnostic == "";
+                clicked => { root.launch(game.case-id); }
+            }
         }
     }
 }

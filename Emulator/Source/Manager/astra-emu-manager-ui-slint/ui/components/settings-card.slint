@@ -1,4 +1,4 @@
-// Settings category card and row components for the settings center.
+// Settings category card and row components for the settings center - M3 Styled.
 
 import { Theme } from "../theme.slint";
 import { Icon } from "./icons.slint";
@@ -11,11 +11,16 @@ export component SettingsCategoryItem inherits Rectangle {
     in property <bool> active: false;
     callback clicked();
 
-    height: 64px;
-    border-radius: Theme.radius-sm;
-    background: active ? Theme.primary-muted : (cat-area.has-hover ? Theme.card-hover : transparent);
+    height: 60px;
+    border-radius: Theme.shape-md;
+    background: active
+        ? Theme.primary-container
+        : (cat-area.pressed
+            ? Theme.surface-container-highest
+            : (cat-area.has-hover ? Theme.surface-container-high : transparent));
     border-width: active ? 1px : 0px;
     border-color: Theme.primary;
+    animate background { duration: 120ms; }
 
     HorizontalLayout {
         padding-left: 14px;
@@ -25,11 +30,13 @@ export component SettingsCategoryItem inherits Rectangle {
 
         Icon {
             glyph: icon;
-            font-size: 22px;
+            font-size: 20px;
             vertical-alignment: center;
             horizontal-alignment: center;
-            width: 30px;
-            color: active ? Theme.primary : Theme.text-muted;
+            width: 28px;
+            color: active
+                ? Theme.on-primary-container
+                : (cat-area.has-hover ? Theme.on-surface : Theme.on-surface-variant);
         }
 
         VerticalLayout {
@@ -38,14 +45,16 @@ export component SettingsCategoryItem inherits Rectangle {
 
             Text {
                 text: label;
-                color: active ? Theme.primary : Theme.text;
-                font-size: 14px;
+                color: active
+                    ? Theme.on-primary-container
+                    : (cat-area.has-hover ? Theme.on-surface : Theme.on-surface);
+                font-size: Theme.font-body-md;
                 font-weight: active ? 600 : 500;
             }
             Text {
                 text: description;
-                color: Theme.text-muted;
-                font-size: 11px;
+                color: active ? Theme.on-primary-container : Theme.on-surface-variant;
+                font-size: Theme.font-label-md;
                 overflow: elide;
             }
         }
@@ -64,8 +73,8 @@ export component SettingsSectionHeader inherits Rectangle {
 
     Text {
         text: title;
-        color: Theme.text;
-        font-size: 16px;
+        color: Theme.on-surface;
+        font-size: Theme.font-title-md;
         font-weight: 700;
         vertical-alignment: center;
     }
@@ -86,8 +95,8 @@ export component SettingsRow inherits Rectangle {
 
         Text {
             text: label;
-            color: Theme.text-muted;
-            font-size: 12px;
+            color: Theme.on-surface-variant;
+            font-size: Theme.font-body-sm;
         }
 
         @children
@@ -97,5 +106,5 @@ export component SettingsRow inherits Rectangle {
 // A divider line between settings sections
 export component SettingsDivider inherits Rectangle {
     height: 1px;
-    background: Theme.divider;
+    background: Theme.outline-variant;
 }
