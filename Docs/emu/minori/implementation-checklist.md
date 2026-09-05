@@ -450,7 +450,7 @@ Manager startup no longer eagerly loads the unselected FVP binary. The compositi
 
 - [x] 重新安装 stable Rust 1.98 后，以当前 signer/trust-root 重新编译、签名并运行 Minori v9 短程；431 fixed step、27 条物理输入、13 个 submitted/rasterized frame、344576 个 audio frame、无 diagnostic，标题与场景 frame hash 不同。
 - [ ] 旧 gallery 输入在当前 mount/profile/global-progress identity 下触发 `ASTRA_EMU_HEADLESS_CHECKPOINT_AFTER_TERMINAL`，不能沿用历史 gallery report；需要重新生成匹配当前状态的物理输入并完成 required checkpoint 复核。
-- [ ] 四条自然路线、自然 gallery unlock、正式 audio review、movie gallery 原版视觉 parity、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。最新 save/restore checkpoint 另发现一组罕见行末 message 控制标记仍被当作可见正文，必须先按原程序语义确认并修复，不能用静默删除代替解析。
+- [x] 四条自然路线 + 自然 gallery unlock 已在 2026-09-05 的 Headless GPU E2 战役闭合：恋/翠/あやめ/透香四会话经 Control 快进与相对调度跑完，逐会话 `gallery_unlock_count` 1..4 断言成立，Memories 页进入有 checkpoint 画面；见 porting-log 同日条目。正式 audio review、movie gallery 原版视觉 parity、Linux FUSE、macOS extract 和 Windows E3 仍未关闭。最新 save/restore checkpoint 另发现一组罕见行末 message 控制标记仍被当作可见正文，必须先按原程序语义确认并修复，不能用静默删除代替解析。
 
 ## 2026-08-26 稀疏采样回归
 

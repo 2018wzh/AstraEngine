@@ -1233,6 +1233,15 @@ pub async fn run_headless(launch: HeadlessLaunch) -> Result<HeadlessRunReportV3,
             launch_mode: prepared.launch_mode,
         },
     )?;
+    if launch.family_id == "minori" {
+        // Headless route campaigns need the same installation-scoped global
+        // progress and config persistence as the native host, so the family
+        // writable-file port is explicitly bound for every Minori session.
+        probe.runtime.family_options.insert(
+            "astra.provider.storage".into(),
+            "astra.writable_file.v1".into(),
+        );
+    }
     if launch.audit_all_resources && launch.family_id == "minori" {
         probe
             .runtime
@@ -7908,9 +7917,16 @@ fn retain_unconsumed_input_edges(
         // Escape is both a normal wait-completion key and the host-owned
         // system-menu shortcut.  Keep its edge visible to the family even
         // when it completes an input wait; the family validates the matching
-        // await token before opening its system page.  Other controls remain
-        // consumed exactly once by the await owner.
-        .filter(|edge| !consumed_keys.contains(&edge.control) || edge.control == "escape")
+        // await token before opening its system page.  Control plays the same
+        // dual role: it completes a message wait that declares it and must
+        // still reach the family so `control_pressed` tracks the physical
+        // key.  Other controls remain consumed exactly once by the await
+        // owner.
+        .filter(|edge| {
+            !consumed_keys.contains(&edge.control)
+                || edge.control == "escape"
+                || edge.control == "control"
+        })
         .collect()
 }
 

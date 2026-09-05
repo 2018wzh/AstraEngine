@@ -1548,3 +1548,35 @@ Minori 菜单的 item id、顺序或平台呈现。
   在同包脚本中闭合；没有出现其它 arity 或裸 target 形态。
 - 这项结果把 parser/runtime 的 pair 结构从“未知”收敛为已验证输入契约，但不推断
   原版界面的焦点初始项、鼠标命中区或确认后的演出时序；这些仍需原版现场证据。
+
+## 2026-09-05：四路线全通 Headless GPU E2 战役
+
+- 修复 Headless runner 的输入边沿保留规则：`retain_unconsumed_input_edges`
+  此前把被消息等待消费的 `control` 边沿从发往 family 的输入里删除，family 的
+  `control_pressed` 永远收不到按下沿，`.pragma enable_control` 的快进在
+  Headless 下完全不生效。`escape`（host 菜单）之外现在也保留 `control`
+  （等待完成与 family 按键状态的双重角色），并经步级 probe 验证：按下后
+  消息以约 2.5 fixed step 一条推进。
+- Headless CLI 为 Minori 会话显式绑定 `astra.provider.storage =
+  astra.writable_file.v1`，与 native host 相同的安装级全局进度与 config
+  持久化在 Headless 生效；四路线跨会话 clear 依赖此绑定。
+- 输入序列改用 `continue_at_match` 相对调度：影片按游戏时间消耗 fixed step
+  （105 秒 OP ≈ 6300 步），绝对 tick 调度会在影片后永久塌陷并触发
+  `INPUT_QUEUE_BOUNDS`；相对调度把未用超时配额从后续事件扣除。选择点经
+  `blackboard.minori.choice_active.true`、路线终点经
+  `blackboard.minori.route_complete.true`、逐会话自然解锁数经
+  `blackboard.minori.gallery_unlock_count.N` 以 exists 形式断言。
+- 功能性运行使用 `--frame-sample-interval 10`（契约只要求 parity 运行用 1），
+  保留 checkpoint PNG、完整 WAV、manifest 与 run report。四条路线加
+  Memories 共五个会话全部 `passed`、零 diagnostic：恋（花畑，unlock 1）、
+  翠（沢，unlock 2）、あやめ（図書室，unlock 3）、透香（三门 clear 后
+  K06_01 自动 chain，unlock 4）、Memories 页进入（Snaps./Flashbacks./
+  Music./Movie.）。checkpoint 画面经人工查看：选择界面三项与焦点、翠路线
+  场景、标题变体 2 的 Memories 行均正确。
+- 每条路线的 ED 影片按原版首次观看语义完整播放；OP 在首个会话观看后由
+  持久化的 `OP_CLEAR` 走可跳过分支，快进下跳过属原版二周目行为。
+- 边界保持开放：本次证据覆盖"全游戏可完整运行 + 逐路线自然解锁计数"，
+  不构成原版同点视觉 parity、正式人工音频 review、movie gallery parity、
+  逐字速度/全屏 Host effect 等 Config 行为级验收或 Windows E3。Quick Save
+  轮换（Page1 槽 10..19 + 持久化游标）随本次构建签名，但快保行为级断言
+  仍未跑定向测试。GPU Layer2D 合成（现走 rayon CPU oracle）留作后续项。

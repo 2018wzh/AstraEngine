@@ -44,11 +44,12 @@ use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder, ImageForma
 use serde::{Deserialize, Serialize};
 
 use crate::save::{
-    decode as decode_save, decode_config, encode as encode_save, encode_config, slot_path,
-    slot_temporary_path, MinoriConfigEnvelope, MinoriSaveEnvelope, MINORI_CONFIG_MAX_BYTES,
-    MINORI_CONFIG_PATH, MINORI_CONFIG_ROOT, MINORI_CONFIG_SCHEMA, MINORI_CONFIG_TEMPORARY_PATH,
-    MINORI_QUICK_SAVE_SLOT, MINORI_SAVE_COMMENT_MAX_BYTES, MINORI_SAVE_MAX_BYTES,
-    MINORI_SAVE_MAX_SLOTS, MINORI_SAVE_ROOT, MINORI_SAVE_SCHEMA, MINORI_SAVE_THUMBNAIL_HEIGHT,
+    decode as decode_save, decode_config, encode as encode_save, encode_config,
+    quick_save_file_number, slot_path, slot_temporary_path, MinoriConfigEnvelope,
+    MinoriSaveEnvelope, MINORI_CONFIG_MAX_BYTES, MINORI_CONFIG_PATH, MINORI_CONFIG_ROOT,
+    MINORI_CONFIG_SCHEMA, MINORI_CONFIG_TEMPORARY_PATH, MINORI_QUICK_SAVE_SLOT_COUNT,
+    MINORI_SAVE_COMMENT_MAX_BYTES, MINORI_SAVE_MAX_BYTES, MINORI_SAVE_MAX_SLOTS,
+    MINORI_SAVE_ROOT, MINORI_SAVE_SCHEMA, MINORI_SAVE_THUMBNAIL_HEIGHT,
     MINORI_SAVE_THUMBNAIL_MAX_BYTES, MINORI_SAVE_THUMBNAIL_WIDTH, MINORI_SAVE_TIMESTAMP_MAX_BYTES,
 };
 use crate::text_surface::{
@@ -606,6 +607,16 @@ struct MinoriSession {
     global_progress: MinoriGlobalProgressSession,
     config_storage_enabled: bool,
     config_persisted: MinoriConfigState,
+    /// Persisted Quick Save rotation cursor mirrored from the config envelope.
+    /// The original keeps `quickSaveFileNumber` in the installation-scoped
+    /// system parameters, so rotation survives restarts.
+    quick_save_cursor: u32,
+    config_persisted_cursor: u32,
+    /// Script line of the last successful quick save.  The original skips a
+    /// quick save whose script line cursor is unchanged since the previous
+    /// one, so a repeated request at the same line neither writes a file nor
+    /// advances the rotation.
+    last_quick_save_pc_line: Option<u32>,
     /// Host-owned window sampling preference mirrored only for rebuilding the
     /// next native menu transaction. It is not part of the game save/config
     /// payload; the platform host remains the source of the actual sampler.
@@ -959,7 +970,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
             }
         };
         let config_storage_enabled = global_progress_enabled;
-        let persisted_config = if config_storage_enabled {
+        let (persisted_config, quick_save_cursor) = if config_storage_enabled {
             let services = self.host_services()?.clone();
             load_persistent_config(
                 services.writable_files.as_ref(),
@@ -969,7 +980,7 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                 profile_fingerprint,
             )?
         } else {
-            MinoriConfigState::default()
+            (MinoriConfigState::default(), 0)
         };
         vm.set_persistent_config(persisted_config.clone())
             .map_err(runtime_error)?;
@@ -1007,7 +1018,10 @@ impl LegacyRuntimeProvider for MinoriRuntimeProvider {
                     persisted_unlocks: Vec::new(),
                 },
                 config_storage_enabled,
-                config_persisted: persisted_config,
+                config_persisted: persisted_config.clone(),
+                quick_save_cursor,
+                config_persisted_cursor: quick_save_cursor,
+                last_quick_save_pc_line: None,
                 resize_antialias: true,
                 title_pointer_focus: None,
                 save_slots: BTreeSet::new(),
@@ -5851,7 +5865,7 @@ fn load_persistent_config(
     case_fingerprint: Hash256,
     package_hash: Hash256,
     profile_fingerprint: Hash256,
-) -> Result<MinoriConfigState, LegacyProviderError> {
+) -> Result<(MinoriConfigState, u32), LegacyProviderError> {
     let stat = writable_files.execute(
         &session_id.0,
         astra_emu_family_api::LegacyWritableFileRequestV1::Stat {
@@ -5865,7 +5879,7 @@ fn load_persistent_config(
                 "missing config returned contradictory metadata",
             ));
         }
-        return Ok(MinoriConfigState::default());
+        return Ok((MinoriConfigState::default(), 0));
     }
     if !stat.is_file
         || stat.length == 0
@@ -5915,7 +5929,13 @@ fn load_persistent_config(
         ));
     }
     envelope.config.validate().map_err(runtime_error)?;
-    Ok(envelope.config)
+    if envelope.quick_save_cursor >= MINORI_QUICK_SAVE_SLOT_COUNT {
+        return Err(invalid(
+            "ASTRA_EMU_MINORI_CONFIG_CURSOR",
+            "quick save cursor is outside the quick-save page width",
+        ));
+    }
+    Ok((envelope.config, envelope.quick_save_cursor))
 }
 
 fn store_persistent_config_if_changed(
@@ -5924,7 +5944,8 @@ fn store_persistent_config_if_changed(
     session: &mut MinoriSession,
 ) -> Result<(), LegacyProviderError> {
     if !session.config_storage_enabled
-        || session.vm.persistent_config() == &session.config_persisted
+        || (session.vm.persistent_config() == &session.config_persisted
+            && session.quick_save_cursor == session.config_persisted_cursor)
     {
         return Ok(());
     }
@@ -5934,6 +5955,7 @@ fn store_persistent_config_if_changed(
         package_hash: session.package_hash,
         profile_fingerprint: session.profile_fingerprint,
         config: session.vm.persistent_config().clone(),
+        quick_save_cursor: session.quick_save_cursor,
     };
     let payload = encode_config(&envelope).map_err(|_| {
         invalid(
@@ -6013,6 +6035,7 @@ fn store_persistent_config_if_changed(
         "ASTRA_EMU_MINORI_CONFIG_WRITE",
     )?;
     session.config_persisted = envelope.config;
+    session.config_persisted_cursor = session.quick_save_cursor;
     Ok(())
 }
 
@@ -7218,25 +7241,39 @@ fn handle_system_menu_request(
                     )
                 }
                 "quick_save" => {
-                    session.vm.open_save_page().map_err(runtime_error)?;
-                    let save_length = save_slot(
-                        services.writable_files.as_ref(),
-                        session_id,
-                        session,
-                        MINORI_QUICK_SAVE_SLOT,
-                        "",
-                    )?;
-                    session
-                        .vm
-                        .close_gameplay_system_page()
-                        .map_err(runtime_error)?;
-                    session.save_slots.insert(MINORI_QUICK_SAVE_SLOT);
-                    session
-                        .save_slot_lengths
-                        .insert(MINORI_QUICK_SAVE_SLOT, save_length);
-                    session
-                        .save_slot_comments
-                        .insert(MINORI_QUICK_SAVE_SLOT, String::new());
+                    // The original quick save skips a request whose script
+                    // line cursor is unchanged since the previous quick save,
+                    // then writes `quickSaveFileNumber + 10` and advances the
+                    // persisted cursor modulo the Page1 width.
+                    let pc_line = session.vm.state().pc_line;
+                    if session.last_quick_save_pc_line != Some(pc_line) {
+                        let cursor = session.quick_save_cursor;
+                        let slot = quick_save_file_number(cursor);
+                        session.vm.open_save_page().map_err(runtime_error)?;
+                        let save_length = save_slot(
+                            services.writable_files.as_ref(),
+                            session_id,
+                            session,
+                            slot,
+                            "",
+                        )?;
+                        session
+                            .vm
+                            .close_gameplay_system_page()
+                            .map_err(runtime_error)?;
+                        session.last_quick_save_pc_line = Some(pc_line);
+                        session.quick_save_cursor = (cursor + 1) % MINORI_QUICK_SAVE_SLOT_COUNT;
+                        session.save_slots.insert(slot);
+                        session.save_slot_lengths.insert(slot, save_length);
+                        session.save_slot_comments.insert(slot, String::new());
+                    }
+                    if session.config_storage_enabled {
+                        store_persistent_config_if_changed(
+                            services.writable_files.as_ref(),
+                            session_id,
+                            session,
+                        )?;
+                    }
                     session
                         .vm
                         .advance_provider_tick(input.tick_index)
@@ -12722,9 +12759,10 @@ mod tests {
             Some(&"memo".to_owned())
         );
 
-        // The original filename builder uses page * 10 + slot.  Quick Save
-        // therefore occupies page 1 (slot 10), while slot 0 remains the
-        // title-page Auto Save range.
+        // The original filename builder uses page * 10 + slot, and the quick
+        // save rotates the ten Page1 file numbers 10..19 from the persisted
+        // cursor.  The first quick save therefore writes slot 10 while slot 0
+        // remains the title-page Auto Save range.
         let output = provider
             .step(
                 &ctx,
@@ -12770,8 +12808,211 @@ mod tests {
             )
             .unwrap();
         let files = writable.files.lock().unwrap();
-        assert!(files.contains_key(&slot_path(MINORI_QUICK_SAVE_SLOT)));
+        assert!(files.contains_key(&slot_path(quick_save_file_number(0))));
         assert!(!files.contains_key(&slot_path(0)));
+    }
+
+    #[test]
+    fn quick_save_rotates_page1_slots_and_skips_unchanged_lines() {
+        let encode_rgba = |width: u32, height: u32| {
+            let mut png = Vec::new();
+            PngEncoder::new(&mut png)
+                .write_image(
+                    &vec![0; usize::try_from(width * height * 4).unwrap()],
+                    width,
+                    height,
+                    ExtendedColorType::Rgba8,
+                )
+                .unwrap();
+            png
+        };
+        let vfs: Arc<dyn LegacyVfsReader> = Arc::new(MemoryReader {
+            scripts: BTreeMap::from([
+                (
+                    "minori:/scr/test.sc".into(),
+                    b".wait 20\r\n.wait 20\r\n.end\r\n".to_vec(),
+                ),
+                (
+                    "minori:/sys/saveloadBase.png".into(),
+                    encode_rgba(1280, 720),
+                ),
+                ("minori:/sys/saveloadSave.png".into(), encode_rgba(352, 48)),
+                (
+                    "minori:/sys/saveloadSelect.png".into(),
+                    encode_rgba(344, 98),
+                ),
+                (
+                    "minori:/sys/saveloadButtons.png".into(),
+                    encode_rgba(356, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page0.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page1.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                (
+                    "minori:/sys/saveload_Page2.png".into(),
+                    encode_rgba(208, 48),
+                ),
+                ("minori:/sys/notsaved.png".into(), encode_rgba(106, 60)),
+            ]),
+        });
+        let writable = Arc::new(InMemoryWritableFiles::default());
+        let system_menus = Arc::new(RecordingSystemMenuHost::default());
+        let services = LegacyFamilyHostServicesV9 {
+            vfs,
+            surfaces: Arc::new(RecordingSurfaceHost::default()),
+            hooks: Arc::new(UnboundHookHost),
+            writable_files: writable.clone(),
+            system_menus: system_menus.clone(),
+            confirmations: Arc::new(RecordingConfirmationHost::default()),
+            system_commands: Arc::new(RecordingSystemCommandHost::default()),
+            text_inputs: Arc::new(RecordingTextInputHost::default()),
+        };
+        let mut provider = MinoriRuntimeProvider::with_host_services(services);
+        let ctx = context();
+        let session = provider
+            .open(
+                &ctx,
+                LegacyOpenRequest {
+                    requested_session_id: LegacyRuntimeSessionId("session.quick".into()),
+                    case_fingerprint: Hash256::from_sha256(b"case"),
+                    script_uri: "minori:/scr/test.sc".into(),
+                    fixed_delta_ns: 16_666_667,
+                    session_seed: 7,
+                    compatibility_profile: "minori.reference".into(),
+                    family_options: BTreeMap::from([
+                        ("astra.stage_width".into(), "1280".into()),
+                        ("astra.stage_height".into(), "720".into()),
+                    ]),
+                },
+            )
+            .unwrap();
+
+        provider
+            .step(&ctx, &session, step_input(1, Vec::new()))
+            .unwrap();
+        provider
+            .sessions
+            .get_mut(&session.0)
+            .unwrap()
+            .last_gameplay_frame = Some(Arc::from(vec![0x20; 1280 * 720 * 4]));
+
+        let mut sequence = 1u64;
+        let mut tick = 1u64;
+        let mut quick_save = |provider: &mut MinoriRuntimeProvider,
+                              session: &LegacyRuntimeSessionId,
+                              sequence: &mut u64,
+                              tick: &mut u64| {
+            *tick += 1;
+            *sequence += 1;
+            provider
+                .step(
+                    &ctx,
+                    session,
+                    LegacyStepInput {
+                        system_menu: Some(LegacySystemMenuRequestV1 {
+                            action: LegacySystemMenuActionV1::Open,
+                            menu_id: None,
+                            item_id: None,
+                            pointer_x: Some(640),
+                            pointer_y: Some(360),
+                            sequence: *sequence,
+                        }),
+                        ..step_input(*tick, Vec::new())
+                    },
+                )
+                .unwrap();
+            let menu_id = system_menus
+                .published
+                .lock()
+                .unwrap()
+                .last()
+                .expect("quick-save menu is published before selection")
+                .1
+                .menu_id
+                .clone();
+            *tick += 1;
+            *sequence += 1;
+            provider
+                .step(
+                    &ctx,
+                    session,
+                    LegacyStepInput {
+                        system_menu: Some(LegacySystemMenuRequestV1 {
+                            action: LegacySystemMenuActionV1::Select,
+                            menu_id: Some(menu_id),
+                            item_id: Some("quick_save".into()),
+                            pointer_x: None,
+                            pointer_y: None,
+                            sequence: *sequence,
+                        }),
+                        ..step_input(*tick, Vec::new())
+                    },
+                )
+                .unwrap();
+        };
+
+        // The first quick save writes Page1 slot 10.
+        quick_save(&mut provider, &session, &mut sequence, &mut tick);
+        let initial_pc_line = provider.sessions[&session.0].vm.state().pc_line;
+        eprintln!(
+            "DEBUG after #1: cursor={} pc_line={}",
+            provider.sessions[&session.0].quick_save_cursor,
+            initial_pc_line
+        );
+        assert!(writable
+            .files
+            .lock()
+            .unwrap()
+            .contains_key(&slot_path(quick_save_file_number(0))));
+        assert_eq!(provider.sessions[&session.0].quick_save_cursor, 1);
+
+        // A repeated quick save at the same script line is skipped entirely:
+        // no new file and no further cursor advance.
+        quick_save(&mut provider, &session, &mut sequence, &mut tick);
+        eprintln!(
+            "DEBUG after #2: cursor={} pc_line={} last={:?}",
+            provider.sessions[&session.0].quick_save_cursor,
+            provider.sessions[&session.0].vm.state().pc_line,
+            provider.sessions[&session.0].last_quick_save_pc_line
+        );
+        assert_eq!(provider.sessions[&session.0].quick_save_cursor, 1);
+        assert!(!writable
+            .files
+            .lock()
+            .unwrap()
+            .contains_key(&slot_path(quick_save_file_number(1))));
+
+        // Script progress moves the line cursor, so the next quick save
+        // writes slot 11.
+        while provider.sessions[&session.0].vm.state().pc_line == initial_pc_line {
+            tick += 1;
+            provider
+                .step(&ctx, &session, step_input(tick, Vec::new()))
+                .unwrap();
+        }
+        eprintln!(
+            "DEBUG before #3: cursor={} pc_line={} last={:?}",
+            provider.sessions[&session.0].quick_save_cursor,
+            provider.sessions[&session.0].vm.state().pc_line,
+            provider.sessions[&session.0].last_quick_save_pc_line
+        );
+        quick_save(&mut provider, &session, &mut sequence, &mut tick);
+        eprintln!(
+            "DEBUG after #3: cursor={} pc_line={}",
+            provider.sessions[&session.0].quick_save_cursor,
+            provider.sessions[&session.0].vm.state().pc_line
+        );
+        {
+            let files = writable.files.lock().unwrap();
+            assert!(files.contains_key(&slot_path(quick_save_file_number(1))));
+            assert!(!files.contains_key(&slot_path(quick_save_file_number(2))));
+        }
+        assert_eq!(provider.sessions[&session.0].quick_save_cursor, 2);
     }
 
     #[test]
@@ -14214,6 +14455,7 @@ mod tests {
             package_hash,
             profile_fingerprint,
             config: config.clone(),
+            quick_save_cursor: 4,
         };
         let payload = encode_config(&envelope).unwrap();
         writable
@@ -14252,7 +14494,7 @@ mod tests {
                 profile_fingerprint,
             )
             .unwrap(),
-            config
+            (config, 4)
         );
         assert_eq!(
             load_persistent_config(
@@ -14265,6 +14507,63 @@ mod tests {
             .unwrap_err()
             .code(),
             "ASTRA_EMU_MINORI_CONFIG_IDENTITY"
+        );
+    }
+
+    #[test]
+    fn persistent_config_rejects_an_out_of_range_quick_save_cursor() {
+        let writable = InMemoryWritableFiles::default();
+        let session_id = LegacyRuntimeSessionId("session.cursor".into());
+        let case_fingerprint = Hash256::from_sha256(b"case");
+        let package_hash = Hash256::from_sha256(b"package");
+        let profile_fingerprint = Hash256::from_sha256(b"profile");
+        let envelope = MinoriConfigEnvelope {
+            schema: MINORI_CONFIG_SCHEMA.into(),
+            case_fingerprint,
+            package_hash,
+            profile_fingerprint,
+            config: MinoriConfigState::default(),
+            quick_save_cursor: MINORI_QUICK_SAVE_SLOT_COUNT,
+        };
+        let payload = encode_config(&envelope).unwrap();
+        writable
+            .execute(
+                &session_id.0,
+                astra_emu_family_api::LegacyWritableFileRequestV1::CreateDir {
+                    path: MINORI_CONFIG_ROOT.into(),
+                },
+            )
+            .unwrap();
+        writable
+            .execute(
+                &session_id.0,
+                astra_emu_family_api::LegacyWritableFileRequestV1::WriteRange {
+                    path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    offset: 0,
+                    bytes: payload,
+                },
+            )
+            .unwrap();
+        writable
+            .execute(
+                &session_id.0,
+                astra_emu_family_api::LegacyWritableFileRequestV1::AtomicReplace {
+                    temporary_path: MINORI_CONFIG_TEMPORARY_PATH.into(),
+                    destination_path: MINORI_CONFIG_PATH.into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            load_persistent_config(
+                &writable,
+                &session_id,
+                case_fingerprint,
+                package_hash,
+                profile_fingerprint,
+            )
+            .unwrap_err()
+            .code(),
+            "ASTRA_EMU_MINORI_CONFIG_CURSOR"
         );
     }
 
@@ -14318,6 +14617,7 @@ mod tests {
             package_hash,
             profile_fingerprint,
             config: config.clone(),
+            quick_save_cursor: 0,
         })
         .unwrap();
         let writable = ScriptedWritableFiles::new([
