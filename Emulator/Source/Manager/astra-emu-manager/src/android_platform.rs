@@ -10,11 +10,13 @@ use std::{
 use android_activity::AndroidApp;
 use astra_core::Hash256;
 use jni::{
+    jni_sig, jni_str,
     objects::{JByteArray, JObject, JString, JValue},
-    JNIEnv, JavaVM,
+    strings::JNIStr,
+    Env, EnvUnowned, JavaVM,
 };
 
-const BRIDGE_CLASS: &str = "org/astraemu/manager/AstraPlatformBridge";
+const BRIDGE_CLASS: &JNIStr = jni_str!("org/astraemu/manager/AstraPlatformBridge");
 const MAX_ASSET_BYTES: usize = 1024 * 1024;
 
 struct AndroidContext {
@@ -62,8 +64,7 @@ pub struct AndroidDocumentEntry {
 }
 
 pub fn initialize(app: AndroidApp) -> Result<(), String> {
-    let vm =
-        unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.map_err(|_| "ASTRA_EMU_ANDROID_JVM")?;
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
     CONTEXT
         .set(AndroidContext { app, vm })
         .map_err(|_| "ASTRA_EMU_ANDROID_CONTEXT_DUPLICATE".to_owned())?;
@@ -86,10 +87,10 @@ pub fn read_asset(path: &str) -> Result<Vec<u8>, String> {
         .asset_manager()
         .open(&path)
         .ok_or("ASTRA_EMU_ANDROID_ASSET_MISSING")?;
-    if asset.get_length() as usize > MAX_ASSET_BYTES {
+    if asset.length() as usize > MAX_ASSET_BYTES {
         return Err("ASTRA_EMU_ANDROID_ASSET_BOUNDS".into());
     }
-    let mut bytes = Vec::with_capacity(asset.get_length() as usize);
+    let mut bytes = Vec::with_capacity(asset.length() as usize);
     asset
         .read_to_end(&mut bytes)
         .map_err(|_| "ASTRA_EMU_ANDROID_ASSET_READ")?;
@@ -100,96 +101,97 @@ pub fn read_asset(path: &str) -> Result<Vec<u8>, String> {
 }
 
 pub fn package_identity() -> Result<AndroidPackageIdentity, String> {
-    let bytes = call_bridge_bytes("packageIdentity", "(Landroid/app/Activity;)[B", &[])?;
+    let bytes = call_bridge_bytes(jni_str!("packageIdentity"), jni_sig!("(Landroid/app/Activity;)[B"), &[])?;
     decode_identity(&bytes)
 }
 
 pub fn request_document_tree() -> Result<(), String> {
     let ctx = context()?;
-    let mut env = ctx
-        .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    env.call_method(&activity, "requestDocumentTree", "()V", &[])
-        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_SAF_REQUEST"))?;
+    let activity = ctx.app.activity_as_ptr();
+    ctx.vm
+        .attach_current_thread(|env| -> jni::errors::Result<()> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            env.call_method(&activity, jni_str!("requestDocumentTree"), jni_sig!("()V"), &[])
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?;
+            Ok(())
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_REQUEST".to_owned())?;
     Ok(())
 }
 
 pub fn set_game_mode(enabled: bool) -> Result<(), String> {
     let ctx = context()?;
-    let mut env = ctx
-        .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    env.call_method(
-        &activity,
-        "setGameMode",
-        "(Z)V",
-        &[JValue::Bool(u8::from(enabled))],
-    )
-    .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_GAME_MODE"))?;
+    let activity = ctx.app.activity_as_ptr();
+    ctx.vm
+        .attach_current_thread(|env| -> jni::errors::Result<()> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            env.call_method(&activity, jni_str!("setGameMode"), jni_sig!("(Z)V"), &[JValue::Bool(enabled)])
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?;
+            Ok(())
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_GAME_MODE".to_owned())?;
     Ok(())
 }
 
 pub fn store_secret(reference: &str, secret: &str) -> Result<(), String> {
     validate_secret(reference, secret)?;
-    call_bridge_secret_method("storeSecret", reference, Some(secret)).map(|_| ())
+    call_bridge_secret_method(jni_str!("storeSecret"), reference, Some(secret)).map(|_| ())
 }
 
 pub fn resolve_secret(reference: &str) -> Result<String, String> {
     validate_secret_reference(reference)?;
-    call_bridge_secret_method("resolveSecret", reference, None)
+    call_bridge_secret_method(jni_str!("resolveSecret"), reference, None)
 }
 
 fn call_bridge_secret_method(
-    method: &str,
+    method: &JNIStr,
     reference: &str,
     secret: Option<&str>,
 ) -> Result<String, String> {
     let ctx = context()?;
-    let mut env = ctx
-        .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    let reference = env
-        .new_string(reference)
-        .map_err(|_| "ASTRA_EMU_ANDROID_SECRET_REFERENCE")?;
-    let secret_string = secret
-        .map(|secret| env.new_string(secret))
-        .transpose()
-        .map_err(|_| "ASTRA_EMU_ANDROID_SECRET_VALUE")?;
-    let result = if let Some(secret) = secret_string.as_ref() {
-        env.call_static_method(
-            BRIDGE_CLASS,
-            method,
-            "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            &[
-                JValue::Object(&activity),
-                JValue::Object(&reference),
-                JValue::Object(secret),
-            ],
-        )
-    } else {
-        env.call_static_method(
-            BRIDGE_CLASS,
-            method,
-            "(Landroid/app/Activity;Ljava/lang/String;)Ljava/lang/String;",
-            &[JValue::Object(&activity), JValue::Object(&reference)],
-        )
-    };
-    let object = result
-        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_SECRET_STORE"))?
-        .l()
-        .map_err(|_| "ASTRA_EMU_ANDROID_SECRET_STORE")?;
-    if object.is_null() {
-        return Ok(String::new());
-    }
-    env.get_string(&JString::from(object))
-        .map(|value| value.into())
-        .map_err(|_| "ASTRA_EMU_ANDROID_SECRET_STORE".into())
+    let activity = ctx.app.activity_as_ptr();
+    ctx.vm
+        .attach_current_thread(|env| -> jni::errors::Result<String> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            let reference = env.new_string(reference)?;
+            let result = if let Some(secret) = secret {
+                let secret_string = env.new_string(secret)?;
+                env.call_static_method(
+                    BRIDGE_CLASS,
+                    method,
+                    jni_sig!("(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+                    &[
+                        JValue::Object(&activity),
+                        JValue::Object(&reference),
+                        JValue::Object(&secret_string),
+                    ],
+                )
+            } else {
+                env.call_static_method(
+                    BRIDGE_CLASS,
+                    method,
+                    jni_sig!("(Landroid/app/Activity;Ljava/lang/String;)Ljava/lang/String;"),
+                    &[JValue::Object(&activity), JValue::Object(&reference)],
+                )
+            };
+            let object = result
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?
+                .l()?;
+            if object.is_null() {
+                return Ok(String::new());
+            }
+            unsafe { JString::from_raw(env, object.as_raw()) }.try_to_string(env)
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_SECRET_STORE".to_owned())
 }
 
 pub fn take_pending_tree_grants() -> Result<Vec<String>, String> {
@@ -230,67 +232,69 @@ pub fn enumerate_tree(
     max_encoded_bytes: usize,
 ) -> Result<Vec<AndroidDocumentEntry>, String> {
     validate_content_uri(tree_uri)?;
+    let max_entries =
+        i32::try_from(max_entries).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS".to_owned())?;
+    let max_encoded_bytes = i32::try_from(max_encoded_bytes)
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS".to_owned())?;
     let ctx = context()?;
-    let mut env = ctx
+    let activity = ctx.app.activity_as_ptr();
+    let bytes = ctx
         .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    let uri = env
-        .new_string(tree_uri)
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_URI")?;
-    let result = env.call_static_method(
-        BRIDGE_CLASS,
-        "enumerateTree",
-        "(Landroid/app/Activity;Ljava/lang/String;II)[B",
-        &[
-            JValue::Object(&activity),
-            JValue::Object(&uri),
-            JValue::Int(i32::try_from(max_entries).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?),
-            JValue::Int(
-                i32::try_from(max_encoded_bytes).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?,
-            ),
-        ],
-    );
-    let object = result
-        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_SAF_ENUMERATE"))?
-        .l()
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_ENUMERATE")?;
-    let bytes = env
-        .convert_byte_array(JByteArray::from(object))
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_ENUMERATE")?;
-    decode_document_entries(&bytes, max_entries, max_encoded_bytes)
+        .attach_current_thread(|env| -> jni::errors::Result<Vec<u8>> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            let uri = env.new_string(tree_uri)?;
+            let result = env.call_static_method(
+                BRIDGE_CLASS,
+                jni_str!("enumerateTree"),
+                jni_sig!("(Landroid/app/Activity;Ljava/lang/String;II)[B"),
+                &[
+                    JValue::Object(&activity),
+                    JValue::Object(&uri),
+                    JValue::Int(max_entries),
+                    JValue::Int(max_encoded_bytes),
+                ],
+            );
+            let object = result
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?
+                .l()?;
+            env.convert_byte_array(unsafe { JByteArray::from_raw(env, object.as_raw()) })
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_ENUMERATE".to_owned())?;
+    decode_document_entries(&bytes, max_entries as usize, max_encoded_bytes as usize)
 }
 
 pub fn read_document(document_uri: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
     validate_content_uri(document_uri)?;
     let max_bytes = i32::try_from(max_bytes).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?;
     let ctx = context()?;
-    let mut env = ctx
+    let activity = ctx.app.activity_as_ptr();
+    let bytes = ctx
         .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    let uri = env
-        .new_string(document_uri)
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_URI")?;
-    let result = env.call_static_method(
-        BRIDGE_CLASS,
-        "readDocument",
-        "(Landroid/app/Activity;Ljava/lang/String;I)[B",
-        &[
-            JValue::Object(&activity),
-            JValue::Object(&uri),
-            JValue::Int(max_bytes),
-        ],
-    );
-    let object = result
-        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_SAF_READ"))?
-        .l()
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_READ")?;
-    let bytes = env
-        .convert_byte_array(JByteArray::from(object))
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_READ")?;
+        .attach_current_thread(|env| -> jni::errors::Result<Vec<u8>> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            let uri = env.new_string(document_uri)?;
+            let result = env.call_static_method(
+                BRIDGE_CLASS,
+                jni_str!("readDocument"),
+                jni_sig!("(Landroid/app/Activity;Ljava/lang/String;I)[B"),
+                &[
+                    JValue::Object(&activity),
+                    JValue::Object(&uri),
+                    JValue::Int(max_bytes),
+                ],
+            );
+            let object = result
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?
+                .l()?;
+            env.convert_byte_array(unsafe { JByteArray::from_raw(env, object.as_raw()) })
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_READ".to_owned())?;
     if bytes.len() > max_bytes as usize {
         return Err("ASTRA_EMU_ANDROID_SAF_BOUNDS".into());
     }
@@ -309,34 +313,34 @@ pub fn read_document_range(
     let offset = i64::try_from(offset).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?;
     let length = i32::try_from(length).map_err(|_| "ASTRA_EMU_ANDROID_SAF_BOUNDS")?;
     let ctx = context()?;
-    let mut env = ctx
+    let activity = ctx.app.activity_as_ptr();
+    let bytes = ctx
         .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    let uri = env
-        .new_string(document_uri)
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_URI")?;
-    let result = env.call_static_method(
-        BRIDGE_CLASS,
-        "readDocumentRange",
-        "(Landroid/app/Activity;Ljava/lang/String;JJJI)[B",
-        &[
-            JValue::Object(&activity),
-            JValue::Object(&uri),
-            JValue::Long(expected_size),
-            JValue::Long(expected_modified_ms),
-            JValue::Long(offset),
-            JValue::Int(length),
-        ],
-    );
-    let object = result
-        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_SAF_RANGE_READ"))?
-        .l()
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_RANGE_READ")?;
-    let bytes = env
-        .convert_byte_array(JByteArray::from(object))
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_RANGE_READ")?;
+        .attach_current_thread(|env| -> jni::errors::Result<Vec<u8>> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            let uri = env.new_string(document_uri)?;
+            let result = env.call_static_method(
+                BRIDGE_CLASS,
+                jni_str!("readDocumentRange"),
+                jni_sig!("(Landroid/app/Activity;Ljava/lang/String;JJJI)[B"),
+                &[
+                    JValue::Object(&activity),
+                    JValue::Object(&uri),
+                    JValue::Long(expected_size),
+                    JValue::Long(expected_modified_ms),
+                    JValue::Long(offset),
+                    JValue::Int(length),
+                ],
+            );
+            let object = result
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?
+                .l()?;
+            env.convert_byte_array(unsafe { JByteArray::from_raw(env, object.as_raw()) })
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_RANGE_READ".to_owned())?;
     if bytes.len() != length as usize {
         return Err("ASTRA_EMU_ANDROID_SAF_SHORT_READ".into());
     }
@@ -344,33 +348,34 @@ pub fn read_document_range(
 }
 
 fn call_bridge_bytes(
-    name: &str,
-    signature: &str,
-    tail: &[JValue<'_, '_>],
+    name: &JNIStr,
+    signature: jni::signature::MethodSignature<'_, '_>,
+    tail: &[JValue<'_>],
 ) -> Result<Vec<u8>, String> {
     let ctx = context()?;
-    let mut env = ctx
-        .vm
-        .attach_current_thread()
-        .map_err(|_| "ASTRA_EMU_ANDROID_JNI_ATTACH")?;
-    let activity = unsafe { JObject::from_raw(ctx.app.activity_as_ptr().cast()) };
-    let mut arguments = Vec::with_capacity(1 + tail.len());
-    arguments.push(JValue::Object(&activity));
-    arguments.extend_from_slice(tail);
-    let result = env.call_static_method(BRIDGE_CLASS, name, signature, &arguments);
-    let object = result
-        .map_err(|_| clear_jni_error(&mut env, "ASTRA_EMU_ANDROID_BRIDGE"))?
-        .l()
-        .map_err(|_| "ASTRA_EMU_ANDROID_BRIDGE")?;
-    env.convert_byte_array(JByteArray::from(object))
-        .map_err(|_| "ASTRA_EMU_ANDROID_BRIDGE".into())
+    let activity = ctx.app.activity_as_ptr();
+    ctx.vm
+        .attach_current_thread(|env| -> jni::errors::Result<Vec<u8>> {
+            let activity = unsafe { JObject::from_raw(env, activity.cast()) };
+            let mut arguments = Vec::with_capacity(1 + tail.len());
+            arguments.push(JValue::Object(&activity));
+            arguments.extend_from_slice(tail);
+            let result = env.call_static_method(BRIDGE_CLASS, name, signature, &arguments);
+            let object = result
+                .map_err(|error| {
+                    clear_jni_exception(env);
+                    error
+                })?
+                .l()?;
+            env.convert_byte_array(unsafe { JByteArray::from_raw(env, object.as_raw()) })
+        })
+        .map_err(|_| "ASTRA_EMU_ANDROID_BRIDGE".to_owned())
 }
 
-fn clear_jni_error(env: &mut JNIEnv<'_>, code: &'static str) -> String {
-    if env.exception_check().unwrap_or(false) {
-        let _ = env.exception_clear();
+fn clear_jni_exception(env: &mut Env) {
+    if env.exception_check() {
+        env.exception_clear();
     }
-    code.into()
 }
 
 fn decode_identity(bytes: &[u8]) -> Result<AndroidPackageIdentity, String> {
@@ -538,23 +543,31 @@ fn validate_secret(reference: &str, secret: &str) -> Result<(), String> {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnDocumentTreeGranted(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _activity: JObject<'_>,
     uri: JString<'_>,
 ) {
     let result = env
-        .get_string(&uri)
-        .map(|value| value.into())
-        .map_err(|_| "ASTRA_EMU_ANDROID_SAF_URI".to_owned())
-        .and_then(|uri: String| {
-            validate_content_uri(&uri)?;
-            PENDING_TREE_GRANTS
-                .get_or_init(|| Mutex::new(Vec::new()))
-                .lock()
-                .map_err(|_| "ASTRA_EMU_ANDROID_SAF_QUEUE_LOCK".to_owned())?
-                .push(uri);
-            Ok(())
-        });
+        .with_env(|env| uri.try_to_string(env))
+        .into_outcome();
+    let uri = match result {
+        jni::Outcome::Ok(uri) => uri,
+        jni::Outcome::Err(_) | jni::Outcome::Panic(_) => {
+            tracing::error!(
+                event = "astra.emu.android.saf_grant_rejected",
+                diagnostic_code = "ASTRA_EMU_ANDROID_SAF_URI"
+            );
+            return;
+        }
+    };
+    let result = validate_content_uri(&uri).and_then(|()| {
+        PENDING_TREE_GRANTS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .map_err(|_| "ASTRA_EMU_ANDROID_SAF_QUEUE_LOCK".to_owned())?
+            .push(uri);
+        Ok(())
+    });
     if let Err(code) = result {
         tracing::error!(
             event = "astra.emu.android.saf_grant_rejected",
@@ -565,7 +578,7 @@ pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnDocumentTr
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnLifecycleChanged(
-    _env: JNIEnv<'_>,
+    _env: EnvUnowned<'_>,
     _activity: JObject<'_>,
     state: i32,
 ) {
@@ -599,29 +612,36 @@ pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnLifecycleC
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnGamepadInput(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _activity: JObject<'_>,
     control: JString<'_>,
-    pressed: u8,
+    pressed: bool,
     value: f32,
 ) {
-    let control = env
-        .get_string(&control)
-        .map(|value| value.into())
-        .map_err(|_| "ASTRA_EMU_ANDROID_GAMEPAD_CONTROL".to_owned())
-        .and_then(|control: String| match control.as_str() {
-            // Canonical ABI key names.
-            "enter" => Ok("enter"),
-            "escape" => Ok("escape"),
-            "arrow_up" => Ok("arrow_up"),
-            "arrow_down" => Ok("arrow_down"),
-            "arrow_left" => Ok("arrow_left"),
-            "arrow_right" => Ok("arrow_right"),
-            "space" => Ok("space"),
-            _ => Err("ASTRA_EMU_ANDROID_GAMEPAD_CONTROL".to_owned()),
-        });
+    let outcome = env.with_env(|env| control.try_to_string(env)).into_outcome();
+    let control_name = match outcome {
+        jni::Outcome::Ok(name) => name,
+        jni::Outcome::Err(_) | jni::Outcome::Panic(_) => {
+            tracing::error!(
+                event = "astra.emu.android.gamepad_input_rejected",
+                diagnostic_code = "ASTRA_EMU_ANDROID_GAMEPAD_CONTROL"
+            );
+            return;
+        }
+    };
+    let control = match control_name.as_str() {
+        // Canonical ABI key names.
+        "enter" => Ok("enter"),
+        "escape" => Ok("escape"),
+        "arrow_up" => Ok("arrow_up"),
+        "arrow_down" => Ok("arrow_down"),
+        "arrow_left" => Ok("arrow_left"),
+        "arrow_right" => Ok("arrow_right"),
+        "space" => Ok("space"),
+        _ => Err("ASTRA_EMU_ANDROID_GAMEPAD_CONTROL".to_owned()),
+    };
     let result = control.and_then(|control| {
-        if !value.is_finite() || pressed > 1 {
+        if !value.is_finite() {
             return Err("ASTRA_EMU_ANDROID_GAMEPAD_VALUE".into());
         }
         let mut pending = PENDING_GAMEPAD_INPUTS
@@ -634,7 +654,7 @@ pub extern "system" fn Java_org_astraemu_manager_MainActivity_nativeOnGamepadInp
         }
         pending.push(AndroidGamepadInput {
             control,
-            pressed: pressed != 0,
+            pressed,
             value,
         });
         Ok(())

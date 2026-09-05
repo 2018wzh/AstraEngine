@@ -8,7 +8,6 @@ license.workspace = true
 doctest = false
 
 [dependencies]
-bangumi-api.workspace = true
 hex.workspace = true
 image.workspace = true
 reqwest.workspace = true
@@ -24,3 +23,9 @@ tracing.workspace = true
 unicode-normalization.workspace = true
 url.workspace = true
 vn.workspace = true
+
+# bangumi-api still uses reqwest's default native-tls; Android has no system
+# OpenSSL and a vendored build is not acceptable, so the Bangumi provider is
+# compiled out there and the manager reports a typed diagnostic instead.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+bangumi-api.workspace = true

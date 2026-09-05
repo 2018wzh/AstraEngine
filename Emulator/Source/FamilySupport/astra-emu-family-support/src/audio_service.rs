@@ -17,6 +17,10 @@ use astra_emu_family_api::{
     LegacyPcmBufferV7,
 };
 use astra_media::{open_symphonia_audio_stream, MediaError, SymphoniaAudioStreamDecoder};
+#[cfg_attr(
+    target_os = "android",
+    allow(unused_imports) // HostLaunchProfile/PlatformHostFactory are used by the desktop-only `open()`
+)]
 use astra_platform::{
     AudioOutputHandle, AudioOutputRequest, AudioWakeRegistration, HostKind, HostLaunchProfile,
     PlatformHostClient, PlatformHostFactory,
@@ -149,16 +153,31 @@ pub struct FamilyAudioService {
 
 impl FamilyAudioService {
     pub fn open() -> Result<Self, String> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|_| "ASTRA_EMU_AUDIO_RUNTIME_CREATE".to_owned())?;
-        let mut profile = native_audio_profile()?;
-        profile.id = "astra-emu-manager-audio".into();
-        let host = runtime
-            .block_on(native_audio_factory().start(HostLaunchProfile::platform(profile)))
-            .map_err(|error| error.to_string())?;
-        Self::start_with_client(host.client, true)
+        // The Android manager cannot start its own platform host: a
+        // native-activity app must attach to the activity-owned host client
+        // (see `start_with_client`) and astra-platform-android belongs to the
+        // game-activity graph, which is feature-exclusive with this crate.
+        #[cfg(target_os = "android")]
+        {
+            Err(
+                "ASTRA_EMU_AUDIO_ANDROID_HOST_REQUIRED: the Android manager must attach the \
+                 FamilyAudioService to the activity-owned PlatformHostClient"
+                    .to_string(),
+            )
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "ASTRA_EMU_AUDIO_RUNTIME_CREATE".to_owned())?;
+            let mut profile = native_audio_profile()?;
+            profile.id = "astra-emu-manager-audio".into();
+            let host = runtime
+                .block_on(native_audio_factory().start(HostLaunchProfile::platform(profile)))
+                .map_err(|error| error.to_string())?;
+            Self::start_with_client(host.client, true)
+        }
     }
 
     pub fn start_with_client(
@@ -1446,6 +1465,7 @@ fn redacted_media_error(error: MediaError) -> String {
 }
 
 #[cfg(target_os = "windows")]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String> {
     Ok(astra_platform::PlatformHostProfile::windows_release(
         "astra-emu-manager",
@@ -1453,6 +1473,7 @@ fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String>
     ))
 }
 #[cfg(target_os = "macos")]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String> {
     Ok(astra_platform::PlatformHostProfile::macos_release(
         "astra-emu-manager",
@@ -1460,6 +1481,7 @@ fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String>
     ))
 }
 #[cfg(target_os = "linux")]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String> {
     Ok(
         astra_platform::PlatformHostProfile::linux_steam_sniper_release(
@@ -1469,6 +1491,7 @@ fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String>
     )
 }
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn native_audio_profile() -> Result<astra_platform::PlatformHostProfile, String> {
     Err("PLATFORM_NOT_IMPLEMENTED".into())
 }

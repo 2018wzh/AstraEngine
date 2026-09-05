@@ -11,7 +11,7 @@ doctest = false
 
 [[bin]]
 name = "astra-emu-manager"
-path = "src/main.rs"
+path = "src/bin_main.rs"
 
 [dependencies]
 astra-emu-manager-core = { path = "../astra-emu-manager-core" }
@@ -40,17 +40,24 @@ postcard.workspace = true
 pollster.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-slint = { workspace = true, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
+slint = { workspace = true, features = ["std", "compat-1-2", "accessibility"] }
 thiserror.workspace = true
 tracing.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-android-activity.workspace = true
+android-activity = { workspace = true, features = ["native-activity"] }
 jni.workspace = true
 ndk.workspace = true
-slint = { workspace = true, features = ["backend-android-activity-06"] }
+# Android cannot use the winit backend (slint gates femtovg/winit out of its
+# android graph), so the manager renders through the android-activity backend
+# with the wgpu-backed Skia renderer instead.
+slint = { workspace = true, features = ["backend-android-activity-06", "unstable-wgpu-29"] }
+winit = { workspace = true, features = ["android-native-activity"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { workspace = true, features = ["backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-29", "unstable-winit-030"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 gilrs = { workspace = true, features = ["wgi"] }

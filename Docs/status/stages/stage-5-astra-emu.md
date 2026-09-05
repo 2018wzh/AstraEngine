@@ -156,4 +156,4 @@ cargo build -p astra-headless
 cargo test --workspace
 ```
 
-本机 Android target 组件尚未完成修复。在全量门禁、Performance E2 和 Windows E3 完成前，本分支不得标记为可合入。
+本机 Android target 的交叉编译组件已修复并闭合到带签名的 `astraemu-release.apk`（`Tools/build_astraemu_android.py`，API 36 emulator）：workspace `android-activity` feature 冲突、jni 0.21→0.22 迁移、Slint Android backend renderer 选择、`Tools/build_astraemu_android.py` 缺失的 `CXX_*` 与 `astra-emu-fvp/dynamic-plugin-export` feature，以及 APK `extractNativeLibs`（family trust chain 需要真实解压的 FVP dylib）。Manager 在 emulator 上已能进入 `android_main` 并走到 FVP family 动态装载链。Android Manager 的完整运行证据（Library 扫描、游玩、音频、SAF）与 arm64 真机 E3 仍未关闭。在全量门禁、Performance E2 和 Windows E3 完成前，本分支不得标记为可合入。

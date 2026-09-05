@@ -200,8 +200,7 @@ export component CoverCard inherits Rectangle {
             border-radius: 15px;
             background: game.diagnostic != "" ? Theme.surface-container-highest : Theme.primary;
             opacity: (root.selected || card-area.has-hover || launch-area.has-hover) ? 1 : 0;
-            animate opacity { duration: 120ms; }
-            visible: game.diagnostic == "" || root.selected;
+            visible: (game.diagnostic == "" || root.selected) && (root.selected || card-area.has-hover || launch-area.has-hover);
 
             HorizontalLayout {
                 alignment: center;

@@ -25,4 +25,4 @@ tracing.workspace = true
 tokio.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-android-activity.workspace = true
+android-activity = { workspace = true, features = ["game-activity"] }

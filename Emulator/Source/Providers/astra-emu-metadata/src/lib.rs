@@ -1,4 +1,3 @@
-mod bangumi;
 mod compatibility;
 mod cover;
 mod license;
@@ -6,6 +5,10 @@ mod matcher;
 mod model;
 mod vndb;
 
+#[cfg(not(target_os = "android"))]
+mod bangumi;
+
+#[cfg(not(target_os = "android"))]
 pub use bangumi::{BangumiProvider, BangumiProviderConfig};
 pub use compatibility::{
     compatibility_json_schema, parse_compatibility_response, CompatibilityClient,

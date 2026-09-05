@@ -576,6 +576,9 @@ impl AndroidHostApp {
             HostCommand::ReadSave { slot, reply } => {
                 let _ = reply.send(self.save_store.read(&slot));
             }
+            HostCommand::ListSaves { reply } => {
+                let _ = reply.send(self.save_store.list());
+            }
             HostCommand::DeleteSave { slot, reply } => {
                 let _ = reply.send(self.save_store.delete(&slot));
             }

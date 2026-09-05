@@ -54,11 +54,11 @@ impl FamilyHostConfig {
             }
             return Ok(Self {});
         }
+        // On Android the process cmdline is owned by the platform (zygote argv0
+        // plus NativeActivity intent extras), so there is no user CLI surface
+        // to validate; ignore argv entirely.
         #[cfg(target_os = "android")]
         {
-            if env::args_os().len() != 1 {
-                return Err("ASTRA_EMU_MANAGER_ARGUMENT_UNKNOWN".into());
-            }
             return Ok(Self {});
         }
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -289,6 +289,7 @@ fn create_static_ios_provider(
         .map_err(|error| error.to_string())
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn platform_library_name() -> &'static Path {
     #[cfg(target_os = "windows")]
     {

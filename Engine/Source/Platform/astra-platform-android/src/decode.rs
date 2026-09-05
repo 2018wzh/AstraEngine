@@ -79,22 +79,13 @@ impl AndroidDecodeWorker {
         temp_root: PathBuf,
         max_output_bytes: usize,
     ) -> Result<Self, PlatformError> {
-        let mut resource = DecodeResource::new(kind, temp_root, max_output_bytes)?;
+        let resource =
+            WorkerDecodeResource(DecodeResource::new(kind, temp_root, max_output_bytes)?);
         let (tx, rx) = mpsc::sync_channel(1);
         let join = std::thread::Builder::new()
             .name("astra-mediacodec".to_string())
             .spawn(move || {
-                while let Ok(work) = rx.recv() {
-                    match work {
-                        DecodeWork::Decode(request, reply) => {
-                            let _ = reply.send(resource.decode(request));
-                        }
-                        DecodeWork::Close(reply) => {
-                            let _ = reply.send(Ok(()));
-                            break;
-                        }
-                    }
-                }
+                decode_worker_loop(resource, rx);
             })
             .map_err(|_| media_codec_error("decode.worker.start"))?;
         Ok(Self {
@@ -155,6 +146,31 @@ pub(crate) struct DecodeResource {
     temp_root: PathBuf,
     max_output_bytes: usize,
     video_stream: Option<AndroidVideoStream>,
+}
+
+// SAFETY: the NDK MediaCodec/MediaExtractor/ImageReader types are !Send because
+// the NDK objects are not internally synchronized, not because of thread
+// affinity. This wrapper moves them to the dedicated astra-mediacodec worker
+// thread before first use, and every access stays on that thread for the
+// lifetime of the resource. The wrapper must be passed to `decode_worker_loop`
+// as a whole value; destructuring it inside the closure would capture the inner
+// NDK objects directly and bypass this impl.
+struct WorkerDecodeResource(DecodeResource);
+unsafe impl Send for WorkerDecodeResource {}
+
+fn decode_worker_loop(resource: WorkerDecodeResource, rx: mpsc::Receiver<DecodeWork>) {
+    let WorkerDecodeResource(mut resource) = resource;
+    while let Ok(work) = rx.recv() {
+        match work {
+            DecodeWork::Decode(request, reply) => {
+                let _ = reply.send(resource.decode(request));
+            }
+            DecodeWork::Close(reply) => {
+                let _ = reply.send(Ok(()));
+                break;
+            }
+        }
+    }
 }
 
 impl DecodeResource {

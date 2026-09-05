@@ -123,7 +123,9 @@ def main() -> int:
                 "--abi",
                 abi,
                 "--apk-signer-sha256",
-                env["ASTRA_EMU_ANDROID_APK_SIGNER_SHA256"],
+                # Hash256 parses `sha256:<hex>`; the driver's own reports use
+                # the dotted `sha256.<hex>` spelling for its artifact hashes.
+                env["ASTRA_EMU_ANDROID_APK_SIGNER_SHA256"].replace("sha256.", "sha256:", 1),
                 "--signer-identity",
                 env["ASTRA_EMU_FAMILY_SIGNER_ID"],
                 "--min-api",
@@ -249,14 +251,18 @@ def configure_target_environment(
     env = base.copy()
     bin_dir = toolchain / "bin"
     compiler = bin_dir / f"{target}{MIN_API}-clang"
+    cpp_compiler = bin_dir / f"{target}{MIN_API}-clang++"
     if os.name == "nt":
         compiler = compiler.with_suffix(".cmd")
+        cpp_compiler = cpp_compiler.with_suffix(".cmd")
     ar = bin_dir / ("llvm-ar.exe" if os.name == "nt" else "llvm-ar")
     require_file(compiler, "ASTRA_EMU_ANDROID_NDK_CLANG_MISSING")
+    require_file(cpp_compiler, "ASTRA_EMU_ANDROID_NDK_CLANGXX_MISSING")
     require_file(ar, "ASTRA_EMU_ANDROID_NDK_AR_MISSING")
     key = target.upper().replace("-", "_")
     env[f"CARGO_TARGET_{key}_LINKER"] = str(compiler)
     env[f"CC_{target.replace('-', '_')}"] = str(compiler)
+    env[f"CXX_{target.replace('-', '_')}"] = str(cpp_compiler)
     env[f"AR_{target.replace('-', '_')}"] = str(ar)
     return env
 
@@ -278,6 +284,10 @@ def cargo_build_android(
         "-p",
         "astra-emu-manager",
         "--lib",
+        # The family trust chain resolves the ABI root symbol from the dylib,
+        # which only exists when the dynamic export is enabled.
+        "--features",
+        "astra-emu-fvp/dynamic-plugin-export",
         "--message-format=json-render-diagnostics",
     ]
     process = subprocess.Popen(

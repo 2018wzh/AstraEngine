@@ -1,4 +1,6 @@
-use astra_emu_manager_core::{GamepadInput, InputMapping};
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+use astra_emu_manager_core::GamepadInput;
+use astra_emu_manager_core::InputMapping;
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::{
@@ -239,6 +241,7 @@ fn process_gamepad_event(
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn map_button(mapping: &InputMapping, button: gilrs::Button) -> Option<String> {
     use gilrs::Button;
     let input = match button {
@@ -263,6 +266,7 @@ fn map_button(mapping: &InputMapping, button: gilrs::Button) -> Option<String> {
     mapping.gamepad.get(&input).cloned()
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 #[derive(Debug)]
 struct DirectionalAxis {
     press_threshold: f32,
@@ -271,6 +275,7 @@ struct DirectionalAxis {
     positive_pressed: bool,
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 impl DirectionalAxis {
     fn new(press_threshold: f32, release_threshold: f32) -> Self {
         Self {
@@ -320,6 +325,7 @@ impl DirectionalAxis {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn update_button(
     previous: &mut bool,
     next: bool,

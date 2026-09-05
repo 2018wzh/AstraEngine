@@ -278,10 +278,15 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
     game_active: bool,
 ) -> Result<(), HostError> {
     #[cfg(not(target_os = "android"))]
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::default())
-        .select()?;
+    {
+        let mut settings = slint::wgpu_29::WGPUSettings::default();
+        settings.power_preference = wgpu::PowerPreference::HighPerformance;
+        settings.device_memory_hints = wgpu::MemoryHints::Performance;
+        slint::BackendSelector::new()
+            .backend_name("winit".into())
+            .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::Automatic(settings))
+            .select()?;
+    }
     let adapter = std::rc::Rc::new(SlintManagerAdapter::new()?);
     adapter.apply(&controller.model().map_err(HostError::Renderer)?);
     adapter.window().set_game_active(game_active);
@@ -1147,7 +1152,9 @@ pub fn run_manager_with_initial_state<C: ManagerController, R: AstraUnderlayRend
             let _ = slint::quit_event_loop();
         } else if matches!(state, slint::RenderingState::BeforeRendering) {
             if let Some(window) = window_weak.upgrade() {
-                window.window().request_redraw();
+                if window.get_game_active() {
+                    window.window().request_redraw();
+                }
             }
         }
     }).map_err(|error| HostError::Renderer(error.to_string()))?;

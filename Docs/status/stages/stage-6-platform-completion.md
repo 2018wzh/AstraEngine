@@ -152,7 +152,7 @@ Stage 6 收纳 Stage 2 之外的平台完成项。Linux、macOS host 与 package
 
 **Target Paths:** `Engine/Source/Platform/astra-platform-android/`、`Docs/platforms/mobile.md`
 
-**Gate:** required conformance 固定为 lifecycle、Vulkan present/readback、native input、TalkBack、audio output/focus/meter、MediaCodec audio/video、transactional save、bundled/SAF package、resume/recreate 和 zero-leak。对应 host 路径已实现并通过 Android cross-clippy；API 28/36 emulator、arm64 真机和同 run report 仍 blocking。
+**Gate:** required conformance 固定为 lifecycle、Vulkan present/readback、native input、TalkBack、audio output/focus/meter、MediaCodec audio/video、transactional save、bundled/SAF package、resume/recreate 和 zero-leak。对应 host 路径已实现；本轮修复了阻塞交叉编译的 android-activity feature 冲突、jni 0.22 迁移、winit `rwh_06`、MediaCodec worker Send 边界和缺失的 `ListSaves` 分支，astra-player-android 双 ABI release 交叉编译与 bundle 构建已闭合。API 36 emulator 已证实 GameActivity 装载 cdylib、host 启动到 `player.package.open` 并对过期 cooked package（provider policy v2 缺 `presentation_lane`）fail-fast；重新 cook package 后的完整同 run report 与 arm64 真机证据仍 blocking。
 
 **Linked Test IDs:** `T-S6-ANDROID-HOST-01`
 

@@ -31,7 +31,7 @@ fn try_fetch_real_cover(vndb_id: &str, dest: &std::path::Path) -> bool {
         let provider = match VndbProvider::new(VndbProviderConfig {
             network_consent: true,
             license: MetadataLicenseManifest { release_use: ReleaseUse::NonCommercial, vndb_commercial_license_id: None },
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(5),
             minimum_request_delay: Duration::from_millis(250),
         }) { Ok(p) => p, Err(_) => return false };
         let record = match provider.fetch_by_id(vndb_id).await { Ok(r) => r, Err(_) => return false };

@@ -24,12 +24,12 @@ serde.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 wgpu.workspace = true
-winit = { workspace = true, features = ["android-game-activity"] }
+winit = { workspace = true, features = ["android-game-activity", "rwh_06"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 accesskit.workspace = true
 accesskit_android.workspace = true
-android-activity.workspace = true
+android-activity = { workspace = true, features = ["game-activity"] }
 jni.workspace = true
 ndk = { workspace = true, features = ["media", "api-level-28"] }
 ndk-sys.workspace = true

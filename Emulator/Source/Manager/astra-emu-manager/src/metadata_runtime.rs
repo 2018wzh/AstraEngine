@@ -5,11 +5,14 @@ use std::{
 };
 
 use astra_emu_metadata::{
-    BangumiPlayUpdate, BangumiProvider, BangumiProviderConfig, CompatibilityClient,
-    CompatibilityFetch, CoverAsset, MetadataLicenseManifest, MetadataProvider, MetadataProviderId,
-    MetadataRecord, MetadataRelease, MetadataSearchQuery, ReleaseUse, VndbProvider,
-    VndbProviderConfig,
+    BangumiPlayUpdate, CompatibilityClient, CompatibilityFetch, CoverAsset,
+    MetadataLicenseManifest, MetadataProvider, MetadataProviderId, MetadataRecord, MetadataRelease,
+    MetadataSearchQuery, ReleaseUse, VndbProvider, VndbProviderConfig,
 };
+// bangumi-api still links native-tls, which has no Android OpenSSL provider;
+// see astra-emu-metadata's Cargo.toml for the target gate.
+#[cfg(not(target_os = "android"))]
+use astra_emu_metadata::{BangumiProvider, BangumiProviderConfig};
 
 const COMMAND_CAPACITY: usize = 64;
 
@@ -17,6 +20,7 @@ const COMMAND_CAPACITY: usize = 64;
 pub enum MetadataCommandKind {
     Search(MetadataSearchQuery),
     Fetch(String),
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     SyncBangumi(BangumiPlayUpdate),
     /// Refresh the central compatibility database. Not tied to a provider; the
     /// command's `provider` field is a placeholder for this variant.
@@ -35,6 +39,7 @@ pub struct MetadataCommand {
     pub request_id: String,
     pub case_identity: String,
     pub provider: MetadataProviderId,
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub access_token: Option<String>,
     pub allow_sensitive_cover: bool,
     pub kind: MetadataCommandKind,
@@ -47,6 +52,7 @@ pub enum MetadataPayload {
         record: Box<MetadataRecord>,
         cover: Option<CoverAsset>,
     },
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     BangumiPlaySynced,
     Compatibility(CompatibilityFetch),
     Releases(Vec<MetadataRelease>),
@@ -181,20 +187,31 @@ async fn execute(command: &MetadataCommand) -> Result<MetadataPayload, String> {
             execute_provider(&provider, command).await
         }
         MetadataProviderId::Bangumi => {
-            let provider = BangumiProvider::new(BangumiProviderConfig {
-                network_consent: true,
-                access_token: command.access_token.clone(),
-                timeout: Duration::from_secs(20),
-            })
-            .map_err(|error| error.to_string())?;
-            if let MetadataCommandKind::SyncBangumi(update) = &command.kind {
-                provider
-                    .sync_play_status(update)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                return Ok(MetadataPayload::BangumiPlaySynced);
+            #[cfg(target_os = "android")]
+            {
+                Err(
+                    "ASTRA_EMU_ANDROID_BANGUMI_UNAVAILABLE: Bangumi progress sync requires a \
+                     native-tls OpenSSL provider that Android does not ship"
+                        .to_string(),
+                )
             }
-            execute_provider(&provider, command).await
+            #[cfg(not(target_os = "android"))]
+            {
+                let provider = BangumiProvider::new(BangumiProviderConfig {
+                    network_consent: true,
+                    access_token: command.access_token.clone(),
+                    timeout: Duration::from_secs(20),
+                })
+                .map_err(|error| error.to_string())?;
+                if let MetadataCommandKind::SyncBangumi(update) = &command.kind {
+                    provider
+                        .sync_play_status(update)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    return Ok(MetadataPayload::BangumiPlaySynced);
+                }
+                execute_provider(&provider, command).await
+            }
         }
     }
 }

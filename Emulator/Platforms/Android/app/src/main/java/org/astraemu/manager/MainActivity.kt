@@ -13,6 +13,15 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 
 class MainActivity : NativeActivity() {
+    companion object {
+        init {
+            // The framework loads the lib for android.app.NativeActivity under
+            // the boot classloader; loading it here also registers it for this
+            // app classloader so the `external fun` bridges can bind.
+            System.loadLibrary("astra_emu_manager")
+        }
+    }
+
     private val treeRequestCode = 0xA57A
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null

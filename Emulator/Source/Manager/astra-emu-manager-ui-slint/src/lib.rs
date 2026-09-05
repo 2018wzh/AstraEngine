@@ -235,6 +235,9 @@ pub struct ManagerViewModel {
     pub selected_aliases: String,
 }
 
+/// Per-game fields whose change invalidates the rendered card list cache.
+type GameCardSignature = (String, String, String, String, String, String, String);
+
 pub struct SlintManagerAdapter {
     window: ManagerWindow,
     games: Rc<VecModel<GameCard>>,
@@ -246,6 +249,8 @@ pub struct SlintManagerAdapter {
     family_config: Rc<VecModel<ConfigField>>,
     extension_config: Rc<VecModel<ConfigField>>,
     filter_config: Rc<VecModel<ConfigField>>,
+    image_cache: std::cell::RefCell<std::collections::HashMap<String, slint::Image>>,
+    cached_games_signature: std::cell::RefCell<Vec<GameCardSignature>>,
 }
 
 impl SlintManagerAdapter {
@@ -280,30 +285,60 @@ impl SlintManagerAdapter {
             family_config,
             extension_config,
             filter_config,
+            image_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            cached_games_signature: std::cell::RefCell::new(Vec::new()),
         })
     }
 
     pub fn apply(&self, model: &ManagerViewModel) {
-        let cards = model
+        let current_signature: Vec<GameCardSignature> = model
             .games
             .iter()
-            .map(|game| GameCard {
-                case_id: SharedString::from(&game.case_id),
-                title: SharedString::from(&game.title),
-                family: SharedString::from(&game.family),
-                cover_uri: SharedString::from(&game.cover_uri),
-                cover: if game.cover_uri.is_empty() {
-                    slint::Image::default()
-                } else {
-                    slint::Image::load_from_path(Path::new(&game.cover_uri)).unwrap_or_default()
-                },
-                diagnostic: SharedString::from(&game.diagnostic),
-                play_time: SharedString::from(&game.play_time),
-                last_played: SharedString::from(&game.last_played),
-                compatibility_status: SharedString::from(&game.compatibility_status),
+            .map(|g| {
+                (
+                    g.case_id.clone(),
+                    g.title.clone(),
+                    g.family.clone(),
+                    g.cover_uri.clone(),
+                    g.diagnostic.clone(),
+                    g.play_time.clone(),
+                    g.compatibility_status.clone(),
+                )
             })
-            .collect::<Vec<_>>();
-        self.games.set_vec(cards);
+            .collect();
+
+        if *self.cached_games_signature.borrow() != current_signature {
+            let mut cache = self.image_cache.borrow_mut();
+            let cards = model
+                .games
+                .iter()
+                .map(|game| {
+                    let cover = if game.cover_uri.is_empty() {
+                        slint::Image::default()
+                    } else if let Some(cached) = cache.get(&game.cover_uri) {
+                        cached.clone()
+                    } else {
+                        let img = slint::Image::load_from_path(Path::new(&game.cover_uri))
+                            .unwrap_or_default();
+                        cache.insert(game.cover_uri.clone(), img.clone());
+                        img
+                    };
+                    GameCard {
+                        case_id: SharedString::from(&game.case_id),
+                        title: SharedString::from(&game.title),
+                        family: SharedString::from(&game.family),
+                        cover_uri: SharedString::from(&game.cover_uri),
+                        cover,
+                        diagnostic: SharedString::from(&game.diagnostic),
+                        play_time: SharedString::from(&game.play_time),
+                        last_played: SharedString::from(&game.last_played),
+                        compatibility_status: SharedString::from(&game.compatibility_status),
+                    }
+                })
+                .collect::<Vec<_>>();
+            self.games.set_vec(cards);
+            *self.cached_games_signature.borrow_mut() = current_signature;
+        }
         self.reviews.set_vec(
             model
                 .match_reviews

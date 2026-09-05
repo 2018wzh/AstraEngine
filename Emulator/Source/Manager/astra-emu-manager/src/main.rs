@@ -1,5 +1,3 @@
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-
 #[cfg(target_os = "android")]
 mod android_platform;
 #[cfg(target_os = "android")]
@@ -39,6 +37,9 @@ use astra_emu_family_api::{
 };
 use astra_emu_family_support::LegacyVfsFamilyRegistry;
 use astra_emu_manager::family_host::FamilyHostConfig;
+// When main.rs is included into the Android cdylib (see lib.rs), these names
+// are already in scope through the crate root re-exports.
+#[cfg(not(target_os = "android"))]
 use astra_emu_manager::{run_manager_with_initial_state, HostWake, ManagerController};
 use astra_emu_manager_core::CoverCacheRecord;
 use astra_emu_manager_core::{
@@ -4076,6 +4077,7 @@ fn main() -> std::process::ExitCode {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn startup_diagnostic_code(error: &(dyn std::error::Error + 'static)) -> String {
     let text = error.to_string();
     let Some(start) = text.find("ASTRA_") else {
@@ -4099,6 +4101,9 @@ pub fn android_main(app: slint::android::AndroidApp) {
     android_platform::initialize(app.clone()).expect("ASTRA_EMU_ANDROID_CONTEXT_INIT");
     slint::android::init(app).expect("ASTRA_EMU_ANDROID_BACKEND_INIT");
     if let Err(error) = run_application() {
+        // The fatal path can run before observability owns a subscriber, so
+        // mirror the diagnostic to stderr, which logcat surfaces verbatim.
+        eprintln!("astra.emu.android.fatal error_kind={error}");
         tracing::error!(
             event = "astra.emu.android.fatal",
             diagnostic_code = "ASTRA_EMU_ANDROID_FATAL",
