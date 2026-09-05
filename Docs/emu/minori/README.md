@@ -20,6 +20,7 @@ Minori family 资料面向 PAZ + `.sc` 脚本游戏。当前已有 `astra-emu-mi
 | [game-observations.md](game-observations.md) | `夏空のペルセウス` 本地样本事实 |
 | [tooling.md](tooling.md) | 通用 VFS CLI、key 文件和研究工具 |
 | [implementation-checklist.md](implementation-checklist.md) | 可编码验收清单 |
+| [chinese-patch-support.md](chinese-patch-support.md) | 汉化补丁支持设计：NLS/覆盖档案/字体/密钥来源扩展（design-only） |
 
 ## 边界
 
