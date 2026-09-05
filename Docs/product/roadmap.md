@@ -1,20 +1,37 @@
-# 路线图
+# 产品推进路线
 
-路线图按 Stage Gate 管理。每个 Stage 都有独立工作清单、测试矩阵映射和退出标准；产品页只保存阶段目标，不记录当前实现状态。
+本路线根据 2026-09-05 产品问卷修订。项目长期推进，没有人为附加的短期截止日期；下面是工作顺序，不是新的串行大门禁。NativeVN 和 EMU 可独立推进、独立交付。详见 [产品愿景](vision.md)和[决策记录](decisions-2026-09-05.md)。
 
-## Stage Gates
+## 先恢复真实可用的开发基础
 
-| Stage | 目标 | 退出标准 | Work |
-| --- | --- | --- | --- |
-| Stage 1 EngineCore | RuntimeWorld、Actor/Component、StateMachine、EventBus、Scheduler、AwaitToken、Save/Replay、PropertySystem、Plugin ABI、Target manifest 和 headless scenario runner。 | Native smoke 可 headless run、save/load/replay，Runtime determinism、Target validation 和插件 fingerprint/load-unload gate 通过；package build 留 Stage 2。 | [stage-1-enginecore](../status/stages/stage-1-enginecore.md) |
-| Stage 2 Media + Package | Import/Cook、binary package、Asset VFS mount family、Renderer2D slot、TextLayout、AudioGraph、FilterGraph、DecodeProvider、完整 Headless test host、Windows/Web Platform capability、strict scenario runner 和 release report。 | Package/VFS/provider gate、真实 Headless PNG/WAV、序列化物理输入、全 Runtime test 收束、自动+模型审查和同 identity 真实平台 preflight 通过；Headless 与六个平台发布类型隔离，desktop-release/web-release 缺真实平台报告时仍阻断。 | [stage-2-media-package](../status/stages/stage-2-media-package.md) |
-| Stage 3 AstraVN | `.astra` 编译、AstraVN module layout、多功能 crate 拆分、facade-only `astra-vn` Rust dylib、`NativeVnRuntimeProvider`、Luau policy、Graph/Timeline 同源、NativeVN Game target、商业 VN 系统 UI、标准命令库、演出模型、完整 playthrough scenario 和 Windows/Web live player automation。 | AstraVN 迁到 `Engine/Source/Modules/AstraVN/`；`astra-vn` 只产出 `rlib`/Rust ABI `dylib` 和 re-export；`.astra` sample 完成 dialogue、choice、backlog、auto、skip、save/load、config、video、system UI、advanced presentation opt-in、Game target、runtime provider binding 和 replay hash gate；Windows/Web `player.full_playable` 必须由平台原生输入、input transcript、视觉变化、音频 meter 和 host evidence 证明。 | [stage-3-astra-vn](../status/stages/stage-3-astra-vn.md) |
-| Stage 4 Editor + AI/MCP | Qt/QML editor、Editor target、PIE、Inspector、Debugger、Package panel、Plugin Manager、Runtime Director、AI provider profile、Asset VFS-backed ONNX ModelBundle、Editor Copilot、Content Generation、Context Pack、runtime memory 和 audit。 | Project Wizard 到 Package/Release Gate 闭环可用，Editor target 隔离、插件启用诊断、Trusted session、Review Queue、provider profile、Asset VFS-backed ONNX ModelBundle、memory policy、context permission、provider-free replay 和 audit gate 通过。 | [stage-4-editor-ai-mcp](../status/stages/stage-4-editor-ai-mcp.md) |
-| Stage 5 AstraEMU | Program target、Manager + `AstraEmuRuntimeProvider` + RuntimeWorld、`LegacyRuntimeProvider` facade、EmulatorCore 状态机映射、legacy pack VFS、auto probe、Trusted Luau、文本翻译、FilterGraph preset、Artemis 通用 family plugin、其他 family alpha profile。 | Manager 以 Program target 启动 gameplay runtime session，Artemis full-flow gate、provider session snapshot/replay、VM scheduler/context trace、legacy pack VFS report、auto probe report、trusted script isolation、text redaction 和 filter preset gate 通过。 | [stage-5-astra-emu](../status/stages/stage-5-astra-emu.md) |
-| Stage 6 Platform Completion | Linux、macOS、iOS 和 Android host completion，覆盖真实 SDK、launcher/window、surface、platform decode、audio、save store、package source、resume、平台输入自动化和 release evidence。 | 四个平台分别提供真实 host smoke、player input transcript、frame region、audio meter、route evidence 和 release profile report；缺 SDK、缺 required smoke、缺 package/source evidence 或缺平台输入自动化不能写成 release pass。 | [stage-6-platform-completion](../status/stages/stage-6-platform-completion.md) |
-| Stage 7 AstraRPG | `AstraRpgRuntimeProvider`、通用 RPG core、Luau rule policy、AI intent/committed output、AI Town、`rpg.trpg` ruleset/profile、deterministic dice、seat authority、transcript redaction 和 CP2020 local-private adapter。 | AI Town 20 NPC one-day headless scenario、save/load/replay hash、provider-free replay、RPG policy bundle gate、`rpg.trpg` dice/check/ruling/transcript gate 和 CP2020 local content redaction gate 通过。 | [stage-7-astra-rpg](../status/stages/stage-7-astra-rpg.md) |
-| Stage 8 AstraRPG Server/Client Protocol | `rpg.net.*` DTO、server/client session、seat sync、action transcript sync、redacted network audit、reconnect cursor 和 network replay gate。 | Server/client handshake、seat authority sync、transcript redaction、network audit 和 provider-free replay hash 一致；协议 mismatch、未脱敏 transcript 或 replay divergence 必须 blocking。 | [stage-8-astra-rpg-network](../status/stages/stage-8-astra-rpg-network.md) |
+修复审计中已定位的确定性问题：Headless helper 的虚假宿主语义/不存在身份文件、Warning 被作为 Blocking、超时路径等待同一把锁、同步 step 每次创建线程。修复后使用少量能捕获问题的回归测试；不要用又一套框架包住原问题。
 
-## 测试矩阵
+按职责分层测试并删除重复包装。文档检查只承担本地链接、编码等实际职责；源代码测试盘点是信息，不是产品验证。此处是实施工作，不能因更新了宪章或检查器就标记相关 Rust 问题已修复。
 
-所有 Stage work 的测试项目统一维护在 [stage-test-matrix](../status/stages/stage-test-matrix.md)。新增或调整 Stage work 时，必须同步更新测试矩阵和最近的状态索引。
+## NativeVN：完成《终之空》现代化高清重制
+
+从已存在的转换、脚本、资源与播放器能力出发，逐个完成剧情/分支、现代演出、高清资源呈现、文本、音视频、系统 UI 与存档流程。作品特定逻辑留在作品层，遇到第二处实际复用再决定是否抽象。
+
+以完整目标作品可玩为交付目标。开发时使用代表性场景快速迭代；里程碑检查完整路线可达、关键演出、保存/冷启动读取与异常退出。现代化结果不强制匹配 Classic 像素基线。Windows 与 Android 优先，分别记录真实验证，不能互相冒充。
+
+## AstraEMU：Minori 优先
+
+先盘点现有合法 Minori 样本的作品、引擎版本与当前可运行程度，再选择覆盖近期需求的真实样本。先打通 archive/script/renderer/audio/input/save 的实际主路径，再根据样本差异补齐兼容。
+
+保持与 NativeVN 的发布独立。复用确有收益的资源、渲染、音频和平台能力，不强迫旧 VM 重写为 NativeVN 剧情模型或保存全部运行 trace。FVP、Artemis 和其他 family 不阻断 Minori 迭代。
+
+## 持续降低复杂度
+
+默认单活跃游戏会话的简单执行路径；保留必要的持久音频/解码/I/O worker。并发规模未确定前，不为假想大量 session 预建服务端体系。性能问题先测量热点，再移除多余往返、编码和复制。
+
+按真实职责调整模块和 crate，优先处理多职责编排文件和无收益的薄包装，而不是追求固定数量。迁移必须完成调用者切换与旧路径去留，不保留仅为“测试通过”的假兼容层。
+
+## 分阶段扩展
+
+存档先保证同版本重启与跨端可移植数据，再接入真正的云同步服务；没有后端选择、账户授权和冲突策略时不宣称同步功能完成。当前无消费者，格式可明确破坏性升级。
+
+Web/iOS 为 T1，Linux/macOS 为 T2。Editor、运行时 AI、RPG/TRPG、公开插件分发生态在近期闭环稳定且出现具体需求后展开；保留设计意图，不加入当前强制依赖或全系列发布要求。
+
+## 旧 Stage 文档的使用
+
+[原实施状态](../status/implementation-plan.md)和[原 Stage 测试矩阵](../status/stages/stage-test-matrix.md)保留历史事实、代码定位和未完成线索。其 lockstep、FVP/Artemis 首发、全测试 Headless、全量提交检查等旧治理要求由新宪章取代。相应模块变化时逐步修订，不用一次性重写全部历史页面，也不得把旧 DONE 当作本轮重验结果。
