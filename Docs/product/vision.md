@@ -1,38 +1,42 @@
 # AstraEngine 产品愿景
 
-AstraEngine 是 Rust + WGPU-first 的 2D/VN-first 高性能游戏引擎。它的核心不是“复制 UE”，而是在视觉小说、互动叙事和演出强化这个范围内，达到 UE 去掉 3D 大型玩法后的工程成熟度：可独立发布、可调试、可回放、可扩展、可审计。
+AstraEngine 面向 VN 创作者：使用现代、演出强化、高可定制的引擎，在作品中充分表达创作意图。AstraEMU 是同系列的旧 VN 兼容与现代化播放器。两者共享必要能力，但不要求同一版本、同时完成或一起发行。
 
-## 用户
+本文是 2026-09-05 产品问卷之后的目标，不是实现完成声明。执行方式见 [工作宪章](../../AGENTS.md)，答案原意与推导边界见 [决策记录](decisions-2026-09-05.md)。
 
-| 用户 | 需要完成的事 | 产品承诺 |
+## 创作者能力
+
+创作能力不等于内核抽象数量。引擎需要按实际作品要求组合多层场景、文本和字体样式、图像与视频、转场、时间线、音画同步、自定义系统 UI、资源替换及脚本逻辑。不能以简化工程为由，把可定制性缩减成固定皮肤和几个硬编码效果。
+
+`.astra`、脚本、配置和可复用的作品适配器应能完成近期创作与发布。Graph/Timeline 和完整 Editor 保留为长期创作工具；其未完成不能阻止现有运行时产出作品。通用机制归引擎，特定作品的演出和资源规则归作品层。
+
+## 两个近期闭环
+
+| 产品 | 近期结果 | 不应被误当作完成 |
 | --- | --- | --- |
-| 创作者 | 从模板创建 VN 项目，导入素材，编写 `.astra`，编辑 Graph/Timeline，PIE 调试，打包发布 | 不理解底层 runtime 也能完成完整项目 |
-| 开发者 | 扩展 renderer、audio、text layout、script runtime、presentation library、asset importer、editor panel、AI/MCP tool | 通过稳定插件 ABI 和 schema 接入，不改 EngineCore |
-| 平台维护者 | 让同一 packaged runtime 在桌面、移动、Web 和实验平台运行 | 平台模块只适配 surface、输入、权限、生命周期和平台解码 |
-| 旧 VN 研究者 | 在合法本地数据上实现兼容、现代化、翻译和补丁流程 | AstraEMU 作为独立套件复用引擎能力，不污染 NativeVN |
-| RPG/TRPG 作者 | 构建传统 RPG、AI 自主小镇或桌面规则书式战役 | AstraRPG 通过 provider、ruleset、seat、transcript 和 provider-free replay 接入，不改 EngineCore |
+| AstraVN | 《终之空》现代化高清重制完整可玩，包括目标作品的剧情分支、演出、文字、音视频、系统 UI、存档及独立启动 | 只有开场 Demo、某条路线 slice、Classic 像素对比或静态报告 |
+| AstraEMU | 选定真实 Minori 游戏能启动、游玩并完成有代表性的演出、交互、保存、冷启动读取和关闭 | 某个 parser 成功、只读档案、单帧截图，或据一个游戏推断所有 Minori 版本兼容 |
 
-## 硬目标
+Minori 是当前 EMU 实施优先级。FVP、Artemis 等已有能力按实际需要维护，不再是近期闭环的统一前置条件。具体 Minori 作品/版本以现有合法样本和可用性盘点确定，尚未由本次问卷指定，不能自行宣称全 family 覆盖。
 
-- EngineCore 使用 Actor/Component + StateMachine 驱动 deterministic runtime。
-- Runtime 可脱离 Editor 完成 launch、tick、save、load、replay、diagnostics、profiling 和 release validation。
-- Asset VFS 统一 package、local authorized、legacy pack 和 overlay mount；`.astrapkg` 保留为控制面和证据面容器。
-- 玩法类型通过 gameplay runtime provider 显式绑定；AstraVN、AstraEMU 和后续 AstraRPG 是同级 runtime provider。
-- TRPG 玩法落在 AstraRPG 的 `rpg.trpg` profile/ruleset layer 中；不创建独立顶层 AstraTRPG runtime provider。
-- AstraVN 使用 `.astra` 作为 canonical story source，Luau policy 用于扩展和受控演出策略。
-- Editor 使用 Qt/QML + Rust core，覆盖完整 creator workflow。
-- 插件采用 Rust-facing `abi_stable` 风格 ABI，支持加载/卸载和 provider selection，不支持热重载。
-- 平台硬目标是 Windows、Linux、macOS、iOS、Android、Web；旧主机/掌机是实验模块。
-- Runtime AI 可以发布，但 Runtime 只通过受限 MCP session 调用模型；所有 committed AI output、角色记忆和玩家相关 consent 必须进入 save/replay，不允许回放时重新请求 provider。
-- AstraEMU 使用 Manager + `AstraEmuRuntimeProvider` + RuntimeWorld + in-process family plugin + `LegacyRuntimeProvider` facade，统一管理通过 auto probe 和 profile override 完成，现代化能力通过 Trusted Luau、TranslationProvider、Asset VFS 和 FilterGraph preset 接入；v1 可用 family 是 Artemis，KrKr、BGI、SoftPAL、FVP、Siglus 输出 alpha probe report 后逐步实现。
+高清重制不是对原版所有像素做机械复制，也不授权 Agent 改剧情或核心美术意图。按现代化目标验证视觉与演出，允许有依据的新基线；剧情、分支、素材映射、文本可读性与交互正确仍然重要。
 
-## 非目标
+## 平台与发布
 
-- 不追求复杂 3D、FPS、高实时网络竞技、大型开放世界 streaming 或 UE full object model。
-- 不把 Editor、AI provider、MCP server、Luau runtime、legacy VM、平台图形句柄放进 Core 依赖。
-- 不把旧 VN 导入为 Astra canonical source。
-- 不在文档或工具中提供绕过 DRM、商业保护或访问控制的方案。
+| 层级 | 平台 | 要求 |
+| --- | --- | --- |
+| T0 | Windows、Android | 近期优先保障；相关主路径改动及里程碑提供相应平台验证 |
+| T1 | Web、iOS | 保留目标，按平台迭代与相关变更验证，不阻断无关 T0 交付 |
+| T2 | Linux、macOS | 实验性维护，不把其完整实现变成当前发布前置 |
 
-## v1 Definition
+T0 不是每次提交运行所有平台全流程的要求。Editor、运行时 AI、RPG/TRPG、公开第三方插件生态均为长期方向。Q03 中的 Android/iOS 合并选项按更具体的 Q13 拆分为 Android T0、iOS T1，不解释为两个移动平台必须同时首发。
 
-v1 不是单个 crate 可编译，而是全系列可发布闭环：EngineCore native smoke、AstraVN commercial baseline、AstraEditor creator workflow、Windows/Linux/macOS/iOS/Android/Web profile gate、AI/MCP audit 和 Artemis full-flow report 都通过 Release Gate。AstraRPG 属于 Stage 7 planned extension；它达到 release gate 前不计入 v1 完成证据。
+## 数据与可靠性
+
+当前组件按可信协作模型设计，不以防御恶意原生插件为默认目标。仍保证格式/内存边界、正常故障处理和已有有效存档不被损坏。读档失败关闭当前游戏会话，返回安全入口，不继续半恢复状态。
+
+同版本冷启动读档是基础。支持跨语言、跨设备、跨平台的数据设计和后续云同步；当前无真实消费者，可破坏性更新 API 与数据格式，不默认承担长期旧版本兼容。数据可移植不等于要求全运行历史持久化或跨 GPU 像素完全一致。
+
+## 成功标准
+
+每次迭代交付真实作品能力、兼容进展或明确减少的工程成本。长期项目不等于一次性实现整个生态。NativeVN 和 EMU 分别报告已验证行为及未验证项；不能以宪章、接口、截图或检查器通过代替产品可用。
